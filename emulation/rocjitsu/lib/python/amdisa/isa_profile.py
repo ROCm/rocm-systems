@@ -937,6 +937,26 @@ class _AmdgpuProfileBase(IsaProfile):
         return ()
 
     @property
+    def vopd_x_slot_opcodes(self) -> frozenset[int]:
+        """Opcode values accepted in the VOPD X slot."""
+        return frozenset(op.opcode for op in self.vopd_slot_ops)
+
+    @property
+    def vopd_y_slot_opcodes(self) -> frozenset[int]:
+        """Opcode values accepted in the VOPD Y slot."""
+        return frozenset(op.opcode for op in self.vopd_slot_ops)
+
+    @property
+    def vopd3_x_slot_opcodes(self) -> frozenset[int]:
+        """Opcode values accepted in the VOPD3 X slot."""
+        return frozenset()
+
+    @property
+    def vopd3_y_slot_opcodes(self) -> frozenset[int]:
+        """Opcode values accepted in the VOPD3 Y slot."""
+        return frozenset()
+
+    @property
     def coherency_model(self) -> MemoryCoherencyModel:
         """Memory coherency encoding model for this ISA family."""
         return MemoryCoherencyModel.GFX9_GLC
@@ -1442,6 +1462,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return _RDNA3_VOPD_SLOT_OPS
 
     @property
+    def vopd_x_slot_opcodes(self) -> frozenset[int]:
+        return frozenset(range(14))
+
+    @property
     def coherency_model(self) -> MemoryCoherencyModel:
         return MemoryCoherencyModel.GFX11_SC0_SC1_TH
 
@@ -1593,6 +1617,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def vopd_slot_ops(self) -> tuple[VopdSlotOp, ...]:
         return _RDNA4_VOPD_SLOT_OPS
+
+    @property
+    def vopd_x_slot_opcodes(self) -> frozenset[int]:
+        return frozenset(range(14))
 
     @property
     def coherency_model(self) -> MemoryCoherencyModel:
@@ -1770,6 +1798,22 @@ class Gfx1250Profile(Rdna4Profile):
     @property
     def vopd_slot_ops(self) -> tuple[VopdSlotOp, ...]:
         return _GFX1250_VOPD_SLOT_OPS
+
+    @property
+    def vopd_x_slot_opcodes(self) -> frozenset[int]:
+        return frozenset(range(12))
+
+    @property
+    def vopd_y_slot_opcodes(self) -> frozenset[int]:
+        return frozenset((*range(12), 16, 17, *range(20, 25)))
+
+    @property
+    def vopd3_x_slot_opcodes(self) -> frozenset[int]:
+        return frozenset((0, *range(3, 12), 16, 17, *range(19, 23), *range(32, 37)))
+
+    @property
+    def vopd3_y_slot_opcodes(self) -> frozenset[int]:
+        return frozenset((0, *range(3, 12), *range(16, 25)))
 
     @property
     def uses_vgpr_msb_indexing(self) -> bool:

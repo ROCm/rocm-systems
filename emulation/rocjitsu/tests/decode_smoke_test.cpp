@@ -629,6 +629,49 @@ INSTANTIATE_TEST_SUITE_P(
       return name;
     });
 
+struct InvalidVopdSlotCase {
+  rj_code_arch_t arch;
+  const char *arch_name;
+  const char *case_name;
+  std::array<uint32_t, 3> words;
+};
+
+class InvalidVopdSlotDecodeTest : public ::testing::TestWithParam<InvalidVopdSlotCase> {};
+
+TEST_P(InvalidVopdSlotDecodeTest, RejectsOpcodeOutsideProfileSlot) {
+  const auto &tc = GetParam();
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr) << tc.arch_name;
+
+  EXPECT_THROW(static_cast<void>(decoder->decode(tc.words.data())), util::InvalidInst)
+      << tc.arch_name << " " << tc.case_name;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    VopdSlotValidation, InvalidVopdSlotDecodeTest,
+    ::testing::Values(InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", "invalid_x",
+                                          make_vopdxy_pair(14, 8)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", "invalid_y",
+                                          make_vopdxy_pair(8, 14)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", "invalid_x",
+                                          make_vopdxy_pair(14, 8)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", "invalid_y",
+                                          make_vopdxy_pair(8, 14)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", "invalid_x",
+                                          make_vopdxy_pair(14, 8)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", "invalid_y",
+                                          make_vopdxy_pair(8, 14)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", "invalid_x",
+                                          make_vopdxy_pair(12, 8)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
+                                          "invalid_y_defined_opcode", make_vopdxy_pair(8, 18)}),
+    [](const ::testing::TestParamInfo<InvalidVopdSlotCase> &info) {
+      std::string name = info.param.arch_name;
+      name += "_";
+      name += info.param.case_name;
+      return name;
+    });
+
 struct InvalidVopdDecodeCase {
   rj_code_arch_t arch;
   const char *arch_name;

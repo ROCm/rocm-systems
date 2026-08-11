@@ -1316,6 +1316,40 @@ class CodeGenerator:
             f'  case k{op.enum_name}:\n    return "{op.mnemonic}";'
             for op in vopd_slot_ops
         )
+
+        def opcode_mask(name: str, opcodes: frozenset[int]) -> str:
+            unknown_opcodes = opcodes.difference(op.opcode for op in vopd_slot_ops)
+            if unknown_opcodes:
+                raise ValueError(
+                    f'{arch} {name} references unknown VOPD opcodes: '
+                    f'{sorted(unknown_opcodes)}'
+                )
+            mask = sum(1 << opcode for opcode in opcodes)
+            return f'constexpr uint64_t {name} = 0x{mask:016X}ULL;'
+
+        opcode_masks = [
+            opcode_mask('kVopdXOpcodeMask', self.isa_spec.profile.vopd_x_slot_opcodes),
+            opcode_mask('kVopdYOpcodeMask', self.isa_spec.profile.vopd_y_slot_opcodes),
+        ]
+        if has_vopd3:
+            opcode_masks.extend(
+                (
+                    opcode_mask(
+                        'kVopd3XOpcodeMask',
+                        self.isa_spec.profile.vopd3_x_slot_opcodes,
+                    ),
+                    opcode_mask(
+                        'kVopd3YOpcodeMask',
+                        self.isa_spec.profile.vopd3_y_slot_opcodes,
+                    ),
+                )
+            )
+        vopd_opcode_validation_helpers = '\n'.join(opcode_masks) + textwrap.dedent('''
+
+            bool is_valid_opcode(uint16_t opcode, uint64_t mask) {
+              return opcode < 64 && (mask & (1ULL << opcode));
+            }
+        ''')
         vopd_src_neg_case_labels = case_labels(
             (
                 'VopdFmacF32',
@@ -1746,6 +1780,10 @@ class CodeGenerator:
                 word2_ = words[2];
                 opx_ = static_cast<uint16_t>((word0_ >> 18) & 0x3F);
                 opy_ = static_cast<uint16_t>((word0_ >> 12) & 0x3F);
+                if (!is_valid_opcode(opx_, kVopd3XOpcodeMask))
+                  throw util::InvalidInst("invalid VOPD3 X opcode", "");
+                if (!is_valid_opcode(opy_, kVopd3YOpcodeMask))
+                  throw util::InvalidInst("invalid VOPD3 Y opcode", "");
                 uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
                 uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
                 negx_ = static_cast<uint8_t>((word1_ >> 9) & 0x7);
@@ -1759,6 +1797,10 @@ class CodeGenerator:
 
                 uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
                 uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
+                const uint32_t x_end = vdstx + x_bits / 32;
+                const uint32_t y_end = vdsty + y_bits / 32;
+                if (vdstx < y_end && vdsty < x_end)
+                  throw util::InvalidInst("VOPD3 destination ranges overlap", "");
                 dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
                 dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
                 srcx0_ = make_src0(x_bits, true, false, 0, srcx0);
@@ -2010,6 +2052,8 @@ class CodeGenerator:
             // VOPD slot opcode values are the MRISA <Opcode> values for V_DUAL_* encodings.
             @VOPD_SLOT_CONSTANTS@
 
+            @VOPD_OPCODE_VALIDATION_HELPERS@
+
             Operand make_src0(uint32_t bits, @VOPD3_UNUSED_ATTR@bool vopd3, bool use_literal,
                               uint32_t literal, uint16_t encoded) {
               if (use_literal && encoded == 255)
@@ -2056,6 +2100,10 @@ class CodeGenerator:
                 encoding_id_ = @VOPD_PREFIX@;
                 opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
                 opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
+                if (!is_valid_opcode(opx_, kVopdXOpcodeMask))
+                  throw util::InvalidInst("invalid VOPD X opcode", "");
+                if (!is_valid_opcode(opy_, kVopdYOpcodeMask))
+                  throw util::InvalidInst("invalid VOPD Y opcode", "");
                 uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
                 uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
                 uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
@@ -2184,6 +2232,7 @@ class CodeGenerator:
             .replace('@VOPD3_FORMAT_ENUM@', ', Vopd3' if has_vopd3 else '')
             .replace('@VOPD3_HEADER_DECLS@', vopd3_header_decls)
             .replace('@VOPD_SLOT_CONSTANTS@', vopd_slot_constants)
+            .replace('@VOPD_OPCODE_VALIDATION_HELPERS@', vopd_opcode_validation_helpers)
             .replace('@VOPD3_UNUSED_ATTR@', vopd3_unused_attr)
             .replace('@VOPD_OP_NAME_CASES@', vopd_op_name_cases)
             .replace('@VOPD3_MODEL_HELPERS@', vopd3_model_helpers)
