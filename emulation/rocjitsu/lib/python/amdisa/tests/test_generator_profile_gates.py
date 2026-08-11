@@ -1319,17 +1319,15 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
     is_standalone_smfmac = mnemonic.startswith('V_SMFMAC_')
 
     if is_standalone_smfmac:
+        expected_operands = 'dst, s0b, s1b, idx'
         if uses_vgpr_msb_indexing:
-            expected_operands = 'dst, src0_base, src1_base, index_base'
-            assert 'uint32_t src0_base = vb + *Isa::resolved_vgpr_offset' in body
-            assert 'uint32_t src1_base = vb + *Isa::resolved_vgpr_offset' in body
-            assert 'uint32_t index_base = vb + *index_off;' in body
+            assert 'uint32_t s0b = vb + *Isa::resolved_vgpr_offset' in body
+            assert 'uint32_t s1b = vb + *Isa::resolved_vgpr_offset' in body
+            assert 'uint32_t idx = vb + *index_off;' in body
         else:
-            expected_operands = (
-                'dst, amdgpu::src_base(vb, src0.encoding_value_), '
-                'amdgpu::src_base(vb, src1.encoding_value_), '
-                'amdgpu::src_base(vb, src2.encoding_value_)'
-            )
+            assert 'uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);' in body
+            assert 'uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);' in body
+            assert 'uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);' in body
             assert 'Isa::resolved_vgpr_offset' not in body
     else:
         if uses_vgpr_msb_indexing:

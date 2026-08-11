@@ -170,11 +170,11 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f'{d}.encoding_value_, {d}.vgpr_msb_role());'
             )
             L.append(
-                f'  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, {s0}.opr_type_, '
+                f'  uint32_t s0b = vb + *Isa::resolved_vgpr_offset(wf, {s0}.opr_type_, '
                 f'{s0}.encoding_value_, {s0}.vgpr_msb_role());'
             )
             L.append(
-                f'  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, {s1}.opr_type_, '
+                f'  uint32_t s1b = vb + *Isa::resolved_vgpr_offset(wf, {s1}.opr_type_, '
                 f'{s1}.encoding_value_, {s1}.vgpr_msb_role());'
             )
             L.append(
@@ -183,10 +183,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             )
             L.append(f'  if (!index_off)')
             L.append(f'    throw util::UnimplementedInst(mnemonic());')
-            L.append(f'  uint32_t index_base = vb + *index_off;')
-            src0_base_expr = 'src0_base'
-            src1_base_expr = 'src1_base'
-            index_base_expr = 'index_base'
+            L.append(f'  uint32_t idx = vb + *index_off;')
         else:
             if 'acc_cd' in ctx.enc_field_names:
                 L.append(
@@ -196,23 +193,21 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 L.append(
                     f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, 1);'
                 )
-            src0_base_expr = f'amdgpu::src_base(vb, {s0}.encoding_value_)'
-            src1_base_expr = f'amdgpu::src_base(vb, {s1}.encoding_value_)'
-            index_base_expr = f'amdgpu::src_base(vb, {s2}.encoding_value_)'
+            L.append(f'  uint32_t s0b = amdgpu::src_base(vb, {s0}.encoding_value_);')
+            L.append(f'  uint32_t s1b = amdgpu::src_base(vb, {s1}.encoding_value_);')
+            L.append(f'  uint32_t idx = amdgpu::src_base(vb, {s2}.encoding_value_);')
 
         if input_type in ('F16', 'BF16'):
             read_fn = _SMFMAC_READ[input_type]
             L.append(
-                f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_f16(cu, dst,'
-                f' {src0_base_expr}, {src1_base_expr}, {index_base_expr}, {read_fn});'
+                f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_f16(cu, dst, s0b, s1b, idx, {read_fn});'
             )
         else:
             parts = input_type.split('_')
             read_a = _SMFMAC_FP8_READ.get(parts[0], 'amdgpu::smfmac_read_fp8')
             read_b = _SMFMAC_FP8_READ.get(parts[1], 'amdgpu::smfmac_read_fp8')
             L.append(
-                f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_fp8(cu, dst,'
-                f' {src0_base_expr}, {src1_base_expr}, {index_base_expr}, {read_a},\n'
+                f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_fp8(cu, dst, s0b, s1b, idx, {read_a},\n'
                 f'                                       {read_b});'
             )
         return '\n'.join(L)
