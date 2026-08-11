@@ -1182,6 +1182,83 @@ ROCSHMEM_DIRECT_CTX_PUT_SIGNAL_DEF(_nbi_wave, _NBI_WAVE)
 
 #undef ROCSHMEM_DIRECT_CTX_PUT_SIGNAL_DEF
 
+/*
+ * direct_ctx_test/direct_ctx_wait_until* helpers mirroring Context::test/
+ * wait_until* bodies in context_tmpl_device.hpp exactly (stat increment,
+ * forward to the base Context template method). These do not use
+ * ROCSHMEM_DIRECT_BACKEND_DISPATCH because Context::test/wait_until* are
+ * plain non-virtual templates on the base Context class, not per-backend
+ * DISPATCH-switched methods -- test() itself is backend-agnostic
+ * (uncached_load + comparison), so there is nothing to switch on.
+ */
+template <typename T>
+__device__ __forceinline__ int direct_ctx_test(rocshmem_ctx_t ctx, T *ivars,
+                                                int cmp, T val) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_TEST);
+  return get_base_internal_ctx(ctx)->test(ivars, cmp, val);
+}
+
+template <typename T>
+__device__ __forceinline__ void direct_ctx_wait_until(rocshmem_ctx_t ctx,
+                                                       T *ivars, int cmp,
+                                                       T val) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_WAIT_UNTIL);
+  get_base_internal_ctx(ctx)->wait_until(ivars, cmp, val);
+}
+
+template <typename T>
+__device__ __forceinline__ void direct_ctx_wait_until_all(
+    rocshmem_ctx_t ctx, T *ivars, size_t nelems, const int *status, int cmp,
+    T val) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_WAIT_UNTIL_ALL);
+  get_base_internal_ctx(ctx)->wait_until_all(ivars, nelems, status, cmp, val);
+}
+
+template <typename T>
+__device__ __forceinline__ size_t direct_ctx_wait_until_any(
+    rocshmem_ctx_t ctx, T *ivars, size_t nelems, const int *status, int cmp,
+    T val) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_WAIT_UNTIL_ANY);
+  return get_base_internal_ctx(ctx)->wait_until_any(ivars, nelems, status,
+                                                     cmp, val);
+}
+
+template <typename T>
+__device__ __forceinline__ size_t direct_ctx_wait_until_some(
+    rocshmem_ctx_t ctx, T *ivars, size_t nelems, size_t *indices,
+    const int *status, int cmp, T val) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_WAIT_UNTIL_SOME);
+  return get_base_internal_ctx(ctx)->wait_until_some(ivars, nelems, indices,
+                                                      status, cmp, val);
+}
+
+template <typename T>
+__device__ __forceinline__ size_t direct_ctx_wait_until_any_vector(
+    rocshmem_ctx_t ctx, T *ivars, size_t nelems, const int *status, int cmp,
+    T *vals) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_WAIT_UNTIL_ANY_VECTOR);
+  return get_base_internal_ctx(ctx)->wait_until_any_vector(ivars, nelems,
+                                                            status, cmp, vals);
+}
+
+template <typename T>
+__device__ __forceinline__ void direct_ctx_wait_until_all_vector(
+    rocshmem_ctx_t ctx, T *ivars, size_t nelems, const int *status, int cmp,
+    T *vals) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_WAIT_UNTIL_ALL_VECTOR);
+  get_base_internal_ctx(ctx)->wait_until_all_vector(ivars, nelems, status,
+                                                     cmp, vals);
+}
+
+template <typename T>
+__device__ __forceinline__ size_t direct_ctx_wait_until_some_vector(
+    rocshmem_ctx_t ctx, T *ivars, size_t nelems, size_t *indices,
+    const int *status, int cmp, T *vals) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_WAIT_UNTIL_SOME_VECTOR);
+  return get_base_internal_ctx(ctx)->wait_until_some_vector(
+      ivars, nelems, indices, status, cmp, vals);
+}
+
 #undef ROCSHMEM_DIRECT_BACKEND_DISPATCH
 #undef ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET
 #undef ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR
@@ -1642,9 +1719,7 @@ __device__ void rocshmem_wait_until(T *ivars, int cmp, T val) {
   LOGD_API("device::wait_until (ivars=%p, cmp=%d, val=%g)",
     ivars, cmp, (double)val);
 
-  Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
-  ctx_internal->ctxStats.incStat(NUM_WAIT_UNTIL);
-  ctx_internal->wait_until(ivars, cmp, val);
+  direct_ctx_wait_until<T>(ROCSHMEM_CTX_DEFAULT, ivars, cmp, val);
 }
 
 template <typename T>
@@ -1653,9 +1728,8 @@ __device__ void rocshmem_wait_until_all(T *ivars, size_t nelems, const int* stat
   LOGD_API("device::wait_until_all (ivars=%p, nelems=%zd cmp=%d, val=%g)",
     ivars, nelems, cmp, (double)val);
 
-  Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
-  ctx_internal->ctxStats.incStat(NUM_WAIT_UNTIL_ALL);
-  ctx_internal->wait_until_all(ivars, nelems, status, cmp, val);
+  direct_ctx_wait_until_all<T>(ROCSHMEM_CTX_DEFAULT, ivars, nelems, status,
+                               cmp, val);
 }
 
 template <typename T>
@@ -1664,9 +1738,8 @@ __device__ size_t rocshmem_wait_until_any(T *ivars, size_t nelems, const int* st
   LOGD_API("device::wait_until_any (ivars=%p, nelems=%zd cmp=%d, val=%g)",
     ivars, nelems, cmp, (double)val);
 
-  Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
-  ctx_internal->ctxStats.incStat(NUM_WAIT_UNTIL_ANY);
-  return ctx_internal->wait_until_any(ivars, nelems, status, cmp, val);
+  return direct_ctx_wait_until_any<T>(ROCSHMEM_CTX_DEFAULT, ivars, nelems,
+                                      status, cmp, val);
 }
 
 template <typename T>
@@ -1676,9 +1749,8 @@ __device__ size_t rocshmem_wait_until_some(T *ivars, size_t nelems, size_t* indi
   LOGD_API("device::wait_until_some (ivars=%p, nelems=%zd cmp=%d, val=%g)",
     ivars, nelems, cmp, (double)val);
 
-  Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
-  ctx_internal->ctxStats.incStat(NUM_WAIT_UNTIL_SOME);
-  return ctx_internal->wait_until_some(ivars, nelems, indices, status, cmp, val);
+  return direct_ctx_wait_until_some<T>(ROCSHMEM_CTX_DEFAULT, ivars, nelems,
+                                       indices, status, cmp, val);
 }
 
 template <typename T>
@@ -1687,9 +1759,8 @@ __device__ size_t rocshmem_wait_until_any_vector(T *ivars, size_t nelems, const 
   LOGD_API("device::wait_until_any_vector (ivars=%p, nelems=%zd cmp=%d, vals=%p)",
     ivars, nelems, cmp, vals);
 
-  Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
-  ctx_internal->ctxStats.incStat(NUM_WAIT_UNTIL_ANY_VECTOR);
-  return ctx_internal->wait_until_any_vector(ivars, nelems, status, cmp, vals);
+  return direct_ctx_wait_until_any_vector<T>(ROCSHMEM_CTX_DEFAULT, ivars,
+                                             nelems, status, cmp, vals);
 }
 
 template <typename T>
@@ -1698,9 +1769,8 @@ __device__ void rocshmem_wait_until_all_vector(T *ivars, size_t nelems, const in
   LOGD_API("device::wait_until_all_vector (ivars=%p, nelems=%zd cmp=%d, vals=%p)",
     ivars, nelems, cmp, vals);
 
-  Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
-  ctx_internal->ctxStats.incStat(NUM_WAIT_UNTIL_ALL_VECTOR);
-  ctx_internal->wait_until_all_vector(ivars, nelems, status, cmp, vals);
+  direct_ctx_wait_until_all_vector<T>(ROCSHMEM_CTX_DEFAULT, ivars, nelems,
+                                      status, cmp, vals);
 }
 
 template <typename T>
@@ -1711,9 +1781,9 @@ __device__ size_t rocshmem_wait_until_some_vector(T *ivars, size_t nelems,
   LOGD_API("device::wait_until_some_vector (ivars=%p, nelems=%zd cmp=%d, vals=%p)",
     ivars, nelems, cmp, vals);
 
-  Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
-  ctx_internal->ctxStats.incStat(NUM_WAIT_UNTIL_SOME_VECTOR);
-  return ctx_internal->wait_until_some_vector(ivars, nelems, indices, status, cmp, vals);
+  return direct_ctx_wait_until_some_vector<T>(ROCSHMEM_CTX_DEFAULT, ivars,
+                                              nelems, indices, status, cmp,
+                                              vals);
 }
 
 template <typename T>
@@ -1721,10 +1791,7 @@ __device__ int rocshmem_test(T *ivars, int cmp, T val) {
   LOGD_API("device::test (ivars=%p, cmp=%d, val=%g)",
     ivars, cmp, (double)val);
 
-  Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
-  ctx_internal->ctxStats.incStat(NUM_TEST);
-
-  return ctx_internal->test(ivars, cmp, val);
+  return direct_ctx_test<T>(ROCSHMEM_CTX_DEFAULT, ivars, cmp, val);
 }
 
 __global__ ATTR_NO_INLINE void rocshmem_barrier_all_kernel(){
@@ -1825,21 +1892,21 @@ __global__ ATTR_NO_INLINE void rocshmem_signal_wait_until_kernel(
 
 __device__ void rocshmem_barrier_all() {
   LOGD_API("device::barrier_all (ctx=%zd)",
-    get_internal_ctx(ROCSHMEM_CTX_DEFAULT));
+    ROCSHMEM_CTX_DEFAULT.ctx_opaque);
 
   direct_ctx_barrier_all(ROCSHMEM_CTX_DEFAULT);
 }
 
 __device__ void rocshmem_barrier_all_wave() {
   LOGD_API("device::barrier_all_wave (ctx=%zd)",
-    get_internal_ctx(ROCSHMEM_CTX_DEFAULT));
+    ROCSHMEM_CTX_DEFAULT.ctx_opaque);
 
   direct_ctx_barrier_all_wave(ROCSHMEM_CTX_DEFAULT);
 }
 
 __device__ void rocshmem_barrier_all_wg() {
   LOGD_API("device::barrier_all_wg (ctx=%zd)",
-    get_internal_ctx(ROCSHMEM_CTX_DEFAULT));
+    ROCSHMEM_CTX_DEFAULT.ctx_opaque);
 
   direct_ctx_barrier_all_wg(ROCSHMEM_CTX_DEFAULT);
 }
@@ -1867,21 +1934,21 @@ __device__ void rocshmem_ctx_barrier_wg(rocshmem_ctx_t ctx, rocshmem_team_t team
 
 __device__ void rocshmem_sync_all() {
   LOGD_API("device::sync_all (ctx=%zd)",
-    get_internal_ctx(ROCSHMEM_CTX_DEFAULT));
+    ROCSHMEM_CTX_DEFAULT.ctx_opaque);
 
   direct_ctx_sync_all(ROCSHMEM_CTX_DEFAULT);
 }
 
 __device__ void rocshmem_sync_all_wave() {
   LOGD_API("device::sync_all_wave (ctx=%zd)",
-    get_internal_ctx(ROCSHMEM_CTX_DEFAULT));
+    ROCSHMEM_CTX_DEFAULT.ctx_opaque);
 
   direct_ctx_sync_all_wave(ROCSHMEM_CTX_DEFAULT);
 }
 
 __device__ void rocshmem_sync_all_wg() {
   LOGD_API("device::sync_all_wg (ctx=%zd)",
-    get_internal_ctx(ROCSHMEM_CTX_DEFAULT));
+    ROCSHMEM_CTX_DEFAULT.ctx_opaque);
 
   direct_ctx_sync_all_wg(ROCSHMEM_CTX_DEFAULT);
 }
