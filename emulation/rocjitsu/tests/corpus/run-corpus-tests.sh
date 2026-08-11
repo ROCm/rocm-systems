@@ -150,10 +150,21 @@ if [[ "${warn_perf}" == true ]]; then
   echo "::group::Check for test cases close to the timeout"
   if (( ${#junit_xml_paths[@]} == 0 )); then
     echo "No JUnit report was written; near-timeout reporting has no input."
-  elif ! python3 "${ROCJITSU_SOURCE_DIR}/tests/corpus/report-near-timeout-tests.py" \
-    --timeout "${soft_timeout_seconds}" \
-    "${junit_xml_paths[@]}"; then
-    echo "::warning::Near-timeout reporting failed."
+  else
+    report_status=0
+    python3 "${ROCJITSU_SOURCE_DIR}/tests/corpus/report-near-timeout-tests.py" \
+      --timeout "${soft_timeout_seconds}" \
+      "${junit_xml_paths[@]}" || report_status=$?
+    case "${report_status}" in
+      0)
+        ;;
+      3)
+        echo "::warning::Near-timeout tests found."
+        ;;
+      *)
+        echo "::warning::Near-timeout reporting failed."
+        ;;
+    esac
   fi
   echo "::endgroup::"
 fi

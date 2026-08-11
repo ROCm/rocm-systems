@@ -24,9 +24,9 @@ from xml.etree import ElementTree
 DEFAULT_NEAR_TIMEOUT_RATIO = 0.9
 
 MAX_LISTED_TESTS = 10
+NEAR_TIMEOUT_TESTS_FOUND_EXIT_STATUS = 3
 NON_PASSING_OUTCOME_TAGS = ("error", "failure", "skipped")
 WHITESPACE_RE = re.compile(r"\s+")
-ERROR = 1
 
 
 class NearTimeoutTest(NamedTuple):
@@ -44,8 +44,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (OSError, ValueError, ElementTree.ParseError) as error:
         print(f"error: {error}", file=sys.stderr)
-        return ERROR
+        return 1
     report_near_timeout_tests(near_timeout_tests, args.timeout, args.near_timeout_ratio)
+    if near_timeout_tests:
+        return NEAR_TIMEOUT_TESTS_FOUND_EXIT_STATUS
     return 0
 
 
@@ -122,7 +124,7 @@ def report_near_timeout_tests(
     )
     print(f"Warning: {summary}.")
     for test in near_timeout_tests[:MAX_LISTED_TESTS]:
-        print(f"{test.duration:g}s, {test.case_id}")
+        print(f"{test.duration:g}s, {test.target}, {test.case_id}")
     unlisted = len(near_timeout_tests) - MAX_LISTED_TESTS
     if unlisted > 0:
         print(f"... and {unlisted} more not listed.")
