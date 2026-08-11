@@ -257,6 +257,9 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtUnmapMemoryToGPU) = (HSAKMT_DEF(hsaKmtUnmapMemoryToGPU)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtUnmapMemoryToGPU");
       if (HSAKMT_PFN(hsaKmtUnmapMemoryToGPU) == nullptr) goto LOAD_ERROR;
 
+      HSAKMT_PFN(hsaKmtTranslateGpuVa) = (HSAKMT_DEF(hsaKmtTranslateGpuVa)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtTranslateGpuVa");
+      if (HSAKMT_PFN(hsaKmtTranslateGpuVa) == nullptr) goto LOAD_ERROR;
+
       HSAKMT_PFN(hsaKmtDbgRegister) = (HSAKMT_DEF(hsaKmtDbgRegister)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDbgRegister");
       if (HSAKMT_PFN(hsaKmtDbgRegister) == nullptr) goto LOAD_ERROR;
 
@@ -548,6 +551,7 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtMapMemoryToGPU) = (HSAKMT_DEF(hsaKmtMapMemoryToGPU)*)(&hsaKmtMapMemoryToGPU);
       HSAKMT_PFN(hsaKmtMapMemoryToGPUNodes) = (HSAKMT_DEF(hsaKmtMapMemoryToGPUNodes)*)(&hsaKmtMapMemoryToGPUNodes);
       HSAKMT_PFN(hsaKmtUnmapMemoryToGPU) = (HSAKMT_DEF(hsaKmtUnmapMemoryToGPU)*)(&hsaKmtUnmapMemoryToGPU);
+      HSAKMT_PFN(hsaKmtTranslateGpuVa) = (HSAKMT_DEF(hsaKmtTranslateGpuVa)*)(&hsaKmtTranslateGpuVa);
       HSAKMT_PFN(hsaKmtDbgRegister) = (HSAKMT_DEF(hsaKmtDbgRegister)*)(&hsaKmtDbgRegister);
       HSAKMT_PFN(hsaKmtDbgUnregister) = (HSAKMT_DEF(hsaKmtDbgUnregister)*)(&hsaKmtDbgUnregister);
       HSAKMT_PFN(hsaKmtDbgWavefrontControl) = (HSAKMT_DEF(hsaKmtDbgWavefrontControl)*)(&hsaKmtDbgWavefrontControl);
