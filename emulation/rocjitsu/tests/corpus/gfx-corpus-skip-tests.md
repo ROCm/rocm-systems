@@ -134,7 +134,7 @@ Classification buckets:
 - `llama.gfx950.backend_ops.MUL_MAT_ID.501e10751a9a`
 - `llama.gfx950.backend_ops.MUL_MAT_ID.dbedbadd142a`
 
-### possible hang or freeze: 6
+### possible hang or freeze: 8
 
 - `llama.gfx950.backend_ops.LIGHTNING_INDEXER.28d7def07117`
 - `llama.gfx950.backend_ops.MUL_MAT.462ccb738b08`
@@ -142,6 +142,8 @@ Classification buckets:
 - `llama.gfx950.backend_ops.MUL_MAT_ID_FUSION.b3d0befaa714`
 - `llama.gfx950.backend_ops.MUL_MAT_ID_FUSION.dfb1ed5ca4e9`
 - `llama.gfx950.backend_ops.MUL_MAT_ID_FUSION.f6f7601c1c97`
+- `rocblas_sgemm::fuzz_iter4`
+- `rocblas_sgemm::large_2048x2048`
 
 ## gfx1100
 
@@ -191,6 +193,11 @@ Classification buckets:
 - `llama.gfx1100.backend_ops.FLASH_ATTN_EXT.e397786c8f00`
 - `llama.gfx1100.backend_ops.FLASH_ATTN_EXT.e5e7712c889c`
 - `llama.gfx1100.backend_ops.FLASH_ATTN_EXT.eb5de146e0b8`
+
+### long-running test: 2
+
+- `cts.gfx1100.fpsan.fpsan_amdgcn_ldexp_test`
+- `cts.gfx1100.fpsan.fpsan_wmma_gfx11_tied_bf16_test`
 
 ### possible hang or freeze: 8
 

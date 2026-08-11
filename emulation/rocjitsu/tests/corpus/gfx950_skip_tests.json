@@ -14,6 +14,8 @@
     "cts.gfx950.fpsan.fpsan_mfma_gfx950_smfmac_test"
   ],
   "kernels": [
+    "rocblas_sgemm::fuzz_iter4",
+    "rocblas_sgemm::large_2048x2048"
   ],
   "llama": [
     "llama.gfx950.backend_ops.LIGHTNING_INDEXER.28d7def07117",
