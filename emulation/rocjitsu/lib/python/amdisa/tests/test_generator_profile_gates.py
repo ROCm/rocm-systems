@@ -2955,6 +2955,14 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
 
     assert codegen._supports_gfx1250_scaled_wmma_vop3px2()
     assert 'VWmmaScaleF32Vop3px2' in (codegen._emit_gfx1250_scaled_wmma_vop3px2_class())
+    model_impl = ' '.join(
+        codegen._emit_gfx1250_scaled_wmma_vop3px2_impls().model[0].split()
+    )
+    assert (
+        'reinterpret_cast<const OpEncoding *>(inst + 2), '
+        'selected_exec_fn(0), 3, Vop3p::ExtensionDecodePolicy::Skip),'
+    ) in model_impl
+
     helpers = codegen._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers()
     assert 'isVop3pOp' in helpers
     assert 'isWmmaScaleF32Vop3px2' not in helpers
@@ -3006,6 +3014,38 @@ def test_vopd_dispatch_uses_primary_decode_table(
     assert 'Decoder::decodeVopd(const MachineInst *opcode)' in decoder
     assert 'is_vopd' not in (arch_root / 'vopd.h').read_text()
     assert 'is_vopd' not in (arch_root / 'vopd.cpp').read_text()
+
+
+def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
+    gfx1250_generated_root: Path,
+):
+    encodings_h = (gfx1250_generated_root / 'encodings.h').read_text()
+    encodings_cpp = (gfx1250_generated_root / 'encodings.cpp').read_text()
+    vop3p_cpp = ' '.join((gfx1250_generated_root / 'vop3p.cpp').read_text().split())
+
+    assert 'enum class ExtensionDecodePolicy { Decode, Skip };' in encodings_h
+    assert 'int num_encoded_sources = 3' in encodings_h
+    assert (
+        'ExtensionDecodePolicy extension_policy = ExtensionDecodePolicy::Decode'
+        in encodings_h
+    )
+
+    constructor = _generated_constructor_body(encodings_cpp, 'Vop3p')
+    guard = 'if (extension_policy == ExtensionDecodePolicy::Decode) {'
+    guarded_suffix = constructor.split(guard, 1)[1]
+    guarded_body, constructor_suffix = guarded_suffix.rsplit('\n  }\n}', 1)
+    assert not constructor_suffix.strip()
+    for extension_step in (
+        'throw util::InvalidInst("Vop3p does not support Literal64", "")',
+        'has_lit_0()',
+        'inst_.src0 == amdgpu::SRC_DPP',
+        'amdgpu::dpp::is_src_dpp8(inst_.src0)',
+        'std::memcpy(raw_words_.data(), inst, size_)',
+        'raw_encoding_ = raw_words_.data()',
+    ):
+        assert extension_step in guarded_body
+
+    assert 'selected_exec_fn(1250), 3, Vop3p::ExtensionDecodePolicy::Skip)' in vop3p_cpp
 
 
 @pytest.mark.parametrize(

@@ -3285,7 +3285,7 @@ VWmmaF3232x16x128F4Vop3p::VWmmaF3232x16x128F4Vop3p(const MachineInst *inst)
 
 VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
     : Vop3p(gfx1250_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
-            selected_exec_fn(1250)),
+            selected_exec_fn(1250), 3, Vop3p::ExtensionDecodePolicy::Skip),
       vdst(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
            reinterpret_cast<const OpEncoding *>(inst + 2)->vdst),
       src0(gfx1250_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
