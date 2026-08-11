@@ -2446,6 +2446,26 @@ class CodeGenerator:
                     f' throw util::InvalidInst("{inst_enc.fmt_enc_name} does not support '
                     'Literal64", "");'
                 )
+            # Size owned storage from this encoding's declared extension forms,
+            # not the architecture-wide operand selector table. For example,
+            # gfx1250 defines selector 254 for 64-bit literals, but the 64-bit
+            # VOP3 and VOP3P encodings only support a 32-bit literal extension.
+            extension_word_capacity = 0
+            if owns_dpp_extension:
+                extension_word_capacity = 1
+            if has_real_default_check and default_cond != 'true':
+                extension_word_capacity = max(extension_word_capacity, 1)
+            if literal32_condition:
+                extension_word_capacity = max(extension_word_capacity, 1)
+            if literal64_condition:
+                extension_word_capacity = max(extension_word_capacity, 2)
+            if inst_enc.has_implied_literal_ops:
+                extension_word_capacity = max(
+                    extension_word_capacity,
+                    1,
+                    *inst_enc.implied_literal_ops.values(),
+                )
+            owns_extension_words = extension_word_capacity > 0
             extension_size_line = ''
             if literal64_condition and size_condition is not None:
                 extension_size_line = (
@@ -2486,7 +2506,7 @@ class CodeGenerator:
                     ' if (hasImpliedLiteral())'
                     ' literal_ = reinterpret_cast<const uint32_t *>(inst)[1];'
                 )
-            if owns_dpp_extension:
+            if owns_extension_words:
                 size_line += (
                     ' std::memcpy(raw_words_.data(), inst, size_);'
                     ' raw_encoding_ = raw_words_.data();'
@@ -2667,12 +2687,7 @@ class CodeGenerator:
                 cgen.Statement(f'using OpEncoding = {inst_enc.fmt_enc_name}MachineInst')
             )
             class_members.append(cgen.Statement('const OpEncoding inst_'))
-            if owns_dpp_extension:
-                extension_word_capacity = max(
-                    [1, *inst_enc.implied_literal_ops.values()]
-                )
-                if any(name.startswith('has_lit64') for name, _ in inst_enc.enc_conds):
-                    extension_word_capacity = max(extension_word_capacity, 2)
+            if owns_extension_words:
                 raw_word_count = (inst_enc.bit_cnt + 31) // 32 + extension_word_capacity
                 class_members.append(
                     cgen.Statement(
@@ -8587,6 +8602,7 @@ class CodeGenerator:
                         f'{enc.fmt_enc_name.lower()}.h',
                         False,
                     ),
+                    ('rocjitsu/isa/arch/amdgpu/shared/simd_glue.h', False),
                     ('util/except.h', False),
                 ]
                 _MEM_ENC_NAMES = frozenset(
@@ -8664,25 +8680,6 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             'rocjitsu/isa/arch/amdgpu/shared/transcendental.h',
-                            False,
-                        )
-                    )
-                uses_true16_write_helper = any(
-                    self.semantics
-                    and (s := self.semantics.instructions.get(i.name))
-                    and s.semantic_class
-                    in (
-                        'mad_mixlo_f16',
-                        'mad_mixhi_f16',
-                        'mad_mixlo_bf16',
-                        'mad_mixhi_bf16',
-                    )
-                    for i in all_insts
-                )
-                if uses_true16_write_helper:
-                    cpp_includes.append(
-                        (
-                            'rocjitsu/isa/arch/amdgpu/shared/simd_glue.h',
                             False,
                         )
                     )
@@ -8775,24 +8772,6 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             'rocjitsu/isa/arch/amdgpu/shared/execute_shared.h',
-                            False,
-                        )
-                    )
-
-                def _has_local_simd_probe(i: Instruction) -> bool:
-                    if not self.semantics or i.name not in self.semantics.instructions:
-                        return False
-                    sem = self.semantics.instructions[i.name]
-                    return bool(
-                        self._true16_vop3_local_simd_probe(i, sem, enc.enc_name)
-                        or self._renamed_vop3p_local_simd_probe(i, enc.enc_name)
-                    )
-
-                has_local_simd_probe = any(_has_local_simd_probe(i) for i in all_insts)
-                if has_local_simd_probe:
-                    cpp_includes.append(
-                        (
-                            'rocjitsu/isa/arch/amdgpu/shared/simd_glue.h',
                             False,
                         )
                     )

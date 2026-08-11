@@ -372,6 +372,7 @@ public:
   bool has_lit_0();
   using OpEncoding = Sop1MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopc : public IsaInstruction<Isa> {
@@ -383,6 +384,7 @@ public:
   bool has_lit_0_has_lit_1();
   using OpEncoding = SopcMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopp : public IsaInstruction<Isa> {
@@ -400,6 +402,7 @@ public:
   bool hasImpliedLiteral();
   using OpEncoding = SopkMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t literal_ = 0;
 };
 
@@ -412,6 +415,7 @@ public:
   bool has_lit_0_has_lit_1();
   using OpEncoding = Sop2MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Smem : public IsaInstruction<Isa> {
@@ -459,6 +463,7 @@ public:
   bool has_lit();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -530,6 +535,7 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 3> raw_words_{};
 };
 
 class Vop3p : public IsaInstruction<Isa> {
@@ -544,6 +550,7 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 3> raw_words_{};
 };
 
 class Ds : public IsaInstruction<Isa> {
@@ -608,6 +615,7 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3SdstEncMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 3> raw_words_{};
 };
 
 } // namespace rdna1
