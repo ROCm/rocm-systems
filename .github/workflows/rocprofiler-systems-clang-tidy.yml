@@ -3,7 +3,6 @@ name: rocprofiler-systems Clang-Tidy
 run-name: clang-tidy
 
 on:
-  workflow_dispatch:
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-clang-tidy.yml'
