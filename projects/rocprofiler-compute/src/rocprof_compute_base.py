@@ -269,23 +269,6 @@ class RocProfCompute:
         """Generate MachineSpecs for RocProfCompute"""
         self.__mspec = generate_machine_specs(self.__args)
 
-        if self.__mode == "profile":
-            compute_partition = getattr(self.__mspec, "compute_partition", None)
-            if compute_partition and compute_partition.strip().lower() != "n/a":
-                console_warning(
-                    f"Compute partition detected as {compute_partition} mode - metrics "
-                    f"calculated are based on number of XCDs derived from "
-                    f"{compute_partition}"
-                )
-
-            memory_partition = getattr(self.__mspec, "memory_partition", None)
-            if memory_partition and memory_partition.strip().lower() != "n/a":
-                console_warning(
-                    f"Memory partition detected as {memory_partition} mode - metrics "
-                    f"calculated are based on number of HBM channels derived from "
-                    f"{memory_partition}"
-                )
-
     @demarcate
     def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
         """
