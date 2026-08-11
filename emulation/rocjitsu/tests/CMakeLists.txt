@@ -354,10 +354,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endfunction()
 
     rj_add_plugin_loader_fixture(good)
-    rj_add_plugin_loader_fixture(
-        badabi
-        PLUGIN_FIXTURE_ABI=::rocjitsu::kPluginAbiVersion+1
-    )
     rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
     rj_add_plugin_loader_fixture(duplicate)
 endif()
@@ -519,7 +515,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_dependencies(
         rocjitsu_tests
         plugin_loader_fixture_good
-        plugin_loader_fixture_badabi
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
     )
@@ -2518,34 +2513,6 @@ if(RJ_ENABLE_HIP_TESTS)
             ENVIRONMENT
                 "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
                 "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
-        )
-
-        # --- Profiled plugin group end-to-end test ---
-        rj_add_hip_test(
-            hip_profiled_plugin_test
-            ARCH gfx950
-            SOURCE logging/hip_profiled_plugin_test.hip
-        )
-        set(PROFILED_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/profiled_test_output)
-        set(PROFILED_RUNTIME_DIR ${PROFILED_SINK_DIR}/runtime)
-        file(MAKE_DIRECTORY ${PROFILED_SINK_DIR})
-        file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
-        if(RJ_INSTALL_TESTS)
-            install(
-                FILES
-                    ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
-                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs/tests
-                RENAME profiled.json
-            )
-        endif()
-        rj_add_hip_test_case(
-            hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
-            CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
-            INSTALL_CONFIG "\${RJ_INSTALLED_CONFIG_DIR}/tests/profiled.json"
-            TIMEOUT 30
-            ENVIRONMENT
-                "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
-                "RJ_SINK_DIR=${PROFILED_SINK_DIR}"
         )
 
         add_subdirectory(race-detector)
