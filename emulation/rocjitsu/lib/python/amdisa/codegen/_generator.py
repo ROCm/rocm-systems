@@ -8602,6 +8602,7 @@ class CodeGenerator:
                         f'{enc.fmt_enc_name.lower()}.h',
                         False,
                     ),
+                    ('rocjitsu/isa/arch/amdgpu/shared/simd_glue.h', False),
                     ('util/except.h', False),
                 ]
                 _MEM_ENC_NAMES = frozenset(
@@ -8679,25 +8680,6 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             'rocjitsu/isa/arch/amdgpu/shared/transcendental.h',
-                            False,
-                        )
-                    )
-                uses_true16_write_helper = any(
-                    self.semantics
-                    and (s := self.semantics.instructions.get(i.name))
-                    and s.semantic_class
-                    in (
-                        'mad_mixlo_f16',
-                        'mad_mixhi_f16',
-                        'mad_mixlo_bf16',
-                        'mad_mixhi_bf16',
-                    )
-                    for i in all_insts
-                )
-                if uses_true16_write_helper:
-                    cpp_includes.append(
-                        (
-                            'rocjitsu/isa/arch/amdgpu/shared/simd_glue.h',
                             False,
                         )
                     )
@@ -8790,24 +8772,6 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             'rocjitsu/isa/arch/amdgpu/shared/execute_shared.h',
-                            False,
-                        )
-                    )
-
-                def _has_local_simd_probe(i: Instruction) -> bool:
-                    if not self.semantics or i.name not in self.semantics.instructions:
-                        return False
-                    sem = self.semantics.instructions[i.name]
-                    return bool(
-                        self._true16_vop3_local_simd_probe(i, sem, enc.enc_name)
-                        or self._renamed_vop3p_local_simd_probe(i, enc.enc_name)
-                    )
-
-                has_local_simd_probe = any(_has_local_simd_probe(i) for i in all_insts)
-                if has_local_simd_probe:
-                    cpp_includes.append(
-                        (
-                            'rocjitsu/isa/arch/amdgpu/shared/simd_glue.h',
                             False,
                         )
                     )
