@@ -19,6 +19,7 @@
 #include "dda_alltoall.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
+#include "ce_coll.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -189,6 +190,7 @@ RCCL_PARAM(DdaLL, "DDA_LL", 1);
 RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));       // 32 KiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
+RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
@@ -617,7 +619,16 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   bool ceCapturing = ncclCudaGraphValid(ceGraph);
   rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
   bool ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
-  bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op);
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+  const bool force = rcclParamForceCeAllReduce() != 0;
+  const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType);
+  bool ceAllReduceAllowed =
+    ncclGroupDepth == 0 && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op) && (force || symReg);
   if (!symEligible && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
     if (count == 0) return ncclSuccess;
     INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d", count, (int)datatype, (int)op,

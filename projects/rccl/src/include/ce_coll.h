@@ -17,7 +17,7 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 #define RCCL_CE_NUM_COPY_STREAMS 8
 
-// Default is <= 2 MiB (holds NUM_SLOTS * nRanks chunks (2 scatter slots),
+// Default is <= 256 MiB (holds NUM_SLOTS * nRanks chunks (2 scatter slots),
 // and the reduced output goes to the user recvbuff)
 #define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
 
@@ -84,7 +84,7 @@ struct ncclCeColl {
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
   uint32_t* d_barrierSync;
-  cudaStream_t scatterStream;     // trails the reduce kernel: waits d_reduceDone, then all-gathers
+  cudaStream_t scatterStream; 
   cudaEvent_t synceEvent;  // join scatterStream back onto the caller's stream
   // Latched while this comm has live graph-captured plans. CE 2-shot AllReduce
   // can deadlock on eager calls that share a graph-mode comm, so we disable CE
@@ -134,9 +134,6 @@ struct ncclCeBatchOpsParams {
 
 bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                      ncclSymRegType_t winRegType);
-
-bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                            ncclSymRegType_t winRegType);
 
 bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                             ncclSymRegType_t winRegType);

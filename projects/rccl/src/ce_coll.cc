@@ -885,48 +885,6 @@ fail:
   goto exit;
 }
 
-// =============================================================================
-// CE AllReduce pipeline: single-op stream memory-op helpers.
-// Thin wrappers over hipStreamBatchMemOp, matching the CUDA-compatible batch
-// memop struct already used by ncclMemOpSync / ncclPrepUCSync in this file.
-//   - WaitGte / WaitEq : stall the stream until *addr >= / == value
-//   - WriteValue       : write value to a local address on the stream
-//   - QueueDoorbellWrite : write value to a peer (LSA) address on the stream
-// =============================================================================
-static ncclResult_t ncclMemOpWaitValue(struct ncclComm* /*comm*/, uint32_t* addr, uint32_t value, uint32_t flags,
-                                       cudaStream_t stream) {
-  hipStreamBatchMemOpParams op = {};
-  op.waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
-  op.waitValue.address = (CUdeviceptr)addr;
-  op.waitValue.value = value;
-  op.waitValue.flags = flags;
-  CUCHECK(hipStreamBatchMemOp(stream, 1, &op, 0));
-  return ncclSuccess;
-}
-
-ncclResult_t ncclMemOpWaitGte(struct ncclComm* comm, uint32_t* addr, uint32_t value, cudaStream_t stream) {
-  return ncclMemOpWaitValue(comm, addr, value, CU_STREAM_WAIT_VALUE_GEQ, stream);
-}
-
-ncclResult_t ncclMemOpWaitEq(struct ncclComm* comm, uint32_t* addr, uint32_t value, cudaStream_t stream) {
-  return ncclMemOpWaitValue(comm, addr, value, CU_STREAM_WAIT_VALUE_EQ, stream);
-}
-
-ncclResult_t ncclMemOpWriteValue(struct ncclComm* /*comm*/, uint32_t* addr, uint32_t value, cudaStream_t stream) {
-  hipStreamBatchMemOpParams op = {};
-  op.writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
-  op.writeValue.address = (CUdeviceptr)addr;
-  op.writeValue.value = value;
-  op.writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
-  CUCHECK(hipStreamBatchMemOp(stream, 1, &op, 0));
-  return ncclSuccess;
-}
-
-// A cross-rank doorbell is just a WriteValue32 to a peer (LSA) pointer.
-ncclResult_t ncclCeQueueDoorbellWrite(struct ncclComm* comm, void* peerAddr, uint32_t value, cudaStream_t stream) {
-  return ncclMemOpWriteValue(comm, (uint32_t*)peerAddr, value, stream);
-}
-
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin) {
@@ -948,15 +906,15 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   size_t slotChunkElems = slotChunkBytes / eltSize;
   size_t chunksPerShard = shardElems / baseChunkElems;
   size_t tailChunkElems = shardElems % baseChunkElems;
-  if (tailChunkElems != 0) chunksPerShard++;
+  if (tailChunkElems != 0) {
+    chunksPerShard++;
+  }
   size_t totalSteps = chunksPerShard;
   // ceARTmpBuf slots are spaced by slotChunkBytes (<= maxChunkBytes at init).
   const size_t slotStrideBytes = slotChunkBytes * (size_t)comm->nRanks;
   int startCh = (int)chunksPerShard - (int)NUM_SLOTS;
   // Unique call verification tracking sequence
-  uint32_t* basePeerSignalAddr[comm->nRanks];
-  static uint32_t callCounter = 0;
-  callCounter++;
+  std::vector<uint32_t*> basePeerSignalAddr(comm->nRanks);
   INFO(NCCL_COLL,
        "CE AllReduce: rank %d totalBytes %zu chunkBytes=%zu baseChunkElems=%zu tailChunkElems=%zu chunksPerShard=%zu",
        comm->rank, totalBytes, chunkBytes, baseChunkElems, tailChunkElems, chunksPerShard);
@@ -984,7 +942,6 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   size_t mySlotOffset = 0;
   uint8_t* myRecvSlot = nullptr;
   size_t recvSlotOffset = 0;
-  struct ncclCeCollArgs agArgs = {};
 
   struct ncclCeBatchOpsParams batchOpsParams = {};
   struct ncclCeCollArgs collArgs = {};
@@ -1063,7 +1020,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
       }
       CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0));
     }
-      // Batched doorbell: all peers' + local slot signals stream memop.
+    // Batched doorbell: all peers' + local slot signals stream memop.
     const size_t dstSlotOffsetBytes = (size_t)slot * slotStrideBytes + (size_t)comm->rank * slotChunkBytes;
     const size_t srcChunkOffsetBytes = ch * chunkBytes;
     batchOpsParams.numOps = 0;
@@ -1103,7 +1060,9 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   if (totalSteps > 1) {
     // Phase 3: wait for NUM_SLOTS chunks to be reduced before starting allgather
     // startch is chunkPerShard - NUM_SLOTS
-    if (startCh < 0) startCh = 0;
+    if (startCh < 0) {
+      startCh = 0;
+    }
     for (int chunkIndex = startCh; chunkIndex < (int)chunksPerShard; chunkIndex++) {
       const int drainSlot = chunkIndex % NUM_SLOTS;
       const size_t slotOffset = (drainSlot * (size_t)comm->nRanks + comm->rank) * sizeof(uint32_t);

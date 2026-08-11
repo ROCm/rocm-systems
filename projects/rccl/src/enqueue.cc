@@ -3761,8 +3761,11 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // Append CE collective task if CE is supported and requested by user
       bool CeScratchAvailable =
         !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      // Uncapped sym-window CE AllReduce (-R 2), without flipping whole comm to CE mode
+      bool ceArSymRegistered =
+        info->coll == ncclFuncAllReduce && rcclParamForceCeAllReduce() && ceAvailable && !hasSysmemSegment;
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment) {
+      if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment) || ceArSymRegistered) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                    opDev));

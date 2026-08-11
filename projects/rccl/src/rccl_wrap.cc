@@ -627,17 +627,17 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
   size_t msgBytes = count * ncclTypeSize(datatype);
   if (force) {
     if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
-      WARN("Skipping CE AllReduce despite RCCL_FORCE_CE_ALLREDUCE=1: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)", msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
+      WARN("Skipping CE AllReduce despite RCCL_FORCE_CE_ALLREDUCE=1: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)",
+           msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
       return false;
     }
-    comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
   }
   if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
     WARN("Skipping CE AllReduce: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)", msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
     return false;
   }
 
-  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO) {
+  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO && !force) {
     WARN("Skipping CE AllReduce: CTA policy is not ZERO");
     return false;
   }
