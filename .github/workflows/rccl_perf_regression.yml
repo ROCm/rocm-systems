@@ -208,7 +208,9 @@ jobs:
         run: |
           set -euo pipefail
           base="$(git merge-base "origin/${BASE_REF}" HEAD)"
-          if git diff --name-only "${base}" HEAD | grep -q '^projects/rccl/'; then
+          # Let grep consume the whole stream (grep -q closes early, which can
+          # SIGPIPE git diff -> exit 141 under pipefail -> false 'rccl_changed=0').
+          if git diff --name-only "${base}" HEAD | grep '^projects/rccl/' >/dev/null; then
             echo "rccl_changed=1" >> "$GITHUB_OUTPUT"
           else
             echo "rccl_changed=0" >> "$GITHUB_OUTPUT"
@@ -360,13 +362,27 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          # If this run was superseded by a newer /perf-regression on the same PR,
+          # its build was cancelled by concurrency. Do NOT publish -- the newer
+          # run owns the pending status and sticky comment, and an old finalizer
+          # writing here would clobber the newer run's feedback for the same
+          # SHA/context. (This also skips feedback for manual cancellations;
+          # distinguishing them would need a durable current-run marker.)
+          if [[ "${BUILD_RESULT}" == "cancelled" ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Build cancelled (superseded) -- not publishing status/comment."
+            exit 0
+          fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
           # Advisory: a detected regression (detector exit 1) does NOT fail the
-          # gate; only build failure / detector infra errors do.
+          # gate; only build failures / detector job or infra errors do.
           state=success; desc="Perf gate passed"
           if [[ "${BUILD_RESULT}" != "success" ]]; then
             state=failure; desc="Build job ${BUILD_RESULT}"
           elif [[ "${DETECT_RESULT}" == "cancelled" || "${DETECT_RESULT}" == "skipped" ]]; then
             state=error; desc="Detector ${DETECT_RESULT}"
+          elif [[ "${DETECT_RESULT}" != "success" ]]; then
+            state=failure; desc="Detector job ${DETECT_RESULT}"
           elif [[ "${DETECT_CODE}" != "0" && "${DETECT_CODE}" != "1" ]]; then
             state=failure; desc="Detector infra error (exit ${DETECT_CODE:-unknown})"
           fi
@@ -381,7 +397,7 @@ jobs:
           fi
 
       - name: Assemble PR comment
-        if: needs.resolve.outputs.pr_number != ''
+        if: needs.resolve.outputs.pr_number != '' && steps.verdict.outputs.publish == 'true'
         env:
           HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
           STATE: ${{ steps.verdict.outputs.state }}
@@ -402,10 +418,23 @@ jobs:
           } > comment.md
 
       - name: Post / update PR comment
-        if: needs.resolve.outputs.pr_number != ''
+        if: needs.resolve.outputs.pr_number != '' && steps.verdict.outputs.publish == 'true'
         uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
         with:
           header: rccl-perf-gate
           number: ${{ needs.resolve.outputs.pr_number }}
           GITHUB_TOKEN: ${{ github.token }}
           path: comment.md
+
+      - name: Enforce result (fail the workflow on build/infra failure)
+        # Restores the original contract: infra/polling failures fail the run.
+        # A detected regression stays advisory (state=success). Skipped for
+        # superseded runs so concurrency cancellation isn't reported as failure.
+        if: always() && steps.verdict.outputs.publish == 'true'
+        env:
+          STATE: ${{ steps.verdict.outputs.state }}
+        run: |
+          if [[ "${STATE}" == "failure" || "${STATE}" == "error" ]]; then
+            echo "::error::RCCL Perf Regression Gate ${STATE} -- see the PR status/comment."
+            exit 1
+          fi
