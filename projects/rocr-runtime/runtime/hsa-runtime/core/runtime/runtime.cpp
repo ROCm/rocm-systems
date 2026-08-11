@@ -4097,11 +4097,20 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     core::Agent* drm_owner = nullptr;
     if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
       const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (gpus.empty()) {
+      const auto& disabled_gpus = core::Runtime::runtime_singleton_->disabled_gpu_agents();
+      if (gpus.empty() && disabled_gpus.empty()) {
         region->Free(driver_handle);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
-      agent_for_drm = gpus.front();
+      auto drm_minor = [](const core::Agent* a) {
+        return static_cast<const AMD::GpuAgent*>(a)->properties().DrmRenderMinor;
+      };
+      agent_for_drm = !gpus.empty() ? gpus.front() : disabled_gpus.front();
+      for (const auto* pool : {&gpus, &disabled_gpus}) {
+        for (auto* candidate : *pool) {
+          if (drm_minor(candidate) < drm_minor(agent_for_drm)) agent_for_drm = candidate;
+        }
+      }
       drm_owner = agent_for_drm;
     }
 
@@ -4309,8 +4318,17 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
      * The driver_handle created during import should have the correct mmap_offset. */
     if (mappedHandle->mem_handle->imported) {
       const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (!gpus.empty()) {
-        agent = gpus.front();
+      const auto& disabled_gpus = core::Runtime::runtime_singleton_->disabled_gpu_agents();
+      if (!gpus.empty() || !disabled_gpus.empty()) {
+        auto drm_minor = [](const core::Agent* a) {
+          return static_cast<const AMD::GpuAgent*>(a)->properties().DrmRenderMinor;
+        };
+        agent = !gpus.empty() ? gpus.front() : disabled_gpus.front();
+        for (const auto* pool : {&gpus, &disabled_gpus}) {
+          for (auto* candidate : *pool) {
+            if (drm_minor(candidate) < drm_minor(agent)) agent = candidate;
+          }
+        }
         agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
       }
     } else if (mappedHandle->mem_handle->region) {
