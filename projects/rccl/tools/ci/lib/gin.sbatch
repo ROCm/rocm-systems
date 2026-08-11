@@ -153,65 +153,19 @@ echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
 
 # 5) rccl-tests (DEVICE_API + ROCSHMEM). allreduce fails to build; -k keeps going
 # so alltoall_perf still lands (matches the Dockerfile's `make -k || true`).
-echo "==> [5/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM)"
+echo "==> [5/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)"
 rccl_tests_src="${workdir}/projects/rccl-tests"
 rccl_tests_build="${workdir}/.ci-out/rccl-tests-build"
 
-# librccl.so (ENABLE_ROCSHMEM_GIN) leaves rocSHMEM host symbols undefined, so
-# rccl-tests must supply them: whole-archive librocshmem.a (+ -rdynamic) and link
-# rocprofiler-register (rocSHMEM api-trace). CI-time patches, no tracked-file edits.
-tlib="${rccl_tests_src}/src/CMakeLists.txt"
-# alltoall_perf: already links rocSHMEM; whole-archive it + add rocprofiler-register.
-if grep -q 'target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY}' "${tlib}" 2>/dev/null; then
-  sed -i \
-    's|target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY}|target_link_libraries(alltoall_perf PRIVATE -Wl,--whole-archive ${ROCSHMEM_LIBRARY} -Wl,--no-whole-archive rocprofiler-register|' \
-    "${tlib}"
-  echo "    patched alltoall_perf link: whole-archive rocSHMEM + rocprofiler-register"
-else
-  echo "    (alltoall_perf whole-archive pattern not found; skipping)"
-fi
-
-# gin factory test: links rocSHMEM plainly; whole-archive it + add rocprofiler-register
-# to resolve sdma_anvil::* and rocprofiler_register_* symbols.
-if grep -q 'roc::rccl ${ROCSHMEM_LIBRARY}' "${tlib}" 2>/dev/null; then
-  sed -i \
-    's|roc::rccl ${ROCSHMEM_LIBRARY}|roc::rccl -Wl,--whole-archive ${ROCSHMEM_LIBRARY} -Wl,--no-whole-archive rocprofiler-register|' \
-    "${tlib}"
-  echo "    patched gin factory test link: whole-archive rocSHMEM + rocprofiler-register"
-else
-  echo "    (gin factory test rocSHMEM link pattern not found; skipping)"
-fi
-
-# Drop the hard-coded ${ROCM_PATH}/include from the GIN factory test's include
-# list so its device headers (nccl_device/.../queue_pair_device.h) resolve to the
-# in-tree RCCL source, not the nightly ROCm copy. hipcc still adds ${ROCM_PATH}
-# implicitly, so HIP/ROCm headers remain available.
-if grep -qE '^[[:space:]]*\$\{ROCM_PATH\}/include[[:space:]]*$' "${tlib}" 2>/dev/null; then
-  sed -i '/^[[:space:]]*${ROCM_PATH}\/include[[:space:]]*$/d' "${tlib}"
-  echo "    patched gin factory test: dropped nightly ROCM_PATH/include precedence"
-else
-  echo "    (gin factory test ROCM_PATH/include pattern not found; skipping)"
-fi
-
-# Pin ROCSHMEM_LIBRARY to the in-tree librocshmem.a we just built. find_library
-# searches CMAKE_PREFIX_PATH (nightly ${ROCM_PATH}) before its HINTS, so it would
-# otherwise resolve rocSHMEM to the nightly bundled librocshmem.a (stale
-# sdma_anvil::* / rocprofiler_register_*). Presetting the cache var skips the search.
-rocshmem_lib="${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a"
-if [[ ! -f "${rocshmem_lib}" ]]; then
-  echo "ERROR: in-tree librocshmem.a not found at ${rocshmem_lib}" >&2
-  ls -la "${ROCSHMEM_INSTALL_DIR}/lib" 2>/dev/null >&2 || true
-  exit 1
-fi
-echo "    in-tree rocSHMEM library: ${rocshmem_lib}"
-
+# rccl-tests uses find_package(rocshmem) with the roc::rocshmem cmake target,
+# which brings in all transitive dependencies (hip::device, hsakmt, numa, etc.).
+# No manual sed patches or ROCSHMEM_LIBRARY overrides needed.
 rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
 (
   cd "${rccl_tests_build}"
   cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON \
-    -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON \
+    -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}" \
-    -DROCSHMEM_LIBRARY="${rocshmem_lib}" \
     -DRCCL_DIR="${rccl_cmake_dir}" \
     -DCMAKE_PREFIX_PATH="${rccl_prefix};${MPI_HOME}" \
     -DGPU_TARGETS="${gpu_targets}" \
