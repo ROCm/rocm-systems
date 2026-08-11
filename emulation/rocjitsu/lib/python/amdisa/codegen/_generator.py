@@ -7475,22 +7475,22 @@ class CodeGenerator:
                     ctor_body_parts.extend(conditional_src_body)
                     ctor_body_parts.extend(conditional_dst_body)
 
-                    # Pseudo-scalar V_S_* instructions encode their SGPR
-                    # destination through VDST, but the ISA reserves the VCC
-                    # selectors for this instruction family. Keep this check
-                    # local to pseudo_scalar_unary: OPR_SREG legitimately
-                    # permits VCC destinations for other instructions.
+                    # LLVM models pseudo-scalar V_S_* destinations as
+                    # SReg_32_XEXEC: selectors 0..125 (SGPRs, TTMPs, VCC,
+                    # NULL, and M0) are legal, while EXEC and every larger
+                    # selector are excluded. The operand is represented as
+                    # OPR_SREG, whose enum stops at NULL, so compare against
+                    # the matching SDST_EXEC value for the first excluded
+                    # selector immediately above M0.
                     if (
                         inst_sem is not None
                         and inst_sem.semantic_class == 'pseudo_scalar_unary'
                     ):
                         ctor_body_parts.append(
-                            'if (reinterpret_cast<const OpEncoding*>(inst)->vdst == '
-                            'OpSelSreg::OPR_SREG_VCC_LO || '
-                            'reinterpret_cast<const OpEncoding*>(inst)->vdst == '
-                            'OpSelSreg::OPR_SREG_VCC_HI) '
-                            f'throw util::InvalidInst("{inst.name} may not use VCC as '
-                            'a destination", "");'
+                            'if (reinterpret_cast<const OpEncoding*>(inst)->vdst >= '
+                            'OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO) '
+                            f'throw util::InvalidInst("{inst.name} has an invalid '
+                            'SReg_32_XEXEC destination", "");'
                         )
 
                     # Flat segment-aware operands: adjust addr width and add
