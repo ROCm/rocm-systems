@@ -3705,4 +3705,54 @@ TEST_F(reader_v3_missing_meta_test, agent_with_null_type_index_is_dropped)
     EXPECT_EQ(agents.front()->name, "Synthetic GPU 0");
 }
 
+// A v3 counter track whose metric name itself contains " [" ("TCC_HIT [sum] [0]")
+// defeats the ordinal strip in ranked_pmc_resolver (the strip cuts at the first
+// " [", yielding "TCC_HIT", matching no pmc name), so the name-match rank collapses
+// and the deterministic pmc_id tiebreaker alone selects the pmc. This fixture puts
+// the correct pmc at the lower id so the tiebreaker still lands on it -- proving the
+// degradation is non-fatal on this shape while documenting that correctness now
+// rides on pmc_id ordering, not the (defeated) name match.
+class reader_v3_bracket_name_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    std::string m_database_path{ ROCPD_DB_V3_BRACKET_NAME_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+TEST_F(reader_v3_bracket_name_test, delimiter_in_metric_name_resolves_via_pmc_id_tiebreak)
+{
+    auto tracks = m_reader->get_tracks();
+    auto counters =
+        find_tracks(tracks, profiler_hub::reader_types::track_type_t::counter);
+    // Exactly one counter track (name string "TCC_HIT [sum] [0]"), co-sampled with a
+    // sibling pmc under one event.
+    ASSERT_EQ(counters.size(), 1U);
+
+    const auto& counter = counters.front();
+    ASSERT_NE(counter->pmc_info, nullptr);
+
+    // The ordinal strip is defeated by the internal " [" (yields "TCC_HIT", matching
+    // neither pmc), so both co-sampled pmcs tie on the name key and the pmc_id
+    // tiebreaker picks the lower id -- pmc 1, which by construction IS the track's own
+    // metric. Correct resolution survives here ONLY because the correct pmc has the
+    // lower id; this is the non-fatal face of the LATENT degradation task 062 graded.
+    EXPECT_EQ(counter->pmc_info->pmc_id, 1U);
+    EXPECT_EQ(counter->pmc_info->name, "TCC_HIT [sum]");
+    // Q9 display name is that same resolved pmc's name.
+    EXPECT_EQ(counter->name, "TCC_HIT [sum]");
+}
+
 }  // namespace
