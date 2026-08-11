@@ -24,6 +24,7 @@ from pc_sampling.pc_sampling_analysis import (
 )
 from pc_sampling.source_snapshot_analysis import (
     SourceFrame,
+    export_source_snapshot_files,
     parse_source_frames,
     read_source_file_digest_and_lines,
     resolve_snapshot_path,
@@ -360,7 +361,12 @@ class db_analysis(OmniAnalyze_Base):
 
         if self.get_args().output_format == "csv":
             Database.commit()
-            Database.write_csv_dir(Path(db_name).with_suffix(""))
+            csv_result_folder = Path(db_name).with_suffix("")
+            Database.write_csv_dir(csv_result_folder)
+            export_source_snapshot_files(
+                workload_paths=self._runs.keys(),
+                csv_result_directory=csv_result_folder,
+            )
         else:
             Database.create_views()
             Database.commit()
