@@ -117,6 +117,16 @@ option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx
 #     from the executable.  Does not enable alltoall_wg offload.
 option(ENABLE_ROCSHMEM                         "Full rocSHMEM: link librocshmem.a into librccl.so (alltoall_wg offload)" OFF)
 option(ENABLE_ROCSHMEM_GIN                     "GIN plugins: device bitcode injected at build, host resolved at runtime" OFF)
+if(ENABLE_ROCSHMEM AND ENABLE_ROCSHMEM_GIN)
+  message(FATAL_ERROR "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are mutually exclusive")
+endif()
+# ENABLE_ROCSHMEM links librocshmem.a via -fgpu-rdc --hip-link, which is
+# incompatible with the device linker pipeline (device.elf can't resolve
+# rocshmem API symbols from the .a).
+if(ENABLE_ROCSHMEM AND ENABLE_DEVICE_LINKER)
+  message(STATUS "ENABLE_ROCSHMEM requires -fgpu-rdc --hip-link; disabling device linker")
+  set(ENABLE_DEVICE_LINKER OFF)
+endif()
 set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
 option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)

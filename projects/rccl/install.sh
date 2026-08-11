@@ -197,6 +197,11 @@ while true; do
     esac
 done
 
+if [[ "${build_rocshmem_support}" == true && "${build_rocshmem_gin}" == true ]]; then
+    echo "Error: --rocshmem and --rocshmem-gin are mutually exclusive"
+    exit 1
+fi
+
 # /etc/*-release files describe the system
 if [[ -e "/etc/os-release" ]]; then
     source /etc/os-release
