@@ -44,6 +44,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
@@ -797,6 +798,13 @@ start_completion_monitor()
     auto& mon = get_completion_monitor();
     if(mon.running.exchange(true)) return;
 
+    // Reset per-cycle state so a re-init after a prior fini starts clean: the previous
+    // monitor left `exited` true, which would otherwise make the new cycle's first
+    // drain_completion_monitor return immediately without draining.
+    mon.exited.store(false, std::memory_order_release);
+    mon.inflight.store(0, std::memory_order_release);
+    mon.registering.store(0, std::memory_order_release);
+
     auto status = get_amd_ext_table()->hsa_amd_signal_create_fn(0, 0, nullptr, 0, &mon.wake_signal);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS)
         << "failed to create completion-monitor wake signal";
@@ -824,39 +832,6 @@ drain_completion_monitor()
         get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
         std::this_thread::sleep_for(poll_interval);
     }
-}
-
-// Stop the monitor: clear running, wake it so it observes the flag, and join. After
-// this returns the monitor thread is dead and its active set is safe to access.
-void
-stop_completion_monitor()
-{
-    auto& mon = get_completion_monitor();
-    if(!mon.running.exchange(false)) return;
-
-    get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
-    if(mon.thread.joinable()) mon.thread.join();
-
-    // A producer may still be between the bypass gate and its register_completion when
-    // the monitor exits (the gate reads fini_status; registering++ happens a few
-    // instructions later). Producers are gated off from starting new work by
-    // fini_status, and this window is bounded non-blocking CPU work, so wait for the
-    // last of them to finish before sweeping. Then process any entry they stranded so
-    // signals / correlation-id refs are released rather than leaked.
-    constexpr auto drain_interval = std::chrono::microseconds{100};
-    while(mon.registering.load(std::memory_order_acquire) > 0)
-        std::this_thread::sleep_for(drain_interval);
-
-    drain_incoming(mon);
-    for(auto& pending : mon.active)
-    {
-        run_completion(pending.session);
-        mon.inflight.fetch_sub(1, std::memory_order_relaxed);
-    }
-    mon.active.clear();
-
-    get_core_table()->hsa_signal_destroy_fn(mon.wake_signal);
-    mon.wake_signal = {};
 }
 
 // Local kernel-dispatch tracing path: swaps in pooled completion signals,
@@ -1798,6 +1773,39 @@ interposition_sync()
     drain_completion_monitor();
 }
 
+// Stop the monitor: clear running, wake it so it observes the flag, and join. After
+// this returns the monitor thread is dead and its active set is safe to access.
+void
+stop_completion_monitor()
+{
+    auto& mon = get_completion_monitor();
+    if(!mon.running.exchange(false)) return;
+
+    get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
+    if(mon.thread.joinable()) mon.thread.join();
+
+    // A producer may still be between the bypass gate and its register_completion when
+    // the monitor exits (the gate reads fini_status; registering++ happens a few
+    // instructions later). Producers are gated off from starting new work by
+    // fini_status, and this window is bounded non-blocking CPU work, so wait for the
+    // last of them to finish before sweeping. Then process any entry they stranded so
+    // signals / correlation-id refs are released rather than leaked.
+    constexpr auto drain_interval = std::chrono::microseconds{100};
+    while(mon.registering.load(std::memory_order_acquire) > 0)
+        std::this_thread::sleep_for(drain_interval);
+
+    drain_incoming(mon);
+    for(auto& pending : mon.active)
+    {
+        run_completion(pending.session);
+        mon.inflight.fetch_sub(1, std::memory_order_relaxed);
+    }
+    mon.active.clear();
+
+    get_core_table()->hsa_signal_destroy_fn(mon.wake_signal);
+    mon.wake_signal = {};
+}
+
 void
 interposition_init(CoreApiTable* core_table, bool enabled)
 {
@@ -1866,16 +1874,15 @@ interposition_fini()
     // it is unsafe there: the registry wlock and the signal pool's lock may have
     // been held by a thread that did not survive the fork, so acquiring them hangs
     // the child, and destroying inherited HSA signals reaches into a runtime the
-    // child does not own. The child abandoned all of this state (D6) and is on its
-    // way out, so skip it. The atomic stores above are kept: they are safe and make
-    // the child's interception inert.
+    // child does not own. The child abandoned all of this state and is on its way
+    // out, so skip it. The atomic stores above are kept: they are safe and make the
+    // child's interception inert.
     if(internal_threading::fork_stale()) return;
 
-    // drain in-flight completions, then stop and join the monitor thread. Stopping
-    // before signal_pool_fini ensures the monitor has released all pooled signals and
-    // is no longer touching the pool.
+    // The monitor is stopped earlier, in queue_controller_fini before queue_fini, so
+    // its straggler sweep releases pooled signals while the pool is still alive. Drain
+    // once more here to flush any completions observed since.
     interposition_sync();
-    stop_completion_monitor();
 
     // clean up signal pool
     signal_pool_fini();
