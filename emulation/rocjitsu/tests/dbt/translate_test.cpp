@@ -16335,7 +16335,7 @@ translate_gfx1250_b0_to_a0_result(rocjitsu::BinaryTranslator &translator,
                                rocjitsu::ProcessorRevision::Gfx1250A0));
 }
 
-/// @brief An s_monitor_sleep, whose A0 handling is deferred (DEGFXMI400-12268).
+/// @brief An s_monitor_sleep whose A0 handling is deferred.
 [[nodiscard]] uint32_t gfx1250_deferred_word() {
   return gfx1250::build_sopp(gfx1250::kSMonitorSleepSopp, {.simm16 = 1})[0];
 }
@@ -16418,7 +16418,7 @@ TEST(BinaryTranslatorE2E, Gfx1250DeferredFamilyReportCarriesOffsetAndMnemonic) {
 }
 
 // s_sleep and s_sleep_var behave identically on A0 and B0. The only sleep-family
-// A0 erratum, DEGFXMI400-12268, is specific to s_monitor_sleep('forever') with
+// A0 translation requirement is specific to s_monitor_sleep('forever') with
 // MWAIT=0. Copying a plain sleep through is therefore the correct translation,
 // not an unimplemented one, and reporting it drowned the reports that do name a
 // real gap: one RCCL all_reduce run emitted 104,831 of them.
