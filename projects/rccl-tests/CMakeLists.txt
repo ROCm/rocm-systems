@@ -218,8 +218,8 @@ if (ENABLE_ROCSHMEM_GIN)
     add_definitions(-DENABLE_ROCSHMEM_GIN)
 
     # Auto-detect paths from mono-repo layout
+    get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
     if (NOT ROCSHMEM_INSTALL_DIR)
-        get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
         if(EXISTS "${_mono_root}/projects/rccl/ext/rocshmem/lib/librocshmem.a")
             set(ROCSHMEM_INSTALL_DIR "${_mono_root}/projects/rccl/ext/rocshmem")
             message(STATUS "rccl-tests: found rocshmem install at ${ROCSHMEM_INSTALL_DIR}")
@@ -228,17 +228,11 @@ if (ENABLE_ROCSHMEM_GIN)
                     "and no install found at ${_mono_root}/projects/rccl/ext/rocshmem")
         endif()
     endif()
-    if (NOT RCCL_SOURCE_DIR)
-        get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
-        if(EXISTS "${_mono_root}/projects/rccl/CMakeLists.txt")
-            set(RCCL_SOURCE_DIR "${_mono_root}/projects/rccl")
-        endif()
+    if (NOT RCCL_SOURCE_DIR AND EXISTS "${_mono_root}/projects/rccl/CMakeLists.txt")
+        set(RCCL_SOURCE_DIR "${_mono_root}/projects/rccl")
     endif()
-    if (NOT ROCSHMEM_SOURCE_DIR)
-        get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
-        if(EXISTS "${_mono_root}/projects/rocshmem/CMakeLists.txt")
-            set(ROCSHMEM_SOURCE_DIR "${_mono_root}/projects/rocshmem")
-        endif()
+    if (NOT ROCSHMEM_SOURCE_DIR AND EXISTS "${_mono_root}/projects/rocshmem/CMakeLists.txt")
+        set(ROCSHMEM_SOURCE_DIR "${_mono_root}/projects/rocshmem")
     endif()
     # Installed rocshmem headers (rocshmem_config.h) are needed globally:
     # RCCL's public nccl_device.h → gin_anvil_sdma.h → anvil_device.hpp
@@ -252,8 +246,6 @@ if (ENABLE_ROCSHMEM_GIN)
 
     find_package(rocshmem REQUIRED CONFIG
         PATHS ${ROCSHMEM_INSTALL_DIR}/lib/cmake/rocshmem NO_DEFAULT_PATH)
-    # hsakmtTargets.cmake bakes in RHEL CI paths (/usr/lib64/libc.so) that
-    # don't exist on Ubuntu.  Scrub them — same fix as rocshmem's own build.
     # hsakmtTargets.cmake bakes in RHEL CI paths (/usr/lib64/libc.so,
     # -L/__w/rockrel/...) that don't exist on Ubuntu.  Scrub them and
     # re-add the correct libdrm search path — same fix as rocshmem's
