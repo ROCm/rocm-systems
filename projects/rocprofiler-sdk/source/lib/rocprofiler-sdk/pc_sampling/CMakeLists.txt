@@ -17,6 +17,7 @@ target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_PC_SAMPLING_
                                                       ${ROCPROFILER_PC_SAMPLING_HEADERS})
 
 add_subdirectory(ioctl)
+add_subdirectory(kernel)
 
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)
