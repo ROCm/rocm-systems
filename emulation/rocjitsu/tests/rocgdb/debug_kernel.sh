@@ -133,14 +133,17 @@ fi
 # --- Assert the debug markers ----------------------------------------------
 fail=0
 
-# Scenarios whose inferior faults on purpose (SIGILL, SIGSEGV) are not held to
-# `exit 0` the way the clean scenarios above are -- rocgdb's batch status for a
-# run that ends on a fatal GPU signal is not something this harness pins down.
-# What must never pass silently is the run being cut short: `timeout` kills with
-# 124, and a signalled child reports 128+signo. Either means the expected output
-# markers below were matched against a truncated log.
+# The two scenarios whose inferior faults on purpose (SIGILL, SIGSEGV) are not
+# held to `exit 0` the way the clean scenarios are -- rocgdb's batch status for a
+# run that ends on a fatal GPU signal is not something this harness pins down,
+# and guessing it would make the test fail on a healthy stack. What must never
+# pass silently is the run being cut short, so reject everything from 124 up:
+# `timeout` kills with 124, the shell reports 126/127 for a command it could not
+# execute, and a signalled child reports 128+signo. Each means the markers below
+# were matched against a truncated log. rocgdb itself only ever exits 0 or 1, so
+# nothing legitimate is above that line.
 check_not_killed() { # <status> <scenario description>
-  if [[ $1 -eq 124 || $1 -ge 128 ]]; then
+  if [[ $1 -ge 124 ]]; then
     echo "FAIL: $2 rocgdb run was killed (status $1)" >&2
     fail=1
   fi
@@ -375,7 +378,10 @@ timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -
     -ex 'continue' \
     "$app" </dev/null >"$outfile6" 2>&1
 status6=$?
-check_not_killed "$status6" "private/scratch-read"
+if [[ $status6 -ne 0 ]]; then
+  echo "FAIL: private/scratch rocgdb run exited with status $status6" >&2
+  fail=1
+fi
 out6="$(cat "$outfile6")"
 echo "--------------------------------------------------------------------"
 echo "$out6"
@@ -392,6 +398,10 @@ check6 '\$1 = \(int \*\) 0x[0-9a-f]+' 'scratch-resident pointer arg `data` resol
 check6 '\$2 = 64' 'scratch-resident scalar arg `n` resolves to 64'
 check6 '\$3 = 0' 'dereferenced device value data[0] reads back 0'
 check6 'n = 64' '`info args` reports the scratch-resident argument'
+# A wave that faults or runs away during the final `continue` still lets rocgdb
+# exit 0, so the status check above cannot stand in for these.
+check6 'add_one done: host\[0\]=1 host\[63\]=1' 'kernel completed after the scratch reads'
+check6 'Inferior 1 .*exited normally' 'inferior exited normally after the scratch reads'
 if grep -qaE 'Cannot access memory at address private_lane|flat_scratch may be corrupted' <<<"$out6"; then
   echo "  FAIL: scratch/private memory was not readable" >&2
   fail=1
