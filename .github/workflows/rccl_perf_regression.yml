@@ -31,6 +31,13 @@
 name: RCCL Perf Regression Gate
 
 on:
+  # Lightweight hint only (see the `hint` job): seeds the required commit status
+  # as pending with an instruction to comment the command. Does NOT run the gate.
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'projects/rccl/**'
+      - '.github/workflows/rccl_perf_regression.yml'
   issue_comment:
     types: [created]
   # Manual dispatch for testing / ad-hoc runs. Inputs mirror a PR run; omit them
@@ -57,6 +64,35 @@ env:
 permissions: {}
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # hint: on PR open/update, seed the required commit status as `pending` with an
+  # instruction to comment the command. This is the ONLY thing that runs on
+  # pull_request -- it never checks out or builds PR code. Without it the required
+  # check would sit as a bare "expected" with no explanation of how to run it.
+  # ---------------------------------------------------------------------------
+  hint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    concurrency:
+      group: rccl-perf-gate-hint-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Post pending hint status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/${{ github.repository }}/statuses/${HEAD_SHA}" \
+            -f state=pending \
+            -f "context=${STATUS_CONTEXT}" \
+            -f "target_url=${RUN_URL}" \
+            -f "description=Comment ${PERF_COMMAND} (org members) to run the perf gate"
+
   # ---------------------------------------------------------------------------
   # resolve: authorization + context resolution + pending feedback.
   # Runs on a hosted runner and never checks out PR code, so its write-capable
