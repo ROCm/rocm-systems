@@ -284,10 +284,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
     arch = arch_name
     is_dense_wmma = name.startswith('V_WMMA_')
-    uses_rdna4_swmmac_layout = arch == 'rdna4' and is_swmmac
     uses_supported_swmmac_layout = is_swmmac and ctx.profile.has_swmmac
+    uses_runtime_wave_swmmac_layout = (
+        uses_supported_swmmac_layout
+        and ctx.profile.wave_size != ctx.profile.wave_size_max
+    )
     uses_plain_vgpr_dst = arch in ('rdna3', 'rdna3_5', 'rdna4') and (
-        is_dense_wmma or uses_rdna4_swmmac_layout
+        is_dense_wmma or uses_runtime_wave_swmmac_layout
     )
     uses_gfx11_wmma_layout = arch in ('rdna3', 'rdna3_5') and is_dense_wmma
     uses_gfx12_wmma_layout = arch == 'rdna4' and is_dense_wmma
@@ -427,7 +430,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' {src0_base_expr}, {src1_base_expr}, s2, extract_a, extract_b,'
                 f' inst_.clamp, const_acc);'
             )
-        elif uses_rdna4_swmmac_layout:
+        elif uses_runtime_wave_swmmac_layout:
             if input_type in ('IU4', 'IU8'):
                 suffix = '4' if input_type == 'IU4' else '8'
                 append_signed_extractors(suffix)
@@ -578,7 +581,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                             f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
                             f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc);'
                         )
-        elif uses_rdna4_swmmac_layout:
+        elif uses_runtime_wave_swmmac_layout:
             if result_type == 'F16':
                 exec_fn = 'exec_swmmac_f16'
             elif result_type == 'BF16':

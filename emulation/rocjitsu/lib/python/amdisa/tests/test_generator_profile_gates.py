@@ -80,9 +80,6 @@ def _gen_mfma(
         'cdna5': Cdna5Profile,
     }
     profile = profile or profiles[arch_name]()
-    if not hasattr(profile, 'has_swmmac'):
-        profile_type = profiles.get(arch_name)
-        profile.has_swmmac = profile_type().has_swmmac if profile_type else False
     return gen_mfma(
         ExecuteContext(
             inst=inst,
@@ -1146,7 +1143,12 @@ def test_matrix_resolved_dense_operands_support_vgpr_and_inline_accumulators():
 
 def test_matrix_resolved_sparse_index_rejects_missing_vgpr_offset():
     inst = Instruction('V_SWMMAC_F32_16X16X32_F16', 'ENC_VOP3P', 0, [])
-    profile = SimpleNamespace(uses_vgpr_msb_indexing=True)
+    profile = SimpleNamespace(
+        uses_vgpr_msb_indexing=True,
+        has_swmmac=True,
+        wave_size=32,
+        wave_size_max=64,
+    )
 
     body = _gen_mfma(inst, 'rdna4', profile)
 
@@ -1180,7 +1182,12 @@ def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
 
 def test_matrix_direct_sparse_operands_reach_final_call():
     inst = Instruction('V_SWMMAC_F32_16X16X32_F16', 'ENC_VOP3P', 0, [])
-    profile = SimpleNamespace(uses_vgpr_msb_indexing=False)
+    profile = SimpleNamespace(
+        uses_vgpr_msb_indexing=False,
+        has_swmmac=True,
+        wave_size=32,
+        wave_size_max=32,
+    )
 
     body = _gen_mfma(inst, 'gfx1250', profile)
 
@@ -1201,7 +1208,10 @@ def test_unsupported_swmmac_layout_does_not_emit_sparse_setup(
     body = _gen_mfma(
         Instruction('V_SWMMAC_F32_16X16X32_F16', 'ENC_VOP3P', 0, []),
         'test_arch',
-        SimpleNamespace(uses_vgpr_msb_indexing=uses_vgpr_msb_indexing),
+        SimpleNamespace(
+            uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
+            has_swmmac=False,
+        ),
     )
 
     assert 'index_base' not in body
@@ -1332,7 +1342,12 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
     body = _gen_mfma(
         Instruction(mnemonic, 'ENC_VOP3P', 0, []),
         arch,
-        SimpleNamespace(uses_vgpr_msb_indexing=uses_vgpr_msb_indexing),
+        SimpleNamespace(
+            uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
+            has_swmmac=arch in ('gfx1250', 'rdna4'),
+            wave_size=32,
+            wave_size_max=32 if arch == 'gfx1250' else 64,
+        ),
     )
     call = _generated_matrix_call(body, callee)
     is_standalone_smfmac = mnemonic.startswith('V_SMFMAC_')
