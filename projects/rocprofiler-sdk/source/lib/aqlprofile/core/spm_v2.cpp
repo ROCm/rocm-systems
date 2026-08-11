@@ -545,8 +545,7 @@ producer(std::shared_ptr<spm_state_t> s)
 
             // Wait until consumer has finished reading cons_buf
             // before rotating, so we don't overwrite data it is still processing.
-            s->work_cond.wait(
-                lock, [&s]() { return s->cons_buf_free || s->stop_cons_thread; });
+            s->work_cond.wait(lock, [&s]() { return s->cons_buf_free || s->stop_cons_thread; });
 
             s->dest_buf = s->prod_buf.exchange(s->cons_buf.exchange(s->dest_buf));
 
