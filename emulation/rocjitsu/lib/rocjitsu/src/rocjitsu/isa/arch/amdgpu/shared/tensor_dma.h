@@ -184,6 +184,10 @@ inline TensorDmaDescriptor parse_descriptor(std::array<uint32_t, 4> d0, std::arr
 }
 
 inline void validate_supported_descriptor(const TensorDmaDescriptor &desc, bool store_from_lds) {
+  // The in-tree HIP descriptor API and LLVM lowering only produce the boolean
+  // count encodings 0 (disabled) and 1 (active).
+  if (desc.count > 1)
+    throw util::UnimplementedInst("tensor DMA count encoding");
   // LLVM MLIR's AMDGPU dialect documents padding only for memory-to-LDS copies.
   if (desc.pad && store_from_lds)
     throw util::UnimplementedInst("tensor DMA padded store descriptor");

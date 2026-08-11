@@ -410,6 +410,35 @@ TEST(Gfx1250ExecutionTest, TensorDmaZeroCountDisablesLoadStoreAndBarrier) {
   EXPECT_TRUE(wf->wait_counters().empty());
 }
 
+TEST(Gfx1250ExecutionTest, TensorDmaUnsupportedCountEncodingsAreRejected) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  write_tensor_dma_d0(*cu, *wf, 0, 0x138000);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16); // i32.
+  write_wave_sgpr(*cu, *wf, 13, 1u << 16);
+  write_wave_sgpr(*cu, *wf, 14, 0);
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);
+  write_wave_sgpr(*cu, *wf, 16, 0);
+  write_wave_sgpr(*cu, *wf, 17, 0);
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+
+  for (uint32_t count : {2u, 3u}) {
+    SCOPED_TRACE("count=" + std::to_string(count));
+    write_wave_sgpr(*cu, *wf, 0, count);
+    EXPECT_THROW(load->execute(*load, wf), util::UnimplementedInst);
+    EXPECT_TRUE(wf->wait_counters().empty());
+  }
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaAtomicBarrierArrivesAfterCopy) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
