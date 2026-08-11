@@ -290,13 +290,26 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     gpuPackets_.clear();
     gpuMetadataPackets_.clear();
 
+    hipError_t submit_status = hipSuccess;
     for (auto& command : commands_) {
       command->setPktCapturingState(true, &gpuPackets_, kernArgMgr, &capturedKernelName_,
                                     &gpuMetadataPackets_);
       // Enqueue command to capture GPU Packet. The packet is not submitted to the device.
       // The packet is stored in gpuPacket_ and submitted during graph launch.
       command->submit(*(command->queue())->vdev());
+      // A kernarg allocation failure inside submit marks the command with a
+      // negative status (see VirtualGPU::submitKernelInternal) rather than
+      // forming a packet; surface it instead of reporting a successful update
+      // that would launch with a stale packet. Mirrors the status check the
+      // non-graph module-launch path performs in hip_module.cpp.
+      if (submit_status == hipSuccess && command->status() < 0) {
+        submit_status = hipErrorOutOfMemory;
+      }
       command->release();
+    }
+    if (submit_status != hipSuccess) {
+      commands_.clear();
+      return submit_status;
     }
 
     // The metadata capture path appends one metadata packet per AQL packet, but
