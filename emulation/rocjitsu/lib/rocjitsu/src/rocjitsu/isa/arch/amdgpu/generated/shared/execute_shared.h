@@ -2508,6 +2508,11 @@ inline void execute_s_sendmsghalt_sopp([[maybe_unused]] Inst &inst,
   if (wf.in_trap_handler() && (message & 0xFu) == 1u)
     wf.set_trap_interrupt_sent(true);
   wf.cu().handle_sendmsg(wf, message);
+
+  // S_SENDMSGHALT halts the wave. Keep the architectural bit and the
+  // scheduler flag in step -- s_rfe consults STATUS.HALT on the way out.
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  wf.set_status_raw(wf.status_raw() | kStatusHalt);
   wf.set_debug_halted(true);
 }
 

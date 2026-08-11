@@ -355,6 +355,50 @@ TEST(WaveDebugTest, TrapEntryPublishesTheWorkgroupCoordinateCwsrSerializes) {
   EXPECT_EQ(wf->ttmp(10), 7u) << "the z coordinate was zeroed on trap entry";
 }
 
+// S_SENDMSGHALT halts the wave -- that is the instruction, not a debugger
+// artefact. It has to publish the architectural STATUS.HALT and not only the
+// scheduler's private flag, because s_rfe reads STATUS.HALT on the way out of
+// the handler to decide whether the wave stays stopped. With only the private
+// flag set, s_rfe saw 0 for a wave s_sendmsghalt had already halted and left
+// single-step armed, so resuming took an extra step.
+TEST(WaveDebugTest, SendmsghaltPublishesArchitecturalStatusHalt) {
+  WaveDebugFixture fx;
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  constexpr uint32_t kSSendmsghaltInterrupt = 0xBF910001u; // s_sendmsghalt sendmsg(MSG_INTERRUPT)
+
+  fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
+  fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
+
+  const uint32_t handler[] = {
+      0x806C846Cu,            // s_add_u32  ttmp0, ttmp0, 4
+      0x826D806Du,            // s_addc_u32 ttmp1, ttmp1, 0
+      kSSendmsghaltInterrupt, // s_sendmsghalt sendmsg(MSG_INTERRUPT)
+      0xBE801F6Cu,            // s_rfe_b64 ttmp[0:1]
+  };
+  for (uint32_t i = 0; i < std::size(handler); ++i)
+    fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+
+  fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
+  });
+  fx.cu->set_sendmsg_handler([](amdgpu::Wavefront &, uint32_t message) { return message == 1; });
+
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->set_debug_single_step(true);
+
+  fx.cu->step(); // s_trap -> handler
+  ASSERT_TRUE(wf->in_trap_handler());
+  ASSERT_EQ(wf->status_raw() & kStatusHalt, 0u) << "STATUS.HALT set before s_sendmsghalt";
+
+  for (int i = 0; i < 3 && !wf->debug_halted(); ++i)
+    fx.cu->step();
+
+  EXPECT_TRUE(wf->debug_halted());
+  EXPECT_NE(wf->status_raw() & kStatusHalt, 0u)
+      << "s_sendmsghalt halted the wave without publishing STATUS.HALT";
+}
+
 // TRAPSTS.EXCP is architecturally sticky, so "the bit changed" is not the same
 // question as "this instruction raised the cause". Delivering on the rising
 // edge went permanently quiet for any cause already latched -- including every
