@@ -608,28 +608,52 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
   }
 
   // Requires single-node symmetric memory support with CTA_POLICY_ZERO (CE mode).
-  if (!comm->symmetricSupport) return false;
-  if (comm->nNodes != 1) return false;
+  if (!comm->symmetricSupport) {
+    WARN("Skipping CE AllReduce: symmetric support is not enabled");
+    return false;
+  }
+  if (comm->nNodes != 1) {
+    WARN("Skipping CE AllReduce: nNodes is not 1");
+    return false;
+  }
 
   // count must divide evenly so every rank owns an equal shard.
-  if (count == 0 || count % (size_t)comm->nRanks != 0) return false;
+  if (count == 0 || count % (size_t)comm->nRanks != 0) {
+    WARN("Skipping CE AllReduce: count (%zu) is not divisible by nRanks (%d)", count, comm->nRanks);
+    return false;
+  }
 
   // Total message must fit within the pre-allocated staging buffer.
   size_t msgBytes = count * ncclTypeSize(datatype);
   if (force) {
-    if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) return false;
+    if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
+      WARN("Skipping CE AllReduce despite RCCL_FORCE_CE_ALLREDUCE=1: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)", msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
+      return false;
+    }
     comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
   }
-  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) return false;
+  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
+    WARN("Skipping CE AllReduce: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)", msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
+    return false;
+  }
 
-  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO) return false;
+  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO) {
+    WARN("Skipping CE AllReduce: CTA policy is not ZERO");
+    return false;
+  }
 
   // Only standard reduction ops with a simple kernel implementation.
   // ncclAvg (maps to SumPostDiv) and user-defined PreMulSum fall back to ring.
-  if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) return false;
+  if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) {
+    WARN("Skipping CE AllReduce: unsupported reduction operation");
+    return false;
+  }
 
   // Float8 types require specialised handling not yet implemented for CE AR.
-  if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) return false;
+  if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
+    WARN("Skipping CE AllReduce: unsupported datatype: Float8");
+    return false;
+  }
 
   return true;
 }
