@@ -8,18 +8,18 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/config/config_loader.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/sop2.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vglobal.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vimage.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop2.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/sop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vds.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vglobal.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vimage.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -4178,6 +4178,10 @@ TEST(Gfx1250DecodeTest, SMovB64Literal64ConsumesThreeDwords) {
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "s_mov_b64");
   EXPECT_EQ(inst->size(), sizeof(words));
+  ASSERT_NE(inst->raw_encoding(), nullptr);
+  EXPECT_EQ(inst->raw_encoding()[0], words[0]);
+  EXPECT_EQ(inst->raw_encoding()[1], words[1]);
+  EXPECT_EQ(inst->raw_encoding()[2], words[2]);
 }
 
 TEST(Gfx1250DecodeTest, Vop3LiteralConsumesThreeDwords) {

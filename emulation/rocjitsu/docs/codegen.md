@@ -40,13 +40,15 @@ rocm-systems/shared/machine-readable-isa/isa/
 
 | Generated files | Location | Generator |
 |---|---|---|
-| ISA decoders, encoders, execute bodies | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<isa>/` | `codegen.py` |
-| Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/` | `codegen.py` |
+| ISA decoders, encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<isa>/` | `codegen.py` |
+| Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen.py` |
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
 | Encoding decode/encode functions | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `encoding_translator_codegen.py` |
 
-Hand-written files (`isa.h`, `insts.h`, `mma_exec.h`, `addr_calc.h/.cpp`)
-are not overwritten by the generator.
+Hand-written per-ISA files (`isa.h`, `mma_exec.h`, `addr_calc.h/.cpp`) remain
+under `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<isa>/` and are not
+overwritten by the generator. Hand-written shared headers remain under
+`lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/`.
 
 The encoding translator engine (`code/dbt/encoding_translator.h`) is
 hand-written and shared across all ISA pairs. Only the per-pair
@@ -95,10 +97,10 @@ python -m amdisa \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     gfx1250:$GFX1250_MRISA/amdgpu_isa_gfx1250.xml \
-  --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu \
+  --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
 
-find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu lib/rocjitsu/src/rocjitsu/code/dbt/generated \
+find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated lib/rocjitsu/src/rocjitsu/code/dbt/generated \
   \( -name '*.h' -o -name '*.cpp' \) -exec clang-format -i {} +
 ```
 
@@ -118,10 +120,10 @@ python -m amdisa \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     gfx1250:$GFX1250_MRISA/amdgpu_isa_gfx1250.xml \
   --gen-isas \
-  --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu
+  --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated
 
-find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu -name '*.cpp' -o -name '*.h' \
-  | xargs clang-format -i
+find lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
+  \( -name '*.cpp' -o -name '*.h' \) -exec clang-format -i {} +
 ```
 
 ## Regenerating DBT files only
@@ -142,8 +144,8 @@ python -m amdisa \
   --gen-dbt \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
 
-find lib/rocjitsu/src/rocjitsu/code/dbt/generated -name '*.cpp' -o -name '*.h' \
-  | xargs clang-format -i
+find lib/rocjitsu/src/rocjitsu/code/dbt/generated \
+  \( -name '*.cpp' -o -name '*.h' \) -exec clang-format -i {} +
 ```
 
 ## Workflow
