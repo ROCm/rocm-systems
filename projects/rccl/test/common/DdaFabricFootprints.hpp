@@ -4,7 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#pragma once
+#ifndef RCCL_TEST_DDA_FABRIC_FOOTPRINTS_HPP
+#define RCCL_TEST_DDA_FABRIC_FOOTPRINTS_HPP
 
 // DDA fabric scratch footprints, mirrored from the launcher headers so tests can
 // compute expected sizes without pulling the device kernel headers everywhere.
@@ -70,3 +71,5 @@ inline size_t ddaLL128ArFootprintForBytes(int nRanks, size_t bytes)
 }
 
 } // namespace RcclUnitTesting
+
+#endif // RCCL_TEST_DDA_FABRIC_FOOTPRINTS_HPP

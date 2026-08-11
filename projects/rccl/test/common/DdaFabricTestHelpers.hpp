@@ -4,7 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#pragma once
+#ifndef RCCL_TEST_DDA_FABRIC_TEST_HELPERS_HPP
+#define RCCL_TEST_DDA_FABRIC_TEST_HELPERS_HPP
 
 #include <cstring>
 
@@ -69,3 +70,5 @@ protected:
 };
 
 } // namespace RcclUnitTesting
+
+#endif // RCCL_TEST_DDA_FABRIC_TEST_HELPERS_HPP
