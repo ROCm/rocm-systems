@@ -21,7 +21,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.mi_gpu_spec import mi_gpu_specs
+from utils.mi_gpu_spec import MIGPUSpecs
 from utils.native_tool_finder import NativeToolFinder
 from utils.specs import MachineSpecs
 from utils.utils_common import (
@@ -49,7 +49,7 @@ _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
 
 def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
     """Return notices on how active partition modes shape analysis metrics."""
-    if not mi_gpu_specs.is_partition_supported(
+    if not MIGPUSpecs.is_partition_supported(
         getattr(mspec, "gpu_arch", None), getattr(mspec, "gpu_model", None)
     ):
         return []
