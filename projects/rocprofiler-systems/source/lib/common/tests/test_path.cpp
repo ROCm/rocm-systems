@@ -85,39 +85,6 @@ TEST_F(PathTest, ParentPath_MultipleSlashes)
     EXPECT_EQ(parent_path("/a/b/c/d/e"), "/a/b/c/d");
 }
 
-TEST_F(PathTest, Exists_ExistingFile)
-{
-    std::string file_path = create_file("existing_file.txt");
-    EXPECT_TRUE(exists(file_path));
-}
-
-TEST_F(PathTest, Exists_NonexistentFile)
-{
-    EXPECT_FALSE(exists(m_test_dir + "/nonexistent_file.txt"));
-}
-
-TEST_F(PathTest, Exists_ExistingDirectory) { EXPECT_TRUE(exists(m_test_dir)); }
-
-TEST_F(PathTest, Exists_NonexistentDirectory)
-{
-    EXPECT_FALSE(exists("/nonexistent/path/to/dir"));
-}
-
-TEST_F(PathTest, Exists_SymbolicLink)
-{
-    std::string target    = create_file("target.txt");
-    std::string link_path = create_symlink(target, "link_to_target");
-    EXPECT_TRUE(exists(link_path));
-}
-
-TEST_F(PathTest, Exists_BrokenSymlink)
-{
-    std::string link_path = create_symlink("/nonexistent/target", "broken_link");
-    EXPECT_TRUE(exists(link_path));
-}
-
-TEST_F(PathTest, Exists_EmptyPath) { EXPECT_FALSE(exists("")); }
-
 TEST_F(PathTest, ReadSymlink_SymbolicLink)
 {
     std::string target    = create_file("read_symlink_target.txt");
@@ -387,24 +354,24 @@ TEST_F(PathTest, GetInternalLibpath_ContainsLib)
     EXPECT_NE(libpath.find("lib"), std::string::npos);
 }
 
-TEST_F(PathTest, FindPath_AbsoluteExisting)
+TEST_F(PathTest, FindLibrary_AbsoluteExisting)
 {
     std::string file_path = create_file("findpath_test.txt");
-    std::string result    = find_path(file_path, 0, "");
+    std::string result    = find_library(file_path, 0, "");
     EXPECT_EQ(result, file_path);
 }
 
-TEST_F(PathTest, FindPath_NonexistentReturnsOriginal)
+TEST_F(PathTest, FindLibrary_NonexistentReturnsOriginal)
 {
     std::string nonexistent = "nonexistent_file_xyz.txt";
-    std::string result      = find_path(nonexistent, 0, m_test_dir);
+    std::string result      = find_library(nonexistent, 0, m_test_dir);
     EXPECT_EQ(result, nonexistent);
 }
 
-TEST_F(PathTest, FindPath_InSearchPath)
+TEST_F(PathTest, FindLibrary_InSearchPath)
 {
     std::string file_path = create_file("searchable.txt");
-    std::string result    = find_path("searchable.txt", 0, m_test_dir);
+    std::string result    = find_library("searchable.txt", 0, m_test_dir);
     EXPECT_EQ(result, file_path);
 }
 
@@ -430,12 +397,6 @@ TEST_F(PathTest, ChainedSymlinks)
     EXPECT_EQ(resolved, target);
 }
 
-TEST_F(PathTest, Exists_SpecialCharactersInPath)
-{
-    std::string file_path = create_file("file with spaces.txt");
-    EXPECT_TRUE(exists(file_path));
-}
-
 TEST_F(PathTest, ParentPath_RocprofsysTypicalPath)
 {
     std::string path   = "/opt/rocm-6.0.0/lib/rocprofiler-systems/librocprof-sys-dl.so";
@@ -451,9 +412,9 @@ TEST_F(PathTest, NestedDirectories)
     std::string subdir3 = subdir2 + "/level3";
     mkdir(subdir3.c_str(), 0755);
 
-    EXPECT_TRUE(exists(subdir1));
-    EXPECT_TRUE(exists(subdir2));
-    EXPECT_TRUE(exists(subdir3));
+    EXPECT_TRUE(is_directory(subdir1));
+    EXPECT_TRUE(is_directory(subdir2));
+    EXPECT_TRUE(is_directory(subdir3));
 
     EXPECT_EQ(parent_path(subdir3), subdir2);
     EXPECT_EQ(parent_path(subdir2), subdir1);

@@ -79,12 +79,9 @@ inline std::string
 get_origin(const std::string&,
            std::vector<int>&& = { (RTLD_LAZY | RTLD_NOLOAD) }) ROCPROFSYS_INTERNAL_API;
 
-inline bool
-exists(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
-
 inline std::string
-find_path(const std::string& _path, int _verbose,
-          const std::string& _search_paths) ROCPROFSYS_INTERNAL_API;
+find_library(const std::string& _path, int _verbose,
+             const std::string& _search_paths) ROCPROFSYS_INTERNAL_API;
 
 [[nodiscard]] inline std::string
 parent_path(std::string_view fpath, std::uint16_t levels = 1) ROCPROFSYS_INTERNAL_API;
@@ -163,20 +160,13 @@ path_type::path_type(const std::string& _fname)
     }
 }
 
-bool
-exists(const std::string& _fname)
-{
-    struct stat _buffer;
-    if(lstat(_fname.c_str(), &_buffer) == 0)
-        return (S_ISDIR(_buffer.st_mode) != 0 || S_ISREG(_buffer.st_mode) != 0 ||
-                S_ISLNK(_buffer.st_mode) != 0);
-    return false;
-}
-
 std::string
-find_path(const std::string& _path, int _verbose, const std::string& _search_paths)
+find_library(const std::string& _path, int _verbose, const std::string& _search_paths)
 {
-    if(exists(_path) && !_path.empty() && _path.at(0) == '/') return _path;
+    if(!_path.empty() && _path.at(0) == '/' && is_regular_file(_path))
+    {
+        return _path;
+    }
 
     auto _paths = delimit(_search_paths, ":");
 
@@ -187,7 +177,7 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
         ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
                             "searching for '%s' in '%s' ...\n", _path.c_str(),
                             itr.c_str());
-        if(exists(_f))
+        if(is_regular_file(_f))
         {
             ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl, "found '%s' in '%s' ...\n",
                                 _path.c_str(), itr.c_str());
@@ -206,7 +196,7 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
                 ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
                                     "searching for '%s' in '%s' ...\n", _path.c_str(),
                                     fmt::format("{}/{}", itr, sitr).c_str());
-                if(exists(_f))
+                if(is_regular_file(_f))
                 {
                     ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl,
                                         "found '%s' in '%s' ...\n", _path.c_str(),
@@ -412,7 +402,7 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
         if(dlinfo(_handle, RTLD_DI_ORIGIN, &_buffer) == 0)
         {
             auto _origin = std::string{ _buffer };
-            if(exists(_origin)) return _origin;
+            if(is_directory(_origin)) return _origin;
         }
 
         if(_noload == false) dlclose(_handle);
@@ -435,7 +425,7 @@ get_internal_libpath(const std::string& _lib)
     for(const auto* libdir : { "lib", "lib64" })
     {
         auto _candidate = fmt::format("{}/{}/{}", _root, libdir, _lib);
-        if(exists(_candidate)) return _candidate;
+        if(is_regular_file(_candidate)) return _candidate;
     }
     return fmt::format("{}/lib/{}", _root, _lib);
 }

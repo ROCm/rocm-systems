@@ -9,8 +9,6 @@
 #include "logger/debug.hpp"
 #include <spdlog/fmt/fmt.h>
 
-#include <timemory/utility/filepath.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -484,7 +482,7 @@ discover_llvm_libdir_for_ompt()
 
     auto has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";
-        return ::tim::filepath::exists(so);
+        return path::is_regular_file(so);
     };
 
     // Pick the first candidate that contains libomptarget.so
