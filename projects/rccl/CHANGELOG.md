@@ -63,6 +63,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Known issues
 * On gfx90a (MI210/MI250/MI250X) with ROCm 7.13 or later, per-launch scratch-memory reclaim in the runtime degrades RCCL performance. Set `HSA_NO_SCRATCH_RECLAIM=1` to restore performance.
 * Elastic-buffer support for GIN (multi-segment symmetric memory windows backed by a mix of device and CPU/`HOST_NUMA` memory, exposed through `NCCL_ELASTIC_BUFFER_REGISTER` and `NCCL_SYM_REUSE_SYSMEM_HANDLES`) was newly synced from upstream and compiles on ROCm, but is unverified on AMD hardware.
+* The `librccl_device.bc` LLVM IR/bitcode artifact and its `nccl_device_wrapper.h` header (used to call RCCL device APIs without linking the full C++ library) are not currently included in official ROCm RCCL packages. To obtain them, rebuild RCCL from source with `-DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=<gfx target>`.
 
 ## RCCL 2.28.3 for ROCm 7.13
 
