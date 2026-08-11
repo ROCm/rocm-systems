@@ -168,7 +168,7 @@ def test_rocpd_tables_populated(rocpd_connection):
 
 
 def test_rocpd_exec_mask_is_hex_text(rocpd_connection):
-    # exec_mask is stored as "0x"-prefixed hex text zero-padded to 16 digits.  Assert
+    # exec_mask is stored as "0x"-prefixed hex text zero-padded to 16 digits. Assert
     # both the SQLite storage class (a numeric value would come back as int/float and
     # would mean the writer stopped formatting it) and the exact textual form.
     rows = rocpd_connection.execute(

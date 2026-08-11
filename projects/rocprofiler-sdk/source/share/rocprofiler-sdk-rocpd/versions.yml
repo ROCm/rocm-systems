@@ -61,7 +61,6 @@ rocprofiler-sdk-rocpd:
 # - Added rocpd_info_blob_field table (per-field descriptor for blob schemas)
 # - Added rocpd_blob_event table (schema-tagged binary blob instances)
 # - Added rocpd_gpu_pc_sample table (GPU PC sampling data); exec_mask is hex TEXT
-#   ("0x" + 16 zero-padded digits)
 # - Added rocpd_disassembly_data table (optional persisted instruction text)
 # - Added rocpd_event.parent_id for parent/child event relationships
 # - Populated rocpd_info_code_object.storage_type (column present since 3.0.1)

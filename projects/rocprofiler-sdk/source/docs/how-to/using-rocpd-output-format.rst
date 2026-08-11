@@ -1861,10 +1861,8 @@ One row per collected PC sample. Key columns:
   * - ``exec_mask``
     - TEXT
     - Bitmask of active SIMD lanes at sample time, as a ``0x``-prefixed hex string
-      zero-padded to 16 digits (for example ``0x00000000ffffffff``). Text storage
-      preserves the full 64-bit mask without integer overflow, and the fixed width
-      makes lexicographic ordering match numeric ordering. Parse with
-      ``int(value, 16)`` in Python; SQLite's ``CAST`` does not understand hex text.
+      zero-padded to 16 digits. Fixed width makes lexicographic ordering match
+      numeric ordering.
   * - ``code_object_id``
     - INTEGER
     - Identifies the loaded code object containing the sampled instruction.

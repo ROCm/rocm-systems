@@ -493,10 +493,6 @@ def _table_exists(importData, table: str) -> bool:
         raise
 
 
-# Both PC-sampling exports below emit Exec_Mask exactly as the database stores it: a
-# "0x"-prefixed 16-digit hex mask.  This intentionally differs from the decimal
-# Exec_Mask the in-process CSV writer (generateCSV.cpp) still produces; see
-# AIPROFSDK-219.
 def write_pc_sampling_host_trap_csv(importData, config) -> None:
     if not _table_exists(importData, '"rocpd_gpu_pc_sample_decoded"'):
         return
