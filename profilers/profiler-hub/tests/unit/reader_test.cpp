@@ -2555,6 +2555,57 @@ TEST_F(reader_v4_kd_pmc_test, v4_get_scalar_track_returns_empty_for_kd_pmc)
     ASSERT_TRUE(m_reader->get_scalar_track(tracks.front()->id).empty());
 }
 
+// --- Tier 2: synthetic v3 ambiguous-pmc fixture ------------------------------
+
+class reader_v3_amb_pmc_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    std::string                              m_database_path{ ROCPD_DB_V3_AMB_PMC_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+TEST_F(reader_v3_amb_pmc_test, v3_ambiguous_pmc_id_flagged)
+{
+    auto pmc_list = m_reader->get_all_pmc_info();
+    ASSERT_EQ(pmc_list.size(), 2U);
+
+    profiler_hub::reader_types::pmc_info_ptr_t fault_pmc;
+    profiler_hub::reader_types::pmc_info_ptr_t clean_pmc;
+    for(const auto& p : pmc_list)
+    {
+        if(p->name == "FAULT_COUNT") fault_pmc = p;
+        if(p->name == "CLEAN_COUNT") clean_pmc = p;
+    }
+    ASSERT_NE(fault_pmc, nullptr);
+    ASSERT_NE(clean_pmc, nullptr);
+    EXPECT_TRUE(fault_pmc->ambiguous);
+    EXPECT_FALSE(clean_pmc->ambiguous);
+}
+
+TEST_F(reader_v3_amb_pmc_test, v3_exactly_one_ambiguous_pmc)
+{
+    auto   pmc_list        = m_reader->get_all_pmc_info();
+    size_t ambiguous_count = 0;
+    for(const auto& p : pmc_list)
+    {
+        if(p->ambiguous) ++ambiguous_count;
+    }
+    EXPECT_EQ(ambiguous_count, 1U);
+}
+
 // --- Tier 3: synthetic v4.0 ambiguous-pmc fixture ----------------------------
 
 class reader_v4_amb_pmc_test : public ::testing::Test
