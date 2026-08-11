@@ -50,6 +50,10 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT
         "ROCPROFILER_TOOL_OUTPUT_FILE=hip-graph-forkjoin-deadlock-test.json"
         "ROCPROFILER_TOOL_CONTEXTS=KERNEL_DISPATCH_CALLBACK,KERNEL_DISPATCH_BUFFERED,CODE_OBJECT"
+        # Pin interposition on: this regression only exercises the monitor path when the
+        # inline path is active. It would default on for these contexts, but set it
+        # explicitly so a future default-logic change cannot silently no-op the test.
+        "ROCPROFILER_QUEUE_INTERPOSITION=1"
     FIXTURES_SETUP hip-graph-forkjoin-deadlock)
 
 rocprofiler_add_integration_validate_test(
