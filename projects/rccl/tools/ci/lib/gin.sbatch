@@ -109,28 +109,14 @@ echo "==> [4/6] build RCCL (GIN, targets=${gpu_targets})"
 rccl_src="${workdir}/projects/rccl"
 rccl_prefix="${workdir}/.ci-out/rccl-install"
 rm -rf "${rccl_prefix}"
-wrap="${rccl_src}/src/rccl_wrap.cc"
-if grep -q 'comm->enableRocshmem && comm->nNodes > 1' "${wrap}" 2>/dev/null; then
-  sed -i \
-    's/if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks\/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576)/if (comm->enableRocshmem)/' \
-    "${wrap}"
-  echo "    patched rccl_wrap.cc rocSHMEM guard"
-else
-  echo "    (rccl_wrap.cc guard pattern not found; assuming already patched)"
-fi
 (
   cd "${rccl_src}"
   MPI_PATH="${MPI_HOME}" ./install.sh -j "${build_jobs}" \
     --amdgpu_targets="${gpu_targets}" \
     --prefix="${rccl_prefix}" \
-    --no-device-linker --no_clean \
-    --cmake-options "-DENABLE_ROCSHMEM_GIN=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
+    --rocshmem-gin --no_clean \
+    --cmake-options "-DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
 )
-# Workaround: hipify renames core.h->core_tmp.h but gin headers still include ../core.h
-rccl_build="${rccl_src}/build/release"
-ln -sf core_tmp.h "${rccl_build}/include/nccl_device/core.h"
-ln -sf ../hipify/src/include/nccl_tuner.h "${rccl_build}/include/nccl_tuner.h"
-cp -r "${rccl_build}/include/." "${rccl_prefix}/include/"
 if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.so.1" ]]; then
   echo "ERROR: no librccl.so under ${rccl_prefix}/lib" >&2
   ls -la "${rccl_prefix}/lib" 2>/dev/null >&2 || true
@@ -139,9 +125,7 @@ fi
 
 # Locate the in-tree RCCL CMake package config. rccl-tests' find_package(RCCL)
 # otherwise resolves roc::rccl to the nightly ROCm (its toolchain prepends
-# ${ROCM_PATH} to CMAKE_PREFIX_PATH), so tests compile against nightly
-# nccl_device.h (stale rocshmem::QueuePair::atomic_add) and link nightly librccl
-# (missing rocshmem_gin_* factory symbols). Pin RCCL_DIR to force THIS build.
+# ${ROCM_PATH} to CMAKE_PREFIX_PATH). Pin RCCL_DIR to force THIS build.
 rccl_cfg="$(ls "${rccl_prefix}"/lib*/cmake/rccl/*[Cc]onfig.cmake 2>/dev/null | head -n1)"
 if [[ -z "${rccl_cfg}" ]]; then
   echo "ERROR: no RCCL cmake config under ${rccl_prefix}/lib*/cmake/rccl" >&2
