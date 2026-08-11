@@ -579,10 +579,10 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
             // An agent can be covered by `all` and by an explicit entry at the same time, so
             // the transition has to be decided by comparing effective counts across the
             // update rather than by watching a single counter hit zero.
-            auto was_enabled = std::unordered_map<uint64_t, bool>{};
+            auto was_enabled = std::unordered_map<rocprofiler_agent_id_t, bool>{};
             _profiler_serializer.rlock([&](const auto& serializers) {
                 for(const auto& [agent_id, _] : serializers)
-                    was_enabled.emplace(agent_id.handle, state.enabled(agent_id.handle));
+                    was_enabled.emplace(agent_id, state.enabled(agent_id));
             });
 
             if(agents.empty())
@@ -594,9 +594,9 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
             }
             else
             {
-                for(auto agent_handle : agents)
+                for(const auto& agent_id : agents)
                 {
-                    auto& count = state.per_agent[agent_handle];
+                    auto& count = state.per_agent[agent_id];
                     if(enable)
                         ++count;
                     else if(count > 0)
@@ -607,9 +607,9 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
             _profiler_serializer.rlock([&](const auto& serializers) {
                 for(const auto& [agent_id, _] : serializers)
                 {
-                    auto itr = was_enabled.find(agent_id.handle);
+                    auto itr = was_enabled.find(agent_id);
                     if(itr == was_enabled.end()) continue;
-                    if(itr->second != state.enabled(agent_id.handle))
+                    if(itr->second != state.enabled(agent_id))
                         transitioned.emplace_back(agent_id);
                 }
             });
@@ -670,7 +670,7 @@ QueueController::is_serialization_enabled(rocprofiler_agent_id_t agent_id) const
 {
     bool enabled = false;
     _serialization_refcount.rlock(
-        [&](const auto& state) { enabled = state.enabled(agent_id.handle); });
+        [&](const auto& state) { enabled = state.enabled(agent_id); });
     return enabled;
 }
 

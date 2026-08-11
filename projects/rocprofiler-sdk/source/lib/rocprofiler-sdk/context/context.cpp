@@ -106,6 +106,20 @@ get_active_contexts_impl()
 }
 }  // namespace
 
+bool
+dispatch_counter_collection_service::intersects(
+    const dispatch_counter_collection_service& rhs) const
+{
+    if(agents.empty() || rhs.agents.empty()) return true;
+    const auto& small = (agents.size() < rhs.agents.size()) ? agents : rhs.agents;
+    const auto& large = (agents.size() < rhs.agents.size()) ? rhs.agents : agents;
+    for(const auto& agent_id : small)
+    {
+        if(large.count(agent_id) > 0) return true;
+    }
+    return false;
+}
+
 context_array_t&
 get_registered_contexts(context_array_t& data, context_filter_t filter)
 {

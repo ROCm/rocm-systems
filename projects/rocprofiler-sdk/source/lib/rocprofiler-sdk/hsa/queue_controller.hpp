@@ -94,7 +94,7 @@ public:
 
     common::Synchronized<hsa::profiler_serializer>& serializer(const Queue*);
 
-    // Agent handles (rocprofiler_agent_id_t::handle). An empty set means every GPU agent.
+    // An empty set means every GPU agent.
     using agent_handle_set_t = std::unordered_set<rocprofiler_agent_id_t>;
 
     /**
@@ -146,21 +146,21 @@ private:
     // that do not exist yet.
     struct serialization_refcount
     {
-        int64_t                               all       = 0;
-        std::unordered_map<uint64_t, int64_t> per_agent = {};
+        int64_t all = 0;
+        std::unordered_map<rocprofiler_agent_id_t, int64_t> per_agent = {};
 
-        int64_t count(uint64_t agent_handle) const
+        int64_t count(rocprofiler_agent_id_t agent_id) const
         {
-            auto itr = per_agent.find(agent_handle);
+            auto itr = per_agent.find(agent_id);
             return all + ((itr == per_agent.end()) ? 0 : itr->second);
         }
 
-        bool enabled(uint64_t agent_handle) const { return count(agent_handle) > 0; }
+        bool enabled(rocprofiler_agent_id_t agent_id) const { return count(agent_id) > 0; }
 
         bool any() const
         {
             if(all > 0) return true;
-            for(const auto& [handle, count] : per_agent)
+            for(const auto& [agent_id, count] : per_agent)
             {
                 if(count > 0) return true;
             }

@@ -227,14 +227,14 @@ set_dispatch_agents(rocprofiler_context_id_t      context_id,
             return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
     }
 
-    auto selected = std::unordered_set<uint64_t>{};
+    auto selected = std::unordered_set<rocprofiler_agent_id_t>{};
     selected.reserve(num_agents);
     for(size_t i = 0; i < num_agents; ++i)
     {
         const auto* agent = rocprofiler::agent::get_agent(agents[i]);
         if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU)
             return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
-        selected.emplace(agents[i].handle);
+        selected.emplace(agents[i]);
     }
 
     ctx_p->dispatch_counter_collection->agents = std::move(selected);

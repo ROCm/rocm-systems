@@ -85,11 +85,11 @@ struct dispatch_counter_collection_service
     // Contains callback information along with other data needed to collect/process
     // counters.
     std::vector<std::shared_ptr<counters::counter_callback_info>> callbacks{};
-    // GPU agents (by rocprofiler_agent_id_t::handle) this context collects on. An empty set
-    // means every GPU agent, which is what a plain configure_{buffer,callback}_dispatch call
-    // produces; rocprofiler_dispatch_counting_service_set_agents narrows it. The set is read
-    // on the dispatch path and when scoping serialization, so it is fixed at configure time
-    // and never mutated once the context is started.
+    // GPU agents this context collects on. An empty set means every GPU agent, which is what a
+    // plain configure_{buffer,callback}_dispatch call produces;
+    // rocprofiler_dispatch_counting_service_set_agents narrows it. The set is read on the
+    // dispatch path and when scoping serialization, so it is fixed at configure time and never
+    // mutated once the context is started.
     std::unordered_set<rocprofiler_agent_id_t> agents{};
     // A flag to state whether or not the counter set is currently enabled. This is primarily
     // to protect against multithreaded calls to enable a context (and enabling already enabled
@@ -105,17 +105,7 @@ struct dispatch_counter_collection_service
 
     // Two counter-collection contexts can coexist as long as they do not both want the same
     // GPU. An unrestricted context claims every agent, so it intersects with everything.
-    bool intersects(const dispatch_counter_collection_service& rhs) const
-    {
-        if(agents.empty() || rhs.agents.empty()) return true;
-        const auto& small = (agents.size() < rhs.agents.size()) ? agents : rhs.agents;
-        const auto& large = (agents.size() < rhs.agents.size()) ? rhs.agents : agents;
-        for(auto handle : small)
-        {
-            if(large.count(handle) > 0) return true;
-        }
-        return false;
-    }
+    bool intersects(const dispatch_counter_collection_service& rhs) const;
 };
 
 struct spm_dispatch_counter_collection_service
