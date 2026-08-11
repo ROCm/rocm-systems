@@ -36,7 +36,6 @@ _common_therock_regex_excludes: &_common_therock_regex_excludes
   - "openmp-target.*"
   - "jacobi-usm-sys-run"
   - "jacobi-roctx.*"
-  - "jpeg-decode.*"
   - "matrix-exponential.*"
   - "scratch-memory.*"
   - "shmem-pingpong.*"
@@ -64,7 +63,8 @@ test_categories:
       - "cli-help.*"
       - "openmp-fortran-offload-sys-run"
       - "roctx-sampling"
-      # Jpeg and video decode should be added once the binaries can be built on TheRock
+      - "jpeg-decode-sys-run"
+      # Video decode should be added once the binary is built on TheRock
     regex_excludes:
       - *_common_therock_regex_excludes
       - "transpose-runtime-instrument"

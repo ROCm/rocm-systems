@@ -593,6 +593,11 @@ set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
 set(CL_FILE_LIST "${KERNELS_DIR}/cu_mask_kernels.cl")
 build_sample_for_devices("cu_mask")
 
+# Trap Handler Test Kernels
+set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
+set(CL_FILE_LIST "${KERNELS_DIR}/trap_handler_test_kernels.cl")
+build_sample_for_devices("trap_handler_test")
+
 # Configure RPATH settings before creating executable target
 set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
 set(CMAKE_SKIP_BUILD_RPATH FALSE)

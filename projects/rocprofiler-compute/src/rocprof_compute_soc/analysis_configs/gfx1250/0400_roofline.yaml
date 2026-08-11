@@ -1,0 +1,216 @@
+# =============================================================================
+# gfx1250 Roofline Performance Metrics
+# =============================================================================
+# Note: gfx1250 has both regular VALU FLOPs (SP_* counters) and WMMA FLOPs (SQ_* counters)
+# VALU metrics are listed first as they represent general compute, WMMA follows for specialized matrix ops
+# Uses gfx1250-specific counters: TX_VMW_* for GL0, GL2C_* for L2, GC_EA_SE_* for HBM
+# =============================================================================
+
+Panel Config:
+  id: 400
+  title: Roofline
+  description: |-
+    Roofline model metrics for gfx1250 performance analysis. Includes compute
+    performance rates and memory bandwidth at each level of the hierarchy.
+
+  data source:
+
+  - metric_table:
+      id: 401
+      title: "Roofline Performance Rates"
+      cli_style: Roofline
+      tui_style: Roofline
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+        peak: Peak (Empirical)
+      metric:
+        VALU FLOPs (FP16):
+          value: AVG(SP_VALU_FLOPS_FP16_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $max_sclk * $cu_per_gpu * 128 / 1000
+        VALU FLOPs (FP32):
+          value: AVG(SP_VALU_FLOPS_FP32_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $max_sclk * $cu_per_gpu * 64 / 1000
+        VALU FLOPs (FP64):
+          value: AVG(SP_VALU_FLOPS_FP64_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $max_sclk * $cu_per_gpu * 32 / 1000
+        VALU IOPs:
+          value: AVG(SP_VALU_IOPS_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GIOP/s
+          peak: $max_sclk * $cu_per_gpu * 64 / 1000
+        VALU Trans FLOPs (FP16):
+          value: AVG(SP_VALU_FLOPS_FP16_TRANS_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $max_sclk * $cu_per_gpu * 64 / 1000
+        VALU Trans FLOPs (FP32):
+          value: AVG(SP_VALU_FLOPS_FP32_TRANS_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $max_sclk * $cu_per_gpu * 32 / 1000
+        VALU Trans FLOPs (FP64):
+          value: AVG(SP_VALU_FLOPS_FP64_TRANS_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $max_sclk * $cu_per_gpu * 16 / 1000
+        WMMA FLOPs (FP64):
+          value: AVG(SQ_VALU_WMMA_FLOP_FP64_sum * 64 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $WMMAF64Flops_empirical_peak
+        WMMA FLOPs (FP32):
+          value: AVG(SQ_VALU_WMMA_FLOP_FP32_sum * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $WMMAF32Flops_empirical_peak
+        WMMA FLOPs (FP16):
+          value: AVG(SQ_VALU_WMMA_FLOP_FP16_sum * 2048 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $WMMAF16Flops_empirical_peak
+        WMMA FLOPs (BF16):
+          value: AVG(SQ_VALU_WMMA_FLOP_BF16_sum * 2048 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $WMMABF16Flops_empirical_peak
+        WMMA FLOPs (FP8):
+          value: AVG(SQ_VALU_WMMA_FLOP_FP8_sum * 4096 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $WMMAF8Flops_empirical_peak
+        WMMA FLOPs (FP6):
+          value: AVG(SQ_VALU_WMMA_FLOP_FP6_sum * 8192 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $WMMAF6Flops_empirical_peak
+        WMMA FLOPs (FP4):
+          value: AVG(SQ_VALU_WMMA_FLOP_FP4_sum * 8192 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $WMMAF4Flops_empirical_peak
+        WMMA FLOPs (F6F4):
+          value: AVG(SQ_VALU_WMMA_FLOP_F6F4_sum * 8192 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GFLOP/s
+          peak: $WMMAF6F4Flops_empirical_peak
+        WMMA IOPs (Int8):
+          value: AVG(SQ_VALU_WMMA_FLOP_I8_sum * 4096 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GIOP/s
+          peak: $WMMAI8Ops_empirical_peak
+        # WMMA IOPs (Int4):
+        #   value: AVG((((SQ_VALU_WMMA_FLOP_I4_sum * 8192)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+        #   unit: GIOP/s
+        #   peak: $WMMAI4Ops_empirical_peak
+
+        # =====================================================================
+        # Memory Bandwidth - Sections 3.4, 3.7, 3.8, 3.9
+        # =====================================================================
+        HBM Bandwidth:
+          value: AVG((GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum + GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+          peak: $HBMBw_empirical_peak
+        GL2 Cache Bandwidth:
+          value: AVG((TX_VMW_GL1_REQ_READ_sum + TX_VMW_GL1_REQ_WRITE_sum + TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+          peak: $L2Bw_empirical_peak
+        GL0 Cache Bandwidth:
+          value: AVG((TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+          peak: $L0Bw_empirical_peak
+        LDS Bandwidth:
+          value: AVG((TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+          peak: $LDSBw_empirical_peak
+
+  - metric_table:
+      id: 402
+      title: "Roofline Plot Points"
+      cli_style: Roofline
+      tui_style: Roofline
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        # Arithmetic Intensity relative to each memory level
+        # Note: Using both VALU and WMMA FLOPs for total compute
+        AI HBM:
+          value: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / (32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum + GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum))
+          unit: FLOPs/Byte
+        AI GL2:
+          value: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / (128 * SUM(TX_VMW_GL1_REQ_READ_sum + TX_VMW_GL1_REQ_WRITE_sum + TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum))
+          unit: FLOPs/Byte
+        AI GL0:
+          value: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum)
+          unit: FLOPs/Byte
+        Performance (GFLOPs):
+          value: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
+          unit: GFLOP/s
+
+  metrics_description:
+    VALU FLOPs (FP16): >-
+      Achieved FP16 VALU throughput.
+
+    VALU FLOPs (FP32): >-
+      Achieved FP32 VALU throughput.
+
+    VALU FLOPs (FP64): >-
+      Achieved FP64 VALU throughput.
+
+    VALU IOPs: >-
+      Achieved integer VALU throughput.
+
+    VALU Trans FLOPs (FP16): >-
+      Achieved FP16 transcendental VALU throughput.
+
+    VALU Trans FLOPs (FP32): >-
+      Achieved FP32 transcendental VALU throughput.
+
+    VALU Trans FLOPs (FP64): >-
+      Achieved FP64 transcendental VALU throughput.
+
+    WMMA FLOPs (FP64): >-
+      Achieved FP64 WMMA throughput.
+
+    WMMA FLOPs (FP32): >-
+      Achieved FP32 WMMA throughput.
+
+    WMMA FLOPs (FP16): >-
+      Achieved FP16 WMMA throughput.
+
+    WMMA FLOPs (BF16): >-
+      Achieved BF16 WMMA throughput.
+
+    WMMA FLOPs (FP8): >-
+      Achieved FP8 WMMA throughput.
+
+    WMMA FLOPs (FP6): >-
+      Achieved FP6 WMMA throughput.
+
+    WMMA FLOPs (FP4): >-
+      Achieved FP4 WMMA throughput.
+
+    WMMA FLOPs (F6F4): >-
+      Achieved mixed FP6/FP4 WMMA throughput.
+
+    WMMA IOPs (Int8): >-
+      Achieved Int8 WMMA throughput.
+
+    # WMMA IOPs (Int4): >-
+    #   Achieved Int4 WMMA throughput.
+
+    HBM Bandwidth: >-
+      Total HBM bandwidth.
+    GL2 Cache Bandwidth: >-
+      GL2 Cache bandwidth.
+
+    GL0 Cache Bandwidth: >-
+      GL0 data delivery bandwidth.
+
+    LDS Bandwidth: >-
+      Total LDS bandwidth.
+
+    AI HBM: >-
+      Arithmetic intensity relative to HBM bandwidth.
+
+    AI GL2: >-
+      Arithmetic intensity relative to GL1 bandwidth.
+
+    AI GL0: >-
+      Arithmetic intensity relative to GL0 data bandwidth.
+
+    Performance (GFLOPs): >-
+      Total achieved compute throughput combining all VALU and WMMA FLOPs.
