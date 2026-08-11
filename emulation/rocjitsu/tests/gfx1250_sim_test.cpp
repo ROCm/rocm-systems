@@ -4178,6 +4178,10 @@ TEST(Gfx1250DecodeTest, SMovB64Literal64ConsumesThreeDwords) {
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "s_mov_b64");
   EXPECT_EQ(inst->size(), sizeof(words));
+  ASSERT_NE(inst->raw_encoding(), nullptr);
+  EXPECT_EQ(inst->raw_encoding()[0], words[0]);
+  EXPECT_EQ(inst->raw_encoding()[1], words[1]);
+  EXPECT_EQ(inst->raw_encoding()[2], words[2]);
 }
 
 TEST(Gfx1250DecodeTest, Vop3LiteralConsumesThreeDwords) {
