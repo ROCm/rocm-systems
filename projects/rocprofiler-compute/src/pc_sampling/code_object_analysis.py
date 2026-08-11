@@ -21,14 +21,14 @@ class CodeObjectInstruction(NamedTuple):
     """One disassembled instruction within a code object."""
 
     virtual_address: int
-    instruction: str
-    comment: str
+    instruction: Optional[str]
+    comment: Optional[str]
 
 
 class CodeObjectSymbol(NamedTuple):
     """One kernel symbol within a code object, and the instructions it spans."""
 
-    name: str
+    name: Optional[str]
     virtual_address: int
     instructions: list[CodeObjectInstruction]
 

@@ -73,7 +73,7 @@ from utils.utils_counter_defs import (
 
 KernelKey = str
 CodeObjectKey = tuple[int, int]
-KernelSymbolKey = tuple[int, int, str]
+KernelSymbolKey = tuple[int, int, str]  # (pid, code_object_id, kernel_name)
 
 
 class MetricInfoRow(NamedTuple):
