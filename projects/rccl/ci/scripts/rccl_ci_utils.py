@@ -147,6 +147,11 @@ def setup_kpack_device_code(artifact_dir: Path) -> None:
     ROCM_KPACK_PATH with absolute paths so the kpack runtime can find
     the archives regardless of where the library is loaded from.
 
+    ROCM_KPACK_PATH is a global override that affects ALL kpack lookups,
+    not just the target library.  When pip-installed packages (e.g. PyTorch)
+    also ship kpack-split device code, their archives must be included too,
+    otherwise the loader will fail to find kernels for those libraries.
+
     ROCM_KPACK_PATH expects literal file paths (not @GFXARCH@ patterns).
     The @GFXARCH@ expansion only applies to paths embedded in the ELF
     .rocm_kpack_ref section, not to the env var override.
@@ -160,12 +165,34 @@ def setup_kpack_device_code(artifact_dir: Path) -> None:
     for f in kpack_files:
         resolved = str(f.resolve())
         kpack_paths.append(resolved)
-        log.info("kpack archive: %s", resolved)
+        log.info("kpack archive (artifact): %s", resolved)
+
+    pip_kpack_files = _find_pip_kpack_archives()
+    for f in pip_kpack_files:
+        resolved = str(f.resolve())
+        if resolved not in kpack_paths:
+            kpack_paths.append(resolved)
+            log.info("kpack archive (pip): %s", resolved)
 
     os.environ["ROCM_KPACK_PATH"] = ":".join(kpack_paths)
     os.environ["ROCM_KPACK_DEBUG"] = "1"
     log.info("ROCM_KPACK_PATH=%s", os.environ["ROCM_KPACK_PATH"])
     log.info("ROCM_KPACK_DEBUG=1 (verbose kpack logging enabled)")
+
+
+def _find_pip_kpack_archives() -> list[Path]:
+    """Discover .kpack archives shipped by pip-installed packages.
+
+    PyTorch ROCm wheels (7.15+) ship kpack-split device code in
+    torch/.kpack/ and _rocm_sdk_libraries/.kpack/.  Since ROCM_KPACK_PATH
+    is a global override, these must be included alongside CI artifact
+    kpacks to avoid hipErrorInvalidImage for PyTorch kernels.
+    """
+    site_packages = Path(sys.prefix) / "lib"
+    kpacks = sorted(site_packages.rglob("*.kpack"))
+    if not kpacks:
+        kpacks = sorted(Path(sys.prefix).rglob("*.kpack"))
+    return kpacks
 
 
 def quarantine_rocm_sysdeps(artifact_lib_dir: Path) -> None:
