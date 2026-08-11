@@ -382,6 +382,9 @@ struct completion_monitor
 completion_monitor&
 get_completion_monitor()
 {
+    // Intentionally leaked, never deleted: the monitor thread and its state must
+    // outlive static destruction so a late completion or teardown cannot touch a
+    // destroyed object during HSA shutdown ordering.
     static auto* _v = new completion_monitor{};
     return *_v;
 }
@@ -726,8 +729,16 @@ completion_monitor_loop(completion_monitor& mon)
         mon.active_scratch.clear();
     }
 
-    // Teardown: the monitor is the sole owner of `active` here (callers join before
-    // touching it). Run remaining completions so signals/correlation ids are released.
+    // Teardown: pull any entries still queued in the inbox into `active` before
+    // draining. On a shutdown break, a batch registered just before the break can be
+    // stranded in `incoming` with its inflight count already incremented; failing to
+    // process it here would leak its signal/correlation-id refs and leave inflight
+    // nonzero, hanging drain_completion_monitor(). Producers no longer register once
+    // finalization has begun, so no new entries arrive after this drain.
+    drain_incoming(mon);
+
+    // Run remaining completions so signals/correlation ids are released and inflight
+    // reaches zero.
     for(auto& pending : mon.active)
     {
         run_completion(pending.session);
