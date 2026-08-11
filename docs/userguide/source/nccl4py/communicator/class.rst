@@ -34,3 +34,18 @@ structure.
 .. autoattribute:: Communicator.n_lsa_teams
 .. autoattribute:: Communicator.host_rma_support
 .. autoattribute:: Communicator.railed_gin_type
+
+Teams
+=====
+
+A :py:class:`NCCLTeam` names a strided subset of the communicator's ranks.
+These properties return the predefined teams; pass one to
+:py:class:`TeamRequirement` or to the rank converters below. See
+:ref:`devapi_teams` for team semantics.
+
+.. autoattribute:: Communicator.team_world
+.. autoattribute:: Communicator.team_lsa
+.. autoattribute:: Communicator.team_rail
+
+.. automethod:: Communicator.team_rank_to_world
+.. automethod:: Communicator.team_rank_to_lsa

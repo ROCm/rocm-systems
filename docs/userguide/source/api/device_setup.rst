@@ -206,6 +206,10 @@ ncclCommProperties_t
       :c:type:`ncclDevComm` cannot be created with GIN connection type :c:macro:`NCCL_GIN_CONNECTION_RAIL`.
       Available since NCCL 2.29.7.
 
+   .. c:member:: uint64_t commHash
+
+      Communicator hash identifier shared across all ranks in the communicator. Available since NCCL 2.31.
+
 
 ncclGinType_t
 -------------

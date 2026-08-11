@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# This code was automatically generated with version 2.30.4. Do not modify it directly.
+# This code was automatically generated with version 2.30.7. Do not modify it directly.
 
 cimport cython  # NOQA
 from libcpp.vector cimport vector
@@ -11,6 +11,9 @@ from ._internal.utils cimport (nested_resource, nullable_unique_ptr, get_buffer_
                               get_resource_ptr, get_nested_resource_ptr)
 
 from enum import IntEnum as _IntEnum
+
+_version_span = "with version 2.30.7"
+__version__ = _version_span.split(", generator version")[0].split()[-1]
 
 
 from libc.stdlib cimport calloc, free, malloc
@@ -216,8 +219,8 @@ cdef class UniqueId:
 cdef _get_config_dtype_offsets():
     cdef ncclConfig_t pod = ncclConfig_t()
     return _numpy.dtype({
-        'names': ['size_', 'magic', 'version', 'blocking', 'cga_cluster_size', 'min_ctas', 'max_ctas', 'net_name', 'split_share', 'traffic_class', 'comm_name', 'collnet_enable', 'cta_policy', 'shrink_share', 'nvls_ctas', 'n_channels_per_net_peer', 'nvlink_centric_sched', 'graph_usage_mode', 'num_rma_ctx', 'max_p2p_peers'],
-        'formats': [_numpy.uint64, _numpy.uint32, _numpy.uint32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.intp, _numpy.int32, _numpy.int32, _numpy.intp, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32],
+        'names': ['size_', 'magic', 'version', 'blocking', 'cga_cluster_size', 'min_ctas', 'max_ctas', 'net_name', 'split_share', 'traffic_class', 'comm_name', 'collnet_enable', 'cta_policy', 'shrink_share', 'nvls_ctas', 'n_channels_per_net_peer', 'nvlink_centric_sched', 'graph_usage_mode', 'num_rma_ctx', 'max_p2p_peers', 'graph_stream_ordering'],
+        'formats': [_numpy.uint64, _numpy.uint32, _numpy.uint32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.intp, _numpy.int32, _numpy.int32, _numpy.intp, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32],
         'offsets': [
             (<intptr_t>&(pod.size)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.magic)) - (<intptr_t>&pod),
@@ -239,6 +242,7 @@ cdef _get_config_dtype_offsets():
             (<intptr_t>&(pod.graphUsageMode)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.numRmaCtx)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.maxP2pPeers)) - (<intptr_t>&pod),
+            (<intptr_t>&(pod.graphStreamOrdering)) - (<intptr_t>&pod),
         ],
         'itemsize': sizeof(ncclConfig_t),
     })
@@ -269,7 +273,7 @@ cdef class Config:
 
         self._ptr[0].size = sizeof(ncclConfig_t)
         self._ptr[0].magic = 0xcafebeef
-        self._ptr[0].version = 23004
+        self._ptr[0].version = 23007
         self._ptr[0].blocking = -2147483648
         self._ptr[0].cgaClusterSize = -2147483648
         self._ptr[0].minCTAs = -2147483648
@@ -285,6 +289,7 @@ cdef class Config:
         self._ptr[0].graphUsageMode = -2147483648
         self._ptr[0].numRmaCtx = -2147483648
         self._ptr[0].maxP2pPeers = -2147483648
+        self._ptr[0].graphStreamOrdering = -2147483648
 
     def __dealloc__(self):
         cdef ncclConfig_t *ptr
@@ -564,6 +569,17 @@ cdef class Config:
             raise ValueError("This Config instance is read-only")
         self._ptr[0].maxP2pPeers = val
 
+    @property
+    def graph_stream_ordering(self):
+        """int: """
+        return self._ptr[0].graphStreamOrdering
+
+    @graph_stream_ordering.setter
+    def graph_stream_ordering(self, val):
+        if self._readonly:
+            raise ValueError("This Config instance is read-only")
+        self._ptr[0].graphStreamOrdering = val
+
     @staticmethod
     def from_buffer(buffer):
         """Create an Config instance with the memory from the given buffer."""
@@ -644,7 +660,7 @@ cdef class SimInfo:
 
         self._ptr[0].size = sizeof(ncclSimInfo_t)
         self._ptr[0].magic = 0x74685283
-        self._ptr[0].version = 23004
+        self._ptr[0].version = 23007
         self._ptr[0].estimatedTime = -1.0
 
     def __dealloc__(self):
@@ -992,7 +1008,7 @@ cdef class CommProperties:
 
         self._ptr[0].size = sizeof(ncclCommProperties_t)
         self._ptr[0].magic = 0xcafebeef
-        self._ptr[0].version = 23004
+        self._ptr[0].version = 23007
 
     def __dealloc__(self):
         cdef ncclCommProperties_t *ptr
@@ -1729,7 +1745,7 @@ cdef _get_resource_window_vidmem_dtype_offsets():
     cdef ncclResourceWindow_vidmem_t pod = ncclResourceWindow_vidmem_t()
     return _numpy.dtype({
         'names': ['reserved1', 'lsa_flat_base', 'reserved2', 'stride4g', 'mc_offset4k', 'reserved3'],
-        'formats': [(_numpy.int8, 8), _numpy.intp, (_numpy.int8, 8), _numpy.uint32, _numpy.uint32, (_numpy.int8, 40)],
+        'formats': [(_numpy.int8, 8), _numpy.intp, (_numpy.int8, 8), _numpy.uint32, _numpy.uint32, (_numpy.int8, 32)],
         'offsets': [
             (<intptr_t>&(pod.reserved1)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.lsaFlatBase)) - (<intptr_t>&pod),
@@ -1892,6 +1908,149 @@ cdef class ResourceWindow_vidmem:
         return obj
 
 
+cdef _get_gin_barrier_handle_dtype_offsets():
+    cdef ncclGinBarrierHandle_t pod = ncclGinBarrierHandle_t()
+    return _numpy.dtype({
+        'names': ['signal0', 'unused'],
+        'formats': [_numpy.uint32, _numpy.uint32],
+        'offsets': [
+            (<intptr_t>&(pod.signal0)) - (<intptr_t>&pod),
+            (<intptr_t>&(pod.unused)) - (<intptr_t>&pod),
+        ],
+        'itemsize': sizeof(ncclGinBarrierHandle_t),
+    })
+
+gin_barrier_handle_dtype = _get_gin_barrier_handle_dtype_offsets()
+
+cdef class GinBarrierHandle:
+    """Empty-initialize an instance of `ncclGinBarrierHandle_t`.
+
+
+    .. seealso:: `ncclGinBarrierHandle_t`
+    """
+    cdef:
+        ncclGinBarrierHandle_t *_ptr
+        object _owner
+        bint _owned
+        bint _readonly
+
+    def __init__(self):
+        self._ptr = <ncclGinBarrierHandle_t *>calloc(1, sizeof(ncclGinBarrierHandle_t))
+        if self._ptr == NULL:
+            raise MemoryError("Error allocating GinBarrierHandle")
+        self._owner = None
+        self._owned = True
+        self._readonly = False
+
+    def __dealloc__(self):
+        cdef ncclGinBarrierHandle_t *ptr
+        if self._owned and self._ptr != NULL:
+            ptr = self._ptr
+            self._ptr = NULL
+            free(ptr)
+
+    def __repr__(self):
+        return f"<{__name__}.GinBarrierHandle object at {hex(id(self))}>"
+
+    @property
+    def ptr(self):
+        """Get the pointer address to the data as Python :class:`int`."""
+        return <intptr_t>(self._ptr)
+
+    cdef intptr_t _get_ptr(self):
+        return <intptr_t>(self._ptr)
+
+    def __int__(self):
+        return <intptr_t>(self._ptr)
+
+    def __eq__(self, other):
+        cdef GinBarrierHandle other_
+        if not isinstance(other, GinBarrierHandle):
+            return False
+        other_ = other
+        return (memcmp(<void *><intptr_t>(self._ptr), <void *><intptr_t>(other_._ptr), sizeof(ncclGinBarrierHandle_t)) == 0)
+
+    def __getbuffer__(self, Py_buffer *buffer, int flags):
+        __getbuffer(self, buffer, <void *>self._ptr, sizeof(ncclGinBarrierHandle_t), self._readonly)
+
+    def __releasebuffer__(self, Py_buffer *buffer):
+        pass
+
+    def __setitem__(self, key, val):
+        if key == 0 and isinstance(val, _numpy.ndarray):
+            self._ptr = <ncclGinBarrierHandle_t *>malloc(sizeof(ncclGinBarrierHandle_t))
+            if self._ptr == NULL:
+                raise MemoryError("Error allocating GinBarrierHandle")
+            memcpy(<void*>self._ptr, <void*><intptr_t>val.ctypes.data, sizeof(ncclGinBarrierHandle_t))
+            self._owner = None
+            self._owned = True
+            self._readonly = not val.flags.writeable
+        else:
+            setattr(self, key, val)
+
+    @property
+    def signal0(self):
+        """int: """
+        return <uint32_t>(self._ptr[0].signal0)
+
+    @signal0.setter
+    def signal0(self, val):
+        if self._readonly:
+            raise ValueError("This GinBarrierHandle instance is read-only")
+        self._ptr[0].signal0 = <ncclGinSignal_t><uint32_t>val
+
+    @property
+    def unused(self):
+        """int: """
+        return <uint32_t>(self._ptr[0].unused)
+
+    @unused.setter
+    def unused(self, val):
+        if self._readonly:
+            raise ValueError("This GinBarrierHandle instance is read-only")
+        self._ptr[0].unused = <ncclDevResourceHandle_t><uint32_t>val
+
+    @staticmethod
+    def from_buffer(buffer):
+        """Create an GinBarrierHandle instance with the memory from the given buffer."""
+        return __from_buffer(buffer, sizeof(ncclGinBarrierHandle_t), GinBarrierHandle)
+
+    @staticmethod
+    def from_data(data):
+        """Create an GinBarrierHandle instance wrapping the given NumPy array.
+
+        Args:
+            data (_numpy.ndarray): a single-element array of dtype `gin_barrier_handle_dtype` holding the data.
+        """
+        return __from_data(data, "gin_barrier_handle_dtype", gin_barrier_handle_dtype, GinBarrierHandle)
+
+    @staticmethod
+    def from_ptr(intptr_t ptr, bint readonly=False, object owner=None):
+        """Create an GinBarrierHandle instance wrapping the given pointer.
+
+        Args:
+            ptr (intptr_t): pointer address as Python :class:`int` to the data.
+            owner (object): The Python object that owns the pointer. If not provided, data will be copied.
+            readonly (bool): whether the data is read-only (to the user). default is `False`.
+        """
+        if ptr == 0:
+            raise ValueError("ptr must not be null (0)")
+        cdef GinBarrierHandle obj = GinBarrierHandle.__new__(GinBarrierHandle)
+        if owner is None:
+            obj._ptr = <ncclGinBarrierHandle_t *>malloc(sizeof(ncclGinBarrierHandle_t))
+            if obj._ptr == NULL:
+                raise MemoryError("Error allocating GinBarrierHandle")
+            memcpy(<void*>(obj._ptr), <void*>ptr, sizeof(ncclGinBarrierHandle_t))
+            obj._owner = None
+            obj._owned = True
+        else:
+            obj._ptr = <ncclGinBarrierHandle_t *>ptr
+            obj._owner = owner
+            obj._owned = False
+        obj._readonly = readonly
+        return obj
+
+
 cdef _get_lsa_barrier_handle_dtype_offsets():
     cdef ncclLsaBarrierHandle_t pod = ncclLsaBarrierHandle_t()
     return _numpy.dtype({
@@ -2035,49 +2194,49 @@ cdef class LsaBarrierHandle:
         return obj
 
 
-cdef _get_gin_barrier_handle_dtype_offsets():
-    cdef ncclGinBarrierHandle_t pod = ncclGinBarrierHandle_t()
+cdef _get_ll_a2a_handle_dtype_offsets():
+    cdef ncclLLA2AHandle_t pod = ncclLLA2AHandle_t()
     return _numpy.dtype({
-        'names': ['signal0', 'unused'],
+        'names': ['buf_handle', 'n_slots'],
         'formats': [_numpy.uint32, _numpy.uint32],
         'offsets': [
-            (<intptr_t>&(pod.signal0)) - (<intptr_t>&pod),
-            (<intptr_t>&(pod.unused)) - (<intptr_t>&pod),
+            (<intptr_t>&(pod.bufHandle)) - (<intptr_t>&pod),
+            (<intptr_t>&(pod.nSlots)) - (<intptr_t>&pod),
         ],
-        'itemsize': sizeof(ncclGinBarrierHandle_t),
+        'itemsize': sizeof(ncclLLA2AHandle_t),
     })
 
-gin_barrier_handle_dtype = _get_gin_barrier_handle_dtype_offsets()
+ll_a2a_handle_dtype = _get_ll_a2a_handle_dtype_offsets()
 
-cdef class GinBarrierHandle:
-    """Empty-initialize an instance of `ncclGinBarrierHandle_t`.
+cdef class LLA2AHandle:
+    """Empty-initialize an instance of `ncclLLA2AHandle_t`.
 
 
-    .. seealso:: `ncclGinBarrierHandle_t`
+    .. seealso:: `ncclLLA2AHandle_t`
     """
     cdef:
-        ncclGinBarrierHandle_t *_ptr
+        ncclLLA2AHandle_t *_ptr
         object _owner
         bint _owned
         bint _readonly
 
     def __init__(self):
-        self._ptr = <ncclGinBarrierHandle_t *>calloc(1, sizeof(ncclGinBarrierHandle_t))
+        self._ptr = <ncclLLA2AHandle_t *>calloc(1, sizeof(ncclLLA2AHandle_t))
         if self._ptr == NULL:
-            raise MemoryError("Error allocating GinBarrierHandle")
+            raise MemoryError("Error allocating LLA2AHandle")
         self._owner = None
         self._owned = True
         self._readonly = False
 
     def __dealloc__(self):
-        cdef ncclGinBarrierHandle_t *ptr
+        cdef ncclLLA2AHandle_t *ptr
         if self._owned and self._ptr != NULL:
             ptr = self._ptr
             self._ptr = NULL
             free(ptr)
 
     def __repr__(self):
-        return f"<{__name__}.GinBarrierHandle object at {hex(id(self))}>"
+        return f"<{__name__}.LLA2AHandle object at {hex(id(self))}>"
 
     @property
     def ptr(self):
@@ -2091,24 +2250,24 @@ cdef class GinBarrierHandle:
         return <intptr_t>(self._ptr)
 
     def __eq__(self, other):
-        cdef GinBarrierHandle other_
-        if not isinstance(other, GinBarrierHandle):
+        cdef LLA2AHandle other_
+        if not isinstance(other, LLA2AHandle):
             return False
         other_ = other
-        return (memcmp(<void *><intptr_t>(self._ptr), <void *><intptr_t>(other_._ptr), sizeof(ncclGinBarrierHandle_t)) == 0)
+        return (memcmp(<void *><intptr_t>(self._ptr), <void *><intptr_t>(other_._ptr), sizeof(ncclLLA2AHandle_t)) == 0)
 
     def __getbuffer__(self, Py_buffer *buffer, int flags):
-        __getbuffer(self, buffer, <void *>self._ptr, sizeof(ncclGinBarrierHandle_t), self._readonly)
+        __getbuffer(self, buffer, <void *>self._ptr, sizeof(ncclLLA2AHandle_t), self._readonly)
 
     def __releasebuffer__(self, Py_buffer *buffer):
         pass
 
     def __setitem__(self, key, val):
         if key == 0 and isinstance(val, _numpy.ndarray):
-            self._ptr = <ncclGinBarrierHandle_t *>malloc(sizeof(ncclGinBarrierHandle_t))
+            self._ptr = <ncclLLA2AHandle_t *>malloc(sizeof(ncclLLA2AHandle_t))
             if self._ptr == NULL:
-                raise MemoryError("Error allocating GinBarrierHandle")
-            memcpy(<void*>self._ptr, <void*><intptr_t>val.ctypes.data, sizeof(ncclGinBarrierHandle_t))
+                raise MemoryError("Error allocating LLA2AHandle")
+            memcpy(<void*>self._ptr, <void*><intptr_t>val.ctypes.data, sizeof(ncclLLA2AHandle_t))
             self._owner = None
             self._owned = True
             self._readonly = not val.flags.writeable
@@ -2116,44 +2275,44 @@ cdef class GinBarrierHandle:
             setattr(self, key, val)
 
     @property
-    def signal0(self):
+    def buf_handle(self):
         """int: """
-        return <uint32_t>(self._ptr[0].signal0)
+        return <uint32_t>(self._ptr[0].bufHandle)
 
-    @signal0.setter
-    def signal0(self, val):
+    @buf_handle.setter
+    def buf_handle(self, val):
         if self._readonly:
-            raise ValueError("This GinBarrierHandle instance is read-only")
-        self._ptr[0].signal0 = <ncclGinSignal_t><uint32_t>val
+            raise ValueError("This LLA2AHandle instance is read-only")
+        self._ptr[0].bufHandle = <ncclDevResourceHandle_t><uint32_t>val
 
     @property
-    def unused(self):
+    def n_slots(self):
         """int: """
-        return <uint32_t>(self._ptr[0].unused)
+        return self._ptr[0].nSlots
 
-    @unused.setter
-    def unused(self, val):
+    @n_slots.setter
+    def n_slots(self, val):
         if self._readonly:
-            raise ValueError("This GinBarrierHandle instance is read-only")
-        self._ptr[0].unused = <ncclDevResourceHandle_t><uint32_t>val
+            raise ValueError("This LLA2AHandle instance is read-only")
+        self._ptr[0].nSlots = val
 
     @staticmethod
     def from_buffer(buffer):
-        """Create an GinBarrierHandle instance with the memory from the given buffer."""
-        return __from_buffer(buffer, sizeof(ncclGinBarrierHandle_t), GinBarrierHandle)
+        """Create an LLA2AHandle instance with the memory from the given buffer."""
+        return __from_buffer(buffer, sizeof(ncclLLA2AHandle_t), LLA2AHandle)
 
     @staticmethod
     def from_data(data):
-        """Create an GinBarrierHandle instance wrapping the given NumPy array.
+        """Create an LLA2AHandle instance wrapping the given NumPy array.
 
         Args:
-            data (_numpy.ndarray): a single-element array of dtype `gin_barrier_handle_dtype` holding the data.
+            data (_numpy.ndarray): a single-element array of dtype `ll_a2a_handle_dtype` holding the data.
         """
-        return __from_data(data, "gin_barrier_handle_dtype", gin_barrier_handle_dtype, GinBarrierHandle)
+        return __from_data(data, "ll_a2a_handle_dtype", ll_a2a_handle_dtype, LLA2AHandle)
 
     @staticmethod
     def from_ptr(intptr_t ptr, bint readonly=False, object owner=None):
-        """Create an GinBarrierHandle instance wrapping the given pointer.
+        """Create an LLA2AHandle instance wrapping the given pointer.
 
         Args:
             ptr (intptr_t): pointer address as Python :class:`int` to the data.
@@ -2162,16 +2321,16 @@ cdef class GinBarrierHandle:
         """
         if ptr == 0:
             raise ValueError("ptr must not be null (0)")
-        cdef GinBarrierHandle obj = GinBarrierHandle.__new__(GinBarrierHandle)
+        cdef LLA2AHandle obj = LLA2AHandle.__new__(LLA2AHandle)
         if owner is None:
-            obj._ptr = <ncclGinBarrierHandle_t *>malloc(sizeof(ncclGinBarrierHandle_t))
+            obj._ptr = <ncclLLA2AHandle_t *>malloc(sizeof(ncclLLA2AHandle_t))
             if obj._ptr == NULL:
-                raise MemoryError("Error allocating GinBarrierHandle")
-            memcpy(<void*>(obj._ptr), <void*>ptr, sizeof(ncclGinBarrierHandle_t))
+                raise MemoryError("Error allocating LLA2AHandle")
+            memcpy(<void*>(obj._ptr), <void*>ptr, sizeof(ncclLLA2AHandle_t))
             obj._owner = None
             obj._owned = True
         else:
-            obj._ptr = <ncclGinBarrierHandle_t *>ptr
+            obj._ptr = <ncclLLA2AHandle_t *>ptr
             obj._owner = owner
             obj._owned = False
         obj._readonly = readonly
@@ -2349,8 +2508,8 @@ cdef class TeamRequirements:
 cdef _get_dev_comm_dtype_offsets():
     cdef ncclDevComm_t pod = ncclDevComm_t()
     return _numpy.dtype({
-        'names': ['magic', 'version', 'rank', 'n_ranks', 'n_ranks_rcp32', 'lsa_rank', 'lsa_size', 'lsa_size_rcp32', 'window_table', 'resource_window', 'resource_window_inlined', 'lsa_multimem', 'lsa_barrier', 'rail_gin_barrier', 'gin_connection_count', 'gin_net_device_types', 'gin_handles', 'gin_signal_count', 'gin_counter_count', 'gin_signal_shadows', 'gin_context_count', 'gin_is_railed', 'abort_flag', 'hybrid_lsa_barrier', 'hybrid_rail_gin_barrier', 'world_gin_barrier'],
-        'formats': [_numpy.uint32, _numpy.uint32, _numpy.int32, _numpy.int32, _numpy.uint32, _numpy.int32, _numpy.int32, _numpy.uint32, _numpy.intp, _numpy.intp, resource_window_vidmem_dtype, multimem_handle_dtype, lsa_barrier_handle_dtype, gin_barrier_handle_dtype, _numpy.uint8, (_numpy.uint8, 4), (_numpy.int64, 4), _numpy.int32, _numpy.int32, _numpy.intp, _numpy.uint32, _numpy.uint8, _numpy.intp, lsa_barrier_handle_dtype, gin_barrier_handle_dtype, gin_barrier_handle_dtype],
+        'names': ['magic', 'version', 'rank', 'n_ranks', 'n_ranks_rcp32', 'lsa_rank', 'lsa_size', 'lsa_size_rcp32', 'window_table', 'resource_window', 'resource_window_inlined', 'hybrid_world_gin_barrier', 'lsa_multimem', 'lsa_barrier', 'rail_gin_barrier', 'gin_connection_count', 'gin_net_device_types', 'gin_handles', 'gin_signal_count', 'gin_counter_count', 'gin_signal_shadows', 'gin_context_count', 'gin_connections_railed', 'gin_strong_legacy_signals', 'gin_contexts_railed', 'abort_flag', 'hybrid_lsa_barrier', 'hybrid_rail_gin_barrier', 'world_gin_barrier'],
+        'formats': [_numpy.uint32, _numpy.uint32, _numpy.int32, _numpy.int32, _numpy.uint32, _numpy.int32, _numpy.int32, _numpy.uint32, _numpy.intp, _numpy.intp, resource_window_vidmem_dtype, gin_barrier_handle_dtype, multimem_handle_dtype, lsa_barrier_handle_dtype, gin_barrier_handle_dtype, _numpy.uint8, (_numpy.uint8, 4), (_numpy.int64, 4), _numpy.int32, _numpy.int32, _numpy.intp, _numpy.uint32, _numpy.uint8, _numpy.uint8, _numpy.uint8, _numpy.intp, lsa_barrier_handle_dtype, gin_barrier_handle_dtype, gin_barrier_handle_dtype],
         'offsets': [
             (<intptr_t>&(pod.magic)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.version)) - (<intptr_t>&pod),
@@ -2363,6 +2522,7 @@ cdef _get_dev_comm_dtype_offsets():
             (<intptr_t>&(pod.windowTable)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.resourceWindow)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.resourceWindow_inlined)) - (<intptr_t>&pod),
+            (<intptr_t>&(pod.hybridWorldGinBarrier)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.lsaMultimem)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.lsaBarrier)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.railGinBarrier)) - (<intptr_t>&pod),
@@ -2373,7 +2533,9 @@ cdef _get_dev_comm_dtype_offsets():
             (<intptr_t>&(pod.ginCounterCount)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.ginSignalShadows)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.ginContextCount)) - (<intptr_t>&pod),
-            (<intptr_t>&(pod.ginIsRailed)) - (<intptr_t>&pod),
+            (<intptr_t>&(pod.ginConnectionsRailed)) - (<intptr_t>&pod),
+            (<intptr_t>&(pod.ginStrongLegacySignals)) - (<intptr_t>&pod),
+            (<intptr_t>&(pod.ginContextsRailed)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.abortFlag)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.hybridLsaBarrier)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.hybridRailGinBarrier)) - (<intptr_t>&pod),
@@ -2461,6 +2623,18 @@ cdef class DevComm:
             raise ValueError("This DevComm instance is read-only")
         cdef ResourceWindow_vidmem val_ = val
         memcpy(<void *>&(self._ptr[0].resourceWindow_inlined), <void *>(val_._get_ptr()), sizeof(ncclResourceWindow_vidmem_t) * 1)
+
+    @property
+    def hybrid_world_gin_barrier(self):
+        """GinBarrierHandle: """
+        return GinBarrierHandle.from_ptr(<intptr_t>&(self._ptr[0].hybridWorldGinBarrier), self._readonly, self)
+
+    @hybrid_world_gin_barrier.setter
+    def hybrid_world_gin_barrier(self, val):
+        if self._readonly:
+            raise ValueError("This DevComm instance is read-only")
+        cdef GinBarrierHandle val_ = val
+        memcpy(<void *>&(self._ptr[0].hybridWorldGinBarrier), <void *>(val_._get_ptr()), sizeof(ncclGinBarrierHandle_t) * 1)
 
     @property
     def lsa_multimem(self):
@@ -2734,15 +2908,37 @@ cdef class DevComm:
         self._ptr[0].ginContextCount = val
 
     @property
-    def gin_is_railed(self):
+    def gin_connections_railed(self):
         """int: """
-        return self._ptr[0].ginIsRailed
+        return self._ptr[0].ginConnectionsRailed
 
-    @gin_is_railed.setter
-    def gin_is_railed(self, val):
+    @gin_connections_railed.setter
+    def gin_connections_railed(self, val):
         if self._readonly:
             raise ValueError("This DevComm instance is read-only")
-        self._ptr[0].ginIsRailed = val
+        self._ptr[0].ginConnectionsRailed = val
+
+    @property
+    def gin_strong_legacy_signals(self):
+        """int: """
+        return self._ptr[0].ginStrongLegacySignals
+
+    @gin_strong_legacy_signals.setter
+    def gin_strong_legacy_signals(self, val):
+        if self._readonly:
+            raise ValueError("This DevComm instance is read-only")
+        self._ptr[0].ginStrongLegacySignals = val
+
+    @property
+    def gin_contexts_railed(self):
+        """int: """
+        return self._ptr[0].ginContextsRailed
+
+    @gin_contexts_railed.setter
+    def gin_contexts_railed(self, val):
+        if self._readonly:
+            raise ValueError("This DevComm instance is read-only")
+        self._ptr[0].ginContextsRailed = val
 
     @property
     def abort_flag(self):
@@ -2799,8 +2995,8 @@ cdef class DevComm:
 cdef _get_dev_comm_requirements_dtype_offsets():
     cdef ncclDevCommRequirements_t pod = ncclDevCommRequirements_t()
     return _numpy.dtype({
-        'names': ['size_', 'magic', 'version', 'resource_requirements_list', 'team_requirements_list', 'lsa_multimem', 'barrier_count', 'lsa_barrier_count', 'rail_gin_barrier_count', 'lsa_ll_a2a_block_count', 'lsa_ll_a2a_slot_count', 'gin_force_enable', 'gin_context_count', 'gin_signal_count', 'gin_counter_count', 'gin_connection_type', 'gin_exclusive_contexts', 'gin_queue_depth', 'gin_traffic_class', 'world_gin_barrier_count'],
-        'formats': [_numpy.uint64, _numpy.uint32, _numpy.uint32, _numpy.intp, _numpy.intp, _numpy.uint8, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.uint8, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.uint8, _numpy.int32, _numpy.int32, _numpy.int32],
+        'names': ['size_', 'magic', 'version', 'resource_requirements_list', 'team_requirements_list', 'lsa_multimem', 'barrier_count', 'lsa_barrier_count', 'rail_gin_barrier_count', 'lsa_ll_a2a_block_count', 'lsa_ll_a2a_slot_count', 'gin_force_enable', 'gin_context_count', 'gin_signal_count', 'gin_counter_count', 'gin_connection_type', 'gin_exclusive_contexts', 'gin_queue_depth', 'gin_traffic_class', 'world_gin_barrier_count', 'gin_strong_signals_required', 'gin_va_signals_required'],
+        'formats': [_numpy.uint64, _numpy.uint32, _numpy.uint32, _numpy.intp, _numpy.intp, _numpy.uint8, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.uint8, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.uint8, _numpy.int32, _numpy.int32, _numpy.int32, _numpy.uint8, _numpy.uint8],
         'offsets': [
             (<intptr_t>&(pod.size)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.magic)) - (<intptr_t>&pod),
@@ -2822,6 +3018,8 @@ cdef _get_dev_comm_requirements_dtype_offsets():
             (<intptr_t>&(pod.ginQueueDepth)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.ginTrafficClass)) - (<intptr_t>&pod),
             (<intptr_t>&(pod.worldGinBarrierCount)) - (<intptr_t>&pod),
+            (<intptr_t>&(pod.ginStrongSignalsRequired)) - (<intptr_t>&pod),
+            (<intptr_t>&(pod.ginVaSignalsRequired)) - (<intptr_t>&pod),
         ],
         'itemsize': sizeof(ncclDevCommRequirements_t),
     })
@@ -2850,10 +3048,12 @@ cdef class DevCommRequirements:
 
         self._ptr[0].size = sizeof(ncclDevCommRequirements_t)
         self._ptr[0].magic = 0xcafebeef
-        self._ptr[0].version = 23004
+        self._ptr[0].version = 23007
         self._ptr[0].ginContextCount = 4
         self._ptr[0].ginConnectionType = NCCL_GIN_CONNECTION_NONE
         self._ptr[0].ginTrafficClass = -2147483648
+        self._ptr[0].ginStrongSignalsRequired = 1
+        self._ptr[0].ginVaSignalsRequired = 1
 
     def __dealloc__(self):
         cdef ncclDevCommRequirements_t *ptr
@@ -3121,6 +3321,28 @@ cdef class DevCommRequirements:
             raise ValueError("This DevCommRequirements instance is read-only")
         self._ptr[0].worldGinBarrierCount = val
 
+    @property
+    def gin_strong_signals_required(self):
+        """int: """
+        return self._ptr[0].ginStrongSignalsRequired
+
+    @gin_strong_signals_required.setter
+    def gin_strong_signals_required(self, val):
+        if self._readonly:
+            raise ValueError("This DevCommRequirements instance is read-only")
+        self._ptr[0].ginStrongSignalsRequired = val
+
+    @property
+    def gin_va_signals_required(self):
+        """int: """
+        return self._ptr[0].ginVaSignalsRequired
+
+    @gin_va_signals_required.setter
+    def gin_va_signals_required(self, val):
+        if self._readonly:
+            raise ValueError("This DevCommRequirements instance is read-only")
+        self._ptr[0].ginVaSignalsRequired = val
+
     @staticmethod
     def from_buffer(buffer):
         """Create an DevCommRequirements instance with the memory from the given buffer."""
@@ -3245,6 +3467,7 @@ class GinType(_IntEnum):
     NONE = NCCL_GIN_TYPE_NONE
     PROXY = NCCL_GIN_TYPE_PROXY
     GDAKI = NCCL_GIN_TYPE_GDAKI
+    GPI = NCCL_GIN_TYPE_GPI
 
 class GinConnectionType(_IntEnum):
     """
@@ -3679,6 +3902,126 @@ cpdef intptr_t get_peer_device_pointer(intptr_t window, size_t offset, int peer)
     return <intptr_t>out_ptr
 
 
+cpdef ll_a2a_create_requirement(int n_blocks, int n_slots, intptr_t out_handle, intptr_t out_req):
+    with nogil:
+        __status__ = ncclLLA2ACreateRequirement(n_blocks, n_slots, <ncclLLA2AHandle_t*>out_handle, <ncclDevResourceRequirements_t*>out_req)
+    check_status(__status__)
+
+
+
+# Hand-written: cybind cannot emit by-value struct returns (ncclTeam_t).
+
+cpdef object team_world(intptr_t comm):
+    cdef Team team_py = Team()
+    cdef ncclTeam_t *team = <ncclTeam_t *><intptr_t>(team_py._get_ptr())
+    with nogil:
+        team[0] = ncclTeamWorld(<Comm>comm)
+    return team_py
+
+
+cpdef object team_lsa(intptr_t comm):
+    cdef Team team_py = Team()
+    cdef ncclTeam_t *team = <ncclTeam_t *><intptr_t>(team_py._get_ptr())
+    with nogil:
+        team[0] = ncclTeamLsa(<Comm>comm)
+    return team_py
+
+
+cpdef object team_rail(intptr_t comm):
+    cdef Team team_py = Team()
+    cdef ncclTeam_t *team = <ncclTeam_t *><intptr_t>(team_py._get_ptr())
+    with nogil:
+        team[0] = ncclTeamRail(<Comm>comm)
+    return team_py
+
+
+# Hand-written: the team rank mappers take ncclTeam_t by value and return int
+# (not ncclResult_t), so there is no status to check.
+
+cpdef int team_rank_to_world(intptr_t comm, intptr_t team, int rank):
+    cdef int result
+    with nogil:
+        result = ncclTeamRankToWorld(<Comm>comm, (<ncclTeam_t*>team)[0], rank)
+    return result
+
+
+cpdef int team_rank_to_lsa(intptr_t comm, intptr_t team, int rank):
+    cdef int result
+    with nogil:
+        result = ncclTeamRankToLsa(<Comm>comm, (<ncclTeam_t*>team)[0], rank)
+    return result
+
+
+# Hand-written: LSA/GIN barrier requirement creators take ncclTeam_t by value
+# (SKIP_LOWPP in nccl.cybind.yaml; cybind cannot emit by-value structs). Each
+# fills the out-req node and wires it to write into the out-handle during
+# ncclDevCommCreate. ncclLLA2ACreateRequirement has no by-value struct and is
+# generated by cybind.
+
+cpdef lsa_barrier_create_requirement(intptr_t team, int n_barriers, intptr_t out_handle, intptr_t out_req):
+    with nogil:
+        __status__ = ncclLsaBarrierCreateRequirement(
+            (<ncclTeam_t*>team)[0], n_barriers,
+            <ncclLsaBarrierHandle_t*>out_handle, <ncclDevResourceRequirements_t*>out_req)
+    check_status(__status__)
+
+
+cpdef gin_barrier_create_requirement(intptr_t comm, intptr_t team, int n_barriers, intptr_t out_handle, intptr_t out_req):
+    with nogil:
+        __status__ = ncclGinBarrierCreateRequirement(
+            <Comm>comm, (<ncclTeam_t*>team)[0], n_barriers,
+            <ncclGinBarrierHandle_t*>out_handle, <ncclDevResourceRequirements_t*>out_req)
+    check_status(__status__)
+
+# Hand-written: ncclLLA2ACalcSlots returns int (not ncclResult_t).
+cpdef int lla2a_calc_slots(int max_elts, int max_elt_size):
+    cdef int result
+    with nogil:
+        result = ncclLLA2ACalcSlots(max_elts, max_elt_size)
+    return result
+
+# Hand-written: ncclGetMultimemDevicePointer takes ncclMultimemHandle_t by value
+# (SKIP_LOWPP in nccl.cybind.yaml). ``multimem`` is a pointer to a MultimemHandle
+# lowpp, dereferenced here.
+cpdef intptr_t get_multimem_device_pointer(intptr_t window, size_t offset, intptr_t multimem) except? 0:
+    cdef void* out_ptr
+    with nogil:
+        __status__ = ncclGetMultimemDevicePointer(
+            <Window>window, offset, (<ncclMultimemHandle_t*>multimem)[0], &out_ptr)
+    check_status(__status__)
+    return <intptr_t>out_ptr
+
 cpdef object get_library_path():
     from ._internal.nccl import _inspect_loaded_library_path
     return _inspect_loaded_library_path()
+
+
+# Hand-written: Param API (SKIP_LOWPP in nccl.cybind.yaml).
+# param_get_parameter raises KeyError on unknown key (not NCCLError).
+# ncclParamDumpAll returns void — auto-gen wraps only ncclResult_t.
+
+cpdef str param_get_parameter(str key):
+    cdef const char* value
+    cdef int value_len
+    cdef bytes key_bytes = key.encode()
+    cdef const char* key_ptr = key_bytes
+    with nogil:
+        __status__ = ncclParamGetParameter(key_ptr, &value, &value_len)
+    if __status__ == Result.InvalidArgument:
+        raise KeyError(key)
+    check_status(__status__)
+    return value[:value_len].decode()
+
+
+cpdef list param_get_all_keys():
+    cdef const char** table
+    cdef int table_len
+    with nogil:
+        __status__ = ncclParamGetAllParameterKeys(&table, &table_len)
+    check_status(__status__)
+    return [table[i].decode() for i in range(table_len)]
+
+
+cpdef param_dump_all():
+    with nogil:
+        ncclParamDumpAll()

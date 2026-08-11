@@ -2,10 +2,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# This code was automatically generated with version 2.30.4. Do not modify it directly.
+# This code was automatically generated with version 2.30.7. Do not modify it directly.
 
 
-from libc.stdint cimport int64_t, uint8_t, uint32_t, uint64_t
+from libc.stdint cimport int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t
 
 
 ###############################################################################
@@ -72,6 +72,7 @@ ctypedef enum ncclGinType_t "ncclGinType_t":
     NCCL_GIN_TYPE_NONE "NCCL_GIN_TYPE_NONE" = 0
     NCCL_GIN_TYPE_PROXY "NCCL_GIN_TYPE_PROXY" = 2
     NCCL_GIN_TYPE_GDAKI "NCCL_GIN_TYPE_GDAKI" = 3
+    NCCL_GIN_TYPE_GPI "NCCL_GIN_TYPE_GPI" = 4
 
 ctypedef enum ncclGinConnectionType_t "ncclGinConnectionType_t":
     NCCL_GIN_CONNECTION_NONE "NCCL_GIN_CONNECTION_NONE" = 0
@@ -127,6 +128,7 @@ ctypedef struct ncclConfig_t 'ncclConfig_t':
     int graphUsageMode
     int numRmaCtx
     int maxP2pPeers
+    int graphStreamOrdering
 
 ctypedef struct ncclSimInfo_t 'ncclSimInfo_t':
     size_t size
@@ -169,11 +171,15 @@ ctypedef struct ncclResourceWindow_vidmem_t 'ncclResourceWindow_vidmem_t':
     char reserved2[8]
     uint32_t stride4G
     uint32_t mcOffset4K
-    char reserved3[40]
+    char reserved3[32]
 
 ctypedef struct ncclLsaBarrierHandle_t 'ncclLsaBarrierHandle_t':
     ncclDevResourceHandle_t bufHandle
     int nBarriers
+
+ctypedef struct ncclLLA2AHandle_t 'ncclLLA2AHandle_t':
+    ncclDevResourceHandle_t bufHandle
+    uint32_t nSlots
 
 ctypedef struct ncclGinBarrierHandle_t 'ncclGinBarrierHandle_t':
     ncclGinSignal_t signal0
@@ -207,6 +213,7 @@ ctypedef struct ncclDevComm_t 'ncclDevComm_t':
     ncclDevCommWindowTable_t windowTable
     ncclWindow_t resourceWindow
     ncclResourceWindow_vidmem_t resourceWindow_inlined
+    ncclGinBarrierHandle_t hybridWorldGinBarrier
     ncclMultimemHandle_t lsaMultimem
     ncclLsaBarrierHandle_t lsaBarrier
     ncclGinBarrierHandle_t railGinBarrier
@@ -217,7 +224,9 @@ ctypedef struct ncclDevComm_t 'ncclDevComm_t':
     int ginCounterCount
     uint64_t* ginSignalShadows
     uint32_t ginContextCount
-    uint8_t ginIsRailed
+    uint8_t ginConnectionsRailed
+    uint8_t ginStrongLegacySignals
+    uint8_t ginContextsRailed
     uint32_t* abortFlag
     ncclLsaBarrierHandle_t hybridLsaBarrier
     ncclGinBarrierHandle_t hybridRailGinBarrier
@@ -244,6 +253,8 @@ ctypedef struct ncclDevCommRequirements_t 'ncclDevCommRequirements_t':
     int ginQueueDepth
     int ginTrafficClass
     int worldGinBarrierCount
+    uint8_t ginStrongSignalsRequired
+    uint8_t ginVaSignalsRequired
 
 
 ###############################################################################
@@ -299,9 +310,33 @@ cdef ncclResult_t ncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs, n
 cdef ncclResult_t ncclGroupStart() except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
 cdef ncclResult_t ncclGroupEnd() except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
 cdef ncclResult_t ncclGroupSimulateEnd(ncclSimInfo_t* simInfo) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamBind(ncclParamHandle_t* out, const char* key) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamGetI8(ncclParamHandle_t h, int8_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamGetI16(ncclParamHandle_t h, int16_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamGetI32(ncclParamHandle_t h, int32_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamGetI64(ncclParamHandle_t h, int64_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamGetU8(ncclParamHandle_t h, uint8_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamGetU16(ncclParamHandle_t h, uint16_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamGetU32(ncclParamHandle_t h, uint32_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamGetU64(ncclParamHandle_t h, uint64_t* out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamGetStr(ncclParamHandle_t h, const char** out) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamGet(ncclParamHandle_t h, void* out, int maxLen, int* len) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamGetParameter(const char* key, const char** value, int* valueLen) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclParamGetAllParameterKeys(const char*** table, int* tableLen) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef void ncclParamDumpAll() except* nogil
 cdef ncclResult_t ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* props) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
 cdef ncclResult_t ncclDevCommCreate(ncclComm_t comm, const ncclDevCommRequirements_t* reqs, ncclDevComm_t* outDevComm) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
 cdef ncclResult_t ncclDevCommDestroy(ncclComm_t comm, const ncclDevComm_t* devComm) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
 cdef ncclResult_t ncclGetLsaMultimemDevicePointer(ncclWindow_t window, size_t offset, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
 cdef ncclResult_t ncclGetLsaDevicePointer(ncclWindow_t window, size_t offset, int lsaRank, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclGetMultimemDevicePointer(ncclWindow_t window, size_t offset, ncclMultimemHandle_t multimem, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
 cdef ncclResult_t ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, int peer, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclTeam_t ncclTeamWorld(ncclComm_t comm) except* nogil
+cdef ncclTeam_t ncclTeamLsa(ncclComm_t comm) except* nogil
+cdef ncclTeam_t ncclTeamRail(ncclComm_t comm) except* nogil
+cdef int ncclTeamRankToWorld(ncclComm_t comm, ncclTeam_t team, int rank) except?-42 nogil
+cdef int ncclTeamRankToLsa(ncclComm_t comm, ncclTeam_t team, int rank) except?-42 nogil
+cdef ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t team, int nBarriers, ncclLsaBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t comm, ncclTeam_t team, int nBarriers, ncclGinBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef ncclResult_t ncclLLA2ACreateRequirement(int nBlocks, int nSlots, ncclLLA2AHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
+cdef int ncclLLA2ACalcSlots(int maxElts, int maxEltSize) except?-42 nogil
