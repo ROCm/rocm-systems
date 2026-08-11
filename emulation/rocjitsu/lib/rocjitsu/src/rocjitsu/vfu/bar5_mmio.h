@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <sys/types.h>  // ssize_t
 #include <atomic>
+#include <cstdio>
 
 namespace rocjitsu::vfu {
 
@@ -32,7 +33,15 @@ public:
   /// @param vram_fd    memfd backing BAR0 VRAM (borrowed, not owned).
   /// @param vram_size  Size of the VRAM region in bytes.
   explicit MmioModel(int vram_fd, uint64_t vram_size);
-  ~MmioModel() = default;
+  ~MmioModel();
+
+  /// @brief File descriptor of the BAR5 memfd (MFD_ALLOW_SEALING | MFD_CLOEXEC).
+  /// Passed to vfu_setup_region so QEMU maps it directly; CPU writes go here.
+  int bar5_fd() const { return bar5_fd_; }
+
+  /// @brief Pointer to the mmap of bar5_fd_ (kBar5SizeBytes, read-write).
+  /// Fence thread polls this for ring-test sentinel values.
+  volatile uint32_t *bar5_mem() const { return bar5_mem_; }
 
   /// @brief Read handler — called by vfio-user when guest reads BAR5.
   /// @param buf    Buffer to fill with read data.
@@ -92,6 +101,12 @@ private:
 
   /// @brief memfd backing BAR0 VRAM (borrowed). -1 if not available.
   int vram_fd_{-1};
+
+  /// @brief memfd for BAR5 shadow buffer shared with QEMU (owned).
+  int bar5_fd_{-1};
+
+  /// @brief mmap of bar5_fd_ for fast direct reads/writes from the server.
+  volatile uint32_t *bar5_mem_{nullptr};
 
   /// @brief Size of the VRAM region in bytes.
   uint64_t vram_size_{0};

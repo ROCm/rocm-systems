@@ -75,11 +75,14 @@ private:
   VfuServerOptions opts_;
   vfu_ctx_t *ctx_ = nullptr;
 
-  /// @brief Background thread that periodically scans VRAM for PSP ring fence
-  /// frames and writes fence_value to fence_addr, allowing PSP command completion.
+  /// @brief Background thread that services fence completions and ring test mocks.
   std::thread fence_thread_;
   std::atomic<bool> fence_stop_{false};
   void fence_service_loop(int vram_fd, uint64_t vram_size);
+
+  /// @brief Find QEMU's HVA for the BAR5 (256 KB) region by scanning /proc/maps.
+  /// Returns 0 if not found.
+  static uintptr_t find_qemu_bar5_hva();
 
   rj_vm_t *vm_handle_ = nullptr;  ///< Owned VM handle (from rj_vm_create).
   rocjitsu::SimulatedKfd *driver_ = nullptr; ///< Non-owning pointer into vm_handle_.

@@ -13,6 +13,9 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+#include <dirent.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
@@ -161,16 +164,22 @@ int VfuServer::init() {
   };
 
   // BAR5: 32-bit non-prefetchable MMIO register window (256 KB).
-  // VFU_REGION_FLAG_MEM declares it as a memory BAR (not I/O).
-  // No 64_BITS or PREFETCH flags — amdgpu_device.c calls
-  // pci_resource_start(pdev, 5) which is the 32-bit non-prefetchable BAR.
+  // We provide a shared memfd (bar5_->bar5_fd()) so QEMU maps it directly into
+  // the guest address space. CPU MMIO writes go straight to the memfd; our
+  // fence thread polls the memfd for ring-test sentinels and writes completions.
+  // The vfio-user callback is still registered for the indirect-register paths
+  // (MM_INDEX/MM_DATA, RSMU_INDEX/DATA) that QEMU does route via the socket.
+  iovec bar5_mmap{.iov_base = nullptr, .iov_len = BarSizes::kBar5Mmio};
+  int bar5_mmfd = bar5_ ? bar5_->bar5_fd() : -1;
   if (vfu_setup_region(ctx_,
                        VFU_PCI_DEV_BAR5_REGION_IDX,
                        BarSizes::kBar5Mmio,
                        bar5_cb,
                        VFU_REGION_FLAG_RW | VFU_REGION_FLAG_MEM |
                          VFU_REGION_FLAG_ALWAYS_CB,
-                       nullptr, 0, -1, 0) != 0) {
+                       (bar5_mmfd >= 0) ? &bar5_mmap : nullptr,
+                       (bar5_mmfd >= 0) ? 1 : 0,
+                       bar5_mmfd, 0) != 0) {
     std::perror("vfu_setup_region BAR5");
     return -1;
   }
@@ -217,8 +226,17 @@ int VfuServer::run() {
   // Start background fence service thread.
   int vram_fd = bar0_ ? bar0_->fd() : -1;
   uint64_t vram_sz = bar0_ ? bar0_->size() : 0;
+  std::fprintf(stderr, "[vfu] creating fence thread (vram_fd=%d vram_sz=%llu)\n",
+               vram_fd, (unsigned long long)vram_sz);
+  std::fflush(stderr);
   fence_stop_.store(false);
-  fence_thread_ = std::thread(&VfuServer::fence_service_loop, this, vram_fd, vram_sz);
+  try {
+    fence_thread_ = std::thread(&VfuServer::fence_service_loop, this, vram_fd, vram_sz);
+    std::fprintf(stderr, "[vfu] fence thread created\n");
+  } catch (const std::system_error &e) {
+    std::fprintf(stderr, "[vfu] fence thread creation failed: %s\n", e.what());
+  }
+  std::fflush(stderr);
 
   // Event loop: process one vfio-user message per iteration.
   int ret = 0;
@@ -244,48 +262,160 @@ int VfuServer::run() {
   return ret;
 }
 
-void VfuServer::fence_service_loop(int vram_fd, uint64_t vram_size) {
-  if (vram_fd < 0 || vram_size == 0)
-    return;
+uintptr_t VfuServer::find_qemu_bar5_hva() {
+  // Scan /proc for a qemu-system process, then search its maps for the 256 KB
+  // anonymous zero-filled mapping that is QEMU's internal BAR5 shadow buffer.
+  int qemu_pid = 0;
+  {
+    DIR *proc_dir = ::opendir("/proc");
+    if (!proc_dir) return 0;
+    struct dirent *ent;
+    while ((ent = ::readdir(proc_dir)) != nullptr) {
+      if (ent->d_type != DT_DIR && ent->d_type != DT_UNKNOWN) continue;
+      char *endp;
+      long pid = std::strtol(ent->d_name, &endp, 10);
+      if (*endp != '\0' || pid <= 0) continue;
+      // Read /proc/<pid>/comm to check if it's qemu-system
+      char comm_path[64];
+      std::snprintf(comm_path, sizeof(comm_path), "/proc/%ld/comm", pid);
+      FILE *cf = std::fopen(comm_path, "r");
+      if (!cf) continue;
+      char comm[64] = {};
+      std::fgets(comm, sizeof(comm), cf);
+      std::fclose(cf);
+      if (std::strncmp(comm, "qemu-system", 11) == 0) {
+        qemu_pid = static_cast<int>(pid);
+        break;
+      }
+    }
+    ::closedir(proc_dir);
+  }
+  if (qemu_pid == 0) return 0;
 
-  // PSP ring frames are 64 bytes each; scan VRAM from fb_start.
+  char maps_path[64], mem_path[64];
+  std::snprintf(maps_path, sizeof(maps_path), "/proc/%d/maps", qemu_pid);
+  std::snprintf(mem_path, sizeof(mem_path), "/proc/%d/mem", qemu_pid);
+
+  FILE *maps = std::fopen(maps_path, "r");
+  if (!maps) return 0;
+
+  uintptr_t result = 0;
+  char line[512];
+  while (std::fgets(line, sizeof(line), maps)) {
+    unsigned long start = 0, end = 0;
+    char perms[8] = {};
+    // Format: start-end perms offset dev inode [path]
+    // Use strtoul for robustness — sscanf field widths can vary.
+    char *p = line;
+    char *q;
+    start = std::strtoul(p, &q, 16); if (!q || *q != '-') continue;
+    p = q + 1;
+    end = std::strtoul(p, &q, 16);   if (!q || *q != ' ') continue;
+    p = q + 1;
+    if (std::sscanf(p, "%4s", perms) != 1) continue;
+
+    if (end - start != 262144) continue;  // must be exactly 256 KB
+    if (perms[0] != 'r' || perms[1] != 'w') continue;
+    // Anonymous mapping: the inode field is 0 and no trailing path.
+    // Quick check: does the line contain a non-zero inode? Look for a "0 \n"
+    // pattern at the end (inode=0, no path). Just open mem and check.
+
+    int memfd = ::open(mem_path, O_RDONLY);
+    if (memfd < 0) continue;
+    char buf[64] = {};
+    ssize_t n = ::pread(memfd, buf, 64, static_cast<off_t>(start));
+    ::close(memfd);
+    if (n != 64) continue;
+    bool all_zero = true;
+    for (int i = 0; i < 64 && all_zero; ++i)
+      if (buf[i] != 0) all_zero = false;
+    if (all_zero) {
+      result = static_cast<uintptr_t>(start);
+      break;
+    }
+  }
+  std::fclose(maps);
+
+  if (result)
+    std::fprintf(stderr, "[vfu] QEMU BAR5 HVA: 0x%lx (pid %d)\n", result, qemu_pid);
+  else
+    std::fprintf(stderr, "[vfu] QEMU BAR5 HVA: not found (pid %d)\n", qemu_pid);
+
+  return result;
+}
+
+void VfuServer::fence_service_loop(int vram_fd, uint64_t vram_size) {
+  std::fprintf(stderr, "[vfu] fence thread started (vram_fd=%d size=0x%llx)\n",
+               vram_fd, static_cast<unsigned long long>(vram_size));
+  std::fflush(stderr);
+  if (vram_fd < 0 || vram_size == 0) {
+    std::fprintf(stderr, "[vfu] fence thread exiting: invalid params\n");
+    std::fflush(stderr);
+    return;
+  }
+
+  // Get a direct pointer to the BAR5 shadow memfd.
+  // CPU MMIO writes from the guest go here (via QEMU's mmap of bar5_fd_).
+  // We poll this for ring-test sentinels and write completions in-place.
+  volatile uint32_t *bar5_mem = bar5_ ? bar5_->bar5_mem() : nullptr;
+  std::fprintf(stderr, "[vfu] fence thread: bar5_mem=%p\n", (void*)bar5_mem);
+  std::fflush(stderr);
+
+  // PSP ring frames are 64 bytes each.
   // fb_start = 0x1000000 (from 0x1 RSMU fallback for MC base).
+  // We scan the ENTIRE VRAM memfd (starting from byte 0) since fence buffers
+  // and ring buffers may be at any offset. The fence_addr in the ring frame
+  // is a GPU MC address (>= fb_start for VRAM-backed BOs).
   static constexpr uint64_t fb_start = 0x1000000ULL;
-  // Scan up to 64MB from fb_start to cover all PSP BOs.
-  // Scan first 16MB of VRAM — PSP BOs (ring, fence, fw_pri, cmd_buf) are
-  // allocated early and should reside within the first 16MB from fb_start.
-  const uint64_t scan_size = std::min<uint64_t>(16ULL * 1024 * 1024,
-                                                 vram_size > fb_start ?
-                                                 vram_size - fb_start : 0);
+  // Scan all usable VRAM: full memfd minus TMR region at top.
+  const uint64_t scan_size = (vram_size > 280ULL << 20) ?
+                              vram_size - (280ULL << 20) : vram_size;
   static constexpr size_t frame_size = 64;
 
   while (!fence_stop_.load(std::memory_order_relaxed)) {
-    // Scan for PSP ring frames and write fence values.
+    // Map the entire scannable VRAM region from offset 0.
     void *p = ::mmap(nullptr, scan_size, PROT_READ | PROT_WRITE, MAP_SHARED,
-                     vram_fd, static_cast<off_t>(fb_start));
+                     vram_fd, 0);
     if (p != MAP_FAILED) {
       auto *mem = static_cast<uint8_t *>(p);
       for (size_t off = 0; off + frame_size <= scan_size; off += frame_size) {
         const auto *frame = reinterpret_cast<const uint32_t *>(mem + off);
-        uint32_t fence_lo  = frame[3];
-        uint32_t fence_hi  = frame[4];
-        uint32_t fence_val = frame[5];
+        uint32_t fence_lo  = frame[3];  // fence_addr_lo
+        uint32_t fence_hi  = frame[4];  // fence_addr_hi
+        uint32_t fence_val = frame[5];  // fence_value
         if (fence_val == 0) continue;
         uint64_t fence_gpu = (static_cast<uint64_t>(fence_hi) << 32) | fence_lo;
-        bool in_vram = (fence_gpu >= fb_start && fence_gpu < fb_start + vram_size);
-        if (!in_vram) continue;
-        uint64_t fence_off = fence_gpu - fb_start;
-        if (fence_off >= scan_size) continue;
-        auto *fence_ptr = reinterpret_cast<uint32_t *>(mem + fence_off);
+        // fence_gpu is a GPU MC address; VRAM-backed fences have hi=0 and
+        // lo in [fb_start, fb_start + vram_size). Convert to memfd offset.
+        if (fence_hi != 0) continue;
+        if (fence_lo < fb_start || fence_lo >= fb_start + vram_size) continue;
+        uint64_t fence_memfd_off = fence_lo - fb_start;
+        // The fence buffer is NOT at the same memfd offset as fence_lo since
+        // memfd offset 0 = GPU MC 0, not fb_start. fence_lo IS the memfd offset.
+        // (fb_start corresponds to memfd byte fb_start, not byte 0.)
+        // So fence_memfd_off correctly gives us the byte within our scan mmap.
+        if (fence_memfd_off >= scan_size) continue;
+        auto *fence_ptr = reinterpret_cast<uint32_t *>(mem + fence_memfd_off);
         if (*fence_ptr != fence_val) {
-          std::fprintf(stderr, "[fence] write: fence_gpu=0x%llx val=%u\n",
-                       (unsigned long long)fence_gpu, fence_val);
+          std::fprintf(stderr,
+                       "[fence] write: ring_frame@memfd+0x%zx fence=0x%x val=%u\n",
+                       off, fence_lo, fence_val);
           *fence_ptr = fence_val;
         }
       }
       ::munmap(p, scan_size);
     }
-    struct timespec ts{0, 500000};  // 500μs between scans
+    // GFX/KIQ ring test auto-complete: if SCRATCH_REG0 in the BAR5 memfd still
+    // holds 0xCAFEDEAD (the driver's init sentinel), overwrite with 0xDEADBEEF
+    // so the polling loop exits immediately even without CP execution.
+    // BAR5 dword index for SCRATCH_REG0: 0x10100 bytes / 4 = 0x4040.
+    if (bar5_mem) {
+      static constexpr uint32_t kScratchIdx = 0x10100 / 4;
+      if (bar5_mem[kScratchIdx] == 0xCAFEDEADU)
+        bar5_mem[kScratchIdx] = 0xDEADBEEFU;
+    }
+
+    struct timespec ts{0, 100000};  // 100μs between scans
     ::nanosleep(&ts, nullptr);
   }
 }

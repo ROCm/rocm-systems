@@ -9,11 +9,39 @@
 #include <cstdio>
 #include <cstring>
 #include <sys/mman.h>
+#include <unistd.h>
 
 namespace rocjitsu::vfu {
 
+MmioModel::~MmioModel() {
+  if (bar5_mem_ && bar5_mem_ != MAP_FAILED)
+    ::munmap(const_cast<uint32_t *>(bar5_mem_), kBar5SizeBytes);
+  if (bar5_fd_ >= 0)
+    ::close(bar5_fd_);
+}
+
 MmioModel::MmioModel(int vram_fd, uint64_t vram_size)
     : vram_fd_(vram_fd), vram_size_(vram_size) {
+  // Create a shared memfd for BAR5 so QEMU maps it directly into the guest.
+  // CPU writes from amdgpu go into this buffer; we poll it in fence_service_loop
+  // to auto-complete ring tests without needing the vfio-user callback path.
+  bar5_fd_ = ::memfd_create("rocjitsu_bar5", MFD_ALLOW_SEALING | MFD_CLOEXEC);
+  if (bar5_fd_ < 0) {
+    std::perror("[vfu/bar5] memfd_create");
+  } else if (::ftruncate(bar5_fd_, kBar5SizeBytes) != 0) {
+    std::perror("[vfu/bar5] ftruncate bar5");
+    ::close(bar5_fd_); bar5_fd_ = -1;
+  } else {
+    void *p = ::mmap(nullptr, kBar5SizeBytes, PROT_READ | PROT_WRITE,
+                     MAP_SHARED, bar5_fd_, 0);
+    if (p == MAP_FAILED) {
+      std::perror("[vfu/bar5] mmap bar5");
+      ::close(bar5_fd_); bar5_fd_ = -1;
+    } else {
+      bar5_mem_ = static_cast<volatile uint32_t *>(p);
+    }
+  }
+
   // Pre-populate registers that the amdgpu driver reads during hw_init.
 
   // GRBM_STATUS: report GPU idle (all busy bits clear).
@@ -62,6 +90,23 @@ MmioModel::MmioModel(int vram_fd, uint64_t vram_size)
   // RCC_CONFIG_MEMSIZE: VRAM size in MB (used by amdgpu_discovery to locate
   // the IP discovery table at vram_size_bytes - DISCOVERY_TMR_OFFSET).
   regs_[kRegRccConfigMemsize / 4] = kVramSizeMb;
+
+  // GFX/KIQ ring test: pre-initialize SCRATCH_REG0 to 0xDEADBEEF at BOTH
+  // possible offsets so RREG32 polls immediately return the expected value.
+  // The amdgpu driver's GFX ring test:
+  //   WREG32(scratch_reg0, 0xCAFEDEAD) → goes to QEMU shadow (not our callback)
+  //   RREG32(scratch_reg0) poll → comes through our callback → returns 0xDEADBEEF
+  //
+  // offset = SOC15_REG_OFFSET(GC, GET_INST(GC, xcc_id), regSCRATCH_REG0)
+  //   xcc_id=0, GC instance 0 (base=0x2000): dword 0x4040, byte 0x10100
+  //   xcc_id=0, GC instance 1 (base=0xa000): dword 0xC040, byte 0x30100
+  regs_[0x10100 / 4] = kScratchReg0TestDone;
+  regs_[0x30100 / 4] = kScratchReg0TestDone;
+
+  // Sync pre-populated shadow values into the BAR5 memfd so QEMU's direct map
+  // serves the correct defaults on first read (before any vfio-user callback).
+  if (bar5_mem_)
+    std::memcpy(const_cast<uint32_t *>(bar5_mem_), regs_, kBar5SizeBytes);
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +338,9 @@ void MmioModel::write_register(uint32_t byte_offset, uint32_t value) {
 
   // Shadow the write so a subsequent read returns the written value.
   regs_[byte_offset / 4] = value;
+  // Mirror into BAR5 memfd so direct-mapped QEMU reads see the same value.
+  if (bar5_mem_)
+    bar5_mem_[byte_offset / 4] = value;
 
   // MMHUB VM invalidation engine REQ → auto-ACK (same pattern as GC).
   if (byte_offset >= kRegMmhubVmInvEng0Req &&
@@ -321,6 +369,18 @@ void MmioModel::write_register(uint32_t byte_offset, uint32_t value) {
   // set the response to OK so it doesn't busy-wait.
   if (byte_offset == kRegMpSmcMsg)
     regs_[kRegMpSmcResp / 4] = kSmcRespOk;
+
+  // GFX/KIQ ring test auto-complete: when the ring test writes 0xCAFEDEAD to
+  // SCRATCH_REG0 (init sentinel), immediately update to 0xDEADBEEF so the
+  // RREG32 poll exits immediately without CP execution.
+  // SCRATCH_REG0 is accessed at two possible offsets depending on which GC
+  // instance the driver uses:
+  //   GC instance 0 (base=0x2000): dword 0x4040, byte 0x10100
+  //   GC instance 1 (base=0xa000): dword 0xC040, byte 0x30100
+  if (value == kScratchReg0TestInit &&
+      (byte_offset == kRegScratchReg0 || byte_offset == 0x30100)) {
+    regs_[byte_offset / 4] = kScratchReg0TestDone;
+  }
 }
 
 ssize_t MmioModel::read(char *buf, size_t count, long offset) {

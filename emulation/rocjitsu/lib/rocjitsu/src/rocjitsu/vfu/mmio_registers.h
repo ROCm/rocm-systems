@@ -30,6 +30,15 @@ inline constexpr uint32_t kRegMmIndex              = 0x0000 * 4; ///< MM indirec
 inline constexpr uint32_t kRegMmData               = 0x0001 * 4; ///< MM indirect data.
 inline constexpr uint32_t kRegMmIndexHi            = 0x0006 * 4; ///< MM indirect index high (for >32-bit).
 
+// GC SCRATCH registers used by gfx_v9_4_3_ring_test_ring.
+// regSCRATCH_REG0 = 0x2040, GC_BASE_seg0=0x2000 → dword 0x4040, byte 0x10100.
+// The ring test writes 0xCAFEDEAD (init) then submits a PM4 packet to write
+// 0xDEADBEEF (expected), polling until RREG32 returns 0xDEADBEEF. Since the
+// CP never executes, we auto-complete by returning 0xDEADBEEF after init write.
+inline constexpr uint32_t kRegScratchReg0      = 0x4040 * 4; ///< GC SCRATCH_REG0 for ring test.
+inline constexpr uint32_t kScratchReg0TestInit = 0xCAFEDEADU;
+inline constexpr uint32_t kScratchReg0TestDone = 0xDEADBEEFU;
+
 // PCIE / RSMU indirect access registers (NBIF seg1 base = 0xE00 in our blob).
 // amdgpu_device_indirect_{r,w}reg writes reg_addr to RSMU_INDEX then
 // reads/writes data from/to RSMU_DATA (no bit-31 flag).

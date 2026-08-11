@@ -10,10 +10,15 @@
 #include <libvfio-user.h>
 #include <vfio-user/pci_defs.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <cstring>
 #include <span>
+#include <sys/mman.h>
+#include <time.h>
+#include <unistd.h>
 
 namespace rocjitsu {
 
@@ -90,20 +95,57 @@ void VfioDeviceHost::trigger(uint32_t vector) {
 
 void VfioDeviceHost::map(const simdojo::DmaRegion &region) {
   device_->dma_map(region);
+  if (region.vaddr && region.length > 0) {
+    std::lock_guard<std::mutex> lk(dma_mutex_);
+    dma_regions_.push_back({region.vaddr, region.length});
+  }
 }
 
 void VfioDeviceHost::unmap(const simdojo::DmaRegion &region) {
   device_->dma_unmap(region);
+  if (region.vaddr) {
+    std::lock_guard<std::mutex> lk(dma_mutex_);
+    dma_regions_.erase(
+        std::remove_if(dma_regions_.begin(), dma_regions_.end(),
+                       [&](const DmaEntry &e) { return e.vaddr == region.vaddr; }),
+        dma_regions_.end());
+  }
 }
 
 int VfioDeviceHost::setup_bars() {
+  // Callback trampoline for register-trapped BARs (currently only BAR5).
+  // Routes to device_->bar_access(5, ...) for indirect register handling
+  // (MM_INDEX/MM_DATA, RSMU_INDEX/DATA, etc.).
+  auto bar5_cb = [](vfu_ctx_t *c, char *buf, size_t cnt,
+                    long off, bool wr) -> ssize_t {
+    auto *host = reinterpret_cast<VfioDeviceHost *>(vfu_get_private(c));
+    if (!host || !host->device_)
+      return -1;
+    std::span<std::byte> span(reinterpret_cast<std::byte *>(buf), cnt);
+    return host->device_->bar_access(5, span, static_cast<uint64_t>(off), wr);
+  };
+
   for (const auto &bar : device_->bars()) {
     int fd = device_->bar_fd(bar.index);
     uint32_t flags = VFU_REGION_FLAG_RW | VFU_REGION_FLAG_MEM;
-    if (bar.is_64bit)    flags |= VFU_REGION_FLAG_64_BITS;
-    if (bar.prefetchable) flags |= VFU_REGION_FLAG_PREFETCH;
+    if (bar.is_64bit)     flags |= VFU_REGION_FLAG_64_BITS;
+    if (bar.prefetchable)  flags |= VFU_REGION_FLAG_PREFETCH;
 
-    if (fd >= 0) {
+    if (fd >= 0 && bar.index == 5) {
+      // BAR5: memfd-backed AND callback-trapped.
+      // QEMU maps the memfd directly so CPU MMIO writes (e.g. SCRATCH_REG0)
+      // land in the shared buffer without going through the socket. The callback
+      // still fires for accesses QEMU explicitly proxies (indirect registers).
+      // VFU_REGION_FLAG_ALWAYS_CB ensures the callback fires for all accesses
+      // that QEMU does route through the socket.
+      iovec mmap_area{.iov_base = nullptr, .iov_len = bar.size};
+      if (vfu_setup_region(ctx_, bar.index, bar.size, bar5_cb,
+                           flags | VFU_REGION_FLAG_ALWAYS_CB,
+                           &mmap_area, 1, fd, 0) != 0) {
+        std::perror("vfu_setup_region (BAR5 mmap+cb)");
+        return -1;
+      }
+    } else if (fd >= 0) {
       // Memfd-backed BAR: fully mmap-able, no per-access callback.
       iovec mmap_area{.iov_base = nullptr, .iov_len = bar.size};
       if (vfu_setup_region(ctx_, bar.index, bar.size, nullptr,
@@ -112,37 +154,14 @@ int VfioDeviceHost::setup_bars() {
         return -1;
       }
     } else {
-      // Register-trapped BAR: install a lambda trampoline.
-      // The lambda captures bar.index so the device can dispatch by BAR.
-      // vfu_get_private(ctx) → VfioDeviceHost* → device_->bar_access().
-      int bar_index = bar.index;
-      auto cb = [](vfu_ctx_t *c, char *buf, size_t cnt,
-                   long off, bool wr) -> ssize_t {
-        auto *host = reinterpret_cast<VfioDeviceHost *>(vfu_get_private(c));
-        if (!host || !host->device_)
-          return -1;
-        // Recover bar_index from the region index via libvfio-user's opaque.
-        // The callback is registered once per BAR; encode the index in the
-        // closure via a second level of indirection using a helper struct
-        // stored as a persistent object on the host.
-        //
-        // Simpler approach: since we have only one register-trapped BAR (BAR5),
-        // route to bar_access(5, …) directly. If additional trapped BARs are
-        // added later, store a per-BAR dispatch table in VfioDeviceHost.
-        //
-        // For now, bar_index is captured from the enclosing lambda — but C
-        // function pointers can't capture. Use the vfu region index instead:
-        // vfu passes the region index as part of the callback type but not in
-        // the current vfu_region_access_cb_t signature. We rely on the fact
-        // that BAR5 is the only trapped BAR and route directly.
-        std::span<std::byte> span(reinterpret_cast<std::byte *>(buf), cnt);
-        return host->device_->bar_access(5, span,
-                                         static_cast<uint64_t>(off), wr);
-      };
-      (void)bar_index; // used in the comment above; silence warning
-
-      if (vfu_setup_region(ctx_, bar.index, bar.size, cb,
-                           flags, nullptr, 0, -1, 0) != 0) {
+      // Register-trapped BAR (no memfd): callback for all accesses.
+      // VFU_REGION_FLAG_ALWAYS_CB ensures libvfio-user routes every access
+      // (including direct MMIO writes from the guest) through our callback.
+      uint32_t cb_flags = flags;
+      if (bar.index == 5) cb_flags |= VFU_REGION_FLAG_ALWAYS_CB;
+      if (vfu_setup_region(ctx_, bar.index, bar.size,
+                           bar.index == 5 ? bar5_cb : nullptr,
+                           cb_flags, nullptr, 0, -1, 0) != 0) {
         std::perror("vfu_setup_region (trapped BAR)");
         return -1;
       }
@@ -266,6 +285,50 @@ int VfioDeviceHost::init() {
   return 0;
 }
 
+void VfioDeviceHost::fence_service_loop() {
+  // Optionally get the BAR5 memfd for ring-test polling.
+  int bar5_fd = device_ ? device_->bar_fd(5) : -1;
+  static constexpr size_t kBar5Size = 256 * 1024;
+  void *bar5_p = nullptr;
+  volatile uint32_t *bar5 = nullptr;
+
+  if (bar5_fd >= 0) {
+    bar5_p = ::mmap(nullptr, kBar5Size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                    bar5_fd, 0);
+    if (bar5_p == MAP_FAILED) {
+      std::perror("[vfio-host] fence thread: mmap BAR5");
+      bar5_p = nullptr;
+    } else {
+      bar5 = static_cast<volatile uint32_t *>(bar5_p);
+    }
+  }
+
+
+  // Poll for GFX/KIQ ring test sentinel: SCRATCH_REG0 at byte 0x10100.
+  // When amdgpu writes 0xCAFEDEAD (ring test init), we overwrite with
+  // 0xDEADBEEF so the poll loop exits immediately without CP execution.
+  static constexpr uint32_t kScratchIdx    = 0x10100 / 4;
+  static constexpr uint32_t kTestInit      = 0xCAFEDEADU;
+  static constexpr uint32_t kTestDone      = 0xDEADBEEFU;
+
+  uint64_t iteration = 0;
+  while (!fence_stop_.load(std::memory_order_relaxed)) {
+    ++iteration;
+
+    // BAR5 ring test (every iteration): if SCRATCH_REG0 has 0xCAFEDEAD, overwrite.
+    if (bar5 && bar5[kScratchIdx] == kTestInit)
+      bar5[kScratchIdx] = kTestDone;
+
+    // GTT scanning disabled pending safe access mechanism.
+
+    struct timespec ts{0, 1000000};  // 1 ms per iteration
+    ::nanosleep(&ts, nullptr);
+  }
+
+  if (bar5_p)
+    ::munmap(bar5_p, kBar5Size);
+}
+
 int VfioDeviceHost::run() {
   if (init() != 0)
     return -1;
@@ -278,6 +341,10 @@ int VfioDeviceHost::run() {
   }
 
   std::fprintf(stderr, "[vfio-host] client connected\n");
+
+  // Start fence/ring-test service thread.
+  fence_stop_.store(false);
+  fence_thread_ = std::thread(&VfioDeviceHost::fence_service_loop, this);
 
   int ret = 0;
   while (!stop_requested_.load(std::memory_order_relaxed)) {
@@ -294,6 +361,10 @@ int VfioDeviceHost::run() {
       break;
     }
   }
+
+  fence_stop_.store(true);
+  if (fence_thread_.joinable())
+    fence_thread_.join();
 
   return ret;
 }

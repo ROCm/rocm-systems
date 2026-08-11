@@ -48,6 +48,8 @@ int GpuPciDevice::bar_fd(int bar_index) const {
   switch (bar_index) {
     case 0: return bar0_.fd();
     case 2: return bar2_.fd();
+    // BAR5 uses callback-only mode (no mmap) so ALL guest MMIO accesses go
+    // through the vfio-user socket to our write/read handlers.
     default: return -1;
   }
 }
@@ -57,6 +59,7 @@ ssize_t GpuPciDevice::bar_access(int bar_index, std::span<std::byte> buf,
   char *cbuf = reinterpret_cast<char *>(buf.data());
   size_t count = buf.size();
   long loff = static_cast<long>(offset);
+
 
   switch (bar_index) {
     case 2:

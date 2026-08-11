@@ -20,7 +20,10 @@
 #include "simdojo/components/pci_device.h"
 
 #include <atomic>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <vector>
 
 // Forward-declare the opaque libvfio-user context to avoid pulling in the
 // full header. The implementation file includes <libvfio-user.h>.
@@ -64,6 +67,16 @@ private:
   int init();
   int setup_bars();
   int setup_pci_identity();
+
+  // Fence/ring-test service thread.
+  std::thread       fence_thread_;
+  std::atomic<bool> fence_stop_{false};
+  void fence_service_loop();
+
+  // Registered DMA regions (system RAM) for GTT writeback scanning.
+  struct DmaEntry { void *vaddr; uint64_t length; };
+  std::vector<DmaEntry> dma_regions_;
+  std::mutex            dma_mutex_;
 
   std::string           socket_path_;
   simdojo::PciDevice   *device_;
