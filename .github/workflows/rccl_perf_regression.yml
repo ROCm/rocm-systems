@@ -71,7 +71,9 @@ jobs:
   # check would sit as a bare "expected" with no explanation of how to run it.
   # ---------------------------------------------------------------------------
   hint:
-    if: github.event_name == 'pull_request'
+    # Same-repo only: fork PRs get a read-only token, so a statuses POST would
+    # 403 and turn this job red on every external PR.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -118,25 +120,39 @@ jobs:
       base_ref: ${{ steps.ctx.outputs.base_ref }}
       pr_number: ${{ steps.ctx.outputs.pr_number }}
       requester: ${{ steps.ctx.outputs.requester }}
+      head_repo: ${{ steps.ctx.outputs.head_repo }}
     steps:
-      - name: Validate command (exact /perf-regression on PR comments)
+      - name: Authorize (exact command + current write permission)
         id: gate
         env:
+          GH_TOKEN: ${{ github.token }}
           COMMENT_BODY: ${{ github.event.comment.body }}
+          ACTOR: ${{ github.event.comment.user.login }}
         run: |
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # workflow_dispatch already requires repo write access to trigger.
             echo "authorized=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Exact, trimmed, single-line match -- rejects substrings and quotations.
           trimmed="$(printf '%s' "${COMMENT_BODY}" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-          if [[ "${trimmed}" == "${PERF_COMMAND}" ]]; then
-            echo "authorized=true" >> "$GITHUB_OUTPUT"
-          else
+          if [[ "${trimmed}" != "${PERF_COMMAND}" ]]; then
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             echo "Comment is not exactly '${PERF_COMMAND}'; not triggering."
+            exit 0
           fi
+          # author_association alone is too broad (MEMBER = any org member;
+          # COLLABORATOR includes read/triage). Require the commenter to CURRENTLY
+          # have write/maintain/admin. Fail closed if the level can't be read.
+          perm="$(gh api "repos/${{ github.repository }}/collaborators/${ACTOR}/permission" --jq '.permission' 2>/dev/null || echo "")"
+          case "${perm}" in
+            admin|maintain|write)
+              echo "authorized=true" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "authorized=false" >> "$GITHUB_OUTPUT"
+              echo "@${ACTOR} lacks write permission (got '${perm:-unknown}'); not triggering." ;;
+          esac
 
       - name: Resolve PR context
         id: ctx
@@ -150,11 +166,13 @@ jobs:
             data="$(gh api "repos/${{ github.repository }}/pulls/${pr}")"
             head_sha="$(printf '%s' "${data}" | jq -r '.head.sha')"
             base_ref="$(printf '%s' "${data}" | jq -r '.base.ref')"
+            head_repo="$(printf '%s' "${data}" | jq -r '.head.repo.full_name')"
             echo "pr_number=${pr}" >> "$GITHUB_OUTPUT"
             echo "requester=${{ github.event.comment.user.login }}" >> "$GITHUB_OUTPUT"
           else
             head_sha="${{ github.sha }}"
             base_ref="${{ github.ref_name }}"
+            head_repo="${{ github.repository }}"
             echo "pr_number=" >> "$GITHUB_OUTPUT"
             echo "requester=${{ github.actor }}" >> "$GITHUB_OUTPUT"
           fi
@@ -162,9 +180,25 @@ jobs:
           git check-ref-format "refs/heads/${base_ref}"
           echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
           echo "base_ref=${base_ref}" >> "$GITHUB_OUTPUT"
+          # Emit the head repo so the PR-code jobs can enforce same-repo-only
+          # (the trigger is issue_comment, where a pull_request head-repo check
+          # in an `if` can't work -- see build/detect).
+          echo "head_repo=${head_repo}" >> "$GITHUB_OUTPUT"
+
+      - name: Reject fork PRs
+        # Forks are not supported (they'd run unvetted fork code on the
+        # self-hosted runner). Tell the requester instead of silently skipping.
+        if: steps.gate.outputs.authorized == 'true' && steps.ctx.outputs.pr_number != '' && steps.ctx.outputs.head_repo != github.repository
+        uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
+        with:
+          header: rccl-perf-gate
+          number: ${{ steps.ctx.outputs.pr_number }}
+          GITHUB_TOKEN: ${{ github.token }}
+          message: |
+            🚫 The RCCL perf gate does not run on fork PRs. Push your branch to `${{ github.repository }}` and re-comment `${{ env.PERF_COMMAND }}`.
 
       - name: Mark commit status pending (PR only)
-        if: steps.gate.outputs.authorized == 'true' && steps.ctx.outputs.pr_number != ''
+        if: steps.gate.outputs.authorized == 'true' && steps.ctx.outputs.pr_number != '' && steps.ctx.outputs.head_repo == github.repository
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ steps.ctx.outputs.head_sha }}
@@ -178,7 +212,7 @@ jobs:
             -f "description=Perf regression run queued"
 
       - name: Acknowledge on the PR
-        if: steps.gate.outputs.authorized == 'true' && steps.ctx.outputs.pr_number != ''
+        if: steps.gate.outputs.authorized == 'true' && steps.ctx.outputs.pr_number != '' && steps.ctx.outputs.head_repo == github.repository
         uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
         with:
           header: rccl-perf-gate
@@ -196,16 +230,14 @@ jobs:
   # ---------------------------------------------------------------------------
   build:
     needs: resolve
-    # Forked PRs cannot run this workflow: it builds and MPI-executes the PR's
-    # own source on a self-hosted runner, so arbitrary fork code would get
-    # arbitrary code execution on our infrastructure. Scope to same-repo PRs
-    # only; workflow_dispatch is unaffected (it already requires repo write
-    # access to trigger). (Kept from the original -- a no-op under
-    # issue_comment/workflow_dispatch, which are never 'pull_request', so the
-    # existing guard isn't weakened.)
+    # SAME-REPO ONLY. This job checks out the PR head SHA and builds + MPI-executes
+    # it on the self-hosted runner, so fork code here would be RCE on our infra.
+    # Under issue_comment the old `github.event.pull_request.head.repo...` guard is
+    # dead (it's a pull_request-only field), so gate on the head repo that the
+    # resolve job read from the API instead -- a check that actually fires here.
     if: >
       needs.resolve.outputs.authorized == 'true' &&
-      ( github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository )
+      needs.resolve.outputs.head_repo == github.repository
     # Separate lock from the detect job below: build never touches the pinned
     # nodes, so it shouldn't queue behind another PR's in-flight A/B run.
     # (Real cross-PR parallelism from this also needs a 2nd self-hosted runner
@@ -234,6 +266,7 @@ jobs:
           BASE_REF: ${{ needs.resolve.outputs.base_ref }}
         run: |
           set -euo pipefail
+          # BASE_REF came from the PR API -- validate before using it in git.
           git check-ref-format "refs/heads/${BASE_REF}"
           git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
 
@@ -260,6 +293,7 @@ jobs:
           BASE_REF: origin/${{ needs.resolve.outputs.base_ref }}
           _CONFIG: ${{ inputs.config || '/it-share/rccl-ci/configs/ci_detect_prod.json' }}
         run: |
+          set -euo pipefail
           if [[ "${BUILD_RCCL}" == "1" ]]; then
             # Give every run its own config copy so a concurrent build can't
             # clobber another PR's in-flight detect config.
@@ -293,11 +327,11 @@ jobs:
   # ---------------------------------------------------------------------------
   detect:
     needs: [resolve, build]
-    # Same-repo guard preserved (see build) -- no-op under issue_comment/dispatch.
+    # Same-repo only (see build) -- gate on the API-resolved head repo.
     if: >
       needs.resolve.outputs.authorized == 'true' &&
-      needs.build.result == 'success' &&
-      ( github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository )
+      needs.resolve.outputs.head_repo == github.repository &&
+      needs.build.result == 'success'
     # Serialise: the pinned calibration nodes can host only one A/B job at a
     # time, and thresholds are only valid there. Do NOT cancel in-progress (a
     # running allocation must finish cleanly to release the nodes).
@@ -327,7 +361,11 @@ jobs:
           exit "${code}"
 
       - name: Render report
+        # Best-effort: a report-render/upload hiccup must not turn an advisory
+        # regression (detector exit 1) into a hard, merge-blocking failure. The
+        # verdict is driven by the detector exit code, not these steps.
         if: always()
+        continue-on-error: true
         run: |
           python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
             "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
@@ -337,6 +375,7 @@ jobs:
 
       - name: Upload rendered report (for finalize)
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: rccl-perf-report
@@ -345,6 +384,7 @@ jobs:
 
       - name: Upload A/B artifacts
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: rccl-ab-report
@@ -370,7 +410,7 @@ jobs:
   # ---------------------------------------------------------------------------
   finalize:
     needs: [resolve, build, detect]
-    if: always() && needs.resolve.outputs.authorized == 'true'
+    if: always() && needs.resolve.outputs.authorized == 'true' && needs.resolve.outputs.head_repo == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -412,13 +452,15 @@ jobs:
           echo "publish=true" >> "$GITHUB_OUTPUT"
           # Advisory: a detected regression (detector exit 1) does NOT fail the
           # gate; only build failures / detector job or infra errors do.
+          # Verdict is driven by the DETECTOR exit code (0 pass, 1 regression =
+          # advisory success, anything else = infra failure). Report/upload steps
+          # are continue-on-error, so a failed detect job here means it was
+          # cancelled or skipped, not a rendering hiccup.
           state=success; desc="Perf gate passed"
           if [[ "${BUILD_RESULT}" != "success" ]]; then
             state=failure; desc="Build job ${BUILD_RESULT}"
           elif [[ "${DETECT_RESULT}" == "cancelled" || "${DETECT_RESULT}" == "skipped" ]]; then
             state=error; desc="Detector ${DETECT_RESULT}"
-          elif [[ "${DETECT_RESULT}" != "success" ]]; then
-            state=failure; desc="Detector job ${DETECT_RESULT}"
           elif [[ "${DETECT_CODE}" != "0" && "${DETECT_CODE}" != "1" ]]; then
             state=failure; desc="Detector infra error (exit ${DETECT_CODE:-unknown})"
           fi
