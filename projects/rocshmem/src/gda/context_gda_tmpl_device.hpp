@@ -568,47 +568,35 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
 
   for (int seg = 0; seg < n_seg; seg++) {
     off_seg = seg * seg_size;
-    // Loop 2 in the algorithm above
-    for (int iter = 0; iter < PE_size - 1; iter++) {
+    for (int iter = 0; iter < 2* PE_size - 2; iter++) {
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
       off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
 
       internal_putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
-        reinterpret_cast<void *>(&dst[off_send + off_seg]),
-        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+                reinterpret_cast<void *>(&dst[off_send + off_seg]),
+                chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+
+      fence();
 
       if (is_thread_zero_in_block()) {
-        fence();
-
-        wait_val = seg + 100;
+      wait_val = (seg + 1) * 1000 + iter + 1;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
-#if defined(__gfx90a__)
-        __threadfence_system();
-#endif /* __gfx90a__ */
-        wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
+    #if defined(__gfx90a__)
+      __threadfence_system();
+    #endif /* __gfx90a__ */
+      wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
+      fence();
       __syncthreads();
+      
+      if (iter < PE_size - 1) {
       gda_compute_reduce<T, Op>(&pWrk[off_recv], &dst[off_seg + off_recv],
                                 chunk_size, wg_id, wg_size);
-    }
-
-    // Loop 2 in the example above
-    for (int iter = PE_size - 1; iter < 2 * PE_size - 2; iter++) {
-      off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
-      internal_putmem_nbi_wg(reinterpret_cast<void *>(&dst[off_send + off_seg]),
-        reinterpret_cast<void *>(&dst[off_send + off_seg]),
-        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
-
-      if (is_thread_zero_in_block()) {
-        fence();
-        wait_val = seg + 100;
-        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
-          send_pe, wf_info);
-#if defined(__gfx90a__)
-        __threadfence_system();
-#endif /* __gfx90a__ */
-        wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
+      } else {
+        for (int i = wg_id; i < chunk_size; i += wg_size) {
+          dst[off_recv + off_seg + i] = pWrk[off_recv + i];
+        }
       }
       __syncthreads();
     }
@@ -626,73 +614,62 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
     int nelems, GDATeam *team_obj,  // NOLINT(runtime/int)
     int n_seg, int seg_size, int chunk_size, ActiveWFInfo &wf_info) {
 
-  int PE_size = team_obj->tinfo_wrt_world->size;
-  long *pSync = team_obj->reduce_pSync;
-  T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
-  int my_pe_in_team = team_obj->my_pe;
+    int PE_size = team_obj->tinfo_wrt_world->size;
+    long *pSync = team_obj->reduce_pSync;
+    T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
+    int my_pe_in_team = team_obj->my_pe;
 
-  int off_seg, off_send, off_recv;
-  int send_pe = (my_pe_in_team + 1) % PE_size;
-  send_pe = team_obj->get_pe_in_world(send_pe);
-  long wait_val;  // NOLINT(runtime/int)
+    int off_seg, off_send, off_recv;
+    int send_pe = (my_pe_in_team + 1) % PE_size;
+    send_pe = team_obj->get_pe_in_world(send_pe);
+    long wait_val;  // NOLINT(runtime/int)
 
-  int wf_tid = get_flat_block_id() % WF_SIZE;
+    int wf_tid = get_flat_block_id() % WF_SIZE;
 
-  for (int i = wf_tid; i < nelems; i += WF_SIZE) {
-    dst[i] = src[i];
-  }
+    for (int i = wf_tid; i < nelems; i += WF_SIZE) {
+      dst[i] = src[i];
+    }
 
-  for (int seg = 0; seg < n_seg; seg++) {
-    off_seg = seg * seg_size;
-    // Loop 1: reduce-scatter
-    for (int iter = 0; iter < PE_size - 1; iter++) {
-      off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
-      off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
+    for (int seg = 0; seg < n_seg; seg++) {
+      off_seg = seg * seg_size;
+      // Loop 1: reduce-scatter
+      for (int iter = 0; iter < PE_size - 1; iter++) {
+        off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
+        off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
 
-      internal_putmem_wave(reinterpret_cast<void *>(&pWrk[off_send]),
-        reinterpret_cast<void *>(&dst[off_send + off_seg]),
-        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
+        internal_putmem_wave(reinterpret_cast<void *>(&pWrk[off_send]),
+          reinterpret_cast<void *>(&dst[off_send + off_seg]),
+          chunk_size * sizeof(T), send_pe, send_pe, wf_info);
 
-      if (is_thread_zero_in_wave()) {
-        qps[send_pe].quiet(wf_info);
-        wait_val = seg + 100;
-        internal_putmem_wave(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
-          send_pe, wf_info);
-#if defined(__gfx90a__)
+        if (is_thread_zero_in_wave()) {
+          qps[send_pe].quiet(wf_info);
+          wait_val = seg + 100;
+          internal_putmem_wave(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
+            send_pe, wf_info);
+      #if defined(__gfx90a__)
         __threadfence_system();
-#endif /* __gfx90a__ */
-        wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
-      }
-      for (int j = wf_tid; j < chunk_size; j += WF_SIZE) {
-        OpWrap<Op>::Calc(&pWrk[off_recv], &dst[off_seg + off_recv], j);
-      }
-    }
+      #endif /* __gfx90a__ */
+          wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
+        }
 
-    // Loop 2: all-gather
-    for (int iter = PE_size - 1; iter < 2 * PE_size - 2; iter++) {
-      off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
-      internal_putmem_nbi_wave(reinterpret_cast<void *>(&dst[off_send + off_seg]),
-        reinterpret_cast<void *>(&dst[off_send + off_seg]),
-        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
-
-      if (is_thread_zero_in_wave()) {
-        qps[send_pe].quiet(wf_info);
-        wait_val = seg + 10;
-        internal_putmem_wave(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
-          send_pe, wf_info);
-#if defined(__gfx90a__)
-        __threadfence_system();
-#endif /* __gfx90a__ */
-        wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
+        if (iter < PE_size - 1) {
+          for (int j = wf_tid; j < chunk_size; j += WF_SIZE) {
+            OpWrap<Op>::Calc(&pWrk[off_recv], &dst[off_seg + off_recv], j);
+          }
+        } else {
+          for (int i = wf_tid; i < chunk_size; i += WF_SIZE) {
+            dst[off_recv + off_seg + i] = pWrk[off_recv + i];
+          }
+        }
+        
       }
-    }
-  }
 
-  if (is_thread_zero_in_wave()) {
-    for (int i = 0; i < 2 * constmem.num_pes - 2; i++) {
-      pSync[i] = ROCSHMEM_SYNC_VALUE;
+    if (is_thread_zero_in_wave()) {
+      for (int i = 0; i < 2 * constmem.num_pes - 2; i++) {
+        pSync[i] = ROCSHMEM_SYNC_VALUE;
+      }
+      __threadfence_system();
     }
-    __threadfence_system();
   }
 }
 

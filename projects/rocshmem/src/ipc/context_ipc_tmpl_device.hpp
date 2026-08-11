@@ -472,7 +472,8 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
         internal_putmem(&pSync[iter], &wait_val, sizeof(wait_val), send_pe);
       }
       wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
-      detail::atomic::threadfence<detail::atomic::memory_scope_system, 
+      
+      detail::atomic::threadfence<detail::atomic::memory_scope_system,
                              detail::atomic::memory_order_acquire>();
 
       if (iter < PE_size - 1) {
