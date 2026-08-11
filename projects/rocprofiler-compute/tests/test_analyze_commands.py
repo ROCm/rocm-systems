@@ -1064,9 +1064,6 @@ def test_analyze_source_snapshot_output_format(
     exports_source_snapshot,
 ):
     """Export source snapshots for CSV output but not database output."""
-    expected_source_file_tree = common.read_binary_file_tree(
-        PC_SAMPLING_SOURCE_WORKLOAD / "src"
-    )
     workload_path = setup_pc_sampling_source_workload(tmp_path).resolve()
     output_path = (tmp_path / output_name).resolve()
     monkeypatch.chdir(tmp_path)
@@ -1089,10 +1086,15 @@ def test_analyze_source_snapshot_output_format(
     )
     if exports_source_snapshot:
         assert workload_source_path.is_dir()
-        assert (
-            common.read_binary_file_tree(workload_source_path)
-            == expected_source_file_tree
-        )
+        # Every exported file sits under the absolute path the CSV records for
+        # it, so the paths below are the fixture's own capture-host paths.
+        assert set(common.read_binary_file_tree(workload_source_path)) == {
+            Path("app/projects/rocprofiler-compute/sample/vcopy.cpp"),
+            Path(
+                "rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel"
+                "/include/hip/amd_detail/amd_hip_runtime.h"
+            ),
+        }
     else:
         assert output_path.with_suffix(".db").is_file()
         assert not (output_path / "source").exists()

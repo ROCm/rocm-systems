@@ -14,14 +14,28 @@ import hashlib
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
-from utils.logger import console_debug, console_warning
+from utils.logger import console_debug
 
 SOURCE_FRAME_SEPARATOR = " -> "
 UNKNOWN_SOURCE_LINE_TOKEN = "?"
+SOURCE_EXPORT_DIRECTORY_NAME = "source"
 
 SourceFrame = tuple[str, Optional[int]]
+
+
+class WorkloadSourceSnapshot(NamedTuple):
+    """One workload's captured source files and the names it is filed under.
+
+    The names are the ones stored on the workload row, so the export folder
+    cannot drift from the database.
+    """
+
+    workload_path: Path
+    workload_name: str
+    workload_sub_name: str
+    absolute_source_paths: tuple[str, ...]
 
 
 def parse_source_frames(source: Optional[str]) -> list[SourceFrame]:
@@ -80,98 +94,41 @@ def read_source_file_digest_and_lines(
     )
 
 
+def resolve_export_path(
+    workload_result_directory: Path,
+    absolute_path: str,
+) -> Path:
+    """Return where one source file is exported under a workload's folder.
+
+    The export mirrors the absolute path the database records for the file, so
+    a source row locates its copy by dropping the leading separator.
+    """
+    return workload_result_directory / Path(absolute_path).relative_to("/")
+
+
 def export_source_snapshot_files(
-    workload_paths: Iterable[str],
+    workload_source_snapshots: Iterable[WorkloadSourceSnapshot],
     csv_result_directory: Path,
 ) -> None:
-    """Export workload source snapshots beneath a CSV result folder."""
-    source_result_directory = csv_result_directory / "source"
-
-    for workload_path in workload_paths:
-        workload_directory = Path(workload_path)
-        source_snapshot_directory = workload_directory / "src"
-        source_snapshot_file_pairs = [
-            (
-                source_snapshot_file,
-                Path("/") / source_snapshot_file.relative_to(source_snapshot_directory),
-            )
-            for source_snapshot_file in _find_source_snapshot_files(
-                source_snapshot_directory
-            )
-        ]
-
-        if not source_snapshot_file_pairs:
-            _log_skipped_source_snapshot_export(workload_path)
-            continue
-
-        source_files_common_ancestor = _find_common_parent([
-            original_source_file
-            for _source_snapshot_file, original_source_file in (
-                source_snapshot_file_pairs
-            )
-        ])
-
-        workload_name = workload_directory.parent.name
-        workload_sub_name = workload_directory.name
+    """Copy the source files a CSV result references into the result folder."""
+    for workload_source_snapshot in workload_source_snapshots:
         workload_result_directory = (
-            source_result_directory / workload_name / workload_sub_name
+            csv_result_directory
+            / SOURCE_EXPORT_DIRECTORY_NAME
+            / workload_source_snapshot.workload_name
+            / workload_source_snapshot.workload_sub_name
         )
-        source_snapshot_destinations = [
-            (
-                source_snapshot_file,
-                _make_source_snapshot_destination(
-                    original_source_file,
-                    source_files_common_ancestor,
-                    workload_result_directory,
+        for absolute_path in workload_source_snapshot.absolute_source_paths:
+            export_path = resolve_export_path(workload_result_directory, absolute_path)
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(
+                resolve_snapshot_path(
+                    workload_source_snapshot.workload_path, absolute_path
                 ),
+                export_path,
             )
-            for source_snapshot_file, original_source_file in (
-                source_snapshot_file_pairs
-            )
-        ]
-        for source_snapshot_file, destination_file in source_snapshot_destinations:
-            destination_file.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_snapshot_file, destination_file)
 
         console_debug(
-            f"Exported {len(source_snapshot_file_pairs)} source snapshot files "
-            f"for workload {workload_path}."
+            f"Exported {len(workload_source_snapshot.absolute_source_paths)} "
+            f"source files for workload {workload_source_snapshot.workload_path}."
         )
-
-
-def _find_source_snapshot_files(
-    source_snapshot_directory: Path,
-) -> list[Path]:
-    """Return regular files in a source snapshot."""
-    return sorted(
-        snapshot_path
-        for snapshot_path in source_snapshot_directory.rglob("*")
-        if snapshot_path.is_file()
-    )
-
-
-def _make_source_snapshot_destination(
-    original_source_file: Path,
-    source_files_common_ancestor: Path,
-    workload_result_directory: Path,
-) -> Path:
-    """Return the ancestor-relative destination for a snapshot file."""
-    return workload_result_directory / original_source_file.relative_to(
-        source_files_common_ancestor
-    )
-
-
-def _log_skipped_source_snapshot_export(workload_path: str) -> None:
-    """Log that no source snapshot files were exported for a workload."""
-    console_warning(f"Source snapshot export skipped for workload {workload_path}.")
-    console_debug(f"Exported 0 source snapshot files for workload {workload_path}.")
-
-
-def _find_common_parent(source_files: list[Path]) -> Path:
-    """Return the deepest directory containing every source file."""
-    first_parent = source_files[0].parent
-    return next(
-        ancestor
-        for ancestor in (first_parent, *first_parent.parents)
-        if all(source_file.is_relative_to(ancestor) for source_file in source_files)
-    )

@@ -1748,29 +1748,32 @@ def fetch_source_lines_by_workload(session):
 
 
 def make_source_export_analyzer(tmp_path, output_format):
-    """Build an analyzer and expected source exports for one output format."""
-    snapshot_files_per_workload = {
-        Path("first/run"): {
-            Path("workspace/src/shared.cpp"): b"first source\n",
-            Path("workspace/include/shared.hpp"): b"first header\n",
-        },
-        Path("second/run"): {
-            Path("workspace/src/shared.cpp"): b"second source\n",
-            Path("workspace/include/shared.hpp"): b"second header\n",
-        },
-    }
+    """Build an analyzer and the source export its result folder should hold.
+
+    Each workload holds one file its samples name and one it does not, so the
+    export is pinned to the files the database records.
+    """
+    unreferenced_source_path = "/workspace/include/unreferenced.hpp"
     tool_data_per_workload = {}
     expected_exported_files = {}
-    for workload_relative_path, snapshot_files in snapshot_files_per_workload.items():
-        workload_path = tmp_path / "workloads" / workload_relative_path
-        tool_data_per_workload[str(workload_path)] = []
-        for snapshot_relative_path, contents in snapshot_files.items():
-            snapshot_path = workload_path / "src" / snapshot_relative_path
-            snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-            snapshot_path.write_bytes(contents)
-            expected_exported_files[
-                workload_relative_path / snapshot_relative_path.relative_to("workspace")
-            ] = contents
+    for workload_name, referenced_source_path, contents in (
+        ("first", "/workspace/src/first.cpp", "int first;\n"),
+        ("second", "/workspace/src/second.cpp", "int second;\n"),
+    ):
+        workload_path = tmp_path / "workloads" / workload_name / "run"
+        tool_data_per_workload[str(workload_path)] = (
+            make_source_workload_tool_data_records(
+                workload_path,
+                {
+                    referenced_source_path: contents,
+                    unreferenced_source_path: "int unreferenced;\n",
+                },
+                [f"{referenced_source_path}:1"],
+            )
+        )
+        expected_exported_files[
+            Path(workload_name) / "run" / Path(referenced_source_path).relative_to("/")
+        ] = contents.encode()
 
     analyzer = make_pc_sampling_database_analyzer(tool_data_per_workload)
     result_path = tmp_path / f"{output_format}_analysis"
@@ -1860,10 +1863,15 @@ def test_run_analysis_source_export_scopes_workloads_and_preserves_view_csvs(
         )
         run_source_export_analysis(analyzer)
 
-    export_source_snapshot_files.assert_called_once_with(
-        workload_paths=analyzer._runs.keys(),
-        csv_result_directory=result_path,
-    )
+    # The analyzer names each export folder, rather than the export rederiving
+    # it, so a folder cannot drift from the workload row it belongs to.
+    export_arguments = export_source_snapshot_files.call_args.kwargs
+    assert export_arguments["csv_result_directory"] == result_path
+    assert [
+        (snapshot.workload_name, snapshot.workload_sub_name)
+        for snapshot in export_arguments["workload_source_snapshots"]
+    ] == [("first", "run"), ("second", "run")]
+
     view_csvs_after_analysis = read_view_csv_files(result_path)
     assert set(view_csvs_before_source_export) == VIEW_CSV_FILENAMES
     assert set(view_csvs_after_analysis) == VIEW_CSV_FILENAMES
@@ -1872,6 +1880,18 @@ def test_run_analysis_source_export_scopes_workloads_and_preserves_view_csvs(
     source_directory = result_path / "source"
     assert source_directory.is_dir()
     assert common.read_binary_file_tree(source_directory) == expected_exported_files
+
+    # Every path the CSV records locates its copy by dropping the leading "/".
+    exported_paths = common.read_binary_file_tree(source_directory)
+    source_lines_frame = pd.read_csv(result_path / "source_lines.csv")
+    assert {
+        Path(file_path).relative_to("/")
+        for file_path in source_lines_frame["file_path"]
+    } == {
+        # The first two components name the workload, not the source file.
+        Path(*exported_path.parts[2:])
+        for exported_path in exported_paths
+    }
 
 
 def test_run_analysis_keeps_each_workloads_source_files_apart(db_session, tmp_path):
