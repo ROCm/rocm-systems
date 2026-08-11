@@ -3,6 +3,7 @@
 
 """Unit tests for ISA dimension properties on IsaProfile subclasses."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,7 @@ from amdisa.codegen._generator import (
     _ImplOutputs,
     _SourceImplUnit,
 )
+from amdisa.codegen.config import CodegenConfig
 from amdisa.__main__ import _detect_profile
 from amdisa.gpuisa import InstEncoding, Instruction, MicrocodeField
 from amdisa.isa_properties_codegen import emit_isa_properties
@@ -22,7 +24,9 @@ from amdisa.isa_profile import (
     Gfx1250Profile,
     MemoryCoherencyModel,
     Rdna1Profile,
+    Rdna2Profile,
     Rdna3Profile,
+    Rdna3_5Profile,
     Rdna4Profile,
 )
 
@@ -80,6 +84,25 @@ def test_max_addressable_vgprs_per_wf(profile, expected):
     assert profile.max_addressable_vgprs_per_wf == expected
 
 
+@pytest.mark.parametrize(
+    ('profile', 'expected_wave32', 'expected_wave64'),
+    [
+        (Cdna1Profile(), 0, 4),
+        (Cdna2Profile(), 0, 8),
+        (CdnaProfile(), 0, 8),
+        (Rdna1Profile(), 8, 4),
+        (Rdna2Profile(), 8, 4),
+        (Rdna3Profile(), 8, 4),
+        (Rdna3_5Profile(), 8, 4),
+        (Rdna4Profile(), 8, 4),
+        (Gfx1250Profile(), 16, 0),
+    ],
+)
+def test_descriptor_vgpr_count_granule(profile, expected_wave32, expected_wave64):
+    assert profile.descriptor_vgpr_count_granule_wave32 == expected_wave32
+    assert profile.descriptor_vgpr_count_granule_wave64 == expected_wave64
+
+
 def test_only_gfx1250_splits_execution_sources():
     assert Gfx1250Profile().split_execution_sources
     assert not Rdna4Profile().split_execution_sources
@@ -134,6 +157,10 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     output = emit_isa_properties(str(tmp_path), specs).read_text()
 
     assert 'uint32_t max_addressable_vgprs_per_wf = 0;' in output
+    assert 'uint32_t wave_size = 0;' in output
+    assert 'uint32_t wave_size_max = 0;' in output
+    assert 'uint32_t descriptor_vgpr_count_granule_wave32 = 0;' in output
+    assert 'uint32_t descriptor_vgpr_count_granule_wave64 = 0;' in output
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
     assert (
         'case ROCJITSU_CODE_ARCH_CDNA3:\n'
@@ -142,7 +169,11 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = true,\n'
         '        .uses_ttmp_workgroup_ids = false,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .wave_size = 64,\n'
+        '        .wave_size_max = 64,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
+        '        .descriptor_vgpr_count_granule_wave32 = 0,\n'
+        '        .descriptor_vgpr_count_granule_wave64 = 8,\n'
         '    };'
     ) in output
     assert (
@@ -152,7 +183,11 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .wave_size = 32,\n'
+        '        .wave_size_max = 64,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
+        '        .descriptor_vgpr_count_granule_wave32 = 8,\n'
+        '        .descriptor_vgpr_count_granule_wave64 = 4,\n'
         '    };'
     ) in output
     assert (
@@ -162,9 +197,39 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
+        '        .wave_size = 32,\n'
+        '        .wave_size_max = 32,\n'
         '        .max_addressable_vgprs_per_wf = 1024,\n'
+        '        .descriptor_vgpr_count_granule_wave32 = 16,\n'
+        '        .descriptor_vgpr_count_granule_wave64 = 0,\n'
         '    };'
     ) in output
+
+
+def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
+    profiles = [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', CdnaProfile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+        ('gfx1250', Gfx1250Profile()),
+    ]
+    specs = [
+        (name, SimpleNamespace(profile=profile), None) for name, profile in profiles
+    ]
+
+    generated = emit_isa_properties(str(tmp_path), specs).read_text()
+    checked_in = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h'
+    ).read_text()
+
+    assert generated == checked_in
 
 
 def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
@@ -206,6 +271,7 @@ def test_gfx1250_instruction_execution_backend_is_dense_and_scoped(tmp_path):
     generator = object.__new__(CodeGenerator)
     generator.out_path = str(tmp_path)
     generator.isa_spec = SimpleNamespace(arch_name='gfx1250', profile=Gfx1250Profile())
+    generator.config = CodegenConfig()
     generator._split_execution_classes = ['FirstInstruction', 'SecondInstruction']
 
     generator.gen_execution_backend()
