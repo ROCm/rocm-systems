@@ -895,8 +895,11 @@ void rcclGetMaxNthreads(struct ncclComm* comm, int maxNthreads[]) {
 }
 
 void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes, int& nThreads) {
-  static int maxNthreads[NCCL_NUM_PROTOCOLS] = {0};
-  if (maxNthreads[NCCL_PROTO_SIMPLE] == 0) rcclGetMaxNthreads(comm, maxNthreads);
+  // Not cached in a static: rcclGetMaxNthreads is variant/arch dependent
+  // (comm->use512Kernels, gfx950), which can differ across comms/devices in one
+  // process, so recompute per comm.
+  int maxNthreads[NCCL_NUM_PROTOCOLS];
+  rcclGetMaxNthreads(comm, maxNthreads);
   if (rcclParamThreadsPerBlock() != -1) {
     nThreads = rcclParamThreadsPerBlock();
     if (nThreads % comm->WarpSize != 0) {
@@ -925,8 +928,11 @@ void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, si
 }
 
 void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]) {
-  static int maxNthreads[NCCL_NUM_PROTOCOLS] = {0};
-  if (maxNthreads[NCCL_PROTO_SIMPLE] == 0) rcclGetMaxNthreads(comm, maxNthreads);
+  // Not cached in a static: rcclGetMaxNthreads is variant/arch dependent
+  // (comm->use512Kernels, gfx950), which can differ across comms/devices in one
+  // process, so recompute per comm.
+  int maxNthreads[NCCL_NUM_PROTOCOLS];
+  rcclGetMaxNthreads(comm, maxNthreads);
   defaultBuffSizes[NCCL_PROTO_LL] =
     NCCL_LL_LINES_PER_THREAD * maxNthreads[NCCL_PROTO_LL] * NCCL_STEPS * sizeof(union ncclLLFifoLine);
   defaultBuffSizes[NCCL_PROTO_LL128] =

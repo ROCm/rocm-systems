@@ -599,6 +599,19 @@ def do_link(args, forwarded_flags):
     if not dispatcher:
         raise SystemExit("ERROR: --link requires --dispatcher=<source>")
 
+    # [RCCL] The 512-thread kernel set is all-or-nothing: linking its objects
+    # without building its dispatcher (or vice versa) produces a misconfigured ELF
+    # whose 512 kernels are never resource-patched, so require both together.
+    # Compile-only flags for that set are meaningless without it.
+    if bool(dispatcher_512) != bool(objects_512_rsp):
+        raise SystemExit(
+            "ERROR: --dispatcher-512 and --objects-512-rsp must be provided together "
+            "(got --dispatcher-512=%r, --objects-512-rsp=%r)" % (dispatcher_512, objects_512_rsp))
+    if compile_512_flags and not dispatcher_512:
+        raise SystemExit(
+            "ERROR: --compile-512-flag requires the 512-thread set "
+            "(--dispatcher-512 and --objects-512-rsp)")
+
     # [RCCL] Optional second (512-thread) kernel set for gfx950. Its objects are
     # passed via --objects-512-rsp (a response file listing .o paths); they are
     # aggregated and dispatched separately so the 512 generic kernels reserve
