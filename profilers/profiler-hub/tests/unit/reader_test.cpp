@@ -3116,4 +3116,45 @@ TEST_F(reader_v4_summary_test, far_future_window_yields_empty)
     expect_far_future_window_empty(*m_reader);
 }
 
+class reader_v3_summary_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    std::string                              m_database_path{ ROCPD_DB_V3_SUMMARY_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+TEST_F(reader_v3_summary_test, kernel_summary_groups_by_name)
+{
+    expect_kernel_summary_oracle(*m_reader);
+}
+TEST_F(reader_v3_summary_test, region_summary_groups_by_name)
+{
+    expect_region_summary_oracle(*m_reader);
+}
+TEST_F(reader_v3_summary_test, kernel_summary_honors_time_window)
+{
+    expect_windowed_kernel_summary(*m_reader);
+}
+TEST_F(reader_v3_summary_test, region_summary_honors_time_window)
+{
+    expect_windowed_region_summary(*m_reader);
+}
+TEST_F(reader_v3_summary_test, far_future_window_yields_empty)
+{
+    expect_far_future_window_empty(*m_reader);
+}
+
 }  // namespace
