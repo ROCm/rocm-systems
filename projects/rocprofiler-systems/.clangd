@@ -10,6 +10,12 @@ CompileFlags:
     - -Werror=pedantic
     - -Wstack-usage=524288
 
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
+  ClangTidy:
+    FastCheckFilter: None
+
 InlayHints:
   Enabled: Yes
   ParameterNames: Yes
