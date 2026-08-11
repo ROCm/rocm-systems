@@ -25,15 +25,18 @@
 //  * Cross-launch lock-step (bank alternation) holds only because DDA launches on
 //    a comm are stream-serialized, so launch N fully restamps before launch N+1.
 //
-// Scope note: these tests validate the HOST MODEL of the epoch arithmetic (using
-// the real dda_init_detail.h constants) and the producer/consumer scratch
-// contract. The negative controls fail if the *model* loses a property, proving
-// the positive assertions are not vacuous; they do NOT read the device kernels,
-// so they cannot detect a device-side regression (e.g. the write-back loop in
-// all_gather_dda_fabric_ll.h being changed from `e < epochLen` to `e < total`).
+// Scope note: the flag/bank/write-back arithmetic is NOT re-implemented here --
+// this file drives the exact shared production helpers meta::comms::ddaLLEpochFlag,
+// ddaLLEpochBank and ddaLLEpochRestamp (src/include/algorithms/CollCommon.h),
+// which every LL and LL128 kernel now calls via ddaLLEpochBegin/ddaLLEpochEnd. So
+// a regression in that arithmetic (e.g. the write-back loop changed from
+// `e < epochLen` to `e < total`) turns these tests red -- the host model and the
+// kernels share one code path. What is still NOT host-testable is the device-only
+// wrapper behavior (the tid-0 guard and __syncthreads() in ddaLLEpochBegin/End);
+// the model serializes a launch as read-all-then-write-all instead.
 // This file is in rccl-UnitTestsFixtures (Release+Debug): it uses only
-// inline/constexpr helpers and the DDA_FABRIC_BUFFER_SIZE macro, no librccl
-// symbols, so the producer-coverage assertion runs in Release CI too.
+// inline/constexpr/host-device helpers and the DDA_FABRIC_BUFFER_SIZE macro, no
+// librccl symbols, so the producer-coverage assertion runs in Release CI too.
 
 #include "common/DdaFabricFootprints.hpp" // shared footprint mirrors
 #include "dda_init_detail.h" // epoch/sizing constants + DDA_FABRIC_MAXBLOCKS/BUFFER_SIZE
@@ -46,6 +49,7 @@
 // The static_asserts below build in the Release-capable rccl-UnitTestsFixtures
 // target -- a production stride/cap change fails this build. LLPacket16 comes from
 // CollCommon.h (pulled via dda_init_detail.h).
+#include "algorithms/CollCommon.h"                                  // meta::comms::{ddaLLEpochFlag,ddaLLEpochBank,ddaLLEpochRestamp}
 #include "algorithms/CollCommon_ll128.h"                            // meta::comms::{LLLine128,kDdaLL128DataElems}
 #include "algorithms/all_reduce/all_reduce_dda_ll.h"                // kDdaLLArMaxBytes, kDdaLLArSlotStridePkts
 #include "algorithms/all_gather/all_gather_dda_fabric_ll.h"         // kDdaLLAgMaxPerRankBytes
@@ -101,6 +105,12 @@ using nccl_dda_detail::ddaLLEpochCount;
 using nccl_dda_detail::kDdaFabricLLArMaxBlocks;
 using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
 
+// The shared production epoch arithmetic (src/include/algorithms/CollCommon.h),
+// exercised here so the host model runs the same code as the kernels.
+using meta::comms::ddaLLEpochBank;
+using meta::comms::ddaLLEpochFlag;
+using meta::comms::ddaLLEpochRestamp;
+
 // Sentinel meaning "restamp the whole array" (the production epochLen).
 constexpr int kFullWriteBack = -1;
 
@@ -108,22 +118,6 @@ constexpr int kFullWriteBack = -1;
 size_t epochCells(int nRanks)
 {
     return ddaLLEpochCount(nRanks, DDA_FABRIC_MAXBLOCKS);
-}
-
-// Per-block LL flag from its epoch cell:  f = cell + 1; if (f == 0) f = 2.
-uint32_t deriveFlag(uint32_t cell)
-{
-    uint32_t f = cell + 1u;
-    if (f == 0u)
-    {
-        f = 2u; // skip 0 sentinel; keep bank parity
-    }
-    return f;
-}
-
-unsigned bankOf(uint32_t flag)
-{
-    return flag & 1u;
 }
 
 // Replay one launch's epoch update: `total` launched blocks, restamping cells
@@ -144,14 +138,11 @@ void applyLaunch(std::vector<uint32_t>& epoch, int total, int writeBackLen = kFu
     std::vector<uint32_t> flag(total);
     for (int b = 0; b < total; ++b)
     {
-        flag[b] = deriveFlag(epoch[b]);
+        flag[b] = ddaLLEpochFlag(epoch[b]);
     }
     for (int b = 0; b < total; ++b)
     {
-        for (int e = b; e < epochLen; e += total)
-        {
-            epoch[e] = flag[b];
-        }
+        ddaLLEpochRestamp(epoch.data(), b, total, epochLen, flag[b]);
     }
 }
 
@@ -204,7 +195,7 @@ long agPairingMismatches(const std::vector<uint32_t>& epoch, int nRanks, int bpp
             }
             for (int c = 0; c < bpp; ++c)
             {
-                if (deriveFlag(epoch[P * bpp + c]) != deriveFlag(epoch[R * bpp + c]))
+                if (ddaLLEpochFlag(epoch[P * bpp + c]) != ddaLLEpochFlag(epoch[R * bpp + c]))
                 {
                     ++mismatches;
                 }
@@ -301,8 +292,39 @@ TEST(DdaFabricEpochStaticTest, DeriveFlag_SkipsZeroKeepsBankParity)
 {
     for (uint32_t x : {0u, 1u, 2u, 3u, 100u, UINT32_MAX - 1u, UINT32_MAX})
     {
-        EXPECT_NE(deriveFlag(x), 0u) << "x=" << x;
-        EXPECT_EQ(bankOf(deriveFlag(x)), (x + 1u) & 1u) << "x=" << x; // parity survives wrap
+        EXPECT_NE(ddaLLEpochFlag(x), 0u) << "x=" << x;
+        EXPECT_EQ(ddaLLEpochBank(ddaLLEpochFlag(x)), (x + 1u) & 1u) << "x=" << x; // parity survives wrap
+    }
+}
+
+// Directly pin ddaLLEpochRestamp's stride/ownership: one block (flatBlockId, total)
+// restamps exactly its residue class (flatBlockId, +total, +2*total, ...) and
+// touches no other cell. Diagnoses a helper regression at the helper instead of
+// indirectly through a whole-array uniformity failure.
+TEST(DdaFabricEpochStaticTest, RestampUpdatesOwnedResidueClassOnly)
+{
+    constexpr int      kFlatBlockId = 2;
+    constexpr int      kTotal       = 5;
+    constexpr uint32_t kSentinel    = 0xABCDu; // distinct from every seeded value below
+    std::vector<uint32_t> epoch(20u);
+    for (size_t i = 0; i < epoch.size(); ++i)
+    {
+        epoch[i] = static_cast<uint32_t>(i); // distinct initial values
+    }
+
+    ddaLLEpochRestamp(epoch.data(), kFlatBlockId, kTotal, static_cast<int>(epoch.size()), kSentinel);
+
+    for (size_t i = 0; i < epoch.size(); ++i)
+    {
+        const bool owned = (static_cast<int>(i) >= kFlatBlockId) && ((static_cast<int>(i) - kFlatBlockId) % kTotal == 0);
+        if (owned)
+        {
+            EXPECT_EQ(epoch[i], kSentinel) << "owned cell " << i << " must be restamped";
+        }
+        else
+        {
+            EXPECT_EQ(epoch[i], static_cast<uint32_t>(i)) << "cell " << i << " outside residue class must be untouched";
+        }
     }
 }
 
@@ -328,13 +350,13 @@ TEST_P(DdaFabricEpochTest, AllGatherSmallThenLarge_StaysConsistent)
     const int nRanks = GetParam();
     std::vector<uint32_t> epoch(epochCells(nRanks), 0u);
 
-    const uint32_t f1 = deriveFlag(epoch[0]);
+    const uint32_t f1 = ddaLLEpochFlag(epoch[0]);
     ASSERT_NO_FATAL_FAILURE(applyAllGather(epoch, nRanks, kSmallBpp));
     ASSERT_TRUE(allCellsUniform(epoch));
     ASSERT_EQ(agPairingMismatches(epoch, nRanks, kLargeBpp), 0);
 
-    const uint32_t f2 = deriveFlag(epoch[0]);
-    ASSERT_NE(bankOf(f2), bankOf(f1)) << "consecutive launches must alternate banks";
+    const uint32_t f2 = ddaLLEpochFlag(epoch[0]);
+    ASSERT_NE(ddaLLEpochBank(f2), ddaLLEpochBank(f1)) << "consecutive launches must alternate banks";
     ASSERT_NO_FATAL_FAILURE(applyAllGather(epoch, nRanks, kLargeBpp));
     ASSERT_TRUE(allCellsUniform(epoch));
     ASSERT_EQ(agPairingMismatches(epoch, nRanks, kLargeBpp), 0);
@@ -391,23 +413,23 @@ TEST_P(DdaFabricEpochTest, RepeatedMixedSizes_StaysConsistent)
     std::vector<uint32_t> epoch(epochCells(nRanks), 0u);
 
     // Seed for the first bank-alternation check: bank 0 vs the first launch's
-    // flag deriveFlag(0)=1 (bank 1), so the first iteration's ASSERT_NE holds.
+    // flag ddaLLEpochFlag(0)=1 (bank 1), so the first iteration's ASSERT_NE holds.
     uint32_t prevFlag = 0u;
     for (int iter = 0; iter < 4; ++iter)
     {
         for (int bpp : agBpp)
         {
             ASSERT_EQ(agPairingMismatches(epoch, nRanks, bpp), 0) << "iter=" << iter << " bpp=" << bpp;
-            const uint32_t f = deriveFlag(epoch[0]);
-            ASSERT_NE(bankOf(f), bankOf(prevFlag)) << "banks must alternate, iter=" << iter << " bpp=" << bpp;
+            const uint32_t f = ddaLLEpochFlag(epoch[0]);
+            ASSERT_NE(ddaLLEpochBank(f), ddaLLEpochBank(prevFlag)) << "banks must alternate, iter=" << iter << " bpp=" << bpp;
             prevFlag = f;
             ASSERT_NO_FATAL_FAILURE(applyAllGather(epoch, nRanks, bpp));
             ASSERT_TRUE(allCellsUniform(epoch)) << "after AG iter=" << iter << " bpp=" << bpp;
         }
         for (int blk : arBlk)
         {
-            const uint32_t f = deriveFlag(epoch[0]);
-            ASSERT_NE(bankOf(f), bankOf(prevFlag)) << "banks must alternate, iter=" << iter << " blk=" << blk;
+            const uint32_t f = ddaLLEpochFlag(epoch[0]);
+            ASSERT_NE(ddaLLEpochBank(f), ddaLLEpochBank(prevFlag)) << "banks must alternate, iter=" << iter << " blk=" << blk;
             prevFlag = f;
             ASSERT_NO_FATAL_FAILURE(applyAllReduce(epoch, blk));
             ASSERT_TRUE(allCellsUniform(epoch)) << "after AR iter=" << iter << " blk=" << blk;
@@ -416,15 +438,17 @@ TEST_P(DdaFabricEpochTest, RepeatedMixedSizes_StaysConsistent)
 }
 
 // ===========================================================================
-// Negative controls -- these MUST fail if the modelled behavior loses the
-// property; they prove the positive tests are not vacuous. They validate the
-// HOST MODEL, not the device kernels.
+// Negative controls -- these MUST fail if the epoch behavior loses the property;
+// they prove the positive tests are not vacuous. The full-restamp arm drives the
+// shared production ddaLLEpochRestamp; the "weakened" arm models a shorter
+// write-back by passing a truncated epochLen, so it does not mutate production.
 // ===========================================================================
 
 // If the full-length restamp is weakened to own-cell-only (modelling the
 // `e < epochLen` -> `e < total` regression in the write-back loop), a small AG
 // followed by a wide AG leaves stale high cells and the pairing breaks. The
-// full-length restamp on the same sequence stays consistent.
+// full-length restamp on the same sequence -- run through the real
+// ddaLLEpochRestamp -- stays consistent.
 TEST_P(DdaFabricEpochTest, NegativeControl_ShortWriteBackBreaksPairing)
 {
     const int nRanks = GetParam();
@@ -461,17 +485,14 @@ TEST_P(DdaFabricEpochTest, NegativeControl_PeerBeyondNRanksBreaksUniformity)
     std::vector<uint32_t> flag(total);
     for (int b = 0; b < total; ++b)
     {
-        flag[b] = deriveFlag(bad[b]);
+        flag[b] = ddaLLEpochFlag(bad[b]);
     }
     for (int b = 0; b < total; ++b)
     {
         // peer = flatBlockId / bpp; peer >= nRanks returns early (skips write-back)
         if (b / bpp < nRanks)
         {
-            for (int e = b; e < static_cast<int>(bad.size()); e += total)
-            {
-                bad[e] = flag[b];
-            }
+            ddaLLEpochRestamp(bad.data(), b, total, static_cast<int>(bad.size()), flag[b]);
         }
     }
     EXPECT_FALSE(allCellsUniform(bad)) << "grid.x > nRanks leaves residue classes unstamped -> non-uniform";

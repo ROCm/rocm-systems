@@ -69,14 +69,8 @@ __launch_bounds__(512)
   const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
   const int total = gridDim.x * gridDim.y;
   __shared__ uint32_t s_flag;
-  if (tid == 0) {
-    uint32_t f = epochDev[flatBlockId] + 1u;
-    if (f == 0u) f = 2u;                   // skip 0 sentinel; keep bank parity
-    s_flag = f;
-  }
-  __syncthreads();
-  const uint32_t flag = s_flag;
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  const uint32_t flag = ddaLLEpochBegin(epochDev, flatBlockId, s_flag);
+  const size_t bankOffsetPkts = (size_t)ddaLLEpochBank(flag) * (size_t)nRanks * slot;
 
   // This block's packet range [pkBegin, pkEnd); [0, nPk) when nChunks == 1.
   const size_t pkPerChunk = (nPk + (size_t)nChunks - 1) / (size_t)nChunks;
@@ -129,11 +123,7 @@ __launch_bounds__(512)
     }
   }
 
-  if (tid == 0) {
-    for (int e = flatBlockId; e < epochLen; e += total) {
-      epochDev[e] = flag;
-    }
-  }
+  ddaLLEpochEnd(epochDev, flatBlockId, total, epochLen, flag);
 }
 
 } // namespace meta::comms
