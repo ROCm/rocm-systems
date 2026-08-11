@@ -207,12 +207,17 @@ def build_command(file_path: str, args: argparse.Namespace) -> list[str]:
 
 
 def run_clang_tidy(command: list[str], timeout: float | None) -> tuple[str, bool]:
-    """Run a clang-tidy command, returning its output and success status."""
+    """Run a clang-tidy command, returning its output and whether it completed.
+
+    clang-tidy's own exit code reflects diagnostics anywhere in the file
+    (including pre-existing issues outside the diff), so it is not a
+    reliable success signal here; only a timeout counts as a run failure.
+    """
     try:
         proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return f"Timed out after {timeout}s: {' '.join(command)}\n", False
-    return proc.stdout + proc.stderr, proc.returncode == 0
+    return proc.stdout + proc.stderr, True
 
 
 def parse_diagnostics(output: str, repo_root: str) -> list[Diagnostic]:
@@ -331,7 +336,7 @@ def main() -> int:
     rule_diagnostics: dict[str, list[Diagnostic]] = {}
     file_totals: dict[str, int] = {}
     file_in_diff_counts: dict[str, int] = {}
-    any_failed = False
+    any_timed_out = False
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         futures = {
             pool.submit(
@@ -344,7 +349,7 @@ def main() -> int:
         for future in concurrent.futures.as_completed(futures):
             changed_file = futures[future]
             output, succeeded = future.result()
-            any_failed = any_failed or not succeeded
+            any_timed_out = any_timed_out or not succeeded
 
             diagnostics = parse_diagnostics(output, repo_root)
             file_totals[changed_file.path] = len(diagnostics)
@@ -361,7 +366,7 @@ def main() -> int:
     print_detected_rules(rule_diagnostics)
     print_legacy_summary(changed_files, file_totals, file_in_diff_counts)
 
-    return 1 if rule_diagnostics or any_failed else 0
+    return 1 if rule_diagnostics or any_timed_out else 0
 
 
 if __name__ == "__main__":

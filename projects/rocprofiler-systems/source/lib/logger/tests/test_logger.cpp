@@ -12,7 +12,9 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
+#include <regex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -195,6 +197,59 @@ TEST_F(logger_test, logger_instance_returns_valid_logger)
         << "PID not found in stdout. Captured: " << captured;
 }
 
+TEST_F(logger_test, logger_output_has_well_formed_local_timestamp)
+{
+    // Creating the logger primes glibc's timezone cache via tzset() so the
+    // spdlog "%H:%M:%S.%e" pattern renders a valid local-time stamp through
+    // localtime_r on every emitted line (including on hot sampler threads).
+    auto& logger = rocprofsys::logger_t::instance();
+
+    // tzset() must have populated the timezone name globals.
+    ASSERT_NE(tzname[0], nullptr);
+
+    testing::internal::CaptureStdout();
+    logger.info("timestamp_probe_marker");
+    logger.flush();
+    auto captured = testing::internal::GetCapturedStdout();
+
+    // Expect a "[HH:MM:SS.mmm]" prefix produced by the localtime formatting path.
+    const std::regex timestamp_pattern{ R"(\[\d{2}:\d{2}:\d{2}\.\d{3}\])" };
+    EXPECT_TRUE(std::regex_search(captured, timestamp_pattern))
+        << "No well-formed local timestamp in log output. Captured: " << captured;
+}
+
+TEST_F(logger_test, logger_creation_primes_timezone_cache)
+{
+    // Ensure the singleton (and its atfork handler) exist in the parent, so the
+    // child's first instance() call rebuilds the logger via create_logger().
+    (void) rocprofsys::logger_t::instance();
+
+    pid_t child_pid = fork();
+    if(child_pid == 0)
+    {
+        // Baseline: a known timezone, explicitly primed -> tzname[0] == "PST".
+        setenv("TZ", "PST8PDT", 1);
+        tzset();
+
+        // Change TZ but do NOT call tzset(): tzname is now stale ("PST").
+        setenv("TZ", "EST5EDT", 1);
+
+        // Rebuilding the logger must run create_logger()'s ::tzset(), refreshing
+        // tzname to "EST" before any line is logged. Without the prime, tzname
+        // stays "PST" (create_logger formats no message, so the lazy localtime
+        // path never fires) and the child exits non-zero.
+        (void) rocprofsys::logger_t::instance();
+
+        _exit(std::string(tzname[0]) == "EST" ? 0 : 1);
+    }
+
+    int status;
+    waitpid(child_pid, &status, 0);
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 0)
+        << "create_logger() did not prime the timezone cache: tzname was not "
+           "refreshed to the new TZ before logging";
+}
 TEST_F(logger_test, logger_instance_is_singleton)
 {
     auto& logger1 = rocprofsys::logger_t::instance();

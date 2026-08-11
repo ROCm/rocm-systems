@@ -1955,6 +1955,23 @@ def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
     ) < ceil_body.index('read_vop3_true16_src(src0, wf, lane, opsel, 0)')
 
 
+def test_single_isa_cdna1_sources_include_simd_glue_once(tmp_path):
+    args = SimpleNamespace(
+        multi=[f'cdna1:{_mrisa_dir() / "amdgpu_isa_cdna1.xml"}'],
+        gen_isas=True,
+        gen_dbt=False,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+
+    _run_multi(args)
+
+    simd_glue_include = '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"'
+    for source_name in ('vop3.cpp', 'vop3p.cpp'):
+        source = (tmp_path / 'cdna1' / source_name).read_text()
+        assert source.count(simd_glue_include) == 1
+
+
 def test_rdna4_64bit_literal_widening_is_format_specific(tmp_path):
     args = SimpleNamespace(
         multi=[f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}'],

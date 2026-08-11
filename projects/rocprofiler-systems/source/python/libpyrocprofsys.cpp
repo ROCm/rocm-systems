@@ -106,8 +106,13 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
         }
         return _use_mpi;
     };
-    rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
-                                                 &pyrocprofsys_resume_callback);
+    // Deferred out of module init: this is the first call into the dl layer and it
+    // dlopens librocprof-sys.so, so registering here would load the whole runtime on
+    // `import rocprofsys`.
+    static auto _register_pause_callbacks = []() {
+        rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
+                                                     &pyrocprofsys_resume_callback);
+    };
 
     omni.def("is_initialized", []() { return _is_initialized; }, "Initialization state");
 
@@ -119,6 +124,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! rocprofsys is already initialized");
             _is_initialized = true;
+            _register_pause_callbacks();
             rocprofsys_set_mpi(_get_use_mpi());
             rocprofsys_init("trace", false, _v.c_str());
         },
@@ -130,6 +136,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! rocprofsys is already initialized");
             _is_initialized = true;
+            _register_pause_callbacks();
             rocprofsys_set_instrumented(
                 static_cast<int>(rocprofsys::dl::InstrumentMode::PythonProfile));
             rocprofsys_set_mpi(_get_use_mpi());
