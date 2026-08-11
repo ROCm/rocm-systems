@@ -5157,7 +5157,9 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
   }
   info->max_clk = max_freq;
   info->min_clk = min_freq;
-  info->clk_deep_sleep = static_cast<uint8_t>(sleep_state_freq);
+  // True/False flag. A no-sleep domain arrives as -1 (UINT_MAX sentinel), so any
+  // value >= 0, including a fully gated 0 MHz floor, is a real deep-sleep state.
+  info->clk_deep_sleep = (sleep_state_freq >= 0) ? 1 : 0;
 
   switch (clk_type) {
     case AMDSMI_CLK_TYPE_GFX:

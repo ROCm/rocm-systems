@@ -37,3 +37,12 @@
 // OD_FCLK) or all levels read zero, so the caller falls back to pp_dpm_*.
 bool smi_amdgpu_parse_od_clk_range(std::istream& od_stream, amdsmi_clk_type_t domain,
                                    unsigned int* max_freq, unsigned int* min_freq);
+
+// Companion seam for the pp_dpm_* clock table behind the same min/max clock.
+// With derive_minmax, min/max and the deep-sleep "S:" floor derive from the
+// levels; callers that already have a range from pp_od_clk_voltage pass false.
+// Out-params accumulate, so pre-seed: num_dpm = 0, sleep_freq = UINT_MAX, plus
+// max = 0 and min = UINT_MAX when derive_minmax.
+amdsmi_status_t smi_amdgpu_parse_clk_ranges(std::istream& ranges, bool derive_minmax,
+                                            unsigned int* max_freq, unsigned int* min_freq,
+                                            unsigned int* num_dpm, unsigned int* sleep_freq);
