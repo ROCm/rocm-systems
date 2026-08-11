@@ -132,6 +132,10 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize);
+size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter);
+// Fills in algo/protocol/channels for a hierarchical AllGather or ReduceScatter.
+ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
+                                      int* algo, int* protocol, int* maxChannels);
 bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Returns true when the CE AllReduce path should be used instead of the standard ring/tree kernels.
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.

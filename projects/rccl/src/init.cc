@@ -2752,14 +2752,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         comm->forcePatEnable = false;
         // inherit PXN disable from parent comm
         comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
-        size_t tempBufSize;
-        if (rcclParamHierarchicalReduceScatter() == 1) {
-          tempBufSize = (comm->nNodes >= 16) ? HIERARCHICAL_TEMP_BUFFER_SIZE : HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
-        } else {
-          tempBufSize = (comm->nNodes >= 32) ? HIERARCHICAL_TEMP_BUFFER_SIZE :
-                        (comm->nNodes >= 16) ? HIERARCHICAL_TEMP_BUFFER_SIZE / 2 :
-                                               HIERARCHICAL_TEMP_BUFFER_SIZE / 4;
-        }
+        size_t tempBufSize = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
+                                                            rcclParamHierarchicalReduceScatter() == 1);
         NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
         comm->hierarchicalCommsInitialized = true;
         INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",

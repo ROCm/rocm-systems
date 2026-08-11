@@ -1654,6 +1654,108 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalReduceScatter Tests Completed ===");
 }
 
+TEST(Rcclwrap, RcclHierarchicalTempBufferSizeTests)
+{
+    const size_t QUARTER = HIERARCHICAL_TEMP_BUFFER_SIZE / 4;
+    const size_t HALF    = HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
+    const size_t FULL    = HIERARCHICAL_TEMP_BUFFER_SIZE;
+
+    // Below 8 nodes neither algorithm is eligible, so nothing needs to be allocated.
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(7, true, true), size_t{0});
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(64, false, false), size_t{0});
+
+    // Per-collective thresholds
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(8, true, false), QUARTER);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(15, true, false), QUARTER);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(16, true, false), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(31, true, false), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(32, true, false), FULL);
+
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(8, false, true), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(15, false, true), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(16, false, true), FULL);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(32, false, true), FULL);
+}
+
+TEST(Rcclwrap, RcclHierarchicalAlgoInfoTests)
+{
+    TEST_INFO("=== Starting Process-Isolated rcclHierarchicalAlgoInfo Tests ===");
+
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "HierAlgoInfo_DirectAllGather_ReportsInterComm",
+            []()
+            {
+                if(rcclUseAinic())
+                {
+                    GTEST_SKIP() << "Direct AllGather is disabled on AINIC";
+                }
+
+                ncclComm_t            parent = nullptr, inter = nullptr, intra = nullptr;
+                struct ncclTopoSystem parentTopo, interTopo, intraTopo;
+                struct ncclTopoNode   parentGpu, interGpu, intraGpu;
+
+                // 8 nodes x 8 local ranks.
+                CreateMockComm(parent, parentTopo, parentGpu, "gfx942", 64);
+                CreateMockComm(inter, interTopo, interGpu, "gfx942", 8);
+                CreateMockComm(intra, intraTopo, intraGpu, "gfx942", 8);
+
+                parent->p2pnChannels          = 32;
+                inter->p2pnChannels           = 12;
+                intra->p2pnChannels           = 5;
+                parent->hierarchicalInterComm = inter;
+                parent->hierarchicalIntraComm = intra;
+
+                // 4 KiB per rank keeps both phases well under the Direct threshold.
+                const uint64_t count    = 1024;
+                size_t         interMsg = count * sizeof(float) * inter->nRanks;
+                size_t         intraMsg = count * inter->nRanks * sizeof(float) * intra->nRanks;
+
+                if(!rcclUseAllGatherDirect(inter, interMsg) || !rcclUseAllGatherDirect(intra, intraMsg))
+                {
+                    CleanupMockComm(parent);
+                    CleanupMockComm(inter);
+                    CleanupMockComm(intra);
+                    GTEST_SKIP() << "Direct AllGather unavailable in this environment; the "
+                                    "tuner fallback cannot run against a mock communicator";
+                }
+
+                int algo = -1, protocol = -1, maxChannels = -1;
+                EXPECT_EQ(rcclHierarchicalAlgoInfo(parent,
+                                                   ncclFuncAllGather,
+                                                   count,
+                                                   ncclFloat32,
+                                                   &algo,
+                                                   &protocol,
+                                                   &maxChannels),
+                          ncclSuccess);
+
+                EXPECT_EQ(algo, RCCL_HIERARCHICAL_ALLGATHER);
+                EXPECT_EQ(protocol, NCCL_PROTO_SIMPLE);
+                EXPECT_EQ(maxChannels, inter->p2pnChannels);
+
+                CleanupMockComm(parent);
+                CleanupMockComm(inter);
+                CleanupMockComm(intra);
+            }
+        )
+            // Direct AllGather bails out when user buffer registration is enabled.
+            .withEnvironment({{"NCCL_LOCAL_REGISTER", "0"}, {"RCCL_DIRECT_ALLGATHER_DISABLE", "0"}})
+            .clearVariable("RCCL_DIRECT_ALLGATHER_THRESHOLD")
+            .withTimeout(std::chrono::seconds(60))
+            .withNumGpus(0)
+    );
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options))
+        << "rcclHierarchicalAlgoInfo test failed";
+
+    TEST_INFO("=== Process-Isolated rcclHierarchicalAlgoInfo Tests Completed ===");
+}
+
 // ===========================================================================
 // CE AllReduce graph latch state machine (rccl_wrap.cc). Regression coverage
 // for the capture-vs-eager ordering bug: the latch must stay set for the
