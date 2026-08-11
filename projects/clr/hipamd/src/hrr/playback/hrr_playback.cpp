@@ -1217,6 +1217,9 @@ int main(int argc, char** argv) {
     printf("[HRR]   GPU graph time  : %.1f ms\n", ctx.total_graph_ms);
     printf("[HRR]   GPU total time  : %.1f ms\n", ctx.total_kernel_ms + ctx.total_graph_ms);
   }
+  if (!ctx.co_no_device_code.empty())
+    printf("[HRR]   Fat binaries   : %zu skipped (no code for this GPU)\n",
+           ctx.co_no_device_code.size());
   printf("[HRR]   D2H checks     : %zu pass (%zu exact, %zu within tol), %zu fail, %zu skipped\n",
          ctx.d2h_pass.load(),
          ctx.d2h_pass.load() - ctx.d2h_pass_tol.load(), ctx.d2h_pass_tol.load(),
