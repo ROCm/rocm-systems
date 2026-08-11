@@ -447,7 +447,7 @@ __device__ __forceinline__ void ginPutChunked(
     ncclWindow_t dstWin, size_t dstOff,
     ncclWindow_t srcWin, size_t srcOff,
     size_t bytes, RemoteAction finalAction) {
-  const size_t kMax = gin_sdma::kGinSdmaSafeCopyBytes < gin_sdma::kGinPutMaxBytes
+  constexpr size_t kMax = gin_sdma::kGinSdmaSafeCopyBytes < gin_sdma::kGinPutMaxBytes
                           ? gin_sdma::kGinSdmaSafeCopyBytes
                           : gin_sdma::kGinPutMaxBytes;
   size_t off = 0;

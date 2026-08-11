@@ -45,7 +45,7 @@ static constexpr size_t kGinPutMaxBytes = 1024ull * 1024 * 1024;  // 1 GiB (2^30
 // vs the 1 GiB total case). 128 MiB is proven safe with zero measured perf loss;
 // do not raise without re-measuring. ginPutChunked segments every GIN-tier put
 // to this size, so it protects ALL GIN-SDMA collectives that route through it.
-static constexpr size_t kGinSdmaSafeCopyBytes = 128ull * 1024 * 1024;  // 128 MiB (MI355X reliable single-copy max)
+static constexpr size_t kGinSdmaSafeCopyBytes = 128ull * 1024 * 1024;  // 128 MiB (reliable single-copy max)
 
 }  // namespace gin_sdma
 
