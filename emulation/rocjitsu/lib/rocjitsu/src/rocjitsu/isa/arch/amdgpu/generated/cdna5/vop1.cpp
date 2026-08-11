@@ -10,7 +10,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 VNopVop1::VNopVop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0) ? "v_nop_dpp"
@@ -5096,5 +5096,5 @@ void VCosBf16Vop1::implicit_use_operands(std::vector<const ::rocjitsu::Operand *
     operands.push_back(&vdst);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

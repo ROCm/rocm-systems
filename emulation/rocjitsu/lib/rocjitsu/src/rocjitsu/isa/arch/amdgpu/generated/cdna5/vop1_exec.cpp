@@ -19,7 +19,7 @@
 #include <limits>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void VNopVop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_nop_vop1(*this, wf); }
 
@@ -1461,5 +1461,5 @@ void VCosBf16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

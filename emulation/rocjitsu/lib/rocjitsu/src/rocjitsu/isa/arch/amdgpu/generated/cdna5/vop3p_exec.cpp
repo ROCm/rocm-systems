@@ -20,7 +20,7 @@
 #include <limits>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 namespace {
 struct PkF32Words {
@@ -2573,5 +2573,5 @@ void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
     throw util::UnimplementedInst(mnemonic());
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

@@ -10,7 +10,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 namespace {
 template <typename VmemMachineInst> uint32_t vflat_vaddr_bits(const VmemMachineInst *inst) {
@@ -1611,5 +1611,5 @@ FlatLoadMonitorB128Vflat::FlatLoadMonitorB128Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

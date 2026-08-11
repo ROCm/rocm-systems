@@ -10,7 +10,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4402,5 +4402,5 @@ void VCvtSrBf8F16Vop3::implicit_use_operands(
     operands.push_back(&vdst);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

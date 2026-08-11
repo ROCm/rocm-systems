@@ -11,7 +11,7 @@
 #include <array>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 namespace {
 
 template <typename Derived> void execute_with_backend(Instruction &instruction, void *context) {
@@ -1651,5 +1651,5 @@ const IsaExecutionBackend &execution_backend() {
   return backend;
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

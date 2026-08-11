@@ -11,7 +11,7 @@
 #include <format>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 namespace {
 
@@ -10791,5 +10791,5 @@ const std::array<Decoder::DecodeFunc, 64> Decoder::sub_decode_smem = {
 
 };
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

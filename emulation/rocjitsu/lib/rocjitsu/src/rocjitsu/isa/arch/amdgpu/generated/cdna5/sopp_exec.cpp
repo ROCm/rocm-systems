@@ -16,7 +16,7 @@
 #include <limits>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nop_sopp(*this, wf); }
 
@@ -199,5 +199,5 @@ void SWaitTensorcntSopp::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_wait_counter("wait_tensorcnt", cnt);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

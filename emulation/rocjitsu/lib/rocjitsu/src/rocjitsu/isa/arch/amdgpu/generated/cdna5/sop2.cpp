@@ -9,7 +9,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 SAddCoU32Sop2::SAddCoU32Sop2(const MachineInst *inst)
     : Sop2("s_add_co_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -3231,5 +3231,5 @@ SMulU64Sop2::SMulU64Sop2(const MachineInst *inst)
   }
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

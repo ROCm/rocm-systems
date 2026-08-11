@@ -17,7 +17,7 @@
 #include <limits>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void SAddCoU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_add_co_u32_sop2(*this, wf);
@@ -281,5 +281,5 @@ void SSubNcU64Sop2::execute_impl(amdgpu::Wavefront &wf) {
 
 void SMulU64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_u64_sop2(*this, wf); }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

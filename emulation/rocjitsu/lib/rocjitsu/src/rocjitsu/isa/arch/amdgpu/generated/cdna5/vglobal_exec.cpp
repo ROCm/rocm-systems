@@ -22,7 +22,7 @@
 #include <memory>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void GlobalLoadU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -2169,5 +2169,5 @@ void GlobalLoadTr6B96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

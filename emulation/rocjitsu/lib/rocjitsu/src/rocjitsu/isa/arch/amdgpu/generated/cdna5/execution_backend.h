@@ -10,7 +10,7 @@
 #include "rocjitsu/isa/execution_backend.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 /// @brief Named entries for the dense execution callback table.
 ///
@@ -1636,5 +1636,5 @@ enum class InstructionExecutionId : size_t {
 
 const IsaExecutionBackend &execution_backend();
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

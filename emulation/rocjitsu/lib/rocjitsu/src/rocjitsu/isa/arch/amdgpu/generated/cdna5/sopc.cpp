@@ -9,7 +9,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1931,5 +1931,5 @@ SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

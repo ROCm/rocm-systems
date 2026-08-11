@@ -9,7 +9,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
     : Sop1("s_mov_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2231,5 +2231,5 @@ void SRndneF16Sop1::implicit_use_operands(
     operands.push_back(&sdst);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

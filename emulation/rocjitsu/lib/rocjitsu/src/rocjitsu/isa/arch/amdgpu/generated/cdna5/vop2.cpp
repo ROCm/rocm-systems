@@ -10,7 +10,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 VCndmaskB32Vop2::VCndmaskB32Vop2(const MachineInst *inst)
     : Vop2(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2644,5 +2644,5 @@ VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst)
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

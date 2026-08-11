@@ -19,7 +19,7 @@
 #include <limits>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t dpp_old_vcc_ = wf.vcc();
@@ -2448,5 +2448,5 @@ void VCmpxClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_exec(result);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

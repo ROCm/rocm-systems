@@ -9,7 +9,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
     : Sopk("s_movk_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -156,5 +156,5 @@ std::optional<int64_t> SCallI64Sopk::branch_offset_bytes() const {
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

@@ -19,7 +19,7 @@
 #include <limits>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void SMovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_movk_i32_sopk(*this, wf);
@@ -83,5 +83,5 @@ void SCallI64Sopk::execute_impl(amdgpu::Wavefront &wf) {
   wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

@@ -22,7 +22,7 @@
 #include <memory>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void ScratchLoadU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
@@ -551,5 +551,5 @@ void ScratchStoreBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

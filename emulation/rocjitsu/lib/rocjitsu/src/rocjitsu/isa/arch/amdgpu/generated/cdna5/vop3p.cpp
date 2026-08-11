@@ -10,7 +10,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 namespace {
 
@@ -3233,5 +3233,5 @@ void VWmmaScaleF32Vop3px2::build_modifiers(std::string &out) const {
     out += " matrix_b_reuse";
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

@@ -20,7 +20,7 @@
 #include <limits>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void SMovB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mov_b32_sop1(*this, wf); }
 
@@ -409,5 +409,5 @@ void SRndneF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_rndne_f16_sop1(*this, wf);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

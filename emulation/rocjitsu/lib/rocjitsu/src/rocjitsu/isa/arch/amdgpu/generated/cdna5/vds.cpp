@@ -10,7 +10,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 DsAddU32Vds::DsAddU32Vds(const MachineInst *inst)
     : Vds("ds_add_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2598,5 +2598,5 @@ DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

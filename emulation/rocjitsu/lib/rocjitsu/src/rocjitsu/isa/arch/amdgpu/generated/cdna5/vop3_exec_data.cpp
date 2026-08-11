@@ -20,7 +20,7 @@
 #include <limits>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void VMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
@@ -480,5 +480,5 @@ void VWritelaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, val);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

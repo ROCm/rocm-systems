@@ -15,7 +15,7 @@
 #include <string>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 namespace {
 [[maybe_unused]] constexpr uint16_t kVopdFmacF32 = 0;
@@ -238,5 +238,5 @@ void Vopd::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

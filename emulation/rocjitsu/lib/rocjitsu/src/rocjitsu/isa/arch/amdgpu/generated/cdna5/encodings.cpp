@@ -10,7 +10,7 @@
 #include <string>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn,
            LiteralSupport literal_support, int num_encoded_sources)
@@ -782,5 +782,5 @@ bool Vop3SdstEnc::has_dpp16() {
   return (((inst_.src0 == 250) && (inst_.src1 != 255)) && (inst_.src2 != 255));
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

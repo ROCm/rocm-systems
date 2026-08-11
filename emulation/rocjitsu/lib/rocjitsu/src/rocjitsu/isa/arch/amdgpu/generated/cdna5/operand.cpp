@@ -12,7 +12,7 @@
 #include <string>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 namespace {
 std::string reg_name(const char *prefix, int reg_num, int size_bits) {
@@ -1264,5 +1264,5 @@ void Operand::simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_
     (this->*callback)(wf, lane_mask, byte_mask);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

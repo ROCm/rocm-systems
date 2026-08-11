@@ -10,7 +10,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3873,5 +3873,5 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

@@ -11,7 +11,7 @@
 #include <string>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 namespace {
 
@@ -345,5 +345,5 @@ std::string Vopd::format_slot(const Slot &slot) const {
   return out;
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

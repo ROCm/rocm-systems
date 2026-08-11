@@ -20,7 +20,7 @@
 #include <limits>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void VTruncF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
@@ -3242,5 +3242,5 @@ void VSubrevCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_subrev_co_u32_vop3(*this, wf);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

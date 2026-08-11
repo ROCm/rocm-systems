@@ -16,7 +16,7 @@
 #include <limits>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void SCmpEqI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_cmp_eq_i32_sopc(*this, wf);
@@ -202,5 +202,5 @@ void SCmpNltF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_cmp_nlt_f16_sopc(*this, wf);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

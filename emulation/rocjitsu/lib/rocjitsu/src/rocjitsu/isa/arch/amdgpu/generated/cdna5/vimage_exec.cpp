@@ -16,7 +16,7 @@
 #include <limits>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void TensorLoadToLdsVimage::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_tensor_load_to_lds(*this, wf);
@@ -26,5 +26,5 @@ void TensorStoreFromLdsVimage::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_tensor_store_from_lds(*this, wf);
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

@@ -17,7 +17,7 @@
 #include <string>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 namespace {
 
@@ -497,5 +497,5 @@ bool Operand::full_execution_backend_complete() {
   return is_complete(*static_cast<const ExecutionBackend *>(full_execution_backend()));
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

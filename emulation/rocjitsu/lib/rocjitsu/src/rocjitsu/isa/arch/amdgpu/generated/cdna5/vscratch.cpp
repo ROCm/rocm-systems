@@ -10,7 +10,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_u8", reinterpret_cast<const OpEncoding *>(inst),
@@ -550,5 +550,5 @@ ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

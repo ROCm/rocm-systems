@@ -9,7 +9,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 TensorLoadToLdsVimage::TensorLoadToLdsVimage(const MachineInst *inst)
     : Vimage("tensor_load_to_lds", reinterpret_cast<const OpEncoding *>(inst),
@@ -41,5 +41,5 @@ TensorStoreFromLdsVimage::TensorStoreFromLdsVimage(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

@@ -21,7 +21,7 @@
 #include <memory>
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 void SLoadB32Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -299,5 +299,5 @@ void SBufferPrefetchDataSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SPrefetchDataPcRelSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

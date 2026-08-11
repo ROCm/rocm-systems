@@ -9,7 +9,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 SNopSopp::SNopSopp(const MachineInst *inst)
     : Sopp("s_nop", reinterpret_cast<const OpEncoding *>(inst),
@@ -476,5 +476,5 @@ SWaitTensorcntSopp::SWaitTensorcntSopp(const MachineInst *inst)
   flags_ |= WAITCNT;
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu

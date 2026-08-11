@@ -10,7 +10,7 @@
 #include "util/except.h"
 
 namespace rocjitsu {
-namespace gfx1250 {
+namespace cdna5 {
 
 namespace {
 uint32_t vbuffer_vaddr_bits(const VbufferMachineInst *inst) {
@@ -1524,5 +1524,5 @@ BufferAtomicMaxNumF64Vbuffer::BufferAtomicMaxNumF64Vbuffer(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
-} // namespace gfx1250
+} // namespace cdna5
 } // namespace rocjitsu
