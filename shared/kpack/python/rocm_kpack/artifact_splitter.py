@@ -214,7 +214,13 @@ class GenericCopyVisitor:
                 dest_path.unlink()
             os.symlink(link_target, dest_path)
         else:
-            # Copy regular file
+            # Copy regular file. Unlink any existing destination first (as the
+            # symlink branch above already does) so copy2 creates a file owned by
+            # the current user. Otherwise copy2's copystat() chmod/utime fails
+            # with EPERM when re-driving an artifacts tree whose destination is
+            # owned by another user.
+            if dest_path.exists() or dest_path.is_symlink():
+                dest_path.unlink()
             shutil.copy2(file_path, dest_path)
         self.copied_count += 1
 
@@ -676,9 +682,14 @@ class ArtifactSplitter:
                 # Create parent directories
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-                # Copy the file (will move after generic is created)
+                # Copy the file (will move after generic is created). Unlink any
+                # existing (possibly not-owned) destination first so copy2's
+                # copystat() chmod/utime does not EPERM when re-driving an
+                # artifacts tree whose destination is owned by another user.
                 if self.verbose:
                     print(f"    Moving: {rel_path}")
+                if dest_path.exists() or dest_path.is_symlink():
+                    dest_path.unlink()
                 shutil.copy2(file_path, dest_path)
 
             # Update or create artifact manifest for this architecture artifact
