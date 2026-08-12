@@ -244,7 +244,7 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
  *****************************************************************************/
 
 __device__ void rocshmem_putmem(void *dest, const void *source, size_t nelems,
-                                 int pe) {
+                                int pe) {
   rocshmem_ctx_putmem(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
@@ -264,7 +264,7 @@ __device__ T rocshmem_g(const T *source, int pe) {
 }
 
 __device__ void rocshmem_getmem(void *dest, const void *source, size_t nelems,
-                                 int pe) {
+                                int pe) {
   rocshmem_ctx_getmem(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
@@ -274,7 +274,7 @@ __device__ void rocshmem_get(T *dest, const T *source, size_t nelems, int pe) {
 }
 
 __device__ void rocshmem_putmem_nbi(void *dest, const void *source,
-                                     size_t nelems, int pe) {
+                                    size_t nelems, int pe) {
   rocshmem_ctx_putmem_nbi(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
@@ -496,18 +496,18 @@ get_backend_ctx(rocshmem_ctx_t ctx) {
 }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
-#define ROCSHMEM_DIRECT_BACKEND_DISPATCH(CTX, FUNC) \
-  switch (constmem.backend_type) {                   \
-    case BackendType::GDA_BACKEND:                   \
-      get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC; \
-      break;                                         \
-    case BackendType::RO_BACKEND:                    \
-      get_backend_ctx<BackendType::RO_BACKEND>(CTX)->FUNC;  \
-      break;                                         \
-    case BackendType::IPC_BACKEND:                   \
-    default:                                         \
-      get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC; \
-      break;                                         \
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH(CTX, FUNC)                     \
+  switch (constmem.backend_type) {                                      \
+    case BackendType::GDA_BACKEND:                                      \
+      get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC;             \
+      break;                                                            \
+    case BackendType::RO_BACKEND:                                       \
+      get_backend_ctx<BackendType::RO_BACKEND>(CTX)->FUNC;              \
+      break;                                                            \
+    case BackendType::IPC_BACKEND:                                      \
+    default:                                                            \
+      get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC;             \
+      break;                                                            \
   }
 #elif defined(USE_GDA)
 #define ROCSHMEM_DIRECT_BACKEND_DISPATCH(CTX, FUNC) \
@@ -521,7 +521,7 @@ get_backend_ctx(rocshmem_ctx_t ctx) {
 #endif
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
-#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(CTX, FUNC)                  \
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(CTX, FUNC)                 \
   if (constmem.backend_type == BackendType::GDA_BACKEND) {              \
     auto ret1 = get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC;   \
     return ret1;                                                        \
@@ -533,75 +533,77 @@ get_backend_ctx(rocshmem_ctx_t ctx) {
     return ret3;                                                        \
   }
 #elif defined(USE_GDA)
-#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(CTX, FUNC)                \
-  auto ret_val = get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC; \
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(CTX, FUNC)                 \
+  auto ret_val = get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC;  \
   return ret_val;
 #elif defined(USE_RO)
-#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(CTX, FUNC)               \
-  auto ret_val = get_backend_ctx<BackendType::RO_BACKEND>(CTX)->FUNC; \
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(CTX, FUNC)                 \
+  auto ret_val = get_backend_ctx<BackendType::RO_BACKEND>(CTX)->FUNC;   \
   return ret_val;
 #elif defined(USE_IPC)
-#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(CTX, FUNC)                \
-  auto ret_val = get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC; \
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(CTX, FUNC)                 \
+  auto ret_val = get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC;  \
   return ret_val;
 #endif
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
-#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR(CTX, FUNC)            \
-  void *ret_val{nullptr};                                              \
-  switch (constmem.backend_type) {                                    \
-    case BackendType::GDA_BACKEND:                                    \
-      ret_val = get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC; \
-      break;                                                          \
-    case BackendType::RO_BACKEND:                                     \
-      ret_val = get_backend_ctx<BackendType::RO_BACKEND>(CTX)->FUNC;  \
-      break;                                                          \
-    case BackendType::IPC_BACKEND:                                    \
-    default:                                                          \
-      ret_val = get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC; \
-      break;                                                          \
-  }                                                                    \
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR(CTX, FUNC)             \
+  void *ret_val{nullptr};                                               \
+  switch (constmem.backend_type) {                                      \
+    case BackendType::GDA_BACKEND:                                      \
+      ret_val = get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC;   \
+      break;                                                            \
+    case BackendType::RO_BACKEND:                                       \
+      ret_val = get_backend_ctx<BackendType::RO_BACKEND>(CTX)->FUNC;    \
+      break;                                                            \
+    case BackendType::IPC_BACKEND:                                      \
+    default:                                                            \
+      ret_val = get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC;   \
+      break;                                                            \
+  }                                                                     \
   return ret_val;
 #elif defined(USE_GDA)
-#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR(CTX, FUNC)          \
-  void *ret_val{nullptr};                                            \
-  ret_val = get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC;   \
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR(CTX, FUNC)             \
+  void *ret_val{nullptr};                                               \
+  ret_val = get_backend_ctx<BackendType::GDA_BACKEND>(CTX)->FUNC;       \
   return ret_val;
 #elif defined(USE_RO)
-#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR(CTX, FUNC)         \
-  void *ret_val{nullptr};                                           \
-  ret_val = get_backend_ctx<BackendType::RO_BACKEND>(CTX)->FUNC;   \
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR(CTX, FUNC)             \
+  void *ret_val{nullptr};                                               \
+  ret_val = get_backend_ctx<BackendType::RO_BACKEND>(CTX)->FUNC;        \
   return ret_val;
 #elif defined(USE_IPC)
-#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR(CTX, FUNC)         \
-  void *ret_val{nullptr};                                           \
-  ret_val = get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC;  \
+#define ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET_PTR(CTX, FUNC)             \
+  void *ret_val{nullptr};                                               \
+  ret_val = get_backend_ctx<BackendType::IPC_BACKEND>(CTX)->FUNC;       \
   return ret_val;
 #endif
 
-#define ROCSHMEM_DIRECT_CTX_MEM_HELPER(NAME, STAT, BACKEND_FUNC)              \
-  __device__ __forceinline__ void direct_ctx_##NAME(                          \
-      rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems,       \
-      int pe) {                                                               \
-    if (nelems == 0) {                                                        \
-      return;                                                                 \
-    }                                                                         \
-                                                                              \
-    get_base_internal_ctx(ctx)->ctxStats.incStat(STAT);                       \
-    ROCSHMEM_DIRECT_BACKEND_DISPATCH(                                         \
-        ctx, BACKEND_FUNC(dest, source, nelems, pe));                         \
+#define ROCSHMEM_DIRECT_CTX_MEM_HELPER(NAME, STAT, BACKEND_FUNC)        \
+  __device__ __forceinline__ void direct_ctx_##NAME(                    \
+      rocshmem_ctx_t ctx, void *dest, const void *source,               \
+      size_t nelems, int pe) {                                          \
+    if (nelems == 0) {                                                  \
+      return;                                                           \
+    }                                                                   \
+                                                                        \
+    get_base_internal_ctx(ctx)->ctxStats.incStat(STAT);                 \
+    ROCSHMEM_DIRECT_BACKEND_DISPATCH(                                   \
+        ctx, BACKEND_FUNC(dest, source, nelems, pe));                   \
   }
 
+ROCSHMEM_DIRECT_CTX_MEM_HELPER(putmem, NUM_PUT, putmem)
+ROCSHMEM_DIRECT_CTX_MEM_HELPER(getmem, NUM_GET, getmem)
+ROCSHMEM_DIRECT_CTX_MEM_HELPER(putmem_nbi, NUM_PUT_NBI, putmem_nbi)
+ROCSHMEM_DIRECT_CTX_MEM_HELPER(getmem_nbi, NUM_GET_NBI, getmem_nbi)
 ROCSHMEM_DIRECT_CTX_MEM_HELPER(putmem_wg, NUM_PUT_WG, putmem_wg)
 ROCSHMEM_DIRECT_CTX_MEM_HELPER(getmem_wg, NUM_GET_WG, getmem_wg)
 ROCSHMEM_DIRECT_CTX_MEM_HELPER(putmem_nbi_wg, NUM_PUT_NBI_WG, putmem_nbi_wg)
 ROCSHMEM_DIRECT_CTX_MEM_HELPER(getmem_nbi_wg, NUM_GET_NBI_WG, getmem_nbi_wg)
 ROCSHMEM_DIRECT_CTX_MEM_HELPER(putmem_wave, NUM_PUT_WAVE, putmem_wave)
 ROCSHMEM_DIRECT_CTX_MEM_HELPER(getmem_wave, NUM_GET_WAVE, getmem_wave)
-ROCSHMEM_DIRECT_CTX_MEM_HELPER(putmem_nbi_wave, NUM_PUT_NBI_WAVE,
-                               putmem_nbi_wave)
-ROCSHMEM_DIRECT_CTX_MEM_HELPER(getmem_nbi_wave, NUM_GET_NBI_WAVE,
-                               getmem_nbi_wave)
+ROCSHMEM_DIRECT_CTX_MEM_HELPER(putmem_nbi_wave, NUM_PUT_NBI_WAVE, putmem_nbi_wave)
+ROCSHMEM_DIRECT_CTX_MEM_HELPER(getmem_nbi_wave, NUM_GET_NBI_WAVE, getmem_nbi_wave)
 
 #undef ROCSHMEM_DIRECT_CTX_MEM_HELPER
 
@@ -612,50 +614,6 @@ ROCSHMEM_DIRECT_CTX_MEM_HELPER(getmem_nbi_wave, NUM_GET_NBI_WAVE,
 __device__ __forceinline__ void direct_ctx_threadfence_system(
     rocshmem_ctx_t /*ctx*/) {
   __threadfence_system();
-}
-
-__device__ __forceinline__ void direct_ctx_putmem(rocshmem_ctx_t ctx,
-                                                   void *dest,
-                                                   const void *source,
-                                                   size_t nelems, int pe) {
-  if (nelems == 0) {
-    return;
-  }
-  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_PUT);
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, putmem(dest, source, nelems, pe));
-}
-
-__device__ __forceinline__ void direct_ctx_getmem(rocshmem_ctx_t ctx,
-                                                   void *dest,
-                                                   const void *source,
-                                                   size_t nelems, int pe) {
-  if (nelems == 0) {
-    return;
-  }
-  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_GET);
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, getmem(dest, source, nelems, pe));
-}
-
-__device__ __forceinline__ void direct_ctx_putmem_nbi(rocshmem_ctx_t ctx,
-                                                       void *dest,
-                                                       const void *source,
-                                                       size_t nelems, int pe) {
-  if (nelems == 0) {
-    return;
-  }
-  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_PUT_NBI);
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, putmem_nbi(dest, source, nelems, pe));
-}
-
-__device__ __forceinline__ void direct_ctx_getmem_nbi(rocshmem_ctx_t ctx,
-                                                       void *dest,
-                                                       const void *source,
-                                                       size_t nelems, int pe) {
-  if (nelems == 0) {
-    return;
-  }
-  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_GET_NBI);
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, getmem_nbi(dest, source, nelems, pe));
 }
 
 __device__ __forceinline__ void direct_ctx_fence(rocshmem_ctx_t ctx) {
@@ -693,9 +651,8 @@ __device__ __forceinline__ void *direct_ctx_shmem_ptr(rocshmem_ctx_t ctx,
  * collective synchronization implementation (internal_sync/
  * internal_direct_barrier/internal_atomic_barrier, plus a quiet() call) --
  * inlining that into shared test kernels that call multiple of the
- * regular/wave/wg variants from one kernel body (e.g. TeamBarrierTest,
- * SyncAllTest, BarrierAllTest) grows register/scratch usage enough to drop
- * occupancy by a full wave (5->4 waves/SIMD, confirmed via gfx950
+ * regular/wave/wg variants from one kernel body grows resource usage enough 
+ * to drop occupancy by a full wave (5->4 waves/SIMD, confirmed via gfx950
  * all_backends resource-usage comparison). This happened even without
  * __forceinline__: because these helpers now live in the same translation
  * unit as their callers (unlike the Context::barrier* /sync* methods they
@@ -706,55 +663,39 @@ __device__ __forceinline__ void *direct_ctx_shmem_ptr(rocshmem_ctx_t ctx,
  * dominated, so the call overhead __noinline__ costs here is not worth an
  * occupancy regression.
  */
-__device__ __noinline__ void direct_ctx_barrier_all(rocshmem_ctx_t ctx) {
-  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER_ALL);
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier_all());
-}
 
-__device__ __noinline__ void direct_ctx_barrier_all_wave(
-    rocshmem_ctx_t ctx) {
-  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER_ALL_WAVE);
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier_all_wave());
-}
+#define ROCSHMEM_DIRECT_CTX_SYNC_HELPER(NAME, STAT, BACKEND_FUNC)       \
+  __device__ __noinline__ void direct_ctx_##NAME(                       \
+      rocshmem_ctx_t ctx) {                                             \
+    get_base_internal_ctx(ctx)->ctxStats.incStat(STAT);                 \
+    ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, BACKEND_FUNC());              \
+  }
 
-__device__ __noinline__ void direct_ctx_barrier_all_wg(
-    rocshmem_ctx_t ctx) {
-  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER_ALL_WG);
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier_all_wg());
-}
+ROCSHMEM_DIRECT_CTX_SYNC_HELPER(barrier_all, NUM_BARRIER_ALL, barrier_all)
+ROCSHMEM_DIRECT_CTX_SYNC_HELPER(barrier_all_wg, NUM_BARRIER_ALL_WG, barrier_all_wg)
+ROCSHMEM_DIRECT_CTX_SYNC_HELPER(barrier_all_wave, NUM_BARRIER_ALL_WAVE, barrier_all_wave)
+ROCSHMEM_DIRECT_CTX_SYNC_HELPER(sync_all, NUM_SYNC_ALL, sync_all)
+ROCSHMEM_DIRECT_CTX_SYNC_HELPER(sync_all_wg, NUM_SYNC_ALL_WG, sync_all_wg)
+ROCSHMEM_DIRECT_CTX_SYNC_HELPER(sync_all_wave, NUM_SYNC_ALL_WAVE, sync_all_wave)
 
-__device__ __noinline__ void direct_ctx_barrier(rocshmem_ctx_t ctx,
-                                                 rocshmem_team_t team) {
+#undef ROCSHMEM_DIRECT_CTX_SYNC_HELPER
+
+__device__ __noinline__ void direct_ctx_barrier(rocshmem_ctx_t ctx, 
+                                                rocshmem_team_t team) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier(team));
 }
 
-__device__ __noinline__ void direct_ctx_barrier_wave(
-    rocshmem_ctx_t ctx, rocshmem_team_t team) {
+__device__ __noinline__ void direct_ctx_barrier_wave(rocshmem_ctx_t ctx,
+                                                     rocshmem_team_t team) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER_WAVE);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier_wave(team));
 }
 
-__device__ __noinline__ void direct_ctx_barrier_wg(
-    rocshmem_ctx_t ctx, rocshmem_team_t team) {
+__device__ __noinline__ void direct_ctx_barrier_wg(rocshmem_ctx_t ctx,
+                                                   rocshmem_team_t team) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER_WG);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier_wg(team));
-}
-
-__device__ __noinline__ void direct_ctx_sync_all(rocshmem_ctx_t ctx) {
-  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SYNC_ALL);
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, sync_all());
-}
-
-__device__ __noinline__ void direct_ctx_sync_all_wave(
-    rocshmem_ctx_t ctx) {
-  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SYNC_ALL_WAVE);
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, sync_all_wave());
-}
-
-__device__ __noinline__ void direct_ctx_sync_all_wg(rocshmem_ctx_t ctx) {
-  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SYNC_ALL_WG);
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, sync_all_wg());
 }
 
 /*
@@ -762,36 +703,36 @@ __device__ __noinline__ void direct_ctx_sync_all_wg(rocshmem_ctx_t ctx) {
  * quirk in rocshmem_gpu.cpp being replicated exactly, not fixed).
  */
 __device__ __noinline__ void direct_ctx_sync_wg(rocshmem_ctx_t ctx,
-                                                 rocshmem_team_t team) {
+                                                rocshmem_team_t team) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SYNC_WG);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, sync_wg(team));
 }
 
-__device__ __forceinline__ void direct_ctx_broadcastmem_wg(
+__device__ __noinline__ void direct_ctx_broadcastmem_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source,
     int nelems, int pe_root) {
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(
       ctx, broadcastmem_wg(team, dest, source, nelems, pe_root));
 }
 
-__device__ __forceinline__ int direct_ctx_broadcastmem_wave(
+__device__ __noinline__ int direct_ctx_broadcastmem_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source,
     int nelems, int pe_root) {
   ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(
       ctx, broadcastmem_wave(team, dest, source, nelems, pe_root));
 }
 
-__device__ __forceinline__ void direct_ctx_alltoallmem_wg(
+__device__ __noinline__ void direct_ctx_alltoallmem_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source,
     int nelems) {
   if (is_thread_zero_in_block()) {
     get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ALLTOALL);
   }
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx,
-                                   alltoallmem_wg(team, dest, source, nelems));
+  ROCSHMEM_DIRECT_BACKEND_DISPATCH(
+    ctx, alltoallmem_wg(team, dest, source, nelems));
 }
 
-__device__ __forceinline__ int direct_ctx_alltoallmem_wave(
+__device__ __noinline__ int direct_ctx_alltoallmem_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source,
     int nelems) {
   if (nelems == 0) {
@@ -804,7 +745,7 @@ __device__ __forceinline__ int direct_ctx_alltoallmem_wave(
       ctx, alltoallmem_wave(team, dest, source, nelems));
 }
 
-__device__ __forceinline__ void direct_ctx_fcollectmem_wg(
+__device__ __noinline__ void direct_ctx_fcollectmem_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source,
     int nelems) {
   if (nelems == 0) {
@@ -813,11 +754,11 @@ __device__ __forceinline__ void direct_ctx_fcollectmem_wg(
   if (is_thread_zero_in_block()) {
     get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_FCOLLECT);
   }
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx,
-                                   fcollectmem_wg(team, dest, source, nelems));
+  ROCSHMEM_DIRECT_BACKEND_DISPATCH(
+    ctx, fcollectmem_wg(team, dest, source, nelems));
 }
 
-__device__ __forceinline__ int direct_ctx_fcollectmem_wave(
+__device__ __noinline__ int direct_ctx_fcollectmem_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source,
     int nelems) {
   if (nelems == 0) {
@@ -830,17 +771,18 @@ __device__ __forceinline__ int direct_ctx_fcollectmem_wave(
       ctx, fcollectmem_wave(team, dest, source, nelems));
 }
 
-#define ROCSHMEM_DIRECT_CTX_PUTMEM_SIGNAL_DEF(SUFFIX, STATS_SUFFIX)          \
-  __device__ __forceinline__ void direct_ctx_putmem_signal##SUFFIX(         \
-      rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems,     \
-      uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {             \
-    if (nelems == 0) {                                                      \
-      return;                                                               \
-    }                                                                       \
-    get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_PUT_SIGNAL##STATS_SUFFIX); \
-    ROCSHMEM_DIRECT_BACKEND_DISPATCH(                                       \
-        ctx, putmem_signal##SUFFIX(dest, source, nelems, sig_addr, signal, \
-                                   sig_op, pe));                            \
+#define ROCSHMEM_DIRECT_CTX_PUTMEM_SIGNAL_DEF(SUFFIX, STATS_SUFFIX)           \
+  __device__ __forceinline__ void direct_ctx_putmem_signal##SUFFIX(           \
+      rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems,      \
+      uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {              \
+    if (nelems == 0) {                                                        \
+      return;                                                                 \
+    }                                                                         \
+    get_base_internal_ctx(ctx)->ctxStats.incStat(                             \
+      NUM_PUT_SIGNAL##STATS_SUFFIX);                                          \
+    ROCSHMEM_DIRECT_BACKEND_DISPATCH(                                         \
+        ctx, putmem_signal##SUFFIX(dest, source, nelems, sig_addr, signal,    \
+                                   sig_op, pe));                              \
   }
 
 ROCSHMEM_DIRECT_CTX_PUTMEM_SIGNAL_DEF(, )
@@ -852,10 +794,11 @@ ROCSHMEM_DIRECT_CTX_PUTMEM_SIGNAL_DEF(_nbi_wave, _NBI_WAVE)
 
 #undef ROCSHMEM_DIRECT_CTX_PUTMEM_SIGNAL_DEF
 
-#define ROCSHMEM_DIRECT_SIGNAL_FETCH_DEF(SUFFIX)                       \
-  __device__ __forceinline__ uint64_t direct_ctx_signal_fetch##SUFFIX( \
-      rocshmem_ctx_t ctx, const uint64_t *sig_addr) {                  \
-    ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(ctx, signal_fetch##SUFFIX(sig_addr)); \
+#define ROCSHMEM_DIRECT_SIGNAL_FETCH_DEF(SUFFIX)                              \
+  __device__ __forceinline__ uint64_t direct_ctx_signal_fetch##SUFFIX(        \
+      rocshmem_ctx_t ctx, const uint64_t *sig_addr) {                         \
+    ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(                                     \
+      ctx, signal_fetch##SUFFIX(sig_addr));                                   \
   }
 
 ROCSHMEM_DIRECT_SIGNAL_FETCH_DEF()
@@ -870,7 +813,7 @@ ROCSHMEM_DIRECT_SIGNAL_FETCH_DEF(_wave)
  */
 template <typename T>
 __device__ __forceinline__ void direct_ctx_p(rocshmem_ctx_t ctx, T *dest,
-                                              T value, int pe) {
+                                             T value, int pe) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_P);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, p(dest, value, pe));
 }
@@ -882,7 +825,7 @@ __device__ __forceinline__ T direct_ctx_g(rocshmem_ctx_t ctx, const T *source,
   ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(ctx, g(source, pe));
 }
 
-#define ROCSHMEM_DIRECT_CTX_T_MEM_HELPER(NAME, STAT, BACKEND_FUNC)      \
+#define ROCSHMEM_DIRECT_CTX_T_MEM_HELPER(NAME, STAT, BACKEND_FUNC)     \
   template <typename T>                                                \
   __device__ __forceinline__ void direct_ctx_##NAME(                   \
       rocshmem_ctx_t ctx, T *dest, const T *source, size_t nelems,     \
@@ -911,10 +854,10 @@ ROCSHMEM_DIRECT_CTX_T_MEM_HELPER(get_nbi_wave, NUM_GET_NBI_WAVE, get_nbi_wave)
 #undef ROCSHMEM_DIRECT_CTX_T_MEM_HELPER
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ __forceinline__ int direct_ctx_reduce_wg(rocshmem_ctx_t ctx,
-                                                     rocshmem_team_t team,
-                                                     T *dest, const T *source,
-                                                     int nreduce) {
+__device__ __noinline__ int direct_ctx_reduce_wg(rocshmem_ctx_t ctx,
+                                                 rocshmem_team_t team,
+                                                 T *dest, const T *source,
+                                                 int nreduce) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -926,7 +869,7 @@ __device__ __forceinline__ int direct_ctx_reduce_wg(rocshmem_ctx_t ctx,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ __forceinline__ int direct_ctx_reduce_scatter_wg(
+__device__ __noinline__ int direct_ctx_reduce_scatter_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,
     int nreduce) {
   if (nreduce == 0) {
@@ -940,16 +883,14 @@ __device__ __forceinline__ int direct_ctx_reduce_scatter_wg(
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ __forceinline__ int direct_ctx_reduce_wave(rocshmem_ctx_t ctx,
-                                                       rocshmem_team_t team,
-                                                       T *dest,
-                                                       const T *source,
-                                                       int nreduce) {
+__device__ __noinline__ int direct_ctx_reduce_wave(rocshmem_ctx_t ctx,
+                                                   rocshmem_team_t team,
+                                                   T *dest,
+                                                   const T *source,
+                                                   int nreduce) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
   }
-  /* Matches source: gated on is_thread_zero_in_block(), NOT _in_wave(),
-   * despite this being the "_wave" variant. */
   if (is_thread_zero_in_block()) {
     get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_REDUCE);
   }
@@ -958,7 +899,7 @@ __device__ __forceinline__ int direct_ctx_reduce_wave(rocshmem_ctx_t ctx,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ __forceinline__ int direct_ctx_reduce_scatter_wave(
+__device__ __noinline__ int direct_ctx_reduce_scatter_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,
     int nreduce) {
   if (nreduce == 0) {
@@ -972,7 +913,7 @@ __device__ __forceinline__ int direct_ctx_reduce_scatter_wave(
 }
 
 template <typename T>
-__device__ __forceinline__ void direct_ctx_broadcast_wg(
+__device__ __noinline__ void direct_ctx_broadcast_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,
     int nelems, int pe_root) {
   if (nelems == 0) {
@@ -986,7 +927,7 @@ __device__ __forceinline__ void direct_ctx_broadcast_wg(
 }
 
 template <typename T>
-__device__ __forceinline__ int direct_ctx_broadcast_wave(
+__device__ __noinline__ int direct_ctx_broadcast_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,
     int nelems, int pe_root) {
   ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(
@@ -994,27 +935,27 @@ __device__ __forceinline__ int direct_ctx_broadcast_wave(
 }
 
 template <typename T>
-__device__ __forceinline__ void direct_ctx_alltoall_wg(rocshmem_ctx_t ctx,
-                                                        rocshmem_team_t team,
-                                                        T *dest,
-                                                        const T *source,
-                                                        int nelems) {
+__device__ __noinline__ void direct_ctx_alltoall_wg(rocshmem_ctx_t ctx,
+                                                    rocshmem_team_t team,
+                                                    T *dest,
+                                                    const T *source,
+                                                    int nelems) {
   if (nelems == 0) {
     return;
   }
   if (is_thread_zero_in_block()) {
     get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ALLTOALL);
   }
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx,
-                                   alltoall_wg<T>(team, dest, source, nelems));
+  ROCSHMEM_DIRECT_BACKEND_DISPATCH(
+    ctx, alltoall_wg<T>(team, dest, source, nelems));
 }
 
 template <typename T>
-__device__ __forceinline__ int direct_ctx_alltoall_wave(rocshmem_ctx_t ctx,
-                                                         rocshmem_team_t team,
-                                                         T *dest,
-                                                         const T *source,
-                                                         int nelems) {
+__device__ __noinline__ int direct_ctx_alltoall_wave(rocshmem_ctx_t ctx,
+                                                     rocshmem_team_t team,
+                                                     T *dest,
+                                                     const T *source,
+                                                     int nelems) {
   if (nelems == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -1027,7 +968,7 @@ __device__ __forceinline__ int direct_ctx_alltoall_wave(rocshmem_ctx_t ctx,
 
 /* NOTE: no nelems guard, matches Context::alltoallv<T> exactly. */
 template <typename T>
-__device__ __forceinline__ void direct_ctx_alltoallv(
+__device__ __noinline__ void direct_ctx_alltoallv(
     rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest,
     const size_t dest_nelems[], const size_t dest_displs[], T *source,
     const size_t source_nelems[], const size_t source_displs[]) {
@@ -1040,27 +981,27 @@ __device__ __forceinline__ void direct_ctx_alltoallv(
 }
 
 template <typename T>
-__device__ __forceinline__ void direct_ctx_fcollect_wg(rocshmem_ctx_t ctx,
-                                                        rocshmem_team_t team,
-                                                        T *dest,
-                                                        const T *source,
-                                                        int nelems) {
+__device__ __noinline__ void direct_ctx_fcollect_wg(rocshmem_ctx_t ctx,
+                                                    rocshmem_team_t team,
+                                                    T *dest,
+                                                    const T *source,
+                                                    int nelems) {
   if (nelems == 0) {
     return;
   }
   if (is_thread_zero_in_block()) {
     get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_FCOLLECT);
   }
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx,
-                                   fcollect_wg<T>(team, dest, source, nelems));
+  ROCSHMEM_DIRECT_BACKEND_DISPATCH(
+    ctx, fcollect_wg<T>(team, dest, source, nelems));
 }
 
 template <typename T>
-__device__ __forceinline__ int direct_ctx_fcollect_wave(rocshmem_ctx_t ctx,
-                                                         rocshmem_team_t team,
-                                                         T *dest,
-                                                         const T *source,
-                                                         int nelems) {
+__device__ __noinline__ int direct_ctx_fcollect_wave(rocshmem_ctx_t ctx,
+                                                     rocshmem_team_t team,
+                                                     T *dest,
+                                                     const T *source,
+                                                     int nelems) {
   if (nelems == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -1072,105 +1013,106 @@ __device__ __forceinline__ int direct_ctx_fcollect_wave(rocshmem_ctx_t ctx,
 }
 
 template <typename T>
-__device__ __forceinline__ T direct_ctx_amo_fetch_add(rocshmem_ctx_t ctx,
-                                                       void *dst, T value,
-                                                       int pe) {
+__device__ __noinline__ T direct_ctx_amo_fetch_add(rocshmem_ctx_t ctx,
+                                                   void *dst, T value,
+                                                   int pe) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ATOMIC_FADD);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(ctx, amo_fetch_add(dst, value, pe));
 }
 
 template <typename T>
-__device__ __forceinline__ T direct_ctx_amo_fetch_cas(rocshmem_ctx_t ctx,
-                                                       void *dst, T value,
-                                                       T cond, int pe) {
+__device__ __noinline__ T direct_ctx_amo_fetch_cas(rocshmem_ctx_t ctx,
+                                                   void *dst, T value,
+                                                   T cond, int pe) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ATOMIC_FCSWAP);
-  ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(ctx,
-                                       amo_fetch_cas(dst, value, cond, pe));
+  ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(
+    ctx, amo_fetch_cas(dst, value, cond, pe));
 }
 
 template <typename T>
-__device__ __forceinline__ void direct_ctx_amo_add(rocshmem_ctx_t ctx,
-                                                    void *dst, T value,
-                                                    int pe) {
+__device__ __noinline__ void direct_ctx_amo_add(rocshmem_ctx_t ctx,
+                                                void *dst, T value,
+                                                int pe) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ATOMIC_ADD);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, amo_add(dst, value, pe));
 }
 
 template <typename T>
-__device__ __forceinline__ void direct_ctx_amo_set(rocshmem_ctx_t ctx,
-                                                    void *dst, T value,
-                                                    int pe) {
+__device__ __noinline__ void direct_ctx_amo_set(rocshmem_ctx_t ctx,
+                                                void *dst, T value,
+                                                int pe) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ATOMIC_SET);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, amo_set(dst, value, pe));
 }
 
 template <typename T>
-__device__ __forceinline__ T direct_ctx_amo_swap(rocshmem_ctx_t ctx,
-                                                  void *dst, T value, int pe) {
+__device__ __noinline__ T direct_ctx_amo_swap(rocshmem_ctx_t ctx,
+                                              void *dst, T value, int pe) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ATOMIC_SWAP);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(ctx, amo_swap(dst, value, pe));
 }
 
 template <typename T>
-__device__ __forceinline__ T direct_ctx_amo_fetch_and(rocshmem_ctx_t ctx,
-                                                       void *dst, T value,
-                                                       int pe) {
+__device__ __noinline__ T direct_ctx_amo_fetch_and(rocshmem_ctx_t ctx,
+                                                   void *dst, T value,
+                                                   int pe) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ATOMIC_FETCH_AND);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(ctx, amo_fetch_and(dst, value, pe));
 }
 
 template <typename T>
-__device__ __forceinline__ void direct_ctx_amo_and(rocshmem_ctx_t ctx,
-                                                    void *dst, T value,
-                                                    int pe) {
+__device__ __noinline__ void direct_ctx_amo_and(rocshmem_ctx_t ctx,
+                                                void *dst, T value,
+                                                int pe) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ATOMIC_AND);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, amo_and(dst, value, pe));
 }
 
 template <typename T>
-__device__ __forceinline__ T direct_ctx_amo_fetch_or(rocshmem_ctx_t ctx,
-                                                      void *dst, T value,
-                                                      int pe) {
+__device__ __noinline__ T direct_ctx_amo_fetch_or(rocshmem_ctx_t ctx,
+                                                  void *dst, T value,
+                                                  int pe) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ATOMIC_FETCH_OR);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(ctx, amo_fetch_or(dst, value, pe));
 }
 
 template <typename T>
-__device__ __forceinline__ void direct_ctx_amo_or(rocshmem_ctx_t ctx,
-                                                   void *dst, T value,
-                                                   int pe) {
+__device__ __noinline__ void direct_ctx_amo_or(rocshmem_ctx_t ctx,
+                                               void *dst, T value,
+                                               int pe) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ATOMIC_OR);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, amo_or(dst, value, pe));
 }
 
 template <typename T>
-__device__ __forceinline__ T direct_ctx_amo_fetch_xor(rocshmem_ctx_t ctx,
-                                                       void *dst, T value,
-                                                       int pe) {
+__device__ __noinline__ T direct_ctx_amo_fetch_xor(rocshmem_ctx_t ctx,
+                                                   void *dst, T value,
+                                                   int pe) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ATOMIC_FETCH_XOR);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(ctx, amo_fetch_xor(dst, value, pe));
 }
 
 template <typename T>
-__device__ __forceinline__ void direct_ctx_amo_xor(rocshmem_ctx_t ctx,
-                                                    void *dst, T value,
-                                                    int pe) {
+__device__ __noinline__ void direct_ctx_amo_xor(rocshmem_ctx_t ctx,
+                                                void *dst, T value,
+                                                int pe) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_ATOMIC_XOR);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, amo_xor(dst, value, pe));
 }
 
-#define ROCSHMEM_DIRECT_CTX_PUT_SIGNAL_DEF(SUFFIX, STATS_SUFFIX)             \
-  template <typename T>                                                     \
-  __device__ __forceinline__ void direct_ctx_put_signal##SUFFIX(            \
-      rocshmem_ctx_t ctx, T *dest, const T *source, size_t nelems,          \
-      uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {            \
-    if (nelems == 0) {                                                      \
-      return;                                                               \
-    }                                                                       \
-    get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_PUT_SIGNAL##STATS_SUFFIX); \
-    ROCSHMEM_DIRECT_BACKEND_DISPATCH(                                       \
-        ctx, put_signal##SUFFIX(dest, source, nelems, sig_addr, signal,    \
-                                sig_op, pe));                               \
+#define ROCSHMEM_DIRECT_CTX_PUT_SIGNAL_DEF(SUFFIX, STATS_SUFFIX)              \
+  template <typename T>                                                       \
+  __device__ __forceinline__ void direct_ctx_put_signal##SUFFIX(              \
+      rocshmem_ctx_t ctx, T *dest, const T *source, size_t nelems,            \
+      uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {              \
+    if (nelems == 0) {                                                        \
+      return;                                                                 \
+    }                                                                         \
+    get_base_internal_ctx(ctx)->ctxStats.incStat(                             \
+      NUM_PUT_SIGNAL##STATS_SUFFIX);                                          \
+    ROCSHMEM_DIRECT_BACKEND_DISPATCH(                                         \
+        ctx, put_signal##SUFFIX(dest, source, nelems, sig_addr, signal,       \
+                                sig_op, pe));                                 \
   }
 
 ROCSHMEM_DIRECT_CTX_PUT_SIGNAL_DEF(, )
@@ -1193,15 +1135,15 @@ ROCSHMEM_DIRECT_CTX_PUT_SIGNAL_DEF(_nbi_wave, _NBI_WAVE)
  */
 template <typename T>
 __device__ __forceinline__ int direct_ctx_test(rocshmem_ctx_t ctx, T *ivars,
-                                                int cmp, T val) {
+                                               int cmp, T val) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_TEST);
   return get_base_internal_ctx(ctx)->test(ivars, cmp, val);
 }
 
 template <typename T>
 __device__ __forceinline__ void direct_ctx_wait_until(rocshmem_ctx_t ctx,
-                                                       T *ivars, int cmp,
-                                                       T val) {
+                                                      T *ivars, int cmp,
+                                                      T val) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_WAIT_UNTIL);
   get_base_internal_ctx(ctx)->wait_until(ivars, cmp, val);
 }
@@ -1421,7 +1363,7 @@ __device__ __attribute__((used)) __forceinline__ void rocshmem_ctx_putmem(
 }
 
 template <typename T>
-__device__ void rocshmem_put(rocshmem_ctx_t ctx, T *dest, const T *source,
+__device__ __attribute__((used)) __forceinline__ void rocshmem_put(rocshmem_ctx_t ctx, T *dest, const T *source,
                               size_t nelems, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::put (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
@@ -1431,7 +1373,7 @@ __device__ void rocshmem_put(rocshmem_ctx_t ctx, T *dest, const T *source,
 }
 
 template <typename T>
-__device__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe) {
+__device__ __attribute__((used)) __forceinline__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::p (ctx=%zd, dest=%p, value=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)value, pe, pe_in_world);
@@ -1440,7 +1382,7 @@ __device__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe) {
 }
 
 template <typename T>
-__device__ T rocshmem_g(rocshmem_ctx_t ctx, const T *source, int pe) {
+__device__ __attribute__((used)) __forceinline__ T rocshmem_g(rocshmem_ctx_t ctx, const T *source, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::g (ctx=%zd, source=%p, pe=%d w%d)",
     ctx.ctx_opaque, source, pe, pe_in_world);
@@ -1448,7 +1390,7 @@ __device__ T rocshmem_g(rocshmem_ctx_t ctx, const T *source, int pe) {
   return direct_ctx_g<T>(ctx, source, pe_in_world);
 }
 
-__device__ void rocshmem_ctx_getmem(rocshmem_ctx_t ctx, void *dest,
+__device__ __attribute__((used)) __forceinline__ void rocshmem_ctx_getmem(rocshmem_ctx_t ctx, void *dest,
                                      const void *source, size_t nelems,
                                      int pe) {
   int pe_in_world = translate_pe(ctx, pe);
@@ -1459,7 +1401,7 @@ __device__ void rocshmem_ctx_getmem(rocshmem_ctx_t ctx, void *dest,
 }
 
 template <typename T>
-__device__ void rocshmem_get(rocshmem_ctx_t ctx, T *dest, const T *source,
+__device__ __attribute__((used)) __forceinline__ void rocshmem_get(rocshmem_ctx_t ctx, T *dest, const T *source,
                               size_t nelems, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::get (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
