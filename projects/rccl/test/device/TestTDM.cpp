@@ -8,8 +8,6 @@
 // 
 // Includes tests for tensor data mover logic
 
-#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
-
 #include "DeviceTestBase.hpp"
 #include <limits>
 #include <hip/hip_bfloat16.h>
@@ -140,6 +138,15 @@ struct AsyncDataCopierTileApiLauncher {
 template<typename Launcher>
 class AsyncCopyTestBase : public DeviceTestBase { 
 protected: 
+  void SetUp() override {
+    DeviceTestBase::SetUp();
+    // These kernels reach the tensor data mover and the async-to/from-LDS builtins,
+    // whose bodies compile away on any device that does not support them. Skip rather
+    // than compare against a copy that never ran.
+    if (!async::IsTdmCopySupported(0))
+      GTEST_SKIP() << "async copy / TDM not supported on this device";
+  }
+
   template<typename T> 
   void TestRoundTrip(const std::vector<T>& h_in) { 
     const int N = static_cast<int>(h_in.size());
@@ -223,4 +230,3 @@ TEST_F(TestAsyncDataCopierTileApi, Double) {
 }
 
 }  // namespace RcclUnitTesting
-#endif // __gfx1250__ && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)

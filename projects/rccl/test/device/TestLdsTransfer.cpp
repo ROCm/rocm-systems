@@ -27,7 +27,6 @@
 // two pointers share a sub-128B offset. The kernel therefore skews each warp's
 // LDS window by the same byte offset the test applies to src/dst.
 
-#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
 #include "DeviceTestBase.hpp"
 
 #include <cstdint>
@@ -367,4 +366,3 @@ TEST_F(LdsSupportTest, DeviceCapabilityMatchesHost) {
 }
 
 }  // namespace RcclUnitTesting
-#endif // __gfx1250__ && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)

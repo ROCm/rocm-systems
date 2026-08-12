@@ -23,8 +23,6 @@ THE SOFTWARE.
 #ifndef __ASYNCCOPY_H
 #define __ASYNCCOPY_H
 
-#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
-
 #include "cachePolicy.h"
 #include "syncPolicy.h"   // shared SyncPolicy encoding (same as tdmCopy.h)
 
@@ -37,8 +35,11 @@ THE SOFTWARE.
 // Unlike tdmCopy.h this keys the include on header availability rather than
 // TDM_SUPPORTED, because the descriptor types must be nameable in every compilation
 // pass that parses those wrappers, not just a gfx1250 device pass.
+// Deliberately NOT gated on __gfx1250__: arch macros are undefined in the host pass,
+// so adding one here would force this to 0 for every host caller and make the
+// host-side capability queries report unsupported on real gfx1250 hardware.
 #ifndef TDM_TOOLCHAIN_AVAILABLE
-#  if defined(__gfx1250__) && __has_include(<hip/amd_detail/amd_gfx1250_TDM.h>) 
+#  if __has_include(<hip/amd_detail/amd_gfx1250_TDM.h>)
 #    define TDM_TOOLCHAIN_AVAILABLE 1
 #  else
 #    define TDM_TOOLCHAIN_AVAILABLE 0
@@ -599,5 +600,4 @@ __device__ inline void tdmCopyByTeam(void* dst, const void* src, size_t sizeByte
 #undef ASYNC_DELETED
 
 
-#endif // __gfx1250__ && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
 #endif // __ASYNCCOPY_H
