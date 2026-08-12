@@ -103,6 +103,7 @@ GFX9_SAMPLE_METRICS = {
 
 
 def render_gfx9_chart(metrics, chart_title=DEFAULT_TITLE):
+    """Render a GFX9 memory chart without ANSI styling or input mutation."""
     return common.strip_ansi(
         mem_chart_gfx9.plot_mem_chart(dict(metrics), chart_title=chart_title)
     )
@@ -110,6 +111,7 @@ def render_gfx9_chart(metrics, chart_title=DEFAULT_TITLE):
 
 @functools.lru_cache(maxsize=None)
 def panel_yaml_metric_keys(architecture: str) -> frozenset[str]:
+    """Return memory-chart metric keys configured for an architecture."""
     config_path = ANALYSIS_CONFIGS / architecture / MEMORY_CHART_CONFIG_FILENAME
     panel_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
@@ -123,16 +125,19 @@ def panel_yaml_metric_keys(architecture: str) -> frozenset[str]:
 def expected_architecture_missing_metric_keys(
     architecture: str,
 ) -> frozenset[str]:
+    """Return metric keys intentionally omitted for an architecture."""
     if architecture in GFX94X_ARCHITECTURES:
         return GFX94X_MISSING_METRIC_KEYS
     return frozenset()
 
 
 def panel_yaml_metrics(architecture: str) -> dict[str, int]:
+    """Return sample values for an architecture's configured panel metrics."""
     return dict.fromkeys(panel_yaml_metric_keys(architecture), 1)
 
 
 def chart_block_header_positions(output: str) -> dict[str, tuple[int, int]]:
+    """Locate the first occurrence of each memory-chart block header."""
     lines = output.splitlines()
     positions = {}
 
@@ -153,6 +158,7 @@ def assert_text_in_chart_block(
     block_label: str,
     expected_text: str,
 ) -> None:
+    """Assert that text appears once within the requested chart block."""
     assert output.count(expected_text) == 1, (
         f"Expected one {expected_text!r} occurrence, "
         f"found {output.count(expected_text)}"
@@ -204,6 +210,7 @@ def assert_text_below_chart_label(
     field_label: str,
     expected_text: str,
 ) -> None:
+    """Assert that text appears directly below the requested chart label."""
     assert output.count(field_label) == 1
     assert output.count(expected_text) == 1
     lines = output.splitlines()
@@ -217,6 +224,8 @@ def assert_text_below_chart_label(
 
 
 class TestMakeFormatSpecGfx9:
+    """Tests for GFX9 format-specification generation."""
+
     @pytest.mark.parametrize(
         ("value", "expected_spec"),
         [
@@ -257,6 +266,8 @@ class TestMakeFormatSpecGfx9:
 
 
 class TestIsValueValidGfx9:
+    """Tests for GFX9 metric-value validation."""
+
     @pytest.mark.parametrize(
         ("value", "expected_validity"),
         [
@@ -276,6 +287,8 @@ class TestIsValueValidGfx9:
 
 
 class TestFormatTextGfx9:
+    """Tests for GFX9 metric-text formatting."""
+
     def test_basic_key_and_value(self):
         """Verify basic key-and-value formatting with the default separator."""
         result = mem_chart_gfx9.format_text(
