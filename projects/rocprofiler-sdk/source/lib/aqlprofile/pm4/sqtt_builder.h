@@ -95,8 +95,8 @@ struct TraceControl
     uint32_t cntr{0};
     uint32_t wptr{0};
     uint32_t status2{0};
-    uint64_t gpu_clock_cnt_start{0};
-    uint64_t gpu_clock_cnt_end{0};
+    uint64_t gpu_clock_start{0};
+    uint64_t gpu_clock_latest{0};
     uint32_t status_double_buffer{0};
     uint32_t wptr_doublebuffer{0};
 };
@@ -533,7 +533,6 @@ public:
                 (1 + cu_per_se) * ((config->perfcounters.size() + 3) & ~3) * config->perfPeriod;
             builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
         }
-        if(Primitives::GFXIP_LEVEL == 9 && config->enable_rt_timestamp)
         {
             for(size_t xcc = 0; xcc < GetXCCNumber(); xcc++)
             {
@@ -541,8 +540,10 @@ public:
 
                 XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
                 auto& control = reinterpret_cast<TraceControl*>(config->control_buffer_ptr)[xcc];
-                InsertTimestampMarker(cmd_buffer, &control.gpu_clock_cnt_start);
+                CaptureClock(cmd_buffer, &control.gpu_clock_start, config->enable_rt_timestamp);
             }
+            builder.BuildCacheFlushPacket(
+                cmd_buffer, size_t(config->control_buffer_ptr), config->control_buffer_size);
         }
     }
 
@@ -553,22 +554,20 @@ public:
         builder.BuildWriteWaitIdlePacket(cmd_buffer);
         const uint32_t se_number_xcc = se_number_total / std::max(1u, GetXCCNumber());
 
+        {
+            for(size_t xcc = 0; xcc < GetXCCNumber(); xcc++)
+            {
+                if(!isXccEnabled(xcc, se_number_xcc, config)) continue;
+
+                XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
+                auto& control = reinterpret_cast<TraceControl*>(config->control_buffer_ptr)[xcc];
+                CaptureClock(cmd_buffer, &control.gpu_clock_latest, config->enable_rt_timestamp);
+            }
+            builder.BuildWriteWaitIdlePacket(cmd_buffer);
+        }
+
         if(Primitives::GFXIP_LEVEL == 9)
         {
-            if(config->enable_rt_timestamp)
-            {
-                for(size_t xcc = 0; xcc < GetXCCNumber(); xcc++)
-                {
-                    if(!isXccEnabled(xcc, se_number_xcc, config)) continue;
-
-                    XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
-                    auto&                    control =
-                        reinterpret_cast<TraceControl*>(config->control_buffer_ptr)[xcc];
-                    InsertTimestampMarker(cmd_buffer, &control.gpu_clock_cnt_end);
-                }
-                builder.BuildWriteWaitIdlePacket(cmd_buffer);
-            }
-
             // Program the thread trace mode register to disable thread trace
             builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                Primitives::SQ_THREAD_TRACE_MODE_ADDR,
@@ -744,14 +743,30 @@ public:
 
     virtual void InsertTimestampMarker(CmdBuffer* cmd_buffer, uint64_t* addr) override
     {
-        rocprof_trace_decoder_packet_header_t header{};
-        header.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP;
-        header.type   = 0;
-        header.data20 = 0;
+        if constexpr(Primitives::GFXIP_LEVEL == 9)
+        {
+            rocprof_trace_decoder_packet_header_t header{};
+            header.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP;
+            header.type   = 0;
+            header.data20 = 0;
 
-        SetGRBMToBroadcast(cmd_buffer);
-        builder.BuildGPUClockPacket(
-            cmd_buffer, addr, Primitives::SQ_THREAD_TRACE_USERDATA_3, header.u32All);
+            SetGRBMToBroadcast(cmd_buffer);
+            builder.BuildGPUClockPacket(
+                cmd_buffer, addr, Primitives::SQ_THREAD_TRACE_USERDATA_3, header.u32All);
+        }
+    }
+
+    void CaptureClock(CmdBuffer* cmd_buffer, uint64_t* addr, bool emit_marker)
+    {
+        if constexpr(Primitives::GFXIP_LEVEL == 9)
+        {
+            if(emit_marker)
+            {
+                InsertTimestampMarker(cmd_buffer, addr);
+                return;
+            }
+        }
+        builder.BuildReadGPUClockPacket(cmd_buffer, addr);
     }
 
     template <typename T>
@@ -837,7 +852,12 @@ public:
             WriteConfigPacket(cmd_buffer, reg_lo, buff1_lo);
             WriteConfigPacket(cmd_buffer, reg_hi, buff1_hi);
         }
+        auto& control =
+            reinterpret_cast<TraceControl*>(config->control_buffer_ptr)[se_id / se_per_xcc];
+        builder.BuildReadGPUClockPacket(cmd_buffer, &control.gpu_clock_latest);
         builder.BuildCacheFlushPacket(cmd_buffer, size_t(prev), config->data_buffer_size);
+        builder.BuildCacheFlushPacket(
+            cmd_buffer, size_t(config->control_buffer_ptr), config->control_buffer_size);
 
         SetGRBMToBroadcast(cmd_buffer);
     }

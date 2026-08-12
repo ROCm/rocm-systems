@@ -627,6 +627,12 @@ public:
             APPEND_COMMAND_WRAPPER(cmdBuf, copy_data);
         }
     }
+
+    void BuildReadGPUClockPacket(CmdBuffer* cmdBuf, uint64_t* dst) override
+    {
+        auto copy_data = ClockRetrievePacket(dst);
+        APPEND_COMMAND_WRAPPER(cmdBuf, copy_data);
+    }
 };
 
 }  // namespace pm4_builder

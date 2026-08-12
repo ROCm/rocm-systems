@@ -298,6 +298,11 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
     MemoryManager::RegisterManager(memorymgr);
 
     auto* control_ptr = memorymgr->GetTraceControlBuf<pm4_builder::TraceControl>();
+    for(size_t i = 0; i < se_number_total; ++i)
+    {
+        control_ptr[i].gpu_clock_start  = 0;
+        control_ptr[i].gpu_clock_latest = 0;
+    }
 
     trace_config.control_buffer_ptr  = control_ptr;
     trace_config.control_buffer_size = control_size;
@@ -443,6 +448,31 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
         out->read_offset = sizeof(uint16_t) * (control.wptr_doublebuffer >> 30);
     }
 
+    return HSA_STATUS_SUCCESS;
+}
+
+PUBLIC_API hsa_status_t
+aqlprofile_att_get_gpu_clock(aqlprofile_att_gpu_clock_t* out,
+                             aqlprofile_handle_t         handle,
+                             int                         shader_engine_id)
+{
+    if(out == nullptr || shader_engine_id < 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto  generic_manager = MemoryManager::GetManager(handle.handle);
+    auto* manager         = dynamic_cast<TraceMemoryManager*>(generic_manager.get());
+    if(manager == nullptr) return HSA_STATUS_ERROR;
+
+    auto* factory = aql_profile::Pm4Factory::Create(manager->GetAgent());
+    if(static_cast<uint32_t>(shader_engine_id) >= factory->GetShaderEnginesNumber())
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    const auto se_per_xcc =
+        factory->GetShaderEnginesNumber() / std::max(1u, factory->GetXccNumber());
+    volatile auto& control = manager->GetTraceControlBuf<
+        pm4_builder::TraceControl>()[static_cast<uint32_t>(shader_engine_id) / se_per_xcc];
+
+    out->start  = control.gpu_clock_start;
+    out->latest = control.gpu_clock_latest;
     return HSA_STATUS_SUCCESS;
 }
 

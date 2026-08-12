@@ -277,6 +277,21 @@ SQTTBufferingPackets::query_buffer_status()
     return query;
 }
 
+aqlprofile_att_gpu_clock_t
+get_gpu_clock(aqlprofile_handle_t handle, int shader_engine_id)
+{
+    auto  clock = aqlprofile_att_gpu_clock_t{};
+    auto* dl    = rocprofiler::thread_trace::get_aqlprofile_dl();
+    if(dl && dl->get_gpu_clock_fn) dl->get_gpu_clock_fn(&clock, handle, shader_engine_id);
+    return clock;
+}
+
+aqlprofile_att_gpu_clock_t
+SQTTBufferingPackets::get_gpu_clock() const
+{
+    return hsa::get_gpu_clock(handle, shader_engine_id);
+}
+
 CodeobjMarkerAQLPacket::CodeobjMarkerAQLPacket(const TraceMemoryPool& _tracepool,
                                                uint64_t               id,
                                                uint64_t               addr,
