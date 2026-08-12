@@ -43,6 +43,63 @@ CHART_BLOCK_LABELS = (
     "Fabric",
     "HBM",
 )
+GFX9_SAMPLE_METRICS = {
+    "Wavefront Occupancy": 1,
+    "Wave Life": 2,
+    "SALU": 3,
+    "SMEM": 4,
+    "VALU": 5,
+    "Matrix Ops": 6,
+    "VMEM": 7,
+    "LDS": 8,
+    "GWS": 9,
+    "BR": 10,
+    "Active CUs": 11,
+    "Num CUs": 12,
+    "VGPR": 13,
+    "SGPR": 14,
+    "LDS Allocation": 15,
+    "Scratch Allocation": 16,
+    "Wavefronts": 17,
+    "Workgroups": 18,
+    "LDS Req": 19,
+    "LDS Util": 20,
+    "LDS Latency": 21,
+    "VL1 Rd": 22,
+    "VL1 Wr": 23,
+    "VL1 Atomic": 24,
+    "VL1 Hit": 25,
+    "VL1 Lat": 26,
+    "VL1 Coalesce": 27,
+    "VL1 Stall": 28,
+    "sL1D Rd": 29,
+    "sL1D Hit": 30,
+    "sL1D Lat": 31,
+    "IL1 Fetch": 32,
+    "IL1 Hit": 33,
+    "IL1 Lat": 34,
+    "VL1_L2 Rd": 36,
+    "VL1_L2 Wr": 37,
+    "VL1_L2 Atomic": 38,
+    "sL1D_L2 Rd": 39,
+    "sL1D_L2 Wr": 40,
+    "sL1D_L2 Atomic": 41,
+    "IL1_L2 Rd": 42,
+    "L2 Hit": 43,
+    "L2 Rd": 44,
+    "L2 Wr": 45,
+    "L2 Atomic": 46,
+    "L2 Rd Lat": 47,
+    "L2 Wr Lat": 48,
+    "Fabric_L2 Rd": 49,
+    "Fabric_L2 Wr": 50,
+    "Fabric_L2 Atomic": 51,
+    "Fabric Rd Lat": 52,
+    "Fabric Wr Lat": 53,
+    "Fabric Atomic Lat": 54,
+    "HBM Rd": 55,
+    "HBM Wr": 56,
+}
 
 
 def render_gfx9_chart(metrics, chart_title=DEFAULT_TITLE):
@@ -382,15 +439,15 @@ class TestPlotMemChartGfx9:
 
     def test_full_sample_metrics_render_without_na_placeholders(self):
         """Render complete gfx9 metrics without N/A placeholders."""
-        output = render_gfx9_chart(common.GFX9_SAMPLE_METRICS)
+        output = render_gfx9_chart(GFX9_SAMPLE_METRICS)
         assert isinstance(output, str)
         assert len(output) > 0
         assert "n/a" not in output.casefold()
 
-    @pytest.mark.parametrize("missing_metric", common.GFX9_SAMPLE_METRICS)
+    @pytest.mark.parametrize("missing_metric", GFX9_SAMPLE_METRICS)
     def test_each_missing_metric_renders_one_placeholder(self, missing_metric):
         """Render one placeholder for each omitted gfx9 metric."""
-        metrics = dict(common.GFX9_SAMPLE_METRICS)
+        metrics = dict(GFX9_SAMPLE_METRICS)
         del metrics[missing_metric]
 
         output = render_gfx9_chart(metrics)
@@ -409,7 +466,7 @@ class TestPlotMemChartGfx9:
 
     def test_contains_complete_cdna_architecture(self):
         """CDNA output contains every component enabled by the renderer."""
-        output = render_gfx9_chart(common.GFX9_SAMPLE_METRICS)
+        output = render_gfx9_chart(GFX9_SAMPLE_METRICS)
         expected_components = (
             "Instr Buff",
             "Instr Dispatch",
@@ -433,7 +490,7 @@ class TestPlotMemChartGfx9:
         """Print a caller-supplied title once outside the chart."""
         chart_title = "7. Memory Chart (Normalization: per_kernel)"
         output = render_gfx9_chart(
-            common.GFX9_SAMPLE_METRICS,
+            GFX9_SAMPLE_METRICS,
             chart_title=chart_title,
         )
         output_lines = output.splitlines()
@@ -444,7 +501,7 @@ class TestPlotMemChartGfx9:
 
     def test_gfx9_chart_contains_directional_connectors(self):
         """Render the expected CDNA directional connectors."""
-        output = render_gfx9_chart(common.GFX9_SAMPLE_METRICS)
+        output = render_gfx9_chart(GFX9_SAMPLE_METRICS)
         output_lines = output.splitlines()
 
         assert "Instr Buff" in output_lines[4]
