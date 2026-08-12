@@ -27,7 +27,7 @@ on:
         description: "Branch, tag, or SHA used by all corpus tests"
         # Last updated on 2026/08/11.
         # This corpus commit was merged on 2026/08/10.
-        default: "ce5da512188dd40de0bc7da298ec11b587d8fdd3"
+        default: "8570f83f753346906ca0965d2c5967257f535c17"
         required: true
 
 concurrency:
@@ -43,7 +43,7 @@ permissions:
 env:
   # Last updated on 2026/08/11.
   # This corpus commit was merged on 2026/08/10.
-  ROCJITSU_CORPUS_REF: ce5da512188dd40de0bc7da298ec11b587d8fdd3
+  ROCJITSU_CORPUS_REF: 8570f83f753346906ca0965d2c5967257f535c17
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
@@ -338,12 +338,14 @@ jobs:
 
           corpus_test_status=0
 
-          WORKERS="$(nproc)"
-          if (( WORKERS > 16 )); then
-            WORKERS=16
+          BUILD_WORKERS="$(( ($(nproc) + 1) / 2 ))"
+          PYTEST_WORKERS="$(nproc)"
+          if (( PYTEST_WORKERS > 16 )); then
+            PYTEST_WORKERS=16
           fi
           corpus_test_flags=(
-            --workers "${WORKERS}" \
+            --workers "${PYTEST_WORKERS}" \
+            --llama-build-workers "${BUILD_WORKERS}" \
             --soft-timeout 15 \
             --hard-timeout 30 \
             --rerun-failed \

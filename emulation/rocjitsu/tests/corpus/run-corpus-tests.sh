@@ -10,11 +10,12 @@
 #     ./tests/corpus/run-corpus-tests.sh [options]
 #
 # Options:
-#   --workers N          Number of pytest-xdist workers (default: 8)
-#   --soft-timeout N     Per-test timeout for the first run (default: 30)
-#   --hard-timeout N     Per-test timeout for failed-test reruns (default: 60)
-#   --rerun-failed       Rerun only tests that failed the soft-timeout pass
-#   --warn-perf          Warn about passing tests close to the soft timeout
+#   --workers N              Pytest-xdist workers (default: 8)
+#   --llama-build-workers N  Llama CMake workers (default: 16)
+#   --soft-timeout N         First-run timeout per test (default: 30)
+#   --hard-timeout N         Failed-test rerun timeout (default: 60)
+#   --rerun-failed           Rerun only tests that failed the first pass
+#   --warn-perf              Warn about tests close to the soft timeout
 #
 # Environment variables:
 #   ROCM_PATH            Required ROCm installation root
@@ -31,13 +32,16 @@ set -euo pipefail
 : "${ROCJITSU_SOURCE_DIR:?ROCJITSU_SOURCE_DIR must be set}"
 
 worker_count=8
+llama_build_workers=16
 soft_timeout_seconds=30
 hard_timeout_seconds=60
 rerun_failed=false
 warn_perf=false
 
 usage() {
-  echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N] [--rerun-failed] [--warn-perf]" >&2
+  echo "Usage: $0 [--workers N] [--llama-build-workers N]" >&2
+  echo "  [--soft-timeout N] [--hard-timeout N] [--rerun-failed]" >&2
+  echo "  [--warn-perf]" >&2
 }
 
 targets=(
@@ -52,6 +56,10 @@ while (( $# )); do
   case "$1" in
     --workers)
       worker_count="$2"
+      shift 2
+      ;;
+    --llama-build-workers)
+      llama_build_workers="$2"
       shift 2
       ;;
     --soft-timeout)
@@ -97,6 +105,7 @@ for target in "${targets[@]}"; do
   junit_xml="${junit_dir}/${name}.xml"
 
   pytest_cmd=(
+    env "LLAMA_CORPUS_BUILD_WORKERS=${llama_build_workers}"
     rocjitsu --config "${rocjitsu_config_path}" -- pytest tests/test_corpus.py
     --target "${name}"
     --suite iree,kernels,cts,llama
