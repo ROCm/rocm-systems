@@ -234,7 +234,14 @@ def run_clang_tidy(command: list[str], timeout: float | None) -> tuple[str, bool
     reliable success signal here; only a timeout counts as a run failure.
     """
     try:
-        proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace",
+        )
     except subprocess.TimeoutExpired:
         return f"Timed out after {timeout}s: {' '.join(command)}\n", False
     return proc.stdout + proc.stderr, True
