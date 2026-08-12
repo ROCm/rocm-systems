@@ -18,12 +18,14 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <thread>
 #include <vector>
 
 using namespace rocjitsu;
@@ -36,6 +38,12 @@ void shutdown_plugin_group(rj_vm_t *vm) {
   // joined. callback_mutex_ is intentionally not lifecycle synchronization.
   if (vm && vm->soc && vm->plugin_group_active.exchange(false, std::memory_order_acq_rel))
     vm->soc->plugin_group().onShutdown();
+}
+
+void set_cpu_dispatch_threads(SoC *soc, uint32_t threads) {
+  if (!soc)
+    return;
+  soc->set_dispatch_threads(threads);
 }
 
 rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, rj_vm_t **handle) {
@@ -54,6 +62,20 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
         partition_socs.push_back(extra_soc);
     }
   }
+  // Shared per-SoC CU dispatch-pool thread count (functional mode), from config
+  // cpu_dispatch_threads. 0 = auto: all hardware threads, capped at
+  // kDispatchThreadCap (parallel out of the box without oversubscribing small
+  // hosts or paying SMT/turbo costs). Results are thread-count-invariant, so
+  // this only affects speed, not output.
+  constexpr uint32_t kDispatchThreadCap = 32;
+  uint32_t cpu_dispatch_threads = 1;
+  if (loaded.exec_mode == simdojo::ExecMode::FUNCTIONAL) {
+    cpu_dispatch_threads = loaded.cpu_dispatch_threads;
+    if (cpu_dispatch_threads == 0) {
+      unsigned hw = std::thread::hardware_concurrency();
+      cpu_dispatch_threads = std::min<uint32_t>(hw ? hw : 1u, kDispatchThreadCap);
+    }
+  }
   // XCD partitions (config num_threads): run each XCD on its own engine
   // partition/thread so the XCDs execute concurrently across their separate L2s.
   const uint32_t num_threads_requested = loaded.engine_config.num_threads;
@@ -63,7 +85,6 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     util::Logger::warn("num_threads clamped: requested=", num_threads_requested,
                        ", effective=", num_threads_used);
   loaded.engine_config.num_threads = num_threads_used;
-
   bool serve = (mode == RJ_VM_MODE_LOCAL || mode == RJ_VM_MODE_DAEMON);
   bool daemon = (mode == RJ_VM_MODE_DAEMON);
   if (serve) {
@@ -114,6 +135,8 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
       if (extra_soc)
         extra_soc->wire_backing(s->engine->topology());
     }
+    for (auto *soc : partition_socs)
+      set_cpu_dispatch_threads(soc, cpu_dispatch_threads);
   } else {
     auto root = loaded.take_root();
     root.release();
@@ -122,6 +145,7 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     s->engine->topology().set_root(std::move(vm_ptr));
     loaded.wire_links(s->engine->topology());
     s->soc->wire_backing(s->engine->topology());
+    set_cpu_dispatch_threads(s->soc, cpu_dispatch_threads);
   }
   if (num_threads_used > 1 && !amdgpu::partition_topology_by_xcds(
                                   s->engine->topology(), partition_socs, num_threads_used)) {
