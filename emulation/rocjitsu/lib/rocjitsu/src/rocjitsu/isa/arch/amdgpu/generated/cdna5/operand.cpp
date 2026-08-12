@@ -65,16 +65,52 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
     : IsaOperand<Isa>(size_bits, opr_type, encoding_value),
       execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
       packed_16bit_source_(packed_16bit_source), packed_16bit_dst_(packed_16bit_dst) {
+  if (opr_type == OperandType::OPR_DSMEM && !((encoding_value >= 0 && encoding_value <= 0)))
+    defer_encoding_error(EncodingError::InvalidSelector);
   if (opr_type == OperandType::OPR_EXEC && !((encoding_value >= 126 && encoding_value <= 126)))
     defer_encoding_error(EncodingError::InvalidExecSelector);
+  if (opr_type == OperandType::OPR_GPUMEM && !((encoding_value >= 0 && encoding_value <= 0)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_PC && !((encoding_value >= 0 && encoding_value <= 0)))
+    defer_encoding_error(EncodingError::InvalidSelector);
   if (opr_type == OperandType::OPR_SDST && !((encoding_value >= 0 && encoding_value <= 127)))
     defer_encoding_error(EncodingError::InvalidSelector);
   if (opr_type == OperandType::OPR_SDST_EXEC && !((encoding_value >= 126 && encoding_value <= 127)))
     defer_encoding_error(EncodingError::InvalidSelector);
   if (opr_type == OperandType::OPR_SDST_M0 && !((encoding_value >= 125 && encoding_value <= 125)))
     defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SGPR && !((encoding_value >= 0 && encoding_value <= 105)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SMEM_OFFSET && !((encoding_value >= 0 && encoding_value <= 125)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SMEM_OFFSET_NOK &&
+      !((encoding_value >= 0 && encoding_value <= 125)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SRC && !((encoding_value >= 0 && encoding_value <= 208) ||
+                                            (encoding_value >= 230 && encoding_value <= 231) ||
+                                            (encoding_value >= 235 && encoding_value <= 236) ||
+                                            (encoding_value >= 240 && encoding_value <= 248) ||
+                                            (encoding_value >= 253 && encoding_value <= 511)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SRC_NOINLINE &&
+      !((encoding_value >= 0 && encoding_value <= 127) ||
+        (encoding_value >= 254 && encoding_value <= 511)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SRC_SIMPLE &&
+      !((encoding_value >= 0 && encoding_value <= 208) ||
+        (encoding_value >= 230 && encoding_value <= 231) ||
+        (encoding_value >= 235 && encoding_value <= 236) ||
+        (encoding_value >= 240 && encoding_value <= 248) ||
+        (encoding_value >= 253 && encoding_value <= 253) ||
+        (encoding_value >= 256 && encoding_value <= 511)))
+    defer_encoding_error(EncodingError::InvalidSelector);
   if (opr_type == OperandType::OPR_SRC_VGPR && !((encoding_value >= 256 && encoding_value <= 511)))
     defer_encoding_error(EncodingError::InvalidVgprSourceSelector);
+  if (opr_type == OperandType::OPR_SRC_VGPR_OR_INLINE &&
+      !((encoding_value >= 128 && encoding_value <= 208) ||
+        (encoding_value >= 240 && encoding_value <= 248) ||
+        (encoding_value >= 256 && encoding_value <= 511)))
+    defer_encoding_error(EncodingError::InvalidSelector);
   if (opr_type == OperandType::OPR_SREG && !((encoding_value >= 0 && encoding_value <= 124)))
     defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
   if (opr_type == OperandType::OPR_SREG_M0 && !((encoding_value >= 0 && encoding_value <= 125)))
@@ -97,6 +133,10 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
   if (opr_type == OperandType::OPR_SSRC_SPECIAL_SCC &&
       !((encoding_value >= 253 && encoding_value <= 253)))
     defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+  if (opr_type == OperandType::OPR_VCC && !((encoding_value >= 106 && encoding_value <= 106)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_VGPR && !((encoding_value >= 0 && encoding_value <= 255)))
+    defer_encoding_error(EncodingError::InvalidSelector);
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
@@ -111,16 +151,52 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
       execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
       literal16_display_value_(literal16_display_value),
       has_literal16_display_(has_literal16_display) {
+  if (opr_type == OperandType::OPR_DSMEM && !((encoding_value >= 0 && encoding_value <= 0)))
+    defer_encoding_error(EncodingError::InvalidSelector);
   if (opr_type == OperandType::OPR_EXEC && !((encoding_value >= 126 && encoding_value <= 126)))
     defer_encoding_error(EncodingError::InvalidExecSelector);
+  if (opr_type == OperandType::OPR_GPUMEM && !((encoding_value >= 0 && encoding_value <= 0)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_PC && !((encoding_value >= 0 && encoding_value <= 0)))
+    defer_encoding_error(EncodingError::InvalidSelector);
   if (opr_type == OperandType::OPR_SDST && !((encoding_value >= 0 && encoding_value <= 127)))
     defer_encoding_error(EncodingError::InvalidSelector);
   if (opr_type == OperandType::OPR_SDST_EXEC && !((encoding_value >= 126 && encoding_value <= 127)))
     defer_encoding_error(EncodingError::InvalidSelector);
   if (opr_type == OperandType::OPR_SDST_M0 && !((encoding_value >= 125 && encoding_value <= 125)))
     defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SGPR && !((encoding_value >= 0 && encoding_value <= 105)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SMEM_OFFSET && !((encoding_value >= 0 && encoding_value <= 125)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SMEM_OFFSET_NOK &&
+      !((encoding_value >= 0 && encoding_value <= 125)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SRC && !((encoding_value >= 0 && encoding_value <= 208) ||
+                                            (encoding_value >= 230 && encoding_value <= 231) ||
+                                            (encoding_value >= 235 && encoding_value <= 236) ||
+                                            (encoding_value >= 240 && encoding_value <= 248) ||
+                                            (encoding_value >= 253 && encoding_value <= 511)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SRC_NOINLINE &&
+      !((encoding_value >= 0 && encoding_value <= 127) ||
+        (encoding_value >= 254 && encoding_value <= 511)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_SRC_SIMPLE &&
+      !((encoding_value >= 0 && encoding_value <= 208) ||
+        (encoding_value >= 230 && encoding_value <= 231) ||
+        (encoding_value >= 235 && encoding_value <= 236) ||
+        (encoding_value >= 240 && encoding_value <= 248) ||
+        (encoding_value >= 253 && encoding_value <= 253) ||
+        (encoding_value >= 256 && encoding_value <= 511)))
+    defer_encoding_error(EncodingError::InvalidSelector);
   if (opr_type == OperandType::OPR_SRC_VGPR && !((encoding_value >= 256 && encoding_value <= 511)))
     defer_encoding_error(EncodingError::InvalidVgprSourceSelector);
+  if (opr_type == OperandType::OPR_SRC_VGPR_OR_INLINE &&
+      !((encoding_value >= 128 && encoding_value <= 208) ||
+        (encoding_value >= 240 && encoding_value <= 248) ||
+        (encoding_value >= 256 && encoding_value <= 511)))
+    defer_encoding_error(EncodingError::InvalidSelector);
   if (opr_type == OperandType::OPR_SREG && !((encoding_value >= 0 && encoding_value <= 124)))
     defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);
   if (opr_type == OperandType::OPR_SREG_M0 && !((encoding_value >= 0 && encoding_value <= 125)))
@@ -143,6 +219,10 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
   if (opr_type == OperandType::OPR_SSRC_SPECIAL_SCC &&
       !((encoding_value >= 253 && encoding_value <= 253)))
     defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+  if (opr_type == OperandType::OPR_VCC && !((encoding_value >= 106 && encoding_value <= 106)))
+    defer_encoding_error(EncodingError::InvalidSelector);
+  if (opr_type == OperandType::OPR_VGPR && !((encoding_value >= 0 && encoding_value <= 255)))
+    defer_encoding_error(EncodingError::InvalidSelector);
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 

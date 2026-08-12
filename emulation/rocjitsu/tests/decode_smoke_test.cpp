@@ -24,11 +24,13 @@
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -90,8 +92,8 @@ constexpr uint32_t make_cdna1_sop1(uint32_t sdst, uint32_t ssrc0) {
 
 TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
   EXPECT_EQ(sizeof(Operand), 32u);
-  EXPECT_EQ(sizeof(gfx1250::Operand), 80u);
-  EXPECT_EQ(sizeof(gfx1250::VAddF32Vop3), 528u);
+  EXPECT_EQ(sizeof(cdna5::Operand), 80u);
+  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 528u);
 }
 
 TEST(CodeArchApiTest, PreservesExistingPublicEnumValues) {
@@ -239,6 +241,84 @@ TEST(OperandSelectorDecodeTest, Cdna1RestrictedScalarSourceRejectsLiteralSelecto
   EXPECT_THROW(invalid.validate_encoding(), util::InvalidInst);
 }
 
+TEST(OperandSelectorDecodeTest, DirectSourceAndSmemOffsetRejectReservedSelectors) {
+  constexpr auto vop1 = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 209, .vdst = 0});
+  auto gfx1250_decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(gfx1250_decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(gfx1250_decoder->decode(vop1.data())),
+               util::InvalidInst);
+
+  constexpr auto smem =
+      cdna1::build_smem(cdna1::kSLoadDwordSmem, {.soffset_en = 1, .soffset = 125});
+  auto cdna1_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  ASSERT_NE(cdna1_decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(cdna1_decoder->decode(smem.data())), util::InvalidInst);
+}
+
+TEST(OperandSelectorDecodeTest, RestrictedVectorAndLaneOperandsRejectLiteralMarkers) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  const auto expect_rejected = [&](const auto &encoding) {
+    std::array<uint32_t, 4> words{};
+    for (size_t i = 0; i < encoding.size(); ++i)
+      words[i] = encoding[i];
+    words[encoding.size()] = 7;
+    words[encoding.size() + 1] = 0;
+    EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+  };
+
+  for (const uint16_t marker : {uint16_t{254}, uint16_t{255}}) {
+    expect_rejected(cdna5::build_vop3(cdna5::kVReadfirstlaneB32Vop3, {.src0 = marker}));
+    expect_rejected(cdna5::build_vop3(cdna5::kVReadlaneB32Vop3, {.src0 = marker, .src1 = 128}));
+    expect_rejected(cdna5::build_vop3(cdna5::kVReadlaneB32Vop3, {.src0 = 256, .src1 = marker}));
+  }
+}
+
+TEST(OperandSelectorDecodeTest, Gfx1250WmmaSrc2ValidatesVgprOrInlineSelector) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  const auto words_for = [](uint16_t selector) {
+    const auto encoding =
+        cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+                           {.vdst = 0, .src0 = 256, .src1 = 256, .src2 = selector});
+    return std::array<uint32_t, 4>{encoding[0], encoding[1], 0, 0};
+  };
+
+  for (const uint16_t selector : {uint16_t{208}, uint16_t{240}, uint16_t{248}, uint16_t{256}}) {
+    SCOPED_TRACE(selector);
+    const auto words = words_for(selector);
+    std::unique_ptr<Instruction> inst;
+    ASSERT_NO_THROW(inst.reset(decoder->decode(words.data())));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->num_src_operands(), 3);
+    ASSERT_NE(inst->src_operand(2), nullptr);
+    EXPECT_EQ(inst->src_operand(2)->encoding_value(), selector);
+    EXPECT_EQ(inst->size(), 2 * static_cast<int>(sizeof(uint32_t)));
+  }
+
+  for (const uint16_t selector :
+       {uint16_t{209}, uint16_t{239}, uint16_t{249}, uint16_t{253}, uint16_t{255}}) {
+    SCOPED_TRACE(selector);
+    const auto words = words_for(selector);
+    EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+  }
+
+  for (const uint16_t selector : {uint16_t{0}, uint16_t{8}, uint16_t{129}, uint16_t{256}}) {
+    SCOPED_TRACE(selector);
+    const auto encoding =
+        cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+                           {.vdst = 0, .src0 = 256, .src1 = 256, .src2 = selector});
+    const std::array<uint32_t, 4> words{encoding[0], encoding[1], 0, 0};
+    std::unique_ptr<Instruction> inst;
+    ASSERT_NO_THROW(inst.reset(decoder->decode(words.data())));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_NE(inst->src_operand(2), nullptr);
+    EXPECT_EQ(inst->src_operand(2)->encoding_value(), selector);
+  }
+}
+
 TEST(OperandSelectorDecodeTest, Gfx1250AndRdna4ValidateBarrierIdSelectors) {
   auto validate = [](rj_code_arch_t arch, const char *arch_name, auto build, uint8_t negative_max) {
     SCOPED_TRACE(arch_name);
@@ -263,22 +343,18 @@ TEST(OperandSelectorDecodeTest, Gfx1250AndRdna4ValidateBarrierIdSelectors) {
       EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
     }
 
-    constexpr uint32_t kLiteralValue = 7;
-    const auto literal = build(255);
-    const std::array<uint32_t, 2> literal_words = {literal[0], kLiteralValue};
-    std::unique_ptr<Instruction> literal_inst;
-    ASSERT_NO_THROW(literal_inst.reset(decoder->decode(literal_words.data())));
-    ASSERT_NE(literal_inst, nullptr);
-    ASSERT_EQ(literal_inst->num_src_operands(), 1);
-    ASSERT_NE(literal_inst->src_operand(0), nullptr);
-    EXPECT_EQ(literal_inst->src_operand(0)->encoding_value(), kLiteralValue);
-    EXPECT_EQ(literal_inst->size(), static_cast<int>(sizeof(literal_words)));
+    for (const uint8_t marker : {uint8_t{254}, uint8_t{255}}) {
+      SCOPED_TRACE(static_cast<int>(marker));
+      const auto base = build(marker);
+      const std::array<uint32_t, 3> words = {base[0], 7, 0};
+      EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+    }
   };
 
   validate(
       ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
       [](uint8_t selector) {
-        return gfx1250::build_sop1(gfx1250::kSBarrierSignalIsfirstSop1, {.ssrc0 = selector});
+        return cdna5::build_sop1(cdna5::kSBarrierSignalIsfirstSop1, {.ssrc0 = selector});
       },
       196);
   validate(

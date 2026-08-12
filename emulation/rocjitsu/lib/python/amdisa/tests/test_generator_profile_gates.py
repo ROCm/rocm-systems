@@ -2099,15 +2099,16 @@ def test_generated_literal32_widening_shapes_cover_gfx1250_and_cdna_vopc(
     assert 'src0 = Operand::make_literal32' in cdna_vopc_ctor
     assert 'Operand::Literal32Widening::SignExtend' in cdna_vopc_ctor
 
-    effective_32bit_ctors = (
+    scalar_mask_ctors = (
         _generated_constructor_body(gfx_vop3_data, 'VCndmaskB32Vop3'),
         _generated_constructor_body(gfx_vop3_data, 'VCndmaskB16Vop3'),
         _generated_constructor_body(gfx_vop3_alu, 'VAddCoCiU32Vop3SdstEnc'),
         _generated_constructor_body(gfx_vop3_alu, 'VSubCoCiU32Vop3SdstEnc'),
         _generated_constructor_body(gfx_vop3_alu, 'VSubrevCoCiU32Vop3SdstEnc'),
     )
-    for constructor in effective_32bit_ctors:
-        assert re.search(r'src2\s*=\s*Operand::make_literal32\(\s*32\s*,', constructor)
+    for constructor in scalar_mask_ctors:
+        assert 'src2 = Operand::make_literal32' not in constructor
+        assert 'src2 = Operand(32, OperandType::OPR_SIMM64' not in constructor
 
 
 def test_generated_rdna4_local_vop3_pack_paths_use_selected_halves(
@@ -2234,6 +2235,64 @@ def test_generated_operand_validates_barrier_id_selectors(
 
     gfx1250_test_encodings = (gfx1250_generated_root / 'test_encodings.h').read_text()
     assert '"s_get_barrier_state", {0xBE805080U' in gfx1250_test_encodings
+
+
+def test_generated_operand_validates_direct_selector_namespaces(
+    amdgpu_generated_root: Path, gfx1250_generated_root: Path
+):
+    gfx1250_operand = ''.join(
+        (gfx1250_generated_root / 'operand.cpp').read_text().split()
+    )
+    assert 'opr_type==OperandType::OPR_SRC&&' in gfx1250_operand
+    assert '(encoding_value>=209&&encoding_value<=229)' not in gfx1250_operand
+    assert 'opr_type==OperandType::OPR_SRC_VGPR_OR_INLINE&&' in gfx1250_operand
+    assert '(encoding_value>=128&&encoding_value<=208)' in gfx1250_operand
+    assert '(encoding_value>=240&&encoding_value<=248)' in gfx1250_operand
+    assert '(encoding_value>=256&&encoding_value<=511)' in gfx1250_operand
+
+    cdna1_operand = ''.join(
+        (amdgpu_generated_root / 'cdna1' / 'operand.cpp').read_text().split()
+    )
+    assert (
+        'opr_type==OperandType::OPR_SMEM_OFFSET&&'
+        '!((encoding_value>=0&&encoding_value<=124))' in cdna1_operand
+    )
+
+
+def test_generated_restricted_operands_do_not_apply_literal_fixups(
+    gfx1250_generated_root: Path,
+):
+    vop3_data = (gfx1250_generated_root / 'vop3_data.cpp').read_text()
+    vop3p = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+    sop1 = (gfx1250_generated_root / 'sop1.cpp').read_text()
+
+    readfirstlane = _generated_constructor_body(vop3_data, 'VReadfirstlaneB32Vop3')
+    readlane = _generated_constructor_body(vop3_data, 'VReadlaneB32Vop3')
+    wmma = _generated_constructor_body(vop3p, 'VWmmaF3216x16x128F8f6f4Vop3p')
+    generic_accumulator_wmma = _generated_constructor_body(
+        vop3p, 'VWmmaF3216x16x128Fp8Fp8Vop3p'
+    )
+    barrier = _generated_constructor_body(sop1, 'SBarrierSignalIsfirstSop1')
+
+    for body in (readfirstlane, readlane, wmma, barrier):
+        assert 'OperandType::OPR_SIMM32' not in body
+        assert 'OperandType::OPR_SIMM64' not in body
+    assert 'src0 == 255' not in readfirstlane
+    assert 'src0 == 254' not in readfirstlane
+    assert 'src0 == 255' not in readlane
+    assert 'src0 == 254' not in readlane
+    assert 'src1 == 255' not in readlane
+    assert 'src1 == 254' not in readlane
+    assert 'src2 == 255' not in wmma
+    assert 'src2 == 254' not in wmma
+    assert 'OperandType::OPR_SRC' in generic_accumulator_wmma
+    assert 'has an invalid accumulator selector' in generic_accumulator_wmma
+    assert 'src2 == 255' not in generic_accumulator_wmma
+    assert 'src2 == 254' not in generic_accumulator_wmma
+    assert 'OperandType::OPR_SIMM32' not in generic_accumulator_wmma
+    assert 'OperandType::OPR_SIMM64' not in generic_accumulator_wmma
+    assert 'ssrc0 == 255' not in barrier
+    assert 'ssrc0 == 254' not in barrier
 
 
 def test_gfx1250_generated_operand_validates_lane_selectors(
@@ -3935,7 +3994,7 @@ def test_generated_operands_validate_vgpr_source_selectors(
         'cdna2',
         'cdna3',
         'cdna4',
-        'gfx1250',
+        'cdna5',
         'rdna1',
         'rdna2',
         'rdna3',

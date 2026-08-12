@@ -1816,45 +1816,35 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
     run_case(false);
 }
 
-TEST(Gfx1250LiteralOperandTest, WidenedMaskLiteralsPreserveEffectiveOperandSize) {
+TEST(Gfx1250LiteralOperandTest, ScalarMaskOperandsRejectLiteralMarkers) {
   struct TestCase {
     const char *name;
     std::array<uint32_t, 2> encoding;
   };
-  constexpr std::array test_cases{
-      TestCase{"v_cndmask_b32",
-               cdna5::build_vop3(cdna5::kVCndmaskB32Vop3, {.src0 = 128, .src1 = 128, .src2 = 255})},
-      TestCase{"v_cndmask_b16",
-               cdna5::build_vop3(cdna5::kVCndmaskB16Vop3, {.src0 = 128, .src1 = 128, .src2 = 255})},
-      TestCase{"v_add_co_ci_u32",
-               cdna5::build_vop3_sdst_enc(cdna5::kVAddCoCiU32Vop3SdstEnc,
-                                          {.src0 = 128, .src1 = 128, .src2 = 255})},
-      TestCase{"v_sub_co_ci_u32",
-               cdna5::build_vop3_sdst_enc(cdna5::kVSubCoCiU32Vop3SdstEnc,
-                                          {.src0 = 128, .src1 = 128, .src2 = 255})},
-      TestCase{"v_subrev_co_ci_u32",
-               cdna5::build_vop3_sdst_enc(cdna5::kVSubrevCoCiU32Vop3SdstEnc,
-                                          {.src0 = 128, .src1 = 128, .src2 = 255})},
-  };
-  constexpr uint32_t kLiteral = 0xffffffffu;
-
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  for (const TestCase &test_case : test_cases) {
-    SCOPED_TRACE(test_case.name);
-    const std::array words{test_case.encoding[0], test_case.encoding[1], kLiteral};
-    std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
-    ASSERT_NE(instruction, nullptr);
-    EXPECT_EQ(instruction->mnemonic(), test_case.name);
-    EXPECT_EQ(instruction->size(), 12);
-    ASSERT_EQ(instruction->num_src_operands(), 3);
-
-    const Operand *literal = instruction->src_operand(2);
-    ASSERT_NE(literal, nullptr);
-    EXPECT_EQ(literal->size_bits(), 32);
-    EXPECT_EQ(literal->vgpr_count(), 1);
-    EXPECT_EQ(static_cast<uint32_t>(literal->encoding_value()), kLiteral);
-    EXPECT_FALSE(literal->literal64_value().has_value());
+  for (const uint16_t marker : {uint16_t{254}, uint16_t{255}}) {
+    const std::array test_cases{
+        TestCase{"v_cndmask_b32", cdna5::build_vop3(cdna5::kVCndmaskB32Vop3,
+                                                    {.src0 = 128, .src1 = 128, .src2 = marker})},
+        TestCase{"v_cndmask_b16", cdna5::build_vop3(cdna5::kVCndmaskB16Vop3,
+                                                    {.src0 = 128, .src1 = 128, .src2 = marker})},
+        TestCase{"v_add_co_ci_u32",
+                 cdna5::build_vop3_sdst_enc(cdna5::kVAddCoCiU32Vop3SdstEnc,
+                                            {.src0 = 128, .src1 = 128, .src2 = marker})},
+        TestCase{"v_sub_co_ci_u32",
+                 cdna5::build_vop3_sdst_enc(cdna5::kVSubCoCiU32Vop3SdstEnc,
+                                            {.src0 = 128, .src1 = 128, .src2 = marker})},
+        TestCase{"v_subrev_co_ci_u32",
+                 cdna5::build_vop3_sdst_enc(cdna5::kVSubrevCoCiU32Vop3SdstEnc,
+                                            {.src0 = 128, .src1 = 128, .src2 = marker})},
+    };
+    for (const TestCase &test_case : test_cases) {
+      SCOPED_TRACE(test_case.name);
+      SCOPED_TRACE(marker);
+      const std::array words{test_case.encoding[0], test_case.encoding[1], 0xffffffffu, 0u};
+      EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+    }
   }
 }
 
