@@ -393,6 +393,11 @@ std::optional<uint8_t> LivenessAnalysis::vgpr_msb_bank_before(const Instruction 
   return gfx1250_vgpr_msb_->bank_before(inst, role);
 }
 
+bool LivenessAnalysis::global_vgpr_usage_is_complete() const {
+  require_available();
+  return global_vgpr_usage_is_complete_;
+}
+
 std::optional<uint16_t>
 LivenessAnalysis::find_globally_unused_vgpr_run(const Instruction *inst, uint16_t count,
                                                 uint16_t search_start, uint16_t base_alignment,
