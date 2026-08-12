@@ -39,6 +39,15 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "constmem.hpp"
 
+#if SQTT_ENABLED
+#include </opt/rocm/include/rocprof-trace-decoder/rocprof_trace_decoder/cxx/markers.hpp>
+#else
+// Define no-op macros when SQTT is disabled
+#define sqtt_marker_enter(name) do {} while(0)
+#define sqtt_marker_exit(name) do {} while(0)
+#endif
+
+
 namespace rocshmem {
 
 /**
@@ -59,6 +68,7 @@ namespace rocshmem {
  */
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
 #define DISPATCH(Func)                     \
+  sqtt_marker_enter(#Func);                \
   switch(constmem.backend_type) {          \
   case BackendType::GDA_BACKEND:           \
     static_cast<GDAContext *>(this)->Func; \
@@ -70,7 +80,8 @@ namespace rocshmem {
   default:                                 \
     static_cast<IPCContext *>(this)->Func; \
     break;                                 \
-  }
+  }                                        \
+  sqtt_marker_exit(#Func);
 #elif defined(USE_GDA)
 #define DISPATCH(Func)                     \
   static_cast<GDAContext *>(this)->Func;

@@ -74,6 +74,7 @@ option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
 option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
 option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
 option(ASAN "Enable AddressSanitizer" ${ASAN})
+option(SQTT_ENABLED "Enable SQTT instrumentation" OFF)
 
 if (ASAN)
   execute_process(
@@ -90,6 +91,19 @@ set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
 # PROJECT
 ###############################################################################
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
+
+# SQTT instrumentation requires ROCm >= 7.13
+if(SQTT_ENABLED)
+  if(${ROCM_MAJOR_VERSION} LESS 7)
+    message(WARNING "SQTT instrumentation requires ROCm version >= 7.13. Current version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}. Disabling SQTT_ENABLED.")
+    set(SQTT_ENABLED OFF CACHE BOOL "Enable SQTT instrumentation" FORCE)
+  elseif(${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} LESS 13)
+    message(WARNING "SQTT instrumentation requires ROCm version >= 7.13. Current version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}. Disabling SQTT_ENABLED.")
+    set(SQTT_ENABLED OFF CACHE BOOL "Enable SQTT instrumentation" FORCE)
+  else()
+    message(STATUS "SQTT instrumentation enabled (ROCm ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION})")
+  endif()
+endif()
 
 ## Setup VERSION
 set(VERSION_STRING 3.7.0)
@@ -432,6 +446,27 @@ if (NOT BUILD_TESTS_ONLY)
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
       $<INSTALL_INTERFACE:include>
   )
+
+  # Add SQTT instrumentation support if enabled
+  if(SQTT_ENABLED)
+    target_compile_options(
+      ${PROJECT_NAME}
+      PRIVATE
+      "-fpass-plugin=/opt/rocm/lib/libsqttinstrumentpass.so"
+    )
+    # Add SQTT include directory
+    #   target_include_directories(
+    #      ${PROJECT_NAME}
+    #      PUBLIC
+    #     "$<BUILD_INTERFACE:/app/rocm-systems-sqtt/experimental/sqtt-instrumentation/include>"
+    # )
+    # Add SQTT enabled compile definition
+    target_compile_definitions(
+      ${PROJECT_NAME}
+      PRIVATE
+      SQTT_ENABLED=1
+    )
+  endif()
 
   target_link_libraries(
     ${PROJECT_NAME}

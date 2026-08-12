@@ -32,6 +32,13 @@
 #include "context_gda_device.hpp"
 #include "context_gda_tmpl_device.hpp"
 
+#if SQTT_ENABLED
+#include </opt/rocm/include/rocprof-trace-decoder/rocprof_trace_decoder/cxx/markers.hpp>
+#else
+#define sqtt_marker_enter(name) do {} while(0)
+#define sqtt_marker_exit(name) do {} while(0)
+#endif
+
 namespace rocshmem {
 
 __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id)
@@ -111,16 +118,24 @@ __device__ void GDAContext::getmem(void *dest, const void *source, size_t nelems
 
 __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
                                        size_t nelems, int pe) {
+  sqtt_marker_enter("put_nbi_call");
+  sqtt_marker_enter("ipc_check");
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
       (remote = ipc_peer_ptr(dest, local_pe)) != nullptr) {
+    sqtt_marker_exit("ipc_check");
     ipcImpl_.ipcCopy<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, local_pe);
+    sqtt_marker_exit("put_nbi_call");
     return;
   }
+  sqtt_marker_exit("ipc_check");
+  sqtt_marker_enter("wf_info+qp");
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
+  sqtt_marker_exit("wf_info+qp");
   qps[qp_index].put_nbi(dest, source, nelems, wf_info);
+  sqtt_marker_exit("put_nbi_call");
 }
 
 __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
@@ -200,10 +215,12 @@ __device__ void GDAContext::quiet() {
 }
 
 __device__ void GDAContext::internal_quiet(ActiveWFInfo &wf_info) {
+  sqtt_marker_enter("lib_overhead");
   for (uint32_t i = 0; i < num_qps; i++) {
     qps[i].quiet(wf_info);
   }
   ipcImpl_.ipcQuiet();
+  sqtt_marker_exit("lib_overhead");
 }
 
 __device__ void GDAContext::pe_quiet(size_t pe) {
