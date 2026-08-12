@@ -142,10 +142,6 @@ rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 
 namespace
 {
-// Initialized once in rocprofv3_main. Used by the signal handler and finalization
-// to detect child processes (fork/fork+exec).
-pid_t ROCPROF_ROOT_PID = 0;
-
 // Thread for safe cleanup output generation
 auto output_generation_thread = common::Synchronized<std::optional<std::thread>>{};
 
@@ -4867,29 +4863,11 @@ rocprofv3_main(int argc, char** argv, char** envp)
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
 
-    // Track root process via ROCPROF_ROOT_PID env var.
-    // All processes (root + children) get their own worker thread and signal handler.
-    // For well-behaved apps, use --disable-signal-handlers (atexit handles everything).
+    // fork+exec and spawn children re-init through the normal init path. Plain fork children
+    // re-init worker state via the pthread_atfork handler below. GPU use in a forked child is
+    // illegal (runtime not fork-safe) so it usually dies first, but host-side data like roctx
+    // markers still flushes if reached (covered by a test).
     {
-        auto* root_pid_env = getenv("ROCPROF_ROOT_PID");
-        bool  is_child     = (root_pid_env != nullptr);
-
-        if(is_child)
-        {
-            // Reset the signal worker state — the inherited state references
-            // the parent's eventfd/thread which are inaccessible from here.
-            get_signal_worker(true);
-            ROCPROF_ROOT_PID = static_cast<pid_t>(std::stol(root_pid_env));
-        }
-        else
-        {
-            ROCPROF_ROOT_PID = getpid();
-            setenv("ROCPROF_ROOT_PID", std::to_string(ROCPROF_ROOT_PID).c_str(), 0);
-        }
-
-        // Spawn finalization worker in ALL processes (parent and children).
-        // On the bad path (signal handlers enabled), every process needs to
-        // flush its own profiling data async-signal-safely via a worker thread.
         auto& sw   = get_signal_worker();
         sw.eventfd = eventfd(0, EFD_CLOEXEC);
         if(sw.eventfd >= 0) sw.thread = std::thread{signal_finalization_worker};
@@ -4902,8 +4880,7 @@ rocprofv3_main(int argc, char** argv, char** envp)
             atfork_registered = true;
             pthread_atfork(nullptr, nullptr, []() {
                 // Child handler: reset stale state and spawn a fresh worker.
-                get_signal_worker(true);
-                auto& child_sw   = get_signal_worker();
+                auto& child_sw   = get_signal_worker(true);
                 child_sw.eventfd = eventfd(0, EFD_CLOEXEC);
                 if(child_sw.eventfd >= 0) child_sw.thread = std::thread{signal_finalization_worker};
             });
