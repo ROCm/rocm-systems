@@ -488,6 +488,7 @@ if(BUILD_TESTS)
       PluginCompatV10_test.cpp
       PluginCompatV11_test.cpp
       ProxyTests.cpp
+      PatAlgorithmTests.cpp
       RcclWrapTests.cpp
       SocketPollTests.cpp
       TransportTests.cpp
