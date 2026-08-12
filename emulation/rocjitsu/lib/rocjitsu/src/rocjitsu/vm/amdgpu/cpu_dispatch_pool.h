@@ -15,12 +15,16 @@
 #include <cstdint>
 #include <exception>
 #include <mutex>
+#include <optional>
 #include <span>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class CpuDispatchPoolTestAccess;
 
 /// @brief Pool of host threads executing one functional quantum per active CU.
 ///
@@ -36,13 +40,7 @@ namespace amdgpu {
 /// scaling from collapsing into lock contention when many short quanta retire.
 class CpuDispatchPool {
 public:
-  explicit CpuDispatchPool(uint32_t threads) {
-    threads = std::max(threads, 1u);
-    uint32_t worker_count = threads > 1 ? threads - 1 : 0;
-    workers_.reserve(worker_count);
-    for (uint32_t i = 0; i < worker_count; ++i)
-      workers_.emplace_back([this](std::stop_token stop) { worker_loop(stop); });
-  }
+  explicit CpuDispatchPool(uint32_t threads) : CpuDispatchPool(threads, std::nullopt) {}
 
   ~CpuDispatchPool() {
     {
@@ -62,6 +60,8 @@ public:
   FunctionalQuantumResult run(std::span<ComputeUnitCore *> tasks, uint32_t threads) {
     if (tasks.empty())
       return {};
+
+    std::lock_guard<std::mutex> run_lock(run_mutex_);
 
     threads = std::clamp<uint32_t>(threads, 1, static_cast<uint32_t>(tasks.size()));
     uint32_t worker_goal =
@@ -108,6 +108,18 @@ public:
   }
 
 private:
+  friend class CpuDispatchPoolTestAccess;
+
+  CpuDispatchPool(uint32_t threads, std::optional<uint32_t> fail_after) {
+    threads = std::max(threads, 1u);
+    uint32_t worker_count = threads > 1 ? threads - 1 : 0;
+    workers_.reserve(worker_count);
+    for (uint32_t i = 0; i < worker_count; ++i) {
+      if (fail_after && i == *fail_after)
+        throw std::runtime_error("injected worker construction failure");
+      workers_.emplace_back([this](std::stop_token stop) { worker_loop(stop); });
+    }
+  }
   /// @brief Claim and execute CUs until the task queue is drained.
   ///
   /// Lock-free: each claim is one atomic fetch_add; the last completion wakes
@@ -140,9 +152,7 @@ private:
   void worker_loop(std::stop_token stop) {
     while (true) {
       std::unique_lock<std::mutex> lock(mutex_);
-      work_cv_.wait(lock, [this, &stop]() {
-        return stopping_ || stop.stop_requested() || worker_tickets_ != 0;
-      });
+      work_cv_.wait(lock, stop, [this]() { return stopping_ || worker_tickets_ != 0; });
       if (stopping_ || stop.stop_requested())
         return;
       --worker_tickets_;
@@ -160,8 +170,9 @@ private:
     }
   }
 
+  std::mutex run_mutex_;
   std::mutex mutex_;
-  std::condition_variable work_cv_;
+  std::condition_variable_any work_cv_;
   std::condition_variable done_cv_;
   std::vector<std::jthread> workers_;
   std::vector<ComputeUnitCore *> tasks_;

@@ -15,6 +15,17 @@
 #include <string>
 #include <vector>
 
+namespace rocjitsu::amdgpu {
+
+class CpuDispatchPoolTestAccess {
+public:
+  static void construct_with_failure(uint32_t threads, uint32_t fail_after) {
+    CpuDispatchPool pool(threads, fail_after);
+  }
+};
+
+} // namespace rocjitsu::amdgpu
+
 namespace {
 
 using namespace rocjitsu;
@@ -105,6 +116,12 @@ TEST(CpuDispatchPoolTest, DestroyJoinsParkedWorkers) {
     amdgpu::CpuDispatchPool pool(/*threads=*/8);
     EXPECT_EQ(pool.thread_count(), 8u);
   }
+}
+
+TEST(CpuDispatchPoolTest, PartialConstructionJoinsParkedWorkers) {
+  EXPECT_THROW(amdgpu::CpuDispatchPoolTestAccess::construct_with_failure(/*threads=*/8,
+                                                                         /*fail_after=*/2),
+               std::runtime_error);
 }
 
 } // namespace

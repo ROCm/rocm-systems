@@ -23,6 +23,7 @@
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -93,7 +94,8 @@ enum class SdmaPacketDialect {
 /// not on global CU idle. Signals fire in per-queue submission order.
 class CommandProcessor : public simdojo::Component {
 public:
-  explicit CommandProcessor(std::string name);
+  explicit CommandProcessor(std::string name,
+                            simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL);
   ~CommandProcessor() override;
 
   void set_memory(GpuMemory *mem) { memory_ = mem; }
@@ -112,6 +114,7 @@ public:
   SdmaPacketDialect sdma_packet_dialect() const { return sdma_packet_dialect_; }
   /// @brief Configure launch and packet behavior derived from the GPU architecture.
   void configure_for_arch(rj_code_arch_t arch);
+  void set_shared_dispatch_pool(CpuDispatchPool *pool);
   void set_dispatch_threads(uint32_t threads);
   uint32_t dispatch_threads() const { return dispatch_threads_; }
   /// @brief Update doorbell_base for all queues belonging to a process.
@@ -259,6 +262,7 @@ private:
   void process_queues();
 
   bool has_active_cus() const;
+  FunctionalQuantumResult run_active_cus_once();
 
   /// @brief Called from CU on_idle callback. In functional mode with quantum>0,
   /// checks for stalled dispatches that can resume.
@@ -322,7 +326,11 @@ private:
   SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
   uint32_t next_dispatch_id_ = 1;
   size_t total_dispatched_ = 0;
+  simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   uint32_t dispatch_threads_ = 1;
+  CpuDispatchPool *shared_dispatch_pool_ = nullptr;
+  std::unique_ptr<CpuDispatchPool> local_dispatch_pool_;
+  std::vector<ComputeUnitCore *> active_cu_scratch_;
 
   struct ClusterWorkgroupPlacement {
     ComputeUnitCore *cu = nullptr;
