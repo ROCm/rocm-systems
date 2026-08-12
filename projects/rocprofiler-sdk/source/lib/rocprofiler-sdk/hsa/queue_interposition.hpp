@@ -306,10 +306,13 @@ void
 interposition_fini();
 
 /**
- * @brief Wait for all in-flight signal handlers to complete and clean up resources
+ * @brief Wait, bounded, for in-flight completions to retire
  *
- * This should be called during shutdown to ensure that any pending doorbell
- * processing is completed and that the signal pool is cleaned up.
+ * Leaves the monitor running, so it is safe on paths where the SDK keeps operating
+ * (context stop, code-object unload). Returns without waiting if the monitor is not
+ * running or if called from a completion callback, which runs on the monitor thread and
+ * so cannot wait for itself. The wait is bounded in every case and warns on expiry
+ * rather than hanging.
  */
 void
 interposition_sync();
@@ -317,10 +320,12 @@ interposition_sync();
 /**
  * @brief Stop and join the completion-monitor thread, sweeping any stragglers
  *
- * Clears the running flag, wakes the monitor, joins it, waits for any producer still
- * in the doorbell path to finish, and runs completion for any entry they leave behind
- * so pooled signals / correlation-id refs are released. Must be called before the
- * signal pool is torn down so the sweep's releases target a live pool.
+ * Closes the producer admission gate, wakes the monitor, joins it, then waits (bounded)
+ * for any producer still in the doorbell path to leave it and retires whatever they left
+ * behind so pooled signals and correlation-id references are released. Must be called
+ * before the signal pool is torn down so those releases target a live pool. A batch whose
+ * completion signal never dropped is released without emitting a dispatch record: its
+ * timestamps live in that signal and were never written.
  */
 void
 stop_completion_monitor();
@@ -328,11 +333,11 @@ stop_completion_monitor();
 /**
  * @brief Signal that global finalization has begun
  *
- * Sets a one-way "global shutdown" flag (distinct from the transient per-client
- * finalizer state) that drain_completion_monitor honors to bound its otherwise
- * unbounded wait: at global shutdown an in-flight dependency may never resolve, and
- * stop_completion_monitor's bounded sweep is the authoritative flush. Must be called
- * before the finalize-path drain, and only on the true global-teardown path.
+ * Moves the monitor to a draining state, distinct from the transient per-client finalizer
+ * state. The monitor keeps running and keeps retiring completions; only the grace period
+ * a drain is willing to wait shortens, because at global shutdown an in-flight dependency
+ * may never resolve and stop_completion_monitor's sweep is the authoritative flush. Must
+ * be called before the finalize-path drain, and only on the true global-teardown path.
  */
 void
 request_completion_monitor_shutdown();
