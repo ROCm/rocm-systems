@@ -707,18 +707,18 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
 hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
   hsa_status_t ret = rocr::os::DmaBufClose(&handle->dmabuf_fd);
 
+  // Attempt every release even if an earlier one fails, so a failure to free the imported BO
+  // does not leak the KFD allocation retained by CreateShareableHandle.
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
-  if (memhandle != nullptr) {
-    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(memhandle));
-    if (status != HSAKMT_STATUS_SUCCESS) {
-      return HSA_STATUS_ERROR;
-    }
+  if (memhandle != nullptr &&
+      HSAKMT_CALL(hsaKmtMemHandleFree(memhandle)) != HSAKMT_STATUS_SUCCESS) {
+    ret = HSA_STATUS_ERROR;
   }
 
   // Release the KFD allocation retained by CreateShareableHandle, if any.
   if (handle->vaddr != nullptr &&
       HSAKMT_CALL(hsaKmtFreeMemory(handle->vaddr, handle->size)) != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
+    ret = HSA_STATUS_ERROR;
   }
 
   *handle = {};
