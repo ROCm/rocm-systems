@@ -6,7 +6,7 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/relocation_function_table.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 
 #include <gtest/gtest.h>

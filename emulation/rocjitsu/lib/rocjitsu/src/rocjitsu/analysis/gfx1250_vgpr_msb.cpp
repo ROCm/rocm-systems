@@ -4,7 +4,7 @@
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 
 #include "rocjitsu/code/basic_block.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 

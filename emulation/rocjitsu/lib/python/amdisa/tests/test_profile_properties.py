@@ -13,6 +13,7 @@ from amdisa.codegen._generator import (
     _ImplOutputs,
     _SourceImplUnit,
 )
+from amdisa.codegen.config import CodegenConfig
 from amdisa.__main__ import _detect_profile
 from amdisa.gpuisa import InstEncoding, Instruction, MicrocodeField
 from amdisa.isa_properties_codegen import emit_isa_properties
@@ -225,7 +226,7 @@ def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
     generated = emit_isa_properties(str(tmp_path), specs).read_text()
     checked_in = (
         Path(__file__).resolve().parents[3]
-        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/isa_properties.h'
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h'
     ).read_text()
 
     assert generated == checked_in
@@ -270,6 +271,7 @@ def test_gfx1250_instruction_execution_backend_is_dense_and_scoped(tmp_path):
     generator = object.__new__(CodeGenerator)
     generator.out_path = str(tmp_path)
     generator.isa_spec = SimpleNamespace(arch_name='gfx1250', profile=Gfx1250Profile())
+    generator.config = CodegenConfig()
     generator._split_execution_classes = ['FirstInstruction', 'SecondInstruction']
 
     generator.gen_execution_backend()
@@ -456,6 +458,10 @@ class TestRdna3Profile:
     def test_has_vopd3_false(self):
         assert self.p.has_vopd3 is False
 
+    def test_vopd_slot_opcodes(self):
+        assert self.p.vopd_x_slot_opcodes == frozenset(range(14))
+        assert self.p.vopd_y_slot_opcodes == frozenset((*range(14), 16, 17, 18))
+
     def test_operand_read64_zero_extends_simm32_literal(self, tmp_path):
         generator = CodeGenerator(
             SimpleNamespace(
@@ -513,6 +519,18 @@ class TestGfx1250Profile:
 
     def test_has_vopd3(self):
         assert self.p.has_vopd3 is True
+
+    def test_vopd_slot_opcodes(self):
+        assert self.p.vopd_x_slot_opcodes == frozenset(range(12))
+        assert self.p.vopd_y_slot_opcodes == frozenset(
+            (*range(12), 16, 17, *range(20, 25))
+        )
+        assert self.p.vopd3_x_slot_opcodes == frozenset(
+            (0, *range(3, 12), 16, 17, *range(19, 23), *range(32, 37))
+        )
+        assert self.p.vopd3_y_slot_opcodes == frozenset(
+            (0, *range(3, 12), *range(16, 25))
+        )
 
     def test_generated_arch_name(self):
         assert self.p.generated_arch_name == 'gfx1250'

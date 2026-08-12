@@ -15,16 +15,16 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/config_loader.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
@@ -46,6 +46,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
 
+#include "halt_snapshot_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
@@ -54,7 +55,11 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <barrier>
 #include <bit>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <format>
@@ -65,13 +70,32 @@ RJ_DIAGNOSTIC_POP
 #include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <vector>
+
+#if defined(__linux__)
+#include <unistd.h>
+#endif
+
+namespace rocjitsu::test {
+
+class ExecutionPluginGroupTestAccess {
+public:
+  static uint64_t callback_lock_acquisitions(const ExecutionPluginGroup &group) {
+    return group.callback_lock_acquisitions_;
+  }
+};
+
+} // namespace rocjitsu::test
 
 namespace {
 
 using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
+
+static_assert(std::is_final_v<ExecutionPluginGroup>);
+static_assert(!std::is_polymorphic_v<ExecutionPluginGroup>);
 using namespace rocjitsu::plugins::race_detector;
 
 static_assert(!std::is_default_constructible_v<ExecutionPluginGroup>);
@@ -337,6 +361,151 @@ public:
 private:
   std::vector<std::string> &events_;
 };
+
+class ParallelSafePlugin final : public ExecutionPlugin {
+public:
+  ParallelSafePlugin() : ExecutionPlugin("parallel_safe") {}
+  bool requires_serial_hot_hooks() const override { return false; }
+};
+
+class SerialHotHookPlugin final : public ExecutionPlugin {
+public:
+  SerialHotHookPlugin() : ExecutionPlugin("serial_hot_hook") {}
+  bool requires_serial_hot_hooks() const override { return true; }
+};
+
+class OverlapProbe {
+public:
+  void observe() {
+    const int current = active_.fetch_add(1, std::memory_order_relaxed) + 1;
+    int observed = max_active_.load(std::memory_order_relaxed);
+    while (current > observed &&
+           !max_active_.compare_exchange_weak(observed, current, std::memory_order_relaxed)) {
+    }
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (current == 1) {
+      first_entered_ = true;
+      cv_.notify_all();
+      cv_.wait(lock, [&]() { return release_first_; });
+    } else {
+      overlap_observed_ = true;
+      cv_.notify_all();
+    }
+    active_.fetch_sub(1, std::memory_order_relaxed);
+  }
+
+  bool wait_for_first(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return cv_.wait_for(lock, timeout, [&]() { return first_entered_; });
+  }
+
+  bool wait_for_overlap(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return cv_.wait_for(lock, timeout, [&]() { return overlap_observed_; });
+  }
+
+  void release_first() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    release_first_ = true;
+    cv_.notify_all();
+  }
+
+  int max_active() const { return max_active_.load(std::memory_order_relaxed); }
+
+private:
+  std::atomic<int> active_{0};
+  std::atomic<int> max_active_{0};
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  bool first_entered_ = false;
+  bool overlap_observed_ = false;
+  bool release_first_ = false;
+};
+
+class ConcurrencyProbePlugin final : public ExecutionPlugin {
+public:
+  explicit ConcurrencyProbePlugin(bool serialize_hot_hooks)
+      : ExecutionPlugin("concurrency_probe"), serialize_hot_hooks_(serialize_hot_hooks) {}
+
+  bool requires_serial_hot_hooks() const override { return serialize_hot_hooks_; }
+
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { hot_probe_.observe(); }
+
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { cold_probe_.observe(); }
+
+  OverlapProbe &hot_probe() { return hot_probe_; }
+  OverlapProbe &cold_probe() { return cold_probe_; }
+
+private:
+  bool serialize_hot_hooks_;
+  OverlapProbe hot_probe_;
+  OverlapProbe cold_probe_;
+};
+
+class CrossHookConcurrencyProbePlugin final : public ExecutionPlugin {
+public:
+  explicit CrossHookConcurrencyProbePlugin(bool serialize_hot_hooks)
+      : ExecutionPlugin("cross_hook_concurrency_probe"), serialize_hot_hooks_(serialize_hot_hooks) {
+  }
+
+  bool requires_serial_hot_hooks() const override { return serialize_hot_hooks_; }
+
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { probe_.observe(); }
+
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { probe_.observe(); }
+
+  OverlapProbe &probe() { return probe_; }
+
+private:
+  bool serialize_hot_hooks_;
+  OverlapProbe probe_;
+};
+
+struct OverlapResult {
+  bool first_entered;
+  bool overlap_observed;
+};
+
+template <typename FirstCallback, typename SecondCallback>
+OverlapResult run_staged_callbacks(OverlapProbe &probe, std::chrono::milliseconds overlap_timeout,
+                                   FirstCallback first_callback, SecondCallback second_callback) {
+  std::thread first(first_callback);
+  const bool first_entered = probe.wait_for_first(std::chrono::seconds(5));
+  if (!first_entered) {
+    probe.release_first();
+    first.join();
+    return {false, false};
+  }
+
+  std::thread second(second_callback);
+  const bool overlap_observed = probe.wait_for_overlap(overlap_timeout);
+  probe.release_first();
+  first.join();
+  second.join();
+  return {true, overlap_observed};
+}
+
+template <typename Callback>
+OverlapResult run_staged_threads(OverlapProbe &probe, std::chrono::milliseconds overlap_timeout,
+                                 Callback callback) {
+  return run_staged_callbacks(probe, overlap_timeout, callback, callback);
+}
+
+template <typename Callback> void run_two_threads(Callback callback) {
+  std::barrier start(3);
+  std::thread first([&]() {
+    start.arrive_and_wait();
+    callback();
+  });
+  std::thread second([&]() {
+    start.arrive_and_wait();
+    callback();
+  });
+  start.arrive_and_wait();
+  first.join();
+  second.join();
+}
 
 class MfmaRacePlugin : public ExecutionPlugin {
 public:
@@ -711,6 +880,161 @@ TEST(ExecutionPluginTest, NoPluginNoCrash) {
   const uint32_t code[] = {S_NOP, S_ENDPGM};
   f.run_kernel(code, 2);
 }
+
+TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  EXPECT_FALSE(group.requires_serial_hot_hooks());
+
+  ASSERT_TRUE(group.add(std::make_unique<ParallelSafePlugin>()));
+  EXPECT_FALSE(group.requires_serial_hot_hooks());
+
+  ASSERT_TRUE(group.add(std::make_unique<OrderingPlugin>()));
+  EXPECT_FALSE(group.requires_serial_hot_hooks());
+
+  ASSERT_TRUE(group.add(std::make_unique<SerialHotHookPlugin>()));
+  EXPECT_TRUE(group.requires_serial_hot_hooks());
+}
+
+TEST(ExecutionPluginTest, InfrequentHooksSerializeAtGroupBoundary) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto probe = std::make_unique<ConcurrencyProbePlugin>(false);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+
+  const auto result = run_staged_threads(probe_ptr->cold_probe(), std::chrono::milliseconds(20),
+                                         [&]() { group.onAmdgpuWorkgroupCompleted(0, 0); });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_FALSE(result.overlap_observed);
+  EXPECT_EQ(probe_ptr->cold_probe().max_active(), 1);
+}
+
+TEST(ExecutionPluginTest, HighFrequencyHooksRunConcurrentlyByDefault) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto probe = std::make_unique<ConcurrencyProbePlugin>(false);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+  ASSERT_FALSE(group.requires_serial_hot_hooks());
+
+  const auto result = run_staged_threads(probe_ptr->hot_probe(), std::chrono::seconds(5),
+                                         [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_TRUE(result.overlap_observed);
+  EXPECT_EQ(probe_ptr->hot_probe().max_active(), 2);
+}
+
+TEST(ExecutionPluginTest, HighFrequencyHooksHonorSerialOptIn) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto probe = std::make_unique<ConcurrencyProbePlugin>(true);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+  ASSERT_TRUE(group.requires_serial_hot_hooks());
+
+  const auto result = run_staged_threads(probe_ptr->hot_probe(), std::chrono::milliseconds(20),
+                                         [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_FALSE(result.overlap_observed);
+  EXPECT_EQ(probe_ptr->hot_probe().max_active(), 1);
+}
+
+TEST(ExecutionPluginTest, InfrequentAndHighFrequencyHooksMayOverlapByDefault) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto probe = std::make_unique<CrossHookConcurrencyProbePlugin>(false);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+  ASSERT_FALSE(group.requires_serial_hot_hooks());
+
+  const auto result = run_staged_callbacks(
+      probe_ptr->probe(), std::chrono::seconds(5),
+      [&]() { group.onAmdgpuWorkgroupCompleted(0, 0); },
+      [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_TRUE(result.overlap_observed);
+  EXPECT_EQ(probe_ptr->probe().max_active(), 2);
+}
+
+TEST(ExecutionPluginTest, SerialHotHookOptInPreventsInfrequentAndHighFrequencyOverlap) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto probe = std::make_unique<CrossHookConcurrencyProbePlugin>(true);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+  ASSERT_TRUE(group.requires_serial_hot_hooks());
+
+  const auto result = run_staged_callbacks(
+      probe_ptr->probe(), std::chrono::milliseconds(20),
+      [&]() { group.onAmdgpuWorkgroupCompleted(0, 0); },
+      [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_FALSE(result.overlap_observed);
+  EXPECT_EQ(probe_ptr->probe().max_active(), 1);
+}
+
+TEST(ExecutionPluginTest, EmptyGroupDispatchBypassesCallbackLock) {
+  auto group = ExecutionPluginGroup::empty_group();
+  ASSERT_TRUE(group->empty());
+  const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(*group);
+
+  run_two_threads([&]() {
+    for (int i = 0; i < 10000; ++i) {
+      group->onInit();
+      group->onAmdgpuReadSgpr(nullptr, 0);
+      group->onAmdgpuWorkgroupCompleted(0, 0);
+    }
+  });
+
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(*group), before);
+
+  ExecutionPluginGroup non_empty_group(PluginSinkConfig{});
+  ASSERT_TRUE(non_empty_group.add(std::make_unique<ExecutionPlugin>("no-op")));
+  const uint64_t non_empty_before =
+      test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(non_empty_group);
+  non_empty_group.onInit();
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(non_empty_group),
+            non_empty_before + 1);
+}
+
+int run_serial_hot_hook_halt_snapshot() {
+  PluginFixture f;
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  if (!f.plugin_group_->add(std::make_unique<SerialHotHookPlugin>()))
+    return 1;
+
+  auto snapshot = std::make_unique<test::HaltSnapshotPlugin>();
+  auto *snapshot_ptr = snapshot.get();
+  if (!f.plugin_group_->add(std::move(snapshot)))
+    return 2;
+  f.soc->set_plugin_group(f.plugin_group_);
+
+  const uint32_t code[] = {S_ENDPGM};
+  f.run_kernel(code, 1);
+
+  if (snapshot_ptr->snapshots().size() != 1u)
+    return 3;
+  if (snapshot_ptr->snapshots().front().sgprs.empty())
+    return 4;
+  if (snapshot_ptr->snapshots().front().vgprs.empty())
+    return 5;
+  return 0;
+}
+
+#if GTEST_HAS_DEATH_TEST && defined(__linux__)
+TEST(ExecutionPluginDeathTest, SerialHotHooksAllowRegisterReadsFromHaltHook) {
+  ASSERT_EXIT(
+      {
+        alarm(5);
+        _exit(run_serial_hot_hook_halt_snapshot());
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+#else
+TEST(ExecutionPluginTest, SerialHotHooksAllowRegisterReadsFromHaltHook) {
+  EXPECT_EQ(run_serial_hot_hook_halt_snapshot(), 0);
+}
+#endif
 
 TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
   if constexpr (!util::has_stdx_simd) {

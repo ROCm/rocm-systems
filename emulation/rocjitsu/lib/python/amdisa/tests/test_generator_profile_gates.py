@@ -15,6 +15,7 @@ from amdisa.__main__ import (
     _unshared_execute_keys_from_variants,
 )
 from amdisa.codegen import CodeGenerator
+from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
     gen_vector_mad_64_32,
@@ -67,7 +68,7 @@ def rocjitsu_source_root() -> Path:
 
 
 @pytest.fixture
-def amdgpu_generated_root(rocjitsu_source_root: Path) -> Path:
+def amdgpu_root(rocjitsu_source_root: Path) -> Path:
     return (
         rocjitsu_source_root
         / 'lib'
@@ -78,6 +79,11 @@ def amdgpu_generated_root(rocjitsu_source_root: Path) -> Path:
         / 'arch'
         / 'amdgpu'
     )
+
+
+@pytest.fixture
+def amdgpu_generated_root(amdgpu_root: Path) -> Path:
+    return amdgpu_root / 'generated'
 
 
 @pytest.fixture
@@ -235,6 +241,7 @@ def _execution_source_path(path: Path) -> Path:
 
 
 def test_gfx1250_model_sources_do_not_include_execution_headers(
+    amdgpu_root: Path,
     gfx1250_generated_root: Path,
 ):
     forbidden_includes = (
@@ -242,7 +249,7 @@ def test_gfx1250_model_sources_do_not_include_execution_headers(
         '#include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"',
         '#include "rocjitsu/isa/arch/amdgpu/gfx1250/mma_exec.h"',
         '#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"',
-        '#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"',
+        '#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"',
         '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"',
         '#include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"',
     )
@@ -258,10 +265,14 @@ def test_gfx1250_model_sources_do_not_include_execution_headers(
         for forbidden in forbidden_includes:
             assert forbidden not in source, f'{path.name} includes {forbidden}'
 
-    for header_name in ('isa.h', 'operand.h', 'encodings.h'):
+    for header_name in ('operand.h', 'encodings.h'):
         header = (gfx1250_generated_root / header_name).read_text()
         assert '#include "rocjitsu/vm/' not in header
         assert 'shared/dpp_sdwa_ops.h' not in header
+
+    isa_header = (amdgpu_root / 'gfx1250' / 'isa.h').read_text()
+    assert '#include "rocjitsu/vm/' not in isa_header
+    assert 'shared/dpp_sdwa_ops.h' not in isa_header
 
 
 def test_gfx1250_model_include_graph_does_not_reach_vm(
@@ -2142,6 +2153,35 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     assert 'src0.clear_delegate();' not in body
 
 
+def test_generated_dpp8_disassembly_uses_encoding_state(
+    amdgpu_generated_root: Path,
+) -> None:
+    for arch in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'gfx1250'):
+        encodings_cpp = (amdgpu_generated_root / arch / 'encodings.cpp').read_text()
+        encodings_h = (amdgpu_generated_root / arch / 'encodings.h').read_text()
+        generated_cpp = '\n'.join(
+            path.read_text() for path in (amdgpu_generated_root / arch).glob('*.cpp')
+        )
+
+        vop1_modifiers = encodings_cpp[
+            encodings_cpp.index('void Vop1::build_modifiers') :
+        ]
+        vop1_modifiers = vop1_modifiers[: vop1_modifiers.index('\n\n')]
+
+        assert 'append_dpp8_disassembly' in encodings_cpp
+        assert 'auto *inst = &inst_;' not in vop1_modifiers
+        for class_name in ('Vop1', 'Vop2', 'Vopc', 'Vop3', 'Vop3p', 'Vop3SdstEnc'):
+            class_match = re.search(
+                rf'class {class_name}\b.*?\n}};', encodings_h, flags=re.DOTALL
+            )
+            assert class_match is not None
+            assert 'owned_mnemonic_' not in class_match.group()
+        assert 'dpp8_mnemonic' not in generated_cpp
+        assert re.search(r'\? "v_add_f16_dpp"\s*: "v_add_f16_e32"', generated_cpp)
+        if arch not in ('rdna1', 'rdna2'):
+            assert re.search(r'"v_rcp_f16_e64_dpp"\s*: "v_rcp_f16"', generated_cpp)
+
+
 def test_generated_sdwa_uses_shared_source_staging(
     amdgpu_generated_root: Path,
 ) -> None:
@@ -2899,17 +2939,23 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     assert '((amdgpu::vop3_opsel(inst_) & 0x1u) << 1)' not in body
 
 
-def test_generated_execute_shared_calls_have_definitions(amdgpu_generated_root: Path):
+def test_generated_execute_shared_calls_have_definitions(
+    amdgpu_root: Path, amdgpu_generated_root: Path
+):
     import re
 
     definitions = set()
-    for path in (amdgpu_generated_root / 'shared').glob('*.h'):
-        definitions.update(
-            re.findall(
-                r'(?:inline\s+)?void\s+(execute_[A-Za-z0-9_]+)\s*\(',
-                path.read_text(),
+    for shared_root in (
+        amdgpu_root / 'shared',
+        amdgpu_generated_root / 'shared',
+    ):
+        for path in shared_root.glob('*.h'):
+            definitions.update(
+                re.findall(
+                    r'(?:inline\s+)?void\s+(execute_[A-Za-z0-9_]+)\s*\(',
+                    path.read_text(),
+                )
             )
-        )
 
     missing = []
     for path in amdgpu_generated_root.rglob('*.cpp'):
@@ -2938,6 +2984,14 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
 
     assert codegen._supports_gfx1250_scaled_wmma_vop3px2()
     assert 'VWmmaScaleF32Vop3px2' in (codegen._emit_gfx1250_scaled_wmma_vop3px2_class())
+    model_impl = ' '.join(
+        codegen._emit_gfx1250_scaled_wmma_vop3px2_impls().model[0].split()
+    )
+    assert (
+        'reinterpret_cast<const OpEncoding *>(inst + 2), '
+        'selected_exec_fn(0), 3, Vop3p::ExtensionDecodePolicy::Skip),'
+    ) in model_impl
+
     helpers = codegen._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers()
     assert 'isVop3pOp' in helpers
     assert 'isWmmaScaleF32Vop3px2' not in helpers
@@ -2989,6 +3043,38 @@ def test_vopd_dispatch_uses_primary_decode_table(
     assert 'Decoder::decodeVopd(const MachineInst *opcode)' in decoder
     assert 'is_vopd' not in (arch_root / 'vopd.h').read_text()
     assert 'is_vopd' not in (arch_root / 'vopd.cpp').read_text()
+
+
+def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
+    gfx1250_generated_root: Path,
+):
+    encodings_h = (gfx1250_generated_root / 'encodings.h').read_text()
+    encodings_cpp = (gfx1250_generated_root / 'encodings.cpp').read_text()
+    vop3p_cpp = ' '.join((gfx1250_generated_root / 'vop3p.cpp').read_text().split())
+
+    assert 'enum class ExtensionDecodePolicy { Decode, Skip };' in encodings_h
+    assert 'int num_encoded_sources = 3' in encodings_h
+    assert (
+        'ExtensionDecodePolicy extension_policy = ExtensionDecodePolicy::Decode'
+        in encodings_h
+    )
+
+    constructor = _generated_constructor_body(encodings_cpp, 'Vop3p')
+    guard = 'if (extension_policy == ExtensionDecodePolicy::Decode) {'
+    guarded_suffix = constructor.split(guard, 1)[1]
+    guarded_body, constructor_suffix = guarded_suffix.rsplit('\n  }\n}', 1)
+    assert not constructor_suffix.strip()
+    for extension_step in (
+        'throw util::InvalidInst("Vop3p does not support Literal64", "")',
+        'has_lit_0()',
+        'inst_.src0 == amdgpu::SRC_DPP',
+        'amdgpu::dpp::is_src_dpp8(inst_.src0)',
+        'std::memcpy(raw_words_.data(), inst, size_)',
+        'raw_encoding_ = raw_words_.data()',
+    ):
+        assert extension_step in guarded_body
+
+    assert 'selected_exec_fn(1250), 3, Vop3p::ExtensionDecodePolicy::Skip)' in vop3p_cpp
 
 
 @pytest.mark.parametrize(
@@ -3133,6 +3219,7 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
         operand_types={'OPR_SRC_SIMPLE'},
     )
     codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
 
     codegen.gen_vopd()
     cpp = (tmp_path / 'gfx1250' / 'vopd.cpp').read_text()
@@ -3148,6 +3235,11 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'make_src0(y_bits, true, false, 0, srcy0)' in cpp
     assert 'make_src0(x_bits, false, has_literal_, literal_, srcx0)' in cpp
     assert 'make_src0(y_bits, false, has_literal_, literal_, srcy0)' in cpp
+    assert 'if (!is_valid_opcode(opx_, kVopdXOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opy_, kVopdYOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opx_, kVopd3XOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opy_, kVopd3YOpcodeMask))' in cpp
+    assert 'if (vdstx < y_end && vdsty < x_end)' in cpp
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' in exec_cpp
     src_neg_start = exec_cpp.index('bool Vopd::uses_src_neg_modifier')
@@ -3194,6 +3286,7 @@ def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
         operand_types={'OPR_SRC'},
     )
     codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
 
     codegen.gen_vopd()
     cpp = (tmp_path / 'rdna4' / 'vopd.cpp').read_text()
@@ -3232,6 +3325,7 @@ def test_rdna3_and_rdna35_vopd_generation_matches_common_profile(tmp_path):
             operand_types={'OPR_SRC'},
         )
         codegen.out_path = str(tmp_path)
+        codegen.config = CodegenConfig()
 
         codegen.gen_vopd()
         generated[arch_name] = (tmp_path / arch_name / 'vopd.cpp').read_text()
@@ -3260,6 +3354,7 @@ def test_gfx1250_vopd_uses_plain_src_when_simple_src_operand_is_absent(tmp_path)
         operand_types={'OPR_SRC'},
     )
     codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
 
     codegen.gen_vopd()
     cpp = (tmp_path / 'gfx1250' / 'vopd.cpp').read_text()
@@ -3466,7 +3561,9 @@ def test_gfx1250_buffer_u64_atomic_payload_width_uses_two_dwords():
     assert 'data_base + 1' in body
 
 
-def test_ev124_125_arch_gating_in_generated_operand(amdgpu_generated_root: Path):
+def test_ev124_125_arch_gating_in_generated_operand(
+    amdgpu_root: Path, amdgpu_generated_root: Path
+):
     # M0 is encoded as 125 on RDNA3+ (and gfx1250) and as 124 on the
     # older RDNA1/2 and all CDNA arches. Verify the generated operand.cpp
     # carries the correct kM0EncodingValue constant for each ISA.
@@ -3498,9 +3595,7 @@ def test_ev124_125_arch_gating_in_generated_operand(amdgpu_generated_root: Path)
     # scalar_operand_resolve.h rather than emitted per-arch, so verify the gating
     # there: encoding value 124 is the NULL slot when M0 is 125, and the operand
     # matching the arch's M0 encoding reads M0.
-    shared_resolve = (
-        amdgpu_generated_root / 'shared' / 'scalar_operand_resolve.h'
-    ).read_text()
+    shared_resolve = (amdgpu_root / 'shared' / 'scalar_operand_resolve.h').read_text()
     assert 'if (m0_ev == 125 && ev == 124)\n    return 0u; // NULL' in shared_resolve
     assert 'if (ev == m0_ev)\n    return wf.m0();' in shared_resolve
 

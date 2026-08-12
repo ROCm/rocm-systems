@@ -1120,7 +1120,7 @@ rocprofsys_finalize_hidden(void)
     // if they are still running (e.g. thread-pool still alive), the
     // thread-specific data will be wrong if try to stop them from
     // the main thread.
-    auto _thr_verbose = (config::get_use_causal()) ? 1 : 0;
+    const bool _thr_verbose = config::get_use_causal() || config::get_verbose() > 0;
     if(thread_data<thread_bundle_t>::get())
     {
         for(auto& itr : *thread_data<thread_bundle_t>::get())
@@ -1131,7 +1131,7 @@ rocprofsys_finalize_hidden(void)
                 std::string _msg = itr->as_string();
                 auto        _pos = _msg.find(">>>  ");
                 if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-                if(_thr_verbose >= 0)
+                if(_thr_verbose)
                 {
                     LOG_INFO("{}", _msg);
                 }
