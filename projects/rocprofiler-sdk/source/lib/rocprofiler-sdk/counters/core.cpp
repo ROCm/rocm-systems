@@ -149,7 +149,7 @@ counter_callback_info::get_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& 
 
 namespace
 {
-// Best-effort enable/disable of the power-throttling lock (PTL) on all GPUs,
+// Best-effort enable/disable of the Peak Tops Limiter (PTL) on all GPUs,
 // toggled symmetrically around counter-collection start/stop.
 void
 set_dispatch_ptl(bool enable)
