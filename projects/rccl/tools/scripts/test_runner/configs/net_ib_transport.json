@@ -931,6 +931,38 @@
       "env_variables": {
         "NCCL_NET": "ib-cast"
       }
+    },
+    "net_ib_multithread_independent": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_IndependentSimpleSendRecv",
+          "description": "Independent worker connections concurrently execute one host-memory send/receive each",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "NetIB_MultiThread_IndependentSequentialTransfers",
+          "description": "Independent worker connections concurrently execute sequential host-memory transfers",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        }
+      ]
+    },
+    "net_ib_multithread_independent_2": {
+      "extends": "net_ib_multithread_independent",
+      "command_args": "--net_ib_nthreads=2"
+    },
+    "net_ib_multithread_independent_4": {
+      "extends": "net_ib_multithread_independent",
+      "command_args": "--net_ib_nthreads=4"
+    },
+    "net_ib_multithread_independent_16": {
+      "extends": "net_ib_multithread_independent",
+      "command_args": "--net_ib_nthreads=16"
     }
   },
   "test_suites": [
@@ -1184,6 +1216,24 @@
       "name": "NET IB-CAST - GIN DmaBuf",
       "description": "GIN plugin tests with dma-buf support",
       "config": "net_ib_cast_gin_dmabuf",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Independent Connections (2)",
+      "description": "2 worker threads/rank, each using an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent_2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Independent Connections (4)",
+      "description": "4 worker threads/rank, each using an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent_4",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Independent Connections (16)",
+      "description": "16 worker threads/rank, each using an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent_16",
       "enabled": true
     }
   ]
