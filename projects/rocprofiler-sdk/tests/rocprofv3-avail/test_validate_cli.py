@@ -28,6 +28,7 @@ import os
 import re
 import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 from collections import defaultdict, namedtuple
@@ -99,9 +100,14 @@ Device = namedtuple(
         "counters",
         "basic_counters",
         "collectable_counters",
+        "largest_block_counters",
         "spm_counters",
     ),
 )
+
+# A single hardware block exposes more countable events than it has physical
+# counters, so this many counters from one block cannot share a pass.
+INCOMPATIBLE_SET_SIZE = 24
 
 
 class Inventory:
@@ -262,6 +268,12 @@ def inventory(request):
         if info["type"] != 2:
             continue
         agent_counters = counters.get(handle, ())
+        by_block = defaultdict(list)
+        for counter in agent_counters:
+            if isinstance(counter, avail.basic_counter) and not _value(
+                counter.is_hw_constant
+            ):
+                by_block[str(counter.block)].append(counter.name)
         devices.append(
             Device(
                 handle=handle,
@@ -277,6 +289,9 @@ def inventory(request):
                     counter.name
                     for counter in agent_counters
                     if not _value(counter.is_hw_constant)
+                ),
+                largest_block_counters=tuple(
+                    sorted(max(by_block.values(), key=len)) if by_block else ()
                 ),
                 spm_counters=frozenset(
                     counter.name for counter in spm_counters.get(handle, ())
@@ -477,6 +492,13 @@ def test_supported_capability_views(commands, inventory, capability):
         detailed = commands.run_avail("info", "--spm")
         assert _listed_counters(listed.stdout, expected) == expected
         assert _info_counters(detailed.stdout) == expected
+
+        device = next(item for item in inventory.devices if item.spm_counters)
+        counter = sorted(device.spm_counters)[0]
+        filtered = commands.run_avail("-d", device.logical_id, "info", "--spm", counter)
+        assert _info_counters(filtered.stdout) == {
+            device.logical_id: frozenset({counter})
+        }
         return
 
     if capability == "pc-sampling":
@@ -569,6 +591,39 @@ def test_pmc_check_rejects_bad_input(commands, inventory, _name, arguments, erro
     assert "Traceback" not in combined
 
 
+def test_pmc_check_rejects_incompatible_set(commands, inventory):
+    device = next(
+        (
+            item
+            for item in inventory.devices
+            if len(item.largest_block_counters) >= INCOMPATIBLE_SET_SIZE
+        ),
+        None,
+    )
+    if device is None:
+        pytest.skip("No GPU block exposes enough counters to exceed its pass limit")
+    counters = device.largest_block_counters[:INCOMPATIBLE_SET_SIZE]
+    result = commands.run_avail(
+        "-d", device.logical_id, "pmc-check", *counters, check=False
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "not collected on agent" in result.stderr
+    assert SUCCESS_PREFIX not in combined
+    assert "Traceback" not in combined
+
+
+@pytest.mark.parametrize("scope", ("disabled-pmc", "unknown-device"))
+def test_avail_list_reports_nothing_outside_scope(commands, inventory, scope):
+    if scope == "disabled-pmc":
+        arguments = ("list", "--pmc", "false")
+    else:
+        unknown_device = max(item.logical_id for item in inventory.devices) + 1
+        arguments = ("-d", unknown_device, "list")
+    result = commands.run_avail(*arguments)
+    assert _gpu_sections(result.stdout) == []
+
+
 def test_help_and_bad_subcommand(commands):
     help_result = commands.run_avail()
     assert help_result.returncode == 0
@@ -598,9 +653,16 @@ def test_output_formatter_error_contract(commands):
     assert library.format_output_path(os.fsencode("path"), None, None) == 0
 
 
-def test_rocprofv3_list_avail_stdout(commands, inventory):
-    result = commands.run_rocprofv3("--list-avail")
+@pytest.mark.parametrize("flag", ("--list-avail", "-L"))
+def test_rocprofv3_list_avail_stdout(commands, inventory, flag):
+    result = commands.run_rocprofv3(flag)
     _assert_availability(result.stdout, inventory)
+
+
+def test_rocprofv3_list_avail_false_runs_application(commands, tmp_path):
+    result = commands.run_rocprofv3("-L", "false", "--", "/bin/true", cwd=tmp_path)
+    assert _info_counters(result.stdout) == {}
+    assert not list(tmp_path.rglob("*_list_avail.txt"))
 
 
 @pytest.mark.parametrize("routing", ("directory-only", "file-only", "placeholder-app"))
@@ -658,6 +720,41 @@ def test_rocprofv3_list_avail_output_routing(commands, inventory, tmp_path, rout
 
     assert sorted(cwd.rglob("*_list_avail.txt")) == [output_file]
     _assert_routed_output(result, output_file, inventory)
+
+
+def test_rocprofv3_list_avail_with_tracing(commands, inventory, request, tmp_path):
+    application = request.config.getoption("--transpose")
+    if not application or not Path(application).is_file():
+        pytest.skip("transpose application is unavailable")
+    output_directory = tmp_path / "traced"
+    commands.run_rocprofv3(
+        "--list-avail",
+        "--sys-trace",
+        "-d",
+        output_directory,
+        "-o",
+        "metrics",
+        "--",
+        application,
+        cwd=tmp_path,
+    )
+
+    availability = output_directory / "metrics_list_avail.txt"
+    _assert_availability(
+        availability.read_text(encoding="utf-8", errors="replace"), inventory
+    )
+
+    trace = output_directory / "metrics_results.db"
+    assert trace.is_file()
+    connection = sqlite3.connect(f"file:{trace}?mode=ro", uri=True)
+    try:
+        counts = [
+            connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("rocpd_kernel_dispatch", "rocpd_region")
+        ]
+    finally:
+        connection.close()
+    assert all(count > 0 for count in counts), f"empty trace tables: {counts}"
 
 
 def test_rocprofv3_list_avail_input_file(commands, inventory, tmp_path):
