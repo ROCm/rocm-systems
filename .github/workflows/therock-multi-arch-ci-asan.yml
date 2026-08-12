@@ -64,8 +64,9 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_variant: "asan"
-      # Only gfx94X has both a host-asan build variant and an ASAN sandbox test
-      # runner, so a pull_request trigger resolves to gfx94X regardless.
+      # Only applies to workflow_dispatch; a pull_request trigger starts from
+      # TheRock's presubmit family defaults and drops every family that has no
+      # host-asan variant, which leaves gfx94X either way.
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || 'test:hip-tests,test:rocrtst' }}
       # Runtime-only build: everything outside these two stages, math-libs
