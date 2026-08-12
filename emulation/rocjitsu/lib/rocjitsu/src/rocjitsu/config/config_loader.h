@@ -77,6 +77,8 @@ struct LoadedConfig {
   DbtGuestConfig dbt_guest;             ///< Optional DBT guest-GPU discovery config.
   uint32_t num_gpus = 1;                ///< Number of simulated GPU instances.
   std::vector<KfdDeviceConfig> devices; ///< Per-GPU configs (populated when num_gpus > 1).
+  uint32_t cpu_dispatch_threads = 0; ///< CP CU-dispatch pool size (0 = auto: HW threads, cap 32).
+  bool soc_dispatch = false;         ///< Consolidate cross-XCD dispatch onto each SoC's primary CP.
 
   /// @brief Return the SoC from the topology root.
   SoC *soc();

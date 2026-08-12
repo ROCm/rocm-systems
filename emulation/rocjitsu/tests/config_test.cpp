@@ -387,6 +387,62 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
   EXPECT_EQ(xcd->shader_engine(0)->compute_unit(0)->config().functional_quantum, 7u);
 }
 
+TEST(ConfigLoaderTest, ExecModeClockedStringSelectsClockedMode) {
+  const char *json = R"({
+    "max_ticks": 1000,
+    "num_threads": 1,
+    "exec_mode": "clocked",
+    "vm": { "arch": "cdna3" },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" }
+        ]
+      }
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(loaded.exec_mode, simdojo::ExecMode::CLOCKED);
+}
+
+TEST(ConfigLoaderTest, ComputeUnitFunctionalQuantumUsesDeclarativeValue) {
+  const char *json = R"({
+    "max_ticks": 1000,
+    "num_threads": 1,
+    "vm": { "arch": "cdna3" },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" },
+          {
+            "name": "xcd0", "type": "xcd",
+            "children": [
+              { "name": "l2", "type": "l2_cache" },
+              { "name": "cp", "type": "command_processor" },
+              {
+                "name": "se0", "type": "shader_engine",
+                "children": [{
+                  "name": "cu0", "type": "compute_unit",
+                  "config": [{ "key": "functional_quantum", "value": "37" }]
+                }]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  EXPECT_EQ(cu->functional_quantum(), 37u);
+}
+
 TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
   const char *json = R"({
     "max_ticks": 5000,
@@ -1324,8 +1380,49 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   EXPECT_TRUE(restored_wf->fp16_ovfl());
 }
 
-TEST(CApiTest, CreateAndDestroyFromString) {
+std::string functional_dispatch_threads_config(uint32_t threads) {
+  return R"({"max_ticks":1000,"num_threads":1,"exec_mode":"functional",
+    "cpu_dispatch_threads":)" +
+         std::to_string(threads) + R"(,
+    "vm":{"arch":"cdna3"},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd[0:2]","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"}
+      ]}
+    ]}}})";
+}
+
+TEST(CApiTest, FunctionalDispatchThreadsPropagateExplicitAndAutoValues) {
+  auto run_case = [](uint32_t configured, std::optional<uint32_t> expected) {
+    const std::string json = functional_dispatch_threads_config(configured);
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    ASSERT_NE(raw, nullptr);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
+
+    uint32_t cp_count = 0;
+    handle->soc->for_each_cp([&](auto *cp) {
+      ++cp_count;
+      if (expected) {
+        EXPECT_EQ(cp->dispatch_threads(), *expected);
+      } else {
+        EXPECT_GE(cp->dispatch_threads(), 1u);
+        EXPECT_LE(cp->dispatch_threads(), 32u);
+      }
+    });
+    EXPECT_EQ(cp_count, 2u);
+  };
+
+  run_case(/*configured=*/7, /*expected=*/7);
+  run_case(/*configured=*/0, /*expected=*/std::nullopt);
+}
+
+TEST(CApiTest, ClockedDispatchStaysEventDriven) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "exec_mode":"clocked","cpu_dispatch_threads":8,
     "vm":{"arch":"cdna3"},
     "topology":{
       "root":{
@@ -1355,6 +1452,35 @@ TEST(CApiTest, CreateAndDestroyFromString) {
   rj_vm_t *handle = nullptr;
   EXPECT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(handle, nullptr);
+  EXPECT_EQ(handle->soc->exec_mode(), simdojo::ExecMode::CLOCKED);
+  EXPECT_EQ(handle->soc->xcd(0)->command_processor()->dispatch_threads(), 1u);
+
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  ((256 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  ((104 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+
+  constexpr uint64_t kKernelAddress = 0x1000;
+  constexpr uint32_t kCode[] = {0xBF800000u, 0xBF810000u}; // s_nop; s_endpgm
+  handle->soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd),
+                                    kKernelAddress);
+  handle->soc->memory()->load_image(reinterpret_cast<const uint8_t *>(kCode), sizeof(kCode),
+                                    kKernelAddress + sizeof(kd));
+
+  test::AqlQueue queue(handle->soc->memory(), handle->soc->xcd(0)->command_processor());
+  queue.dispatch(kKernelAddress, /*grid_size=*/64, /*workgroup_size=*/64);
+
+  int active = 0;
+  const auto tick_before_doorbell = handle->engine->global_time();
+  EXPECT_EQ(rj_vm_step(handle, &active), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(handle->engine->global_time(), tick_before_doorbell);
+  auto *cu = handle->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu->wf(0), nullptr);
+  EXPECT_EQ(cu->wf(0)->trace_inst_count_, 0u);
   rj_vm_destroy(handle);
 }
 
