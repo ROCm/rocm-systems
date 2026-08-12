@@ -45,6 +45,8 @@ typedef enum rj_code_arch_e {
   ROCJITSU_CODE_ARCH_RV64I = 10,
   /// @brief gfx1250 ISA architecture.
   ROCJITSU_CODE_ARCH_GFX1250 = 11,
+  /// @brief Temporary CDNA5 alias for the gfx1250 ISA architecture.
+  ROCJITSU_CODE_ARCH_CDNA5 = ROCJITSU_CODE_ARCH_GFX1250,
   // \NPI new ISA family: add its public architecture identifier here and wire
   // its closed-world semantics through the ISA traits, properties, and users.
   /// @brief Number of named, built-in architectures.
