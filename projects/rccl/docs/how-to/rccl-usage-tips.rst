@@ -298,7 +298,7 @@ RCCL channel tuning for multi-node MI350X (ROCm 7.14 / RCCL 2.30.4)
 --------------------------------------------------------------------
 
 Starting with RCCL 2.30.4 (ROCm 7.14), the default number of communication
-channels for multi-node collectives on MI350X has been reduced from 64 to 48,
+channels for multi-node collectives on MI350X/MI355X in SPX mode has been reduced from 64 to 48,
 leaving additional Compute Units (CUs) free for compute kernels that run
 concurrently with communication. For computation-bound workloads that rely
 heavily on communication-computation overlap, staying with this default may
