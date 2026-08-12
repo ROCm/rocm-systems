@@ -340,6 +340,8 @@ def main() -> int:
     print_enabled_checks(get_enabled_checks(args, sample_file))
     print_changed_files(changed_files)
 
+    print(f"Running clang-tidy on {len(changed_files)} files ...")
+
     rule_diagnostics: dict[str, list[Diagnostic]] = {}
     legacy_rule_diagnostics: dict[str, list[Diagnostic]] = {}
     any_timed_out = False
