@@ -39,7 +39,10 @@ endif()
 if(NOT TARGET roc::rocshmem)
     if(NOT NUMA_DIR)
         foreach(_rocm_root ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
-            if(_rocm_root AND EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA/numa-config.cmake")
+            if(
+                _rocm_root
+                AND EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA/numa-config.cmake"
+            )
                 set(NUMA_DIR "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA")
                 break()
             endif()
