@@ -5,6 +5,12 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
+// THROWAWAY -- do not merge. Exercises the RCCL perf-regression gate end to
+// end (ROCm/rocm-systems#10073). A comment-only edit clears the workflow's
+// paths filter and forces a real two-sided build, while leaving reference
+// and candidate functionally identical, so the expected verdict is known in
+// advance: no regression. Close this PR and delete the branch afterwards.
+
 #include "argcheck.h" // Need some checks here since we access comm
 #include "collectives.h"
 #include "enqueue.h"
