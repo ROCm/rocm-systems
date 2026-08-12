@@ -103,20 +103,40 @@ def test_descriptor_vgpr_count_granule(profile, expected_wave32, expected_wave64
     assert profile.descriptor_vgpr_count_granule_wave64 == expected_wave64
 
 
-def test_only_gfx1250_splits_execution_sources():
-    assert Gfx1250Profile().split_execution_sources
-    assert not Rdna4Profile().split_execution_sources
+@pytest.mark.parametrize(
+    'profile',
+    [
+        CdnaProfile(),
+        Cdna1Profile(),
+        Cdna2Profile(),
+        Rdna1Profile(),
+        Rdna2Profile(),
+        Rdna3Profile(),
+        Rdna3_5Profile(),
+        Rdna4Profile(),
+        Gfx1250Profile(),
+    ],
+)
+def test_amdgpu_profiles_split_execution_sources(profile):
+    assert profile.split_execution_sources
 
 
 def test_non_split_generation_leaves_exec_named_sources_untouched(tmp_path):
-    arch_dir = tmp_path / 'rdna4'
+    class NonSplitRdna4Profile(Rdna4Profile):
+        @property
+        def split_execution_sources(self):
+            return False
+
+    arch_dir = tmp_path / 'test'
     arch_dir.mkdir()
     exec_named_source = arch_dir / 'sopp_exec.cpp'
     exec_named_source.write_text('user-owned source')
 
     generator = object.__new__(CodeGenerator)
     generator.out_path = str(tmp_path)
-    generator.isa_spec = SimpleNamespace(arch_name='rdna4', profile=Rdna4Profile())
+    generator.isa_spec = SimpleNamespace(
+        arch_name='test', profile=NonSplitRdna4Profile()
+    )
     generator._write_inst_impl_files(
         'ENC_SOPP',
         'sopp',
@@ -262,6 +282,10 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert 'uint32_t Operand::read_scalar_exec' in operand_exec_cpp
     assert 'const void *Operand::full_execution_backend()' in operand_exec_cpp
     assert 'bool Operand::full_execution_backend_complete()' in operand_exec_cpp
+    assert 'Operand::simd_vgpr_base_mut_impl' in operand_cpp
+    assert 'Operand::simd_vgpr_base_mut_exec' in operand_exec_cpp
+    assert '&Operand::simd_vgpr_base_mut_exec' in operand_exec_cpp
+    assert 'backend.simd_vgpr_base_mut != nullptr' in operand_exec_cpp
     assert 'backend.simd_notify_read64_mut != nullptr' in operand_exec_cpp
     assert 'execution_backend_registered_' not in operand_exec_cpp
     assert 'rocjitsu/vm/amdgpu/compute_unit.h' in operand_exec_cpp
@@ -279,7 +303,14 @@ def test_gfx1250_instruction_execution_backend_is_dense_and_scoped(tmp_path):
     backend_cpp = (tmp_path / 'gfx1250' / 'execution_backend_exec.cpp').read_text()
 
     assert 'const IsaExecutionBackend &execution_backend();' in backend_h
-    assert 'std::array<Instruction::ExecuteFn, 2>' in backend_cpp
+    assert 'enum class InstructionExecutionId : size_t {' in backend_h
+    assert 'FirstInstruction,' in backend_h
+    assert 'SecondInstruction,' in backend_h
+    assert 'Count,' in backend_h
+    assert 'static_cast<size_t>(InstructionExecutionId::Count)' in backend_cpp
+    assert (
+        'std::array<Instruction::ExecuteFn, kInstructionCallbackCount>' in backend_cpp
+    )
     assert '&execute_with_backend<FirstInstruction>' in backend_cpp
     assert '&execute_with_backend<SecondInstruction>' in backend_cpp
     assert 'execute_impl may construct temporary operands' in backend_cpp
@@ -288,7 +319,7 @@ def test_gfx1250_instruction_execution_backend_is_dense_and_scoped(tmp_path):
     assert 'execute_registered_' not in backend_cpp
 
 
-def test_rdna4_operand_execution_backend_stays_in_common_source(tmp_path):
+def test_rdna4_operand_execution_backend_is_split_from_model_source(tmp_path):
     generator = CodeGenerator(
         SimpleNamespace(
             arch_name='rdna4',
@@ -302,10 +333,42 @@ def test_rdna4_operand_execution_backend_stays_in_common_source(tmp_path):
     generator.gen_operand()
     operand_h = (tmp_path / 'rdna4' / 'operand.h').read_text()
     operand_cpp = (tmp_path / 'rdna4' / 'operand.cpp').read_text()
+    operand_exec_cpp = (tmp_path / 'rdna4' / 'operand_exec.cpp').read_text()
 
-    assert 'class Operand : public AmdgpuIsaOperand<Isa>' in operand_h
+    assert 'class Operand : public IsaOperand<Isa>' in operand_h
     assert 'uint32_t Operand::read_scalar' in operand_cpp
-    assert not (tmp_path / 'rdna4' / 'operand_exec.cpp').exists()
+    assert 'uint32_t Operand::read_scalar_exec' in operand_exec_cpp
+    assert 'rocjitsu/vm/amdgpu/wavefront.h' not in operand_cpp
+    assert 'rocjitsu/vm/amdgpu/wavefront.h' in operand_exec_cpp
+
+
+def test_cdna1_split_operand_emits_simd_dispatch_methods(tmp_path):
+    generator = CodeGenerator(
+        SimpleNamespace(
+            arch_name='cdna1',
+            opnd_selectors=[],
+            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+            profile=Cdna1Profile(),
+        ),
+        str(tmp_path),
+    )
+
+    generator.gen_operand()
+    operand_h = (tmp_path / 'cdna1' / 'operand.h').read_text()
+    operand_cpp = (tmp_path / 'cdna1' / 'operand.cpp').read_text()
+    operand_exec_cpp = (tmp_path / 'cdna1' / 'operand_exec.cpp').read_text()
+
+    assert 'bool simd_capable() const override;' in operand_h
+    assert 'void read_lane_chunk(' in operand_h
+    assert 'bool Operand::simd_capable() const' in operand_cpp
+    assert 'bool Operand::simd_capable_exec() const' in operand_exec_cpp
+    assert 'if (!reads_value())' in operand_exec_cpp
+    assert 'if (!is_writable())' in operand_exec_cpp
+    assert 'void Operand::read_lane_chunk_exec(' in operand_exec_cpp
+    assert 'assert(lane_base <= wf.wf_size());' in operand_exec_cpp
+    assert 'assert(count <= wf.wf_size() - lane_base);' in operand_exec_cpp
+    assert 'write_lane_exec(wf, lane_base + i, vals[i]);' in (operand_exec_cpp)
+    assert 'amdgpu::OperandExecutionAccess::raw_compute_unit' in operand_exec_cpp
 
 
 class TestCdnaProfile:
@@ -458,6 +521,10 @@ class TestRdna3Profile:
     def test_has_vopd3_false(self):
         assert self.p.has_vopd3 is False
 
+    def test_vopd_slot_opcodes(self):
+        assert self.p.vopd_x_slot_opcodes == frozenset(range(14))
+        assert self.p.vopd_y_slot_opcodes == frozenset((*range(14), 16, 17, 18))
+
     def test_operand_read64_zero_extends_simm32_literal(self, tmp_path):
         generator = CodeGenerator(
             SimpleNamespace(
@@ -471,13 +538,17 @@ class TestRdna3Profile:
 
         generator.gen_operand()
         operand_cpp = (tmp_path / 'rdna3' / 'operand.cpp').read_text()
+        operand_exec_cpp = (tmp_path / 'rdna3' / 'operand_exec.cpp').read_text()
 
         assert (
             'if (opr_type == OperandType::OPR_SIMM32)\n'
             '    return static_cast<uint64_t>(static_cast<uint32_t>(ev));'
-        ) in operand_cpp
-        assert 'return read_immediate64(opr_type_, ev);' in operand_cpp
-        assert 'return read_immediate64(opr_type_, encoding_value_);' in operand_cpp
+        ) in operand_exec_cpp
+        assert 'return read_immediate64(opr_type_, ev);' in operand_exec_cpp
+        assert (
+            'return read_immediate64(opr_type_, encoding_value_);' in operand_exec_cpp
+        )
+        assert 'read_immediate64' not in operand_cpp
 
 
 class TestRdna4Profile:
@@ -515,6 +586,18 @@ class TestGfx1250Profile:
 
     def test_has_vopd3(self):
         assert self.p.has_vopd3 is True
+
+    def test_vopd_slot_opcodes(self):
+        assert self.p.vopd_x_slot_opcodes == frozenset(range(12))
+        assert self.p.vopd_y_slot_opcodes == frozenset(
+            (*range(12), 16, 17, *range(20, 25))
+        )
+        assert self.p.vopd3_x_slot_opcodes == frozenset(
+            (0, *range(3, 12), 16, 17, *range(19, 23), *range(32, 37))
+        )
+        assert self.p.vopd3_y_slot_opcodes == frozenset(
+            (0, *range(3, 12), *range(16, 25))
+        )
 
     def test_generated_arch_name(self):
         assert self.p.generated_arch_name == 'gfx1250'

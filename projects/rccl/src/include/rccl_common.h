@@ -139,6 +139,12 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
 // Pure query: is CE AllReduce currently allowed on this comm?
 bool rcclCeAllReduceAllowed(struct ncclComm* comm);
+// Decides whether ncclAllReduce_impl takes the DDA path for this call. Mirrors the guard in
+// collectives.cc exactly: DDA runs when the buffers are not symmetric-kernel eligible, CE AllReduce
+// will not service the call (non-gfx1250 only; gfx1250 always keeps the DDA fabric path), and DDA is
+// enabled for this arch/size. Host-side and GPU-free so the dispatch decision can be unit tested.
+bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t datatype,
+                                    ncclRedOp_t op, bool symEligible, bool ceArGraphAllowed);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);

@@ -15841,9 +15841,23 @@ TEST(KernelDescriptorTranslator, VirtualLdsRejectsMissingKernargSegmentPointerWi
 
 TEST(KernelDescriptorTranslator, IgnoresNonAllocExecutableSectionsForEntryRange) {
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  const uint64_t descriptor_vaddr = source.kernel_descriptor_offset("kernel");
+  ASSERT_NE(descriptor_vaddr, 0u);
   const auto ehdr = rocjitsu::read_elf_struct_for_test<rocjitsu::Elf64_Ehdr>(image, 0);
   auto shdrs =
       rocjitsu::read_elf_array_for_test<rocjitsu::Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+
+  const auto descriptor_section = std::ranges::find_if(shdrs, [&](const auto &section) {
+    return (section.sh_flags & rocjitsu::SHF_ALLOC) != 0 &&
+           (section.sh_flags & rocjitsu::SHF_EXECINSTR) == 0 &&
+           descriptor_vaddr >= section.sh_addr &&
+           descriptor_vaddr - section.sh_addr < section.sh_size;
+  });
+  ASSERT_NE(descriptor_section, shdrs.end());
+  const uint64_t descriptor_file_offset =
+      descriptor_section->sh_offset + (descriptor_vaddr - descriptor_section->sh_addr);
 
   constexpr uint64_t fake_exec_vaddr = 0x9000;
   shdrs[5].sh_flags = rocjitsu::SHF_EXECINSTR;
@@ -15853,9 +15867,9 @@ TEST(KernelDescriptorTranslator, IgnoresNonAllocExecutableSectionsForEntryRange)
     rocjitsu::write_elf_struct_for_test(image, ehdr.e_shoff + i * sizeof(rocjitsu::Elf64_Shdr),
                                         shdrs[i]);
 
-  rocjitsu::write_kernel_descriptor_entry_offset(image.data() + shdrs[2].sh_offset,
+  rocjitsu::write_kernel_descriptor_entry_offset(image.data() + descriptor_file_offset,
                                                  static_cast<int64_t>(fake_exec_vaddr) -
-                                                     static_cast<int64_t>(shdrs[2].sh_addr));
+                                                     static_cast<int64_t>(descriptor_vaddr));
 
   rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA4,
                                                   ROCJITSU_CODE_ARCH_RDNA4);
@@ -15871,6 +15885,44 @@ namespace {
 constexpr uint16_t kFlatScratchBaseLoSelector = 230;
 /// @brief Scalar selector naming the high half of the flat-scratch base.
 constexpr uint16_t kFlatScratchBaseHiSelector = 231;
+/// @brief Dependency wait required before a generated flat-scratch selector read.
+constexpr auto kFlatScratchSelectorWait =
+    gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = 0});
+
+/// @brief Translate a gfx1250 kernel that forces destination staging while GPR indexing is active.
+[[nodiscard]] rocjitsu::TranslatedCodeObject
+translate_gfx1250_indexed_flat_scratch_destination(uint32_t gpr_index_control) {
+  constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
+  constexpr uint16_t kLiteralSelector = 255;
+  constexpr uint16_t kM0Operand = 125;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto enable_gpr_indexing =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kModeGprIdxEnableHwreg});
+  const auto set_m0 =
+      gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = kLiteralSelector, .sdst = kM0Operand});
+  const auto vector_read = gfx1250::build_vop3(
+      gfx1250::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256 + 2});
+
+  std::vector<uint32_t> words = {
+      enable_gpr_indexing[0], 1u, set_m0[0], gpr_index_control, vector_read[0], vector_read[1]};
+  // Reading every ordinary scalar register after the affected instruction
+  // leaves no SGPR pair to borrow, forcing the destination-staging decision.
+  for (uint16_t base = 0; base + 1 <= 101; base += 2) {
+    words.push_back(
+        gfx1250::build_sop2(gfx1250::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
+                                                    .ssrc1 = static_cast<uint8_t>(base + 1),
+                                                    .sdst = 102})[0]);
+  }
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  return translator.translate(source);
+}
 
 /// @brief Translate a single-instruction gfx1250 kernel with the B0-to-A0 profile.
 [[nodiscard]] std::vector<uint32_t> translate_gfx1250_b0_to_a0_words(std::vector<uint32_t> words) {
@@ -15988,13 +16040,14 @@ TEST(BinaryTranslatorE2E, Gfx1250MovesFlatScratchBaseInSingleSourceVectorFormToS
   const auto source =
       gfx1250::build_vop1(gfx1250::kVMovB64Vop1, {.src0 = kFlatScratchBaseHiSelector, .vdst = 4});
   const auto out = translate_gfx1250_b0_to_a0_words({source[0]});
-  ASSERT_GE(out.size(), 3u) << "the rewrite prepends one scalar move";
+  ASSERT_GE(out.size(), 4u) << "the rewrite prepends a wait and one scalar move";
 
-  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
-  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
-  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_EQ(out[0], kFlatScratchSelectorWait[0]);
+  ASSERT_EQ((out[1] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[1] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[1] >> 16) & 0x7fu;
   EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
-  EXPECT_EQ(out[1] & 0x1ffu, pair_base) << "the vector source must name the borrowed pair";
+  EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "the vector source must name the borrowed pair";
 }
 
 // Two affected positions in one instruction share a single borrowed pair. This
@@ -16005,15 +16058,16 @@ TEST(BinaryTranslatorE2E, Gfx1250SharesOneBorrowedPairAcrossTwoVectorSourcesForA
       gfx1250::kVAddNcU64Vop3,
       {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = kFlatScratchBaseHiSelector});
   const auto out = translate_gfx1250_b0_to_a0_words({source[0], source[1]});
-  ASSERT_GE(out.size(), 4u);
+  ASSERT_GE(out.size(), 5u);
 
-  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
-  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
-  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_EQ(out[0], kFlatScratchSelectorWait[0]);
+  ASSERT_EQ((out[1] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[1] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[1] >> 16) & 0x7fu;
 
-  EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
-  EXPECT_EQ((out[2] >> 9) & 0x1ffu, pair_base) << "src1 must name the same pair";
-  EXPECT_EQ(out.size(), 4u) << "one move serves both positions, so only one is emitted";
+  EXPECT_EQ(out[3] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
+  EXPECT_EQ((out[3] >> 9) & 0x1ffu, pair_base) << "src1 must name the same pair";
+  EXPECT_EQ(out.size(), 5u) << "one move serves both positions, so only one is emitted";
 }
 
 // The third source is the last modelled field and the only one no other case
@@ -16024,16 +16078,17 @@ TEST(BinaryTranslatorE2E, Gfx1250MovesFlatScratchBaseInThirdVectorSourceToSgprPa
       gfx1250::kVFmaF64Vop3,
       {.vdst = 0, .src0 = 256 + 2, .src1 = 256 + 4, .src2 = kFlatScratchBaseHiSelector});
   const auto out = translate_gfx1250_b0_to_a0_words({source[0], source[1]});
-  ASSERT_GE(out.size(), 4u) << "the rewrite prepends one scalar move";
+  ASSERT_GE(out.size(), 5u) << "the rewrite prepends a wait and one scalar move";
 
-  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
-  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
-  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_EQ(out[0], kFlatScratchSelectorWait[0]);
+  ASSERT_EQ((out[1] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[1] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[1] >> 16) & 0x7fu;
   EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
 
-  EXPECT_EQ(out[2] & 0x1ffu, 256u + 2u) << "src0 is unchanged";
-  EXPECT_EQ((out[2] >> 9) & 0x1ffu, 256u + 4u) << "src1 is unchanged";
-  EXPECT_EQ((out[2] >> 18) & 0x1ffu, pair_base) << "src2 must name the borrowed pair";
+  EXPECT_EQ(out[3] & 0x1ffu, 256u + 2u) << "src0 is unchanged";
+  EXPECT_EQ((out[3] >> 9) & 0x1ffu, 256u + 4u) << "src1 is unchanged";
+  EXPECT_EQ((out[3] >> 18) & 0x1ffu, pair_base) << "src2 must name the borrowed pair";
 }
 
 // VOP3P carries packed 64-bit sources through nine-bit fields, so it reaches
@@ -16044,16 +16099,17 @@ TEST(BinaryTranslatorE2E, Gfx1250MovesVop3pFlatScratchBaseSourceToSgprPairForA0)
   const auto source = gfx1250::build_vop3p(
       gfx1250::kVPkMulF32Vop3p, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 258});
   const auto out = translate_gfx1250_b0_to_a0_words({source[0], source[1]});
-  ASSERT_GE(out.size(), 4u) << "the rewrite prepends one scalar move";
+  ASSERT_GE(out.size(), 5u) << "the rewrite prepends a wait and one scalar move";
 
-  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
-  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
-  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_EQ(out[0], kFlatScratchSelectorWait[0]);
+  ASSERT_EQ((out[1] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[1] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[1] >> 16) & 0x7fu;
   EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
 
-  EXPECT_EQ(out[1], source[0]) << "the first word is unchanged";
-  EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
-  EXPECT_EQ((out[2] >> 9) & 0x1ffu, 258u) << "src1 is unchanged";
+  EXPECT_EQ(out[2], source[0]) << "the first word is unchanged";
+  EXPECT_EQ(out[3] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
+  EXPECT_EQ((out[3] >> 9) & 0x1ffu, 258u) << "src1 is unchanged";
 }
 
 // A decoder may report more sources than the encoding has source fields: an
@@ -16073,26 +16129,216 @@ TEST(BinaryTranslatorE2E, Gfx1250RewritesCompactFormsWithExtraDecodedOperandsFor
   for (const ExtraOperandCase &test_case : cases) {
     SCOPED_TRACE(test_case.name);
     const auto out = translate_gfx1250_b0_to_a0_words(test_case.words);
-    ASSERT_GE(out.size(), 3u) << "the rewrite prepends one scalar move";
+    ASSERT_GE(out.size(), 4u) << "the rewrite prepends a wait and one scalar move";
 
-    ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
-    EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
-    const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
-    EXPECT_EQ(out[1] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
-    EXPECT_EQ((out[1] >> 9) & 0xffu, 2u) << "the VGPR source is unchanged";
+    EXPECT_EQ(out[0], kFlatScratchSelectorWait[0]);
+    ASSERT_EQ((out[1] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+    EXPECT_EQ(out[1] & 0xffu, kFlatScratchBaseLoSelector);
+    const uint32_t pair_base = (out[1] >> 16) & 0x7fu;
+    EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
+    EXPECT_EQ((out[2] >> 9) & 0xffu, 2u) << "the VGPR source is unchanged";
   }
 }
 
-// With every ordinary scalar register live there is no pair to borrow. The
-// rewrite must fail rather than clobber one, and the object must come back
-// unchanged.
-TEST(BinaryTranslatorE2E, Gfx1250FailsClosedWhenNoDeadSgprPairIsAvailableForA0) {
+// With every ordinary scalar register live there is no pair to borrow. A
+// non-aliasing two-register destination is overwritten by the guest
+// instruction anyway, so stage the two 32-bit halves there instead.
+TEST(BinaryTranslatorE2E, Gfx1250StagesFlatScratchBaseInDestinationWhenSgprsAreLive) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto scratch_alias_producer =
+      gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 0, .sdst = 102});
   const auto vector_read = gfx1250::build_vop3(
       gfx1250::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256 + 2});
-  std::vector<uint32_t> words = {vector_read[0], vector_read[1]};
+  std::vector<uint32_t> words = {scratch_alias_producer[0], vector_read[0], vector_read[1]};
   // Reading every ordinary scalar register after the rewrite keeps them all
   // live across it, so the allocator has nothing to take.
+  for (uint16_t base = 0; base + 1 <= 101; base += 2) {
+    words.push_back(
+        gfx1250::build_sop2(gfx1250::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
+                                                    .ssrc1 = static_cast<uint8_t>(base + 1),
+                                                    .sdst = 102})[0]);
+  }
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *section = translated.text_sections()[0];
+  const auto *out = reinterpret_cast<const uint32_t *>(section->data());
+  const size_t out_words = section->size() / sizeof(uint32_t);
+  constexpr auto low =
+      gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = kFlatScratchBaseLoSelector, .vdst = 0});
+  constexpr auto high =
+      gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = kFlatScratchBaseHiSelector, .vdst = 1});
+  const auto low_move = std::ranges::find(out, out + out_words, low[0]);
+  ASSERT_NE(low_move, out + out_words);
+  ASSERT_NE(low_move, out);
+  EXPECT_EQ(*std::prev(low_move), kFlatScratchSelectorWait[0])
+      << "the selector read must wait for the preceding s102 producer";
+  EXPECT_NE(std::ranges::find(low_move + 1, out + out_words, high[0]), out + out_words);
+
+  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  bool found_rewritten_add = false;
+  for (size_t offset = 0; offset < out_words;) {
+    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(out + offset));
+    ASSERT_NE(inst, nullptr) << "translated word " << offset << " failed to decode";
+    if (std::string_view(inst->mnemonic()) == "v_add_nc_u64") {
+      ASSERT_NE(inst->raw_encoding(), nullptr);
+      EXPECT_EQ(inst->raw_encoding()[1] & 0x1ffu, 256u)
+          << "the wide source must read staged v[0:1]";
+      found_rewritten_add = true;
+    }
+    offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
+  }
+  EXPECT_TRUE(found_rewritten_add);
+}
+
+// The source and destination roles both select bank 1. Executing the translated
+// sequence proves that the two staging moves and the rewritten source all name
+// that physical bank, rather than merely agreeing in the encoded low byte.
+TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingExecutesInMatchingNonzeroBank) {
+  constexpr uint8_t kMatchingBankOneMode = 0x41;
+  constexpr uint64_t kScratchBase = 0x1122334455667788ull;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto set_vgpr_msb =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = kMatchingBankOneMode});
+  const auto vector_read = gfx1250::build_vop3(
+      gfx1250::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256 + 2});
+  std::vector<uint32_t> words = {set_vgpr_msb[0], vector_read[0], vector_read[1]};
+  for (uint16_t base = 0; base + 1 <= 101; base += 2) {
+    words.push_back(
+        gfx1250::build_sop2(gfx1250::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
+                                                    .ssrc1 = static_cast<uint8_t>(base + 1),
+                                                    .sdst = 102})[0]);
+  }
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *translated_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t translated_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+
+  rocjitsu::amdgpu::GpuMemory gpu_mem("gfx1250_flat_scratch_stage_mem");
+  rocjitsu::amdgpu::L2Cache l2("gfx1250_flat_scratch_stage_l2");
+  rocjitsu::amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 1024;
+  cfg.lds_size_kb = 64;
+  auto cu =
+      rocjitsu::amdgpu::ComputeUnitCore::create("gfx1250_flat_scratch_stage", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  wf->set_scratch_base(kScratchBase);
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + 2, 0, 0u);
+  cu->write_vgpr(vb + 3, 0, 0u);
+
+  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  for (size_t offset = 0; offset < translated_count;) {
+    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(translated_words + offset));
+    ASSERT_NE(inst, nullptr) << "translated word " << offset << " failed to decode";
+    if (std::string_view(inst->mnemonic()) == "s_endpgm")
+      break;
+    cu->execute_instruction(inst.get(), *wf);
+    offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
+  }
+
+  EXPECT_EQ(cu->read_vgpr(vb + 256, 0), static_cast<uint32_t>(kScratchBase));
+  EXPECT_EQ(cu->read_vgpr(vb + 257, 0), static_cast<uint32_t>(kScratchBase >> 32));
+  EXPECT_EQ(wf->vgpr_msb_mode(), kMatchingBankOneMode);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingRejectsMismatchedBanks) {
+  constexpr uint8_t kSourceBankOneDestinationBankTwo = 0x81;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto set_vgpr_msb =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = kSourceBankOneDestinationBankTwo});
+  const auto vector_read = gfx1250::build_vop3(
+      gfx1250::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256 + 2});
+  std::vector<uint32_t> words = {set_vgpr_msb[0], vector_read[0], vector_read[1]};
+  for (uint16_t base = 0; base + 1 <= 101; base += 2) {
+    words.push_back(
+        gfx1250::build_sop2(gfx1250::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
+                                                    .ssrc1 = static_cast<uint8_t>(base + 1),
+                                                    .sdst = 102})[0]);
+  }
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_FALSE(result.dispatchable());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(
+      result, rocjitsu::DiagnosticKind::ExpandFailed,
+      "flat-scratch-base rewrite could not allocate safe temporary storage"));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingRejectsSourceGprIndexing) {
+  constexpr uint32_t kNonzeroOffset = 16;
+  constexpr uint32_t kIndexSource0 = 1u << 8;
+  const auto result =
+      translate_gfx1250_indexed_flat_scratch_destination(kIndexSource0 | kNonzeroOffset);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_FALSE(result.dispatchable());
+  EXPECT_TRUE(rocjitsu::has_error_containing(
+      result, rocjitsu::DiagnosticKind::ExpandFailed,
+      "flat-scratch-base rewrite could not allocate safe temporary storage"));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingRejectsDestinationGprIndexing) {
+  constexpr uint32_t kNonzeroOffset = 16;
+  constexpr uint32_t kIndexDestination = 1u << 11;
+  const auto result =
+      translate_gfx1250_indexed_flat_scratch_destination(kIndexDestination | kNonzeroOffset);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_FALSE(result.dispatchable());
+  EXPECT_TRUE(rocjitsu::has_error_containing(
+      result, rocjitsu::DiagnosticKind::ExpandFailed,
+      "flat-scratch-base rewrite could not allocate safe temporary storage"));
+}
+
+// Destination staging is not safe when another source reads that pair: the
+// moves would overwrite the guest input before the original instruction. With
+// all SGPRs live as well, the rewrite must fail closed.
+TEST(BinaryTranslatorE2E, Gfx1250FailsClosedWhenFlatScratchTemporariesAlias) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto vector_read = gfx1250::build_vop3(
+      gfx1250::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256});
+  std::vector<uint32_t> words = {vector_read[0], vector_read[1]};
   for (uint16_t base = 0; base + 1 <= 101; base += 2) {
     words.push_back(
         gfx1250::build_sop2(gfx1250::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
@@ -16114,7 +16360,7 @@ TEST(BinaryTranslatorE2E, Gfx1250FailsClosedWhenNoDeadSgprPairIsAvailableForA0) 
   EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
   EXPECT_TRUE(rocjitsu::has_error_containing(
       result, rocjitsu::DiagnosticKind::ExpandFailed,
-      "flat-scratch-base rewrite could not allocate a dead SGPR pair"));
+      "flat-scratch-base rewrite could not allocate safe temporary storage"));
 }
 
 // An unmodelled encoding carrying a wide vector register whose number equals
@@ -16150,16 +16396,17 @@ TEST(BinaryTranslatorE2E, Gfx1250BorrowsFlatScratchBasePairAboveLiveRegistersFor
         {.ssrc0 = base, .ssrc1 = static_cast<uint8_t>(base + 1), .sdst = 20})[0]);
   }
   const auto out = translate_gfx1250_b0_to_a0_words(words);
-  ASSERT_GE(out.size(), 3u);
+  ASSERT_GE(out.size(), 4u);
 
-  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
-  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
-  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_EQ(out[0], kFlatScratchSelectorWait[0]);
+  ASSERT_EQ((out[1] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[1] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[1] >> 16) & 0x7fu;
   EXPECT_GE(pair_base, 8u) << "s0..s7 are live, so the pair must sit above them";
   EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
   EXPECT_LE(pair_base + 1u, kHighestOrdinarySgpr)
       << "the borrowed pair must stay inside the ordinary scalar file";
-  EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "the vector read must name the borrowed pair";
+  EXPECT_EQ(out[3] & 0x1ffu, pair_base) << "the vector read must name the borrowed pair";
 }
 
 // The compact vector formats reach the same rewrite as their VOP3 forms.
@@ -16179,15 +16426,16 @@ TEST(BinaryTranslatorE2E, Gfx1250MovesCompactVectorFlatScratchBaseSourceToSgprPa
   for (const CompactCase &test_case : cases) {
     SCOPED_TRACE(test_case.name);
     const auto out = translate_gfx1250_b0_to_a0_words(test_case.words);
-    ASSERT_GE(out.size(), 3u) << "the rewrite prepends one scalar move";
+    ASSERT_GE(out.size(), 4u) << "the rewrite prepends a wait and one scalar move";
 
-    EXPECT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
-    EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
-    const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+    EXPECT_EQ(out[0], kFlatScratchSelectorWait[0]);
+    EXPECT_EQ((out[1] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+    EXPECT_EQ(out[1] & 0xffu, kFlatScratchBaseLoSelector);
+    const uint32_t pair_base = (out[1] >> 16) & 0x7fu;
     EXPECT_EQ(pair_base % 2u, 0u);
 
-    EXPECT_EQ(out[1] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
-    EXPECT_EQ((out[1] >> 9) & 0xffu, 2u) << "the VGPR source is unchanged";
+    EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
+    EXPECT_EQ((out[2] >> 9) & 0xffu, 2u) << "the VGPR source is unchanged";
   }
 }
 
@@ -16277,19 +16525,20 @@ TEST(BinaryTranslatorE2E, Gfx1250RewritesVop3SelectorButKeepsCollidingLiteralFor
       {.vdst = 10, .src0 = kFlatScratchBaseHiSelector, .src1 = kLiteralSelector});
   const auto out =
       translate_gfx1250_b0_to_a0_words({source[0], source[1], kFlatScratchBaseHiSelector});
-  ASSERT_GE(out.size(), 5u) << "the rewrite prepends one scalar move and keeps four words";
+  ASSERT_GE(out.size(), 6u) << "the rewrite prepends a wait and scalar move and keeps four words";
 
-  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
-  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
-  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_EQ(out[0], kFlatScratchSelectorWait[0]);
+  ASSERT_EQ((out[1] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[1] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[1] >> 16) & 0x7fu;
   EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
 
-  EXPECT_EQ(out[1], source[0]) << "vdst, opcode, and modifiers are unchanged";
-  EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "the real selector must name the borrowed pair";
-  EXPECT_EQ((out[2] >> 9) & 0x1ffu, kLiteralSelector)
+  EXPECT_EQ(out[2], source[0]) << "vdst, opcode, and modifiers are unchanged";
+  EXPECT_EQ(out[3] & 0x1ffu, pair_base) << "the real selector must name the borrowed pair";
+  EXPECT_EQ((out[3] >> 9) & 0x1ffu, kLiteralSelector)
       << "the literal marker must survive, or its dword becomes an instruction";
-  EXPECT_EQ(out[3], kFlatScratchBaseHiSelector) << "the literal dword itself is unchanged";
-  EXPECT_EQ(out.size(), 5u) << "only the prologue is added";
+  EXPECT_EQ(out[4], kFlatScratchBaseHiSelector) << "the literal dword itself is unchanged";
+  EXPECT_EQ(out.size(), 6u) << "only the wait and move prologue are added";
 }
 
 namespace {
@@ -16335,7 +16584,7 @@ translate_gfx1250_b0_to_a0_result(rocjitsu::BinaryTranslator &translator,
                                rocjitsu::ProcessorRevision::Gfx1250A0));
 }
 
-/// @brief An s_monitor_sleep, whose A0 handling is deferred (DEGFXMI400-12268).
+/// @brief An s_monitor_sleep whose A0 handling is deferred.
 [[nodiscard]] uint32_t gfx1250_deferred_word() {
   return gfx1250::build_sopp(gfx1250::kSMonitorSleepSopp, {.simm16 = 1})[0];
 }
@@ -16418,7 +16667,7 @@ TEST(BinaryTranslatorE2E, Gfx1250DeferredFamilyReportCarriesOffsetAndMnemonic) {
 }
 
 // s_sleep and s_sleep_var behave identically on A0 and B0. The only sleep-family
-// A0 erratum, DEGFXMI400-12268, is specific to s_monitor_sleep('forever') with
+// A0 translation requirement is specific to s_monitor_sleep('forever') with
 // MWAIT=0. Copying a plain sleep through is therefore the correct translation,
 // not an unimplemented one, and reporting it drowned the reports that do name a
 // real gap: one RCCL all_reduce run emitted 104,831 of them.
@@ -16443,20 +16692,21 @@ TEST(BinaryTranslatorE2E, Gfx1250MovesVectorFlatScratchBase64BitSourceToSgprPair
   const auto source = gfx1250::build_vop3(
       gfx1250::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256 + 2});
   const auto out = translate_gfx1250_b0_to_a0_words({source[0], source[1]});
-  ASSERT_GE(out.size(), 4u) << "the rewrite prepends one scalar move";
+  ASSERT_GE(out.size(), 5u) << "the rewrite prepends a wait and one scalar move";
 
   // The prologue is a 64-bit scalar read of the base through the low selector.
   const auto expected_prologue_op = static_cast<uint32_t>(gfx1250::kSMovB64Sop1);
-  EXPECT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
-  EXPECT_EQ((out[0] >> 8) & 0xffu, expected_prologue_op);
-  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
+  EXPECT_EQ(out[0], kFlatScratchSelectorWait[0]);
+  EXPECT_EQ((out[1] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ((out[1] >> 8) & 0xffu, expected_prologue_op);
+  EXPECT_EQ(out[1] & 0xffu, kFlatScratchBaseLoSelector);
 
-  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  const uint32_t pair_base = (out[1] >> 16) & 0x7fu;
   EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
   EXPECT_LE(pair_base + 1u, 105u) << "the borrowed pair must be an ordinary SGPR pair";
 
   // The vector instruction now reads that pair; its other operands are intact.
-  EXPECT_EQ(out[1] & 0xffffu, source[0] & 0xffffu) << "vdst and modifiers are unchanged";
-  EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
-  EXPECT_EQ((out[2] >> 9) & 0x1ffu, 256u + 2u) << "src1 is unchanged";
+  EXPECT_EQ(out[2] & 0xffffu, source[0] & 0xffffu) << "vdst and modifiers are unchanged";
+  EXPECT_EQ(out[3] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
+  EXPECT_EQ((out[3] >> 9) & 0x1ffu, 256u + 2u) << "src1 is unchanged";
 }

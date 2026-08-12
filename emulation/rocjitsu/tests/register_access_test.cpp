@@ -10,7 +10,9 @@
 /// in execution_plugin_test.cpp.
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -91,6 +93,7 @@ public:
 };
 
 struct Fixture {
+  ScopedIsaExecutionBackend execution_backend_scope;
   GpuMemory gpu_mem{"register_access_mem"};
   L2Cache l2{"register_access_l2"};
   std::unique_ptr<ComputeUnitCore> cu;
@@ -98,7 +101,9 @@ struct Fixture {
   RecordingPlugin *plugin = nullptr;
   Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4) {
+  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+      : execution_backend_scope(arch == ROCJITSU_CODE_ARCH_RDNA4 ? &rdna4::execution_backend()
+                                                                 : &cdna4::execution_backend()) {
     ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
     cfg.num_wf_slots = 1;
@@ -681,7 +686,7 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
 }
 
 TEST(RegisterAccessTest, OperandReadViewFallbackUsesLaneSemantics) {
-  Fixture fx;
+  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(fx.wf, nullptr);
 
   rdna4::Operand inline_one(16, rdna4::OperandType::OPR_SRC, 242);

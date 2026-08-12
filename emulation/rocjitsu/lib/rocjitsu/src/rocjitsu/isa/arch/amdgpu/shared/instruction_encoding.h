@@ -8,6 +8,7 @@
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_INSTRUCTION_ENCODING_H_
 
 #include <cstdint>
+#include <string>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -59,6 +60,19 @@ inline bool dpp_ctrl_produces_oob(uint32_t dpp_ctrl) {
 inline bool is_src_dpp8(uint32_t src0) { return src0 == SRC_DPP8_FI_0 || src0 == SRC_DPP8_FI_1; }
 
 inline uint32_t src_dpp8_fi(uint32_t src0) { return src0 == SRC_DPP8_FI_1 ? 1u : 0u; }
+
+/// @brief Add the lane selectors for a DPP8 instruction.
+inline void append_dpp8_disassembly(std::string &out, uint32_t lane_sel, uint32_t fi) {
+  out += " dpp8:[";
+  for (uint32_t lane = 0; lane < 8; ++lane) {
+    if (lane != 0)
+      out += ',';
+    out += std::to_string((lane_sel >> (lane * 3)) & 0x7);
+  }
+  out += ']';
+  if (fi != 0)
+    out += " fi:1";
+}
 
 } // namespace dpp
 

@@ -5,11 +5,8 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopd.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
 #include <format>
 #include <string>
 
@@ -36,6 +33,13 @@ constexpr uint16_t kVopdDot2AccF32Bf16 = 13;
 constexpr uint16_t kVopdAddNcU32 = 16;
 constexpr uint16_t kVopdLshlrevB32 = 17;
 constexpr uint16_t kVopdAndB32 = 18;
+
+constexpr uint64_t kVopdXOpcodeMask = 0x0000000000003FFFULL;
+constexpr uint64_t kVopdYOpcodeMask = 0x0000000000073FFFULL;
+
+bool is_valid_opcode(uint16_t opcode, uint64_t mask) {
+  return opcode < 64 && (mask & (1ULL << opcode));
+}
 
 Operand make_src0(uint32_t bits, [[maybe_unused]] bool vopd3, bool use_literal, uint32_t literal,
                   uint16_t encoded) {
@@ -91,121 +95,12 @@ const char *Vopd::op_name(uint16_t op) {
   }
 }
 
-bool Vopd::uses_src_neg_modifier(uint16_t op) {
-  switch (op) {
-  case kVopdFmacF32:
-  case kVopdFmaakF32:
-  case kVopdFmamkF32:
-  case kVopdMulF32:
-  case kVopdAddF32:
-  case kVopdSubF32:
-  case kVopdSubrevF32:
-  case kVopdMulDx9ZeroF32:
-  case kVopdMaxF32:
-  case kVopdMinF32:
-  case kVopdCndmaskB32:
-    return true;
-  default:
-    return false;
-  }
-}
-
-uint32_t Vopd::apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx) {
-  return (neg_bits & (1u << src_idx)) ? (value ^ 0x80000000u) : value;
-}
-
-uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
-  uint32_t result = 0;
-  for (uint32_t bit = 0; bit < 32; ++bit) {
-    uint32_t idx = (((src0 >> bit) & 1u) << 2) | (((src1 >> bit) & 1u) << 1);
-    result |= ((truth_table >> idx) & 1u) << bit;
-  }
-  return result;
-}
-
-uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane) {
-  uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
-  uint32_t src1 = amdgpu::RegisterAccess(wf).read_lane(*slot.src1, lane);
-  uint32_t src2 = slot.has_src2_operand ? amdgpu::RegisterAccess(wf).read_lane(*slot.src2, lane)
-                                        : slot.src2_imm;
-  if (uses_src_neg_modifier(slot.op)) {
-    src0 = apply_neg(src0, slot.neg, 0);
-    src1 = apply_neg(src1, slot.neg, 1);
-    src2 = apply_neg(src2, slot.neg, 2);
-  }
-
-  switch (slot.op) {
-  case kVopdFmacF32: {
-    float result =
-        std::fma(std::bit_cast<float>(src0), std::bit_cast<float>(src1),
-                 std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)));
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdFmaakF32: {
-    float result = std::fma(std::bit_cast<float>(src0), std::bit_cast<float>(src1),
-                            std::bit_cast<float>(src2));
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdFmamkF32: {
-    float result = std::fma(std::bit_cast<float>(src0), std::bit_cast<float>(src2),
-                            std::bit_cast<float>(src1));
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdMulF32: {
-    float result = std::bit_cast<float>(src0) * std::bit_cast<float>(src1);
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdMulDx9ZeroF32: {
-    float lhs = std::bit_cast<float>(src0);
-    float rhs = std::bit_cast<float>(src1);
-    if (lhs == 0.0f || rhs == 0.0f)
-      return std::bit_cast<uint32_t>(0.0f);
-    return std::bit_cast<uint32_t>(lhs * rhs);
-  }
-  case kVopdAddF32: {
-    float result = std::bit_cast<float>(src0) + std::bit_cast<float>(src1);
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdSubF32: {
-    float result = std::bit_cast<float>(src0) - std::bit_cast<float>(src1);
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdSubrevF32: {
-    float result = std::bit_cast<float>(src1) - std::bit_cast<float>(src0);
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdMovB32:
-    return src0;
-  case kVopdCndmaskB32: {
-    uint64_t condition =
-        slot.uses_vcc ? wf.vcc() : amdgpu::RegisterAccess(wf).read_scalar64(*slot.src2);
-    return ((condition >> lane) & 1u) ? src1 : src0;
-  }
-  case kVopdMaxF32: {
-    float result = std::fmax(std::bit_cast<float>(src0), std::bit_cast<float>(src1));
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdMinF32: {
-    float result = std::fmin(std::bit_cast<float>(src0), std::bit_cast<float>(src1));
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdAddNcU32:
-    return src0 + src1;
-  case kVopdLshlrevB32:
-    return src1 << (src0 & 31u);
-  case kVopdAndB32:
-    return src0 & src1;
-  default:
-    throw util::UnimplementedInst(op_name(slot.op));
-  }
-}
-
 Vopd::Vopd(const MachineInst *inst)
-    : IsaInstruction<Isa>("vopd", make_exec_fn<Vopd>()), dstx_(32, OperandType::OPR_VGPR, 0),
-      dsty_(32, OperandType::OPR_VGPR, 0), srcx0_(32, OperandType::OPR_SRC, 0),
-      srcx1_(32, OperandType::OPR_VGPR, 0), srcx2_(32, OperandType::OPR_VGPR, 0),
-      srcy0_(32, OperandType::OPR_SRC, 0), srcy1_(32, OperandType::OPR_VGPR, 0),
-      srcy2_(32, OperandType::OPR_VGPR, 0) {
+    : IsaInstruction<Isa>("vopd", selected_exec_fn(InstructionExecutionId::Vopd)),
+      dstx_(32, OperandType::OPR_VGPR, 0), dsty_(32, OperandType::OPR_VGPR, 0),
+      srcx0_(32, OperandType::OPR_SRC, 0), srcx1_(32, OperandType::OPR_VGPR, 0),
+      srcx2_(32, OperandType::OPR_VGPR, 0), srcy0_(32, OperandType::OPR_SRC, 0),
+      srcy1_(32, OperandType::OPR_VGPR, 0), srcy2_(32, OperandType::OPR_VGPR, 0) {
   const auto *words = reinterpret_cast<const uint32_t *>(inst);
   raw_encoding_ = words;
   word0_ = words[0];
@@ -215,6 +110,10 @@ Vopd::Vopd(const MachineInst *inst)
   encoding_id_ = 0x32;
   opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
   opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
+  if (!is_valid_opcode(opx_, kVopdXOpcodeMask))
+    throw util::InvalidInst("invalid VOPD X opcode", "");
+  if (!is_valid_opcode(opy_, kVopdYOpcodeMask))
+    throw util::InvalidInst("invalid VOPD Y opcode", "");
   uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
   uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
   uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
@@ -334,18 +233,6 @@ std::string Vopd::format_slot(const Slot &slot) const {
     break;
   }
   return out;
-}
-
-void Vopd::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t x_result = execute_slot(x_, wf, lane);
-    uint32_t y_result = execute_slot(y_, wf, lane);
-    amdgpu::RegisterAccess(wf).write_lane(*x_.dst, lane, x_result);
-    amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result);
-  }
 }
 
 } // namespace rdna3

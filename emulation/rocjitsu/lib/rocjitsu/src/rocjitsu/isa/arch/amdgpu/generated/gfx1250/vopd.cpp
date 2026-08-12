@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
 #include "util/except.h"
 #include <format>
 #include <string>
@@ -41,6 +42,15 @@ constexpr uint16_t kVopdAddF64 = 33;
 constexpr uint16_t kVopdMulF64 = 34;
 constexpr uint16_t kVopdMaxNumF64 = 35;
 constexpr uint16_t kVopdMinNumF64 = 36;
+
+constexpr uint64_t kVopdXOpcodeMask = 0x0000000000000FFFULL;
+constexpr uint64_t kVopdYOpcodeMask = 0x0000000001F30FFFULL;
+constexpr uint64_t kVopd3XOpcodeMask = 0x0000001F007B0FF9ULL;
+constexpr uint64_t kVopd3YOpcodeMask = 0x0000000001FF0FF9ULL;
+
+bool is_valid_opcode(uint16_t opcode, uint64_t mask) {
+  return opcode < 64 && (mask & (1ULL << opcode));
+}
 
 Operand make_src0(uint32_t bits, bool vopd3, bool use_literal, uint32_t literal, uint16_t encoded) {
   if (use_literal && encoded == 255)
@@ -127,11 +137,11 @@ bool Vopd::is_float64_op(uint16_t op) {
 }
 
 Vopd::Vopd(const MachineInst *inst)
-    : IsaInstruction<Isa>("vopd", selected_exec_fn(0)), dstx_(32, OperandType::OPR_VGPR, 0),
-      dsty_(32, OperandType::OPR_VGPR, 0), srcx0_(32, OperandType::OPR_SRC, 0),
-      srcx1_(32, OperandType::OPR_VGPR, 0), srcx2_(32, OperandType::OPR_VGPR, 0),
-      srcy0_(32, OperandType::OPR_SRC, 0), srcy1_(32, OperandType::OPR_VGPR, 0),
-      srcy2_(32, OperandType::OPR_VGPR, 0) {
+    : IsaInstruction<Isa>("vopd", selected_exec_fn(InstructionExecutionId::Vopd)),
+      dstx_(32, OperandType::OPR_VGPR, 0), dsty_(32, OperandType::OPR_VGPR, 0),
+      srcx0_(32, OperandType::OPR_SRC, 0), srcx1_(32, OperandType::OPR_VGPR, 0),
+      srcx2_(32, OperandType::OPR_VGPR, 0), srcy0_(32, OperandType::OPR_SRC, 0),
+      srcy1_(32, OperandType::OPR_VGPR, 0), srcy2_(32, OperandType::OPR_VGPR, 0) {
   const auto *words = reinterpret_cast<const uint32_t *>(inst);
   raw_encoding_ = words;
   word0_ = words[0];
@@ -144,6 +154,10 @@ Vopd::Vopd(const MachineInst *inst)
     word2_ = words[2];
     opx_ = static_cast<uint16_t>((word0_ >> 18) & 0x3F);
     opy_ = static_cast<uint16_t>((word0_ >> 12) & 0x3F);
+    if (!is_valid_opcode(opx_, kVopd3XOpcodeMask))
+      throw util::InvalidInst("invalid VOPD3 X opcode", "");
+    if (!is_valid_opcode(opy_, kVopd3YOpcodeMask))
+      throw util::InvalidInst("invalid VOPD3 Y opcode", "");
     uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
     uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
     negx_ = static_cast<uint8_t>((word1_ >> 9) & 0x7);
@@ -157,6 +171,10 @@ Vopd::Vopd(const MachineInst *inst)
 
     uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
     uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
+    const uint32_t x_end = vdstx + x_bits / 32;
+    const uint32_t y_end = vdsty + y_bits / 32;
+    if (vdstx < y_end && vdsty < x_end)
+      throw util::InvalidInst("VOPD3 destination ranges overlap", "");
     dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
     dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
     srcx0_ = make_src0(x_bits, true, false, 0, srcx0);
@@ -172,6 +190,10 @@ Vopd::Vopd(const MachineInst *inst)
     encoding_id_ = 0x32;
     opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
     opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
+    if (!is_valid_opcode(opx_, kVopdXOpcodeMask))
+      throw util::InvalidInst("invalid VOPD X opcode", "");
+    if (!is_valid_opcode(opy_, kVopdYOpcodeMask))
+      throw util::InvalidInst("invalid VOPD Y opcode", "");
     uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
     uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
     uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
