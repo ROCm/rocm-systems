@@ -5,10 +5,10 @@
 /// @brief Cross-architecture pseudo-scalar transcendental execution tests.
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "rocjitsu/isa/decoder.h"
@@ -717,22 +717,51 @@ TEST_P(PseudoScalarExecTest, ExecutesAtExecZeroWithDestinationOpselZeroAndUsesLo
   EXPECT_EQ(fixture.wavefront->exec(), 0u);
 }
 
-TEST_P(PseudoScalarExecTest, RejectsVccDestinations) {
-  constexpr uint32_t kSourceSgpr = 0;
-  constexpr std::array<uint32_t, 2> kVccDestinationEncodings{{106u, 107u}};
+TEST_P(PseudoScalarExecTest, ExecutesWithVccAsSourceAndDestination) {
+  constexpr std::array<uint32_t, 2> kVccSelectors{{106u, 107u}};
+  constexpr uint32_t kOtherHalfSentinel = 0xDEADBEEFu;
 
   const PseudoScalarProfile &profile = *GetParam().profile;
   const PseudoScalarCase &test_case = *GetParam().test_case;
-  PseudoScalarFixture fixture(profile);
-  ASSERT_TRUE(fixture.ready()) << profile.name;
+  for (const uint32_t selector : kVccSelectors) {
+    SCOPED_TRACE(selector);
+    PseudoScalarFixture fixture(profile);
+    ASSERT_TRUE(fixture.ready()) << profile.name;
 
-  for (const uint32_t destination : kVccDestinationEncodings) {
-    const InstructionWords words =
-        encode_vop3(profile, test_case.mnemonic, destination, kSourceSgpr);
-    EXPECT_THROW(
-        { std::unique_ptr<Instruction> instruction(fixture.decoder->decode(words.data())); },
-        util::InvalidInst)
-        << profile.name << " " << test_case.mnemonic << " destination=" << destination;
+    const InstructionWords words = encode_vop3(profile, test_case.mnemonic, selector, selector,
+                                               {.source_opsel = test_case.set_source_opsel});
+    std::unique_ptr<Instruction> instruction(fixture.decoder->decode(words.data()));
+    ASSERT_NE(instruction, nullptr);
+
+    const uint64_t source = selector == kVccSelectors[0]
+                                ? (uint64_t{kOtherHalfSentinel} << 32) | test_case.source
+                                : (uint64_t{test_case.source} << 32) | kOtherHalfSentinel;
+    const uint64_t expected = selector == kVccSelectors[0]
+                                  ? (uint64_t{kOtherHalfSentinel} << 32) | test_case.expected
+                                  : (uint64_t{test_case.expected} << 32) | kOtherHalfSentinel;
+    fixture.wavefront->set_vcc(source);
+    fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
+    EXPECT_EQ(fixture.wavefront->vcc(), expected);
+  }
+}
+
+TEST(PseudoScalarDecodeTest, RejectsOutOfClassDestinations) {
+  constexpr std::array<uint32_t, 4> kInvalidSelectors{{126u, 127u, 128u, 255u}};
+  constexpr uint32_t kSourceSgpr = 0;
+
+  for (const PseudoScalarProfile &profile : kProfiles) {
+    SCOPED_TRACE(profile.name);
+    std::unique_ptr<Decoder> decoder = Decoder::create(profile.arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const PseudoScalarCase &test_case : kCases) {
+      SCOPED_TRACE(test_case.mnemonic);
+      for (const uint32_t selector : kInvalidSelectors) {
+        SCOPED_TRACE(selector);
+        const InstructionWords words =
+            encode_vop3(profile, test_case.mnemonic, selector, kSourceSgpr);
+        EXPECT_THROW((void)decoder->decode(words.data()), util::InvalidInst);
+      }
+    }
   }
 }
 
