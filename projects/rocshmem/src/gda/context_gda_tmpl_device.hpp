@@ -1049,13 +1049,12 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
     size_t nelems = source_nelems[dest_pe] * sizeof(T);
-    char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
+    long *amo_dst = &pSync[alltoall_pSync_offset + my_pe_in_team];
 
     if (nelems != 0) {
-      T* src = (T*)((char*)source + (source_displs[j] * sizeof(T)));
-      T* dst = (T*)((char*)&tmp_buf[constmem.my_pe * tmp_buf_off] + base_heap_offset);
+      T *src = &source[source_displs[j]];
+      T *dst = &tmp_buf[constmem.my_pe * tmp_buf_off];
       qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
     }
 
@@ -1081,8 +1080,8 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
     size_t nelems = dest_nelems[j] * sizeof(T);
 
     if (nelems != 0) {
-      T* dst = (T*)((char*) dest + dest_displs[j] * sizeof(T));
-      T* src = (T*)((char*) &tmp_buf[j * tmp_buf_off]);
+      T *dst = &dest[dest_displs[j]];
+      T *src = &tmp_buf[j * tmp_buf_off];
       memcpy_wg<MemcpyKind::Put>(dst, src, nelems);
     }
   }
@@ -1115,26 +1114,20 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
   /* Put Ctrl Message */
   for (int j = tid; j < pe_size; j+= step_size) {
-    uint64_t *src;
-    uint64_t *dst;
-    uint64_t seq_bits;
-    uint64_t displ_bits;
-
     int dest_pe = team_obj->get_pe_in_world(j);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
 
     /* Pack Ctrl Message * 16 bits seq | 48bit displ */
-    seq_bits = (seq_mask & (a2a_sn + 1)) << seq_shift;
-    displ_bits = (displs_mask & source_displs[dest_pe]);
+    uint64_t seq_bits = (seq_mask & (a2a_sn + 1)) << seq_shift;
+    uint64_t displ_bits = (displs_mask & source_displs[dest_pe]);
     uint64_t ctrl_msg = seq_bits | displ_bits;
 
     /* Prepare Ctrl Message */
-    src = (uint64_t*)&ctrl_msg;
-    dst = (uint64_t*)((char*)&tmp_buf[constmem.my_pe] + base_heap_offset);
+    uint64_t *ctrl_src = &ctrl_msg;
+    uint64_t *ctrl_dst = &tmp_buf[constmem.my_pe];
 
     static_assert(QueuePair::can_inline<QueuePair::OpCode::RDMA_WRITE>(sizeof(ctrl_msg)),
                   "alltoallv_get control message must be posted inline");
-    qps[dest_pe].put_nbi_single(dst, src, sizeof(uint64_t), PostOpt{RingDB<true>});
+    qps[dest_pe].put_nbi_single(ctrl_dst, ctrl_src, sizeof(ctrl_msg), PostOpt{RingDB<true>});
 
     /* Wait for Ctrl Message */
     uint64_t ctrl_value;
@@ -1148,13 +1141,13 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
     /* Get data */
     size_t nelems = dest_nelems[dest_pe] * sizeof(T);
-    src = (uint64_t*)((char*)source + (displ_bits * sizeof(T)));
-    dst = (uint64_t*)((char*)dest + (dest_displs[j] * sizeof(T)));
+    T *src = &source[displ_bits];
+    T *dst = &dest[dest_displs[j]];
 
     qps[dest_pe].get_nbi_single(dst, src, nelems, PostOpt{RingDB<true>});
 
     /* Put Completion */
-    char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
+    long *amo_dst = &pSync[alltoall_pSync_offset + my_pe_in_team];
     qps[dest_pe].atomic_add_single(amo_dst, 1);
 
     long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
