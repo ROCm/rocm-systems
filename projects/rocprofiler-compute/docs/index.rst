@@ -33,7 +33,9 @@ ROCm Compute Profiler is open source and hosted at `<https://github.com/ROCm/roc
 
       * :doc:`Quickstart <install/quickstart>`
 
-   .. grid-item::
+   .. grid-item-card:: Quick reference
+
+      * :doc:`ROCm Compute Profiler at a glance <quick-reference/rocprofiler-compute-at-a-glance>`
 
 Use the following topics to learn more about the advantages of ROCm Compute Profiler in your
 development toolkit, how it aims to model performance, and how to use ROCm Compute Profiler
