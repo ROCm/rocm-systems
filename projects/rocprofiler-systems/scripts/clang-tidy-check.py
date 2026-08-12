@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 SOURCE_EXTENSION_RE = re.compile(
@@ -64,6 +65,24 @@ class Diagnostic:
     severity: str
     message: str
     checks: list[str]
+
+
+@dataclass
+class FileResult:
+    """clang-tidy outcome for a single file."""
+
+    changed_file: ChangedFile
+    diagnostics: list[Diagnostic]
+    succeeded: bool
+
+
+@dataclass
+class AggregatedDiagnostics:
+    """Diagnostics bucketed by whether they fall inside the changed lines."""
+
+    in_diff: dict[str, list[Diagnostic]]
+    preexisting: dict[str, list[Diagnostic]]
+    any_timed_out: bool
 
 
 def in_line_ranges(line: int, ranges: list[tuple[int, int]]) -> bool:
@@ -331,6 +350,65 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def check_file(
+    changed_file: ChangedFile, args: argparse.Namespace, repo_root: str
+) -> FileResult:
+    """Run clang-tidy on one file and parse its diagnostics."""
+    command = build_command(os.path.join(repo_root, changed_file.path), args)
+    output, succeeded = run_clang_tidy(command, args.timeout)
+    return FileResult(changed_file, parse_diagnostics(output, repo_root), succeeded)
+
+
+def report_progress(completed: int, total: int, changed_file: ChangedFile) -> None:
+    """Print a per-file completion line to stderr."""
+    print(
+        _color(f"  [{completed}/{total}] {changed_file.path}", "cyan"),
+        file=sys.stderr,
+    )
+
+
+def run_checks(
+    changed_files: list[ChangedFile],
+    args: argparse.Namespace,
+    repo_root: str,
+    on_complete: Callable[[int, int, ChangedFile], None] | None = None,
+) -> list[FileResult]:
+    """Run clang-tidy over all files in parallel, calling on_complete as each finishes."""
+    total = len(changed_files)
+    results: list[FileResult] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        futures = {
+            pool.submit(check_file, changed_file, args, repo_root): changed_file
+            for changed_file in changed_files
+        }
+        for completed, future in enumerate(
+            concurrent.futures.as_completed(futures), start=1
+        ):
+            result = future.result()
+            if on_complete is not None:
+                on_complete(completed, total, result.changed_file)
+            results.append(result)
+    return results
+
+
+def aggregate_diagnostics(results: list[FileResult]) -> AggregatedDiagnostics:
+    """Bucket diagnostics into in-diff vs pre-existing, keyed by check name."""
+    in_diff: dict[str, list[Diagnostic]] = {}
+    preexisting: dict[str, list[Diagnostic]] = {}
+    any_timed_out = False
+    for result in results:
+        any_timed_out = any_timed_out or not result.succeeded
+        for diagnostic in result.diagnostics:
+            target = (
+                in_diff
+                if in_line_ranges(diagnostic.line, result.changed_file.line_ranges)
+                else preexisting
+            )
+            for check_name in diagnostic.checks:
+                target.setdefault(check_name, []).append(diagnostic)
+    return AggregatedDiagnostics(in_diff, preexisting, any_timed_out)
+
+
 def main() -> int:
     """Run clang-tidy over changed files and print the results; return an exit code."""
     args = parse_args()
@@ -345,38 +423,18 @@ def main() -> int:
     print_enabled_checks(get_enabled_checks(args, sample_file))
     print_changed_files(changed_files)
 
-    rule_diagnostics: dict[str, list[Diagnostic]] = {}
-    preexisting_rule_diagnostics: dict[str, list[Diagnostic]] = {}
-    any_timed_out = False
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        futures = {
-            pool.submit(
-                run_clang_tidy,
-                build_command(os.path.join(repo_root, changed_file.path), args),
-                args.timeout,
-            ): changed_file
-            for changed_file in changed_files
-        }
-        for future in concurrent.futures.as_completed(futures):
-            changed_file = futures[future]
-            output, succeeded = future.result()
-            any_timed_out = any_timed_out or not succeeded
+    print("Running clang-tidy ...")
+    results = run_checks(changed_files, args, repo_root, on_complete=report_progress)
+    aggregated = aggregate_diagnostics(results)
 
-            for diagnostic in parse_diagnostics(output, repo_root):
-                target = (
-                    rule_diagnostics
-                    if in_line_ranges(diagnostic.line, changed_file.line_ranges)
-                    else preexisting_rule_diagnostics
-                )
-                for check_name in diagnostic.checks:
-                    target.setdefault(check_name, []).append(diagnostic)
-
-    print_rule_diagnostics("Detected clang-tidy rules (in this diff):", rule_diagnostics)
     print_rule_diagnostics(
-        "Pre-existing issues (outside this diff):", preexisting_rule_diagnostics
+        "Detected clang-tidy rules (in this diff):", aggregated.in_diff
+    )
+    print_rule_diagnostics(
+        "Pre-existing issues (outside this diff):", aggregated.preexisting
     )
 
-    return 1 if rule_diagnostics or any_timed_out else 0
+    return 1 if aggregated.in_diff or aggregated.any_timed_out else 0
 
 
 if __name__ == "__main__":
