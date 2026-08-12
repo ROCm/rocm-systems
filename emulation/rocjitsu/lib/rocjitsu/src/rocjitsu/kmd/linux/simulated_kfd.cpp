@@ -40,8 +40,22 @@ RJ_DIAGNOSTIC_POP
 #include <sys/random.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #ifndef MADV_POPULATE_WRITE
 #define MADV_POPULATE_WRITE 23
+#endif
+// pidfd_open(2) landed in Linux 5.3. The build hosts are older than their
+// kernels here -- gcc-toolset-13 on the CI base image ships sanitized headers
+// that predate it -- so the wrapper and even __NR_pidfd_open can be missing
+// while the running kernel implements it fine. 434 is the number on every
+// architecture ROCm targets; the syscall was added after new numbers began
+// being allocated identically across arches.
+#ifndef SYS_pidfd_open
+#ifdef __NR_pidfd_open
+#define SYS_pidfd_open __NR_pidfd_open
+#else
+#define SYS_pidfd_open 434
+#endif
 #endif
 #include <thread>
 #include <unistd.h>
