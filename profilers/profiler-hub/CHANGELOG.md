@@ -29,6 +29,7 @@ downstream consumer of the library.
 
 ### Changed
 
+- profiler-hub now requires a C++20-compatible compiler for all build and consumer paths.
 - spdlog is now built with `SPDLOG_FMT_EXTERNAL=ON`. fmt is resolved as an
   independent dependency (via `find_package(fmt)` or FetchContent) rather than
   through spdlog's vendored copy. Internal includes switched from
