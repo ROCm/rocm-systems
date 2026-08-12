@@ -254,7 +254,7 @@ TEST(DecodeExecuteBenchmark, Rdna4) {
 }
 
 TEST(DecodeExecuteBenchmark, Gfx1250) {
-  run_benchmark(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
+  run_benchmark(ROCJITSU_CODE_ARCH_CDNA5, "gfx1250",
                 reinterpret_cast<const TestEncEntry *>(cdna5::test_data::ENCODINGS),
                 cdna5::test_data::NUM_ENCODINGS);
 }
