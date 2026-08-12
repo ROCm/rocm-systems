@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vds.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "util/except.h"
 
@@ -12,7 +13,8 @@ namespace rocjitsu {
 namespace gfx1250 {
 
 DsAddU32Vds::DsAddU32Vds(const MachineInst *inst)
-    : Vds("ds_add_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1251)),
+    : Vds("ds_add_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAddU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -30,7 +32,8 @@ DsAddU32Vds::DsAddU32Vds(const MachineInst *inst)
 }
 
 DsSubU32Vds::DsSubU32Vds(const MachineInst *inst)
-    : Vds("ds_sub_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1252)),
+    : Vds("ds_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsSubU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -48,7 +51,8 @@ DsSubU32Vds::DsSubU32Vds(const MachineInst *inst)
 }
 
 DsRsubU32Vds::DsRsubU32Vds(const MachineInst *inst)
-    : Vds("ds_rsub_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1253)),
+    : Vds("ds_rsub_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsRsubU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -66,7 +70,8 @@ DsRsubU32Vds::DsRsubU32Vds(const MachineInst *inst)
 }
 
 DsIncU32Vds::DsIncU32Vds(const MachineInst *inst)
-    : Vds("ds_inc_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1254)),
+    : Vds("ds_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsIncU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -84,7 +89,8 @@ DsIncU32Vds::DsIncU32Vds(const MachineInst *inst)
 }
 
 DsDecU32Vds::DsDecU32Vds(const MachineInst *inst)
-    : Vds("ds_dec_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1255)),
+    : Vds("ds_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsDecU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -102,7 +108,8 @@ DsDecU32Vds::DsDecU32Vds(const MachineInst *inst)
 }
 
 DsMinI32Vds::DsMinI32Vds(const MachineInst *inst)
-    : Vds("ds_min_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1256)),
+    : Vds("ds_min_i32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinI32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -120,7 +127,8 @@ DsMinI32Vds::DsMinI32Vds(const MachineInst *inst)
 }
 
 DsMaxI32Vds::DsMaxI32Vds(const MachineInst *inst)
-    : Vds("ds_max_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1257)),
+    : Vds("ds_max_i32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxI32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -138,7 +146,8 @@ DsMaxI32Vds::DsMaxI32Vds(const MachineInst *inst)
 }
 
 DsMinU32Vds::DsMinU32Vds(const MachineInst *inst)
-    : Vds("ds_min_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1258)),
+    : Vds("ds_min_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -156,7 +165,8 @@ DsMinU32Vds::DsMinU32Vds(const MachineInst *inst)
 }
 
 DsMaxU32Vds::DsMaxU32Vds(const MachineInst *inst)
-    : Vds("ds_max_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1259)),
+    : Vds("ds_max_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -174,7 +184,8 @@ DsMaxU32Vds::DsMaxU32Vds(const MachineInst *inst)
 }
 
 DsAndB32Vds::DsAndB32Vds(const MachineInst *inst)
-    : Vds("ds_and_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1260)),
+    : Vds("ds_and_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAndB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -192,7 +203,8 @@ DsAndB32Vds::DsAndB32Vds(const MachineInst *inst)
 }
 
 DsOrB32Vds::DsOrB32Vds(const MachineInst *inst)
-    : Vds("ds_or_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1261)),
+    : Vds("ds_or_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsOrB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -210,7 +222,8 @@ DsOrB32Vds::DsOrB32Vds(const MachineInst *inst)
 }
 
 DsXorB32Vds::DsXorB32Vds(const MachineInst *inst)
-    : Vds("ds_xor_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1262)),
+    : Vds("ds_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsXorB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -228,7 +241,8 @@ DsXorB32Vds::DsXorB32Vds(const MachineInst *inst)
 }
 
 DsMskorB32Vds::DsMskorB32Vds(const MachineInst *inst)
-    : Vds("ds_mskor_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1263)),
+    : Vds("ds_mskor_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMskorB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -249,7 +263,8 @@ DsMskorB32Vds::DsMskorB32Vds(const MachineInst *inst)
 }
 
 DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
-    : Vds("ds_store_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1264)),
+    : Vds("ds_store_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsStoreB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
@@ -265,7 +280,8 @@ DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
 }
 
 DsStore2addrB32Vds::DsStore2addrB32Vds(const MachineInst *inst)
-    : Vds("ds_store_2addr_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1265)),
+    : Vds("ds_store_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsStore2addrB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -285,7 +301,7 @@ DsStore2addrB32Vds::DsStore2addrB32Vds(const MachineInst *inst)
 
 DsStore2addrStride64B32Vds::DsStore2addrStride64B32Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1266)),
+          selected_exec_fn(InstructionExecutionId::DsStore2addrStride64B32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -304,7 +320,8 @@ DsStore2addrStride64B32Vds::DsStore2addrStride64B32Vds(const MachineInst *inst)
 }
 
 DsCmpstoreB32Vds::DsCmpstoreB32Vds(const MachineInst *inst)
-    : Vds("ds_cmpstore_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1267)),
+    : Vds("ds_cmpstore_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsCmpstoreB32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -325,7 +342,8 @@ DsCmpstoreB32Vds::DsCmpstoreB32Vds(const MachineInst *inst)
 }
 
 DsMinNumF32Vds::DsMinNumF32Vds(const MachineInst *inst)
-    : Vds("ds_min_num_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1268)),
+    : Vds("ds_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinNumF32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -343,7 +361,8 @@ DsMinNumF32Vds::DsMinNumF32Vds(const MachineInst *inst)
 }
 
 DsMaxNumF32Vds::DsMaxNumF32Vds(const MachineInst *inst)
-    : Vds("ds_max_num_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1269)),
+    : Vds("ds_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxNumF32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -361,13 +380,15 @@ DsMaxNumF32Vds::DsMaxNumF32Vds(const MachineInst *inst)
 }
 
 DsNopVds::DsNopVds(const MachineInst *inst)
-    : Vds("ds_nop", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1270)) {
+    : Vds("ds_nop", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsNopVds)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
 DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
-    : Vds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1271)),
+    : Vds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAddF32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -385,7 +406,8 @@ DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
 }
 
 DsStoreB8Vds::DsStoreB8Vds(const MachineInst *inst)
-    : Vds("ds_store_b8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1272)),
+    : Vds("ds_store_b8", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsStoreB8Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -401,7 +423,8 @@ DsStoreB8Vds::DsStoreB8Vds(const MachineInst *inst)
 }
 
 DsStoreB16Vds::DsStoreB16Vds(const MachineInst *inst)
-    : Vds("ds_store_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1273)),
+    : Vds("ds_store_b16", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsStoreB16Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
@@ -417,7 +440,8 @@ DsStoreB16Vds::DsStoreB16Vds(const MachineInst *inst)
 }
 
 DsAddRtnU32Vds::DsAddRtnU32Vds(const MachineInst *inst)
-    : Vds("ds_add_rtn_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1274)),
+    : Vds("ds_add_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAddRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -438,7 +462,8 @@ DsAddRtnU32Vds::DsAddRtnU32Vds(const MachineInst *inst)
 }
 
 DsSubRtnU32Vds::DsSubRtnU32Vds(const MachineInst *inst)
-    : Vds("ds_sub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1275)),
+    : Vds("ds_sub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsSubRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -459,7 +484,8 @@ DsSubRtnU32Vds::DsSubRtnU32Vds(const MachineInst *inst)
 }
 
 DsRsubRtnU32Vds::DsRsubRtnU32Vds(const MachineInst *inst)
-    : Vds("ds_rsub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1276)),
+    : Vds("ds_rsub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsRsubRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -480,7 +506,8 @@ DsRsubRtnU32Vds::DsRsubRtnU32Vds(const MachineInst *inst)
 }
 
 DsIncRtnU32Vds::DsIncRtnU32Vds(const MachineInst *inst)
-    : Vds("ds_inc_rtn_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1277)),
+    : Vds("ds_inc_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsIncRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -501,7 +528,8 @@ DsIncRtnU32Vds::DsIncRtnU32Vds(const MachineInst *inst)
 }
 
 DsDecRtnU32Vds::DsDecRtnU32Vds(const MachineInst *inst)
-    : Vds("ds_dec_rtn_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1278)),
+    : Vds("ds_dec_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsDecRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -522,7 +550,8 @@ DsDecRtnU32Vds::DsDecRtnU32Vds(const MachineInst *inst)
 }
 
 DsMinRtnI32Vds::DsMinRtnI32Vds(const MachineInst *inst)
-    : Vds("ds_min_rtn_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1279)),
+    : Vds("ds_min_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinRtnI32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -543,7 +572,8 @@ DsMinRtnI32Vds::DsMinRtnI32Vds(const MachineInst *inst)
 }
 
 DsMaxRtnI32Vds::DsMaxRtnI32Vds(const MachineInst *inst)
-    : Vds("ds_max_rtn_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1280)),
+    : Vds("ds_max_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxRtnI32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -564,7 +594,8 @@ DsMaxRtnI32Vds::DsMaxRtnI32Vds(const MachineInst *inst)
 }
 
 DsMinRtnU32Vds::DsMinRtnU32Vds(const MachineInst *inst)
-    : Vds("ds_min_rtn_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1281)),
+    : Vds("ds_min_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -585,7 +616,8 @@ DsMinRtnU32Vds::DsMinRtnU32Vds(const MachineInst *inst)
 }
 
 DsMaxRtnU32Vds::DsMaxRtnU32Vds(const MachineInst *inst)
-    : Vds("ds_max_rtn_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1282)),
+    : Vds("ds_max_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -606,7 +638,8 @@ DsMaxRtnU32Vds::DsMaxRtnU32Vds(const MachineInst *inst)
 }
 
 DsAndRtnB32Vds::DsAndRtnB32Vds(const MachineInst *inst)
-    : Vds("ds_and_rtn_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1283)),
+    : Vds("ds_and_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAndRtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -627,7 +660,8 @@ DsAndRtnB32Vds::DsAndRtnB32Vds(const MachineInst *inst)
 }
 
 DsOrRtnB32Vds::DsOrRtnB32Vds(const MachineInst *inst)
-    : Vds("ds_or_rtn_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1284)),
+    : Vds("ds_or_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsOrRtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -648,7 +682,8 @@ DsOrRtnB32Vds::DsOrRtnB32Vds(const MachineInst *inst)
 }
 
 DsXorRtnB32Vds::DsXorRtnB32Vds(const MachineInst *inst)
-    : Vds("ds_xor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1285)),
+    : Vds("ds_xor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsXorRtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -669,7 +704,8 @@ DsXorRtnB32Vds::DsXorRtnB32Vds(const MachineInst *inst)
 }
 
 DsMskorRtnB32Vds::DsMskorRtnB32Vds(const MachineInst *inst)
-    : Vds("ds_mskor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1286)),
+    : Vds("ds_mskor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMskorRtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -694,7 +730,7 @@ DsMskorRtnB32Vds::DsMskorRtnB32Vds(const MachineInst *inst)
 
 DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1287)),
+          selected_exec_fn(InstructionExecutionId::DsStorexchgRtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -716,7 +752,7 @@ DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
 
 DsStorexchg2addrRtnB32Vds::DsStorexchg2addrRtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1288)),
+          selected_exec_fn(InstructionExecutionId::DsStorexchg2addrRtnB32Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -741,7 +777,7 @@ DsStorexchg2addrRtnB32Vds::DsStorexchg2addrRtnB32Vds(const MachineInst *inst)
 
 DsStorexchg2addrStride64RtnB32Vds::DsStorexchg2addrStride64RtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_stride64_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1289)),
+          selected_exec_fn(InstructionExecutionId::DsStorexchg2addrStride64RtnB32Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -766,7 +802,7 @@ DsStorexchg2addrStride64RtnB32Vds::DsStorexchg2addrStride64RtnB32Vds(const Machi
 
 DsCmpstoreRtnB32Vds::DsCmpstoreRtnB32Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1290)),
+          selected_exec_fn(InstructionExecutionId::DsCmpstoreRtnB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -790,7 +826,8 @@ DsCmpstoreRtnB32Vds::DsCmpstoreRtnB32Vds(const MachineInst *inst)
 }
 
 DsMinNumRtnF32Vds::DsMinNumRtnF32Vds(const MachineInst *inst)
-    : Vds("ds_min_num_rtn_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1291)),
+    : Vds("ds_min_num_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinNumRtnF32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -811,7 +848,8 @@ DsMinNumRtnF32Vds::DsMinNumRtnF32Vds(const MachineInst *inst)
 }
 
 DsMaxNumRtnF32Vds::DsMaxNumRtnF32Vds(const MachineInst *inst)
-    : Vds("ds_max_num_rtn_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1292)),
+    : Vds("ds_max_num_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxNumRtnF32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -832,7 +870,8 @@ DsMaxNumRtnF32Vds::DsMaxNumRtnF32Vds(const MachineInst *inst)
 }
 
 DsSwizzleB32Vds::DsSwizzleB32Vds(const MachineInst *inst)
-    : Vds("ds_swizzle_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1293)),
+    : Vds("ds_swizzle_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsSwizzleB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
@@ -844,7 +883,8 @@ DsSwizzleB32Vds::DsSwizzleB32Vds(const MachineInst *inst)
 }
 
 DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
-    : Vds("ds_load_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1294)),
+    : Vds("ds_load_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
@@ -860,7 +900,8 @@ DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
 }
 
 DsLoad2addrB32Vds::DsLoad2addrB32Vds(const MachineInst *inst)
-    : Vds("ds_load_2addr_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1295)),
+    : Vds("ds_load_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoad2addrB32Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
@@ -877,7 +918,7 @@ DsLoad2addrB32Vds::DsLoad2addrB32Vds(const MachineInst *inst)
 
 DsLoad2addrStride64B32Vds::DsLoad2addrStride64B32Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1296)),
+          selected_exec_fn(InstructionExecutionId::DsLoad2addrStride64B32Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
@@ -893,7 +934,8 @@ DsLoad2addrStride64B32Vds::DsLoad2addrStride64B32Vds(const MachineInst *inst)
 }
 
 DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
-    : Vds("ds_load_i8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1297)),
+    : Vds("ds_load_i8", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadI8Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -909,7 +951,8 @@ DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
 }
 
 DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
-    : Vds("ds_load_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1298)),
+    : Vds("ds_load_u8", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadU8Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -925,7 +968,8 @@ DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
 }
 
 DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
-    : Vds("ds_load_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1299)),
+    : Vds("ds_load_i16", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadI16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
@@ -941,7 +985,8 @@ DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
 }
 
 DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
-    : Vds("ds_load_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1300)),
+    : Vds("ds_load_u16", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadU16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
@@ -957,7 +1002,8 @@ DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
 }
 
 DsConsumeVds::DsConsumeVds(const MachineInst *inst)
-    : Vds("ds_consume", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1301)),
+    : Vds("ds_consume", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsConsumeVds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -972,7 +1018,8 @@ DsConsumeVds::DsConsumeVds(const MachineInst *inst)
 }
 
 DsAppendVds::DsAppendVds(const MachineInst *inst)
-    : Vds("ds_append", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1302)),
+    : Vds("ds_append", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAppendVds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -987,7 +1034,8 @@ DsAppendVds::DsAppendVds(const MachineInst *inst)
 }
 
 DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
-    : Vds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1303)),
+    : Vds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAddU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1005,7 +1053,8 @@ DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
 }
 
 DsSubU64Vds::DsSubU64Vds(const MachineInst *inst)
-    : Vds("ds_sub_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1304)),
+    : Vds("ds_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsSubU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1023,7 +1072,8 @@ DsSubU64Vds::DsSubU64Vds(const MachineInst *inst)
 }
 
 DsRsubU64Vds::DsRsubU64Vds(const MachineInst *inst)
-    : Vds("ds_rsub_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1305)),
+    : Vds("ds_rsub_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsRsubU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1041,7 +1091,8 @@ DsRsubU64Vds::DsRsubU64Vds(const MachineInst *inst)
 }
 
 DsIncU64Vds::DsIncU64Vds(const MachineInst *inst)
-    : Vds("ds_inc_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1306)),
+    : Vds("ds_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsIncU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1059,7 +1110,8 @@ DsIncU64Vds::DsIncU64Vds(const MachineInst *inst)
 }
 
 DsDecU64Vds::DsDecU64Vds(const MachineInst *inst)
-    : Vds("ds_dec_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1307)),
+    : Vds("ds_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsDecU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1077,7 +1129,8 @@ DsDecU64Vds::DsDecU64Vds(const MachineInst *inst)
 }
 
 DsMinI64Vds::DsMinI64Vds(const MachineInst *inst)
-    : Vds("ds_min_i64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1308)),
+    : Vds("ds_min_i64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinI64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1095,7 +1148,8 @@ DsMinI64Vds::DsMinI64Vds(const MachineInst *inst)
 }
 
 DsMaxI64Vds::DsMaxI64Vds(const MachineInst *inst)
-    : Vds("ds_max_i64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1309)),
+    : Vds("ds_max_i64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxI64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1113,7 +1167,8 @@ DsMaxI64Vds::DsMaxI64Vds(const MachineInst *inst)
 }
 
 DsMinU64Vds::DsMinU64Vds(const MachineInst *inst)
-    : Vds("ds_min_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1310)),
+    : Vds("ds_min_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1131,7 +1186,8 @@ DsMinU64Vds::DsMinU64Vds(const MachineInst *inst)
 }
 
 DsMaxU64Vds::DsMaxU64Vds(const MachineInst *inst)
-    : Vds("ds_max_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1311)),
+    : Vds("ds_max_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxU64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1149,7 +1205,8 @@ DsMaxU64Vds::DsMaxU64Vds(const MachineInst *inst)
 }
 
 DsAndB64Vds::DsAndB64Vds(const MachineInst *inst)
-    : Vds("ds_and_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1312)),
+    : Vds("ds_and_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAndB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1167,7 +1224,8 @@ DsAndB64Vds::DsAndB64Vds(const MachineInst *inst)
 }
 
 DsOrB64Vds::DsOrB64Vds(const MachineInst *inst)
-    : Vds("ds_or_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1313)),
+    : Vds("ds_or_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsOrB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1185,7 +1243,8 @@ DsOrB64Vds::DsOrB64Vds(const MachineInst *inst)
 }
 
 DsXorB64Vds::DsXorB64Vds(const MachineInst *inst)
-    : Vds("ds_xor_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1314)),
+    : Vds("ds_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsXorB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1203,7 +1262,8 @@ DsXorB64Vds::DsXorB64Vds(const MachineInst *inst)
 }
 
 DsMskorB64Vds::DsMskorB64Vds(const MachineInst *inst)
-    : Vds("ds_mskor_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1315)),
+    : Vds("ds_mskor_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMskorB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -1224,7 +1284,8 @@ DsMskorB64Vds::DsMskorB64Vds(const MachineInst *inst)
 }
 
 DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
-    : Vds("ds_store_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1316)),
+    : Vds("ds_store_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsStoreB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
@@ -1240,7 +1301,8 @@ DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
 }
 
 DsStore2addrB64Vds::DsStore2addrB64Vds(const MachineInst *inst)
-    : Vds("ds_store_2addr_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1317)),
+    : Vds("ds_store_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsStore2addrB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -1260,7 +1322,7 @@ DsStore2addrB64Vds::DsStore2addrB64Vds(const MachineInst *inst)
 
 DsStore2addrStride64B64Vds::DsStore2addrStride64B64Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1318)),
+          selected_exec_fn(InstructionExecutionId::DsStore2addrStride64B64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -1279,7 +1341,8 @@ DsStore2addrStride64B64Vds::DsStore2addrStride64B64Vds(const MachineInst *inst)
 }
 
 DsCmpstoreB64Vds::DsCmpstoreB64Vds(const MachineInst *inst)
-    : Vds("ds_cmpstore_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1319)),
+    : Vds("ds_cmpstore_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsCmpstoreB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
@@ -1300,7 +1363,8 @@ DsCmpstoreB64Vds::DsCmpstoreB64Vds(const MachineInst *inst)
 }
 
 DsMinNumF64Vds::DsMinNumF64Vds(const MachineInst *inst)
-    : Vds("ds_min_num_f64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1320)),
+    : Vds("ds_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinNumF64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1318,7 +1382,8 @@ DsMinNumF64Vds::DsMinNumF64Vds(const MachineInst *inst)
 }
 
 DsMaxNumF64Vds::DsMaxNumF64Vds(const MachineInst *inst)
-    : Vds("ds_max_num_f64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1321)),
+    : Vds("ds_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxNumF64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1336,7 +1401,8 @@ DsMaxNumF64Vds::DsMaxNumF64Vds(const MachineInst *inst)
 }
 
 DsAddF64Vds::DsAddF64Vds(const MachineInst *inst)
-    : Vds("ds_add_f64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1322)),
+    : Vds("ds_add_f64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAddF64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
@@ -1355,7 +1421,7 @@ DsAddF64Vds::DsAddF64Vds(const MachineInst *inst)
 
 DsAtomicAsyncBarrierArriveB64Vds::DsAtomicAsyncBarrierArriveB64Vds(const MachineInst *inst)
     : Vds("ds_atomic_async_barrier_arrive_b64", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1323)),
+          selected_exec_fn(InstructionExecutionId::DsAtomicAsyncBarrierArriveB64Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
@@ -1370,7 +1436,8 @@ DsAtomicAsyncBarrierArriveB64Vds::DsAtomicAsyncBarrierArriveB64Vds(const Machine
 }
 
 DsAddRtnU64Vds::DsAddRtnU64Vds(const MachineInst *inst)
-    : Vds("ds_add_rtn_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1324)),
+    : Vds("ds_add_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAddRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1391,7 +1458,8 @@ DsAddRtnU64Vds::DsAddRtnU64Vds(const MachineInst *inst)
 }
 
 DsSubRtnU64Vds::DsSubRtnU64Vds(const MachineInst *inst)
-    : Vds("ds_sub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1325)),
+    : Vds("ds_sub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsSubRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1412,7 +1480,8 @@ DsSubRtnU64Vds::DsSubRtnU64Vds(const MachineInst *inst)
 }
 
 DsRsubRtnU64Vds::DsRsubRtnU64Vds(const MachineInst *inst)
-    : Vds("ds_rsub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1326)),
+    : Vds("ds_rsub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsRsubRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1433,7 +1502,8 @@ DsRsubRtnU64Vds::DsRsubRtnU64Vds(const MachineInst *inst)
 }
 
 DsIncRtnU64Vds::DsIncRtnU64Vds(const MachineInst *inst)
-    : Vds("ds_inc_rtn_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1327)),
+    : Vds("ds_inc_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsIncRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1454,7 +1524,8 @@ DsIncRtnU64Vds::DsIncRtnU64Vds(const MachineInst *inst)
 }
 
 DsDecRtnU64Vds::DsDecRtnU64Vds(const MachineInst *inst)
-    : Vds("ds_dec_rtn_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1328)),
+    : Vds("ds_dec_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsDecRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1475,7 +1546,8 @@ DsDecRtnU64Vds::DsDecRtnU64Vds(const MachineInst *inst)
 }
 
 DsMinRtnI64Vds::DsMinRtnI64Vds(const MachineInst *inst)
-    : Vds("ds_min_rtn_i64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1329)),
+    : Vds("ds_min_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinRtnI64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1496,7 +1568,8 @@ DsMinRtnI64Vds::DsMinRtnI64Vds(const MachineInst *inst)
 }
 
 DsMaxRtnI64Vds::DsMaxRtnI64Vds(const MachineInst *inst)
-    : Vds("ds_max_rtn_i64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1330)),
+    : Vds("ds_max_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxRtnI64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1517,7 +1590,8 @@ DsMaxRtnI64Vds::DsMaxRtnI64Vds(const MachineInst *inst)
 }
 
 DsMinRtnU64Vds::DsMinRtnU64Vds(const MachineInst *inst)
-    : Vds("ds_min_rtn_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1331)),
+    : Vds("ds_min_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1538,7 +1612,8 @@ DsMinRtnU64Vds::DsMinRtnU64Vds(const MachineInst *inst)
 }
 
 DsMaxRtnU64Vds::DsMaxRtnU64Vds(const MachineInst *inst)
-    : Vds("ds_max_rtn_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1332)),
+    : Vds("ds_max_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxRtnU64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1559,7 +1634,8 @@ DsMaxRtnU64Vds::DsMaxRtnU64Vds(const MachineInst *inst)
 }
 
 DsAndRtnB64Vds::DsAndRtnB64Vds(const MachineInst *inst)
-    : Vds("ds_and_rtn_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1333)),
+    : Vds("ds_and_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAndRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1580,7 +1656,8 @@ DsAndRtnB64Vds::DsAndRtnB64Vds(const MachineInst *inst)
 }
 
 DsOrRtnB64Vds::DsOrRtnB64Vds(const MachineInst *inst)
-    : Vds("ds_or_rtn_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1334)),
+    : Vds("ds_or_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsOrRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1601,7 +1678,8 @@ DsOrRtnB64Vds::DsOrRtnB64Vds(const MachineInst *inst)
 }
 
 DsXorRtnB64Vds::DsXorRtnB64Vds(const MachineInst *inst)
-    : Vds("ds_xor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1335)),
+    : Vds("ds_xor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsXorRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1622,7 +1700,8 @@ DsXorRtnB64Vds::DsXorRtnB64Vds(const MachineInst *inst)
 }
 
 DsMskorRtnB64Vds::DsMskorRtnB64Vds(const MachineInst *inst)
-    : Vds("ds_mskor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1336)),
+    : Vds("ds_mskor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMskorRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1647,7 +1726,7 @@ DsMskorRtnB64Vds::DsMskorRtnB64Vds(const MachineInst *inst)
 
 DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1337)),
+          selected_exec_fn(InstructionExecutionId::DsStorexchgRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1669,7 +1748,7 @@ DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
 
 DsStorexchg2addrRtnB64Vds::DsStorexchg2addrRtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1338)),
+          selected_exec_fn(InstructionExecutionId::DsStorexchg2addrRtnB64Vds)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1694,7 +1773,7 @@ DsStorexchg2addrRtnB64Vds::DsStorexchg2addrRtnB64Vds(const MachineInst *inst)
 
 DsStorexchg2addrStride64RtnB64Vds::DsStorexchg2addrStride64RtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_stride64_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1339)),
+          selected_exec_fn(InstructionExecutionId::DsStorexchg2addrStride64RtnB64Vds)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1719,7 +1798,7 @@ DsStorexchg2addrStride64RtnB64Vds::DsStorexchg2addrStride64RtnB64Vds(const Machi
 
 DsCmpstoreRtnB64Vds::DsCmpstoreRtnB64Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1340)),
+          selected_exec_fn(InstructionExecutionId::DsCmpstoreRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1743,7 +1822,8 @@ DsCmpstoreRtnB64Vds::DsCmpstoreRtnB64Vds(const MachineInst *inst)
 }
 
 DsMinNumRtnF64Vds::DsMinNumRtnF64Vds(const MachineInst *inst)
-    : Vds("ds_min_num_rtn_f64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1341)),
+    : Vds("ds_min_num_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMinNumRtnF64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1764,7 +1844,8 @@ DsMinNumRtnF64Vds::DsMinNumRtnF64Vds(const MachineInst *inst)
 }
 
 DsMaxNumRtnF64Vds::DsMaxNumRtnF64Vds(const MachineInst *inst)
-    : Vds("ds_max_num_rtn_f64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1342)),
+    : Vds("ds_max_num_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsMaxNumRtnF64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1785,7 +1866,8 @@ DsMaxNumRtnF64Vds::DsMaxNumRtnF64Vds(const MachineInst *inst)
 }
 
 DsAddRtnF64Vds::DsAddRtnF64Vds(const MachineInst *inst)
-    : Vds("ds_add_rtn_f64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1343)),
+    : Vds("ds_add_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAddRtnF64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1807,7 +1889,7 @@ DsAddRtnF64Vds::DsAddRtnF64Vds(const MachineInst *inst)
 
 DsAtomicBarrierArriveRtnB64Vds::DsAtomicBarrierArriveRtnB64Vds(const MachineInst *inst)
     : Vds("ds_atomic_barrier_arrive_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1344)),
+          selected_exec_fn(InstructionExecutionId::DsAtomicBarrierArriveRtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1828,7 +1910,8 @@ DsAtomicBarrierArriveRtnB64Vds::DsAtomicBarrierArriveRtnB64Vds(const MachineInst
 }
 
 DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
-    : Vds("ds_load_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1345)),
+    : Vds("ds_load_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
@@ -1844,7 +1927,8 @@ DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
 }
 
 DsLoad2addrB64Vds::DsLoad2addrB64Vds(const MachineInst *inst)
-    : Vds("ds_load_2addr_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1346)),
+    : Vds("ds_load_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoad2addrB64Vds)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
@@ -1861,7 +1945,7 @@ DsLoad2addrB64Vds::DsLoad2addrB64Vds(const MachineInst *inst)
 
 DsLoad2addrStride64B64Vds::DsLoad2addrStride64B64Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1347)),
+          selected_exec_fn(InstructionExecutionId::DsLoad2addrStride64B64Vds)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
@@ -1877,7 +1961,8 @@ DsLoad2addrStride64B64Vds::DsLoad2addrStride64B64Vds(const MachineInst *inst)
 }
 
 DsAddRtnF32Vds::DsAddRtnF32Vds(const MachineInst *inst)
-    : Vds("ds_add_rtn_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1348)),
+    : Vds("ds_add_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsAddRtnF32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1899,7 +1984,7 @@ DsAddRtnF32Vds::DsAddRtnF32Vds(const MachineInst *inst)
 
 DsCondxchg32RtnB64Vds::DsCondxchg32RtnB64Vds(const MachineInst *inst)
     : Vds("ds_condxchg32_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1349)),
+          selected_exec_fn(InstructionExecutionId::DsCondxchg32RtnB64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -1920,7 +2005,8 @@ DsCondxchg32RtnB64Vds::DsCondxchg32RtnB64Vds(const MachineInst *inst)
 }
 
 DsCondSubU32Vds::DsCondSubU32Vds(const MachineInst *inst)
-    : Vds("ds_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1350)),
+    : Vds("ds_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsCondSubU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -1938,7 +2024,8 @@ DsCondSubU32Vds::DsCondSubU32Vds(const MachineInst *inst)
 }
 
 DsSubClampU32Vds::DsSubClampU32Vds(const MachineInst *inst)
-    : Vds("ds_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1351)),
+    : Vds("ds_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsSubClampU32Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -1956,7 +2043,8 @@ DsSubClampU32Vds::DsSubClampU32Vds(const MachineInst *inst)
 }
 
 DsPkAddF16Vds::DsPkAddF16Vds(const MachineInst *inst)
-    : Vds("ds_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1352)),
+    : Vds("ds_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsPkAddF16Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -1974,7 +2062,8 @@ DsPkAddF16Vds::DsPkAddF16Vds(const MachineInst *inst)
 }
 
 DsPkAddBf16Vds::DsPkAddBf16Vds(const MachineInst *inst)
-    : Vds("ds_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1353)),
+    : Vds("ds_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsPkAddBf16Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
@@ -1992,7 +2081,8 @@ DsPkAddBf16Vds::DsPkAddBf16Vds(const MachineInst *inst)
 }
 
 DsStoreB8D16HiVds::DsStoreB8D16HiVds(const MachineInst *inst)
-    : Vds("ds_store_b8_d16_hi", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1354)),
+    : Vds("ds_store_b8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsStoreB8D16HiVds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -2009,7 +2099,7 @@ DsStoreB8D16HiVds::DsStoreB8D16HiVds(const MachineInst *inst)
 
 DsStoreB16D16HiVds::DsStoreB16D16HiVds(const MachineInst *inst)
     : Vds("ds_store_b16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1355)),
+          selected_exec_fn(InstructionExecutionId::DsStoreB16D16HiVds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
@@ -2025,7 +2115,8 @@ DsStoreB16D16HiVds::DsStoreB16D16HiVds(const MachineInst *inst)
 }
 
 DsLoadU8D16Vds::DsLoadU8D16Vds(const MachineInst *inst)
-    : Vds("ds_load_u8_d16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1356)),
+    : Vds("ds_load_u8_d16", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadU8D16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -2054,7 +2145,8 @@ void DsLoadU8D16Vds::implicit_use_operands(
 }
 
 DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
-    : Vds("ds_load_u8_d16_hi", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1357)),
+    : Vds("ds_load_u8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadU8D16HiVds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -2083,7 +2175,8 @@ void DsLoadU8D16HiVds::implicit_use_operands(
 }
 
 DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
-    : Vds("ds_load_i8_d16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1358)),
+    : Vds("ds_load_i8_d16", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadI8D16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -2112,7 +2205,8 @@ void DsLoadI8D16Vds::implicit_use_operands(
 }
 
 DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
-    : Vds("ds_load_i8_d16_hi", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1359)),
+    : Vds("ds_load_i8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadI8D16HiVds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
@@ -2141,7 +2235,8 @@ void DsLoadI8D16HiVds::implicit_use_operands(
 }
 
 DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
-    : Vds("ds_load_u16_d16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1360)),
+    : Vds("ds_load_u16_d16", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadU16D16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
@@ -2170,7 +2265,8 @@ void DsLoadU16D16Vds::implicit_use_operands(
 }
 
 DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
-    : Vds("ds_load_u16_d16_hi", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1361)),
+    : Vds("ds_load_u16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadU16D16HiVds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
@@ -2200,7 +2296,7 @@ void DsLoadU16D16HiVds::implicit_use_operands(
 
 DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
     : Vds("ds_cond_sub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1362)),
+          selected_exec_fn(InstructionExecutionId::DsCondSubRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -2222,7 +2318,7 @@ DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
 
 DsSubClampRtnU32Vds::DsSubClampRtnU32Vds(const MachineInst *inst)
     : Vds("ds_sub_clamp_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1363)),
+          selected_exec_fn(InstructionExecutionId::DsSubClampRtnU32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -2243,7 +2339,8 @@ DsSubClampRtnU32Vds::DsSubClampRtnU32Vds(const MachineInst *inst)
 }
 
 DsPkAddRtnF16Vds::DsPkAddRtnF16Vds(const MachineInst *inst)
-    : Vds("ds_pk_add_rtn_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1364)),
+    : Vds("ds_pk_add_rtn_f16", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsPkAddRtnF16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -2264,7 +2361,8 @@ DsPkAddRtnF16Vds::DsPkAddRtnF16Vds(const MachineInst *inst)
 }
 
 DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
-    : Vds("ds_pk_add_rtn_bf16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1365)),
+    : Vds("ds_pk_add_rtn_bf16", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsPkAddRtnBf16Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
@@ -2286,7 +2384,7 @@ DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
 
 DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
     : Vds("ds_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
-          selected_exec_fn(1366)),
+          selected_exec_fn(InstructionExecutionId::DsStoreAddtidB32Vds)),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &data0;
@@ -2301,7 +2399,8 @@ DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
 }
 
 DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
-    : Vds("ds_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1367)),
+    : Vds("ds_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadAddtidB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
@@ -2316,7 +2415,8 @@ DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
 }
 
 DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)
-    : Vds("ds_permute_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1368)),
+    : Vds("ds_permute_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsPermuteB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
@@ -2331,7 +2431,8 @@ DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)
 }
 
 DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
-    : Vds("ds_bpermute_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1369)),
+    : Vds("ds_bpermute_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsBpermuteB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
@@ -2346,7 +2447,8 @@ DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
 }
 
 DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)
-    : Vds("ds_bpermute_fi_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1370)),
+    : Vds("ds_bpermute_fi_b32", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsBpermuteFiB32Vds)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
@@ -2361,7 +2463,8 @@ DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)
 }
 
 DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
-    : Vds("ds_store_b96", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1371)),
+    : Vds("ds_store_b96", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsStoreB96Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(96, OperandType::OPR_DSMEM, 0) {
@@ -2377,7 +2480,8 @@ DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
 }
 
 DsStoreB128Vds::DsStoreB128Vds(const MachineInst *inst)
-    : Vds("ds_store_b128", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1372)),
+    : Vds("ds_store_b128", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsStoreB128Vds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data0(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(128, OperandType::OPR_DSMEM, 0) {
@@ -2393,7 +2497,8 @@ DsStoreB128Vds::DsStoreB128Vds(const MachineInst *inst)
 }
 
 DsLoadTr4B64Vds::DsLoadTr4B64Vds(const MachineInst *inst)
-    : Vds("ds_load_tr4_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1373)),
+    : Vds("ds_load_tr4_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadTr4B64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
@@ -2409,7 +2514,8 @@ DsLoadTr4B64Vds::DsLoadTr4B64Vds(const MachineInst *inst)
 }
 
 DsLoadTr6B96Vds::DsLoadTr6B96Vds(const MachineInst *inst)
-    : Vds("ds_load_tr6_b96", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1374)),
+    : Vds("ds_load_tr6_b96", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadTr6B96Vds)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(96, OperandType::OPR_DSMEM, 0) {
@@ -2425,7 +2531,8 @@ DsLoadTr6B96Vds::DsLoadTr6B96Vds(const MachineInst *inst)
 }
 
 DsLoadTr16B128Vds::DsLoadTr16B128Vds(const MachineInst *inst)
-    : Vds("ds_load_tr16_b128", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1375)),
+    : Vds("ds_load_tr16_b128", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadTr16B128Vds)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(128, OperandType::OPR_DSMEM, 0) {
@@ -2441,7 +2548,8 @@ DsLoadTr16B128Vds::DsLoadTr16B128Vds(const MachineInst *inst)
 }
 
 DsLoadTr8B64Vds::DsLoadTr8B64Vds(const MachineInst *inst)
-    : Vds("ds_load_tr8_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1376)),
+    : Vds("ds_load_tr8_b64", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadTr8B64Vds)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
@@ -2457,7 +2565,8 @@ DsLoadTr8B64Vds::DsLoadTr8B64Vds(const MachineInst *inst)
 }
 
 DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
-    : Vds("ds_load_b96", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1377)),
+    : Vds("ds_load_b96", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadB96Vds)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(96, OperandType::OPR_DSMEM, 0) {
@@ -2473,7 +2582,8 @@ DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
 }
 
 DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
-    : Vds("ds_load_b128", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1378)),
+    : Vds("ds_load_b128", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::DsLoadB128Vds)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(128, OperandType::OPR_DSMEM, 0) {
