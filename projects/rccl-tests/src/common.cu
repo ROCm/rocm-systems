@@ -62,7 +62,7 @@ static void loadRcclSyms() {
   rcclTestsGetProtocolName  = (rcclTestsGetProtocolName_t) dlsym(RTLD_DEFAULT, "rcclGetProtocolName");
   rcclTestsGetSymkInfo      = (rcclTestsGetSymkInfo_t)     dlsym(RTLD_DEFAULT, "rcclSymKGetInfo");
   // Optional (newer librccl). Left NULL on older libs -> reporting falls back.
-  rcclTestsGetCollImplInfo  = (rcclTestsGetCollImplInfo_t) dlsym(handle, "rcclGetCollImplInfo");
+  rcclTestsGetCollImplInfo  = (rcclTestsGetCollImplInfo_t) dlsym(RTLD_DEFAULT, "rcclGetCollImplInfo");
 }
 
 // RCCL_FLOAT8 support
@@ -2456,10 +2456,10 @@ testResult_t run() {
   }
 
   fflush(stdout);
-  
+
   // RCCL: Call NCCL's refactored header function with RCCL-specific parameters
   writeResultHeader(report_cputime, report_timestamps, enable_out_of_place, enable_in_place, output_algo_proto_channels);
-  
+
   // RCCL: Initialize Reporter for file output (-Z flag)
   Reporter reporter(rccl_output_file, rccl_output_format);
 
