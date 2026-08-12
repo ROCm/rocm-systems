@@ -134,6 +134,7 @@ TEST_F(TestCountersWriter, OutputFilename_IsTheOnlyFileWritten)
     writer.write_counters(&m_tool_data);
 
     EXPECT_TRUE(std::filesystem::exists(path));
+    EXPECT_FALSE(std::filesystem::exists(path.string() + ".tmp"));
     EXPECT_EQ(std::distance(std::filesystem::directory_iterator{directory},
                             std::filesystem::directory_iterator{}),
               1);

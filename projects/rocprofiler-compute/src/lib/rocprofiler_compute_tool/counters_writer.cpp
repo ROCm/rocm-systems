@@ -48,10 +48,13 @@ bool format_counters_csv(const tool_data_t& tool_data, const std::function<bool(
 
 void CsvCountersWriter::write_counters(tool_data_t* tool_data)
 {
-    compression::GzipFileOutputStream stream(tool_data->output_filename);
+    const std::string& final_path = tool_data->output_filename;
+    const std::string  temp_path  = final_path + ".tmp";
+
+    compression::GzipFileOutputStream stream(temp_path);
     if (!stream.is_open())
     {
-        std::cerr << "Failed to open output file: " << tool_data->output_filename << std::endl;
+        std::cerr << "Failed to open output file: " << final_path << std::endl;
         return;
     }
 
@@ -59,17 +62,24 @@ void CsvCountersWriter::write_counters(tool_data_t* tool_data)
                                            [&stream](std::string_view text)
                                            { return stream.write(text); });
 
+    std::error_code ec;
     if (!stream.close() || !wrote)
     {
-        std::error_code ec;
-        std::filesystem::remove(tool_data->output_filename, ec);
-        std::cerr << "Failed to write output file: " << tool_data->output_filename << std::endl;
+        std::filesystem::remove(temp_path, ec);
+        std::cerr << "Failed to write output file: " << final_path << std::endl;
+        return;
+    }
+
+    std::filesystem::rename(temp_path, final_path, ec);
+    if (ec)
+    {
+        std::filesystem::remove(temp_path, ec);
+        std::cerr << "Failed to write output file: " << final_path << std::endl;
         return;
     }
 
     std::clog << "[rocprofiler-compute] [" << __FUNCTION__
-              << "] Counter collection data has been written to: " << tool_data->output_filename
-              << std::endl;
+              << "] Counter collection data has been written to: " << final_path << std::endl;
 }
 
 }  // namespace rocprofiler_compute_tool

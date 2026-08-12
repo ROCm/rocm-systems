@@ -1796,9 +1796,9 @@ def test_get_submodules_docstring_verification(mock_walk, mock_import):
 # =============================================================================
 
 
-def test_is_workload_empty_valid_data_file(tmp_path):
+def test_validate_workload_valid_data_file(tmp_path):
     """
-    Test is_workload_empty with a valid pmc_perf.csv file containing data.
+    Test validate_workload with a valid pmc_perf.csv file containing data.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -1824,14 +1824,14 @@ kernel3,0,120,220"""
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        utils_analysis.is_workload_empty(str(workload_dir))
+        utils_analysis.validate_workload(str(workload_dir))
 
     assert len(console_error_calls) == 0
 
 
-def test_is_workload_empty_file_with_nan_values(tmp_path):
+def test_validate_workload_file_with_nan_values(tmp_path):
     """
-    Test is_workload_empty with pmc_perf.csv containing NaN values.
+    Test validate_workload with pmc_perf.csv containing NaN values.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -1857,7 +1857,7 @@ NaN,,,"""
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        utils_analysis.is_workload_empty(str(workload_dir))
+        utils_analysis.validate_workload(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -1867,9 +1867,9 @@ NaN,,,"""
     assert "Profiling data could be corrupt" in error_args[1]
 
 
-def test_is_workload_empty_completely_empty_gzip_csv(tmp_path):
+def test_validate_workload_completely_empty_gzip_csv(tmp_path):
     """
-    Test is_workload_empty with a valid gzip file containing no CSV data.
+    Test validate_workload with a valid gzip file containing no CSV data.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -1892,7 +1892,7 @@ def test_is_workload_empty_completely_empty_gzip_csv(tmp_path):
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        utils_analysis.is_workload_empty(str(workload_dir))
+        utils_analysis.validate_workload(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -1902,9 +1902,9 @@ def test_is_workload_empty_completely_empty_gzip_csv(tmp_path):
     assert "Profiling data could be corrupt" in error_args[1]
 
 
-def test_is_workload_empty_headers_only_csv(tmp_path):
+def test_validate_workload_headers_only_csv(tmp_path):
     """
-    Test is_workload_empty with CSV containing only headers.
+    Test validate_workload with CSV containing only headers.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -1927,7 +1927,7 @@ def test_is_workload_empty_headers_only_csv(tmp_path):
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        utils_analysis.is_workload_empty(str(workload_dir))
+        utils_analysis.validate_workload(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -1935,9 +1935,9 @@ def test_is_workload_empty_headers_only_csv(tmp_path):
     assert "Found empty cells" in error_args[1]
 
 
-def test_is_workload_empty_no_pmc_perf_file(tmp_path):
+def test_validate_workload_no_pmc_perf_file(tmp_path):
     """
-    Test is_workload_empty when pmc_perf.csv file doesn't exist.
+    Test validate_workload when pmc_perf.csv file doesn't exist.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -1956,7 +1956,7 @@ def test_is_workload_empty_no_pmc_perf_file(tmp_path):
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        utils_analysis.is_workload_empty(str(workload_dir))
+        utils_analysis.validate_workload(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -1964,9 +1964,9 @@ def test_is_workload_empty_no_pmc_perf_file(tmp_path):
     assert error_args[1] == "No profiling data found."
 
 
-def test_is_workload_empty_nonexistent_directory():
+def test_validate_workload_nonexistent_directory():
     """
-    Test is_workload_empty with nonexistent directory path.
+    Test validate_workload with nonexistent directory path.
 
     Returns:
         None: Asserts function handles nonexistent directories.
@@ -1979,7 +1979,7 @@ def test_is_workload_empty_nonexistent_directory():
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        utils_analysis.is_workload_empty("/nonexistent/path")
+        utils_analysis.validate_workload("/nonexistent/path")
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -1987,9 +1987,9 @@ def test_is_workload_empty_nonexistent_directory():
     assert error_args[1] == "No profiling data found."
 
 
-def test_is_workload_empty_malformed_csv(tmp_path):
+def test_validate_workload_malformed_csv(tmp_path):
     """
-    Test is_workload_empty with malformed CSV that causes pandas read error.
+    Test validate_workload with malformed CSV that causes pandas read error.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -2016,14 +2016,14 @@ incomplete_row"""
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
         try:
-            utils_analysis.is_workload_empty(str(workload_dir))
+            utils_analysis.validate_workload(str(workload_dir))
         except Exception:
             pass
 
 
-def test_is_workload_empty_mixed_valid_invalid_data(tmp_path):
+def test_validate_workload_mixed_valid_invalid_data(tmp_path):
     """
-    Test is_workload_empty with CSV containing mix of valid and invalid (NaN) data.
+    Test validate_workload with CSV containing mix of valid and invalid (NaN) data.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -2050,14 +2050,14 @@ kernel3,1,120,
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        utils_analysis.is_workload_empty(str(workload_dir))
+        utils_analysis.validate_workload(str(workload_dir))
 
     assert len(console_error_calls) == 0
 
 
-def test_is_workload_empty_large_dataset_with_nans(tmp_path):
+def test_validate_workload_large_dataset_with_nans(tmp_path):
     """
-    Test is_workload_empty with large dataset that becomes empty after dropping NaNs.
+    Test validate_workload with large dataset that becomes empty after dropping NaNs.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -2084,7 +2084,7 @@ def test_is_workload_empty_large_dataset_with_nans(tmp_path):
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        utils_analysis.is_workload_empty(str(workload_dir))
+        utils_analysis.validate_workload(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -2092,9 +2092,9 @@ def test_is_workload_empty_large_dataset_with_nans(tmp_path):
     assert "Found empty cells" in error_args[1]
 
 
-def test_is_workload_empty_unicode_content(tmp_path):
+def test_validate_workload_unicode_content(tmp_path):
     """
-    Test is_workload_empty with CSV containing Unicode characters.
+    Test validate_workload with CSV containing Unicode characters.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -2120,14 +2120,14 @@ kernel_tëst,0,120,220"""
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        utils_analysis.is_workload_empty(str(workload_dir))
+        utils_analysis.validate_workload(str(workload_dir))
 
     assert len(console_error_calls) == 0
 
 
-def test_is_workload_empty_special_path_characters(tmp_path):
+def test_validate_workload_special_path_characters(tmp_path):
     """
-    Test is_workload_empty with directory paths containing special characters.
+    Test validate_workload with directory paths containing special characters.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -2151,14 +2151,14 @@ kernel1,0,100,200"""
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        utils_analysis.is_workload_empty(str(workload_dir))
+        utils_analysis.validate_workload(str(workload_dir))
 
     assert len(console_error_calls) == 0
 
 
-def test_is_workload_empty_csv_read_permission_error(tmp_path):
+def test_validate_workload_csv_read_permission_error(tmp_path):
     """
-    Test is_workload_empty when CSV file exists but cannot be read due to permissions.
+    Test validate_workload when CSV file exists but cannot be read due to permissions.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -2188,16 +2188,16 @@ def test_is_workload_empty_csv_read_permission_error(tmp_path):
         with patch(
             "utils.utils_analysis.console_error", side_effect=mock_console_error
         ):
-            utils_analysis.is_workload_empty(str(workload_dir))
+            utils_analysis.validate_workload(str(workload_dir))
     except PermissionError:
         pass
     finally:
         pmc_perf_file.chmod(0o644)
 
 
-def test_is_workload_empty_string_path_input():
+def test_validate_workload_string_path_input():
     """
-    Test is_workload_empty with string path input vs Path.
+    Test validate_workload with string path input vs Path.
 
     Returns:
         None: Asserts function handles different path input types.
@@ -2210,7 +2210,7 @@ def test_is_workload_empty_string_path_input():
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        utils_analysis.is_workload_empty("/nonexistent/string/path")
+        utils_analysis.validate_workload("/nonexistent/string/path")
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -2218,9 +2218,9 @@ def test_is_workload_empty_string_path_input():
     assert error_args[1] == "No profiling data found."
 
 
-def test_is_workload_empty_console_error_string_formatting(tmp_path):
+def test_validate_workload_console_error_string_formatting(tmp_path):
     """
-    Test is_workload_empty string formatting in console_error messages.
+    Test validate_workload string formatting in console_error messages.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -2242,7 +2242,7 @@ def test_is_workload_empty_console_error_string_formatting(tmp_path):
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
-        utils_analysis.is_workload_empty(str(workload_dir))
+        utils_analysis.validate_workload(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -2253,9 +2253,9 @@ def test_is_workload_empty_console_error_string_formatting(tmp_path):
     assert "Profiling data could be corrupt" in error_args[1]
 
 
-def test_is_workload_empty_function_return_value(tmp_path):
+def test_validate_workload_function_return_value(tmp_path):
     """
-    Test that is_workload_empty function return behavior (implicitly returns None).
+    Test that validate_workload function return behavior (implicitly returns None).
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -2272,7 +2272,7 @@ def test_is_workload_empty_function_return_value(tmp_path):
     pmc_perf_file.write_text("Kernel_Name,GPU_ID\nkernel1,0")
 
     with patch("utils.utils_analysis.console_error"):
-        result = utils_analysis.is_workload_empty(str(workload_dir))
+        result = utils_analysis.validate_workload(str(workload_dir))
 
     assert result is None
 
@@ -2280,14 +2280,14 @@ def test_is_workload_empty_function_return_value(tmp_path):
     workload_dir2.mkdir()
 
     with patch("utils.utils_analysis.console_error"):
-        result2 = utils_analysis.is_workload_empty(str(workload_dir2))
+        result2 = utils_analysis.validate_workload(str(workload_dir2))
 
     assert result2 is None
 
 
-def test_is_workload_empty_pandas_import_dependency():
+def test_validate_workload_pandas_import_dependency():
     """
-    Test is_workload_empty dependency on pandas module.
+    Test validate_workload dependency on pandas module.
 
     Returns:
         None: Asserts function properly uses pandas functionality.
@@ -2303,7 +2303,7 @@ def test_is_workload_empty_pandas_import_dependency():
         with patch("utils.utils_analysis.pd", mock_pandas):
             with patch("utils.utils_analysis.console_error"):
                 with patch("pathlib.Path.is_file", return_value=True):
-                    utils_analysis.is_workload_empty("/test/path")
+                    utils_analysis.validate_workload("/test/path")
 
     mock_pandas.read_csv.assert_called_once()
     mock_df.dropna.assert_called_once()

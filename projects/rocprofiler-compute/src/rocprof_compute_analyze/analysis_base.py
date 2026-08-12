@@ -33,7 +33,7 @@ from utils.logger import (
 from utils.metrics.expression import build_metric_value_string
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
-    is_workload_empty,
+    validate_workload,
 )
 from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
@@ -338,7 +338,7 @@ class OmniAnalyze_Base:
                 profiling_config.get("iteration_multiplexing"),
                 self.pc_sampling_only(),
             ]):
-                is_workload_empty(dir_info[0])
+                validate_workload(dir_info[0])
 
         # Ensure analysis output does not overwrite existing files
         if args.output_name:

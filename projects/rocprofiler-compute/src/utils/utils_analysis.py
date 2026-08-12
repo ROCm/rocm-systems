@@ -585,8 +585,8 @@ def process_ml_api_trace_output(
     return consolidated_df, ml_api_trace_path
 
 
-def is_workload_empty(path: str) -> None:
-    """Peek workload directory to verify valid profiling output"""
+def validate_workload(path: str) -> None:
+    """Validate workload directory contains readable, non-empty profiling output."""
     workload_dir = Path(path)
     pmc_perf_path = workload_dir / "pmc_perf.csv"
 

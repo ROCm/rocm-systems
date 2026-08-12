@@ -145,14 +145,6 @@ TEST_F(TestGzipOutputStream, StartsAsOneGzipMember)
     EXPECT_EQ(static_cast<unsigned char>(compressed[2]), 0x08);
 }
 
-TEST_F(TestGzipOutputStream, WriteAfterClose_Fails)
-{
-    GzipFileOutputStream stream(m_path.string());
-
-    ASSERT_TRUE(stream.close());
-    EXPECT_FALSE(stream.write("late"));
-}
-
 TEST_F(TestGzipOutputStream, WriteAfterClose_LeavesTheStreamFailed)
 {
     GzipFileOutputStream stream(m_path.string());

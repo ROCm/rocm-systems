@@ -59,13 +59,11 @@ bool GzipFileOutputStream::write(std::string_view data)
 
 bool GzipFileOutputStream::close()
 {
-    if (m_file)
-    {
-        if (gzclose(m_file) != Z_OK)
-            m_failed = true;
-        m_file = nullptr;
-    }
+    if (!m_file)
+        return !m_failed;
 
+    m_failed |= gzclose(m_file) != Z_OK;
+    m_file = nullptr;
     return !m_failed;
 }
 

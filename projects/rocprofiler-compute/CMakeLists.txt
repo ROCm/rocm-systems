@@ -883,6 +883,10 @@ if(TARGET test-pc-sampling-collector)
     endif()
 endif()
 
+# -----------------------------------
+# CSV compression Tests
+# -----------------------------------
+
 if(TARGET test-compression)
     if(TEST_FROM_INSTALL)
         set(_compression_test_cmd tests/test-compression)

@@ -66,7 +66,11 @@ def find_csvs(directory: PathLike, pattern: str) -> list[Path]:
 
 
 def resolve_csv(path: PathLike) -> Path:
-    """Find an existing artifact for path, preferring the compressed form."""
+    """Find an existing artifact for path, preferring the compressed form.
+
+    When neither file exists, returns the compressed path as the canonical
+    target for callers that open or check a single expected location.
+    """
     plain = Path(path)
     compressed = compressed_name(path)
     if compressed.is_file():

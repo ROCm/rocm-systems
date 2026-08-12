@@ -492,9 +492,11 @@ def save_ml_api_trace_inputs(
     # Only one pair expected
     src_marker = src_dir / f"{fbase}_marker_api_trace.csv"
     # Byte-copy counter artifact; preserve compressed vs plain form.
-    dst_counter = Path(workload_dir) / (
-        f"ml_api_trace_{fbase}_counter_collection.csv"
-        + (GZIP_SUFFIX if str(src_counter).endswith(GZIP_SUFFIX) else "")
+    counter_base = Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv"
+    dst_counter = (
+        compressed_name(counter_base)
+        if str(src_counter).endswith(GZIP_SUFFIX)
+        else counter_base
     )
     dst_marker = Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv"
     # These files are expected to exist.
