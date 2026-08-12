@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/refcount.h"
+#include "util/except.h"
 
 #include <memory>
 
@@ -68,7 +69,13 @@ rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
   if (!decoder || !decoder->decoder || !binary_inst || !inst)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto decoded = decoder->decoder->decode(binary_inst);
+  *inst = nullptr;
+  Instruction *decoded = nullptr;
+  try {
+    decoded = decoder->decoder->decode(binary_inst);
+  } catch (const util::InvalidInst &) {
+    return ROCJITSU_STATUS_ERROR;
+  }
   if (!decoded)
     return ROCJITSU_STATUS_ERROR;
 

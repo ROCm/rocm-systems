@@ -64,20 +64,20 @@
 #include "rocjitsu/code/relocation_function_table.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/code/rj_code_internal.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
@@ -10459,9 +10459,8 @@ TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtF32Fp8E5m3ForA0) {
   // Assert the value-defining literal constants of the emitted sequence, not just
   // mnemonic counts: an off-by-one in the NaN threshold, exponent clamp, or the
   // F16/F32 reconstruction constants would otherwise pass. These constants are
-  // distinctive, so scan the raw translated text words for each. (Reading them from
-  // the raw text is robust; a decoded VOP3's raw_encoding() only spans its 2-dword
-  // base and does not expose the trailing literal.)
+  // distinctive, so scan the raw translated text words for each. This checks the
+  // emitted bytes directly without coupling the test to decoded instruction objects.
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
@@ -16336,7 +16335,7 @@ translate_gfx1250_b0_to_a0_result(rocjitsu::BinaryTranslator &translator,
                                rocjitsu::ProcessorRevision::Gfx1250A0));
 }
 
-/// @brief An s_monitor_sleep, whose A0 handling is deferred (DEGFXMI400-12268).
+/// @brief An s_monitor_sleep whose A0 handling is deferred.
 [[nodiscard]] uint32_t gfx1250_deferred_word() {
   return gfx1250::build_sopp(gfx1250::kSMonitorSleepSopp, {.simm16 = 1})[0];
 }
@@ -16419,7 +16418,7 @@ TEST(BinaryTranslatorE2E, Gfx1250DeferredFamilyReportCarriesOffsetAndMnemonic) {
 }
 
 // s_sleep and s_sleep_var behave identically on A0 and B0. The only sleep-family
-// A0 erratum, DEGFXMI400-12268, is specific to s_monitor_sleep('forever') with
+// A0 translation requirement is specific to s_monitor_sleep('forever') with
 // MWAIT=0. Copying a plain sleep through is therefore the correct translation,
 // not an unimplemented one, and reporting it drowned the reports that do name a
 // real gap: one RCCL all_reduce run emitted 104,831 of them.

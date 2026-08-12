@@ -129,6 +129,37 @@ def test_implied_literal_extension_keeps_literal32_as_one_word():
     assert not parent.has_variable_implied_literal_size
 
 
+def test_vop3p_literal64_rejection_uses_complete_encoding_capability():
+    unsupported = _enc('ENC_VOP3P')
+    assert CodeGenerator._rejects_unencoded_vop3p_literal64(unsupported)
+
+    explicit = _enc('ENC_VOP3P')
+    explicit.enc_conds.append(('has_lit64_0', 'inst_.src0 == 254'))
+    assert not CodeGenerator._rejects_unencoded_vop3p_literal64(explicit)
+
+    implied = _enc('ENC_VOP3P')
+    implied.insts.append(
+        Instruction(
+            'V_FUTURE_LITERAL64',
+            'VOP3P_INST_LITERAL64',
+            opcode=1,
+            operands=[],
+            is_implied_literal_enc=True,
+        )
+    )
+    assert not CodeGenerator._rejects_unencoded_vop3p_literal64(implied)
+
+
+def test_gfx1250_packed_f32_reader_has_no_unreachable_literal64_branch():
+    source = CodeGenerator._emit_gfx1250_matrix_fmt_helpers().execution[0]
+
+    reader_start = source.index('PkF32Words read_pk_f32_words')
+    reader_end = source.index('\n}', reader_start)
+    reader = source[reader_start:reader_end]
+    assert 'literal64_value' not in reader
+    assert 'return {lo, lo};' in reader
+
+
 def test_literal_fixups_require_generated_machine_inst_struct():
     inst = Instruction('V_PK_ADD_I16', 'ENC_VOP3P', opcode=0, operands=[])
 
@@ -168,32 +199,28 @@ def test_f64_simm32_literal_operand_uses_extension_word_as_double_high_bits():
     )
 
     assert (
-        'src0 = Operand(64, OperandType::OPR_SIMM32, '
-        '(static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) '
-        '<< 32), true);'
+        'src0 = Operand::make_literal32(64, static_cast<uint32_t>('
+        'reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32), '
+        'Operand::Literal32Widening::F64HighBits);'
     ) == stmt
 
 
-def test_f64_simm32_literal_operand_falls_back_to_semantics():
-    sem = InstructionSemantics(
-        'V_FMAC_F64',
-        'vector_binop',
-        operation='fmac',
-        data_type='f64',
-    )
-
-    stmt = CodeGenerator._literal_operand_fixup_stmt(
-        _operand('src0', 'OPR_SRC_VGPR', size=64),
-        'Vop2InstLiteralMachineInst',
-        inst_sem=sem,
-        literal_operand_type='OPR_SIMM32',
-    )
-
-    assert (
-        'src0 = Operand(64, OperandType::OPR_SIMM32, '
-        '(static_cast<uint64_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32) '
-        '<< 32), true);'
-    ) == stmt
+def test_64bit_simm32_literal_operand_requires_data_format():
+    with pytest.raises(
+        ValueError,
+        match=(
+            "architecture 'rdna4', instruction 'V_FMAC_F64', encoding 'ENC_VOP2': "
+            "64-bit SIMM32 input operand 'src0' has unsupported data format '<missing>'"
+        ),
+    ):
+        CodeGenerator._literal_operand_fixup_stmt(
+            _operand('src0', 'OPR_SRC_VGPR', size=64),
+            'Vop2InstLiteralMachineInst',
+            literal_operand_type='OPR_SIMM32',
+            arch_name='rdna4',
+            inst_name='V_FMAC_F64',
+            enc_name='ENC_VOP2',
+        )
 
 
 def test_mixed_width_literal_operands_classify_per_operand_signature():
@@ -219,9 +246,9 @@ def test_mixed_width_literal_operands_classify_per_operand_signature():
     )
 
     assert (
-        'src0 = Operand(64, OperandType::OPR_SIMM32, '
-        '(static_cast<uint64_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32) '
-        '<< 32), true);'
+        'src0 = Operand::make_literal32(64, static_cast<uint32_t>('
+        'reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32), '
+        'Operand::Literal32Widening::F64HighBits);'
     ) == src0_stmt
     assert (
         'src1 = Operand(32, OperandType::OPR_SIMM32, '
@@ -230,24 +257,180 @@ def test_mixed_width_literal_operands_classify_per_operand_signature():
 
 
 def test_u64_simm32_literal_operand_keeps_low_32_bit_value():
-    sem = InstructionSemantics(
-        'S_MUL_U64',
-        'scalar_binop',
-        operation='mul',
-        data_type='u64',
-        sets_scc='none',
-    )
-
     stmt = CodeGenerator._literal_operand_fixup_stmt(
         _operand('ssrc0', 'OPR_SSRC', size=64, data_format_name='FMT_NUM_U64'),
         'Sop2InstLiteralMachineInst',
-        inst_sem=sem,
         literal_operand_type='OPR_SIMM32',
     )
 
     assert (
-        'ssrc0 = Operand(64, OperandType::OPR_SIMM32, '
-        'static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));'
+        'ssrc0 = Operand::make_literal32(64, static_cast<uint32_t>('
+        'reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32), '
+        'Operand::Literal32Widening::ZeroExtend);'
+    ) == stmt
+
+
+def test_pk_f32_simm32_literal_operand_replicates_extension_word():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand(
+            'src0',
+            'OPR_SRC',
+            size=64,
+            data_format_name='FMT_NUM_PK2_F32',
+        ),
+        'Vop3pInstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src0 = Operand::make_literal32(64, static_cast<uint32_t>('
+        'reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32), '
+        'Operand::Literal32Widening::Replicate32);'
+    ) == stmt
+
+
+def test_i64_simm32_literal_operand_sign_extends_from_data_format():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand(
+            'src0',
+            'OPR_SRC',
+            size=64,
+            data_format_name='FMT_NUM_I64',
+        ),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src0 = Operand::make_literal32(64, '
+        'static_cast<uint32_t>(reinterpret_cast<const '
+        'Vop3InstLiteralMachineInst *>(inst)->simm32), '
+        'Operand::Literal32Widening::SignExtend);'
+    ) == stmt
+
+
+def test_64bit_simm32_literal_operand_rejects_unrecognized_data_format():
+    with pytest.raises(
+        ValueError,
+        match=(
+            "architecture 'cdna4', instruction 'S_FAKE_I64', encoding 'ENC_SOP2': "
+            "64-bit SIMM32 input operand 'ssrc0' has unsupported data format 'FMT_NUM_X64'"
+        ),
+    ):
+        CodeGenerator._literal_operand_fixup_stmt(
+            _operand(
+                'ssrc0',
+                'OPR_SSRC',
+                size=64,
+                data_format_name='FMT_NUM_X64',
+            ),
+            'Sop2InstLiteralMachineInst',
+            literal_operand_type='OPR_SIMM32',
+            arch_name='cdna4',
+            inst_name='S_FAKE_I64',
+            enc_name='ENC_SOP2',
+        )
+
+
+def test_mixed_width_i64_literal_fixup_only_sign_extends_i64_operand():
+    operands = (
+        _operand('src0', 'OPR_SRC', size=32, data_format_name='FMT_NUM_I32'),
+        _operand('src1', 'OPR_SRC', size=32, data_format_name='FMT_NUM_I32'),
+        _operand('src2', 'OPR_SRC', size=64, data_format_name='FMT_NUM_I64'),
+    )
+
+    stmts = [
+        CodeGenerator._literal_operand_fixup_stmt(
+            operand,
+            'Vop3InstLiteralMachineInst',
+            literal_operand_type='OPR_SIMM32',
+        )
+        for operand in operands
+    ]
+
+    assert all(stmt is not None for stmt in stmts)
+    assert 'make_literal32' not in stmts[0]
+    assert 'make_literal32' not in stmts[1]
+    assert 'Operand::Literal32Widening::SignExtend' in stmts[2]
+
+
+def test_generated_operand_tracks_literal32_widening_without_literal64_provenance(
+    tmp_path,
+):
+    generator = CodeGenerator(
+        SimpleNamespace(
+            arch_name='rdna4',
+            opnd_selectors=[],
+            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+            profile=Rdna4Profile(),
+        ),
+        str(tmp_path),
+    )
+
+    generator.gen_operand()
+    operand_cpp = (tmp_path / 'rdna4' / 'operand.cpp').read_text()
+    operand_h = (tmp_path / 'rdna4' / 'operand.h').read_text()
+
+    assert 'enum class Literal32Widening' in operand_h
+    assert 'static Operand make_literal32(' in operand_h
+    assert 'uint64_t signed_literal32_value_' not in operand_h
+    assert 'uint64_t widened_literal32_value() const;' in operand_h
+    assert 'std::optional<Literal32Widening> literal32_widening_' in operand_h
+    assert 'literal32_display' not in operand_h
+    assert 'Operand operand(size_bits, OperandType::OPR_SIMM32' in operand_cpp
+    assert 'operand.literal32_widening_ = widening;' in operand_cpp
+    assert operand_cpp.count('if (literal32_widening_)') == 2
+    assert operand_cpp.count('return widened_literal32_value();') == 2
+    assert 'case Literal32Widening::Replicate32:' in operand_cpp
+    assert (
+        'return (static_cast<uint64_t>(literal_value) << 32) | literal_value;'
+        in operand_cpp
+    )
+    assert 'case Literal32Widening::F64HighBits:' in operand_cpp
+    assert 'static_cast<uint32_t>(encoding_value_)' in operand_cpp
+    assert 'if (!has_literal64_)\n    return std::nullopt;' in operand_cpp
+
+
+def test_b64_simm32_literal_operand_keeps_low_32_bit_value():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('ssrc0', 'OPR_SSRC', size=64, data_format_name='FMT_NUM_B64'),
+        'Sop2InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'ssrc0 = Operand::make_literal32(64, static_cast<uint32_t>('
+        'reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32), '
+        'Operand::Literal32Widening::ZeroExtend);'
+    ) == stmt
+
+
+def test_m64_simm32_literal_operand_keeps_low_32_bit_mask():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src2', 'OPR_SRC', size=64, data_format_name='FMT_NUM_M64'),
+        'Vop3InstLiteralMachineInst',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src2 = Operand::make_literal32(64, static_cast<uint32_t>('
+        'reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32), '
+        'Operand::Literal32Widening::ZeroExtend);'
+    ) == stmt
+
+
+def test_64bit_simm32_literal_preserves_effective_operand_size():
+    stmt = CodeGenerator._literal_operand_fixup_stmt(
+        _operand('src2', 'OPR_SREG', size=64, data_format_name='FMT_NUM_M64'),
+        'Vop3InstLiteralMachineInst',
+        size_expr='32',
+        literal_operand_type='OPR_SIMM32',
+    )
+
+    assert (
+        'src2 = Operand::make_literal32(32, static_cast<uint32_t>('
+        'reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32), '
+        'Operand::Literal32Widening::ZeroExtend);'
     ) == stmt
 
 
@@ -497,6 +680,24 @@ def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
     assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);' in body
     assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)' not in body
     assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)' not in body
+
+
+def test_scalar_addpc_generated_execute_uses_unsigned_pc_addition():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1250',
+        profile=Gfx1250Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    operands = [_operand('ssrc0', 'OPR_SSRC', size=64, order=0)]
+    inst = Instruction('S_ADD_PC_I64', 'ENC_SOP1', opcode=75, operands=operands)
+    sem = InstructionSemantics('S_ADD_PC_I64', 'scalar_addpc')
+
+    body = codegen._gen_execute_body(inst, sem, 'ENC_SOP1')
+
+    assert body == '  wf.pc += amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);'
+    assert 'int64_t' not in body
 
 
 def test_literal_fma_can_share_with_matching_operand_layouts_only():
