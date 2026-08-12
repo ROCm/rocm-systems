@@ -55,27 +55,10 @@ struct DrainStats {
 /// reusing the same instance for another dispatch.
 class LogBuffer final {
 public:
-  /// @brief Allocate a host-memory logging buffer sized for @p slot_count
-  ///        records.
-  /// @param slot_count  Number of record slots; must be a nonzero power of two.
-  /// @param error_out   Optional; assigned a single diagnostic on failure.
-  /// @returns The buffer, or nullptr if @p slot_count is zero or not a power of
-  ///          two, or if allocation fails.
-  [[nodiscard]] static std::unique_ptr<LogBuffer>
-  create_for_host_tests(uint32_t slot_count, std::string *error_out = nullptr);
-
   ~LogBuffer();
 
   LogBuffer(const LogBuffer &) = delete;
   LogBuffer &operator=(const LogBuffer &) = delete;
-
-  /// @brief Pointer to the control header (start of the allocation).
-  [[nodiscard]] RjLogBufferHeader *header();
-  [[nodiscard]] const RjLogBufferHeader *header() const;
-
-  /// @brief Pointer to the first record slot (immediately after the header).
-  [[nodiscard]] RjLogRecord *records();
-  [[nodiscard]] const RjLogRecord *records() const;
 
   /// @brief Number of record slots (power of two).
   [[nodiscard]] uint32_t slot_count() const;
@@ -132,6 +115,29 @@ public:
   void reinitialize();
 
 private:
+  // Construction and raw header/record access are test-only seams: no production
+  // consumer defines their contract yet, so they stay private and are reached in
+  // tests through the LogBufferTestAccess friend. A real drain caller uses the
+  // public validate()/drain()/reinitialize() API and never touches raw pointers.
+  friend struct LogBufferTestAccess;
+
+  /// @brief Allocate a host-memory logging buffer sized for @p slot_count
+  ///        records.
+  /// @param slot_count  Number of record slots; must be a nonzero power of two.
+  /// @param error_out   Optional; assigned a single diagnostic on failure.
+  /// @returns The buffer, or nullptr if @p slot_count is zero or not a power of
+  ///          two, or if allocation fails.
+  [[nodiscard]] static std::unique_ptr<LogBuffer> create(uint32_t slot_count,
+                                                         std::string *error_out = nullptr);
+
+  /// @brief Pointer to the control header (start of the allocation).
+  [[nodiscard]] RjLogBufferHeader *header();
+  [[nodiscard]] const RjLogBufferHeader *header() const;
+
+  /// @brief Pointer to the first record slot (immediately after the header).
+  [[nodiscard]] RjLogRecord *records();
+  [[nodiscard]] const RjLogRecord *records() const;
+
   LogBuffer(void *storage, uint32_t slot_count, size_t total_bytes);
 
   /// @brief Custom deleter matching the aligned operator new used to allocate.

@@ -42,8 +42,7 @@ void LogBuffer::AlignedStorageDeleter::operator()(void *p) const noexcept {
 LogBuffer::LogBuffer(void *storage, uint32_t slot_count, size_t total_bytes)
     : storage_(storage), slot_count_(slot_count), total_bytes_(total_bytes) {}
 
-std::unique_ptr<LogBuffer> LogBuffer::create_for_host_tests(uint32_t slot_count,
-                                                            std::string *error_out) {
+std::unique_ptr<LogBuffer> LogBuffer::create(uint32_t slot_count, std::string *error_out) {
   if (!util::is_power_of_2(slot_count)) {
     report(error_out, "slot_count must be a nonzero power of two");
     return nullptr;
@@ -54,10 +53,11 @@ std::unique_ptr<LogBuffer> LogBuffer::create_for_host_tests(uint32_t slot_count,
   const size_t total_bytes =
       sizeof(RjLogBufferHeader) + static_cast<size_t>(slot_count) * sizeof(RjLogRecord);
 
-  // Own the backing allocation via RAII immediately: the wrapper allocation
-  // below is a throwing new, and until ownership transfers into the LogBuffer a
-  // bare pointer would leak (and std::bad_alloc would escape) the factory's
-  // nullptr-on-failure contract if that throw fired.
+  // Own the backing allocation via RAII immediately so it cannot leak before
+  // ownership transfers into the LogBuffer. Both allocations below use
+  // non-throwing new -- failure is a nullptr return, not an exception -- so the
+  // guard's job is the null-return window: if the wrapper allocation fails, the
+  // early return must still free this backing buffer (see release() below).
   std::unique_ptr<void, AlignedStorageDeleter> storage(
       ::operator new(total_bytes, std::align_val_t{kBufferAlignment}, std::nothrow));
   if (storage == nullptr) {
