@@ -50,8 +50,8 @@ HIP_TEST_CASE(Unit_hipDeviceGetExecAffinitySupport_Positive) {
   int wgpGranularity = -1;
   HIP_CHECK(
       hipDeviceGetExecAffinitySupport(&cuGranularity, hipExtExecAffinityTypeGranularityCU, device));
-  HIP_CHECK(
-      hipDeviceGetExecAffinitySupport(&wgpGranularity, hipExtExecAffinityTypeGranularityWGP, device));
+  HIP_CHECK(hipDeviceGetExecAffinitySupport(&wgpGranularity, hipExtExecAffinityTypeGranularityWGP,
+                                            device));
   REQUIRE((cuGranularity == 0 || cuGranularity == 1));
   REQUIRE((wgpGranularity == 0 || wgpGranularity == 1));
 
@@ -104,9 +104,8 @@ HIP_TEST_CASE(Unit_hipDeviceGetExecAffinitySupport_Negative) {
   // Invalid device ordinals.
   HIP_CHECK_ERROR(hipDeviceGetExecAffinitySupport(&support, hipExecAffinityTypeCUCount, -1),
                   hipErrorInvalidDevice);
-  HIP_CHECK_ERROR(
-      hipDeviceGetExecAffinitySupport(&support, hipExecAffinityTypeCUCount, numDevices),
-      hipErrorInvalidDevice);
+  HIP_CHECK_ERROR(hipDeviceGetExecAffinitySupport(&support, hipExecAffinityTypeCUCount, numDevices),
+                  hipErrorInvalidDevice);
 }
 
 /**
