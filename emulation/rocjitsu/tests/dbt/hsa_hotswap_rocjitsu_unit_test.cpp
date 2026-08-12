@@ -1472,12 +1472,10 @@ TEST_F(HsaHotswapMemoTest, WaitersResumeWhenAClaimIsReleasedWithoutPublishing) {
   EXPECT_GE(rj_test_translation_count(), 2u);
 }
 
-// The two ways a real translation fails, told apart by what they imply about the
-// input. A body the translator renders non-dispatchable is a verdict on the bytes
-// and is remembered; a body that makes it throw promises nothing and is not. The
+// Deterministic failures are verdicts on the bytes and are remembered. The
 // header-only object used above never reaches translation at all, so it cannot
-// exercise either.
-TEST_F(HsaHotswapMemoTest, ANonDispatchableObjectIsRememberedButAThrowingOneIsNot) {
+// exercise either path.
+TEST_F(HsaHotswapMemoTest, NonDispatchableAndInvalidInstructionVerdictsAreRemembered) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> base = read_translation_fixture();
   ASSERT_FALSE(base.empty()) << GFX1250_B0_TO_A0_FIXTURE;
@@ -1490,14 +1488,15 @@ TEST_F(HsaHotswapMemoTest, ANonDispatchableObjectIsRememberedButAThrowingOneIsNo
         << load;
   EXPECT_EQ(rj_test_translation_count(), 1u) << "a verdict on the bytes was re-derived";
 
-  // An all-ones opcode makes the translator throw, which says nothing about the
-  // input, so every load has to try again.
+  // An invalid instruction is now a structured, deterministic translation
+  // diagnostic, so repeated loads reuse the same negative verdict.
   rj_test_clear_retained_storage();
-  const std::vector<uint8_t> throwing = patch_first_instruction(base, 0xffffffffu);
-  ASSERT_FALSE(throwing.empty());
+  const std::vector<uint8_t> invalid_instruction = patch_first_instruction(base, 0xffffffffu);
+  ASSERT_FALSE(invalid_instruction.empty());
   for (size_t load = 0; load < 4; ++load)
-    ASSERT_EQ(load_through_new_reader(throwing), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
-  EXPECT_EQ(rj_test_translation_count(), 4u) << "an unattributable failure was remembered";
+    ASSERT_EQ(load_through_new_reader(invalid_instruction), HSA_STATUS_ERROR_INVALID_CODE_OBJECT)
+        << load;
+  EXPECT_EQ(rj_test_translation_count(), 1u) << "an invalid-instruction verdict was re-derived";
 }
 
 // A failure that says nothing about the bytes must not become a verdict on them.

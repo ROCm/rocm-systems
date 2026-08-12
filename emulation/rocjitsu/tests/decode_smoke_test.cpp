@@ -190,6 +190,18 @@ TEST(RawEncodingTest, PreservesScalarLiteralWordsAcrossAmdgpuIsas) {
   }
 }
 
+TEST(SendmsgReturnDecodeTest, Rdna3Selector255DoesNotConsumeLiteral) {
+  constexpr uint32_t word = 0xBE804CFFu; // s_sendmsg_rtn_b32 s0, 255
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_NE(decoder, nullptr);
+
+  std::unique_ptr<Instruction> inst(decoder->decode(&word));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "s_sendmsg_rtn_b32");
+  EXPECT_EQ(inst->size(), sizeof(word));
+  EXPECT_EQ(inst->src_operand(0)->name(), "255");
+}
+
 TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
   const uint32_t words[] = {
       0xBE802000u, // s_and_saveexec_b64 s[0:1], s[0:1]
