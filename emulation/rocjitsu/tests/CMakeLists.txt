@@ -399,6 +399,7 @@ add_executable(
     gfx1250_sim_test.cpp
     l2_cache_test.cpp
     sparse_memory_test.cpp
+    cpu_dispatch_pool_test.cpp
     simdojo_sim_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
