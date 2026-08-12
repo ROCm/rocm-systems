@@ -25,9 +25,9 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA used by all corpus tests"
-        # Last updated on 2026/08/11.
-        # This corpus commit was merged on 2026/08/10.
-        default: "59f6bc8a7c5e2f491de396e2551cd18952dd4071"
+        # Last updated on 2026/08/12.
+        # This corpus commit was merged on 2026/08/12.
+        default: "a1c3a1df8c87e46557ad505d111faa15d21a6efb"
         required: true
 
 concurrency:
@@ -41,9 +41,9 @@ permissions:
   contents: read
 
 env:
-  # Last updated on 2026/08/11.
-  # This corpus commit was merged on 2026/08/10.
-  ROCJITSU_CORPUS_REF: 59f6bc8a7c5e2f491de396e2551cd18952dd4071
+  # Last updated on 2026/08/12.
+  # This corpus commit was merged on 2026/08/12.
+  ROCJITSU_CORPUS_REF: a1c3a1df8c87e46557ad505d111faa15d21a6efb
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
