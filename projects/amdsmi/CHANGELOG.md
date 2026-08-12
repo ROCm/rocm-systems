@@ -188,6 +188,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - On a system without KFD (`/sys/class/kfd` missing), `amdsmi_init()` with `AMDSMI_INIT_AMD_GPUS` now returns `AMDSMI_STATUS_DRIVER_NOT_LOADED` without printing, instead of `AMDSMI_STATUS_NOT_INIT`. Libraries that use AMD SMI as an optional dependency, such as hwloc, no longer print to stderr on machines without AMD GPUs.
   - Other initialization error handling is unchanged.
 
+- **Fixed the widened `amdsmi_gpu_metrics_t` accumulators reporting `4294967295` instead of `N/A`**.
+  - `amdsmi_get_gpu_metrics_info()` and `amd-smi metric` reported an unsupported `gfx_activity_acc`, `mem_activity_acc`, `pcie_nak_sent_count_acc`, `pcie_nak_rcvd_count_acc` or `pcie_lc_perf_other_end_recovery` as a literal `4294967295` instead of `N/A`.
+
 - **Fixed `amd-smi set --ampp-configure=@<path>` lowercasing its file path**.  
   - The `=` form of `--ampp-configure` incorrectly lowercased its `@<path>` value, breaking case-sensitive paths. It now preserves case, matching the space-separated form.
 
