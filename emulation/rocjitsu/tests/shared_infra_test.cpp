@@ -30,10 +30,11 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vopc.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
@@ -3979,6 +3980,15 @@ TEST(RdnaAddrCalcTest, Rdna3MubufWrapsOffsetPartBeforeBoundsCheck) {
   rdna3::mubuf_calculate_addresses(inst, *wf, d);
   EXPECT_EQ(d.lane_mask, 1ULL);
   EXPECT_EQ(d.per_lane_addr[0], kBase);
+
+  wf->set_m0(0x40);
+  inst.soffset = rdna3::OPR_SREG_M0_INL_M0;
+  rdna3::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.per_lane_addr[0], kBase + 0x40);
+
+  inst.soffset = rdna3::OPR_SREG_M0_INL_NULL;
+  rdna3::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.per_lane_addr[0], kBase);
 }
 
 TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
@@ -4305,6 +4315,15 @@ TEST(CdnaAddrCalcTest, Cdna4BufferSelectorsUsePerWaveTrapStorage) {
   EXPECT_EQ(addresses.per_lane_addr[0], kBase + 0x40);
   for (uint32_t i = 0; i < 5; ++i)
     EXPECT_EQ(cu->read_sgpr(former_descriptor_alias + i), 0xDEAD0000u + i);
+
+  first->set_m0(0x80);
+  inst.soffset = cdna4::OPR_SSRC_NOLIT_M0;
+  cdna4::mubuf_calculate_addresses(inst, *first, addresses);
+  EXPECT_EQ(addresses.per_lane_addr[0], kBase + 0x80);
+
+  inst.soffset = cdna4::OPR_SSRC_NOLIT_POS_INT_MIN;
+  cdna4::mubuf_calculate_addresses(inst, *first, addresses);
+  EXPECT_EQ(addresses.per_lane_addr[0], kBase);
 }
 
 TEST(CdnaMemoryTest, SmemLoadWritesTtmpDestination) {

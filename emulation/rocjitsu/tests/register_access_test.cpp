@@ -495,9 +495,13 @@ TEST(RegisterAccessTest, SgprOrTrapSelectorRoutesPerWaveStorage) {
   EXPECT_EQ(fx.cu->read_sgpr(fx.sgpr_base() + 6), 0xA5A50006u);
   EXPECT_EQ(fx.wf->read_trap_register(kTtmp0Selector), 0x25262728u);
   EXPECT_EQ(fx.wf->read_trap_register(kTtmp0Selector + 1), 0x21222324u);
+
+  EXPECT_THROW(static_cast<void>(registers.read_sgpr_or_trap_register(124)), std::logic_error);
+  EXPECT_THROW(registers.write_sgpr_or_trap_register(124, 0), std::logic_error);
 }
 
 TEST(RegisterAccessTest, TtmpAccessDoesNotAliasAdjacentWaveSgprs) {
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
   for (uint32_t sgprs_per_wf : {104u, 106u, 128u}) {
     SCOPED_TRACE(sgprs_per_wf);
     GpuMemory gpu_mem{"ttmp_storage_mem"};

@@ -323,6 +323,10 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
   if (inst.data()->tag() == amdgpu::SCALAR_MEM) {
     auto &d = *inst.data_as<amdgpu::ScalarMemState>();
     if (d.is_load) {
+      // Trap-register hazards are intentionally outside the race detector's
+      // ordinary-SGPR model. An SMEM load into TTMP therefore does not produce
+      // a GLOBAL_TO_SGPR event, and a later TTMP read cannot diagnose a missing
+      // lgkmcnt wait until trap-register hazard tracking is implemented.
       std::vector<uint32_t> registers;
       registers.reserve(d.num_dwords);
       for (uint32_t i = 0; i < d.num_dwords; ++i) {

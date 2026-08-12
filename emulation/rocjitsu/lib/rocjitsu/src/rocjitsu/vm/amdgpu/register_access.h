@@ -963,42 +963,40 @@ public:
     return OperandReadWrite64View(op, wf, storage, lane_mask, byte_mask);
   }
 
-  // SGPR-or-trap selector access. Selectors 108..123 are per-wave state;
-  // every other value accepted by the caller remains an ordinary SGPR index.
+  // SGPR-or-trap selector access. Selectors 108..123 are per-wave state.
+  // Other special scalar encodings must be resolved by the architecture-aware
+  // caller rather than interpreted as physical SGPR offsets.
   [[nodiscard]] uint32_t read_sgpr_or_trap_register(uint32_t selector) const {
-    const Wavefront &wf = wavefront();
-    if (Wavefront::is_trap_register_selector(selector))
-      return wf.read_trap_register(selector);
-    return read_sgpr(wf.sgpr_alloc().base + selector);
+    validate_sgpr_or_trap_register_range(selector, 1);
+    return read_sgpr_or_trap_register_unchecked(selector);
   }
 
   [[nodiscard]] uint64_t read_sgpr_or_trap_register64(uint32_t selector) const {
-    uint64_t lo = read_sgpr_or_trap_register(selector);
-    uint64_t hi = read_sgpr_or_trap_register(selector + 1);
+    validate_sgpr_or_trap_register_range(selector, 2);
+    uint64_t lo = read_sgpr_or_trap_register_unchecked(selector);
+    uint64_t hi = read_sgpr_or_trap_register_unchecked(selector + 1);
     return lo | (hi << 32);
   }
 
   [[nodiscard]] std::array<uint32_t, 4> read_sgpr_or_trap_register128(uint32_t selector) const {
+    validate_sgpr_or_trap_register_range(selector, 4);
     return {
-        read_sgpr_or_trap_register(selector),
-        read_sgpr_or_trap_register(selector + 1),
-        read_sgpr_or_trap_register(selector + 2),
-        read_sgpr_or_trap_register(selector + 3),
+        read_sgpr_or_trap_register_unchecked(selector),
+        read_sgpr_or_trap_register_unchecked(selector + 1),
+        read_sgpr_or_trap_register_unchecked(selector + 2),
+        read_sgpr_or_trap_register_unchecked(selector + 3),
     };
   }
 
   void write_sgpr_or_trap_register(uint32_t selector, uint32_t value) const {
-    Wavefront &wf = mutable_wavefront();
-    if (Wavefront::is_trap_register_selector(selector)) {
-      wf.write_trap_register(selector, value);
-      return;
-    }
-    write_sgpr(wf.sgpr_alloc().base + selector, value);
+    validate_sgpr_or_trap_register_range(selector, 1);
+    write_sgpr_or_trap_register_unchecked(selector, value);
   }
 
   void write_sgpr_or_trap_register64(uint32_t selector, uint64_t value) const {
-    write_sgpr_or_trap_register(selector, static_cast<uint32_t>(value));
-    write_sgpr_or_trap_register(selector + 1, static_cast<uint32_t>(value >> 32));
+    validate_sgpr_or_trap_register_range(selector, 2);
+    write_sgpr_or_trap_register_unchecked(selector, static_cast<uint32_t>(value));
+    write_sgpr_or_trap_register_unchecked(selector + 1, static_cast<uint32_t>(value >> 32));
   }
 
   // Physical SGPR access. These APIs are for helpers that already know the
@@ -1075,6 +1073,34 @@ public:
   }
 
 private:
+  void validate_sgpr_or_trap_register_range(uint32_t selector, uint32_t count) const {
+    const Wavefront &wf = wavefront();
+    for (uint32_t i = 0; i < count; ++i) {
+      const uint32_t current = selector + i;
+      const bool ordinary_sgpr = current < wf.max_sgprs() && current < wf.num_sgprs();
+      if (!ordinary_sgpr && !Wavefront::is_trap_register_selector(current)) {
+        throw std::logic_error("Scalar selector " + std::to_string(current) +
+                               " is neither an allocated ordinary SGPR nor a trap register");
+      }
+    }
+  }
+
+  [[nodiscard]] uint32_t read_sgpr_or_trap_register_unchecked(uint32_t selector) const {
+    const Wavefront &wf = wavefront();
+    if (Wavefront::is_trap_register_selector(selector))
+      return wf.read_trap_register(selector);
+    return read_sgpr(wf.sgpr_alloc().base + selector);
+  }
+
+  void write_sgpr_or_trap_register_unchecked(uint32_t selector, uint32_t value) const {
+    Wavefront &wf = mutable_wavefront();
+    if (Wavefront::is_trap_register_selector(selector)) {
+      wf.write_trap_register(selector, value);
+      return;
+    }
+    write_sgpr(wf.sgpr_alloc().base + selector, value);
+  }
+
   const Wavefront &wavefront() const {
     if (!wf_)
       throw std::logic_error("RegisterAccess was not constructed from a Wavefront");
