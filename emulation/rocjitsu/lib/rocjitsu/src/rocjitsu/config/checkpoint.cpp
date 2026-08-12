@@ -42,7 +42,8 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
       if (num_cus > 0) {
         const auto &cu_cfg = se->compute_unit(0)->config();
         fb_cu = fb::CreateComputeUnitConfig(builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf,
-                                            cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb);
+                                            cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb,
+                                            cu_cfg.functional_quantum);
       }
     }
   }
@@ -53,7 +54,8 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
   auto fb_vm = fb::CreateVirtualMachineConfig(builder, arch_str, fb_gpu);
 
   return fb::CreateSimulationConfig(builder, engine_config.max_ticks, engine_config.num_threads,
-                                    exec_mode_str, fb_vm);
+                                    exec_mode_str, fb_vm, 0, 0, soc.dispatch_threads(),
+                                    soc.soc_dispatch());
 }
 
 /// @brief Reconstruct a VirtualMachine::Config from a stored FlatBuffer config.
@@ -84,6 +86,7 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
           cu_cfg.sgprs_per_wf = cu->sgprs_per_wf();
           cu_cfg.vgprs_per_wf = cu->vgprs_per_wf();
           cu_cfg.lds_size_kb = cu->lds_size_kb();
+          cu_cfg.functional_quantum = cu->functional_quantum();
         }
       }
     }
@@ -276,6 +279,8 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   LoadedConfig result;
   result.engine_config = engine_config;
   result.exec_mode = vm_config.soc.exec_mode;
+  result.cpu_dispatch_threads = fb_config->cpu_dispatch_threads();
+  result.soc_dispatch = fb_config->soc_dispatch();
   result.build_result.root = std::move(soc);
   result.build_result.memory = mem_ptr;
   return result;

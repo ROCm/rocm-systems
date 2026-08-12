@@ -241,7 +241,7 @@ table SimulationConfig {
   vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
   topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.
   dbt_guest: DbtGuestConfig;     // Optional guest-GPU DBT interposition mode.
-  // CPU CU-dispatch worker-pool size per command processor (functional mode).
+  // Shared CPU CU-dispatch worker budget per SoC (functional mode).
   // 0 = auto: all hardware threads, capped at 32. Affects speed, not results.
   cpu_dispatch_threads: uint32 = 0;
   // Consolidate cross-XCD dispatch onto each SoC's primary CP (single-stream

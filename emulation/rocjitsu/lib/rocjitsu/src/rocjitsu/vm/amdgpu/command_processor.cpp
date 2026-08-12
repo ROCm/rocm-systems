@@ -1157,10 +1157,15 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // resource availability.
     std::optional<ShaderProcessorInput::WorkgroupPlacement> placement;
     if (!spis_.empty()) {
-      for (auto *spi : spis_) {
-        placement = spi->allocate_workgroup(entry, global_wg_id);
-        if (placement)
+      size_t first_spi = round_robin_spis_ ? next_spi_ : 0;
+      for (size_t attempt = 0; attempt < spis_.size(); ++attempt) {
+        size_t spi_idx = (first_spi + attempt) % spis_.size();
+        placement = spis_[spi_idx]->allocate_workgroup(entry, global_wg_id);
+        if (placement) {
+          if (round_robin_spis_)
+            next_spi_ = (spi_idx + 1) % spis_.size();
           break;
+        }
       }
     } else if (!entry.wgp_mode) {
       for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
