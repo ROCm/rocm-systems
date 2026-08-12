@@ -13,11 +13,17 @@
 #   --workers N          Number of pytest-xdist workers (default: 8)
 #   --soft-timeout N     Per-test timeout for the first run (default: 30)
 #   --hard-timeout N     Per-test timeout for failed-test reruns (default: 60)
-#   --rerun-failed       Rerun only tests that failed the first pass
+#   --rerun-failed       Rerun only tests that failed the soft-timeout pass
+#   --warn-perf          Warn about passing tests close to the soft timeout
 #
 # Environment variables:
 #   ROCM_PATH            Required ROCm installation root
 #   ROCJITSU_SOURCE_DIR  Required rocjitsu source directory
+#
+# Outputs:
+#   .pytest-artifacts/<target>/           Corpus harness logs and artifacts
+#   .pytest-artifacts/junit/<target>.xml  Soft-timeout JUnit report per target
+#   .pytest-cache/<target>/               Pytest cache with the lastfailed list
 
 set -euo pipefail
 
@@ -28,9 +34,10 @@ worker_count=8
 soft_timeout_seconds=30
 hard_timeout_seconds=60
 rerun_failed=false
+warn_perf=false
 
 usage() {
-  echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N] [--rerun-failed]" >&2
+  echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N] [--rerun-failed] [--warn-perf]" >&2
 }
 
 targets=(
@@ -59,6 +66,10 @@ while (( $# )); do
       rerun_failed=true
       shift
       ;;
+    --warn-perf)
+      warn_perf=true
+      shift
+      ;;
     *)
       echo "Unknown option: $1" >&2
       exit 1
@@ -68,6 +79,11 @@ done
 
 corpus_test_status=0
 corpus_work_dir="$(pwd -P)"
+junit_dir="${corpus_work_dir}/.pytest-artifacts/junit"
+junit_xml_paths=()
+
+# A report left by an earlier run would otherwise be reported as this run's.
+rm -rf "${junit_dir}"
 
 for target in "${targets[@]}"; do
   read -r name rocjitsu_config skip_tests_config <<< "${target}"
@@ -77,6 +93,7 @@ for target in "${targets[@]}"; do
   skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
   artifact_dir="${corpus_work_dir}/.pytest-artifacts/${name}"
   cache_dir="${corpus_work_dir}/.pytest-cache/${name}"
+  junit_xml="${junit_dir}/${name}.xml"
 
   pytest_cmd=(
     rocjitsu --config "${rocjitsu_config_path}" -- pytest tests/test_corpus.py
@@ -90,9 +107,18 @@ for target in "${targets[@]}"; do
     --tb=short
     -n "${worker_count}"
     -o "timeout_func_only=true"
+    -o "junit_duration_report=call"
   )
 
-  if "${pytest_cmd[@]}" --timeout "${soft_timeout_seconds}"; then
+  # Only the soft-timeout run is configured to output a JUnit XML report.
+  first_run_status=0
+  "${pytest_cmd[@]}" --timeout "${soft_timeout_seconds}" \
+    --junitxml "${junit_xml}" || first_run_status=$?
+  if [[ -f "${junit_xml}" ]]; then
+    junit_xml_paths+=("${junit_xml}")
+  fi
+
+  if (( first_run_status == 0 )); then
     echo "::endgroup::"
     echo "All (${name}) tests passed."
     continue
@@ -118,5 +144,29 @@ for target in "${targets[@]}"; do
   fi
   echo "::endgroup::"
 done
+
+# The reporting script's return code does not affect the corpus test status.
+if [[ "${warn_perf}" == true ]]; then
+  echo "::group::Check for test cases close to the timeout"
+  if (( ${#junit_xml_paths[@]} == 0 )); then
+    echo "No JUnit report was written; near-timeout reporting has no input."
+  else
+    report_status=0
+    python3 "${ROCJITSU_SOURCE_DIR}/tests/corpus/report-near-timeout-tests.py" \
+      --timeout "${soft_timeout_seconds}" \
+      "${junit_xml_paths[@]}" || report_status=$?
+    case "${report_status}" in
+      0)
+        ;;
+      3)
+        echo "::warning::Near-timeout tests found."
+        ;;
+      *)
+        echo "::warning::Near-timeout reporting failed."
+        ;;
+    esac
+  fi
+  echo "::endgroup::"
+fi
 
 exit "${corpus_test_status}"

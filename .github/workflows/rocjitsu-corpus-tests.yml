@@ -343,6 +343,7 @@ jobs:
             --soft-timeout 15 \
             --hard-timeout 30 \
             --rerun-failed \
+            --warn-perf \
           )
           bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
           exit "${corpus_test_status}"
