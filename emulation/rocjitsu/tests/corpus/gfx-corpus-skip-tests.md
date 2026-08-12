@@ -19,7 +19,7 @@ Classification buckets:
 | component | commit |
 | --- | --- |
 | ROCjitsu | `81ffb57e24c682d15e10d2b90d82bcf4c45a9f67` |
-| `rocjitsu-test-corpus` | `ce5da512188dd40de0bc7da298ec11b587d8fdd3` |
+| `rocjitsu-test-corpus` | `a1c3a1df8c87e46557ad505d111faa15d21a6efb` |
 
 ## gfx942
 
