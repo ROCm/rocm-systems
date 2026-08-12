@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vbuffer.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "util/except.h"
 
@@ -22,7 +23,8 @@ uint32_t vbuffer_vaddr_bits(const VbufferMachineInst *inst) {
 } // namespace
 
 BufferLoadU8Vbuffer::BufferLoadU8Vbuffer(const MachineInst *inst)
-    : Vbuffer("buffer_load_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1379)),
+    : Vbuffer("buffer_load_u8", reinterpret_cast<const OpEncoding *>(inst),
+              selected_exec_fn(InstructionExecutionId::BufferLoadU8Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -43,7 +45,8 @@ BufferLoadU8Vbuffer::BufferLoadU8Vbuffer(const MachineInst *inst)
 }
 
 BufferLoadI8Vbuffer::BufferLoadI8Vbuffer(const MachineInst *inst)
-    : Vbuffer("buffer_load_i8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1380)),
+    : Vbuffer("buffer_load_i8", reinterpret_cast<const OpEncoding *>(inst),
+              selected_exec_fn(InstructionExecutionId::BufferLoadI8Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -65,7 +68,7 @@ BufferLoadI8Vbuffer::BufferLoadI8Vbuffer(const MachineInst *inst)
 
 BufferLoadU16Vbuffer::BufferLoadU16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_u16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1381)),
+              selected_exec_fn(InstructionExecutionId::BufferLoadU16Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -87,7 +90,7 @@ BufferLoadU16Vbuffer::BufferLoadU16Vbuffer(const MachineInst *inst)
 
 BufferLoadI16Vbuffer::BufferLoadI16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_i16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1382)),
+              selected_exec_fn(InstructionExecutionId::BufferLoadI16Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -109,7 +112,7 @@ BufferLoadI16Vbuffer::BufferLoadI16Vbuffer(const MachineInst *inst)
 
 BufferLoadB32Vbuffer::BufferLoadB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_b32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1383)),
+              selected_exec_fn(InstructionExecutionId::BufferLoadB32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -131,7 +134,7 @@ BufferLoadB32Vbuffer::BufferLoadB32Vbuffer(const MachineInst *inst)
 
 BufferLoadB64Vbuffer::BufferLoadB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_b64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1384)),
+              selected_exec_fn(InstructionExecutionId::BufferLoadB64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -153,7 +156,7 @@ BufferLoadB64Vbuffer::BufferLoadB64Vbuffer(const MachineInst *inst)
 
 BufferLoadB96Vbuffer::BufferLoadB96Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_b96", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1385)),
+              selected_exec_fn(InstructionExecutionId::BufferLoadB96Vbuffer)),
       vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -175,7 +178,7 @@ BufferLoadB96Vbuffer::BufferLoadB96Vbuffer(const MachineInst *inst)
 
 BufferLoadB128Vbuffer::BufferLoadB128Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_b128", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1386)),
+              selected_exec_fn(InstructionExecutionId::BufferLoadB128Vbuffer)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -197,7 +200,7 @@ BufferLoadB128Vbuffer::BufferLoadB128Vbuffer(const MachineInst *inst)
 
 BufferStoreB8Vbuffer::BufferStoreB8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b8", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1387)),
+              selected_exec_fn(InstructionExecutionId::BufferStoreB8Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -219,7 +222,7 @@ BufferStoreB8Vbuffer::BufferStoreB8Vbuffer(const MachineInst *inst)
 
 BufferStoreB16Vbuffer::BufferStoreB16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1388)),
+              selected_exec_fn(InstructionExecutionId::BufferStoreB16Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -241,7 +244,7 @@ BufferStoreB16Vbuffer::BufferStoreB16Vbuffer(const MachineInst *inst)
 
 BufferStoreB32Vbuffer::BufferStoreB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1389)),
+              selected_exec_fn(InstructionExecutionId::BufferStoreB32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -263,7 +266,7 @@ BufferStoreB32Vbuffer::BufferStoreB32Vbuffer(const MachineInst *inst)
 
 BufferStoreB64Vbuffer::BufferStoreB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1390)),
+              selected_exec_fn(InstructionExecutionId::BufferStoreB64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -285,7 +288,7 @@ BufferStoreB64Vbuffer::BufferStoreB64Vbuffer(const MachineInst *inst)
 
 BufferStoreB96Vbuffer::BufferStoreB96Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b96", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1391)),
+              selected_exec_fn(InstructionExecutionId::BufferStoreB96Vbuffer)),
       vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -307,7 +310,7 @@ BufferStoreB96Vbuffer::BufferStoreB96Vbuffer(const MachineInst *inst)
 
 BufferStoreB128Vbuffer::BufferStoreB128Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b128", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1392)),
+              selected_exec_fn(InstructionExecutionId::BufferStoreB128Vbuffer)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -329,7 +332,7 @@ BufferStoreB128Vbuffer::BufferStoreB128Vbuffer(const MachineInst *inst)
 
 BufferLoadD16U8Vbuffer::BufferLoadD16U8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1393)),
+              selected_exec_fn(InstructionExecutionId::BufferLoadD16U8Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -364,7 +367,7 @@ void BufferLoadD16U8Vbuffer::implicit_use_operands(
 
 BufferLoadD16I8Vbuffer::BufferLoadD16I8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1394)),
+              selected_exec_fn(InstructionExecutionId::BufferLoadD16I8Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -399,7 +402,7 @@ void BufferLoadD16I8Vbuffer::implicit_use_operands(
 
 BufferLoadD16B16Vbuffer::BufferLoadD16B16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1395)),
+              selected_exec_fn(InstructionExecutionId::BufferLoadD16B16Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -434,7 +437,7 @@ void BufferLoadD16B16Vbuffer::implicit_use_operands(
 
 BufferLoadD16HiU8Vbuffer::BufferLoadD16HiU8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1396)),
+              selected_exec_fn(InstructionExecutionId::BufferLoadD16HiU8Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -469,7 +472,7 @@ void BufferLoadD16HiU8Vbuffer::implicit_use_operands(
 
 BufferLoadD16HiI8Vbuffer::BufferLoadD16HiI8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1397)),
+              selected_exec_fn(InstructionExecutionId::BufferLoadD16HiI8Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -504,7 +507,7 @@ void BufferLoadD16HiI8Vbuffer::implicit_use_operands(
 
 BufferLoadD16HiB16Vbuffer::BufferLoadD16HiB16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1398)),
+              selected_exec_fn(InstructionExecutionId::BufferLoadD16HiB16Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -539,7 +542,7 @@ void BufferLoadD16HiB16Vbuffer::implicit_use_operands(
 
 BufferStoreD16HiB8Vbuffer::BufferStoreD16HiB8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1399)),
+              selected_exec_fn(InstructionExecutionId::BufferStoreD16HiB8Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -561,7 +564,7 @@ BufferStoreD16HiB8Vbuffer::BufferStoreD16HiB8Vbuffer(const MachineInst *inst)
 
 BufferStoreD16HiB16Vbuffer::BufferStoreD16HiB16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1400)),
+              selected_exec_fn(InstructionExecutionId::BufferStoreD16HiB16Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -583,7 +586,7 @@ BufferStoreD16HiB16Vbuffer::BufferStoreD16HiB16Vbuffer(const MachineInst *inst)
 
 BufferAtomicSwapB32Vbuffer::BufferAtomicSwapB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1401)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicSwapB32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -609,7 +612,7 @@ BufferAtomicSwapB32Vbuffer::BufferAtomicSwapB32Vbuffer(const MachineInst *inst)
 
 BufferAtomicCmpswapB32Vbuffer::BufferAtomicCmpswapB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1402)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicCmpswapB32Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
@@ -637,7 +640,7 @@ BufferAtomicCmpswapB32Vbuffer::BufferAtomicCmpswapB32Vbuffer(const MachineInst *
 
 BufferAtomicAddU32Vbuffer::BufferAtomicAddU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1403)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicAddU32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -663,7 +666,7 @@ BufferAtomicAddU32Vbuffer::BufferAtomicAddU32Vbuffer(const MachineInst *inst)
 
 BufferAtomicSubU32Vbuffer::BufferAtomicSubU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1404)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicSubU32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -689,7 +692,7 @@ BufferAtomicSubU32Vbuffer::BufferAtomicSubU32Vbuffer(const MachineInst *inst)
 
 BufferAtomicSubClampU32Vbuffer::BufferAtomicSubClampU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1405)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicSubClampU32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -715,7 +718,7 @@ BufferAtomicSubClampU32Vbuffer::BufferAtomicSubClampU32Vbuffer(const MachineInst
 
 BufferAtomicMinI32Vbuffer::BufferAtomicMinI32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1406)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicMinI32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -741,7 +744,7 @@ BufferAtomicMinI32Vbuffer::BufferAtomicMinI32Vbuffer(const MachineInst *inst)
 
 BufferAtomicMinU32Vbuffer::BufferAtomicMinU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1407)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicMinU32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -767,7 +770,7 @@ BufferAtomicMinU32Vbuffer::BufferAtomicMinU32Vbuffer(const MachineInst *inst)
 
 BufferAtomicMaxI32Vbuffer::BufferAtomicMaxI32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1408)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicMaxI32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -793,7 +796,7 @@ BufferAtomicMaxI32Vbuffer::BufferAtomicMaxI32Vbuffer(const MachineInst *inst)
 
 BufferAtomicMaxU32Vbuffer::BufferAtomicMaxU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1409)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicMaxU32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -819,7 +822,7 @@ BufferAtomicMaxU32Vbuffer::BufferAtomicMaxU32Vbuffer(const MachineInst *inst)
 
 BufferAtomicAndB32Vbuffer::BufferAtomicAndB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1410)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicAndB32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -845,7 +848,7 @@ BufferAtomicAndB32Vbuffer::BufferAtomicAndB32Vbuffer(const MachineInst *inst)
 
 BufferAtomicOrB32Vbuffer::BufferAtomicOrB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1411)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicOrB32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -871,7 +874,7 @@ BufferAtomicOrB32Vbuffer::BufferAtomicOrB32Vbuffer(const MachineInst *inst)
 
 BufferAtomicXorB32Vbuffer::BufferAtomicXorB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1412)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicXorB32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -897,7 +900,7 @@ BufferAtomicXorB32Vbuffer::BufferAtomicXorB32Vbuffer(const MachineInst *inst)
 
 BufferAtomicIncU32Vbuffer::BufferAtomicIncU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1413)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicIncU32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -923,7 +926,7 @@ BufferAtomicIncU32Vbuffer::BufferAtomicIncU32Vbuffer(const MachineInst *inst)
 
 BufferAtomicDecU32Vbuffer::BufferAtomicDecU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1414)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicDecU32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -949,7 +952,7 @@ BufferAtomicDecU32Vbuffer::BufferAtomicDecU32Vbuffer(const MachineInst *inst)
 
 BufferAtomicSwapB64Vbuffer::BufferAtomicSwapB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1415)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicSwapB64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -975,7 +978,7 @@ BufferAtomicSwapB64Vbuffer::BufferAtomicSwapB64Vbuffer(const MachineInst *inst)
 
 BufferAtomicCmpswapB64Vbuffer::BufferAtomicCmpswapB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1416)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicCmpswapB64Vbuffer)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
@@ -1003,7 +1006,7 @@ BufferAtomicCmpswapB64Vbuffer::BufferAtomicCmpswapB64Vbuffer(const MachineInst *
 
 BufferAtomicAddU64Vbuffer::BufferAtomicAddU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1417)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicAddU64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1029,7 +1032,7 @@ BufferAtomicAddU64Vbuffer::BufferAtomicAddU64Vbuffer(const MachineInst *inst)
 
 BufferAtomicSubU64Vbuffer::BufferAtomicSubU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1418)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicSubU64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1055,7 +1058,7 @@ BufferAtomicSubU64Vbuffer::BufferAtomicSubU64Vbuffer(const MachineInst *inst)
 
 BufferAtomicMinI64Vbuffer::BufferAtomicMinI64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1419)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicMinI64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1081,7 +1084,7 @@ BufferAtomicMinI64Vbuffer::BufferAtomicMinI64Vbuffer(const MachineInst *inst)
 
 BufferAtomicMinU64Vbuffer::BufferAtomicMinU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1420)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicMinU64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1107,7 +1110,7 @@ BufferAtomicMinU64Vbuffer::BufferAtomicMinU64Vbuffer(const MachineInst *inst)
 
 BufferAtomicMaxI64Vbuffer::BufferAtomicMaxI64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1421)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicMaxI64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1133,7 +1136,7 @@ BufferAtomicMaxI64Vbuffer::BufferAtomicMaxI64Vbuffer(const MachineInst *inst)
 
 BufferAtomicMaxU64Vbuffer::BufferAtomicMaxU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1422)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicMaxU64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1159,7 +1162,7 @@ BufferAtomicMaxU64Vbuffer::BufferAtomicMaxU64Vbuffer(const MachineInst *inst)
 
 BufferAtomicAndB64Vbuffer::BufferAtomicAndB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1423)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicAndB64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1185,7 +1188,7 @@ BufferAtomicAndB64Vbuffer::BufferAtomicAndB64Vbuffer(const MachineInst *inst)
 
 BufferAtomicOrB64Vbuffer::BufferAtomicOrB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1424)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicOrB64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1211,7 +1214,7 @@ BufferAtomicOrB64Vbuffer::BufferAtomicOrB64Vbuffer(const MachineInst *inst)
 
 BufferAtomicXorB64Vbuffer::BufferAtomicXorB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1425)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicXorB64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1237,7 +1240,7 @@ BufferAtomicXorB64Vbuffer::BufferAtomicXorB64Vbuffer(const MachineInst *inst)
 
 BufferAtomicIncU64Vbuffer::BufferAtomicIncU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1426)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicIncU64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1263,7 +1266,7 @@ BufferAtomicIncU64Vbuffer::BufferAtomicIncU64Vbuffer(const MachineInst *inst)
 
 BufferAtomicDecU64Vbuffer::BufferAtomicDecU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1427)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicDecU64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1289,7 +1292,7 @@ BufferAtomicDecU64Vbuffer::BufferAtomicDecU64Vbuffer(const MachineInst *inst)
 
 BufferAtomicCondSubU32Vbuffer::BufferAtomicCondSubU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1428)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicCondSubU32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1315,7 +1318,7 @@ BufferAtomicCondSubU32Vbuffer::BufferAtomicCondSubU32Vbuffer(const MachineInst *
 
 BufferAtomicMinNumF32Vbuffer::BufferAtomicMinNumF32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1429)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicMinNumF32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1341,7 +1344,7 @@ BufferAtomicMinNumF32Vbuffer::BufferAtomicMinNumF32Vbuffer(const MachineInst *in
 
 BufferAtomicMaxNumF32Vbuffer::BufferAtomicMaxNumF32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1430)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicMaxNumF32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1367,7 +1370,7 @@ BufferAtomicMaxNumF32Vbuffer::BufferAtomicMaxNumF32Vbuffer(const MachineInst *in
 
 BufferAtomicAddF64Vbuffer::BufferAtomicAddF64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_add_f64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1431)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicAddF64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1393,7 +1396,7 @@ BufferAtomicAddF64Vbuffer::BufferAtomicAddF64Vbuffer(const MachineInst *inst)
 
 BufferAtomicAddF32Vbuffer::BufferAtomicAddF32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1432)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicAddF32Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1419,7 +1422,7 @@ BufferAtomicAddF32Vbuffer::BufferAtomicAddF32Vbuffer(const MachineInst *inst)
 
 BufferAtomicPkAddF16Vbuffer::BufferAtomicPkAddF16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1433)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicPkAddF16Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1445,7 +1448,7 @@ BufferAtomicPkAddF16Vbuffer::BufferAtomicPkAddF16Vbuffer(const MachineInst *inst
 
 BufferAtomicPkAddBf16Vbuffer::BufferAtomicPkAddBf16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1434)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicPkAddBf16Vbuffer)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1471,7 +1474,7 @@ BufferAtomicPkAddBf16Vbuffer::BufferAtomicPkAddBf16Vbuffer(const MachineInst *in
 
 BufferAtomicMinNumF64Vbuffer::BufferAtomicMinNumF64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1435)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicMinNumF64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1497,7 +1500,7 @@ BufferAtomicMinNumF64Vbuffer::BufferAtomicMinNumF64Vbuffer(const MachineInst *in
 
 BufferAtomicMaxNumF64Vbuffer::BufferAtomicMaxNumF64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(1436)),
+              selected_exec_fn(InstructionExecutionId::BufferAtomicMaxNumF64Vbuffer)),
       vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),

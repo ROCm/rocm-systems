@@ -214,6 +214,25 @@ static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx94
   return threshold > 0 && totalBytes <= threshold;
 }
 
+// Decides whether ncclAllReduce_impl takes the DDA path for this call. Kept as a small named helper
+// (rather than an inline expression) so the dispatch decision is reachable from host unit tests; the
+// logic is identical to the guard at the AllReduce call site below.
+bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclDataType_t datatype,
+                                    ncclRedOp_t op, bool symEligible, bool ceArGraphAllowed) {
+  const size_t msgBytes = count * ncclTypeSize(datatype);
+  // gfx1250 DDA fabric AR is bounded by rcclDdaEnabled (RCCL_DDA_THRESHOLD) and the per-tier
+  // thresholds, so it may claim the full range. On the other arches CE AllReduce owns
+  // [NCCL_CE_AR_MIN_MSG_BYTES, NCCL_CE_AR_MAX_MSG_BYTES], but only yield to it when it can actually
+  // service this call: it additionally requires single-node symmetric-memory support, a count
+  // divisible by nRanks and a supported op/datatype. Yielding on message size alone left comms
+  // without those prerequisites (e.g. gfx950 with symmetricSupport off) with no DDA and no CE,
+  // falling back to the generic ring/tree kernel across the whole 4 MiB+ range that DDA still wins.
+  const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
+  const bool ceAllReduceHandlesCall =
+    !ddaFabricArch1250 && ceArGraphAllowed && rcclUseCeAllReduce(const_cast<ncclComm*>(comm), count, datatype, op);
+  return !symEligible && !ceAllReduceHandlesCall && rcclDdaEnabled(comm, msgBytes, 8388608);
+}
+
 // Check if symmteric kernels is requested for this collective
 static bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
                                        size_t nElts, const void* sendbuff, void* recvbuff) {
@@ -628,13 +647,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   info.ceCapturing = ceCapturing;
   info.ceArGraphAllowed = ceArGraphAllowed;
   info.ceGraphDecisionValid = true;
-  size_t msgBytes = count * ncclTypeSize(datatype);
-  // gfx1250 DDA fabric AR is bounded by rcclDdaEnabled (RCCL_DDA_THRESHOLD) and
-  // the per-tier thresholds, so it may claim the full range; the CE min-size cap
-  // only applies to the other arches' DDA paths.
-  const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  if (!symEligible && rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) &&
-      (ddaFabricArch1250 || msgBytes < NCCL_CE_AR_MIN_MSG_BYTES)) {
+  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, op, symEligible, ceArGraphAllowed)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (rcclParamDdaLL() && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLThreshold() &&

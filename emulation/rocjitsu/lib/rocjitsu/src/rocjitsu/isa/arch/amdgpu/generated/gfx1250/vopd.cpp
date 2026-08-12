@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
 #include "util/except.h"
 #include <format>
 #include <string>
@@ -136,11 +137,11 @@ bool Vopd::is_float64_op(uint16_t op) {
 }
 
 Vopd::Vopd(const MachineInst *inst)
-    : IsaInstruction<Isa>("vopd", selected_exec_fn(0)), dstx_(32, OperandType::OPR_VGPR, 0),
-      dsty_(32, OperandType::OPR_VGPR, 0), srcx0_(32, OperandType::OPR_SRC, 0),
-      srcx1_(32, OperandType::OPR_VGPR, 0), srcx2_(32, OperandType::OPR_VGPR, 0),
-      srcy0_(32, OperandType::OPR_SRC, 0), srcy1_(32, OperandType::OPR_VGPR, 0),
-      srcy2_(32, OperandType::OPR_VGPR, 0) {
+    : IsaInstruction<Isa>("vopd", selected_exec_fn(InstructionExecutionId::Vopd)),
+      dstx_(32, OperandType::OPR_VGPR, 0), dsty_(32, OperandType::OPR_VGPR, 0),
+      srcx0_(32, OperandType::OPR_SRC, 0), srcx1_(32, OperandType::OPR_VGPR, 0),
+      srcx2_(32, OperandType::OPR_VGPR, 0), srcy0_(32, OperandType::OPR_SRC, 0),
+      srcy1_(32, OperandType::OPR_VGPR, 0), srcy2_(32, OperandType::OPR_VGPR, 0) {
   const auto *words = reinterpret_cast<const uint32_t *>(inst);
   raw_encoding_ = words;
   word0_ = words[0];
