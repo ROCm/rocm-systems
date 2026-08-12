@@ -136,11 +136,6 @@ prepare_runtime_configuration(const configuration&            requested_config,
     return true;
 }
 
-void
-log_continue_without_spm()
-{
-    LOG_WARNING("Continuing without SPM counter collection");
-}
 }  // namespace
 
 namespace detail
@@ -739,7 +734,8 @@ configure_runtime(client_data* data, const configuration& requested_config,
         return false;
     if(!requested_config.requested()) return true;
 
-    if(!configure_requested_runtime(data, requested_config)) log_continue_without_spm();
+    if(!configure_requested_runtime(data, requested_config))
+        LOG_WARNING("Continuing without SPM counter collection");
     return true;
 }
 
@@ -771,7 +767,7 @@ configure_runtime(client_data*, const configuration& requested_config,
                 "build does not provide the experimental SPM API. Build with a "
                 "rocprofiler-sdk version that provides "
                 "rocprofiler-sdk/experimental/spm.h.");
-    log_continue_without_spm();
+    LOG_WARNING("Continuing without SPM counter collection");
     return true;
 }
 
