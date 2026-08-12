@@ -534,7 +534,10 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
   // avoid an O(symbols * relocations) search below.
   std::unordered_map<size_t, std::unordered_set<uint32_t>> referenced_by_symtab;
   for (const Elf64_Shdr &relocs : shdrs) {
-    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+    const bool is_rela = relocs.sh_type == SHT_RELA;
+    const bool is_rel = relocs.sh_type == SHT_REL;
+    const uint64_t expected_entsize = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
+    if ((!is_rela && !is_rel) || relocs.sh_entsize != expected_entsize ||
         relocs.sh_link >= shdrs.size() ||
         !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size)) {
       continue;
@@ -544,11 +547,19 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
         !image_contains_range(image.size(), symtab.sh_offset, symtab.sh_size)) {
       continue;
     }
-    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    const size_t count = relocs.sh_size / expected_entsize;
     for (size_t i = 0; i < count; ++i) {
-      Elf64_Rela rela{};
-      std::memcpy(&rela, image.data() + relocs.sh_offset + i * sizeof(rela), sizeof(rela));
-      const uint32_t symbol_index = elf_reloc_sym(rela.r_info);
+      uint64_t r_info = 0;
+      if (is_rela) {
+        Elf64_Rela rela{};
+        std::memcpy(&rela, image.data() + relocs.sh_offset + i * expected_entsize, sizeof(rela));
+        r_info = rela.r_info;
+      } else {
+        Elf64_Rel rel{};
+        std::memcpy(&rel, image.data() + relocs.sh_offset + i * expected_entsize, sizeof(rel));
+        r_info = rel.r_info;
+      }
+      const uint32_t symbol_index = elf_reloc_sym(r_info);
       if (symbol_index == 0 ||
           static_cast<uint64_t>(symbol_index) * sizeof(Elf64_Sym) + sizeof(Elf64_Sym) >
               symtab.sh_size) {
@@ -581,13 +592,22 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
         continue;
 
       const auto referenced = referenced_by_symtab.find(symtab_index);
+      const bool is_referenced =
+          referenced != referenced_by_symtab.end() && referenced->second.contains(i);
       // An unreferenced symbol normally may stay unmapped, because debug and tooling tables
       // legitimately label padding this translation does not emit. When the caller is relying on
       // every `.text` address being relocated, that tolerance is a hole: a host can resolve such a
       // symbol and hand the stale address back in, so nothing may stay unmapped.
-      const bool must_relocate =
-          require_every_text_symbol_mapped ||
-          (referenced != referenced_by_symtab.end() && referenced->second.contains(i));
+      const bool must_relocate = require_every_text_symbol_mapped || is_referenced;
+
+      // Local symbols with no relocation references are tooling/debug boundaries,
+      // not runtime-visible code addresses. Opportunistically remapping one can
+      // make ownership of a shared CFG terminator drift by one instruction on a
+      // repeated translation. Preserve it verbatim so the first translation is
+      // already a fixed point. Referenced symbols and the all-symbol proof mode
+      // still take the exact, fail-closed relocation path below.
+      if (!must_relocate && elf_symbol_bind(symbol.st_info) == kElfSymbolBindLocal)
+        continue;
 
       uint64_t source_text_offset = symbol.st_value;
       if (ehdr.e_type != ET_REL) {

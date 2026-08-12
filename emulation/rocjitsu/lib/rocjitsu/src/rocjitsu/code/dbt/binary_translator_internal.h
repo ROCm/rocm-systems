@@ -19,8 +19,15 @@
 namespace rocjitsu {
 
 class BasicBlock;
+struct IndirectCallFixup;
 
 namespace internal {
+
+/// @brief Compare the complete semantic identity of two recovered PC builders.
+/// @details Marked-window idempotence may suppress a repeated rewrite only for
+/// the same getpc, recovery range, target, and xcnt-drain requirement.
+[[nodiscard]] bool same_recovered_builder_identity(const IndirectCallFixup &lhs,
+                                                   const IndirectCallFixup &rhs);
 
 /// @brief Decide whether every external entry into an incomplete-consumer scope
 ///        is an entry-state root that cannot carry an original `.text` pointer.

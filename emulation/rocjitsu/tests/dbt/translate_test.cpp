@@ -19,6 +19,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/code/dbt/binary_translator_internal.h"
 #include "rocjitsu/code/dbt/encoding_translator.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
@@ -969,8 +970,9 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_relocation_after_text(
 // chosen type, defined either in .text or .data. Ordinary zero-addend text
 // symbols can follow their relocated st_value; section symbols and nonzero
 // addends need relocation-specific reconstruction and remain unsupported.
-std::vector<uint8_t> make_amdgpu_elf_with_symbol_relocation(uint8_t sym_type, bool defined_in_text,
-                                                            int64_t addend = 0) {
+std::vector<uint8_t>
+make_amdgpu_elf_with_symbol_relocation(uint8_t sym_type, bool defined_in_text, int64_t addend = 0,
+                                       uint8_t sym_bind = kElfSymbolBindGlobal) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   constexpr uint64_t text_size = 8;
@@ -1048,7 +1050,7 @@ std::vector<uint8_t> make_amdgpu_elf_with_symbol_relocation(uint8_t sym_type, bo
 
   std::array<Elf64_Sym, sym_count> syms{};
   syms[1].st_name = sym_name;
-  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, sym_type);
+  syms[1].st_info = elf_symbol_info(sym_bind, sym_type);
   syms[1].st_shndx = defined_in_text ? text_index : data_index;
   syms[1].st_value = defined_in_text ? text_vaddr : data_vaddr;
   syms[1].st_size = defined_in_text ? text_size : data_size;
@@ -2330,6 +2332,80 @@ TEST(CodeObjectPatcher, ReplaceTextRelocatesTextSymbolsWithExactOffsetMap) {
   EXPECT_EQ(symbols[2].st_size, 12u);
 }
 
+TEST(CodeObjectPatcher, ReplaceTextLeavesUnreferencedLocalTextSymbolStable) {
+  auto image = make_minimal_amdgpu_elf_with_load_segments();
+  auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  const auto symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+  ASSERT_NE(symtab, shdrs.end());
+  auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab->sh_offset,
+                                                    symtab->sh_size / sizeof(Elf64_Sym));
+  ASSERT_GE(symbols.size(), 3u);
+  symbols[2].st_info = elf_symbol_info(kElfSymbolBindLocal, kElfSymbolTypeFunc);
+  std::memcpy(image.data() + symtab->sh_offset, symbols.data(), symbols.size() * sizeof(Elf64_Sym));
+
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+  CodeObjectPatcher patcher(co);
+  const std::array<uint32_t, 4> text_words = {0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u};
+  const auto *text_bytes = reinterpret_cast<const uint8_t *>(text_words.data());
+  constexpr std::array<TextOffsetRelocation, 2> relocations = {
+      TextOffsetRelocation{.source_offset = 0, .target_offset = 4},
+      TextOffsetRelocation{.source_offset = 8, .target_offset = 16},
+  };
+  ASSERT_TRUE(patcher.replace_text({text_bytes, sizeof(text_words)}, relocations));
+
+  const auto patched = patcher.emit();
+  ehdr = read_elf_struct_for_test<Elf64_Ehdr>(patched, 0);
+  shdrs = read_elf_array_for_test<Elf64_Shdr>(patched, ehdr.e_shoff, ehdr.e_shnum);
+  const auto patched_symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+  ASSERT_NE(patched_symtab, shdrs.end());
+  symbols = read_elf_array_for_test<Elf64_Sym>(patched, patched_symtab->sh_offset,
+                                               patched_symtab->sh_size / sizeof(Elf64_Sym));
+  ASSERT_GE(symbols.size(), 3u);
+  EXPECT_EQ(symbols[2].st_value, 0x1100u);
+  EXPECT_EQ(symbols[2].st_size, 8u);
+}
+
+TEST(CodeObjectPatcher, ReplaceTextRelocatesLocalSymbolInAllSymbolProofMode) {
+  auto image = make_minimal_amdgpu_elf_with_load_segments();
+  auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  const auto symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+  ASSERT_NE(symtab, shdrs.end());
+  auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab->sh_offset,
+                                                    symtab->sh_size / sizeof(Elf64_Sym));
+  ASSERT_GE(symbols.size(), 3u);
+  symbols[2].st_info = elf_symbol_info(kElfSymbolBindLocal, kElfSymbolTypeFunc);
+  std::memcpy(image.data() + symtab->sh_offset, symbols.data(), symbols.size() * sizeof(Elf64_Sym));
+
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+  CodeObjectPatcher patcher(co);
+  const std::array<uint32_t, 4> text_words = {0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u};
+  constexpr std::array<TextOffsetRelocation, 2> relocations = {
+      TextOffsetRelocation{.source_offset = 0, .target_offset = 4},
+      TextOffsetRelocation{.source_offset = 8, .target_offset = 16},
+  };
+  ASSERT_TRUE(patcher.replace_text(
+      {reinterpret_cast<const uint8_t *>(text_words.data()), sizeof(text_words)}, relocations, {},
+      {}, /*require_every_text_symbol_mapped=*/true));
+  const auto patched = patcher.emit();
+  ehdr = read_elf_struct_for_test<Elf64_Ehdr>(patched, 0);
+  shdrs = read_elf_array_for_test<Elf64_Shdr>(patched, ehdr.e_shoff, ehdr.e_shnum);
+  const auto patched_symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_SYMTAB; });
+  ASSERT_NE(patched_symtab, shdrs.end());
+  symbols = read_elf_array_for_test<Elf64_Sym>(patched, patched_symtab->sh_offset,
+                                               patched_symtab->sh_size / sizeof(Elf64_Sym));
+  ASSERT_GE(symbols.size(), 3u);
+  EXPECT_EQ(symbols[2].st_value, 0x1104u);
+  EXPECT_EQ(symbols[2].st_size, 12u);
+}
+
 TEST(CodeObjectPatcher, AppendsNonAllocSectionWithoutMovingLoadableSegments) {
   auto image = make_minimal_amdgpu_elf_with_load_segments();
   AmdGpuCodeObject co(image.data(), image.size());
@@ -2591,6 +2667,38 @@ TEST(CodeObjectPatcher, RelocatesReferencedTextSymbolWithExactOffsetMap) {
   ASSERT_GE(symbols.size(), 2u);
   EXPECT_EQ(symbols[1].st_value, 0x1104u);
   EXPECT_EQ(symbols[1].st_size, 12u);
+}
+
+TEST(CodeObjectPatcher, RejectsLocalTextSymbolReferencedByRel) {
+  auto image = make_amdgpu_elf_with_symbol_relocation(kElfSymbolTypeFunc, /*defined_in_text=*/true,
+                                                      /*addend=*/0, kElfSymbolBindLocal);
+  auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  const auto rela = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_RELA; });
+  ASSERT_NE(rela, shdrs.end());
+  const size_t rela_index = static_cast<size_t>(rela - shdrs.begin());
+  const Elf64_Rela rela_record = read_elf_struct_for_test<Elf64_Rela>(image, rela->sh_offset);
+  const Elf64_Rel rel_record{.r_offset = rela_record.r_offset, .r_info = rela_record.r_info};
+  std::memcpy(image.data() + rela->sh_offset, &rel_record, sizeof(rel_record));
+  shdrs[rela_index].sh_type = SHT_REL;
+  shdrs[rela_index].sh_size = sizeof(Elf64_Rel);
+  shdrs[rela_index].sh_entsize = sizeof(Elf64_Rel);
+  std::memcpy(image.data() + ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  CodeObjectPatcher patcher(object);
+  const std::array<uint32_t, 4> expanded_text = {0xBF800000u, 0xBF800000u, 0xBF800000u,
+                                                 0xBF800000u};
+  constexpr std::array<TextOffsetRelocation, 2> mappings = {
+      TextOffsetRelocation{.source_offset = 0, .target_offset = 4},
+      TextOffsetRelocation{.source_offset = 8, .target_offset = 16},
+  };
+  const auto bytes = std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(expanded_text.data()), sizeof(expanded_text));
+  EXPECT_FALSE(patcher.replace_text(bytes, mappings))
+      << "an implicit-addend REL reference must fail closed rather than leave a local target stale";
 }
 
 TEST(CodeObjectPatcher, RejectsReferencedTextSymbolWithoutExactOffsetMap) {
@@ -5370,6 +5478,32 @@ TEST(BinaryTranslatorE2E, Gfx1250LongDirectBranchGrowthIsIdempotent) {
   ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
                                                           : second.diagnostics.front().message);
   EXPECT_EQ(second.elf_bytes, result.elf_bytes);
+}
+
+TEST(BinaryTranslator, MarkedWindowSuppressionRequiresExactBuilderIdentity) {
+  rocjitsu::IndirectCallFixup owner{.source_getpc_offset = 8,
+                                    .source_recovery_begin_offset = 12,
+                                    .source_recovery_end_offset = 40,
+                                    .source_call_offset = 40,
+                                    .source_target_offset = 200,
+                                    .source_requires_xcnt_drain = true};
+  EXPECT_TRUE(rocjitsu::internal::same_recovered_builder_identity(owner, owner));
+
+  auto different = owner;
+  different.source_getpc_offset += 4;
+  EXPECT_FALSE(rocjitsu::internal::same_recovered_builder_identity(owner, different));
+  different = owner;
+  different.source_recovery_begin_offset += 4;
+  EXPECT_FALSE(rocjitsu::internal::same_recovered_builder_identity(owner, different));
+  different = owner;
+  different.source_recovery_end_offset -= 4;
+  EXPECT_FALSE(rocjitsu::internal::same_recovered_builder_identity(owner, different));
+  different = owner;
+  different.source_target_offset += 4;
+  EXPECT_FALSE(rocjitsu::internal::same_recovered_builder_identity(owner, different));
+  different = owner;
+  different.source_requires_xcnt_drain = false;
+  EXPECT_FALSE(rocjitsu::internal::same_recovered_builder_identity(owner, different));
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250LongBranchReportsSgprExhaustionAfterSemanticExpansion) {

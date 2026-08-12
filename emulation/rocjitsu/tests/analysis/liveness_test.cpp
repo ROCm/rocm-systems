@@ -46,6 +46,12 @@
 namespace rocjitsu {
 namespace {
 
+TEST(CfgAnalysis, ScratchAtomicsInvalidateTrackedScratchProvenance) {
+  EXPECT_TRUE(internal::invalidates_scratch_provenance("scratch_atomic_swap_b32"));
+  EXPECT_TRUE(internal::invalidates_scratch_provenance("scratch_atomic_cmpswap_b64"));
+  EXPECT_FALSE(internal::invalidates_scratch_provenance("scratch_load_b32"));
+}
+
 class TestOperand : public Operand {
 public:
   TestOperand() = default;
@@ -2524,6 +2530,327 @@ TEST(CfgAnalysis, Gfx1250IndirectCallKillsCarriedLaneStash) {
   ASSERT_EQ(total_fixups, 1u);
   ASSERT_NE(call_fixup, nullptr);
   EXPECT_EQ(call_fixup->source_target_offset, 80u);
+}
+
+TEST(CfgAnalysis, Gfx1250ScratchSpillRestoresCalleeSavedLaneStash) {
+  constexpr uint16_t kCallPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr auto stale_getpc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = 0});
+  constexpr auto call_getpc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = kCallPcSreg});
+  constexpr auto call_add = gfx1250::build_sop2(
+      gfx1250::kSAddNcU64Sop2, {.ssrc0 = kCallPcSreg, .ssrc1 = 254, .sdst = kCallPcSreg});
+  constexpr auto call =
+      gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = kCallPcSreg, .sdst = kReturnSreg});
+  constexpr auto stale_call =
+      gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = 0, .sdst = 28});
+
+  // Mirror the RCCL caller-save sequence: save a fixed-lane PC stash to the
+  // canonical (s33,+20) scratch slot under full EXEC, call, and reload the
+  // same slot under full EXEC. The load is a real v44 definition, so recovery
+  // depends on scratch provenance rather than merely preserving callee-saved
+  // v44 across the call.
+  std::vector<uint32_t> words = {
+      stale_getpc[0], // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      120u,
+      0u, // 0x04: stale target 0x04 + 120 = 0x7c.
+      0xD761002Cu,
+      0x02010000u, // 0x10: v44 lane 0 <- s0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v44 lane 1 <- s1.
+      call_getpc[0],
+      call_add[0],
+      92u,
+      0u,          // 0x24: call target 0x24 + 92 = 0x80.
+      0xBEE922C1u, // 0x30: s_or_saveexec_b32 s105, -1.
+      0xED0680A1u,
+      0x16000000u,
+      0x00001400u, // 0x34: scratch_store_b32 off, v44, s33 offset:20.
+      0xBFC50000u, // 0x40: s_wait_xcnt 0.
+      0xBEFE0069u, // 0x44: s_mov_b32 exec_lo, s105.
+      call[0],     // 0x48: resolved intervening indirect call.
+      0xBEE922C1u, // 0x4c: s_or_saveexec_b32 s105, -1.
+      0xED0500A1u,
+      0x0000002Cu,
+      0x00001400u, // 0x50: scratch_load_b32 v44, off, s33 offset:20.
+      0xBFC50000u, // 0x5c: s_wait_xcnt 0.
+      0xBEFE0069u, // 0x60: s_mov_b32 exec_lo, s105.
+      0xD7600000u,
+      0x0201012Cu, // 0x64: v44 lane 0 -> s0.
+      0xD7600001u,
+      0x0201032Cu,                                // 0x6c: v44 lane 1 -> s1.
+      stale_call[0],                              // 0x74: recovered continuation call.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x78: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x7c: stashed target.
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+      // 0x80: callee return.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  const IndirectCallFixup *continuation_fixup = nullptr;
+  for (const auto &block : blocks) {
+    for (const auto &fixup : block->static_indirect_call_fixups()) {
+      if (fixup.source_call_offset == 116)
+        continuation_fixup = &fixup;
+    }
+  }
+  ASSERT_NE(continuation_fixup, nullptr);
+  EXPECT_EQ(continuation_fixup->source_target_offset, 124u);
+}
+
+TEST(CfgAnalysis, Gfx1250ScratchSpillOffsetMismatchFailsClosed) {
+  constexpr uint16_t kCallPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr auto getpc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = 0});
+  constexpr auto call_getpc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = kCallPcSreg});
+  constexpr auto call_add = gfx1250::build_sop2(
+      gfx1250::kSAddNcU64Sop2, {.ssrc0 = kCallPcSreg, .ssrc1 = 254, .sdst = kCallPcSreg});
+  constexpr auto call =
+      gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = kCallPcSreg, .sdst = kReturnSreg});
+
+  std::vector<uint32_t> words = {
+      getpc[0],
+      0xA980FE00u,
+      120u,
+      0u,
+      0xD761002Cu,
+      0x02010000u,
+      0xD761002Cu,
+      0x02010201u,
+      call_getpc[0],
+      call_add[0],
+      92u,
+      0u,
+      0xBEE922C1u,
+      0xED0680A1u,
+      0x16000000u,
+      0x00001400u,
+      0xBFC50000u,
+      0xBEFE0069u,
+      call[0],
+      0xBEE922C1u,
+      0xED0500A1u,
+      0x0000002Cu,
+      0x00001800u, // Mismatch: reload (s33,+24), not the saved (s33,+20).
+      0xBFC50000u,
+      0xBEFE0069u,
+      0xD7600000u,
+      0x0201012Cu,
+      0xD7600001u,
+      0x0201032Cu,
+      0xBE9C4900u,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  size_t continuation_fixups = 0;
+  for (const auto &block : blocks) {
+    for (const auto &fixup : block->static_indirect_call_fixups())
+      continuation_fixups += fixup.source_call_offset == 116;
+  }
+  EXPECT_EQ(continuation_fixups, 0u);
+}
+
+TEST(CfgAnalysis, Gfx1250ScratchSpillSignedOffsetOverlapFailsClosed) {
+  constexpr uint16_t kCallPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr auto getpc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = 0});
+  constexpr auto call_getpc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = kCallPcSreg});
+  constexpr auto call_add = gfx1250::build_sop2(
+      gfx1250::kSAddNcU64Sop2, {.ssrc0 = kCallPcSreg, .ssrc1 = 254, .sdst = kCallPcSreg});
+  constexpr auto call =
+      gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = kCallPcSreg, .sdst = kReturnSreg});
+  constexpr auto spill = gfx1250::build_vscratch(gfx1250::kScratchStoreB32Vscratch,
+                                                 {.saddr = 33, .vsrc = 44, .ioffset = 0});
+  constexpr auto overlapping_store = gfx1250::build_vscratch(
+      gfx1250::kScratchStoreB32Vscratch,
+      {.saddr = 33, .vsrc = 1, .ioffset = 0x00fffffeu}); // Signed -2: overlaps [0, 4).
+  constexpr auto reload = gfx1250::build_vscratch(gfx1250::kScratchLoadB32Vscratch,
+                                                  {.saddr = 33, .vdst = 44, .ioffset = 0});
+
+  std::vector<uint32_t> words = {
+      getpc[0],
+      0xA980FE00u,
+      144u,
+      0u,
+      0xD761002Cu,
+      0x02010000u,
+      0xD761002Cu,
+      0x02010201u,
+      call_getpc[0],
+      call_add[0],
+      116u,
+      0u,
+      0xBEE922C1u,
+      spill[0],
+      spill[1],
+      spill[2],
+      0xBFC50000u,
+      0xBEFE0069u,
+      call[0],
+      0xBEE922C1u,
+      overlapping_store[0],
+      overlapping_store[1],
+      overlapping_store[2],
+      0xBFC50000u,
+      0xBEFE0069u,
+      0xBEE922C1u,
+      reload[0],
+      reload[1],
+      reload[2],
+      0xBFC50000u,
+      0xBEFE0069u,
+      0xD7600000u,
+      0x0201012Cu,
+      0xD7600001u,
+      0x0201032Cu,
+      0xBE9C4900u,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  size_t continuation_fixups = 0;
+  for (const auto &block : blocks) {
+    for (const auto &fixup : block->static_indirect_call_fixups())
+      continuation_fixups += fixup.source_call_offset == 140;
+  }
+  EXPECT_EQ(continuation_fixups, 0u);
+}
+
+TEST(CfgAnalysis, Gfx1250ScratchSpillSaveExecBaseOverlapFailsClosed) {
+  constexpr uint16_t kCallPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr auto getpc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = 0});
+  constexpr auto call_getpc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = kCallPcSreg});
+  constexpr auto call_add = gfx1250::build_sop2(
+      gfx1250::kSAddNcU64Sop2, {.ssrc0 = kCallPcSreg, .ssrc1 = 254, .sdst = kCallPcSreg});
+  constexpr auto call =
+      gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = kCallPcSreg, .sdst = kReturnSreg});
+
+  std::vector<uint32_t> words = {
+      getpc[0],
+      0xA980FE00u,
+      120u,
+      0u,
+      0xD761002Cu,
+      0x02010000u,
+      0xD761002Cu,
+      0x02010201u,
+      call_getpc[0],
+      call_add[0],
+      92u,
+      0u,
+      0xBEE922C1u,
+      0xED0680E9u,
+      0x16000000u,
+      0x00001400u, // Invalid: saveexec dst and saddr are both s105.
+      0xBFC50000u,
+      0xBEFE0069u,
+      call[0],
+      0xBEE922C1u,
+      0xED0500E9u,
+      0x0000002Cu,
+      0x00001400u,
+      0xBFC50000u,
+      0xBEFE0069u,
+      0xD7600000u,
+      0x0201012Cu,
+      0xD7600001u,
+      0x0201032Cu,
+      0xBE9C4900u,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  size_t continuation_fixups = 0;
+  for (const auto &block : blocks) {
+    for (const auto &fixup : block->static_indirect_call_fixups())
+      continuation_fixups += fixup.source_call_offset == 116;
+  }
+  EXPECT_EQ(continuation_fixups, 0u);
+}
+
+TEST(CfgAnalysis, Gfx1250ScratchSpillFlatWriteAliasFailsClosed) {
+  constexpr uint16_t kCallPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr auto getpc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = 0});
+  constexpr auto call_getpc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = kCallPcSreg});
+  constexpr auto call_add = gfx1250::build_sop2(
+      gfx1250::kSAddNcU64Sop2, {.ssrc0 = kCallPcSreg, .ssrc1 = 254, .sdst = kCallPcSreg});
+  constexpr auto call =
+      gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = kCallPcSreg, .sdst = kReturnSreg});
+  for (const uint16_t opcode : {gfx1250::kFlatStoreB32Vflat, gfx1250::kFlatAtomicAddU32Vflat}) {
+    SCOPED_TRACE(opcode);
+    const auto flat_write = gfx1250::build_vflat(opcode, {.saddr = 0, .vsrc = 1});
+    std::vector<uint32_t> words = {
+        getpc[0],
+        0xA980FE00u,
+        132u,
+        0u,
+        0xD761002Cu,
+        0x02010000u,
+        0xD761002Cu,
+        0x02010201u,
+        call_getpc[0],
+        call_add[0],
+        104u,
+        0u,
+        0xBEE922C1u,
+        0xED0680A1u,
+        0x16000000u,
+        0x00001400u,
+        0xBFC50000u,
+        0xBEFE0069u,
+        call[0],
+        flat_write[0],
+        flat_write[1],
+        flat_write[2],
+        0xBEE922C1u,
+        0xED0500A1u,
+        0x0000002Cu,
+        0x00001400u,
+        0xBFC50000u,
+        0xBEFE0069u,
+        0xD7600000u,
+        0x0201012Cu,
+        0xD7600001u,
+        0x0201032Cu,
+        0xBE9C4900u,
+        build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+        build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+        rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+    };
+
+    TestCodeObject co(std::move(words));
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+    size_t continuation_fixups = 0;
+    for (const auto &block : blocks) {
+      for (const auto &fixup : block->static_indirect_call_fixups())
+        continuation_fixups += fixup.source_call_offset == 128;
+    }
+    EXPECT_EQ(continuation_fixups, 0u);
+  }
 }
 
 TEST(CfgAnalysis, Gfx1250CalleeSavedLaneStashSurvivesIndirectCall) {

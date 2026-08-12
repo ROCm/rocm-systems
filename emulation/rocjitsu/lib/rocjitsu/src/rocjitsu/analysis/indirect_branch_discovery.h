@@ -10,9 +10,18 @@
 
 #include <cstdint>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
+
+namespace internal {
+
+/// @brief Whether an unmodelled memory instruction must kill tracked scratch provenance.
+/// @details Internal test seam for the fail-closed mnemonic policy used by indirect-call recovery.
+[[nodiscard]] bool invalidates_scratch_provenance(std::string_view mnemonic);
+
+} // namespace internal
 
 class Instruction;
 

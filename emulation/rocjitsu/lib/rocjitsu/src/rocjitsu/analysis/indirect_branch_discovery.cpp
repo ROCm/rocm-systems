@@ -5,6 +5,11 @@
 
 #include "rocjitsu/analysis/control_flow.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#if __has_include("rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h")
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
+#else
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
+#endif
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
@@ -1982,8 +1987,28 @@ struct StashedPcHalf {
   friend bool operator==(const StashedPcHalf &, const StashedPcHalf &) = default;
 };
 
+struct ScratchSpillSlot {
+  uint16_t saddr = 0;
+  int32_t byte_offset = 0;
+
+  friend bool operator==(const ScratchSpillSlot &, const ScratchSpillSlot &) = default;
+};
+
+struct ScratchSpillSlotHash {
+  size_t operator()(const ScratchSpillSlot &slot) const {
+    return std::hash<uint16_t>{}(slot.saddr) ^ (std::hash<int32_t>{}(slot.byte_offset) << 1);
+  }
+};
+
+struct ScratchSpillValue {
+  std::unordered_map<uint16_t, StashedPcHalf> lanes;
+
+  friend bool operator==(const ScratchSpillValue &, const ScratchSpillValue &) = default;
+};
+
 struct VectorLaneFlowState {
   std::unordered_map<VectorLaneSlot, StashedPcHalf, VectorLaneSlotHash> slots;
+  std::unordered_map<ScratchSpillSlot, ScratchSpillValue, ScratchSpillSlotHash> scratch_spills;
   std::optional<uint8_t> vgpr_msb_imm;
 
   friend bool operator==(const VectorLaneFlowState &, const VectorLaneFlowState &) = default;
@@ -2064,6 +2089,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
 
   constexpr unsigned kDstBankShift = 6;  // s_set_vgpr_msb immediate DST field.
   constexpr unsigned kSrc0BankShift = 0; // s_set_vgpr_msb immediate SRC0 field.
+  constexpr unsigned kSrc1BankShift = 3; // s_set_vgpr_msb immediate SRC1 field.
+  constexpr uint16_t kInlineIntNeg1 = 193;
 
   const auto scan_block = [&](const AnalysisBlock &block, VectorLaneFlowState state,
                               bool emit_fixups) {
@@ -2078,10 +2105,87 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       return static_cast<uint16_t>(low + static_cast<uint16_t>(bank) * 256u);
     };
 
+    const auto full_exec_setup_immediately_precedes = [&](size_t index, uint16_t scratch_saddr) {
+      if (index == block.first_index)
+        return false;
+      const Instruction &previous = *ctx.insts[index - 1];
+      if (previous.mnemonic() != "s_or_saveexec_b32")
+        return false;
+      const auto saved_exec = operand_register(previous.dst_operand(0), RegClass::SGPR);
+      if (!saved_exec || saved_exec->index == scratch_saddr)
+        return false;
+      for (int src_index = 0; src_index < previous.num_src_operands(); ++src_index) {
+        const Operand *source = previous.src_operand(src_index);
+        if (source != nullptr && source->encoding_value() == kInlineIntNeg1)
+          return true;
+      }
+      return false;
+    };
+
+    const auto canonical_scratch_slot =
+        [&](const Instruction &inst, int saddr_operand_index) -> std::optional<ScratchSpillSlot> {
+      // Restrict provenance to the compiler's scalar-base, immediate-offset
+      // form. A VGPR address makes aliasing data-dependent and must fail closed.
+      const auto saddr = operand_register(inst.src_operand(saddr_operand_index), RegClass::SGPR);
+      if (!saddr || inst.raw_encoding() == nullptr || inst.size() < 12)
+        return std::nullopt;
+      gfx1250::VscratchMachineInst encoded{};
+      std::memcpy(&encoded, inst.raw_encoding(), sizeof(encoded));
+      // The decoder exposes src_operand(0) as a VGPR even when SVE=0 and the
+      // disassembly prints `off`; SVE, not the decoded operand, controls whether
+      // VADDR participates in address calculation.
+      if (encoded.sve != 0 || encoded.saddr != saddr->index)
+        return std::nullopt;
+      const int32_t byte_offset = static_cast<int32_t>(encoded.ioffset << 8) >> 8;
+      return ScratchSpillSlot{.saddr = saddr->index, .byte_offset = byte_offset};
+    };
+
+    const auto scratch_store_width = [](std::string_view mnemonic) -> std::optional<uint32_t> {
+      if (mnemonic == "scratch_store_b8")
+        return 1;
+      if (mnemonic == "scratch_store_b16")
+        return 2;
+      if (mnemonic == "scratch_store_b32")
+        return 4;
+      if (mnemonic == "scratch_store_b64")
+        return 8;
+      if (mnemonic == "scratch_store_b96")
+        return 12;
+      if (mnemonic == "scratch_store_b128")
+        return 16;
+      return std::nullopt;
+    };
+
+    const auto invalidate_scratch_store_aliases = [&](std::optional<ScratchSpillSlot> store,
+                                                      std::optional<uint32_t> width) {
+      if (!store || !width) {
+        state.scratch_spills.clear();
+        return;
+      }
+      const int64_t store_begin = store->byte_offset;
+      const int64_t store_end = store_begin + static_cast<int64_t>(*width);
+      std::erase_if(state.scratch_spills, [&](const auto &item) {
+        // Different scalar bases are not proven disjoint.
+        if (item.first.saddr != store->saddr)
+          return true;
+        const int64_t saved_begin = item.first.byte_offset;
+        const int64_t saved_end = saved_begin + static_cast<int64_t>(sizeof(uint32_t));
+        return store_begin < saved_end && saved_begin < store_end;
+      });
+    };
+
     for (size_t index = block.first_index; index <= block.last_index; ++index) {
       const Instruction &inst = *ctx.insts[index];
       const InstructionFacts &facts = ctx.facts[index];
       const std::string_view mnemonic = inst.mnemonic();
+
+      if (!state.scratch_spills.empty()) {
+        ensure_written_sgprs(ctx, index);
+        ctx.facts[index].written_sgprs.for_each([&](uint16_t sgpr) {
+          std::erase_if(state.scratch_spills,
+                        [&](const auto &item) { return item.first.saddr == sgpr; });
+        });
+      }
 
       if (!active_read_halves.empty()) {
         ensure_written_sgprs(ctx, index);
@@ -2110,6 +2214,74 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         // stash there survives (see is_callee_saved_vgpr).
         std::erase_if(state.slots,
                       [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
+        // A conforming AMDGPU callee owns a disjoint scratch frame and therefore
+        // preserves caller spill slots. This is the scratch-memory counterpart
+        // of the callee-saved VGPR invariant above. Hand-written code that
+        // violates the calling convention remains outside this proof.
+      }
+
+      if (mnemonic == "scratch_store_b32") {
+        const auto source = operand_register(inst.src_operand(1), RegClass::VGPR);
+        const auto source_phys =
+            source ? physical_vgpr(source->index, kSrc1BankShift) : std::nullopt;
+        const auto spill = canonical_scratch_slot(inst, 2);
+        invalidate_scratch_store_aliases(spill, sizeof(uint32_t));
+        if (spill && source_phys && full_exec_setup_immediately_precedes(index, spill->saddr)) {
+          ScratchSpillValue saved;
+          for (const auto &[slot, value] : state.slots) {
+            if (slot.vgpr == *source_phys)
+              saved.lanes.emplace(slot.lane, value);
+          }
+          if (!saved.lanes.empty())
+            state.scratch_spills[*spill] = std::move(saved);
+        }
+        if (!builders.active_pairs().empty())
+          invalidate_written_sgprs(ctx, index, builders);
+        continue;
+      }
+
+      if (mnemonic.starts_with("scratch_store_")) {
+        // Preserve only proven non-overlapping ranges on the same scalar base.
+        // Unknown forms/bases and overlaps fail closed.
+        invalidate_scratch_store_aliases(canonical_scratch_slot(inst, 2),
+                                         scratch_store_width(mnemonic));
+      }
+
+      // A scratch atomic is both a read and a write at an address whose width
+      // and aliasing cannot be derived generically from the mnemonic. Current
+      // gfx1250 tables do not decode these opcodes, but fail closed if support
+      // is added so an atomic can never leave stale PC provenance behind.
+      if (internal::invalidates_scratch_provenance(mnemonic))
+        state.scratch_spills.clear();
+
+      // Flat memory writes can address the private/scratch aperture. Without a
+      // proven address-space and alias result, retaining a caller scratch fact
+      // across any flat store or atomic would be unsound.
+      if (mnemonic.starts_with("flat_store_") || mnemonic.starts_with("flat_atomic_"))
+        state.scratch_spills.clear();
+
+      if (mnemonic == "scratch_load_b32") {
+        const auto destination = operand_register(inst.dst_operand(0), RegClass::VGPR);
+        const auto destination_phys =
+            destination ? physical_vgpr(destination->index, kDstBankShift) : std::nullopt;
+        const auto spill = canonical_scratch_slot(inst, 1);
+        if (spill && destination_phys &&
+            full_exec_setup_immediately_precedes(index, spill->saddr)) {
+          auto saved = state.scratch_spills.find(*spill);
+          if (saved != state.scratch_spills.end()) {
+            std::erase_if(state.slots,
+                          [&](const auto &item) { return item.first.vgpr == *destination_phys; });
+            for (const auto &[lane, value] : saved->second.lanes)
+              state.slots[VectorLaneSlot{*destination_phys, lane}] = value;
+            // A load does not consume or modify the saved memory value. Keep
+            // the provenance live across loop backedges until an actual store
+            // or scalar-base rewrite invalidates it.
+            if (!builders.active_pairs().empty())
+              invalidate_written_sgprs(ctx, index, builders);
+            continue;
+          }
+        }
+        // No exact provenance: fall through to ordinary VGPR-def invalidation.
       }
 
       if (mnemonic == "v_writelane_b32") {
@@ -2261,6 +2433,14 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         else
           ++it;
       }
+      for (auto it = new_entry.scratch_spills.begin(); it != new_entry.scratch_spills.end();) {
+        auto incoming = exit_states[predecessor].scratch_spills.find(it->first);
+        if (incoming == exit_states[predecessor].scratch_spills.end() ||
+            incoming->second != it->second)
+          it = new_entry.scratch_spills.erase(it);
+        else
+          ++it;
+      }
       if (new_entry.vgpr_msb_imm != exit_states[predecessor].vgpr_msb_imm)
         new_entry.vgpr_msb_imm = std::nullopt;
     }
@@ -2280,6 +2460,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         new_entry = std::move(external_entry);
       } else {
         new_entry.slots.clear();
+        new_entry.scratch_spills.clear();
         if (new_entry.vgpr_msb_imm != external_entry.vgpr_msb_imm)
           new_entry.vgpr_msb_imm = std::nullopt;
       }
@@ -2500,6 +2681,10 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 }
 
 } // namespace
+
+bool internal::invalidates_scratch_provenance(std::string_view mnemonic) {
+  return mnemonic.starts_with("scratch_atomic_");
+}
 
 bool is_callee_saved_vgpr(uint16_t phys_vgpr) {
   return phys_vgpr >= 40 && phys_vgpr <= 255 && ((phys_vgpr - 40) % 16) < 8;

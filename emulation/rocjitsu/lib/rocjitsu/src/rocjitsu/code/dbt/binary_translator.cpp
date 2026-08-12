@@ -1189,6 +1189,14 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
 
 namespace internal {
 
+bool same_recovered_builder_identity(const IndirectCallFixup &lhs, const IndirectCallFixup &rhs) {
+  return lhs.source_getpc_offset == rhs.source_getpc_offset &&
+         lhs.source_recovery_begin_offset == rhs.source_recovery_begin_offset &&
+         lhs.source_recovery_end_offset == rhs.source_recovery_end_offset &&
+         lhs.source_target_offset == rhs.source_target_offset &&
+         lhs.source_requires_xcnt_drain == rhs.source_requires_xcnt_drain;
+}
+
 /// @brief Prove that every external entry into an incomplete-consumer scope is
 ///        an entry-state root that cannot carry an original `.text` pointer.
 ///
@@ -2322,6 +2330,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
       const IndirectCallFixup &first = consumer.fixups.front();
       bool single_effective_target = true;
+      bool single_builder_identity = true;
       for (const IndirectCallFixup &fixup : consumer.fixups) {
         if (fixup.source_call_sreg != first.source_call_sreg ||
             fixup.source_is_call != first.source_is_call ||
@@ -2340,6 +2349,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         }
         if (fixup.source_target_offset != first.source_target_offset)
           single_effective_target = false;
+        if (!internal::same_recovered_builder_identity(fixup, first))
+          single_builder_identity = false;
       }
       if (skip_scope)
         break;
@@ -2386,15 +2397,24 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       if (single_effective_target) {
         consumer.window_fixup = first;
         const bool contiguous_builder =
-            consumer.fixups.size() == 1 && first.source_getpc_offset >= sizeof(uint32_t) &&
+            first.source_getpc_offset >= sizeof(uint32_t) &&
             first.source_recovery_begin_offset == first.source_getpc_offset + sizeof(uint32_t) &&
             first.source_recovery_end_offset == first.source_call_offset &&
             first.source_call_offset <= text.size() &&
             sizeof(uint32_t) <= text.size() - first.source_call_offset;
-        const auto getpc_it = source_instruction_by_offset.find(first.source_getpc_offset);
-        const Instruction *getpc =
-            getpc_it == source_instruction_by_offset.end() ? nullptr : getpc_it->second;
-        const Instruction *marker = getpc == nullptr ? nullptr : getpc->previous_instruction();
+        uint32_t marker_word = 0;
+        const uint64_t marker_offset = first.source_getpc_offset - sizeof(uint32_t);
+        const bool has_marker_word =
+            first.source_getpc_offset >= sizeof(uint32_t) &&
+            first.source_getpc_offset <= text.size() &&
+            (std::memcpy(&marker_word, text.data() + marker_offset, sizeof(marker_word)),
+             marker_word == build_s_nop(kLongDirectBranchMarkerNopImmediate, guest_arch_));
+        const auto marker_it = source_instruction_by_offset.find(marker_offset);
+        const Instruction *marker =
+            marker_it == source_instruction_by_offset.end() ? nullptr : marker_it->second;
+        const bool has_decoded_marker =
+            marker != nullptr && marker->size() == static_cast<int>(sizeof(uint32_t)) &&
+            marker->raw_encoding() != nullptr && marker->raw_encoding()[0] == marker_word;
         const auto call_it = source_instruction_by_offset.find(first.source_call_offset);
         const Instruction *call =
             call_it == source_instruction_by_offset.end() ? nullptr : call_it->second;
@@ -2420,18 +2440,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             std::ranges::any_of(
                 (*call_block_it)->predecessors(),
                 [&](const BasicBlock *predecessor) { return predecessor != *builder_block_it; });
-        const bool canonical_marked_window =
-            contiguous_builder && marker != nullptr &&
-            marker->size() == static_cast<int>(sizeof(uint32_t)) &&
-            marker->src_loc() + sizeof(uint32_t) == first.source_getpc_offset &&
-            marker->raw_encoding() != nullptr &&
-            marker->raw_encoding()[0] ==
-                build_s_nop(kLongDirectBranchMarkerNopImmediate, guest_arch_) &&
-            call != nullptr && call->size() == static_cast<int>(sizeof(uint32_t)) &&
-            !has_interior_block_entry && !has_external_call_entry;
+        const bool canonical_marked_window = single_builder_identity && contiguous_builder &&
+                                             has_marker_word && has_decoded_marker &&
+                                             call != nullptr &&
+                                             call->size() == static_cast<int>(sizeof(uint32_t)) &&
+                                             !has_interior_block_entry && !has_external_call_entry;
         if (canonical_marked_window) {
           consumer.preserve_marked_long_transfer = true;
-          consumer.marked_window_begin = marker->src_loc();
+          consumer.marked_window_begin = marker_offset;
           consumer.marked_window_end = first.source_call_offset + sizeof(uint32_t);
         } else {
           consumer.use_transfer_window = true;
@@ -2460,6 +2476,17 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       if (consumer.preserve_marked_long_transfer)
         marked_long_transfer_by_start.emplace(consumer.marked_window_begin, &consumer);
     }
+    // A repeated pass can propagate the PC value built by a translator-generated
+    // marked long-transfer window to a distant consumer. Regenerating the marked
+    // window already relocates that exact semantic builder. Suppress only an
+    // identical builder proof; a positional test is insufficient because the
+    // encoded delta builder can change width between translation passes.
+    std::erase_if(pending_builder_fixups, [&](const IndirectCallFixup &fixup) {
+      return std::ranges::any_of(marked_long_transfer_by_start, [&](const auto &item) {
+        const IndirectCallFixup &owner = item.second->window_fixup;
+        return internal::same_recovered_builder_identity(fixup, owner);
+      });
+    });
 
     std::vector<uint8_t> kernel_text;
     std::vector<PendingTrace> pending_traces;
