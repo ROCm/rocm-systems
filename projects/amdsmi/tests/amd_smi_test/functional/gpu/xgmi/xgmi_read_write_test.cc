@@ -40,7 +40,8 @@ void TestXGMIReadWrite::Close() {
 }
 
 void TestXGMIReadWrite::Run(void) {
-  GTEST_SKIP_("Temporarily disabled");
+  GTEST_SKIP_(
+      "xgmi error injection not available; skipped until synthetic xgmi errors can be generated");
   amdsmi_status_t err;
   amdsmi_xgmi_status_t err_stat;
 
