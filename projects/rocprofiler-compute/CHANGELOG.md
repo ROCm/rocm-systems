@@ -9,6 +9,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added GPU benchmarking and roofline profiling/analysis support for gfx1153 hardware.
 
+* Added per-kernel PC sampling analysis.
+  * `rocprof-compute analyze --output-format csv` writes each kernel's disassembly under `per_kernel_pc_sampling/`, with the sample and stall counts on every instruction and the source it was compiled from.
+  * The analysis database records the same per-instruction data, so `--output-format db` can be queried for it.
+
 * Added multi-process PC sampling across profile and analyze modes.
   * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` per process.
   * Analyze mode reports every process in a single run, with a `pid` column
@@ -21,6 +25,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   XCD, L2 channel, and HBM channel counts from them.
 
 ### Changed
+
+* Renamed the PC sampling analysis output: `pc_sampling.csv` is now `pc_sampling_summary.csv`, and the `compute_pc_sampling_view` view is now `compute_pc_sampling_summary_view`.
 
 * ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
 

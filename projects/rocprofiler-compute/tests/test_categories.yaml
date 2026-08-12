@@ -18,6 +18,7 @@ test_categories:
       - test_analysis_orm
       - test_code_object_analysis
       - test_source_snapshot_analysis
+      - test_per_kernel_isa_export
       - test_torch_trace_analysis
       - test_torch_trace_coverage
       - test_L1_cache_counters
@@ -98,6 +99,7 @@ test_categories:
       - test_analysis_orm
       - test_code_object_analysis
       - test_source_snapshot_analysis
+      - test_per_kernel_isa_export
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_csv_compression
@@ -171,6 +173,7 @@ test_categories:
       - test_analysis_orm
       - test_code_object_analysis
       - test_source_snapshot_analysis
+      - test_per_kernel_isa_export
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_csv_compression
@@ -244,6 +247,7 @@ test_categories:
       - test_analysis_orm
       - test_code_object_analysis
       - test_source_snapshot_analysis
+      - test_per_kernel_isa_export
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_csv_compression
