@@ -30,6 +30,27 @@ RJ_DIAGNOSTIC_POP
 
 using namespace rocjitsu;
 
+std::vector<uint32_t>
+rocjitsu::detail::resolve_cpu_dispatch_thread_budgets(uint32_t configured_threads,
+                                                      uint32_t hardware_threads, size_t soc_count) {
+  if (soc_count == 0)
+    return {};
+  if (configured_threads != 0)
+    return std::vector<uint32_t>(soc_count, configured_threads);
+
+  constexpr uint32_t kDispatchThreadCap = 32;
+  const size_t host_budget = std::min(hardware_threads ? hardware_threads : 1u, kDispatchThreadCap);
+  if (host_budget < soc_count)
+    return std::vector<uint32_t>(soc_count, 1);
+
+  const uint32_t base = static_cast<uint32_t>(host_budget / soc_count);
+  const size_t remainder = host_budget % soc_count;
+  std::vector<uint32_t> budgets(soc_count, base);
+  for (size_t i = 0; i < remainder; ++i)
+    ++budgets[i];
+  return budgets;
+}
+
 namespace {
 
 void shutdown_plugin_group(rj_vm_t *vm) {
@@ -62,19 +83,13 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
         partition_socs.push_back(extra_soc);
     }
   }
-  // Shared per-SoC CU dispatch-pool thread count (functional mode), from config
-  // cpu_dispatch_threads. 0 = auto: all hardware threads, capped at
-  // kDispatchThreadCap (parallel out of the box without oversubscribing small
-  // hosts or paying SMT/turbo costs). Results are thread-count-invariant, so
-  // this only affects speed, not output.
-  constexpr uint32_t kDispatchThreadCap = 32;
-  uint32_t cpu_dispatch_threads = 1;
+  // A nonzero cpu_dispatch_threads value is a per-SoC width. Automatic mode
+  // divides one host-wide budget across the SoCs so adding simulated GPUs does
+  // not multiply the number of persistent dispatch workers.
+  std::vector<uint32_t> cpu_dispatch_thread_budgets(partition_socs.size(), 1);
   if (loaded.exec_mode == simdojo::ExecMode::FUNCTIONAL) {
-    cpu_dispatch_threads = loaded.cpu_dispatch_threads;
-    if (cpu_dispatch_threads == 0) {
-      unsigned hw = std::thread::hardware_concurrency();
-      cpu_dispatch_threads = std::min<uint32_t>(hw ? hw : 1u, kDispatchThreadCap);
-    }
+    cpu_dispatch_thread_budgets = detail::resolve_cpu_dispatch_thread_budgets(
+        loaded.cpu_dispatch_threads, std::thread::hardware_concurrency(), partition_socs.size());
   }
   // XCD partitions (config num_threads): run each XCD on its own engine
   // partition/thread so the XCDs execute concurrently across their separate L2s.
@@ -135,8 +150,8 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
       if (extra_soc)
         extra_soc->wire_backing(s->engine->topology());
     }
-    for (auto *soc : partition_socs)
-      set_cpu_dispatch_threads(soc, cpu_dispatch_threads);
+    for (size_t i = 0; i < partition_socs.size(); ++i)
+      set_cpu_dispatch_threads(partition_socs[i], cpu_dispatch_thread_budgets[i]);
   } else {
     auto root = loaded.take_root();
     root.release();
@@ -145,7 +160,7 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     s->engine->topology().set_root(std::move(vm_ptr));
     loaded.wire_links(s->engine->topology());
     s->soc->wire_backing(s->engine->topology());
-    set_cpu_dispatch_threads(s->soc, cpu_dispatch_threads);
+    set_cpu_dispatch_threads(s->soc, cpu_dispatch_thread_budgets.front());
   }
   if (num_threads_used > 1 && !amdgpu::partition_topology_by_xcds(
                                   s->engine->topology(), partition_socs, num_threads_used)) {
