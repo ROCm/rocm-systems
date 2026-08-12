@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -374,6 +375,13 @@ public:
   /// @brief Select a callback from the active immutable per-ISA table.
   static ExecuteFn selected_exec_fn(size_t instruction_id) {
     return current_instruction_execute(instruction_id);
+  }
+
+  /// @brief Select a callback using a generated, named execution ID.
+  template <typename ExecutionId>
+    requires std::is_enum_v<ExecutionId>
+  static ExecuteFn selected_exec_fn(ExecutionId instruction_id) {
+    return current_instruction_execute(static_cast<size_t>(instruction_id));
   }
 };
 
