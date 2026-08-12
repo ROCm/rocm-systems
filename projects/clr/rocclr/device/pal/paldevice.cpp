@@ -627,21 +627,15 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
 #if IS_WINDOWS
   info_.luidLowPart_ = palProp.osProperties.luidLowPart;
   info_.luidHighPart_ = palProp.osProperties.luidHighPart;
-  // Node mask = this device's node within its adapter (LUID). Devices sharing a
-  // LUID form a linked display adapter (LDA), so the index is their position:
-  // standalone -> 0x1 and LDA -> 1 << localNodeIndex.
-  uint32_t luidNodeIndex = 0;
-  for (uint32_t i = 0; (i < gNumDevices) && (gDeviceList[i] != pal_device); ++i) {
-    Pal::DeviceProperties siblingProps = {};
-    if ((gDeviceList[i] != nullptr) &&
-        (gDeviceList[i]->GetProperties(&siblingProps) == Pal::Result::Success) &&
-        (siblingProps.osProperties.luidLowPart == palProp.osProperties.luidLowPart) &&
-        (siblingProps.osProperties.luidHighPart == palProp.osProperties.luidHighPart)) {
-      ++luidNodeIndex;
+#endif
+  // Setup the node mask from the original PAL list of all devices
+  if (pal_device != nullptr) {
+    for (uint32_t i = 0; i < gNumDevices; ++i) {
+      if (gDeviceList[i] == pal_device) {
+        info_.luidDeviceNodeMask_ = 1 << i;
+      }
     }
   }
-  info_.luidDeviceNodeMask_ = 1u << luidNodeIndex;
-#endif
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 989
   info_.hasExpertSchedMode_ = palProp.gfxTriple >= Pal::IpLevel(12, 0);
 #else
