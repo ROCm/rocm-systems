@@ -229,6 +229,12 @@ namespace
 {
 constexpr auto invalid_context_handle = 0UL;
 
+/// One requested SPM counter, resolved against an agent.
+///
+/// `id` is the base counter id that `rocprofiler_spm_create_counter_config()`
+/// requires. `name_entries` holds one entry per dimension instance, each keyed by
+/// its own instance id, used to resolve samples back to pmc_info/track names. The
+/// two id spaces are distinct: do not derive one from the other.
 struct resolved_counter
 {
     rocprofiler_counter_id_t                                    id           = {};
@@ -309,8 +315,7 @@ spm_supported_counters_callback(rocprofiler_agent_id_t /*agent_id*/,
     if(output == nullptr || (counters == nullptr && num_counters > 0))
         return ROCPROFILER_STATUS_ERROR;
 
-    if(num_counters == 0) return ROCPROFILER_STATUS_SUCCESS;
-    output->assign(counters, counters + num_counters);
+    if(num_counters > 0) output->assign(counters, counters + num_counters);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 

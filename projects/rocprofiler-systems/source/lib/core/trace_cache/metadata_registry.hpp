@@ -167,7 +167,11 @@ struct kernel_symbol_less
  */
 struct gpu_perf_counter_name_entry
 {
-    std::uint64_t counter_id;     ///< SDK counter instance ID (counter_id_t)
+    /// Per-dimension-instance lookup id, not the base counter id. On SDK v1 this is
+    /// `dimensions_instances[i]->instance_id`, so one base counter yields several
+    /// entries with distinct ids. Falls back to the base counter handle on SDK v0,
+    /// which reports no dimension instances.
+    std::uint64_t counter_id;
     std::string   pmc_info_name;  ///< Qualified counter name, e.g. "SQ_WAVES[WGP=0,SA=0]"
     std::string   track_name;     ///< Perfetto track name, e.g. "GPU [0] SQ_WAVES (S)"
 };
