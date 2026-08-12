@@ -183,22 +183,26 @@ def _clang_tidy(
 
     clang-tidy's exit code reflects diagnostics anywhere in the file (not just
     the diff), so it is not a reliable success signal; callers inspect the
-    captured output instead. Propagates TimeoutExpired when `timeout` elapses.
+    captured output instead. Propagates TimeoutExpired when `timeout` elapses,
+    and exits if the clang-tidy binary is missing.
     """
     command = [args.clang_tidy_binary]
     if args.checks:
         command.append(f"-checks={args.checks}")
     command.append(f"-p={args.build_path}")
     command.extend(extra)
-    return subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
-        check=False,
-    )
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError:
+        sys.exit(f"error: clang-tidy binary '{args.clang_tidy_binary}' not found")
 
 
 def run_clang_tidy(
@@ -222,6 +226,15 @@ def run_clang_tidy(
 def get_enabled_checks(args: argparse.Namespace, sample_file: str) -> list[str]:
     """Resolve the effective check list clang-tidy will apply to `sample_file`."""
     result = _clang_tidy(args, "-list-checks", sample_file)
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() or "clang-tidy -list-checks failed"
+        print(
+            _color(f"warning: could not resolve check list: {detail}", "yellow"),
+            file=sys.stderr,
+        )
+        return []
+
     checks = []
     in_list = False
     for line in result.stdout.splitlines():
@@ -344,7 +357,13 @@ def main() -> int:
         return 0
 
     sample_file = os.path.join(repo_root, changed_files[0].path)
-    print_enabled_checks(get_enabled_checks(args, sample_file))
+    enabled_checks = get_enabled_checks(args, sample_file)
+
+    if not enabled_checks:
+        print("No checks enabled.")
+        return 0
+
+    print_enabled_checks(enabled_checks)
     print_changed_files(changed_files)
 
     print(f"Running clang-tidy on {len(changed_files)} files ...")
