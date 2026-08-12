@@ -31,6 +31,8 @@ def _generator(tmp_path: Path, encodings: list[InstEncoding]) -> CodeGenerator:
     )
     spec = SimpleNamespace(
         arch_name='testisa',
+        generated_dir_name='testisa',
+        cpp_namespace='testisa',
         inst_encodings=encodings,
         primary_decode_table=[None] * (max_decode_value + 2),
         encoding_map={enc.enc_name: enc for enc in encodings},

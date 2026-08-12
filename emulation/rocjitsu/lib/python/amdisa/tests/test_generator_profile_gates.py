@@ -3365,6 +3365,8 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='gfx1250',
+        generated_dir_name='cdna5',
+        cpp_namespace='cdna5',
         profile=Gfx1250Profile(),
         operand_types={'OPR_SRC_SIMPLE'},
     )
@@ -3372,8 +3374,8 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     codegen.config = CodegenConfig()
 
     codegen.gen_vopd()
-    cpp = (tmp_path / 'gfx1250' / 'vopd.cpp').read_text()
-    exec_cpp = (tmp_path / 'gfx1250' / 'vopd_exec.cpp').read_text()
+    cpp = (tmp_path / 'cdna5' / 'vopd.cpp').read_text()
+    exec_cpp = (tmp_path / 'cdna5' / 'vopd_exec.cpp').read_text()
 
     assert '(word0_ >> 24) == 0xCF' in cpp
     assert '[[maybe_unused]] bool vopd3' not in cpp
@@ -3432,6 +3434,8 @@ def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='rdna4',
+        generated_dir_name='rdna4',
+        cpp_namespace='rdna4',
         profile=Rdna4Profile(),
         operand_types={'OPR_SRC'},
     )
@@ -3473,6 +3477,8 @@ def test_rdna3_and_rdna35_vopd_generation_matches_common_profile(tmp_path):
         codegen = object.__new__(CodeGenerator)
         codegen.isa_spec = SimpleNamespace(
             arch_name=arch_name,
+            generated_dir_name=arch_name,
+            cpp_namespace=arch_name,
             profile=profile,
             operand_types={'OPR_SRC'},
         )
@@ -3502,6 +3508,8 @@ def test_gfx1250_vopd_uses_plain_src_when_simple_src_operand_is_absent(tmp_path)
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='gfx1250',
+        generated_dir_name='cdna5',
+        cpp_namespace='cdna5',
         profile=Gfx1250Profile(),
         operand_types={'OPR_SRC'},
     )
@@ -3509,7 +3517,7 @@ def test_gfx1250_vopd_uses_plain_src_when_simple_src_operand_is_absent(tmp_path)
     codegen.config = CodegenConfig()
 
     codegen.gen_vopd()
-    cpp = (tmp_path / 'gfx1250' / 'vopd.cpp').read_text()
+    cpp = (tmp_path / 'cdna5' / 'vopd.cpp').read_text()
 
     assert '[[maybe_unused]] bool vopd3' in cpp
     assert 'OperandType::OPR_SRC_SIMPLE' not in cpp

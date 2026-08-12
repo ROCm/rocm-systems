@@ -317,15 +317,12 @@ class CodeGenerator:
     @property
     def generated_dir_name(self) -> str:
         """Filesystem directory for this ISA's generated and handwritten files."""
-        return (
-            getattr(self.isa_spec, 'generated_dir_name', None)
-            or self.isa_spec.arch_name
-        )
+        return self.isa_spec.generated_dir_name
 
     @property
     def cpp_namespace(self) -> str:
         """C++ namespace for this ISA's generated declarations."""
-        return getattr(self.isa_spec, 'cpp_namespace', None) or self.isa_spec.arch_name
+        return self.isa_spec.cpp_namespace
 
     def _split_execute_expr(self, class_name: str) -> str:
         """Return the model constructor expression for one split instruction."""
