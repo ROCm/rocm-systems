@@ -45,7 +45,7 @@ HIP_TEST_CASE(Unit_Device__hip_hc_add8pk_Sanity_Positive) {
     REQUIRE(out.ptr()[0].x == 0);
     REQUIRE(out.ptr()[0].y == 0);
     REQUIRE(out.ptr()[0].z == 0);
-    REQUIRE(out.ptr()[0].w == reference[i]);
+    REQUIRE(static_cast<signed char>(out.ptr()[0].w) == reference[i]);
   }
 }
 
@@ -78,7 +78,7 @@ HIP_TEST_CASE(Unit_Device__hip_hc_sub8pk_Sanity_Positive) {
     REQUIRE(out.ptr()[0].x == 0);
     REQUIRE(out.ptr()[0].y == 0);
     REQUIRE(out.ptr()[0].z == 0);
-    REQUIRE(out.ptr()[0].w == reference[i]);
+    REQUIRE(static_cast<signed char>(out.ptr()[0].w) == reference[i]);
   }
 }
 
@@ -111,7 +111,7 @@ HIP_TEST_CASE(Unit_Device__hip_hc_mul8pk_Sanity_Positive) {
     REQUIRE(out.ptr()[0].x == 0);
     REQUIRE(out.ptr()[0].y == 0);
     REQUIRE(out.ptr()[0].z == 0);
-    REQUIRE(out.ptr()[0].w == reference[i]);
+    REQUIRE(static_cast<signed char>(out.ptr()[0].w) == reference[i]);
   }
 }
 
