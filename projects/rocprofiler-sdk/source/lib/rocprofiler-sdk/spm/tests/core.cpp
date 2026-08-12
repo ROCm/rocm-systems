@@ -1124,3 +1124,182 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
     if(!found_spm_agent) GTEST_SKIP() << "SPM unavailable";
     FAIL() << "Could not exercise SPM in-flight completion hook path";
 }
+
+// Verify that rocprofiler_spm_dispatch_counting_service_set_agents restricts serialization
+// and write_hook filtering to the configured agents.
+TEST(spm_core, set_agents_restricts_collection)
+{
+    rocprofiler::common::set_env("ROCPROFILER_SPM_BETA_ENABLED", true);
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    registration::set_fini_status(0);
+
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+
+    // Pick the first SPM-capable agent to scope the context to.
+    const rocprofiler::hsa::AgentCache* target_agent = nullptr;
+    for(const auto& [_, agent] : agents)
+    {
+        auto rocp_agent = agent.get_rocp_agent();
+        if(!rocp_agent) continue;
+        if(!rocp_agent->runtime_visibility.hsa || !rocp_agent->runtime_visibility.hip) continue;
+        if(!is_spm_supported_arch(agent)) continue;
+        target_agent = &agent;
+        break;
+    }
+
+    if(!target_agent) GTEST_SKIP() << "SPM unavailable";
+
+    rocprofiler_context_id_t ctx_id{};
+    ROCPROFILER_CALL(rocprofiler_create_context(&ctx_id), "context creation failed");
+
+    ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(ctx_id,
+                                                                         null_dispatch_callback,
+                                                                         nullptr,
+                                                                         null_record_callback,
+                                                                         nullptr),
+                     "Could not setup counting service");
+
+    // Scope the context to target_agent only.
+    rocprofiler_agent_id_t target_id = target_agent->get_rocp_agent()->id;
+    ROCPROFILER_CALL(
+        rocprofiler_spm_dispatch_counting_service_set_agents(ctx_id, &target_id, 1),
+        "Could not set agents on SPM context");
+
+    // Verify that the agent set was recorded correctly before starting the context.
+    auto* ctx_p = context::get_mutable_registered_context(ctx_id);
+    ASSERT_TRUE(ctx_p && ctx_p->dispatch_spm);
+
+    EXPECT_TRUE(ctx_p->dispatch_spm->collects_on(target_id))
+        << "Context should collect on the configured agent";
+
+    // For every other GPU agent the context must NOT collect.
+    for(const auto& [_, agent] : agents)
+    {
+        auto rocp_agent = agent.get_rocp_agent();
+        if(!rocp_agent) continue;
+        if(rocp_agent->id.handle == target_id.handle) continue;
+        if(rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+        EXPECT_FALSE(ctx_p->dispatch_spm->collects_on(rocp_agent->id))
+            << "Context must not collect on an agent that was not configured";
+    }
+
+    ROCPROFILER_CALL(rocprofiler_start_context(ctx_id), "start context");
+
+    bool enabled = false;
+    ctx_p->dispatch_spm->enabled.rlock([&](const auto& data) { enabled = data; });
+    EXPECT_TRUE(enabled);
+
+    ROCPROFILER_CALL(rocprofiler_stop_context(ctx_id), "stop context");
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+    set_client_ctx(get_client_ctx());
+}
+
+// Verify that two SPM dispatch contexts with disjoint agent sets can start concurrently,
+// while two contexts that share an agent cannot.
+TEST(spm_core, disjoint_contexts_no_conflict)
+{
+    rocprofiler::common::set_env("ROCPROFILER_SPM_BETA_ENABLED", true);
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    registration::set_fini_status(0);
+
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+
+    // Collect SPM-capable agents.
+    std::vector<rocprofiler_agent_id_t> spm_agents;
+    for(const auto& [_, agent] : agents)
+    {
+        auto rocp_agent = agent.get_rocp_agent();
+        if(!rocp_agent) continue;
+        if(!rocp_agent->runtime_visibility.hsa || !rocp_agent->runtime_visibility.hip) continue;
+        if(!is_spm_supported_arch(agent)) continue;
+        spm_agents.push_back(rocp_agent->id);
+    }
+
+    if(spm_agents.empty()) GTEST_SKIP() << "SPM unavailable";
+
+    // ---- Single-agent case: two contexts claiming the same agent must conflict ----
+    {
+        rocprofiler_context_id_t ctx_a{};
+        rocprofiler_context_id_t ctx_b{};
+
+        ROCPROFILER_CALL(rocprofiler_create_context(&ctx_a), "create ctx_a");
+        ROCPROFILER_CALL(rocprofiler_create_context(&ctx_b), "create ctx_b");
+
+        ROCPROFILER_CALL(
+            rocprofiler_spm_configure_callback_dispatch_service(
+                ctx_a, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+            "configure ctx_a");
+        ROCPROFILER_CALL(
+            rocprofiler_spm_configure_callback_dispatch_service(
+                ctx_b, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+            "configure ctx_b");
+
+        // Point both contexts at the same (first) agent.
+        ROCPROFILER_CALL(
+            rocprofiler_spm_dispatch_counting_service_set_agents(ctx_a, &spm_agents[0], 1),
+            "set agents ctx_a");
+        ROCPROFILER_CALL(
+            rocprofiler_spm_dispatch_counting_service_set_agents(ctx_b, &spm_agents[0], 1),
+            "set agents ctx_b");
+
+        ROCPROFILER_CALL(rocprofiler_start_context(ctx_a), "start ctx_a");
+        auto status_b = rocprofiler_start_context(ctx_b);
+        EXPECT_EQ(status_b, ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT)
+            << "Two SPM contexts covering the same agent must conflict";
+
+        ROCPROFILER_CALL(rocprofiler_stop_context(ctx_a), "stop ctx_a");
+    }
+
+    // ---- Two-agent case: contexts covering disjoint agents must coexist ----
+    if(spm_agents.size() >= 2)
+    {
+        rocprofiler_context_id_t ctx_a{};
+        rocprofiler_context_id_t ctx_b{};
+
+        ROCPROFILER_CALL(rocprofiler_create_context(&ctx_a), "create ctx_a (disjoint)");
+        ROCPROFILER_CALL(rocprofiler_create_context(&ctx_b), "create ctx_b (disjoint)");
+
+        ROCPROFILER_CALL(
+            rocprofiler_spm_configure_callback_dispatch_service(
+                ctx_a, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+            "configure ctx_a (disjoint)");
+        ROCPROFILER_CALL(
+            rocprofiler_spm_configure_callback_dispatch_service(
+                ctx_b, null_dispatch_callback, nullptr, null_record_callback, nullptr),
+            "configure ctx_b (disjoint)");
+
+        ROCPROFILER_CALL(
+            rocprofiler_spm_dispatch_counting_service_set_agents(ctx_a, &spm_agents[0], 1),
+            "set agents ctx_a (disjoint)");
+        ROCPROFILER_CALL(
+            rocprofiler_spm_dispatch_counting_service_set_agents(ctx_b, &spm_agents[1], 1),
+            "set agents ctx_b (disjoint)");
+
+        ROCPROFILER_CALL(rocprofiler_start_context(ctx_a), "start ctx_a (disjoint)");
+        ROCPROFILER_CALL(rocprofiler_start_context(ctx_b),
+                         "start ctx_b (disjoint) — must not conflict with ctx_a");
+
+        ROCPROFILER_CALL(rocprofiler_stop_context(ctx_a), "stop ctx_a (disjoint)");
+        ROCPROFILER_CALL(rocprofiler_stop_context(ctx_b), "stop ctx_b (disjoint)");
+    }
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+    set_client_ctx(get_client_ctx());
+}
