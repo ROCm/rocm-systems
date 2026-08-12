@@ -252,7 +252,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
     }
     state_.interprocess_ = properties_.handleTypes != hipMemHandleTypeNone;
     // Check if VM heap can be enabled
-    if (DEBUG_HIP_MEM_POOL_VMHEAP && AMD_DIRECT_DISPATCH &&
+    if (DEBUG_HIP_MEM_POOL_VMHEAP && AMD_DIRECT_DISPATCH && HIP_MEM_POOL_USE_VM &&
         !state_.phys_mem_ && !state_.interprocess_) {
       state_.use_vm_heap_ = true;
       busy_heap_.EnableVmHeap();

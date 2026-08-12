@@ -129,6 +129,7 @@ body:
       - rocr_debug_agent
       - rocRAND
       - ROCR-Runtime
+      - rocSHMEM
       - rocSOLVER
       - rocSPARSE
       - rocThrust

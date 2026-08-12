@@ -288,11 +288,13 @@ void TesterArguments::get_arguments() {
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case AllToAllWaveTestType:
+    case BroadcastWaveTestType:
     case TeamFCollectTestType:
     case FcollectWaveTestType:
     case TeamReductionTestType:
     case TeamReduceScatterTestType:
     case ReduceWaveTestType:
+    case TeamReduceScatterWaveTestType:
     case TeamBroadcastTestType:
     case PingAllTestType:
     case TeamBarrierTestType:

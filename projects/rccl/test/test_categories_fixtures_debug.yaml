@@ -15,7 +15,6 @@ test_categories:
       - "Alloc.*"
       - "ParamTests.*"
       - "ParameterApiTests.*"
-      - "EnvPluginTests.*"
       - "EnqueueTests.*"
       - "ProxyTests.*"
       - "Rcclwrap.*"
@@ -26,10 +25,12 @@ test_categories:
       - "DdaIpcEligibilityTest.*"
       - "DdaFabricEligibilityTest.*"
       - "NetSocketTests.*"
+      - "SocketPollTimeout.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
       - "NetDevsPolicyP2pNetTests.*"
       - "TopoTest.*"
+      - "TopoNicFusionTests.*"
     exclude_windows:
       - "*"
     labels:

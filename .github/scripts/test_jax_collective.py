@@ -26,6 +26,7 @@ from rccl_ci_utils import (
     find_rccl_library,
     parse_junit_xml,
     send_email_report,
+    send_teams_webhook,
     set_github_output,
     verify_rccl_override,
     write_github_summary,
@@ -359,6 +360,12 @@ def main() -> None:
         help="Send summary report to this email address",
     )
     parser.add_argument(
+        "--notify-webhook",
+        type=str,
+        default="",
+        help="Send summary report to this Teams webhook URL",
+    )
+    parser.add_argument(
         "--discover-only",
         action="store_true",
         help="Only discover library paths and set GITHUB_OUTPUT, then exit",
@@ -400,10 +407,13 @@ def main() -> None:
     summary_path.write_text(report)
     log.info("Summary written to: %s", summary_path)
 
+    status = "PASSED" if exit_code == 0 else "FAILED"
     if args.notify_email:
-        status = "PASSED" if exit_code == 0 else "FAILED"
         send_email_report(report, args.notify_email, status,
                           subject_prefix="RCCL JAX Collective Test")
+    if args.notify_webhook:
+        send_teams_webhook(report, args.notify_webhook, status,
+                           subject_prefix="RCCL JAX Collective Test")
 
     sys.exit(exit_code)
 

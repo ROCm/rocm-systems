@@ -68,27 +68,33 @@ endif()
 # placeholder expansion), so use a `bash -c` shim to expand $OMPI_COMM_WORLD_RANK at the
 # per-rank level. Validation only inspects rank 0's trace; both ranks exercise the same
 # set of APIs.
-rocprofiler_add_integration_execute_test(
-    rocshmem-tracing
-    COMMAND
-        ${MPIEXEC_EXECUTABLE} -np 2 bash -c
-        "ROCPROFILER_TOOL_OUTPUT_FILE='${CMAKE_CURRENT_BINARY_DIR}/rocshmem-tracing-test.rank-'\${OMPI_COMM_WORLD_RANK}.json exec timeout -k 5 30 '$<IF:$<TARGET_EXISTS:rocshmem-demo>,$<TARGET_FILE:rocshmem-demo>,rocshmem-demo>'"
-    DEPENDS rocshmem-demo
-    TIMEOUT 45
-    LABELS "integration-tests"
-    ENVIRONMENT ${MPI_ENV_VARS}
-    PRELOAD "${PRELOAD_ENV}"
-    PASS_REGULAR_EXPRESSION "Finalization complete"
-    FIXTURES_SETUP rocshmem-tracing
-    DISABLED "${IS_DISABLED}")
+#
+# Only register the tests when the rocshmem-demo target exists. When it is absent (e.g.
+# the code-coverage build, which has no MPI/rocSHMEM), skipping registration avoids
+# emitting an unlabeled disabled placeholder that would fail the test-label verification.
+if(TARGET rocshmem-demo)
+    rocprofiler_add_integration_execute_test(
+        rocshmem-tracing
+        COMMAND
+            ${MPIEXEC_EXECUTABLE} -np 2 bash -c
+            "ROCPROFILER_TOOL_OUTPUT_FILE='${CMAKE_CURRENT_BINARY_DIR}/rocshmem-tracing-test.rank-'\${OMPI_COMM_WORLD_RANK}.json exec timeout -k 5 30 '$<IF:$<TARGET_EXISTS:rocshmem-demo>,$<TARGET_FILE:rocshmem-demo>,rocshmem-demo>'"
+        DEPENDS rocshmem-demo
+        TIMEOUT 45
+        LABELS "integration-tests"
+        ENVIRONMENT ${MPI_ENV_VARS}
+        PRELOAD "${PRELOAD_ENV}"
+        PASS_REGULAR_EXPRESSION "Finalization complete"
+        FIXTURES_SETUP rocshmem-tracing
+        DISABLED "${IS_DISABLED}")
 
-rocprofiler_add_integration_validate_test(
-    rocshmem-tracing
-    TEST_PATHS validate.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    LABELS "integration-tests"
-    TIMEOUT 45
-    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-tracing-test.rank-0.json
-    FIXTURES_REQUIRED rocshmem-tracing
-    DISABLED "${IS_DISABLED}")
+    rocprofiler_add_integration_validate_test(
+        rocshmem-tracing
+        TEST_PATHS validate.py
+        COPY conftest.py
+        CONFIG pytest.ini
+        LABELS "integration-tests"
+        TIMEOUT 45
+        ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-tracing-test.rank-0.json
+        FIXTURES_REQUIRED rocshmem-tracing
+        DISABLED "${IS_DISABLED}")
+endif()

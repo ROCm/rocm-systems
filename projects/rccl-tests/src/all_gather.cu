@@ -9,7 +9,7 @@
 #include "common.h"
 
 void AllGatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
-  size_t base = (count/nranks) & -(16/eltSize);
+  size_t base = (count/nranks) & ~(16/eltSize - 1);
   *sendcount = base;
   *recvcount = base*nranks;
   *sendInplaceOffset = base;
@@ -48,7 +48,7 @@ testResult_t  AllGatherGetSymkInfo(ncclComm_t comm, size_t count, ncclDataType_t
   return testSuccess;
 }
 
-void AllGatherGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+void AllGatherGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize * nranks) / 1.0E9 / sec;
 
   *algBw = baseBw;
@@ -104,7 +104,7 @@ testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine ncclTestEngine = {
-  .getBuffSize = AllGatherGetBuffSize,
-  .runTest = AllGatherRunTest
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ AllGatherGetBuffSize,
+  /* .runTest = */ AllGatherRunTest
 };

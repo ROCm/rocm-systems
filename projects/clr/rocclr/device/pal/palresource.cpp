@@ -1133,6 +1133,12 @@ bool Resource::CreatePinned(CreateParams* params) {
   createInfo.pSysMem = pinAddress;
   createInfo.size = allocSize;
   createInfo.vaRange = Pal::VaRange::Default;
+  // Fine-grain pinning requires bypassing GPU L2 for CPU-GPU coherency.
+  // Coarse-grain (hipExtHostRegisterCoarseGrained, no CL_MEM_SVM_ATOMICS) leaves gl2Uncached=0,
+  // so the GPU can cache in L2; explicit sync is the caller's responsibility.
+  if ((params->owner_ != nullptr) && (params->owner_->getMemFlags() & CL_MEM_SVM_ATOMICS)) {
+    createInfo.flags.gl2Uncached = 1;
+  }
   memRef_ = GpuMemoryReference::Create(dev(), createInfo);
   if (nullptr == memRef_) {
     LogError("Failed PAL memory allocation!");

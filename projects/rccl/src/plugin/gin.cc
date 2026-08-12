@@ -27,6 +27,8 @@ extern getNcclGin_t getNcclGin_v11;
 extern getNcclGin_t getNcclGin_v12;
 extern getNcclGin_t getNcclGin_v13;
 extern getNcclGin_t getNcclRma_v13;
+extern int64_t ncclParamGinEnable();
+extern bool rcclUseAinic();
 NCCL_PARAM(GinPluginRefCount, "GIN_PLUGIN_REF_COUNT", 0);
 #define NCCL_GIN_VERSION_COUNT 3
 int ncclGinVersion[NCCL_GIN_VERSION_COUNT] = {13, 12, 11};
@@ -206,12 +208,15 @@ static void initPluginLibsOnceFunc() {
   char* envGinPluginList = nullptr;
   char* savePtr = nullptr;
   int pluginCounter = 0;
+  // "none" and an empty value only opt out of external plugins; they must not disable the internal AINIC path
+  bool extGinPluginRequested = false;
 
   memset(ginPluginLibs, 0, NCCL_GIN_MAX_PLUGINS * sizeof(ginPluginLib_t));
   envGinPlugin = ncclGetEnv("NCCL_GIN_PLUGIN");
   if (envGinPlugin) {
     INFO(NCCL_ENV | NCCL_NET, "NCCL_GIN_PLUGIN set by environment to %s", envGinPlugin);
     if (strcasecmp(envGinPlugin, "none") == 0) envGinPlugin = "";
+    extGinPluginRequested = (envGinPlugin[0] != '\0');
     envGinPluginList = strdup(envGinPlugin);
     // Iterate over list until the list is empty
     ginPluginName = strtok_r(envGinPluginList, ",", &savePtr);
@@ -249,9 +254,12 @@ static void initPluginLibsOnceFunc() {
     pluginCounter++;
   }
 
-  // Add internal ib plugin
   const char* envNet = ncclGetEnv("NCCL_NET");
-  if (envNet && strcasecmp(envNet, "IB-CAST") == 0) {
+  if (envNet && (strcasecmp(envNet, "ROCM-IB") == 0)) {
+    envNet = "IB-CAST";
+  }
+  if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !extGinPluginRequested) ||
+      (!envNet && rcclUseAinic() && !extGinPluginRequested)) {
     ginPluginLibs[pluginCounter].ncclGin = &IbCastGinIb;
     ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
     ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
@@ -259,18 +267,15 @@ static void initPluginLibsOnceFunc() {
     ginPluginLibs[pluginCounter].ncclRmaPluginState = ncclGinPluginStateInitReady;
     ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
     pluginCounter++;
+  } else {
+    ginPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
+    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
+    ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
+    ginPluginLibs[pluginCounter].ncclRma = ginPluginLibs[pluginCounter].ncclGin;
+    ginPluginLibs[pluginCounter].ncclRmaPluginState = ncclGinPluginStateInitReady;
+    ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
+    pluginCounter++;
   }
-
-  // ncclGinIbProxy is an ncclGin_t (v13) instance, so register it directly
-  // instead of adapting through getNcclGin_v12_internal.
-  ginPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
-  ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
-  ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
-  ginPluginLibs[pluginCounter].ncclRma = ginPluginLibs[pluginCounter].ncclGin;
-  ginPluginLibs[pluginCounter].ncclRmaPluginState = ncclGinPluginStateInitReady;
-  ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
-
-  pluginCounter++;
 
 #ifdef ENABLE_ROCSHMEM_GIN
   // Add internal rocshmem GDA plugin (device-initiated, GIN_TYPE=4)
@@ -306,6 +311,10 @@ static ncclResult_t ncclGinPluginFinalize(struct ncclComm* comm, int pluginIndex
 
 ncclResult_t ncclGinInit(struct ncclComm* comm) {
   bool ncclGinPluginInitialized = false;
+  if (ncclParamGinEnable() == 0) {
+    INFO(NCCL_INIT|NCCL_NET, "GIN disabled by NCCL_GIN_ENABLE=0; skipping GIN plugin init");
+    return ncclSuccess;
+  }
   std::call_once(initPluginLibsOnceFlag, initPluginLibsOnceFunc);
   std::lock_guard<std::mutex> lock(ginPluginMutex);
   for (int pluginIndex = 0; pluginIndex < pluginCount; pluginIndex++) {

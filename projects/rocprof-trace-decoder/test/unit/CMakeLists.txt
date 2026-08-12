@@ -9,6 +9,8 @@ project(att-decoder-unit-tests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+include(${TTD_PROJECT_SOURCE_DIR}/cmake/version.cmake)
+
 function(create_system_gtest_targets)
     find_path(GTEST_INCLUDE_DIR NAMES gtest/gtest.h)
     find_library(GTEST_LIBRARY NAMES gtest)
@@ -130,7 +132,8 @@ set(TEST_FILES
     quick_scan_api_test.cpp
     sqttparser_test.cpp
     mi400_test.cpp
-    funcmap_test.cpp)
+    funcmap_test.cpp
+    version_test.cpp)
 
 # Function to create a test executable with specific sanitizer options Re-list library sources for sanitizer builds
 # (must be recompiled with sanitizer flags)
@@ -158,6 +161,7 @@ function(add_unit_test_executable TARGET_NAME SANITIZER_TYPE)
     endif()
 
     target_include_directories(${TARGET_NAME} PRIVATE ${SRC_DIR} ${INC_DIR})
+    target_compile_definitions(${TARGET_NAME} PRIVATE ${TTD_VERSION_COMPILE_DEFS})
 
     if(NOT SANITIZER_TYPE STREQUAL "regular")
         if(DISABLE_COMGR)
@@ -191,6 +195,10 @@ add_unit_test_executable(unit_tests_ubsan "ubsan")
 add_executable(unit_tests_logging rdna_logging_test.cpp)
 target_include_directories(unit_tests_logging PRIVATE ${SRC_DIR} ${INC_DIR})
 target_link_libraries(unit_tests_logging PRIVATE rocprof-trace-decoder-static GTest::gtest_main GTest::gmock_main)
+
+add_executable(api_lifetime_test api_lifetime_test.cpp)
+target_include_directories(api_lifetime_test PRIVATE ${SRC_DIR} ${INC_DIR})
+target_link_libraries(api_lifetime_test PRIVATE rocprof-trace-decoder-static)
 
 if(BUILD_MARKERS)
     find_package(LLVM REQUIRED CONFIG)
@@ -243,6 +251,9 @@ gtest_discover_tests(
     unit_tests_logging
     PROPERTIES LABELS "unit-tests;regular;logging" ENVIRONMENT "SQTT_LOGGING=1"
     TEST_PREFIX "logging/")
+
+add_test(NAME api-lifetime COMMAND api_lifetime_test)
+set_tests_properties(api-lifetime PROPERTIES LABELS "unit-tests;regular;lifetime")
 
 if(BUILD_MARKERS)
     gtest_discover_tests(

@@ -25,6 +25,7 @@ cmake --build build
 | `RJ_ENABLE_UBSAN` | `OFF` | Enable UndefinedBehaviorSanitizer |
 | `RJ_ENABLE_TSAN` | `OFF` | Enable ThreadSanitizer |
 | `RJ_ENABLE_MSAN` | `OFF` | Enable MemorySanitizer |
+| `RJ_SANITIZER_RUNTIME` | `AUTO` | Select `AUTO`, `SHARED`, or `STATIC` sanitizer runtime linkage |
 | `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis |
 | `LTO` | `OFF` | Enable link-time optimization for Release/RelWithDebInfo |
 
@@ -46,6 +47,10 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_MSAN=1
 # UndefinedBehaviorSanitizer
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_UBSAN=1
 ```
+
+`AUTO` uses shared runtimes for ASan, UBSan, and TSan, and the only
+supported static runtime for MSan. `SHARED` rejects MSan explicitly because
+Clang does not provide a shared MSan runtime.
 
 ### Static analysis
 

@@ -42,6 +42,16 @@ CONST_VERSION_INFO = {
     "rocm_version": "@rocm_version_FULL_VERSION@",
 }
 
+# Perfetto's TraceConfig BufferConfig.size_kb field is a uint32_t, and the
+# tracing service allocates size_kb * 1024 bytes and rejects the config when
+# that byte count does not fit in a uint32_t. So although the option is named
+# in "KB", the value is treated as KiB (multiplied by 1024). The usable range
+# is 1 KiB up to floor((2^32 - 1) / 1024) = 4,194,303 KiB. These bounds mirror
+# the C++ limits (defaults::perfetto_buffer_size_{min,max}_kb in
+# source/lib/output/output_config.hpp) so both validation paths agree.
+PERFETTO_BUFFER_SIZE_KB_MIN = 1
+PERFETTO_BUFFER_SIZE_KB_MAX = ((1 << 32) - 1) // 1024
+
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes"""
@@ -122,6 +132,24 @@ def strtobool(val):
     else:
         val_type = type(val).__name__
         raise ValueError(f"invalid truth value {val} (type={val_type})")
+
+
+def perfetto_buffer_size_kb(val):
+    if isinstance(val, bool) or not isinstance(val, (int, str)):
+        raise argparse.ArgumentTypeError(f"invalid integer value: {val}")
+
+    try:
+        value = int(val)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(f"invalid integer value: {val}")
+
+    if not PERFETTO_BUFFER_SIZE_KB_MIN <= value <= PERFETTO_BUFFER_SIZE_KB_MAX:
+        raise argparse.ArgumentTypeError(
+            f"must be between {PERFETTO_BUFFER_SIZE_KB_MIN} and "
+            f"{PERFETTO_BUFFER_SIZE_KB_MAX} KB"
+        )
+
+    return value
 
 
 def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
@@ -519,13 +547,13 @@ For attachment profiling of running processes:
         aggregate_tracing_options,
         "-r",
         "--runtime-trace",
-        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
+        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
     )
     add_parser_bool_argument(
         aggregate_tracing_options,
         "-s",
         "--sys-trace",
-        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
+        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
     )
 
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
@@ -610,6 +638,16 @@ For attachment profiling of running processes:
         basic_tracing_options,
         "--rocjpeg-trace",
         help="For collecting rocJPEG Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--rocshmem-trace",
+        help="For collecting rocSHMEM (ROCm SHared MEMory) host-stream API Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hipfile-trace",
+        help="For collecting hipFILE Traces",
     )
 
     extended_tracing_options = parser.add_argument_group("Granular tracing options")
@@ -898,9 +936,9 @@ For attachment profiling of running processes:
     )
     perfetto_options.add_argument(
         "--perfetto-buffer-size",
-        help="Size of buffer for perfetto output in KB. default: 1 GB",
+        help=f"Size of buffer for perfetto output in KB ({PERFETTO_BUFFER_SIZE_KB_MIN}-{PERFETTO_BUFFER_SIZE_KB_MAX}). default: 1 GB",
         default=None,
-        type=int,
+        type=perfetto_buffer_size_kb,
         metavar="KB",
     )
     perfetto_options.add_argument(
@@ -1314,6 +1352,12 @@ def has_set_attr(obj, key):
 def patch_args(data):
     """Used to handle certain fields which might be specified as a string instead of an array or vice-versa"""
 
+    if hasattr(data, "perfetto_buffer_size") and data.perfetto_buffer_size is not None:
+        try:
+            data.perfetto_buffer_size = perfetto_buffer_size_kb(data.perfetto_buffer_size)
+        except argparse.ArgumentTypeError as err:
+            fatal_error(f"Invalid perfetto_buffer_size: {err}")
+
     if hasattr(data, "kernel_iteration_range") and isinstance(
         data.kernel_iteration_range, str
     ):
@@ -1672,6 +1716,8 @@ def run(app_args, args, **kwargs):
             "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
+            "rocshmem_trace",
+            "hipfile_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1688,23 +1734,10 @@ def run(app_args, args, **kwargs):
             "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
+            "rocshmem_trace",
+            "hipfile_trace",
         ):
             setattrifnone(args, itr, True)
-
-    # OMPT is a rocpd-only trace: it is written to the rocpd database and exported to
-    # other formats via `rocpd convert`; the direct csv/json/pftrace/otf2 emitters do
-    # not contain OMPT records. This runs after the --sys-trace/--runtime-trace folds
-    # have resolved args.ompt_trace, which honors an explicit --ompt-trace=false. If
-    # OMPT tracing is effectively enabled but rocpd was not requested, add it so OMPT
-    # data is not silently dropped, and warn the user.
-    if bool(getattr(args, "ompt_trace", None)) and "rocpd" not in args.output_format:
-        warning(
-            "--ompt-trace: OMPT data is only emitted to the 'rocpd' output format; "
-            "the requested output format(s) {fmts} will not contain OMPT records. "
-            "Adding 'rocpd' to --output-format -- use `rocpd convert` to export OMPT "
-            "to csv/pftrace/otf2.".format(fmts=", ".join(args.output_format))
-        )
-        args.output_format.append("rocpd")
 
     update_env(
         "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
@@ -1744,6 +1777,8 @@ def run(app_args, args, **kwargs):
             ["ompt_trace", "OMPT_TRACE"],
             ["rocdecode_trace", "ROCDECODE_API_TRACE"],
             ["rocjpeg_trace", "ROCJPEG_API_TRACE"],
+            ["rocshmem_trace", "ROCSHMEM_API_TRACE"],
+            ["hipfile_trace", "HIPFILE_API_TRACE"],
             ["kernel_trace", "KERNEL_TRACE"],
             ["hip_graph_trace", "HIP_GRAPH_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
