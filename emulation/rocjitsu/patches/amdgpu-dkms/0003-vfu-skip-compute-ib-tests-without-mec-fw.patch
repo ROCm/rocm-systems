@@ -1,0 +1,38 @@
+From: rocjitsu vfio-user development
+Subject: [PATCH] amdgpu: skip compute IB tests when MEC firmware not loaded
+
+When running in vfio-user emulation with fw_load_type=0, the MEC
+firmware is not loaded (mec_fw_version stays 0) and the CP command
+processor never executes. In this case, the compute ring DRM
+schedulers are initialized but the compute queues are never mapped
+(KCQ enable via KIQ submits PM4 packets that never run).
+
+If amdgpu_ib_ring_tests() then tries to submit IB jobs on these
+compute rings, drm_sched_job_init() dereferences a null sched->ops
+pointer and the kernel panics with "modprobe exited with irqs disabled".
+
+Fix by skipping IB tests on COMPUTE rings when mec_fw_version == 0,
+which reliably indicates the CP firmware has not been loaded and the
+compute scheduler is not functional.
+
+Applies to: ROCm amdgpu roc-7.2.x
+Tested on:  kernel 7.0.0-28-generic, Ubuntu 24.04 Noble
+
+--- a/amd/amdgpu/amdgpu_ib.c
++++ b/amd/amdgpu/amdgpu_ib.c
+@@ -449,6 +449,14 @@ int amdgpu_ib_ring_tests(struct amdgpu_device *adev)
+ 		if (!ring->sched.ready || !ring->funcs->test_ib)
+ 			continue;
+ 
++		/* Skip IB tests on compute rings when MEC firmware has not
++		 * loaded (fw_load_type=0 leaves mec_fw_version as 0). In
++		 * vfio-user emulation the CP never executes so compute ring
++		 * schedulers are initialized but queue mapping never runs,
++		 * causing drm_sched_job_init to dereference null ops. */
++		if (ring->funcs->type == AMDGPU_RING_TYPE_COMPUTE &&
++		    adev->gfx.mec_fw_version == 0)
++			continue;
++
+ 		if (adev->enable_mes &&
+ 		    ring->funcs->type == AMDGPU_RING_TYPE_KIQ)
+ 			continue;

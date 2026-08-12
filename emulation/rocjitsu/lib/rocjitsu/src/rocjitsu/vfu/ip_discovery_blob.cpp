@@ -278,9 +278,42 @@ std::vector<uint8_t> build_gfx944_discovery_blob() {
   size_t harvest_end = w.tell();
 
   // ----------------------------------------------------------------
-  // 5. Fill in binary_header.binary_size and table_info entries
+  // 5. GC topology table (gc_info_v1_0) — shader engine geometry.
+  //    GFX950 (GFX9.4.3): 8 SE, 1 SA/SE, 4 WGP0/SA (→8 CU/SH), 4 RB/SE.
+  //    The driver reads this from table_list[GC] in the binary_header.
+  //    max_cu_per_sh = 2 * (gc_num_wgp0_per_sa + gc_num_wgp1_per_sa) = 2*4 = 8.
   // ----------------------------------------------------------------
-  uint16_t binary_size = static_cast<uint16_t>(harvest_end);
+  size_t gc_off = w.tell();
+  w.write_u32(0x4347u);       // table_id = GC_TABLE_ID (0x4347 = "GC")
+  w.write_u16(1);              // version_major
+  w.write_u16(0);              // version_minor
+  w.write_u32(96);             // size = sizeof(gc_info_v1_0) = 12 + 21*4 = 96
+  // gc_info_v1_0 fields (21 × uint32):
+  w.write_u32(8);    // gc_num_se
+  w.write_u32(4);    // gc_num_wgp0_per_sa   → max_cu_per_sh = 2*(4+0)=8
+  w.write_u32(0);    // gc_num_wgp1_per_sa
+  w.write_u32(4);    // gc_num_rb_per_se
+  w.write_u32(16);   // gc_num_gl2c
+  w.write_u32(256);  // gc_num_gprs
+  w.write_u32(256);  // gc_num_max_gs_thds
+  w.write_u32(32);   // gc_gs_table_depth
+  w.write_u32(256);  // gc_gsprim_buff_depth
+  w.write_u32(128);  // gc_parameter_cache_depth
+  w.write_u32(1);    // gc_double_offchip_lds_buffer
+  w.write_u32(64);   // gc_wave_size
+  w.write_u32(8);    // gc_max_waves_per_simd
+  w.write_u32(32);   // gc_max_scratch_slots_per_cu
+  w.write_u32(64);   // gc_lds_size (KB)
+  w.write_u32(4);    // gc_num_sc_per_se
+  w.write_u32(1);    // gc_num_sa_per_se
+  w.write_u32(2);    // gc_num_packer_per_sc
+  w.write_u32(4);    // gc_num_gl2a
+  size_t gc_end = w.tell();
+
+  // ----------------------------------------------------------------
+  // 6. Fill in binary_header.binary_size and table_info entries
+  // ----------------------------------------------------------------
+  uint16_t binary_size = static_cast<uint16_t>(gc_end);
   blob[binary_checksum_pos + 2] = binary_size & 0xff;
   blob[binary_checksum_pos + 3] = binary_size >> 8;
 
@@ -306,6 +339,18 @@ std::vector<uint8_t> build_gfx944_discovery_blob() {
   blob[t2+3] = harv_checksum >> 8;
   blob[t2+4] = harv_size & 0xff;
   blob[t2+5] = harv_size >> 8;
+
+  // table_info[GC] (index 1): offset, checksum, size
+  uint16_t gc_size16     = static_cast<uint16_t>(gc_end - gc_off);
+  uint16_t gc_off16      = static_cast<uint16_t>(gc_off);
+  uint16_t gc_checksum   = checksum_range(blob, gc_off, gc_size16);
+  size_t t1 = table_info_pos + 1 * 8;
+  blob[t1]   = gc_off16 & 0xff;
+  blob[t1+1] = gc_off16 >> 8;
+  blob[t1+2] = gc_checksum & 0xff;
+  blob[t1+3] = gc_checksum >> 8;
+  blob[t1+4] = gc_size16 & 0xff;
+  blob[t1+5] = gc_size16 >> 8;
 
   // binary_checksum: sum of all bytes from after the checksum field to binary_size.
   // The driver computes: offset = offsetof(binary_checksum) + sizeof(binary_checksum)
