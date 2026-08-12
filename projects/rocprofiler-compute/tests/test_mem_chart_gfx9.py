@@ -15,8 +15,11 @@ import yaml
 from utils import mem_chart_gfx9
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
+
 MEMORY_CHART_CONFIG_FILENAME = "0300_memory_chart.yaml"
+
 ANALYSIS_CONFIGS = Path(common.SRC) / "rocprof_compute_soc" / "analysis_configs"
+
 GFX9_ARCHITECTURES = (
     "gfx908",
     "gfx90a",
@@ -25,12 +28,16 @@ GFX9_ARCHITECTURES = (
     "gfx942",
     "gfx950",
 )
+
 DISCOVERED_GFX9_ARCHITECTURES = tuple(
     path.parent.name
     for path in sorted(ANALYSIS_CONFIGS.glob(f"gfx9*/{MEMORY_CHART_CONFIG_FILENAME}"))
 )
+
 GFX94X_ARCHITECTURES = frozenset({"gfx940", "gfx941", "gfx942"})
+
 GFX94X_MISSING_METRIC_KEYS = frozenset({"L2 Rd Lat", "L2 Wr Lat", "VL1 Lat"})
+
 CHART_BLOCK_LABELS = (
     "Instr Buff",
     "Instr Dispatch",
@@ -43,6 +50,7 @@ CHART_BLOCK_LABELS = (
     "Fabric",
     "HBM",
 )
+
 GFX9_SAMPLE_METRICS = {
     "Wavefront Occupancy": 1,
     "Wave Life": 2,
