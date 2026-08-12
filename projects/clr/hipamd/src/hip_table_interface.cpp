@@ -355,6 +355,11 @@ hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* mem_pool, int device) {
   return hip::GetHipDispatchTable()->hipDeviceGetDefaultMemPool_fn(mem_pool, device);
   CATCH;
 }
+hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type, hipDevice_t dev) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceGetExecAffinitySupport_fn(pi, type, dev);
+  CATCH;
+}
 hipError_t hipDeviceGetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void* value) {
   TRY;
   return hip::GetHipDispatchTable()->hipDeviceGetGraphMemAttribute_fn(device, attr, value);

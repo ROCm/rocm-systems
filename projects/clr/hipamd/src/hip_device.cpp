@@ -627,6 +627,33 @@ hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_
 }
 
 // ================================================================================================
+hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type, hipDevice_t dev) {
+  HIP_INIT_API(hipDeviceGetExecAffinitySupport, pi, type, dev);
+  if (pi == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (dev < 0 || static_cast<size_t>(dev) >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+  auto* deviceHandle = g_devices[dev]->devices()[0];
+  const bool isWgp = deviceHandle->settings().enableWgpMode_;
+  switch (type) {
+    case hipExecAffinityTypeCUCount:
+      *pi = 1;
+      break;
+    case hipExtExecAffinityTypeGranularityCU:
+      *pi = isWgp ? 0 : 1;
+      break;
+    case hipExtExecAffinityTypeGranularityWGP:
+      *pi = isWgp ? 1 : 0;
+      break;
+    default:
+      HIP_RETURN(hipErrorInvalidValue);
+  }
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
 hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   if (props == nullptr) {
     return hipErrorInvalidValue;

@@ -7392,6 +7392,34 @@ static hipError_t capture_hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEve
   return r;
 }
 
+// Generated shim
+static hipError_t capture_hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location, hipMemAllocationType type) {
+  hipError_t r = g_real_table.hipMemGetDefaultMemPool_fn(memPool, location, type);
+  if (r == hipSuccess) {
+    hrr_args_hipMemGetDefaultMemPool a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.location = 0;  // non-castable type skipped
+    a.type = static_cast<decltype(a.type)>(type);
+    if (memPool) a.memPool = reinterpret_cast<uint64_t>(*memPool);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMGETDEFAULTMEMPOOL, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDeviceGetExecAffinitySupport(int* p0, hipExecAffinityType p1, hipDevice_t p2) {
+  hipError_t r = g_real_table.hipDeviceGetExecAffinitySupport_fn(p0, p1, p2);
+  if (r == hipSuccess) {
+    hrr_args_hipDeviceGetExecAffinitySupport a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.p0 = reinterpret_cast<uint64_t>(p0);
+    a.p1 = static_cast<decltype(a.p1)>(p1);
+    a.p2 = static_cast<uint64_t>(static_cast<int>(p2));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
 // ============================================================
 // Table builders
 // ============================================================
@@ -7984,6 +8012,8 @@ void hip_capture_build_table() {
   g_cap_table.hipExecutionCtxRecordEvent_fn = capture_hipExecutionCtxRecordEvent;
   g_cap_table.hipExecutionCtxSynchronize_fn = capture_hipExecutionCtxSynchronize;
   g_cap_table.hipExecutionCtxWaitEvent_fn = capture_hipExecutionCtxWaitEvent;
+  g_cap_table.hipMemGetDefaultMemPool_fn = capture_hipMemGetDefaultMemPool;
+  g_cap_table.hipDeviceGetExecAffinitySupport_fn = capture_hipDeviceGetExecAffinitySupport;
 }
 
 void hip_capture_build_compiler_table() {
