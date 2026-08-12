@@ -9,6 +9,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #include "comm.h"
 #include "common/ErrCode.hpp"
@@ -1471,9 +1472,9 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         std::unordered_map<std::string, std::string> extraEnv;
     };
 
-    const size_t HALF = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
-    const size_t QUARTER = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 4;
-    const size_t FULL = HIERARCHICAL_AG_TEMP_BUFFER_SIZE;
+    const size_t HALF = HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
+    const size_t QUARTER = HIERARCHICAL_TEMP_BUFFER_SIZE / 4;
+    const size_t FULL = HIERARCHICAL_TEMP_BUFFER_SIZE;
 
     std::vector<HierAGCase> testCases = {
         // nNodes < 8 --> disabled
@@ -1555,6 +1556,208 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         << "One or more rcclUseHierarchicalAllGather tests failed";
 
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalAllGather Tests Completed ===");
+}
+
+TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
+{
+    TEST_INFO("=== Starting Process-Isolated rcclUseHierarchicalReduceScatter Tests ===");
+    struct HierRSCase
+    {
+        std::string                                  name;
+        int                                          nNodes;
+        bool                                         hierCommsInit;
+        size_t                                       msgSize;
+        bool                                         expected;
+        std::unordered_map<std::string, std::string> extraEnv;
+    };
+
+    const size_t HALF = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 8-node threshold (64MB)
+    const size_t FULL = HIERARCHICAL_TEMP_BUFFER_SIZE;     // 16-node threshold (128MB)
+
+    std::vector<HierRSCase> testCases = {
+        // nNodes < 8 --> disabled
+        {"LessThan8Nodes",            4,  true,  1ULL << 20, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // sub-comms not initialized --> disabled
+        {"CommsNotInitialized",       16, false, 1ULL << 20, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 8 node size > 64MB --> disabled
+        {"Disabled_8Nodes_AboveHalf", 8,  true,  HALF + 1,   false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 16 node size > 128MB --> disabled
+        {"Disabled_16N_AboveFull",    16, true,  FULL + 1,   false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // disabled by default
+        {"DisabledByDefault",          16, true,  1ULL << 20, false, {}},
+        // env var forces off --> disabled
+        {"DisabledByEnvVar",          16, true,  1ULL << 20, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "0"}}},
+        // 8 nodes, initialized, below threshold --> enabled
+        {"Enabled_8Nodes_BelowHalf",  8,  true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 8 nodes, exactly at threshold --> enabled
+        {"Enabled_8Nodes_AtHalf",     8,  true,  HALF,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 16 nodes, initialized, below threshold --> enabled
+        {"Enabled_16Nodes_BelowFull", 16, true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 16 nodes, exactly at threshold --> enabled
+        {"Enabled_16Nodes_AtFull",    16, true,  FULL,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+    };
+
+    // Base environment shared by every case
+    std::unordered_map<std::string, std::string> baseEnv = {
+        {       "NCCL_DEBUG", "TRACE"},
+        {"NCCL_DEBUG_SUBSYS",   "ALL"}
+    };
+
+    for(const auto& tc : testCases)
+    {
+        ProcessIsolatedTestRunner::registerTest(
+            ProcessIsolatedTestRunner::TestConfig(
+                tc.name,
+                [tc]()
+                {
+                    ncclComm_t            mockComm = nullptr;
+                    struct ncclTopoSystem mockTopo;
+                    struct ncclTopoNode   mockGpu;
+                    CreateMockComm(mockComm,
+                                   mockTopo,
+                                   mockGpu,
+                                   "gfx942",
+                                   /*nRanks=*/8 * tc.nNodes);
+                    mockComm->nNodes                       = tc.nNodes;
+                    mockComm->hierarchicalCommsInitialized = tc.hierCommsInit;
+
+                    EXPECT_EQ(rcclUseHierarchicalReduceScatter(mockComm, tc.msgSize),
+                              tc.expected)
+                        << "Case: " << tc.name
+                        << " (nNodes=" << tc.nNodes
+                        << ", hierCommsInit=" << tc.hierCommsInit
+                        << ", msgSize=" << tc.msgSize << ")";
+
+                    CleanupMockComm(mockComm);
+                }
+            )
+                .withEnvironment(
+                    [&tc, &baseEnv]()
+                    {
+                        auto env = baseEnv;
+                        env.insert(tc.extraEnv.begin(), tc.extraEnv.end());
+                        return env;
+                    }()
+                )
+                .withTimeout(std::chrono::seconds(60))
+        );
+    }
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    bool allTestsPassed = ProcessIsolatedTestRunner::executeAllTests(options);
+
+    EXPECT_TRUE(allTestsPassed)
+        << "One or more rcclUseHierarchicalReduceScatter tests failed";
+
+    TEST_INFO("=== Process-Isolated rcclUseHierarchicalReduceScatter Tests Completed ===");
+}
+
+TEST(Rcclwrap, RcclHierarchicalTempBufferSizeTests)
+{
+    const size_t QUARTER = HIERARCHICAL_TEMP_BUFFER_SIZE / 4;
+    const size_t HALF    = HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
+    const size_t FULL    = HIERARCHICAL_TEMP_BUFFER_SIZE;
+
+    // Below 8 nodes neither algorithm is eligible, so nothing needs to be allocated.
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(7, true, true), size_t{0});
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(64, false, false), size_t{0});
+
+    // Per-collective thresholds
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(8, true, false), QUARTER);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(15, true, false), QUARTER);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(16, true, false), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(31, true, false), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(32, true, false), FULL);
+
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(8, false, true), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(15, false, true), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(16, false, true), FULL);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(32, false, true), FULL);
+}
+
+TEST(Rcclwrap, RcclHierarchicalAlgoInfoTests)
+{
+    TEST_INFO("=== Starting Process-Isolated rcclHierarchicalAlgoInfo Tests ===");
+
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "HierAlgoInfo_DirectAllGather_ReportsInterComm",
+            []()
+            {
+                if(rcclUseAinic())
+                {
+                    GTEST_SKIP() << "Direct AllGather is disabled on AINIC";
+                }
+
+                ncclComm_t          parent = nullptr, inter = nullptr, intra = nullptr;
+                struct ncclTopoNode parentGpu, interGpu, intraGpu;
+
+                auto parentTopo = std::make_unique<ncclTopoSystem>();
+                auto interTopo  = std::make_unique<ncclTopoSystem>();
+                auto intraTopo  = std::make_unique<ncclTopoSystem>();
+
+                // 8 nodes x 8 local ranks.
+                CreateMockComm(parent, *parentTopo, parentGpu, "gfx942", 64);
+                CreateMockComm(inter, *interTopo, interGpu, "gfx942", 8);
+                CreateMockComm(intra, *intraTopo, intraGpu, "gfx942", 8);
+
+                parent->p2pnChannels          = 32;
+                inter->p2pnChannels           = 12;
+                intra->p2pnChannels           = 5;
+                parent->hierarchicalInterComm = inter;
+                parent->hierarchicalIntraComm = intra;
+
+                // 4 KiB per rank keeps both phases well under the Direct threshold.
+                const uint64_t count    = 1024;
+                size_t         interMsg = count * sizeof(float) * inter->nRanks;
+                size_t         intraMsg = count * inter->nRanks * sizeof(float) * intra->nRanks;
+
+                if(!rcclUseAllGatherDirect(inter, interMsg) || !rcclUseAllGatherDirect(intra, intraMsg))
+                {
+                    CleanupMockComm(parent);
+                    CleanupMockComm(inter);
+                    CleanupMockComm(intra);
+                    GTEST_SKIP() << "Direct AllGather unavailable in this environment; the "
+                                    "tuner fallback cannot run against a mock communicator";
+                }
+
+                int algo = -1, protocol = -1, maxChannels = -1;
+                EXPECT_EQ(rcclHierarchicalAlgoInfo(parent,
+                                                   ncclFuncAllGather,
+                                                   count,
+                                                   ncclFloat32,
+                                                   &algo,
+                                                   &protocol,
+                                                   &maxChannels),
+                          ncclSuccess);
+
+                EXPECT_EQ(algo, RCCL_HIERARCHICAL_ALLGATHER);
+                EXPECT_EQ(protocol, NCCL_PROTO_SIMPLE);
+                EXPECT_EQ(maxChannels, inter->p2pnChannels);
+
+                CleanupMockComm(parent);
+                CleanupMockComm(inter);
+                CleanupMockComm(intra);
+            }
+        )
+            // Direct AllGather bails out when user buffer registration is enabled.
+            .withEnvironment({{"NCCL_LOCAL_REGISTER", "0"}, {"RCCL_DIRECT_ALLGATHER_DISABLE", "0"}})
+            .clearVariable("RCCL_DIRECT_ALLGATHER_THRESHOLD")
+            .withTimeout(std::chrono::seconds(60))
+            .withNumGpus(0)
+    );
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options))
+        << "rcclHierarchicalAlgoInfo test failed";
+
+    TEST_INFO("=== Process-Isolated rcclHierarchicalAlgoInfo Tests Completed ===");
 }
 
 // ===========================================================================
