@@ -25,6 +25,7 @@ RJ_DIAGNOSTIC_POP
 #include <bit>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <elf.h>
 #include <format>
@@ -274,6 +275,26 @@ uint32_t initial_mode_from_compute_pgm_rsrc1(uint32_t rsrc1, rj_code_arch_t arch
 }
 
 } // namespace
+
+CommandProcessor::CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {
+  // register_queue() may start the doorbell monitor before startup(), so the
+  // event must already have a handler when the queue becomes visible.
+  doorbell_event_.set_handler(
+      [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
+}
+
+CommandProcessor::~CommandProcessor() { stop_doorbell_monitor(); }
+
+void CommandProcessor::set_dispatch_threads(uint32_t threads) {
+  threads = std::max(threads, 1u);
+  if (plugin_group_->requires_serial_hot_hooks())
+    threads = 1;
+  if (dispatch_threads_ == threads)
+    return;
+  dispatch_threads_ = threads;
+  for (auto *spi : spis_)
+    spi->reset_dispatch_pool();
+}
 
 void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
                                            const DispatchEntry &pkt, uint32_t global_wg_id,
@@ -547,9 +568,7 @@ void CommandProcessor::startup() {
   for ([[maybe_unused]] const auto *cu : cus_)
     assert(cu->partition_id() == partition_id() &&
            "CommandProcessor and its compute units must share one partition");
-  // doorbell_event_'s handler is bound in the constructor (see there) so it is live
-  // before register_queue() can start the poll thread; nothing to (re)bind here.
-  completion_ = std::make_unique<CompletionTracker>(memory_, cus_);
+  completion_ = std::make_unique<CompletionTracker>(memory_, cus_, l2_caches_);
   completion_->set_plugin_group(plugin_group_);
   completion_->set_dispatch_retired_callback(
       [this](const DispatchEntry &entry) { erase_cluster_workgroups(entry.dispatch_id); });
@@ -746,6 +765,7 @@ void CommandProcessor::register_queue(HwQueue queue) {
     }
   }
   {
+    std::unique_lock<std::shared_mutex> structure_lock(queue_structure_mutex_);
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     HwQueueState qs{};
     qs.queue_desc_va = queue.queue_desc_va;
@@ -817,6 +837,7 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
   bool drop_replicas = false;
   {
+    std::unique_lock<std::shared_mutex> structure_lock(queue_structure_mutex_);
     // Holds hw_queue_mutex_ across with_wave_state_locked(), which is the order
     // the dispatch path uses too (handle_doorbell -> dispatch_workgroups ->
     // dispatch_wf). Nothing takes them the other way any more: a wave reaching
@@ -1693,6 +1714,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     if (!dispatch_to_placement(local_wg_id, global_wg_id, *placement))
       throw std::runtime_error("dispatch_wf failed after workgroup placement was reserved");
   }
+
   return dispatched;
 }
 
@@ -1712,8 +1734,14 @@ void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) 
   mark_cluster_workgroup_complete(dispatch_id, wg_id);
   {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    if (completion_)
+    if (completion_) {
       completion_->notify_wg_complete(dispatch_id, wg_id, new_queue_states_);
+      // Without worker fan-out, completion arrives on the CP's engine thread, so
+      // retire promptly while another resident dispatch may wait on this signal.
+      // Parallel workers must defer draining until their fan-out rejoins the CP.
+      if (dispatch_threads_ <= 1)
+        completion_->drain_completions(new_queue_states_);
+    }
   }
 }
 
@@ -1817,6 +1845,14 @@ void CommandProcessor::process_queues() {
         break; // CU backpressure.
     }
   }
+}
+
+bool CommandProcessor::has_active_cus() const {
+  for (auto *cu : cus_) {
+    if (cu->has_active_wfs())
+      return true;
+  }
+  return false;
 }
 
 rocr::llvm::amdhsa::kernel_descriptor_t
@@ -2516,14 +2552,19 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
   queue.fetch_cursor = process_limit;
 }
 
-void CommandProcessor::handle_doorbell(simdojo::Tick now) {
+void CommandProcessor::handle_doorbell(simdojo::Tick timestamp) {
   doorbell_handle_count_.fetch_add(1, std::memory_order_relaxed);
+  handle_doorbell_sync(timestamp);
+}
+
+void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   // Release so the doorbell poll thread's acquire-load cannot observe a stale
   // "pending" after this handler has re-fetched; pairs with the release-stores at
   // the INVALID-packet and barrier/dependency stall sites. A site that is still
   // unsatisfied on this pass re-sets its flag below, re-arming the paced re-check.
   invalid_pending_.store(false, std::memory_order_release);
   stall_pending_.store(false, std::memory_order_release);
+  std::shared_lock<std::shared_mutex> structure_lock(queue_structure_mutex_);
   util::Logger::cp(
       [&](auto &os) { os << std::format("{}: DOORBELL queues={}", name(), hw_queues_.size()); });
 
@@ -2532,7 +2573,6 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
   drain_fanout_inbox();
 
   std::unique_lock<std::recursive_mutex> lock(hw_queue_mutex_);
-
   size_t entries_before = 0;
   for (auto &qs : new_queue_states_)
     entries_before += qs.entries.size();
@@ -2560,127 +2600,219 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
                       entries_after - entries_before, entries_after);
   });
 
-  // Phase 1: Dispatch-Execute-Complete loop (functional mode).
-  bool progress = true;
-  while (progress) {
-    progress = false;
+  // While the queue mutex is dropped, CU workers may append completions to
+  // new_queue_states_. The shared structure lock remains held, so concurrent
+  // registration/removal cannot invalidate the dispatch loop's vector
+  // references; worker completion callbacks continue to use only the queue
+  // mutex.
+  auto run_dispatch_workers = [&]() {
+    if (dispatch_threads_ <= 1 || !has_active_cus())
+      return FunctionalQuantumResult{};
+    lock.unlock();
+    // Wavefront execution is driven by the SPIs, which own the worker pools;
+    // the CP only orchestrates queue fetch, dispatch, and completion. SPI-less
+    // topologies (direct add_compute_unit test harnesses) fall back to driving
+    // the CUs directly.
+    FunctionalQuantumResult result;
+    if (!spis_.empty()) {
+      for (auto *spi : spis_)
+        result.merge(spi->run_active_cus_once(dispatch_threads_));
+    } else {
+      for (auto *cu : cus_) {
+        if (cu->has_active_wfs())
+          result.merge(cu->run_quantum());
+      }
+    }
+    lock.lock();
+    if (completion_)
+      completion_->drain_completions(new_queue_states_);
+    return result;
+  };
 
+  // Phase 1: Dispatch-Execute-Complete loop (functional mode).
+  //
+  // Wrapped in a rescan loop. A dependent kernel the host submits *while this
+  // handler is executing* is picked up only by the post-loop re-fetch below;
+  // without re-running the dispatch loop it would be stranded un-dispatched,
+  // blocking in-order completion of the trailing barrier packets and hanging the
+  // waiting host forever (the doorbell that delivered it was already consumed by
+  // scan_doorbells, so no further handle_doorbell fires). This races at any
+  // thread count — the resume paths that would otherwise catch it (on_cu_idle at
+  // T=1, the synchronous pool drain at T>1) have all finished by the time the
+  // late packet arrives — but the window is widest with multi-dispatch IREE
+  // kernels at dispatch thread counts > 1. After each re-fetch we rescan and
+  // re-run this loop when new packets arrived.
+  bool rescan = true;
+  bool first_pass = true;
+  bool yield_to_event_loop = false;
+  while (rescan) {
+    bool progress = true;
+    while (progress && !yield_to_event_loop) {
+      progress = false;
+
+      for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
+        if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
+            hw_queues_[qi].runtime_suspended)
+          continue;
+        auto &qs = new_queue_states_[qi];
+
+        while (qs.next_dispatch_idx < qs.entries.size()) {
+          auto &entry = qs.entries[qs.next_dispatch_idx];
+
+          if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
+            break;
+
+          if (entry.is_non_kernel()) {
+            entry.completed_wgs = entry.total_wgs;
+            ++qs.next_dispatch_idx;
+            if (completion_)
+              completion_->drain_completions(new_queue_states_);
+            progress = true;
+            continue;
+          }
+
+          // Dispatch-execute-retire loop: keep dispatching WGs, activating CUs,
+          // and retiring WFs until the entry is fully dispatched and completed,
+          // or we hit genuine backpressure (no CU can accept any WG).
+          // NOTE: drain_completions may pop entries, so we must re-check indices
+          // after each drain and not hold stale references.
+          uint32_t dispatch_id = entry.dispatch_id;
+          bool backpressure = false;
+          for (;;) {
+            if (qs.next_dispatch_idx >= qs.entries.size())
+              break;
+            auto &cur = qs.entries[qs.next_dispatch_idx];
+            if (cur.dispatch_id != dispatch_id)
+              break;
+
+            uint32_t sent = dispatch_workgroups(cur);
+            if (sent > 0)
+              progress = true;
+
+            auto worker_result = run_dispatch_workers();
+            if (worker_result.ran)
+              progress = true;
+            if (worker_result.yielded) {
+              yield_to_event_loop = true;
+              break;
+            }
+
+            if (completion_)
+              completion_->drain_completions(new_queue_states_);
+
+            if (qs.next_dispatch_idx >= qs.entries.size())
+              break;
+            auto &post = qs.entries[qs.next_dispatch_idx];
+            if (post.dispatch_id != dispatch_id)
+              break;
+
+            if (post.fully_dispatched()) {
+              ++qs.next_dispatch_idx;
+              break;
+            }
+            if (sent == 0 && !worker_result.ran) {
+              backpressure = true;
+              break;
+            }
+          }
+          if (yield_to_event_loop)
+            break;
+          if (backpressure)
+            break;
+        }
+        if (yield_to_event_loop)
+          break;
+      }
+
+      if (!yield_to_event_loop) {
+        auto worker_result = run_dispatch_workers();
+        if (worker_result.ran)
+          progress = true;
+        if (worker_result.yielded)
+          yield_to_event_loop = true;
+      }
+    }
+
+    // Final drain: catch any entries that became fully_completed during the
+    // last iteration but weren't drained by the re-entrant path.
+    if (completion_)
+      completion_->drain_completions(new_queue_states_);
+
+    util::Logger::cp([&](auto &os) {
+      size_t remaining = 0;
+      for (auto &qs : new_queue_states_)
+        remaining += qs.entries.size();
+      uint32_t active_cus = 0;
+      for (auto *cu : cus_)
+        if (cu->has_active_wfs())
+          ++active_cus;
+      os << std::format("{}: PHASE1_DONE remaining={} active_cus={}/{}", name(), remaining,
+                        active_cus, cus_.size());
+      for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
+        auto &qs = new_queue_states_[qi];
+        if (qs.entries.empty())
+          continue;
+        os << std::format("\n  queue[{}] entries={} next_disp={} implicit_barrier={}", qi,
+                          qs.entries.size(), qs.next_dispatch_idx, qs.implicit_barrier_next);
+        for (size_t ei = 0; ei < qs.entries.size(); ++ei) {
+          auto &e = qs.entries[ei];
+          os << std::format(
+              "\n    [{}] d={} qid={} total_wgs={} disp={} comp={} barrier={} sig={:#x} "
+              "non_kern={}",
+              ei, e.dispatch_id, e.queue_id, e.total_wgs, e.dispatched_wgs, e.completed_wgs,
+              e.barrier_bit, e.completion_signal, e.is_non_kernel());
+        }
+      }
+    });
+
+    if (yield_to_event_loop)
+      break;
+
+    // Re-fetch: pick up any packets the host submitted while we were executing
+    // (e.g., barrier packets queued after a kernel dispatch). Process them
+    // immediately so host signal waits see completed barriers before returning.
+    //
+    // SDMA queues are re-fetched only on the first pass. The compute (AQL) re-fetch
+    // is clamped to last_doorbell so repeating it is safe, but the SDMA path reads
+    // the live doorbell value and would read ahead of an observed doorbell —
+    // re-polling the ring across rescan iterations races with the host's
+    // concurrent ring writes (torn packet -> bad copy). Late *kernel* packets,
+    // which is all the rescan needs, only arrive on the compute queue anyway;
+    // SDMA packets are picked up by their own doorbell-driven passes.
+    const uint32_t dispatch_id_before_refetch = next_dispatch_id_;
+    for (size_t i = 0; i < hw_queues_.size(); ++i) {
+      if (hw_queues_[i].is_sdma && !first_pass)
+        continue;
+      fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
+    }
+    first_pass = false;
+    // Process any new non-kernel entries (barriers with total_wgs==0).
     for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
-      if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
-          hw_queues_[qi].runtime_suspended)
+      if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
         continue;
       auto &qs = new_queue_states_[qi];
-
       while (qs.next_dispatch_idx < qs.entries.size()) {
         auto &entry = qs.entries[qs.next_dispatch_idx];
-
         if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
           break;
-
-        if (entry.is_non_kernel()) {
-          entry.completed_wgs = entry.total_wgs;
-          ++qs.next_dispatch_idx;
-          if (completion_)
-            completion_->drain_completions(new_queue_states_);
-          progress = true;
-          continue;
-        }
-
-        // Dispatch-execute-retire loop: keep dispatching WGs, activating CUs,
-        // and retiring WFs until the entry is fully dispatched and completed,
-        // or we hit genuine backpressure (no CU can accept any WG).
-        // NOTE: drain_completions may pop entries, so we must re-check indices
-        // after each drain and not hold stale references.
-        uint32_t dispatch_id = entry.dispatch_id;
-        bool backpressure = false;
-        for (;;) {
-          if (qs.next_dispatch_idx >= qs.entries.size())
-            break;
-          auto &cur = qs.entries[qs.next_dispatch_idx];
-          if (cur.dispatch_id != dispatch_id)
-            break;
-
-          uint32_t sent = dispatch_workgroups(cur);
-          if (sent > 0)
-            progress = true;
-
-          if (completion_)
-            completion_->drain_completions(new_queue_states_);
-
-          if (qs.next_dispatch_idx >= qs.entries.size())
-            break;
-          auto &post = qs.entries[qs.next_dispatch_idx];
-          if (post.dispatch_id != dispatch_id)
-            break;
-
-          if (post.fully_dispatched()) {
-            ++qs.next_dispatch_idx;
-            break;
-          }
-          if (sent == 0) {
-            backpressure = true;
-            break;
-          }
-        }
-        if (backpressure)
+        if (!entry.is_non_kernel())
           break;
+        entry.completed_wgs = entry.total_wgs;
+        ++qs.next_dispatch_idx;
       }
     }
-  }
+    if (completion_)
+      completion_->drain_completions(new_queue_states_);
 
-  // Final drain: catch any entries that became fully_completed during the
-  // last iteration but weren't drained by the re-entrant path.
-  if (completion_)
-    completion_->drain_completions(new_queue_states_);
-
-  util::Logger::cp([&](auto &os) {
-    size_t remaining = 0;
-    for (auto &qs : new_queue_states_)
-      remaining += qs.entries.size();
-    uint32_t active_cus = 0;
-    for (auto *cu : cus_)
-      if (cu->has_active_wfs())
-        ++active_cus;
-    os << std::format("{}: PHASE1_DONE remaining={} active_cus={}/{}", name(), remaining,
-                      active_cus, cus_.size());
-    for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-      auto &qs = new_queue_states_[qi];
-      if (qs.entries.empty())
-        continue;
-      os << std::format("\n  queue[{}] entries={} next_disp={} implicit_barrier={}", qi,
-                        qs.entries.size(), qs.next_dispatch_idx, qs.implicit_barrier_next);
-      for (size_t ei = 0; ei < qs.entries.size(); ++ei) {
-        auto &e = qs.entries[ei];
-        os << std::format(
-            "\n    [{}] d={} qid={} total_wgs={} disp={} comp={} barrier={} sig={:#x} non_kern={}",
-            ei, e.dispatch_id, e.queue_id, e.total_wgs, e.dispatched_wgs, e.completed_wgs,
-            e.barrier_bit, e.completion_signal, e.is_non_kernel());
-      }
-    }
-  });
-
-  // Re-fetch: pick up any packets the host submitted while we were executing
-  // (e.g., barrier packets queued after a kernel dispatch). Process them
-  // immediately so host signal waits see completed barriers before returning.
-  for (size_t i = 0; i < hw_queues_.size(); ++i)
-    fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
-  // Process any new non-kernel entries (barrier-kind packets).
-  for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
-      continue;
-    auto &qs = new_queue_states_[qi];
-    while (qs.next_dispatch_idx < qs.entries.size()) {
-      auto &entry = qs.entries[qs.next_dispatch_idx];
-      if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
-        break;
-      if (!entry.is_non_kernel())
-        break;
-      entry.completed_wgs = entry.total_wgs;
-      ++qs.next_dispatch_idx;
-    }
-  }
-  if (completion_)
-    completion_->drain_completions(new_queue_states_);
+    // Re-run Phase 1 only if the re-fetch actually pulled in NEW packets
+    // (next_dispatch_id_ advances exactly once per fetched packet). Gating on new
+    // packets — rather than "a dispatchable entry still exists" — is what
+    // guarantees termination: a kernel held back by CU backpressure stays
+    // "dispatchable" but creates no new dispatch ids, so it cannot spin the loop.
+    // New arrivals are finite: they are bounded by host submissions, which are
+    // themselves gated on the completion signals we deliver here.
+    rescan = (next_dispatch_id_ != dispatch_id_before_refetch);
+  } // while (rescan)
 
   arm_grid_wait_recheck();
 

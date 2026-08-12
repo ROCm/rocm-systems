@@ -3570,6 +3570,27 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   EXPECT_EQ(kernel_symbol, "vmid_dispatch_kernel");
 }
 
+TEST(ExecutionPluginTest, PluginCapabilitiesSetCpuDispatchPolicy) {
+  {
+    PluginFixture f;
+    f.cp()->set_dispatch_threads(8);
+    auto pg = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    pg->add(std::make_unique<SerialHotHookPlugin>());
+    f.soc->set_plugin_group(pg);
+    EXPECT_EQ(f.cp()->dispatch_threads(), 1u);
+    f.cp()->set_dispatch_threads(8);
+    EXPECT_EQ(f.cp()->dispatch_threads(), 1u);
+  }
+  {
+    PluginFixture f;
+    auto pg = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    pg->add(std::make_unique<ParallelSafePlugin>());
+    f.soc->set_plugin_group(pg);
+    f.cp()->set_dispatch_threads(8);
+    EXPECT_EQ(f.cp()->dispatch_threads(), 8u);
+  }
+}
+
 // -- Ordering tests ----------------------------------------------------------
 //
 // These tests use functional mode (the PluginFixture default). Tests that

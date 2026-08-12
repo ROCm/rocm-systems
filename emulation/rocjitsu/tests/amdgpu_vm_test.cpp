@@ -25,6 +25,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -46,9 +47,11 @@ RJ_DIAGNOSTIC_POP
 #include <barrier>
 #include <bit>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <limits>
 #include <memory>
 #include <new>
@@ -297,6 +300,72 @@ TEST(ComputeUnitConfigTest, DirectFactoryRejectsTargetFromAnotherArchitecture) {
 
   EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2),
                util::ConfigError);
+}
+
+enum class SubmitTrigger { DispatchBegin, AfterInstruction };
+
+class SubmitDispatchDuringWorkerPlugin final : public ExecutionPlugin {
+public:
+  SubmitDispatchDuringWorkerPlugin(test::AqlQueue &queue,
+                                   const hsa_kernel_dispatch_packet_t &packet,
+                                   SubmitTrigger trigger)
+      : ExecutionPlugin("submit_dispatch_during_worker"), queue_(queue), packet_(packet),
+        trigger_(trigger) {}
+
+  void onAmdgpuDispatchExecutionBegin(uint32_t /*dispatch_id*/) override {
+    if (trigger_ == SubmitTrigger::DispatchBegin)
+      submit_once();
+  }
+
+  void onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
+                                       amdgpu::Wavefront & /*wf*/) override {
+    if (trigger_ == SubmitTrigger::AfterInstruction)
+      submit_once();
+  }
+
+  bool submitted() const { return submitted_.load(); }
+
+  bool requires_serial_hot_hooks() const override { return false; }
+
+private:
+  void submit_once() {
+    bool expected = false;
+    if (submitted_.compare_exchange_strong(expected, true))
+      queue_.submit(packet_);
+  }
+
+  test::AqlQueue &queue_;
+  hsa_kernel_dispatch_packet_t packet_{};
+  SubmitTrigger trigger_;
+  std::atomic_bool submitted_{false};
+};
+
+void init_completion_signal(amdgpu::GpuMemory *mem, uint64_t signal_addr) {
+  mem->write64(signal_addr, 0);
+  mem->write64(signal_addr + 8, 1);
+  mem->write64(signal_addr + 16, 0);
+  mem->write32(signal_addr + 24, 0);
+}
+
+int64_t completion_signal_value(amdgpu::GpuMemory *mem, uint64_t signal_addr) {
+  return static_cast<int64_t>(mem->read64(signal_addr + 8));
+}
+
+hsa_kernel_dispatch_packet_t make_dispatch_packet(uint64_t kernel_object, uint64_t signal_addr,
+                                                  uint32_t grid_size_x = 64,
+                                                  uint16_t workgroup_size_x = 64) {
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 1;
+  pkt.workgroup_size_x = workgroup_size_x;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = grid_size_x;
+  pkt.grid_size_y = 1;
+  pkt.grid_size_z = 1;
+  pkt.kernel_object = kernel_object;
+  pkt.completion_signal.handle = signal_addr;
+  return pkt;
 }
 
 // Drive the engine until the listed CUs have no resident wavefronts. A wavefront
@@ -4198,6 +4267,95 @@ TEST_P(IsaTest, RoundRobinScheduling) {
   EXPECT_EQ(f.cp()->dispatched_count(), 2u);
 }
 
+void run_deferred_rescan_late_completion_test(uint32_t dispatch_threads, SubmitTrigger trigger) {
+  VmFixture f("cdna3", /*num_cus=*/2);
+  f.cp()->set_dispatch_threads(dispatch_threads);
+
+  auto prog_a = ExecFixture::cat({{SOPP_S_NOP}, {SOPP_S_NOP}, {SOPP_S_ENDPGM}});
+  auto prog_b = ExecFixture::cat({{SOPP_S_NOP}, {SOPP_S_ENDPGM}});
+  uint64_t ko_a = f.write_kernel(0x1000, prog_a.data(), prog_a.size() * sizeof(uint32_t));
+  uint64_t ko_b = f.write_kernel(0x2000, prog_b.data(), prog_b.size() * sizeof(uint32_t));
+
+  constexpr uint64_t sig_a = 0xF0020000;
+  constexpr uint64_t sig_b = 0xF0020100;
+  init_completion_signal(f.mem(), sig_a);
+  init_completion_signal(f.mem(), sig_b);
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  auto packet_b = make_dispatch_packet(ko_b, sig_b, /*grid_size_x=*/128);
+
+  auto pg = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<SubmitDispatchDuringWorkerPlugin>(queue, packet_b, trigger);
+  auto *submitter = plugin.get();
+  ASSERT_TRUE(pg->add(std::move(plugin)));
+  f.soc_ptr->set_plugin_group(pg);
+  f.cp()->set_dispatch_threads(dispatch_threads);
+
+  ASSERT_EQ(f.cp()->dispatch_threads(), dispatch_threads);
+
+  auto packet_a = make_dispatch_packet(ko_a, sig_a, /*grid_size_x=*/128);
+  queue.submit(packet_a);
+
+  ASSERT_TRUE(f.engine->step());
+  EXPECT_TRUE(submitter->submitted());
+  EXPECT_EQ(f.cp()->dispatched_count(), 2u);
+
+  for (uint32_t i = 0; i < 10000 && (completion_signal_value(f.mem(), sig_a) != 0 ||
+                                     completion_signal_value(f.mem(), sig_b) != 0);
+       ++i) {
+    ASSERT_TRUE(f.engine->step());
+  }
+
+  EXPECT_EQ(completion_signal_value(f.mem(), sig_a), 0);
+  EXPECT_EQ(completion_signal_value(f.mem(), sig_b), 0);
+  EXPECT_FALSE(f.cu(0)->has_active_wfs());
+  EXPECT_FALSE(f.cu(1)->has_active_wfs());
+}
+
+TEST(AqlDispatchTest, DeferredRescanFiresLateCompletionSignalSerialWorker) {
+  run_deferred_rescan_late_completion_test(1, SubmitTrigger::DispatchBegin);
+}
+
+TEST(AqlDispatchTest, DeferredRescanFiresLateCompletionSignalParallelWorkers) {
+  run_deferred_rescan_late_completion_test(3, SubmitTrigger::AfterInstruction);
+}
+
+TEST(AqlDispatchTest, SerialCompletionUnblocksCoResidentSignalWaiter) {
+  VmFixture f("cdna3", /*num_cus=*/1);
+  f.cp()->set_dispatch_threads(1);
+
+  const uint32_t producer_code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  const uint32_t waiter_code[] = {
+      0xC0060080u,
+      0x00000008u, // s_load_dwordx2 s[2:3], s[0:1], 8
+      enc::S_WAITCNT_0,
+      0xBF128002u,             // s_cmp_eq_u64 s[2:3], 0
+      enc::s_cbranch_scc0(-5), // retry until producer completion is delivered
+      SOPP_S_ENDPGM,
+  };
+  const uint64_t producer = f.write_kernel(0x1000, producer_code, sizeof(producer_code));
+  const uint64_t waiter = f.write_kernel(0x2000, waiter_code, sizeof(waiter_code));
+
+  constexpr uint64_t producer_signal = 0xF0021000;
+  constexpr uint64_t waiter_signal = 0xF0021100;
+  init_completion_signal(f.mem(), producer_signal);
+  init_completion_signal(f.mem(), waiter_signal);
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  auto producer_packet = make_dispatch_packet(producer, producer_signal);
+  auto waiter_packet = make_dispatch_packet(waiter, waiter_signal);
+  waiter_packet.kernarg_address = reinterpret_cast<void *>(producer_signal);
+  queue.submit(producer_packet);
+  queue.submit(waiter_packet);
+
+  for (uint32_t i = 0; i < 16 && completion_signal_value(f.mem(), waiter_signal) != 0; ++i)
+    ASSERT_TRUE(f.engine->step());
+
+  EXPECT_EQ(completion_signal_value(f.mem(), producer_signal), 0);
+  EXPECT_EQ(completion_signal_value(f.mem(), waiter_signal), 0);
+  EXPECT_FALSE(f.cu()->has_active_wfs());
+}
+
 TEST_P(IsaTest, EngineRunsToCompletion) {
   VmFixture f(arch());
   auto *snap = f.capture_halts();
@@ -5294,6 +5452,147 @@ TEST(L1ScalarCacheVmidTest, WriteThroughStoreUsesStoreVmid) {
 
   mem.unregister_process(kVmidA);
   mem.unregister_process(kVmidB);
+}
+
+class BlockingInstructionPlugin final : public ExecutionPlugin {
+public:
+  BlockingInstructionPlugin() : ExecutionPlugin("blocking_instruction") {}
+
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
+                                        amdgpu::Wavefront &) override {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (entered_)
+      return;
+    entered_ = true;
+    cv_.notify_all();
+    cv_.wait(lock, [this]() { return released_; });
+  }
+
+  bool wait_until_entered(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return cv_.wait_for(lock, timeout, [this]() { return entered_; });
+  }
+
+  void release() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    released_ = true;
+    cv_.notify_all();
+  }
+
+private:
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  bool entered_ = false;
+  bool released_ = false;
+};
+
+TEST(AqlDispatchTest, WorkerExceptionPropagatesThroughEngineStep) {
+  constexpr uint32_t kSSetvskip = 0xBF100000u;
+  VmFixture f("cdna4", /*num_cus=*/2);
+  f.cp()->set_dispatch_threads(2);
+
+  uint64_t kernel = f.write_kernel(0x1000, &kSSetvskip, sizeof(kSSetvskip));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
+
+  EXPECT_THROW((void)f.engine->step(), std::exception);
+}
+
+TEST(AqlDispatchTest, WorkerYieldReturnsToEventLoopBeforeResuming) {
+  constexpr uint32_t kSSleep = 0xBF8E0001u;
+  VmFixture f("cdna4", /*num_cus=*/2);
+  f.cp()->set_dispatch_threads(2);
+
+  const uint32_t code[] = {kSSleep, SOPP_S_ENDPGM};
+  uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
+
+  bool peer_event_ran = false;
+  bool peer_saw_yielded_waves = false;
+  simdojo::Event peer_event{f.cp(), simdojo::EventType::TIMER_CALLBACK,
+                            [&](simdojo::Tick, simdojo::Message *) {
+                              peer_event_ran = true;
+                              auto *wf0 = f.cu(0)->wf(0);
+                              auto *wf1 = f.cu(1)->wf(0);
+                              peer_saw_yielded_waves = wf0 && wf1 && wf0->trace_inst_count_ == 1 &&
+                                                       wf1->trace_inst_count_ == 1;
+                            }};
+  f.engine->schedule_event_async(&peer_event, 1);
+
+  ASSERT_TRUE(f.engine->step()); // Doorbell: both CUs stop after s_sleep.
+  EXPECT_FALSE(peer_event_ran);
+  ASSERT_TRUE(f.engine->step()); // Peer event runs before the CU resume events.
+  EXPECT_TRUE(peer_event_ran);
+  EXPECT_TRUE(peer_saw_yielded_waves);
+
+  while (f.engine->step()) {
+  }
+  EXPECT_TRUE(f.cu(0)->is_idle());
+  EXPECT_TRUE(f.cu(1)->is_idle());
+}
+
+TEST(AqlDispatchTest, QueueMutationWaitsForDispatchWorkerWindow) {
+  using namespace std::chrono_literals;
+
+  VmFixture f("cdna4", /*num_cus=*/2);
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto blocking_plugin = std::make_unique<BlockingInstructionPlugin>();
+  auto *blocker = blocking_plugin.get();
+  ASSERT_TRUE(group->add(std::move(blocking_plugin)));
+  f.soc_ptr->set_plugin_group(group);
+  f.cp()->set_dispatch_threads(2);
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue dispatch_queue(f.mem(), f.cp());
+  amdgpu::HwQueue removable_queue{};
+  removable_queue.process_id = 9;
+  removable_queue.queue_id = 42;
+  f.cp()->register_queue(removable_queue);
+  dispatch_queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
+
+  auto step = std::async(std::launch::async, [&]() { return f.engine->step(); });
+  const bool entered = blocker->wait_until_entered(2s);
+  EXPECT_TRUE(entered) << "CU execution did not reach the blocking plugin";
+  if (!entered) {
+    blocker->release();
+    return;
+  }
+
+  amdgpu::HwQueue added_queue{};
+  added_queue.process_id = 9;
+  added_queue.queue_id = 43;
+  std::promise<void> registration_started_promise;
+  auto registration_started = registration_started_promise.get_future();
+  auto registration =
+      std::async(std::launch::async, [cp = f.cp(), added_queue,
+                                      started = std::move(registration_started_promise)]() mutable {
+        started.set_value();
+        cp->register_queue(std::move(added_queue));
+      });
+  std::promise<void> removal_started_promise;
+  auto removal_started = removal_started_promise.get_future();
+  auto removal =
+      std::async(std::launch::async, [cp = f.cp(), removable_queue,
+                                      started = std::move(removal_started_promise)]() mutable {
+        started.set_value();
+        cp->unregister_queue(removable_queue.queue_id, removable_queue.process_id);
+      });
+
+  registration_started.wait();
+  removal_started.wait();
+
+  EXPECT_EQ(registration.wait_for(50ms), std::future_status::timeout)
+      << "queue structure changed while dispatch workers held live references";
+  EXPECT_EQ(removal.wait_for(50ms), std::future_status::timeout)
+      << "queue structure changed while dispatch workers held live references";
+
+  blocker->release();
+  EXPECT_TRUE(step.get());
+  registration.get();
+  removal.get();
+  f.cp()->unregister_queue(added_queue.queue_id, added_queue.process_id);
 }
 
 TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {

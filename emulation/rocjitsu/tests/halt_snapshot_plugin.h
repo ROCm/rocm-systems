@@ -193,6 +193,8 @@ public:
     total_++;
   }
 
+  bool requires_serial_hot_hooks() const override { return false; }
+
   uint32_t total() const {
     std::lock_guard<std::mutex> lk(mutex_);
     return total_;
