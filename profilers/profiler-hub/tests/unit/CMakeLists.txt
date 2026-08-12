@@ -11,7 +11,12 @@ set(UNIT_TEST_SOURCES
     json_serializer_test.cpp
     symbol_seal_test.cpp
     writer_test.cpp
-    reader_test.cpp
+    reader_core_test.cpp
+    reader_flows_test.cpp
+    reader_pmc_test.cpp
+    reader_memory_test.cpp
+    reader_summary_test.cpp
+    reader_track_metadata_test.cpp
     sqlite_backend_impl_test.cpp
 )
 
