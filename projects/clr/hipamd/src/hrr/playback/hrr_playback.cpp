@@ -1028,6 +1028,8 @@ int main(int argc, char** argv) {
   ctx.scan_args_bytes =
       env_size_or("HIP_HRR_REPLAY_SCAN_ARGS_BYTES", ctx.scan_args_bytes);
   ctx.scan_h2d = env_size_or("HIP_HRR_REPLAY_SCAN_H2D", 0u) != 0;
+  ctx.audit_host_args =
+      env_size_or("HIP_HRR_REPLAY_AUDIT_HOST_ARGS", 0u) != 0;
   // The scan reads the pointer arguments, which the pointer dump is what
   // collects, so asking for one implies the other.
   if (ctx.scan_args_ordinal && !ctx.dump_ptrs_ordinal)

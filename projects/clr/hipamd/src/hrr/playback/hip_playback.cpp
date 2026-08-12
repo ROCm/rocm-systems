@@ -541,6 +541,20 @@ static void decode_kernel_args(
     const bool dbg_dump_ptrs = (dbg_ptrs_out != nullptr);
     auto& dbg_ptrs = dbg_ptrs_out ? *dbg_ptrs_out : dbg_sink;
 
+    // A pointer that the kernel's own metadata does not describe as one.
+    // Hand-written assembly kernels carry hand-written metadata, and aiter's MLA
+    // decode kernel declares a 64-bit buffer address as two 4-byte by_value i32
+    // fields — "out16" followed by a "pad". Neither half is eight bytes wide, so
+    // neither the capture-side detector nor the per-argument rescan can find a
+    // pointer in it, and the capture-time address reaches the GPU unchanged;
+    // the kernel builds a buffer descriptor from it and faults on an address
+    // belonging to the recording process. Join adjacent scalar halves and
+    // translate the pair when it resolves to a recorded allocation.
+    struct { bool valid = false; uint16_t idx = 0;
+             const uint8_t* data = nullptr; size_t store = 0; } prev_half;
+    static const bool no_rescan =
+        (std::getenv("HIP_HRR_REPLAY_NO_RESCAN") != nullptr);
+
     for (uint16_t i = 0; i < num_args; i++) {
         if (p + 3 > end) break;
         uint8_t  value_kind = *p++;
@@ -557,12 +571,23 @@ static void decode_kernel_args(
         // what identifies it.
         if (dbg_args_out) {
             char line[128];
-            snprintf(line, sizeof(line), "  arg[%u] kind=%u size=%u words:", i,
+            snprintf(line, sizeof(line), "  arg[%u] kind=%u size=%u", i,
                      value_kind, arg_size);
             *dbg_args_out += line;
-            for (uint16_t off = 0; off + 8 <= arg_size; off += 8) {
-                uint64_t w; memcpy(&w, data + off, 8);
-                snprintf(line, sizeof(line), " 0x%llx", (unsigned long long)w);
+            if (arg_size >= 8) {
+                *dbg_args_out += " words:";
+                for (uint16_t off = 0; off + 8 <= arg_size; off += 8) {
+                    uint64_t w; memcpy(&w, data + off, 8);
+                    snprintf(line, sizeof(line), " 0x%llx", (unsigned long long)w);
+                    *dbg_args_out += line;
+                }
+            }
+            // Raw bytes as well: a pointer split across two 4-byte arguments is
+            // invisible as words, and those are exactly the arguments nothing
+            // translates.
+            *dbg_args_out += " bytes:";
+            for (uint16_t off = 0; off < arg_size && off < 32; off++) {
+                snprintf(line, sizeof(line), " %02x", data[off]);
                 *dbg_args_out += line;
             }
             *dbg_args_out += "\n";
@@ -712,6 +737,51 @@ static void decode_kernel_args(
             }
         }
         arg_ptrs.push_back(storage.data());
+
+        const size_t store_idx = arg_storage.size() - 1;
+        if (!no_rescan && value_kind == 0 && arg_size == 4) {
+            bool joined = false;
+            if (prev_half.valid && prev_half.idx + 1 == i) {
+                uint32_t lo, hi;
+                memcpy(&lo, prev_half.data, 4);
+                memcpy(&hi, data, 4);
+                const uint64_t rec = (static_cast<uint64_t>(hi) << 32) | lo;
+                // Same guards the embedded-pointer rescan uses: a genuine device
+                // address carries a full 48 bits, so a tiny low half means two
+                // ordinary scalars that happen to sit next to each other.
+                void* live = (rec >= 0x10000ULL &&
+                              (rec & 0xFFFFFFFFULL) >= 0x10000ULL)
+                                 ? ctx.translate_ptr(rec)
+                                 : nullptr;
+                if (live) {
+                    const uint64_t lv = reinterpret_cast<uint64_t>(live);
+                    const uint32_t l32 = static_cast<uint32_t>(lv);
+                    const uint32_t h32 = static_cast<uint32_t>(lv >> 32);
+                    memcpy(arg_storage[prev_half.store].data(), &l32, 4);
+                    memcpy(arg_storage[store_idx].data(), &h32, 4);
+                    if (dbg_dump_ptrs) dbg_ptrs.emplace_back(prev_half.idx, rec, live);
+                    static std::mutex mu;
+                    static std::set<std::string> warned;
+                    char key[160];
+                    snprintf(key, sizeof(key), "%s#%u", kernel_name.c_str(),
+                             prev_half.idx);
+                    bool first;
+                    { std::lock_guard<std::mutex> lk(mu); first = warned.insert(key).second; }
+                    if (first)
+                        fprintf(stderr,
+                                "[HRR] '%s' arg[%u]+arg[%u]: two scalar halves "
+                                "form 0x%llx, a recorded address the metadata "
+                                "does not call a pointer — translated to %p\n",
+                                compact_kernel_name(kernel_name).c_str(),
+                                prev_half.idx, i, (unsigned long long)rec, live);
+                    joined = true;
+                }
+            }
+            prev_half = joined ? decltype(prev_half){}
+                               : decltype(prev_half){true, i, data, store_idx};
+        } else {
+            prev_half.valid = false;
+        }
     }
 }
 
@@ -782,7 +852,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     std::vector<void*>                arg_ptrs;
     std::vector<std::vector<uint8_t>> arg_storage;
     // Optional recorded->live pointer dump for one target kernel (diff tooling).
-    const bool dbg_dump_ptrs = (ctx.dump_ptrs_ordinal != 0);
+    const bool dbg_dump_ptrs = (ctx.dump_ptrs_ordinal != 0) || ctx.audit_host_args;
     std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_ptrs;  // (arg_idx, recorded, live)
     std::string dbg_args;
     decode_kernel_args(ctx, p, end, num_args, kernel_name, arg_ptrs,
@@ -836,6 +906,29 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     hipStream_t stream = ctx.translate_stream(stream_rec);
     const size_t kernel_ordinal =
         ctx.kernels_launched.load(std::memory_order_relaxed) + 1;
+
+    if (ctx.audit_host_args) {
+        for (auto& [idx, rec, live] : dbg_ptrs) {
+            void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
+            AllocKind akind = AllocKind::Device;
+            if (!live || !ctx.live_alloc_of(live, &abase, &asize, &arec, &akind))
+                continue;
+            if (akind == AllocKind::Device) continue;
+            static std::mutex mu;
+            static std::set<std::string> seen;
+            std::string key = kernel_name + "#" + std::to_string(idx);
+            bool first;
+            { std::lock_guard<std::mutex> lk(mu); first = seen.insert(key).second; }
+            if (first)
+                fprintf(stderr,
+                        "[HRR host-audit] kernel #%zu '%s' arg[%u] reads %s "
+                        "allocation 0x%llx+%zu, which replay reallocated but "
+                        "could not refill\n",
+                        kernel_ordinal, compact_kernel_name(kernel_name).c_str(),
+                        idx, PlaybackContext::alloc_kind_name(akind),
+                        (unsigned long long)arec, asize);
+        }
+    }
 
     if (dbg_dump_ptrs && kernel_ordinal == ctx.dump_ptrs_ordinal) {
         fprintf(stderr,
@@ -1881,6 +1974,24 @@ static bool hrr_replay_zero_init() {
     return g_enabled;
 }
 
+// Byte to fill fresh replay allocations with, normally zero. Set it to
+// something no program would compute with — 0xa5, say — to find out whether a
+// kernel is consuming memory that nothing in the archive ever wrote: the
+// pattern then shows up in the values it derives, and a wild pointer built
+// from it is recognisable on sight in a fault address.
+static int hrr_replay_fill_byte() {
+    static std::once_flag once;
+    static int g_byte = 0;
+    std::call_once(once, [] {
+        if (const char* e = std::getenv("HIP_HRR_REPLAY_FILL_BYTE")) {
+            g_byte = static_cast<int>(strtoul(e, nullptr, 0) & 0xff);
+            fprintf(stderr, "[HRR] filling fresh allocations with 0x%02x "
+                            "(HIP_HRR_REPLAY_FILL_BYTE)\n", g_byte);
+        }
+    });
+    return g_byte;
+}
+
 // Zero-initialise a host-synchronous replay allocation, ordered.
 //
 // ROCM-27985. hipMalloc is host-synchronous by contract, so the recorded
@@ -1906,7 +2017,8 @@ static void hrr_zero_init_alloc(PlaybackContext& ctx, void* live, size_t sz) {
     if (!live || sz == 0) return;  // nothing written, so nothing to order
     if (!hrr_zero_init_needs_drain(hrr_replay_zero_init(), ctx.in_graph_capture))
         return;
-    if (hipMemsetAsync(live, 0, sz, nullptr) != hipSuccess) return;
+    if (hipMemsetAsync(live, hrr_replay_fill_byte(), sz, nullptr) != hipSuccess)
+        return;
     (void)hipStreamSynchronize(nullptr);
 }
 
