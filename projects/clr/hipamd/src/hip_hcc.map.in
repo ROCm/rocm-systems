@@ -694,3 +694,10 @@ global:
 local:
     *;
 } hip_7.15;
+
+hip_10.2 {
+global:
+    hipDeviceGetExecAffinitySupport;
+local:
+    *;
+} hip_10.1;
