@@ -93,6 +93,8 @@ output_config::parse_env()
     {
         tmp_directory = *tmp_dir;
     }
+    // Keep the default tmp directory aligned with ROCPROF_OUTPUT_PATH when it was not
+    // explicitly overridden, while preserving a caller-provided tmp_directory value.
     else if(previous_tmp_dir == previous_output_path)
     {
         tmp_directory = output_path;
