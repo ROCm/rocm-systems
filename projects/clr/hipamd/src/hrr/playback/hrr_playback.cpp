@@ -800,6 +800,7 @@ static bool run_pass(PlaybackContext& ctx,
   // Loading all code objects up front ensures no code object load happens after
   // any kernel launch, preventing error 719 from corrupting module loads.
   if (log) printf("[HRR] Pre-loading %zu code objects...\n", archive.code_objects.size());
+  size_t preload_failures = 0;
   for (const auto& [hex, fpath] : archive.code_objects) {
       // hex is "llllllllllllllllhhhhhhhhhhhhhhhh" (lo first, hi second)
       uint64_t lo = 0, hi = 0;
@@ -809,12 +810,29 @@ static bool run_pass(PlaybackContext& ctx,
       }
       hipModule_t mod = ctx.load_module(lo, hi);
       if (!mod) {
+          // An archive can hold an image this build cannot load at all: older
+          // captures recorded a code object's bytes after the runtime had freed
+          // the buffer, so the archive holds whatever the allocator put there
+          // instead. Aborting then loses a replay that never needed the module.
+          // Under --continue-on-error, carry on: the lazy load at first launch
+          // re-reports the failure, and only kernels from this module fail.
+          if (ctx.continue_on_error) {
+              fprintf(stderr, "[HRR] Skipping unloadable code object %s "
+                      "(--continue-on-error); kernels from it will fail\n", hex.c_str());
+              ++preload_failures;
+              continue;
+          }
           fprintf(stderr, "[HRR] Fatal: failed to pre-load code object %s — aborting\n",
                   hex.c_str());
           return false;
       }
   }
-  if (log) printf("[HRR] All code objects pre-loaded OK.\n");
+  if (log) {
+      if (preload_failures)
+          printf("[HRR] Code objects pre-loaded, %zu unloadable.\n", preload_failures);
+      else
+          printf("[HRR] All code objects pre-loaded OK.\n");
+  }
 
   // Reset the sequence counter to the first event's seq_id before every pass
   // so MT threads start waiting at the right value, and ST kernel-filter
@@ -1161,7 +1179,8 @@ static void print_usage(const char* argv0) {
     "                        archive fail, not to reproduce a fault: later events\n"
     "                        run in a state the capture never had, so their\n"
     "                        results mean less the further past the first error\n"
-    "                        they are.\n"
+    "                        they are. Also downgrades an unloadable code object\n"
+    "                        at pre-load from fatal to a warning.\n"
     "  --sync-watchdog-ms N  Abort with a diagnostic if any device synchronize does\n"
     "                        not complete within N ms (catches hung/deadlocked\n"
     "                        kernels, e.g. StreamK flag spin-waits). 0 = disabled.\n"
