@@ -270,6 +270,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed the widened `amdsmi_gpu_metrics_t` accumulators reporting `4294967295` instead of `N/A`**.  
   - `amdsmi_get_gpu_metrics_info()` and `amd-smi metric` reported an unsupported `gfx_activity_acc`, `mem_activity_acc`, `pcie_nak_sent_count_acc`, `pcie_nak_rcvd_count_acc` or `pcie_lc_perf_other_end_recovery` as a literal `4294967295` instead of `N/A`.
 
+- **Fixed `amd-smi set --compute-partition-mem-alloc-mode` reporting under `accelerator_partition_mem_alloc_mode`**.  
+  - `amd-smi set` and `amd-smi static --partition` now both report `compute_partition_mem_alloc_mode`, matching the flag. Scripts that read the old key from `set --json` must switch to the new one.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
