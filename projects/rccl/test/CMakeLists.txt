@@ -137,6 +137,9 @@ if(BUILD_TESTS)
       list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_ENABLE_HOST_API_TESTS)
     endif()
   endif()
+  if(HIP_MEM_LOCATION_TYPE_HOST)
+    list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_HAS_HIP_MEM_LOCATION_TYPE_HOST)
+  endif()
   list(APPEND RCCL_COMMON_COMPILE_DEFS __HIP_PLATFORM_AMD__)
 
   # All test executables link against GTest; tell MPIHelpers.cpp so it can use

@@ -361,6 +361,16 @@ check_symbol_exists("hipMemcpyBatchAsync" "hip/hip_runtime_api.h" HIP_MEMCPY_BAT
 ### Check for cuMem VMM DMA-BUF export support (driver-level dmabuf export).
 check_symbol_exists("hipMemGetHandleForAddressRange" "hip/hip_runtime_api.h" HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
 
+### Check for hipMemLocationTypeHost (host-NUMA VMM location type).
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemLocationType t = hipMemLocationTypeHost;
+    (void)t;
+    return 0;
+  }
+" HIP_MEM_LOCATION_TYPE_HOST)
+
 ### Check for uncached VMM allocation type (hipMemAllocationTypeUncached).
 check_cxx_source_compiles("
   #include <hip/hip_runtime_api.h>
