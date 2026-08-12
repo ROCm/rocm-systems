@@ -1191,6 +1191,12 @@ std::optional<uint32_t> Operand::simd_vgpr_base_impl(const amdgpu::Wavefront &wf
   return callback ? (this->*callback)(wf) : std::nullopt;
 }
 
+std::optional<uint32_t> Operand::simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const {
+  decltype(ExecutionBackend::simd_vgpr_base_mut) callback =
+      execution_backend_ ? execution_backend_->simd_vgpr_base_mut : nullptr;
+  return callback ? (this->*callback)(wf) : std::nullopt;
+}
+
 const amdgpu::VgprStorage *Operand::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage : nullptr;

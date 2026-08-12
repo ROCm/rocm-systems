@@ -20,6 +20,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
@@ -2441,6 +2442,7 @@ TEST(Rdna4True16Vop3Test, AddF16UsesSelectedHalvesAndPreservesDestinationHalf) {
 
 TEST(Rdna4True16Vop3Test, AddF16DppPreservesMaskedDestinationHalf) {
   ForceScalarGuard guard(false);
+  ScopedIsaExecutionBackend execution_backend_scope{&rdna4::execution_backend()};
   amdgpu::GpuMemory gpu_mem("rdna4_true16_add_f16_dpp_mem");
   amdgpu::L2Cache l2("rdna4_true16_add_f16_dpp_l2");
 

@@ -1,0 +1,86 @@
+# ---------------------------------------------------------------------------
+# AMD SMI Python-version loader tests.
+#
+# The amdsmi loader and wrapper must behave identically across every CPython
+# version AMD SMI supports (3.6.8 through the latest release). This job runs the
+# version-independent loader contract tests under a matrix of interpreters so a
+# change that only breaks on a specific version is caught. No GPU required.
+# ---------------------------------------------------------------------------
+
+name: AMDSMI Python Version Tests
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/py-interface/**'
+      - 'projects/amdsmi/tools/generator.py'
+      - 'projects/amdsmi/tools/disable_system_fallback.py'
+      - 'projects/amdsmi/tests/python/**'
+      - 'projects/amdsmi/tests/run_amdsmi_python_versions_test.py'
+      - '.github/workflows/amdsmi-python-versions.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/py-interface/**'
+      - 'projects/amdsmi/tools/generator.py'
+      - 'projects/amdsmi/tools/disable_system_fallback.py'
+      - 'projects/amdsmi/tests/python/**'
+      - 'projects/amdsmi/tests/run_amdsmi_python_versions_test.py'
+      - '.github/workflows/amdsmi-python-versions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-version-tests:
+    name: Python ${{matrix.python-version}}
+    runs-on: ubuntu-22.04
+    # 3.6/3.7 run inside official python images because actions/setup-python no
+    # longer provides those EOL interpreters on a supported hosted runner (they
+    # were only on ubuntu-20.04, itself being retired). The images are archived,
+    # not deleted, so this stays green after the runner EOL. Newer minors run
+    # natively via setup-python. Empty matrix.container = no container.
+    container: ${{matrix.container}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { python-version: '3.6',  container: 'python:3.6-slim-bullseye' }
+          - { python-version: '3.7',  container: 'python:3.7-slim-bullseye' }
+          - { python-version: '3.8',  container: '' }
+          - { python-version: '3.9',  container: '' }
+          - { python-version: '3.10', container: '' }
+          - { python-version: '3.11', container: '' }
+          - { python-version: '3.12', container: '' }
+          - { python-version: '3.13', container: '' }
+          - { python-version: '3.14', container: '' }
+
+    steps:
+      # The slim python images ship without git; actions/checkout needs it.
+      - name: Install git (container legs only)
+        if: matrix.container != ''
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          # rocm-systems is a large monorepo; only the amdsmi tests are needed.
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
+
+      - name: Set up Python ${{matrix.python-version}}
+        # Container legs already ship the exact interpreter; only host runners
+        # need setup-python.
+        if: matrix.container == ''
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{matrix.python-version}}
+
+      - name: Run loader tests under this interpreter
+        run: |
+          python3 projects/amdsmi/tests/run_amdsmi_python_versions_test.py \
+            --interpreters "$(command -v python3)"
