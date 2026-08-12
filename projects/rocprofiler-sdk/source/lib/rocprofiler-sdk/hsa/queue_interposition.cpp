@@ -544,8 +544,12 @@ completion_monitor_loop(completion_monitor& mon)
             auto value = get_core_table()->hsa_signal_load_relaxed_fn(pending.completion_signal);
             if(value < pending.starting_value)
             {
-                run_completion(pending.session);
+                // Decrement inflight before invoking callbacks so that a
+                // reentrant interposition_sync() / drain_completion_monitor()
+                // call from within a callback does not wait on the entry it is
+                // currently executing (which would self-deadlock on this thread).
                 mon.inflight.fetch_sub(1, std::memory_order_release);
+                run_completion(pending.session);
             }
             else
                 mon.active_scratch.emplace_back(std::move(pending));
@@ -572,8 +576,8 @@ completion_monitor_loop(completion_monitor& mon)
         drain_incoming(mon);
         for(auto& pending : mon.active)
         {
-            run_completion(pending.session);
             mon.inflight.fetch_sub(1, std::memory_order_release);
+            run_completion(pending.session);
         }
         mon.active.clear();
 
@@ -599,8 +603,8 @@ completion_monitor_loop(completion_monitor& mon)
     drain_incoming(mon);
     for(auto& pending : mon.active)
     {
-        run_completion(pending.session);
         mon.inflight.fetch_sub(1, std::memory_order_release);
+        run_completion(pending.session);
     }
     mon.active.clear();
 
