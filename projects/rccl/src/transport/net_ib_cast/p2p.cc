@@ -923,6 +923,17 @@ static ncclResult_t IbCastLogCompletionWithError(struct ncclIbNetCommBase* commB
   return ncclSuccess;
 }
 
+// Record one drained CQE against its QP, once per CQE not per sub-request.
+static inline void IbCastTelemetryWqeComplete(struct ncclIbNetCommBase* commBase, struct ibv_wc* wc, int devIndex,
+                                              int64_t postTs) {
+  if (!rcclTelemetryEnabled) return;
+  ncclIbQp* telQp = NULL;
+  int telQpIdx = -1;
+  if (IbCastCommBaseGetQpByQpNum(commBase, devIndex, wc->qp_num, &telQp, &telQpIdx) != ncclSuccess) return;
+  if (telQp == NULL || telQp->telQpSlot < 0) return;
+  rcclTelemetryWqeComplete(commBase->vProps.devs[devIndex], telQp->channelId, telQp->telQpSlot, postTs);
+}
+
 static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commBase, struct ibv_wc* wc, int devIndex) {
   // In case of a completion with error, there is no guarantee that all fields
   // of the completion are valid.
@@ -988,6 +999,7 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
                                        NULL));
 #endif
     }
+    IbCastTelemetryWqeComplete(commBase, wc, devIndex, req->tel_post_ts);
   } else {
     if (wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
       if (req->type != NCCL_NET_IB_REQ_RECV && !commBase->resiliency) {
@@ -1006,6 +1018,7 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
       }
       TRACE(NCCL_NET, "NET/IB: %s: Got completion for a recv request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)",
             __func__, req, req->base, req->id, devIndex, wc->qp_num);
+      IbCastTelemetryWqeComplete(commBase, wc, devIndex, req->tel_post_ts);
       req->events[devIndex]--;
     } else if (wc->opcode == IBV_WC_RDMA_READ) {
       TRACE(NCCL_NET,
@@ -1087,12 +1100,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
 #endif
     }
     // One CQE == one WQE completion on one QP; record once (not per sub-request).
-    if (rcclTelemetryEnabled) {
-      ncclIbQp* telQp = NULL; int telQpIdx = -1;
-      if (IbCastCommBaseGetQpByQpNum(commBase, devIndex, wc->qp_num, &telQp, &telQpIdx) == ncclSuccess
-          && telQp && telQp->telQpSlot >= 0)
-        rcclTelemetryWqeComplete(commBase->vProps.devs[devIndex], telQp->channelId, telQp->telQpSlot, req->tel_post_ts);
-    }
+    IbCastTelemetryWqeComplete(commBase, wc, devIndex, req->tel_post_ts);
   } else {
     if (wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
       if (req->type == NCCL_NET_IB_REQ_UNUSED && commBase->resiliency) {
@@ -1119,12 +1127,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
       }
       TRACE(NCCL_NET, "NET/IB: %s: Got completion for a recv request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)",
             __func__, req, req->base, req->id, devIndex, wc->qp_num);
-      if (rcclTelemetryEnabled) {
-        ncclIbQp* telQp = NULL; int telQpIdx = -1;
-        if (IbCastCommBaseGetQpByQpNum(commBase, devIndex, wc->qp_num, &telQp, &telQpIdx) == ncclSuccess
-            && telQp && telQp->telQpSlot >= 0)
-          rcclTelemetryWqeComplete(commBase->vProps.devs[devIndex], telQp->channelId, telQp->telQpSlot, req->tel_post_ts);
-      }
+      IbCastTelemetryWqeComplete(commBase, wc, devIndex, req->tel_post_ts);
       struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)commBase;
 
       if (recvComm->prepostReceiveWorkRequests) {
