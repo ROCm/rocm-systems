@@ -34,10 +34,10 @@ chmod 755 "$CONFIG_DIR"
 
 if [ ! -f "$HMAC_KEY_FILE" ]; then
     echo "Generating HMAC key at $HMAC_KEY_FILE..."
-    # openssl is already a hard dependency (libssl); use it to produce 32 bytes
-    # of cryptographically-random key material and immediately restrict access.
-    if ! openssl rand -out "$HMAC_KEY_FILE" 32; then
-        echo "ERROR: Failed to generate HMAC key with openssl." >&2
+    # Draw 32 bytes of cryptographically-random key material from the kernel
+    # CSPRNG and immediately restrict access.
+    if ! dd if=/dev/urandom of="$HMAC_KEY_FILE" bs=32 count=1 status=none 2>/dev/null; then
+        echo "ERROR: Failed to generate HMAC key." >&2
         rm -f "$HMAC_KEY_FILE"
         exit 1
     fi

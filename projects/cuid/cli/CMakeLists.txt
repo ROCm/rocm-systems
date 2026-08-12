@@ -53,7 +53,7 @@ target_include_directories(${AMDCUID_TOOL_EXECUTABLE} PRIVATE ${INC_DIR})
 
 # Link against the CUID library (public API only)
 # The tool now uses only the public API defined in amd_cuid.h
-target_link_libraries(${AMDCUID_TOOL_EXECUTABLE} amdcuid_static OpenSSL::Crypto)
+target_link_libraries(${AMDCUID_TOOL_EXECUTABLE} amdcuid_static)
 
 # Install the tool
 install(

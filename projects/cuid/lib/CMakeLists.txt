@@ -39,11 +39,6 @@ message("")
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(INC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# When built as part of the top-level project, OpenSSL is already resolved
-# (either from the system or via FetchContent). QUIET prevents a redundant
-# hard failure when targets are already available through FetchContent.
-find_package(OpenSSL QUIET)
-
 set(CUID_SOURCES
     ${SRC_DIR}/cuid.cc
     ${SRC_DIR}/cuid_util.cc
@@ -61,6 +56,19 @@ set(CUID_SOURCES
     ${SRC_DIR}/smbios_util.cc
     ${SRC_DIR}/gim_util.cc
 )
+
+# Non-Windows builds use a small vendored SHA-256/HMAC implementation (cifra,
+# CC0-1.0), see src/third_party/cifra.
+if(NOT WIN32)
+    set(CIFRA_DIR ${SRC_DIR}/third_party/cifra)
+    list(
+        APPEND CUID_SOURCES
+        ${CIFRA_DIR}/sha256.c
+        ${CIFRA_DIR}/hmac.c
+        ${CIFRA_DIR}/chash.c
+        ${CIFRA_DIR}/blockwise.c
+    )
+endif()
 
 set(CUID_HEADERS
     ${INC_DIR}/amd_cuid.h
@@ -92,6 +100,13 @@ target_include_directories(
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+if(NOT WIN32)
+    target_include_directories(
+        amdcuid_static
+        PRIVATE ${CIFRA_DIR} ${CIFRA_DIR}/ext
+    )
+endif()
+
 # Pass the version-independent shared config directory to the library at compile
 # time. All installed versions of the library must agree on this path so that
 # the HMAC key is shared and CUIDs remain stable across version upgrades.
@@ -102,8 +117,6 @@ target_compile_definitions(
 
 if(WIN32)
     target_link_libraries(amdcuid_static PUBLIC bcrypt)
-else()
-    target_link_libraries(amdcuid_static PUBLIC OpenSSL::Crypto)
 endif()
 
 # Static library
