@@ -49,10 +49,10 @@ void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
   packed_tid_ = arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
                 arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
                 arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-                arch == ROCJITSU_CODE_ARCH_GFX1250;
+                arch == ROCJITSU_CODE_ARCH_CDNA5;
 
   sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     sdma_packet_dialect_ = SdmaPacketDialect::Gfx1250;
   else if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
            arch == ROCJITSU_CODE_ARCH_RDNA4)
@@ -218,7 +218,7 @@ bool compute_pgm_rsrc1_mode_preserves_dx10_ieee(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA3_5:
     return true;
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
   case ROCJITSU_CODE_ARCH_NUM_ARCHS:
@@ -240,7 +240,7 @@ bool compute_pgm_rsrc1_mode_has_debug_field(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA3_5:
     return true;
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
   case ROCJITSU_CODE_ARCH_NUM_ARCHS:
