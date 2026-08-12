@@ -112,7 +112,7 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   constexpr uint32_t kRdnaDescriptorSgprLimit = 106;
   if (arch_is_cdna(arch))
     return kCdnaDescriptorSgprLimit;
-  if (arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
     return kRdnaDescriptorSgprLimit;
   return 0;
 }
@@ -130,17 +130,17 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
     return 64u * 1024u;
   case ROCJITSU_CODE_ARCH_CDNA4:
     return 160u * 1024u;
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    // gfx1250 can allocate up to 320 KiB to one workgroup. This is distinct
+    // from the configurable LDS/vector-cache partition sizes reported for a
+    // TCP, which must not be used as the descriptor allocation ceiling.
+    return 320u * 1024u;
   case ROCJITSU_CODE_ARCH_RDNA1:
   case ROCJITSU_CODE_ARCH_RDNA2:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
     return 64u * 1024u;
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    // gfx1250 can allocate up to 320 KiB to one workgroup. This is distinct
-    // from the configurable LDS/vector-cache partition sizes reported for a
-    // TCP, which must not be used as the descriptor allocation ceiling.
-    return 320u * 1024u;
   default:
     return 0;
   }
