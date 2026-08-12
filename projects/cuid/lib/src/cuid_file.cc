@@ -76,8 +76,8 @@ bool CuidFileLock::acquire() {
   }
 
   if (lock_fd_ < 0) {
-    LOG(ERROR,
-        "CuidFileLock: Failed to open lock file " << lock_file_path_ << ": " << strerror(errno));
+    LOG(ERROR, "CuidFileLock: Failed to open lock file " << lock_file_path_ << ": "
+                                                         << CuidUtilities::errno_string(errno));
     return false;
   }
 
@@ -91,8 +91,8 @@ bool CuidFileLock::acquire() {
 
   // F_SETLKW: blocking call - wait until lock is available
   if (fcntl(lock_fd_, F_SETLKW, &fl) < 0) {
-    LOG(ERROR,
-        "CuidFileLock: Failed to acquire lock on " << lock_file_path_ << ": " << strerror(errno));
+    LOG(ERROR, "CuidFileLock: Failed to acquire lock on " << lock_file_path_ << ": "
+                                                          << CuidUtilities::errno_string(errno));
     close(lock_fd_);
     lock_fd_ = -1;
     return false;
@@ -146,8 +146,8 @@ bool CuidFileLock::acquire_with_timeout(int timeout_seconds) {
   }
 
   if (lock_fd_ < 0) {
-    LOG(ERROR,
-        "CuidFileLock: Failed to open lock file " << lock_file_path_ << ": " << strerror(errno));
+    LOG(ERROR, "CuidFileLock: Failed to open lock file " << lock_file_path_ << ": "
+                                                         << CuidUtilities::errno_string(errno));
     return false;
   }
 
@@ -175,8 +175,8 @@ bool CuidFileLock::acquire_with_timeout(int timeout_seconds) {
 
     // Check if it's a "lock held" error vs real error
     if (errno != EACCES && errno != EAGAIN) {
-      LOG(ERROR,
-          "CuidFileLock: Failed to acquire lock on " << lock_file_path_ << ": " << strerror(errno));
+      LOG(ERROR, "CuidFileLock: Failed to acquire lock on " << lock_file_path_ << ": "
+                                                            << CuidUtilities::errno_string(errno));
       close(lock_fd_);
       lock_fd_ = -1;
       return false;
@@ -229,8 +229,8 @@ bool CuidFileLock::try_acquire() {
   }
 
   if (lock_fd_ < 0) {
-    LOG(ERROR,
-        "CuidFileLock: Failed to open lock file " << lock_file_path_ << ": " << strerror(errno));
+    LOG(ERROR, "CuidFileLock: Failed to open lock file " << lock_file_path_ << ": "
+                                                         << CuidUtilities::errno_string(errno));
     return false;
   }
 
@@ -248,8 +248,8 @@ bool CuidFileLock::try_acquire() {
       // Lock is held by another process
       LOG(DEBUG, "CuidFileLock: Lock on " << lock_file_path_ << " held by another process");
     } else {
-      LOG(ERROR, "CuidFileLock: Failed to try_acquire lock on " << lock_file_path_ << ": "
-                                                                << strerror(errno));
+      LOG(ERROR, "CuidFileLock: Failed to try_acquire lock on "
+                     << lock_file_path_ << ": " << CuidUtilities::errno_string(errno));
     }
     close(lock_fd_);
     lock_fd_ = -1;
@@ -277,8 +277,8 @@ void CuidFileLock::release() {
   fl.l_type = F_UNLCK;
 
   if (fcntl(lock_fd_, F_SETLK, &fl) < 0) {
-    LOG(ERROR,
-        "CuidFileLock: Failed to release lock on " << lock_file_path_ << ": " << strerror(errno));
+    LOG(ERROR, "CuidFileLock: Failed to release lock on " << lock_file_path_ << ": "
+                                                          << CuidUtilities::errno_string(errno));
   }
 
   close(lock_fd_);
@@ -331,7 +331,7 @@ amdcuid_id_t CuidFile::string_to_cuid(const std::string& str) const {
   }
 
   for (int i = 0; i < 16; ++i) {
-    std::string byte_str = hex_only.substr(i * 2, 2);
+    std::string byte_str = hex_only.substr(static_cast<size_t>(i) * 2, 2);
     id.bytes[i] = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
   }
 

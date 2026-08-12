@@ -97,6 +97,10 @@ const char* amdcuid_id_to_string(amdcuid_id_t cuid_value) {
 }
 
 amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count) {
+  if (!count) {
+    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  }
+
   amdcuid_status_t status;
   // get all the devices on the system first
   if (mgr.devices().empty()) {
@@ -109,7 +113,7 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count)
   auto handle_list = mgr.get_all_handles();
   auto handle_count = static_cast<uint32_t>(handle_list.size());
   if (handle_count == 0) {
-    handles = nullptr;
+    *count = 0;
     return AMDCUID_STATUS_UNSUPPORTED;
   }
   if (*count < handle_count) {
@@ -448,7 +452,11 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
   if (!device) {
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
   }
-  amdcuid_status_t status;
+  // Must be initialized: most cases below only assign `status` inside
+  // `if (data != nullptr)`, so the size-query form of this API
+  // (data == nullptr, *length large enough) would otherwise return the value
+  // of an uninitialized variable.
+  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
   switch (query) {
     case AMDCUID_QUERY_PRIMARY_CUID: {
       if (geteuid() != 0) {
@@ -665,10 +673,19 @@ amdcuid_status_t amdcuid_set_hash_key(const uint8_t key[32]) {
   if (geteuid() != 0) {
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
+  if (!key) {
+    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  }
 
-  global_hmac.set_hmac_key(key);
+  // Persist first: if the key cannot be written, leave the in-memory key alone
+  // so the process keeps deriving the CUIDs that match what is on disk. The
+  // previous code ignored both failures and reported success regardless.
+  amdcuid_status_t status = global_hmac.store_key(key);
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    return status;
+  }
 
-  return AMDCUID_STATUS_SUCCESS;
+  return global_hmac.set_hmac_key(key);
 }
 
 amdcuid_status_t amdcuid_generate_hash_key(uint8_t key[32]) {
@@ -677,6 +694,5 @@ amdcuid_status_t amdcuid_generate_hash_key(uint8_t key[32]) {
   }
   if (!key) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
-  global_hmac.generate_key(key);
-  return AMDCUID_STATUS_SUCCESS;
+  return global_hmac.generate_key(key);
 }

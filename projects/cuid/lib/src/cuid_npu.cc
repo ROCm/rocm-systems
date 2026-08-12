@@ -45,6 +45,9 @@ static amdcuid_status_t discover_via_accel(std::vector<DevicePtr>& npus) {
   if (!dir) return AMDCUID_STATUS_UNSUPPORTED;
 
   struct dirent* entry;
+  // This call site owns its DIR*, which is all POSIX requires for readdir to be
+  // safe; readdir_r is deprecated and must not be adopted.
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
   while ((entry = readdir(dir)) != NULL) {
     if (is_accel_entry(entry->d_name)) {
       std::string accel_name(entry->d_name);
@@ -77,6 +80,9 @@ static amdcuid_status_t discover_via_pci_bus(std::vector<DevicePtr>& npus) {
   if (!dir) return AMDCUID_STATUS_UNSUPPORTED;
 
   struct dirent* entry;
+  // This call site owns its DIR*, which is all POSIX requires for readdir to be
+  // safe; readdir_r is deprecated and must not be adopted.
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
   while ((entry = readdir(dir)) != NULL) {
     if (entry->d_name[0] == '.') continue;
 
@@ -126,7 +132,7 @@ amdcuid_status_t CuidNpu::discover_single(amdcuid_npu_info* npu_info,
     uint8_t vendor_id_bytes[2] = {0};
     const uint16_t offset = 0x0;
     amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, vendor_id_bytes, 2, offset);
-    uint16_t vendor_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(vendor_id_bytes));
+    uint16_t vendor_id_int = PciUtil::load_le16(vendor_id_bytes);
     info.header.fields.npu.vendor_id = (status == AMDCUID_STATUS_SUCCESS) ? vendor_id_int : 0;
   } else {
     info.header.fields.npu.vendor_id = static_cast<uint16_t>(strtol(vendor.c_str(), nullptr, 16));
@@ -137,7 +143,7 @@ amdcuid_status_t CuidNpu::discover_single(amdcuid_npu_info* npu_info,
     uint8_t device_id_bytes[2] = {0};
     const uint16_t offset = 0x2;
     amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, device_id_bytes, 2, offset);
-    uint16_t device_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(device_id_bytes));
+    uint16_t device_id_int = PciUtil::load_le16(device_id_bytes);
     info.header.fields.npu.device_id = (status == AMDCUID_STATUS_SUCCESS) ? device_id_int : 0;
   } else {
     info.header.fields.npu.device_id = static_cast<uint16_t>(strtol(device.c_str(), nullptr, 16));
@@ -149,7 +155,7 @@ amdcuid_status_t CuidNpu::discover_single(amdcuid_npu_info* npu_info,
     uint8_t class_id_bytes[2] = {0};
     const uint16_t offset = 0xa;
     amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, class_id_bytes, 2, offset);
-    uint16_t class_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(class_id_bytes));
+    uint16_t class_id_int = PciUtil::load_le16(class_id_bytes);
     pci_class_integer = (status == AMDCUID_STATUS_SUCCESS) ? class_id_int : 0;
   } else {
     // sysfs class file returns 24-bit value (class:subclass:prog_if),
@@ -160,13 +166,13 @@ amdcuid_status_t CuidNpu::discover_single(amdcuid_npu_info* npu_info,
 
   std::string revision_id = CuidUtilities::read_sysfs_file(device_path + "/revision");
   if (revision_id.empty() && !bdf.empty()) {
-    uint8_t revision_id_bytes[2] = {0};
+    // RevisionID is the single byte at 0x08. The byte at 0x09 is prog-if and
+    // must not be folded in: revision_id is a uint8_t, so a two-byte load left
+    // prog-if in the low half and the revision was discarded by the narrowing.
+    uint8_t revision_id_byte = 0;
     const uint16_t offset = 0x8;
-    amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, revision_id_bytes, 2, offset);
-    uint16_t revision_id_int =
-        PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(revision_id_bytes));
-    info.header.fields.npu.revision_id =
-        (status == AMDCUID_STATUS_SUCCESS) ? static_cast<uint8_t>(revision_id_int) : 0;
+    amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, &revision_id_byte, 1, offset);
+    info.header.fields.npu.revision_id = (status == AMDCUID_STATUS_SUCCESS) ? revision_id_byte : 0;
   } else {
     info.header.fields.npu.revision_id =
         static_cast<uint8_t>(strtol(revision_id.c_str(), nullptr, 16));
@@ -231,7 +237,7 @@ amdcuid_status_t CuidNpu::get_hardware_fingerprint(uint64_t& fingerprint) const 
       uint64_t fingerprint_value = 0;
       std::memcpy(&fingerprint_value, fingerprint_bytes, fingerprint_size);
       fingerprint = PciUtil::le64_to_be64(fingerprint_value);
-      return AMDCUID_STATUS_SUCCESS;
+      return CuidUtilities::validate_fingerprint(fingerprint);
     } else {
       fingerprint = 0;
       return status;

@@ -53,9 +53,20 @@ static void init_logging(bool enabled) {
     g_log_file = std::make_unique<std::ofstream>("/var/log/amdcuid.log", std::ios::app);
     if (g_log_file->is_open()) {
       g_logging_to_file = true;
-      // Add timestamp to log entry
+      // Add timestamp to log entry. ctime() formats into a static buffer
+      // shared by every thread; the daemon serves clients concurrently, so
+      // use the reentrant form.
       time_t now = time(nullptr);
-      *g_log_file << "\n=== Log started at " << ctime(&now);
+      struct tm tm_buf{};
+      char stamp[64] = "unknown time";
+      if (localtime_r(&now, &tm_buf) != nullptr) {
+        if (strftime(stamp, sizeof(stamp), "%a %b %e %H:%M:%S %Y", &tm_buf) == 0) {
+          // Fixed 12-character literal into a 64-byte buffer.
+          // NOLINTNEXTLINE(cert-err33-c)
+          std::snprintf(stamp, sizeof(stamp), "unknown time");
+        }
+      }
+      *g_log_file << "\n=== Log started at " << stamp << "\n";
     }
   }
 }
@@ -82,7 +93,10 @@ class CuidDaemonServer {
     struct sockaddr_un server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sun_family = AF_UNIX;
-    strncpy(server_addr.sun_path, AMDCUID_SOCKET_PATH, sizeof(server_addr.sun_path) - 1);
+    constexpr size_t kSocketPathLen = sizeof(AMDCUID_SOCKET_PATH) - 1;
+    static_assert(kSocketPathLen < sizeof(server_addr.sun_path),
+                  "AMDCUID_SOCKET_PATH does not fit in sockaddr_un::sun_path");
+    memcpy(server_addr.sun_path, AMDCUID_SOCKET_PATH, kSocketPathLen);
 
     if (bind(server_fd_, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
       close(server_fd_);
@@ -137,9 +151,17 @@ class CuidDaemonServer {
   }
 
   void handle_client(int client_fd) {
-    IpcRequest request;
-    if (recv(client_fd, &request, sizeof(request), 0) != sizeof(request)) {
-      return;
+    // recv() on a SOCK_STREAM socket may return a short read, so loop until the
+    // whole fixed-size request has arrived. Anything less is a malformed peer.
+    IpcRequest request{};
+    auto* buf = reinterpret_cast<uint8_t*>(&request);
+    size_t got = 0;
+    while (got < sizeof(request)) {
+      ssize_t n = recv(client_fd, buf + got, sizeof(request) - got, 0);
+      if (n <= 0) {
+        return;
+      }
+      got += static_cast<size_t>(n);
     }
 
     IpcResponse response;
@@ -162,7 +184,11 @@ class CuidDaemonServer {
   }
 
   amdcuid_status_t handle_add_device(const IpcRequest& request, amdcuid_id_t& device_handle) {
-    std::string dev_path(request.device_path);
+    // Never trust the wire buffer to be NUL-terminated.
+    const std::string dev_path = ipc_get_device_path(request);
+    if (dev_path.empty()) {
+      return AMDCUID_STATUS_INVALID_ARGUMENT;
+    }
     amdcuid_device_type_t device_type = request.device_type;
     amdcuid_status_t status =
         amdcuid_get_handle_by_dev_path(dev_path.c_str(), device_type, &device_handle);

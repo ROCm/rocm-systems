@@ -21,28 +21,41 @@
 
 class CuidDaemonIpcClientUtils {
  public:
+  // Fill sun_path leaving room for the terminating NUL.
+  static void fill_socket_addr(struct sockaddr_un& addr) {
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    constexpr size_t kPathLen = sizeof(AMDCUID_SOCKET_PATH) - 1;
+    static_assert(kPathLen < sizeof(addr.sun_path),
+                  "AMDCUID_SOCKET_PATH does not fit in sockaddr_un::sun_path");
+    memcpy(addr.sun_path, AMDCUID_SOCKET_PATH, kPathLen);
+  }
+
   static amdcuid_status_t request_add_device(const char* dev_path,
                                              amdcuid_device_type_t device_type,
                                              amdcuid_id_t* device_handle) {
+    // Build the request before opening the socket so an over-long path is
+    // rejected without bothering the daemon. `request` is value-initialized so
+    // no uninitialized padding is written to the socket.
+    IpcRequest request{};
+    request.type = IpcMessageType::ADD_DEVICE;
+    request.device_type = device_type;
+    if (!ipc_set_device_path(request, dev_path)) {
+      return AMDCUID_STATUS_INVALID_ARGUMENT;
+    }
+
     int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock_fd < 0) {
       return AMDCUID_STATUS_IPC_ERROR;
     }
 
     struct sockaddr_un server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sun_family = AF_UNIX;
-    strncpy(server_addr.sun_path, AMDCUID_SOCKET_PATH, sizeof(server_addr.sun_path));
+    fill_socket_addr(server_addr);
 
     if (connect(sock_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
       close(sock_fd);
       return AMDCUID_STATUS_IPC_ERROR;
     }
-
-    IpcRequest request;
-    request.type = IpcMessageType::ADD_DEVICE;
-    strncpy(request.device_path, dev_path, sizeof(request.device_path));
-    request.device_type = device_type;
 
     if (send(sock_fd, &request, sizeof(request), 0) != sizeof(request)) {
       close(sock_fd);
@@ -69,20 +82,18 @@ class CuidDaemonIpcClientUtils {
     }
 
     struct sockaddr_un server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sun_family = AF_UNIX;
-    strncpy(server_addr.sun_path, AMDCUID_SOCKET_PATH, sizeof(server_addr.sun_path));
+    fill_socket_addr(server_addr);
 
     if (connect(sock_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
       close(sock_fd);
       return AMDCUID_STATUS_IPC_ERROR;
     }
 
-    IpcRequest request;
+    // Value-initialized: device_path/device_type are unused for
+    // REFRESH_DEVICES and must not leak uninitialized stack bytes.
+    IpcRequest request{};
     request.type = IpcMessageType::REFRESH_DEVICES;
-    memset(request.device_path, 0,
-           sizeof(request.device_path));             // Not used for REFRESH_DEVICES
-    request.device_type = AMDCUID_DEVICE_TYPE_NONE;  // Not used for REFRESH_DEVICES
+    request.device_type = AMDCUID_DEVICE_TYPE_NONE;
 
     if (send(sock_fd, &request, sizeof(request), 0) != sizeof(request)) {
       close(sock_fd);
@@ -106,9 +117,7 @@ class CuidDaemonIpcClientUtils {
     }
 
     struct sockaddr_un server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sun_family = AF_UNIX;
-    strncpy(server_addr.sun_path, AMDCUID_SOCKET_PATH, sizeof(server_addr.sun_path));
+    fill_socket_addr(server_addr);
 
     if (connect(sock_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
       close(sock_fd);
@@ -180,7 +189,7 @@ amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
 }
 
 // helper function to convert CuidFileEntry to appropriate CuidDevice
-void _convert_entry_to_device(CuidFileEntry& entry, DevicePtr& device) {
+void convert_entry_to_device(CuidFileEntry& entry, DevicePtr& device) {
   switch (entry.device_type) {
     case AMDCUID_DEVICE_TYPE_PLATFORM: {
       amdcuid_platform_info platform_info = {};
@@ -255,7 +264,7 @@ amdcuid_status_t CuidDeviceManager::get_devices_from_file_entries(CuidFile& cuid
   devices_.clear();
   for (const auto& entry : cuid_file.get_entries()) {
     DevicePtr device = nullptr;
-    _convert_entry_to_device(const_cast<CuidFileEntry&>(entry), device);
+    convert_entry_to_device(const_cast<CuidFileEntry&>(entry), device);
     if (device) {
       devices_.push_back(device);
     }
@@ -309,7 +318,7 @@ amdcuid_status_t CuidDeviceManager::get_device_from_file_by_id(amdcuid_id_t& der
   }
 
   // Create device based on the found entry
-  _convert_entry_to_device(entry, device);
+  convert_entry_to_device(entry, device);
   if (device) {
     add_device(device);
   }
@@ -343,7 +352,7 @@ amdcuid_status_t CuidDeviceManager::get_device_from_file_by_dev_path(const std::
   }
 
   // Create device based on the found entry
-  _convert_entry_to_device(entry, device);
+  convert_entry_to_device(entry, device);
   if (device) {
     add_device(device);
   }
@@ -377,7 +386,7 @@ amdcuid_status_t CuidDeviceManager::get_device_from_file_by_bdf(const std::strin
   }
 
   // Create device based on the found entry
-  _convert_entry_to_device(entry, device);
+  convert_entry_to_device(entry, device);
   if (device) {
     add_device(device);
   }
@@ -502,12 +511,20 @@ void CuidDeviceManager::build_cuid_index() {
 }
 
 DevicePtr CuidDeviceManager::lookup_by_handle(const amdcuid_id_t& handle) const {
+  // cuid_index_ is rebuilt wholesale by build_cuid_index() under this mutex.
+  // Reading it unlocked is a data race that ThreadSanitizer reports against an
+  // ordinary multithreaded consumer of the public API; neither of the two
+  // callers (both in cuid.cc) holds the lock, so taking it here cannot deadlock.
+  std::lock_guard<std::mutex> lock(manager_mutex_);
+
   // Since amdcuid_id_t is our handle, we can use it directly as key
   auto it = cuid_index_.find(handle);
   return (it != cuid_index_.end()) ? it->second : nullptr;
 }
 
 std::vector<amdcuid_id_t> CuidDeviceManager::get_all_handles() const {
+  std::lock_guard<std::mutex> lock(manager_mutex_);
+
   std::vector<amdcuid_id_t> handles;
   handles.reserve(cuid_index_.size());
 
