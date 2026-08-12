@@ -61,10 +61,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 
@@ -151,6 +153,44 @@ replay_drain_or_fatal(const Queue& queue)
         "kernel replay: async completion handler(s) failed to drain ({} still active after ~{}s)",
         queue.active_async_packets(),
         kMaxSlices * 5);
+}
+
+// Drain every queue on `agent` before snapshotting, WITHOUT holding the queue-map lock across the
+// wait. iterate_queues holds the queue-map read lock for the duration of its callback, so a
+// per-sibling blocking drain there would block stream creation/destruction for the whole (up to
+// ~60s) drain. Instead poll each queue's in-flight async count under a brief read lock and sleep
+// between polls, so the map lock is held only for the microsecond poll -- never across the wait.
+// Safe against concurrent queue destruction: a Queue is only dereferenced while the read lock is
+// held (destroy_queue erases under the write lock), and the live set is re-read every poll. The
+// per-agent writer lock held by the replay window blocks new dispatches on the agent, so in-flight
+// work only decreases and the poll converges; fatal on a genuinely stuck queue (beta feature),
+// matching replay_drain_or_fatal.
+void
+replay_drain_agent_or_fatal(hsa_agent_t agent)
+{
+    auto* queue_controller = get_queue_controller();
+    if(queue_controller == nullptr) return;
+
+    constexpr auto poll_interval = std::chrono::milliseconds{2};
+    constexpr auto max_wait      = std::chrono::seconds{60};
+    const auto     deadline      = std::chrono::steady_clock::now() + max_wait;
+
+    for(;;)
+    {
+        int64_t in_flight = 0;
+        queue_controller->iterate_queues([&](const Queue* sibling) {
+            if(sibling != nullptr && sibling->get_agent().get_hsa_agent().handle == agent.handle)
+                in_flight += sibling->active_async_packets();
+        });
+
+        if(in_flight == 0) return;
+
+        ROCP_FATAL_IF(std::chrono::steady_clock::now() >= deadline)
+            << "kernel replay: agent-wide drain stuck (" << in_flight
+            << " async handler(s) still active after ~60s)";
+
+        std::this_thread::sleep_for(poll_interval);
+    }
 }
 
 template <typename DomainT, typename... Args>
@@ -976,21 +1016,16 @@ WriteInterceptor(const void* packets,
                     drain_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
             }
 
-            // Agent-wide drain: sibling queues on this agent can have kernels in flight that mutate
-            // device memory concurrently with snapshot/restore. The per-agent replay lock blocks
-            // other threads' *replayed* dispatches (every kernel dispatch passes through this
-            // gate), but not work already submitted to their queues. Wait for every queue on this
-            // agent to finish its outstanding kernels before snapshotting. (Async SDMA copies
-            // bypass both the AQL queues and the replay gate; serializing those is a separate
-            // follow-up -- see the design doc "replay-scoped per-agent quiesce".)
-            if(auto* queue_controller = get_queue_controller())
-            {
-                queue_controller->iterate_queues([&replay_agent](const Queue* sibling) {
-                    if(sibling != nullptr &&
-                       sibling->get_agent().get_hsa_agent().handle == replay_agent.handle)
-                        replay_drain_or_fatal(*sibling);
-                });
-            }
+            // Agent-wide drain. Sibling queues on this agent can have kernels in flight that mutate
+            // device memory while we snapshot and restore. The per-agent replay lock blocks other
+            // threads' replayed dispatches, since every kernel dispatch passes through that gate.
+            // It does not block work already submitted to their queues. So wait for every queue on
+            // this agent to finish its outstanding kernels before snapshotting. We wait outside the
+            // queue-map lock so it does not block stream creation or destruction. See
+            // replay_drain_agent_or_fatal. Async SDMA copies bypass both the AQL queues and the
+            // replay gate and serializing those is a separate follow-up (TODO: mkuriche,
+            // amd-vkale).
+            replay_drain_agent_or_fatal(replay_agent);
 
             // Save this agent's tracked device allocations so every pass runs against identical
             // inputs. snap() returns ok=false if it could not capture the complete set (host memory
