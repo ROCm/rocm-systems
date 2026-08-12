@@ -306,8 +306,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_Rtc_Reduce_Simple, float, __half) {
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
 
-TEST_CASE(Unit_Rtc_Global_Memory_Access)
+HIP_TEMPLATE_TEST_CASE(Unit_Rtc_Global_Memory_Access, __half, float)
 {
+  static constexpr unsigned long long mask = 0x000000000000ff00ULL;
   unsigned int wavefrontSize = getWarpSize();
   size_t logSize;
   std::string scalarName, intrinsicName, kernelStr;
@@ -316,38 +317,61 @@ TEST_CASE(Unit_Rtc_Global_Memory_Access)
   hipFunction_t kernel;
   hipModule_t module;
   hiprtcResult compileResult;
-  int numIncrements = 10;
-  LinearAllocGuard<int> d_numIncrements(LinearAllocs::hipMalloc, sizeof(int));
-  LinearAllocGuard<float> d_output(LinearAllocs::hipMalloc, wavefrontSize * sizeof(float));
-  LinearAllocGuard<float> output(LinearAllocs::malloc, wavefrontSize * sizeof(float));
+  int numIterations = 10;
+
+  LinearAllocGuard<int> d_numIterations(LinearAllocs::hipMalloc, sizeof(int));
+  LinearAllocGuard<unsigned long long> d_masks(LinearAllocs::hipMalloc, numIterations * sizeof(unsigned long long));
+  LinearAllocGuard<unsigned long long> masks(LinearAllocs::malloc, d_masks.size_bytes());
+  LinearAllocGuard<TestType> d_output(LinearAllocs::hipMalloc, numIterations * wavefrontSize * sizeof(TestType));
+  LinearAllocGuard<TestType> output(LinearAllocs::malloc, d_output.size_bytes());
+  LinearAllocGuard<TestType> d_input(LinearAllocs::hipMalloc, wavefrontSize * sizeof(TestType));
+  LinearAllocGuard<TestType> input(LinearAllocs::malloc, d_input.size_bytes());
   size_t codeSize;
   std::vector<char> code;
   dim3 grdDim{1u};
   dim3 blkDim{wavefrontSize};
-  std::vector<const void*> args = {d_output.ptr(), d_numIncrements.ptr()};
+  std::vector<const void*> args = {d_output.ptr(), d_input.ptr(), d_masks.ptr(), d_numIterations.ptr()};
   std::size_t sizeBytes = args.size() * sizeof(void*);
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, args.data(), HIP_LAUNCH_PARAM_BUFFER_SIZE,
                     &sizeBytes, HIP_LAUNCH_PARAM_END};
-  const char* options[] = { "-O2" };
-  std::string expression = "mykernel<float>";
+  const char* options[] = { "-O3", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-DHIP_ENABLE_EXTRA_WARP_SYNC_TYPES" };
+  std::string expression = std::string("mykernel<") + typeToString<TestType>() + ", unsigned long long>";
+  TestType expected = 0;
+
+  for (int i = 0; i < wavefrontSize; i++) {
+    input.host_ptr()[i] = i;
+
+    if (mask & (1ull << i)) {
+      expected += i;
+    }
+  }
+
+  for (int i = 0; i < numIterations; i++) {
+    masks.host_ptr()[i] = mask;
+  }
 
   kernelStr = R"(
-     template <class T>
-     __global__ void mykernel(T* output, int* numIncrements)
+     template <class T, class MaskType>
+     __global__ void mykernel(T* output, T* input, const MaskType* masks, int* numIterations)
      {
        int tid = threadIdx.x;
        int laneId = tid % warpSize;
 
-       for (int i = 0; i < *numIncrements; i++) {
-         output[laneId]++;
+       printf("numIterations: %d\n", *numIterations);
+
+       for (int i = 0; i < *numIterations; i++) {
+         int idx = i * warpSize + laneId;
+         if (masks[i] & (1ULL << laneId)) {
+           T& result = output[idx];
+           result = __reduce_add_sync<unsigned long long>(masks[i], input[laneId]);
+         }
        }
      }
    )";
 
-  HIP_CHECK(hipMemcpy(d_numIncrements.ptr(), &numIncrements, sizeof(int), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemset(d_output.ptr(), 0, d_output.size_bytes()));
   HIPRTC_CHECK(
       hiprtcCreateProgram(&prog, kernelStr.c_str(), "mykernel.hip", 0, nullptr, nullptr));
+
   HIPRTC_CHECK(hiprtcAddNameExpression(prog, expression.c_str()));
   compileResult = hiprtcResult{hiprtcCompileProgram(prog, NELEMS(options), options)};
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
@@ -369,13 +393,31 @@ TEST_CASE(Unit_Rtc_Global_Memory_Access)
   HIP_CHECK(hipModuleLoadData(&module, code.data()));
   HIPRTC_CHECK(hiprtcGetLoweredName(prog, expression.c_str(), &loweredName));
   HIP_CHECK(hipModuleGetFunction(&kernel, module, loweredName));
+  HIP_CHECK(hipMemcpy(d_input.ptr(), input.host_ptr(), d_input.size_bytes(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_masks.ptr(), masks.host_ptr(), masks.size_bytes(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_numIterations.ptr(), &numIterations, sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemset(d_output.ptr(), 0, d_output.size_bytes()));
   HIP_CHECK(hipModuleLaunchKernel(kernel, grdDim.x, grdDim.y, grdDim.z, blkDim.x, blkDim.y,
                                   blkDim.z, 0, 0, nullptr, config));
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
 
-  for (int i = 0; i < wavefrontSize; i++) {
-    REQUIRE(output.ptr()[i] == numIncrements);
+  for (int i = 0; i < numIterations; i++) {
+    for (int j = 0; j < wavefrontSize; j++) {
+      TestType result = output.ptr()[i * wavefrontSize + j];
+
+      if (mask & (1ull << j)) {
+        INFO("iteration: " << i << " index: " << j);
+
+	if constexpr (std::is_same<TestType, __half>::value) {
+          UNSCOPED_INFO("got: " << __half2float(result) << " expected: " << __half2float(expected));
+	} else {
+	  UNSCOPED_INFO("got: " << result << " expected: " << expected);
+	}
+
+        REQUIRE(output.ptr()[i * wavefrontSize + j] == expected);
+      }
+    }
   }
 }
