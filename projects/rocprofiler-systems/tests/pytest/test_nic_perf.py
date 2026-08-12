@@ -85,7 +85,12 @@ class TestNIC(RocprofsysTest):
         self.assert_regex(result)
         self.assert_perfetto(
             result,
-            counter_names=["receive byte", "receive packet", "transmit byte", "transmit packet"],
+            counter_names=[
+                "receive byte",
+                "receive packet",
+                "transmit byte",
+                "transmit packet",
+            ],
             pass_regex=self.PERFETTO_PASS_REGEX,
             fail_regex=self.PERFETTO_FAIL_REGEX,
         )
