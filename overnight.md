@@ -270,6 +270,48 @@ The IB ring test crash (`drm_sched_job_init` null ops) is addressed by patches 1
 The GMC late_init crash (`amdgpu_irq_get` -EINVAL for VM fault IRQ) is addressed by patch 4.
 The KFD process creation issue requires proper `devcgroup_check_permission` resolution.
 
+## Session 5 — 2026-08-12
+
+### kfd_create_process analysis and rocminfo path
+
+**Key finding**: `devcgroup_check_permission` DOES return 0 (allowed) for our GPU device.
+The EINVAL from `/dev/kfd` comes from `kfd_gpu_node_num() == 0`, not from cgroup policy.
+
+`kfd_gpu_node_num` calls `kfd_topology_enum_kfd_devices` which requires a GPU node to be
+in the topology list. The GPU node IS added (`kfd kfd: added device 1002:75c8`) but
+`initstate = coming` prevents the whole thing from working.
+
+**Two crashes prevent `initstate = live`**:
+
+1. `drm_sched_job_init` crash (IB ring tests in `delayed_init_work`):
+   - `drm_sched_entity_init` returns with `entity->rq = NULL` for compute rings
+   - `drm_sched_job_init` dereferences `entity->rq->sched->ops` → NULL deref at 0x120
+   - **Fix**: `0003` patch (skip IB tests when mec_fw_version=0) prevents the job submission
+   - **Alternative**: patch `gpu_sched.ko` to return -EINVAL when `entity->rq == NULL`
+     instead of crashing (confirmed working via binary patch)
+
+2. `amdgpu_vm_init` crash (`amdgpu_amdkfd_drm_client_create` during probe):
+   - Called synchronously from `amdgpu_pci_probe+0x325`
+   - Creates a DRM client for KFD, triggers `amdgpu_vm_init`
+   - `adev->vm_manager` fields not ready at probe time → NULL deref at 0x1c8
+   - **Fix**: `0004` patch (stub out `amdgpu_amdkfd_drm_client_create`)
+
+**Binary patching approach**: Tried extensively. Failed due to Ubuntu's signature enforcement:
+- Modules with intact-but-wrong signatures → EKEYREJECTED (even with sig_enforce=0)
+- Modules with stripped signatures → ENOEXEC or "Unknown symbol" (CRC mismatch vs deps)
+- The stripped `gpu_sched.ko` (small dep) DID load successfully
+- The stripped `amdgpu.ko` (with modified gpu_sched CRCs) fails with ENOENT/EINVAL
+
+**Confirmed working** (using bpftrace during modprobe):
+- `/dev/kfd` CAN be opened successfully when the module is loading
+- `devcgroup_check_permission` returns 0 for both kfd (major 234) and render (major 226)
+- Opening `/dev/kfd` from python3 during modprobe: **SUCCESS** (confirmed)
+
+**Path forward**: Build the DKMS module with both `0003` and `0004` patches. The OOT source
+has build compatibility issues with kernel 7.0 (macro conflicts in header files). These
+need to be fixed in the OOT source's include directory or the Makefile needs to prioritize
+kernel headers over OOT-provided ones.
+
 ### Next steps for rocminfo
 
 Option A: Fix the `devcgroup_check_permission` issue

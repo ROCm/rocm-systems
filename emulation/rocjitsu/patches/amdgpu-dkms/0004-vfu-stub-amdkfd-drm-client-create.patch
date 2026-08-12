@@ -1,0 +1,38 @@
+From: rocjitsu vfio-user development
+Subject: [PATCH] amdgpu: stub amdgpu_amdkfd_drm_client_create for vfio-user
+
+amdgpu_amdkfd_drm_client_create is called from amdgpu_pci_probe during
+device initialization. It creates a DRM client for KFD internal use by
+calling drm_client_init → amdgpu_driver_open_kms → amdgpu_vm_init.
+
+In vfio-user emulation adev->vm_manager is not fully initialized at the
+point amdgpu_vm_init+0x359 accesses it (mov 0x1c8(%r13),%rax with r13=0),
+causing a NULL pointer dereference (CR2: 0x1c8) that crashes the probe.
+
+Stub this function to return 0 immediately. KFD topology registration and
+device discovery still work; the DRM client is needed only for KFD internal
+GPU memory operations which are not yet supported in vfio-user emulation.
+
+The call stack for the crash:
+  amdgpu_vm_init+0x359
+  amdgpu_driver_open_kms
+  drm_file_alloc
+  drm_client_init
+  amdgpu_amdkfd_drm_client_create
+  amdgpu_pci_probe+0x325
+
+Applies to: ROCm amdgpu roc-7.2.x
+Tested on:  kernel 7.0.0-28-generic, Ubuntu 24.04 Noble
+
+--- a/amd/amdgpu/amdgpu_amdkfd.c
++++ b/amd/amdgpu/amdgpu_amdkfd.c
+@@ -139,6 +139,10 @@ void amdgpu_amdkfd_device_probe(struct amdgpu_device *adev)
+
+ int amdgpu_amdkfd_drm_client_create(struct amdgpu_device *adev)
+ {
++	/* vfio-user emulation: adev->vm_manager not fully initialized at probe
++	 * time; stub out to avoid NULL dereference in amdgpu_vm_init+0x359. */
++	return 0;
++
+ 	if (!adev->kfd.init_complete || adev->kfd.client.dev)
+ 		return 0;
