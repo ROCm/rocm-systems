@@ -26,6 +26,7 @@
 #include "amd_smi/impl/amd_smi_cper.h"
 #include "amd_smi/impl/amd_smi_cper_testing.h"
 #include "ras-decode/ras_decode_constants.h"
+#include "unit/unit_test_framework.h"
 
 namespace {
 
@@ -151,7 +152,7 @@ amdsmi_status_t CallCperSized(const char* path, uint64_t buf_bytes, uint64_t slo
 // Zero-size regular file: st_size == 0, so read(fd, buf, 0) returns 0 trivially.
 // Hits the same empty-ring success branch as the field case (large st_size,
 // read() returns 0) and must not abort the process.
-TEST(GpuUnit, CperReadZeroSizeFile) {
+TEST_F(GpuUnit, CperReadZeroSizeFile) {
   std::string tmpl = "/tmp/amdsmi_cper_zero_XXXXXX";
   int fd = mkstemp(tmpl.data());
   ASSERT_NE(fd, -1) << "failed to create temp file";
@@ -175,7 +176,7 @@ TEST(GpuUnit, CperReadZeroSizeFile) {
 // (read() == 0 while st_size advertises ring capacity) needs the injectable read
 // seam in CperEmptyRingAdvertisedCapacityShortRead to reproduce faithfully, and
 // why CperReadZeroSizeFile pins the st_size == 0 corner with a real read().
-TEST(GpuUnit, CperNonZeroFileRealReadHasNoRecords) {
+TEST_F(GpuUnit, CperNonZeroFileRealReadHasNoRecords) {
   std::string path;
   MakeSparseFile(4096, &path);  // st_size == 4096, no payload written
   ASSERT_FALSE(path.empty());
@@ -193,7 +194,7 @@ TEST(GpuUnit, CperNonZeroFileRealReadHasNoRecords) {
 // Missing path -> NOT_SUPPORTED (stat() fails), no crash. Create then remove a
 // temp file so the path is guaranteed absent (no hardcoded path another process
 // might have created).
-TEST(GpuUnit, CperReadMissingFile) {
+TEST_F(GpuUnit, CperReadMissingFile) {
   std::string tmpl = "/tmp/amdsmi_cper_missing_XXXXXX";
   int fd = mkstemp(tmpl.data());
   ASSERT_NE(fd, -1) << "failed to create temp file";
@@ -206,7 +207,7 @@ TEST(GpuUnit, CperReadMissingFile) {
 
 // Happy path: a well-formed single-record file parses to one entry. Guards the
 // read path against regressions in the empty/error handling around it.
-TEST(GpuUnit, CperParsesSingleRecord) {
+TEST_F(GpuUnit, CperParsesSingleRecord) {
   std::string path;
   WriteTempFile(MakeOneRecordBlob(), &path);
   ASSERT_FALSE(path.empty());
@@ -223,7 +224,7 @@ TEST(GpuUnit, CperParsesSingleRecord) {
 
 // Faithful ROCM-25954 repro: st_size advertises the 4 MiB ring capacity while
 // read() returns 0 on an empty ring. Must be SUCCESS with zero entries.
-TEST(GpuUnit, CperEmptyRingAdvertisedCapacityShortRead) {
+TEST_F(GpuUnit, CperEmptyRingAdvertisedCapacityShortRead) {
   CperReadFnGuard guard;
   cper_set_read_fn_for_testing(&FakeReadZero);
 
@@ -242,7 +243,7 @@ TEST(GpuUnit, CperEmptyRingAdvertisedCapacityShortRead) {
 
 // Partial read (0 < bytes_read < st_size) of non-record bytes: accepted as
 // success; pin that no records are parsed and the out-params are zeroed.
-TEST(GpuUnit, CperPartialReadNoRecords) {
+TEST_F(GpuUnit, CperPartialReadNoRecords) {
   CperReadFnGuard guard;
   cper_set_read_fn_for_testing(&FakeReadPartial);
 
@@ -260,7 +261,7 @@ TEST(GpuUnit, CperPartialReadNoRecords) {
 }
 
 // A real read() failure (returns -1) must still surface FILE_ERROR.
-TEST(GpuUnit, CperReadErrorIsFileError) {
+TEST_F(GpuUnit, CperReadErrorIsFileError) {
   CperReadFnGuard guard;
   cper_set_read_fn_for_testing(&FakeReadError);
 
@@ -275,7 +276,7 @@ TEST(GpuUnit, CperReadErrorIsFileError) {
 
 // A record larger than the caller's buffer yields OUT_OF_RESOURCES with nothing
 // copied and the out-params zeroed.
-TEST(GpuUnit, CperFirstRecordExceedsBufferOutOfResources) {
+TEST_F(GpuUnit, CperFirstRecordExceedsBufferOutOfResources) {
   std::string path;
   WriteTempFile(MakeOneRecordBlob(), &path);
   ASSERT_FALSE(path.empty());
@@ -296,7 +297,7 @@ TEST(GpuUnit, CperFirstRecordExceedsBufferOutOfResources) {
 
 // Two records with a buffer that fits only one: the first is copied and
 // MORE_DATA is returned with the partial entry_count/buf_size.
-TEST(GpuUnit, CperSecondRecordOverflowsBufferMoreData) {
+TEST_F(GpuUnit, CperSecondRecordOverflowsBufferMoreData) {
   std::string path;
   WriteTempFile(MakeRecordsBlob(2), &path);
   ASSERT_FALSE(path.empty());
@@ -320,7 +321,7 @@ TEST(GpuUnit, CperSecondRecordOverflowsBufferMoreData) {
 // Two records with ample byte budget but only one header slot: the slot count,
 // not the byte buffer, is what trips. The first is copied and MORE_DATA is
 // returned with one entry and a non-zero buf_size.
-TEST(GpuUnit, CperSlotExhaustionMoreData) {
+TEST_F(GpuUnit, CperSlotExhaustionMoreData) {
   std::string path;
   WriteTempFile(MakeRecordsBlob(2), &path);
   ASSERT_FALSE(path.empty());
@@ -339,7 +340,7 @@ TEST(GpuUnit, CperSlotExhaustionMoreData) {
 }
 
 // Invalid arguments are rejected with OUT_OF_RESOURCES before any file read.
-TEST(GpuUnit, CperByPathRejectsInvalidArgs) {
+TEST_F(GpuUnit, CperByPathRejectsInvalidArgs) {
   std::string path;
   WriteTempFile(MakeOneRecordBlob(), &path);
   ASSERT_FALSE(path.empty());

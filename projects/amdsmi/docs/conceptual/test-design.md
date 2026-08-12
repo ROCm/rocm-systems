@@ -40,7 +40,7 @@ The test suite redesign has four goals:
 
 | Type | Directory | Hardware required | Framework |
 | :--- | :--- | :--- | :--- |
-| **Unit** | `unit/` | No — pure logic, static data, no device calls | C++: `TEST()` macro · Python: `unittest` |
+| **Unit** | `unit/` | No — pure logic, static data, no device calls | C++: `TEST_F()` macro · Python: `unittest` |
 | **Functional** | `functional/` | Yes — runs against a live device | C++: `TestBase` lifecycle · Python: `unittest` |
 
 Performance benchmarks belong in `functional/` because they require a real device to produce
@@ -62,7 +62,7 @@ tests/amd_smi_test/
 ├── amdsmitst.exclude                # Global ASIC blacklist for --gtest_filter
 ├── detect_asic_filter.sh            # ASIC detection and per-ASIC exclusion
 │
-├── unit/                            # No hardware required; pure TEST() macro tests
+├── unit/                            # No hardware required; pure TEST_F() macro tests
 │   ├── gpu/
 │   │   ├── dynamic_metrics_test.cc  # Metric struct versioning and compatibility checks
 │   │   ├── cper_read_test.cc        # CPER read path: synthetic edge cases (no fixtures)
@@ -178,8 +178,13 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 - `<feature>` — for example: `fan`, `clock`, or `dynamic_metrics`.
 - `<operation>` — for example: `read` or `read_write`.
 
-**Classes**: `Test<FeatureName><Operation>` derived from `TestBase` for functional tests; plain
-`TEST(Suite, Name)` for unit tests.
+**Classes**: `Test<FeatureName><Operation>` derived from `TestBase` for functional tests; unit tests
+declare no class of their own.
+
+**Every test registers with `TEST_F(Suite, Name)`** — never the fixture-less `TEST()`. The suite
+fixtures in `unit/unit_test_framework.h` own the `amdsmi_init`, device enumeration and shutdown that
+each test depends on. Mixing `TEST()` into a suite that uses `TEST_F()` still compiles, but GTest
+then fails every `TEST()` case in that suite at runtime. `check_test_conventions.py` enforces this.
 
 **GTest suites registered in `main.cc` follow the `<Component><Type>[<Operation>]` scheme**:
 
