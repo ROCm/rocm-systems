@@ -340,8 +340,8 @@ jobs:
 
           BUILD_WORKERS="$(( ($(nproc) + 1) / 2 ))"
           PYTEST_WORKERS="$(nproc)"
-          if (( PYTEST_WORKERS > 16 )); then
-            PYTEST_WORKERS=16
+          if (( PYTEST_WORKERS > 12 )); then
+            PYTEST_WORKERS=12
           fi
           corpus_test_flags=(
             --workers "${PYTEST_WORKERS}" \
