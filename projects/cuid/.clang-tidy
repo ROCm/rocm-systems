@@ -1,0 +1,57 @@
+# Modelled on projects/amdsmi/.clang-tidy so the two sibling C++ libraries in
+# this monorepo report the same class of findings. Deviations from that file
+# are listed at the bottom with a reason.
+Checks:
+  bugprone*,
+  clang-analyzer*,
+  cert-*,
+  concurrency-*,
+  google*,
+  misc*,
+  modernize*,
+  -abseil*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-reserved-identifier,
+  -cert-dcl21-cpp,
+  -cert-err58-cpp,
+  -clang-analyzer-security.insecureAPI.strcpy,
+  -clang-diagnostic-sign-conversion,
+  -clang-diagnostic-unused-parameter,
+  -cppcoreguidelines*,
+  -cppcoreguidelines-pro*,
+  -google-readability*,
+  -google-runtime-int,
+  -misc-const-correctness,
+  -misc-include-cleaner,
+  -misc-non-copyable-objects,
+  -misc-unused-parameters,
+  -misc-use-anonymous-namespace,
+  -misc-use-internal-linkage,
+  -modernize-avoid-c-arrays,
+  -modernize-macro-to-enum,
+  -modernize-redundant-void-arg,
+  -modernize-use-auto,
+  -modernize-use-nodiscard,
+  -modernize-use-noexcept,
+  -modernize-use-nullptr,
+  -modernize-use-trailing-return-type,
+  -modernize-use-using,
+  -performance*,
+  -readability*,
+  readability-delete-null-pointer,
+
+# Deviations from projects/amdsmi/.clang-tidy:
+#
+#   +cert-*         libamdcuid handles key material and parses firmware tables
+#                   read from sysfs, so the CERT rules about buffer handling and
+#                   integer conversion earn their keep here. The two noisiest
+#                   and least relevant are disabled individually above:
+#                   dcl21-cpp (postfix operator return types) and err58-cpp
+#                   (throwing static initializers, which are gtest fixtures).
+#   +concurrency-*  CuidDeviceManager is a shared, mutex-guarded singleton
+#                   reached from the public C API, and the daemon serves
+#                   multiple clients.
+#
+# Treat findings as advisory: fix what is real, do not silence what is not.
+HeaderFilterRegex: 'projects/cuid/(lib|cli|daemon)/.*\.(h|hpp)$'
+WarningsAsErrors: ''

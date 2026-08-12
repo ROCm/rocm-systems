@@ -17,23 +17,11 @@ set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 
 # Read version from amd_cuid.h so there is a single source of truth
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/lib/include/amd_cuid.h" _CUID_HEADER)
-string(
-    REGEX MATCH "#define AMDCUID_LIB_VERSION_MAJOR ([0-9]+)"
-    _
-    "${_CUID_HEADER}"
-)
+string(REGEX MATCH "#define AMDCUID_LIB_VERSION_MAJOR ([0-9]+)" _ "${_CUID_HEADER}")
 set(VERSION_MAJOR "${CMAKE_MATCH_1}")
-string(
-    REGEX MATCH "#define AMDCUID_LIB_VERSION_MINOR ([0-9]+)"
-    _
-    "${_CUID_HEADER}"
-)
+string(REGEX MATCH "#define AMDCUID_LIB_VERSION_MINOR ([0-9]+)" _ "${_CUID_HEADER}")
 set(VERSION_MINOR "${CMAKE_MATCH_1}")
-string(
-    REGEX MATCH "#define AMDCUID_LIB_VERSION_PATCH ([0-9]+)"
-    _
-    "${_CUID_HEADER}"
-)
+string(REGEX MATCH "#define AMDCUID_LIB_VERSION_PATCH ([0-9]+)" _ "${_CUID_HEADER}")
 set(VERSION_PATCH "${CMAKE_MATCH_1}")
 set(VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
 message("Package version: ${VERSION_STRING}")
@@ -48,19 +36,9 @@ project(${AMDCUID} VERSION "${VERSION_STRING}")
 # CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT is only available after project()
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(WIN32)
-        set(CMAKE_INSTALL_PREFIX
-            "C:/Program Files/AMD/ROCM/AMDCUID"
-            CACHE PATH
-            "Default installation directory."
-            FORCE
-        )
+        set(CMAKE_INSTALL_PREFIX "C:/Program Files/AMD/ROCM/AMDCUID" CACHE PATH "Default installation directory." FORCE)
     else() # Linux/Unix
-        set(CMAKE_INSTALL_PREFIX
-            "${ROCM_DIR}/core"
-            CACHE PATH
-            "Default installation directory."
-            FORCE
-        )
+        set(CMAKE_INSTALL_PREFIX "${ROCM_DIR}/core" CACHE PATH "Default installation directory." FORCE)
     endif()
 endif()
 
@@ -146,9 +124,7 @@ if(UNIX AND NOT APPLE)
         @ONLY
     )
     install(
-        PROGRAMS
-            ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_postinst.sh
-            ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_prerm.sh
+        PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_postinst.sh ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_prerm.sh
         DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
         COMPONENT ${LIB_COMPONENT}
     )
@@ -167,9 +143,7 @@ if(NOT TARGET uninstall)
     )
     add_custom_target(
         uninstall
-        COMMAND
-            ${CMAKE_COMMAND} -P
-            "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+        COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
         COMMENT "Uninstalling ${AMDCUID} ..."
     )
 endif()
