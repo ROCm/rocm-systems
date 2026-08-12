@@ -1,23 +1,162 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for the gfx9 memory-chart renderer and formatting helpers."""
+"""Unit tests for the gfx9 memory-chart renderer and panel contract."""
 
+import functools
 import math
 import re
+from pathlib import Path
 
 import common
 import pytest
+import yaml
 
 from utils import mem_chart_gfx9
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
+MEMORY_CHART_CONFIG_FILENAME = "0300_memory_chart.yaml"
+ANALYSIS_CONFIGS = Path(common.SRC) / "rocprof_compute_soc" / "analysis_configs"
+GFX9_ARCHITECTURES = (
+    "gfx908",
+    "gfx90a",
+    "gfx940",
+    "gfx941",
+    "gfx942",
+    "gfx950",
+)
+DISCOVERED_GFX9_ARCHITECTURES = tuple(
+    path.parent.name
+    for path in sorted(ANALYSIS_CONFIGS.glob(f"gfx9*/{MEMORY_CHART_CONFIG_FILENAME}"))
+)
+GFX94X_ARCHITECTURES = frozenset({"gfx940", "gfx941", "gfx942"})
+GFX94X_MISSING_METRIC_KEYS = frozenset({"L2 Rd Lat", "L2 Wr Lat", "VL1 Lat"})
+CHART_BLOCK_LABELS = (
+    "Instr Buff",
+    "Instr Dispatch",
+    "Exec",
+    "LDS",
+    "Vector L1 Cache",
+    "Scalar L1D Cache",
+    "Instr L1 Cache",
+    "L2 Cache",
+    "Fabric",
+    "HBM",
+)
 
 
-def render_gfx9_chart(metrics):
+def render_gfx9_chart(metrics, chart_title=DEFAULT_TITLE):
     return common.strip_ansi(
-        mem_chart_gfx9.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
+        mem_chart_gfx9.plot_mem_chart(dict(metrics), chart_title=chart_title)
     )
+
+
+@functools.lru_cache(maxsize=None)
+def panel_yaml_metric_keys(architecture: str) -> frozenset[str]:
+    config_path = ANALYSIS_CONFIGS / architecture / MEMORY_CHART_CONFIG_FILENAME
+    panel_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    return frozenset(
+        metric_name
+        for data_source in panel_config["Panel Config"]["data source"]
+        for metric_name in data_source["metric_table"]["metric"]
+    )
+
+
+def expected_architecture_missing_metric_keys(
+    architecture: str,
+) -> frozenset[str]:
+    if architecture in GFX94X_ARCHITECTURES:
+        return GFX94X_MISSING_METRIC_KEYS
+    return frozenset()
+
+
+def panel_yaml_metrics(architecture: str) -> dict[str, int]:
+    return dict.fromkeys(panel_yaml_metric_keys(architecture), 1)
+
+
+def chart_block_header_positions(output: str) -> dict[str, tuple[int, int]]:
+    lines = output.splitlines()
+    positions = {}
+
+    for block_label in CHART_BLOCK_LABELS:
+        matches = [
+            (row_index, line.index(block_label))
+            for row_index, line in enumerate(lines)
+            if block_label in line
+        ]
+        assert matches, f"Missing chart block label: {block_label}"
+        positions[block_label] = min(matches)
+
+    return positions
+
+
+def assert_text_in_chart_block(
+    output: str,
+    block_label: str,
+    expected_text: str,
+) -> None:
+    assert output.count(expected_text) == 1, (
+        f"Expected one {expected_text!r} occurrence, "
+        f"found {output.count(expected_text)}"
+    )
+    lines = output.splitlines()
+    text_positions = [
+        (row_index, line.index(expected_text))
+        for row_index, line in enumerate(lines)
+        if expected_text in line
+    ]
+
+    header_positions = chart_block_header_positions(output)
+    header_row, header_column = header_positions[block_label]
+    text_row, text_column = text_positions[0]
+    header_columns = sorted({column for _, column in header_positions.values()})
+    column_index = header_columns.index(header_column)
+    left_column = (
+        -math.inf
+        if column_index == 0
+        else (header_columns[column_index - 1] + header_column) / 2
+    )
+    right_column = (
+        math.inf
+        if column_index == len(header_columns) - 1
+        else (header_column + header_columns[column_index + 1]) / 2
+    )
+
+    assert left_column <= text_column < right_column, (
+        f"{expected_text!r} rendered outside the {block_label!r} column region"
+    )
+
+    stacked_header_rows = sorted(
+        row for row, column in header_positions.values() if column == header_column
+    )
+    if len(stacked_header_rows) > 1:
+        row_index = stacked_header_rows.index(header_row)
+        next_header_row = (
+            math.inf
+            if row_index == len(stacked_header_rows) - 1
+            else stacked_header_rows[row_index + 1]
+        )
+        assert header_row <= text_row < next_header_row, (
+            f"{expected_text!r} rendered outside the {block_label!r} row region"
+        )
+
+
+def assert_text_below_chart_label(
+    output: str,
+    field_label: str,
+    expected_text: str,
+) -> None:
+    assert output.count(field_label) == 1
+    assert output.count(expected_text) == 1
+    lines = output.splitlines()
+    label_row = next(row for row, line in enumerate(lines) if field_label in line)
+    label_column = lines[label_row].index(field_label)
+    text_row = next(row for row, line in enumerate(lines) if expected_text in line)
+    text_column = lines[text_row].index(expected_text)
+
+    assert text_row == label_row + 1
+    assert label_column <= text_column <= label_column + len(field_label)
 
 
 class TestMakeFormatSpecGfx9:
@@ -232,22 +371,32 @@ class TestFormatTextGfx9:
 class TestPlotMemChartGfx9:
     """Tests for gfx9 plot_mem_chart - CDNA memory chart generation."""
 
+    def test_render_helper_does_not_mutate_input_metrics(self):
+        """Protect callers from the renderer's top-level value normalization."""
+        metrics = {"HBM Rd": "invalid"}
+
+        output = render_gfx9_chart(metrics)
+
+        assert metrics == {"HBM Rd": "invalid"}
+        assert "N/A" in output
+
     def test_full_sample_metrics_render_without_na_placeholders(self):
         """Render complete gfx9 metrics without N/A placeholders."""
         output = render_gfx9_chart(common.GFX9_SAMPLE_METRICS)
         assert isinstance(output, str)
         assert len(output) > 0
-        assert "N/A" not in output
+        assert "n/a" not in output.casefold()
 
-    def test_empty_metrics_render_expected_placeholders(self):
-        """Render 54 N/A placeholders when no gfx9 metrics are provided."""
-        output = render_gfx9_chart({})
+    @pytest.mark.parametrize("missing_metric", common.GFX9_SAMPLE_METRICS)
+    def test_each_missing_metric_renders_one_placeholder(self, missing_metric):
+        """Render one placeholder for each omitted gfx9 metric."""
+        metrics = dict(common.GFX9_SAMPLE_METRICS)
+        del metrics[missing_metric]
+
+        output = render_gfx9_chart(metrics)
         assert isinstance(output, str)
         assert len(output) > 0
-
-        # The renderer consumes 55 keys but emits 54 uppercase placeholders because
-        # missing Active CUs/Num CUs render together as "n/a: N/A".
-        assert output.count("N/A") == 54
+        assert output.casefold().count("n/a") == 1
 
     def test_partial_metrics_render_values_and_placeholders(self):
         """Render supplied gfx9 values and placeholders for missing metrics."""
@@ -280,15 +429,25 @@ class TestPlotMemChartGfx9:
 
         assert re.search(r"(?<!x)GMI(?!/PCIe)", output)
 
-    def test_gfx9_heading_outside_chart_and_directional_connectors(self):
-        """CDNA output prints the heading once outside the chart, with connectors."""
+    def test_caller_title_appears_once_outside_chart(self):
+        """Print a caller-supplied title once outside the chart."""
+        chart_title = "7. Memory Chart (Normalization: per_kernel)"
+        output = render_gfx9_chart(
+            common.GFX9_SAMPLE_METRICS,
+            chart_title=chart_title,
+        )
+        output_lines = output.splitlines()
+
+        assert output_lines[0] == chart_title
+        assert DEFAULT_TITLE not in output
+        assert chart_title not in "\n".join(output_lines[1:])
+
+    def test_gfx9_chart_contains_directional_connectors(self):
+        """Render the expected CDNA directional connectors."""
         output = render_gfx9_chart(common.GFX9_SAMPLE_METRICS)
         output_lines = output.splitlines()
 
-        assert output_lines[0] == DEFAULT_TITLE
-        assert "3. Memory Chart" not in "\n".join(output_lines[1:])
         assert "Instr Buff" in output_lines[4]
-        assert output.count("(Normalization: per_kernel)") == 1
 
         for connector_label in ("Req", "Fetch", "Rd", "Wr", "Atomic"):
             assert connector_label in output
@@ -301,153 +460,120 @@ class TestPlotMemChartGfx9:
         (
             "metric_name",
             "metric_value",
+            "block_label",
             "expected_text",
-            "expected_row_index",
-            "expected_column_slice",
         ),
         [
             pytest.param(
                 "SALU",
                 7101,
+                "Instr Dispatch",
                 "SALU: 7101",
-                6,
-                slice(38, 58),
                 id="salu-instruction",
             ),
             pytest.param(
                 "SMEM",
                 7102,
+                "Instr Dispatch",
                 "SMEM: 7102",
-                9,
-                slice(38, 58),
                 id="smem-instruction",
             ),
             pytest.param(
                 "VGPR",
                 7201,
+                "Exec",
                 "VGPRs:  7201",
-                11,
-                slice(58, 78),
                 id="vgpr-allocation",
             ),
             pytest.param(
                 "SGPR",
                 7202,
+                "Exec",
                 "SGPRs:  7202",
-                14,
-                slice(58, 78),
                 id="sgpr-allocation",
-            ),
-            pytest.param(
-                "Wavefronts",
-                7301,
-                "7301",
-                28,
-                slice(58, 78),
-                id="wavefront-count",
-            ),
-            pytest.param(
-                "Workgroups",
-                7302,
-                "7302",
-                32,
-                slice(58, 78),
-                id="workgroup-count",
             ),
             pytest.param(
                 "LDS Req",
                 1234,
+                "LDS",
                 "Req: 1234",
-                7,
-                slice(78, 95),
                 id="lds-request",
             ),
             pytest.param(
                 "LDS Latency",
                 321,
+                "LDS",
                 "Lat:    321 cycles",
-                9,
-                slice(95, 122),
                 id="lds-latency",
             ),
             pytest.param(
                 "L2 Hit",
                 87,
+                "L2 Cache",
                 "Hit:     87 %",
-                9,
-                slice(140, 165),
                 id="l2-hit-rate",
             ),
             pytest.param(
                 "L2 Rd Lat",
                 2468,
+                "L2 Cache",
                 "Rd:   2468",
-                27,
-                slice(140, 165),
                 id="l2-read-latency",
             ),
             pytest.param(
                 "L2 Wr Lat",
                 1357,
+                "L2 Cache",
                 "Wr:   1357",
-                29,
-                slice(140, 165),
                 id="l2-write-latency",
             ),
             pytest.param(
                 "VL1 Rd",
                 7401,
+                "Vector L1 Cache",
                 "Rd: 7401",
-                15,
-                slice(78, 95),
                 id="vector-l1-read",
             ),
             pytest.param(
                 "VL1 Wr",
                 7402,
+                "Vector L1 Cache",
                 "Wr: 7402",
-                17,
-                slice(78, 95),
                 id="vector-l1-write",
             ),
             pytest.param(
                 "VL1 Hit",
                 2581,
+                "Vector L1 Cache",
                 "Hit:   2581 %",
-                15,
-                slice(95, 122),
                 id="vector-l1-hit-rate",
             ),
             pytest.param(
                 "sL1D Lat",
                 3692,
+                "Scalar L1D Cache",
                 "Lat:   3692 cycles",
-                29,
-                slice(95, 122),
                 id="scalar-l1d-latency",
             ),
             pytest.param(
                 "IL1 Hit",
                 4703,
+                "Instr L1 Cache",
                 "Hit:   4703 %",
-                35,
-                slice(95, 122),
                 id="instruction-l1-hit-rate",
             ),
             pytest.param(
                 "Fabric Rd Lat",
                 5814,
+                "Fabric",
                 "Rd:   5814",
-                20,
-                slice(183, 207),
                 id="fabric-read-latency",
             ),
             pytest.param(
                 "HBM Rd",
                 6925,
+                "HBM",
                 "Rd: 6925",
-                18,
-                slice(207, 221),
                 id="hbm-read-bandwidth",
             ),
         ],
@@ -456,17 +582,75 @@ class TestPlotMemChartGfx9:
         self,
         metric_name,
         metric_value,
+        block_label,
         expected_text,
-        expected_row_index,
-        expected_column_slice,
     ):
         """Place each gfx9 metric in the expected chart region."""
-        output_lines = render_gfx9_chart({metric_name: metric_value}).splitlines()
+        output = render_gfx9_chart({metric_name: metric_value})
 
-        assert expected_text in output_lines[expected_row_index][expected_column_slice]
+        assert_text_in_chart_block(output, block_label, expected_text)
+
+    @pytest.mark.parametrize(
+        ("metric_name", "metric_value", "field_label"),
+        [
+            pytest.param("Wavefronts", 7301, "Wavefronts:", id="wavefront-count"),
+            pytest.param("Workgroups", 7302, "Workgroups:", id="workgroup-count"),
+        ],
+    )
+    def test_exec_count_routes_below_expected_label(
+        self,
+        metric_name,
+        metric_value,
+        field_label,
+    ):
+        """Place unlabeled execution counts below their semantic field labels."""
+        expected_text = str(metric_value)
+        output = render_gfx9_chart({metric_name: metric_value})
+
+        assert_text_in_chart_block(output, "Exec", expected_text)
+        assert_text_below_chart_label(output, field_label, expected_text)
 
     def test_empty_placeholders_do_not_render_metric_suffixes(self):
         """Omit percentage and cycle suffixes from N/A placeholders."""
         output = render_gfx9_chart({})
 
         assert re.search(r"N/A[ \t]*(?:%|cycles)", output) is None
+
+
+class TestPanelYamlGfx9:
+    """Tests for gfx9 panel YAML and renderer contracts."""
+
+    def test_discovers_expected_architectures(self):
+        """Verify all supported gfx9 memory-chart architectures are discovered."""
+        assert DISCOVERED_GFX9_ARCHITECTURES == GFX9_ARCHITECTURES
+
+    @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
+    def test_panel_yaml_keys_match_architecture_contract(self, architecture):
+        """Verify each panel YAML differs only by architecture-specific metrics."""
+        reference_keys = panel_yaml_metric_keys(GFX9_ARCHITECTURES[0])
+        panel_keys = panel_yaml_metric_keys(architecture)
+
+        assert reference_keys - panel_keys == (
+            expected_architecture_missing_metric_keys(architecture)
+        )
+        assert panel_keys - reference_keys == frozenset()
+
+    def test_panel_yaml_metrics_render_same_line_count_across_architectures(self):
+        """Verify all gfx9 panel inputs render the same architecture shape."""
+        line_counts = {
+            architecture: len(
+                render_gfx9_chart(panel_yaml_metrics(architecture)).splitlines()
+            )
+            for architecture in GFX9_ARCHITECTURES
+        }
+
+        assert len(set(line_counts.values())) == 1, line_counts
+
+    @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
+    def test_panel_yaml_metrics_render_expected_placeholders(self, architecture):
+        """Verify omitted architecture metrics render uppercase placeholders."""
+        output = render_gfx9_chart(panel_yaml_metrics(architecture))
+
+        assert output.count("N/A") == len(
+            expected_architecture_missing_metric_keys(architecture)
+        )

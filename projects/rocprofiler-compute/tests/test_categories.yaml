@@ -34,9 +34,8 @@ test_categories:
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_import_guard
-      - test_mem_chart
+      - test_mem_chart_gfx11
       - test_mem_chart_gfx9
-      - test_gfx9_memory_chart_integration
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -100,9 +99,8 @@ test_categories:
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
-      - test_mem_chart
+      - test_mem_chart_gfx11
       - test_mem_chart_gfx9
-      - test_gfx9_memory_chart_integration
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -170,9 +168,8 @@ test_categories:
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
-      - test_mem_chart
+      - test_mem_chart_gfx11
       - test_mem_chart_gfx9
-      - test_gfx9_memory_chart_integration
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
@@ -240,9 +237,8 @@ test_categories:
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
-      - test_mem_chart
+      - test_mem_chart_gfx11
       - test_mem_chart_gfx9
-      - test_gfx9_memory_chart_integration
       - test_native_tool_finder
       - test_metrics_common
       - test_tty

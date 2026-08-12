@@ -2,19 +2,17 @@
 # SPDX-License-Identifier:  MIT
 
 """
-Unit tests for memory-chart renderers.
+Unit tests for the GFX11 memory-chart renderer.
 
 Covers:
 - mem_chart_gfx11.py - RDNA3.5 (Rich-based) memory architecture visualization
-- mem_chart_gfx9.py  - CDNA (plotille-based) memory architecture visualization
 """
 
 import re
 
 import common
-import pytest
 
-from utils import mem_chart_gfx9, mem_chart_gfx11
+from utils import mem_chart_gfx11
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
 
@@ -554,25 +552,15 @@ class TestIntegrationGfx11:
         assert "GB/s" in chart
 
 
-@pytest.mark.parametrize(
-    ("renderer", "metrics"),
-    [
-        pytest.param(
-            mem_chart_gfx11.plot_mem_chart,
-            mem_chart_gfx11.get_sample_metrics(),
-            id="gfx115x",
-        ),
-        pytest.param(
-            mem_chart_gfx9.plot_mem_chart,
-            common.GFX9_SAMPLE_METRICS,
-            id="gfx9",
-        ),
-    ],
-)
-def test_chart_title_appears_as_first_line(renderer, metrics):
-    """Both renderers print the caller's chart_title as the first line."""
+def test_chart_title_appears_as_first_line():
+    """The renderer prints the caller's chart_title as the first line."""
     chart_title = "7. Memory Chart (Normalization: per_kernel)"
-    output = common.strip_ansi(renderer(metrics, chart_title=chart_title))
+    output = common.strip_ansi(
+        mem_chart_gfx11.plot_mem_chart(
+            mem_chart_gfx11.get_sample_metrics(),
+            chart_title=chart_title,
+        )
+    )
 
     assert output.strip().splitlines()[0] == chart_title
     assert "3. Memory Chart" not in output
