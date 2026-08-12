@@ -12,8 +12,11 @@
 #include <tuple>
 #include <cmd_options.hh>
 #include <functional>
+#include <fstream>
 
 #define NELEMS(array) (sizeof(array) / sizeof(array[0]))
+
+static constexpr bool kSaveCodeObject = true;
 
 // compiles the program, reusing the same compiling session for all the types
 // (as opposed as calling the rtc compiler for each of the types)
@@ -51,6 +54,16 @@ void runRtcReduceOp(hiprtcProgram& prog, T* output, const T* input, const MaskTy
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
   code.resize(codeSize);
   HIPRTC_CHECK(hiprtcGetCode(prog, code.data()));
+
+  if constexpr (kSaveCodeObject) {
+    const char* filename = "kernel_binary.co";
+    std::ofstream out_bin(filename, std::ios::binary);
+
+    std::cout << "Saving " << filename << "..." << std::endl;
+    out_bin.write(code.data(), codeSize);
+    out_bin.close();
+  }
+
   HIP_CHECK(hipModuleLoadData(&module, code.data()));
   HIPRTC_CHECK(hiprtcGetLoweredName(prog, expression.c_str(), &loweredName));
   HIP_CHECK(hipModuleGetFunction(&kernel, module, loweredName));
@@ -156,12 +169,19 @@ void runAndCompileTest(const std::tuple<Types...> types) {
         }
       }
    })";
-
+  
   HIPRTC_CHECK(
       hiprtcCreateProgram(&prog, kernelStr.c_str(), "warp_reduce.hip", 0, nullptr, nullptr));
   compileProgram<Op>(prog, types);
   runTestReduceForTypes<Op>(prog, types);
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+
+  if constexpr (kSaveCodeObject) {
+    const char* filename = "warp_reduce.hip"; 
+    std::ofstream out_src(filename);
+    std::cout << "Saving " << filename << "..." << std::endl;
+    out_src << kernelStr;
+  }
 }
 
 HIP_TEST_CASE(Unit_Rtc_ReduceRandom) {
@@ -219,6 +239,12 @@ HIP_TEMPLATE_TEST_CASE(Unit_Rtc_Reduce_Simple, float, __half) {
       hiprtcCreateProgram(&prog, kernelStr.c_str(), "warp_reduce.hip", 0, nullptr, nullptr));
   compileProgram<std::plus>(prog, types);
 
+  if constexpr (kSaveCodeObject) {
+    const char* filename = "warp_reduce.hip"; 
+    std::ofstream out_src(filename);
+    std::cout << "Saving " << filename << "..." << std::endl;
+    out_src << kernelStr;
+  }
 
   for (int i = 0; i < numReduces; i++) {
     unsigned long long mask = 0ull;
