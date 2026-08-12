@@ -24,6 +24,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <thread>
 
@@ -63,6 +64,10 @@ ncclResult_t ncclProxyClientQueryFdBlocking(
 );
 
 void ncclDumpProxyState(int signal);
+
+// Defined in proxy.cc, not exported through proxy.h.
+ncclResult_t ncclProxyPost(struct ncclProxyOpsPool* pool, int nextOps, int nextOpsEnd);
+ncclResult_t ncclProxyProgressDestroy(struct ncclProxyState* proxyState);
 
 #define PROXYARGS_ALLOCATE_SIZE NCCL_MAX_OPS
 
@@ -550,15 +555,13 @@ static constexpr int kNoOps = -1;
 static constexpr int kPostedOpIndex = 7;
 static constexpr auto kWaitTimeout = std::chrono::seconds(10);
 
-// Single-process: drive the producer/consumer handshake on the pool's std::mutex and
-// std::condition_variable exactly as ncclProxyPost() and ncclProxyGetPostedOps() do,
-// after arming them process-shared. Covers ncclOsSetMutexCondShared, std::lock_guard,
-// std::unique_lock, cond.wait(predicate) and cond.notify_one() with correct RAII scope.
+// Single-process producer/consumer round-trip: producer calls the real ncclProxyPost(),
+// consumer mirrors ncclProxyGetPostedOps() on the pool's std::mutex/condition_variable.
 TEST(ProxyTests, ProxyOpsPoolMutexCondRoundTrip)
 {
     TEST_INFO("[ProxyTests] ProxyOpsPoolMutexCondRoundTrip start");
 
-    struct ncclProxyOpsPool* pool = new ncclProxyOpsPool();
+    auto pool = std::make_unique<ncclProxyOpsPool>();
     pool->nextOps    = kNoOps;
     pool->nextOpsEnd = kNoOps;
 
@@ -568,8 +571,7 @@ TEST(ProxyTests, ProxyOpsPoolMutexCondRoundTrip)
     bool waitSucceeded = false;
     bool stop          = false;
 
-    // Consumer mirrors ncclProxyGetPostedOps: block on the condvar until an op is
-    // posted (or a stop is requested), under a std::unique_lock.
+    // Consumer: block until an op is posted or a stop is requested.
     std::thread consumer([&]() {
         std::unique_lock<std::mutex> lock(pool->mutex);
         waitSucceeded = pool->cond.wait_for(
@@ -578,24 +580,14 @@ TEST(ProxyTests, ProxyOpsPoolMutexCondRoundTrip)
         pool->nextOps  = kNoOps;
     });
 
-    // Give the consumer time to actually reach cond.wait_for()
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    // Producer mirrors ncclProxyPost: publish an op under a std::lock_guard and wake
-    // exactly one waiter. The lock_guard must release before the consumer can proceed.
-    {
-        std::lock_guard<std::mutex> lock(pool->mutex);
-        pool->nextOps = kPostedOpIndex;
-        pool->cond.notify_one();
-    }
+    ASSERT_EQ(ncclProxyPost(pool.get(), kPostedOpIndex, kPostedOpIndex), ncclSuccess);
 
     consumer.join();
 
     EXPECT_TRUE(waitSucceeded) << "consumer timed out waiting on the pool condvar";
     EXPECT_EQ(observedOps, kPostedOpIndex);
 
-    // Second leg: the shutdown wake path (ncclProxyProgressDestroy sets stop then
-    // notifies). The consumer must wake and exit even though no op is posted.
+    // Shutdown wake path: stop is set and notified, consumer must wake with no op posted.
     observedOps   = kPostedOpIndex;
     waitSucceeded = false;
     pool->nextOps = kNoOps;
@@ -606,8 +598,6 @@ TEST(ProxyTests, ProxyOpsPoolMutexCondRoundTrip)
             lock, kWaitTimeout, [&]() { return pool->nextOps != kNoOps || stop; });
         observedOps = pool->nextOps;
     });
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     {
         std::lock_guard<std::mutex> lock(pool->mutex);
@@ -620,8 +610,36 @@ TEST(ProxyTests, ProxyOpsPoolMutexCondRoundTrip)
     EXPECT_TRUE(waitSucceeded) << "consumer did not wake on stop request";
     EXPECT_EQ(observedOps, kNoOps) << "stop wake must not fabricate a posted op";
 
-    delete pool;
     TEST_INFO("[ProxyTests] ProxyOpsPoolMutexCondRoundTrip PASSED");
+}
+
+// Covers when an op is already queued (nextOps != -1), a subsequent
+// post chains onto ops[nextOpsEnd].next and advances nextOpsEnd, without
+// touching nextOps or notifying.
+TEST(ProxyTests, ProxyOpsPoolPostChainsWhenPending)
+{
+    TEST_INFO("[ProxyTests] ProxyOpsPoolPostChainsWhenPending start");
+
+    constexpr int kFirstOp  = 3;
+    constexpr int kSecondOp = 5;
+
+    auto pool = std::make_unique<ncclProxyOpsPool>();
+    pool->nextOps    = kNoOps;
+    pool->nextOpsEnd = kNoOps;
+
+    // First post takes the nextOps == -1 branch and becomes the head of the chain.
+    ASSERT_EQ(ncclProxyPost(pool.get(), kFirstOp, kFirstOp), ncclSuccess);
+    ASSERT_EQ(pool->nextOps, kFirstOp);
+    ASSERT_EQ(pool->nextOpsEnd, kFirstOp);
+
+    // Second post takes the else branch: it links onto the pending tail, leaving the head
+    // untouched and only advancing nextOpsEnd.
+    ASSERT_EQ(ncclProxyPost(pool.get(), kSecondOp, kSecondOp), ncclSuccess);
+    EXPECT_EQ(pool->nextOps, kFirstOp) << "head must not change while an op is pending";
+    EXPECT_EQ(pool->ops[kFirstOp].next, kSecondOp) << "new op must chain onto the tail";
+    EXPECT_EQ(pool->nextOpsEnd, kSecondOp);
+
+    TEST_INFO("[ProxyTests] ProxyOpsPoolPostChainsWhenPending PASSED");
 }
 
 struct ProxyOpsPoolShmRegion
@@ -673,13 +691,7 @@ TEST(ProxyTests, ProxyOpsPoolMutexCondProcessShared)
                 _exit(woke ? 0 : 1);
             }
 
-            // Parent = producer. Let the child block in cond.wait_for first.
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            {
-                std::lock_guard<std::mutex> lock(pool.mutex);
-                pool.nextOps = kPostedOpIndex;
-                pool.cond.notify_one();
-            }
+            ASSERT_EQ(ncclProxyPost(&pool, kPostedOpIndex, kPostedOpIndex), ncclSuccess);
 
             int status = 0;
             ASSERT_EQ(waitpid(pid, &status, 0), pid);
@@ -691,6 +703,44 @@ TEST(ProxyTests, ProxyOpsPoolMutexCondProcessShared)
             ASSERT_EQ(munmap(map, sizeof(ProxyOpsPoolShmRegion)), 0);
             TEST_INFO("[ProxyTests] ProxyOpsPoolMutexCondProcessShared PASSED");
         });
+}
+
+// Drive the real ncclProxyProgressDestroy: it must wake and join the progress thread via
+// the opsPool condvar (stop path), then free the whole pools chain. The joined thread is a
+// stand-in consumer mirroring ncclProxyProgress's stop check; the destroy itself is real.
+TEST(ProxyTests, ProxyProgressDestroyJoinsAndFreesPools)
+{
+    TEST_INFO("[ProxyTests] ProxyProgressDestroyJoinsAndFreesPools start");
+
+    auto state   = std::make_unique<ncclProxyState>();
+    auto opsPool = std::make_unique<ncclProxyOpsPool>();
+
+    auto& ps    = state->progressState;
+    ps.opsPool  = opsPool.get();
+    ps.stop     = 0;
+
+    // Stand-in progress thread: block on the pool condvar until destroy sets stop.
+    ps.thread = std::thread([&]() {
+        std::unique_lock<std::mutex> lock(opsPool->mutex);
+        opsPool->cond.wait_for(lock, kWaitTimeout, [&]() { return ps.stop != 0; });
+    });
+
+    // Two-node pool chain for the free loop to walk and release.
+    auto* pool0 = static_cast<ncclProxyPool*>(calloc(1, sizeof(ncclProxyPool)));
+    auto* pool1 = static_cast<ncclProxyPool*>(calloc(1, sizeof(ncclProxyPool)));
+    ASSERT_NE(pool0, nullptr);
+    ASSERT_NE(pool1, nullptr);
+    pool0->next = pool1;
+    pool1->next = nullptr;
+    ps.pools    = pool0;
+
+    EXPECT_EQ(ncclProxyProgressDestroy(state.get()), ncclSuccess);
+
+    EXPECT_EQ(ps.stop, 1) << "destroy must request the progress thread to stop";
+    EXPECT_FALSE(ps.thread.joinable()) << "destroy must join the progress thread";
+    EXPECT_EQ(ps.pools, nullptr) << "destroy must free the entire pools chain";
+
+    TEST_INFO("[ProxyTests] ProxyProgressDestroyJoinsAndFreesPools PASSED");
 }
 
 } // namespace RcclUnitTesting
