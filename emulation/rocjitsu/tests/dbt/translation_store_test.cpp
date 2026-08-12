@@ -18,6 +18,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <memory>
 #include <span>
@@ -25,7 +26,9 @@
 #include <vector>
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <sched.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -70,7 +73,7 @@ protected:
                                                               const char *path = nullptr) {
     return std::make_unique<TranslationStore>(
         domain, reinterpret_cast<const void *>(&translator_identity_anchor),
-        path == nullptr ? root_ : path, access);
+        path == nullptr ? root_ : path, access, TranslationStore::KeyMode::kTranslatorBuild);
   }
 
   /// @brief The common case: a writable store over this test's directory.
@@ -121,6 +124,19 @@ TEST_F(TranslationStoreTest, ADomainThatIsNotOneComponentDisablesTheStore) {
   // Nothing was created outside the domain directories.
   for (const auto &item : std::filesystem::recursive_directory_iterator(root_))
     EXPECT_TRUE(std::filesystem::is_directory(item)) << item.path();
+}
+
+TEST_F(TranslationStoreTest, AStoreRootMustBeAnAbsoluteDescendedPath) {
+  EXPECT_FALSE(open_shared("pair-a", TranslationStore::Access::kReadWrite, "/")->available());
+
+  // This spelling would reach the fixture directory if it were incorrectly
+  // interpreted relative to `/`, making the assertion independent of whether a
+  // coincidentally named top-level directory exists on the host.
+  const std::string relative = std::string(root_).substr(1);
+  auto store = open_shared("pair-a", TranslationStore::Access::kReadWrite, relative.c_str());
+  EXPECT_FALSE(store->available());
+  EXPECT_FALSE(store->key_for(kSource, kIdentity).valid);
+  EXPECT_TRUE(std::filesystem::is_empty(root_));
 }
 
 TEST_F(TranslationStoreTest, AnEmptyObjectIsNotStored) {
@@ -246,7 +262,8 @@ open_against_module(const char *module, std::string_view domain, const char *roo
   if (anchor == nullptr)
     return nullptr;
   return std::make_unique<TranslationStore>(domain, anchor, root,
-                                            TranslationStore::Access::kReadWrite);
+                                            TranslationStore::Access::kReadWrite,
+                                            TranslationStore::KeyMode::kTranslatorBuild);
 }
 
 [[nodiscard]] std::unique_ptr<TranslationStore>
@@ -262,6 +279,24 @@ open_portable_against_module(const char *module, std::string_view domain, const 
     return nullptr;
   return std::make_unique<TranslationStore>(domain, anchor, root, access,
                                             TranslationStore::KeyMode::kPortablePrebuilt);
+}
+
+TEST_F(TranslationStoreTest, SharedRootUsesTheResolvedTranslatorPath) {
+  const std::filesystem::path prefix(root_);
+  std::filesystem::create_directories(prefix / "bin");
+  std::filesystem::create_directories(prefix / "lib");
+  const std::filesystem::path copied = prefix / "lib" / "librj-probe.so";
+  std::filesystem::copy_file(RJ_TRANSLATOR_PROBE_a, copied);
+
+  const std::string loader_path = (prefix / "bin" / ".." / "lib" / "librj-probe.so").string();
+  void *handle = dlopen(loader_path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  ASSERT_NE(handle, nullptr) << dlerror();
+  void *anchor = dlsym(handle, "rj_probe_translator_anchor");
+  ASSERT_NE(anchor, nullptr);
+
+  EXPECT_EQ(rocjitsu::shared_translation_root(anchor),
+            (prefix / "share" / "rocjitsu" / "translations").string());
+  dlclose(handle);
 }
 
 TEST_F(TranslationStoreTest, ARebuiltTranslatorDoesNotReadTheOldEntries) {
@@ -396,6 +431,59 @@ TEST_F(TranslationStoreTest, AManifestWithNoObjectIsReclaimed) {
     orphans += std::filesystem::exists(object) ? 0 : 1;
   }
   EXPECT_EQ(orphans, 0u) << "an orphan manifest must be reclaimed";
+}
+
+TEST_F(TranslationStoreTest, AbandonedFileSweepWaitsForTheDirectoryWriter) {
+  {
+    auto initial = open("pair-a");
+    ASSERT_TRUE(initial->available());
+  }
+  const std::filesystem::path entries = std::filesystem::path(root_) / "pair-a" / "v1";
+  const std::filesystem::path temporary = entries / "entry.tmp.writer";
+  std::ofstream(temporary) << "still publishing";
+  std::filesystem::last_write_time(temporary, std::filesystem::file_time_type::clock::now() -
+                                                  std::chrono::hours(1));
+
+  int ready[2];
+  int release[2];
+  ASSERT_EQ(pipe(ready), 0);
+  ASSERT_EQ(pipe(release), 0);
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    close(ready[0]);
+    close(release[1]);
+    const int fd = ::open(entries.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    char token = 'x';
+    if (fd < 0 || flock(fd, LOCK_EX) != 0 || write(ready[1], &token, 1) != 1 ||
+        read(release[0], &token, 1) != 1)
+      _exit(1);
+    close(fd);
+    _exit(0);
+  }
+
+  close(ready[1]);
+  close(release[0]);
+  char token = 0;
+  ASSERT_EQ(read(ready[0], &token, 1), 1);
+  auto reopening = std::async(std::launch::async, [this] {
+    auto store = open("pair-a");
+    return store->available();
+  });
+  EXPECT_EQ(reopening.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  EXPECT_TRUE(reopening.get());
+  EXPECT_TRUE(std::filesystem::exists(temporary));
+
+  ASSERT_EQ(write(release[1], &token, 1), 1);
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  EXPECT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+  auto next = open("pair-a");
+  EXPECT_TRUE(next->available());
+  EXPECT_FALSE(std::filesystem::exists(temporary));
+  close(ready[0]);
+  close(release[1]);
 }
 
 TEST_F(TranslationStoreTest, AGroupWritableStoreRootIsStillUsable) {

@@ -348,6 +348,12 @@ add_test(
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_cli.py -v
 )
+add_test(
+    NAME PretranslateScriptUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLUGIN_LOADER_FIXTURE_DIR

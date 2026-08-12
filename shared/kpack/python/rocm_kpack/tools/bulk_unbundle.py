@@ -45,7 +45,7 @@ def main(argv: list[str]):
         "--gfx-arch",
         help="write only code objects for this base architecture (for example, gfx1250)",
     )
-    args = p.parse_args()
+    args = p.parse_args(argv)
     if args.output_dir is not None and len(args.files) != 1:
         p.error("--output-dir requires exactly one input file")
     run(args)

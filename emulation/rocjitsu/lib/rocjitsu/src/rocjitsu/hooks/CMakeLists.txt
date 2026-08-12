@@ -122,7 +122,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set_target_properties(${_target} PROPERTIES OUTPUT_NAME ${_target})
         target_link_libraries(
             ${_target}
-            PRIVATE rocjitsu_gfx1250_b0_to_a0 Threads::Threads
+            PRIVATE rocjitsu_gfx1250_b0_to_a0 Threads::Threads ${CMAKE_DL_LIBS}
         )
         target_include_directories(
             ${_target}

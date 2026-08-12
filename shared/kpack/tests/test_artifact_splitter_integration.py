@@ -558,9 +558,7 @@ class TestArtifactSplitterIntegration:
         (prefix_dir / "share").mkdir(parents=True)
         (prefix_dir / "share/common.txt").write_text("generic")
         digest = "0123456789abcdef" * 4
-        cache_dir = (
-            prefix_dir / "share/rocjitsu/translations/gfx1250-b0-a0/v1"
-        )
+        cache_dir = prefix_dir / "share/rocjitsu/translations/gfx1250-b0-a0/v1"
         cache_dir.mkdir(parents=True)
         (cache_dir / f"{digest}.obj").write_text("translated object")
         (cache_dir / f"{digest}.man").write_text("manifest")
@@ -576,9 +574,7 @@ class TestArtifactSplitterIntegration:
         )
         batch_split(args, toolchain)
 
-        relative_cache = Path(
-            "share/rocjitsu/translations/gfx1250-b0-a0/v1"
-        )
+        relative_cache = Path("share/rocjitsu/translations/gfx1250-b0-a0/v1")
         gfx1250_prefix = output_dir / "rccl_lib_gfx1250" / prefix
         generic_prefix = output_dir / "rccl_lib_generic" / prefix
         assert (gfx1250_prefix / relative_cache / f"{digest}.obj").exists()

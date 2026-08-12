@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <mutex>
@@ -276,7 +277,15 @@ std::string shared_translation_root(const void *address) {
   Dl_info info{};
   if (dladdr(address, &info) == 0 || info.dli_fname == nullptr)
     return {};
-  const std::string_view path(info.dli_fname);
+  // dladdr() preserves the spelling used by the loader, including relative
+  // components. The secure descriptor walk intentionally rejects those, so
+  // derive the installed root from the resolved module path instead.
+  char *resolved = realpath(info.dli_fname, nullptr);
+  if (resolved == nullptr)
+    return {};
+  const std::string resolved_path(resolved);
+  free(resolved);
+  const std::string_view path(resolved_path);
   const size_t file_at = path.rfind('/');
   if (file_at == std::string_view::npos)
     return {}; // A bare name means the loader resolved it by search; no prefix.
@@ -342,6 +351,20 @@ namespace {
     at = next + 1;
   }
   return components;
+}
+
+/// @brief Whether a store root is an absolute, descended path.
+/// @details The descriptor walk begins at `/`, so accepting a relative root
+/// would silently reinterpret it as absolute. Requiring at least one ordinary
+/// component also rejects `/` before trust-boundary index arithmetic.
+[[nodiscard]] bool is_descended_absolute_path(std::string_view path) {
+  if (path.size() < 2 || path.front() != '/' || path.find('\0') != std::string_view::npos)
+    return false;
+  const auto components = path_components(path);
+  return !components.empty() &&
+         std::none_of(components.begin(), components.end(), [](const std::string &component) {
+           return component == "." || component == "..";
+         });
 }
 
 /// @brief Which owners a directory the store relies on may have.
@@ -472,8 +495,11 @@ enum class DirectoryTrust {
 /// for everyone after it.
 class DirectoryWriteLock {
 public:
-  explicit DirectoryWriteLock(int dir_fd) : dir_fd_(dir_fd) {
-    held_ = dir_fd_ >= 0 && flock(dir_fd_, LOCK_EX) == 0;
+  enum class Mode { kBlocking, kNonBlocking };
+
+  explicit DirectoryWriteLock(int dir_fd, Mode mode = Mode::kBlocking) : dir_fd_(dir_fd) {
+    const int operation = LOCK_EX | (mode == Mode::kNonBlocking ? LOCK_NB : 0);
+    held_ = dir_fd_ >= 0 && flock(dir_fd_, operation) == 0;
   }
   ~DirectoryWriteLock() {
     if (held_)
@@ -605,6 +631,8 @@ struct TranslationStore::Impl {
         return;
       base = root_;
     }
+    if (!is_descended_absolute_path(base))
+      return;
     const std::string path = base + "/" + domain_ + "/" + std::string(kSchemaDir);
     // The trust policy starts at the store's own root. Everything above it
     // belongs to the system -- /tmp is world-writable by design, and judging it
@@ -626,10 +654,15 @@ struct TranslationStore::Impl {
     const mode_t create_mode = writable() ? 0755 : 0;
     dir_fd_ = open_descended_directory(path, create_mode, DirectoryTrust::kOwnedByRootOrCaller,
                                        owner_checked_from, trusted_from);
-    if (writable()) {
+    if (writable() && dir_fd_ >= 0) {
       // Once per process, and the only moment at which a temporary left by a
       // process that died mid-write is unambiguously abandoned.
-      sweep_abandoned_locked();
+      // Opening and lookup must never wait behind a publisher. The sweep is
+      // opportunistic; losing this race only leaves old files for the next
+      // process to reclaim.
+      const DirectoryWriteLock directory_lock(dir_fd_, DirectoryWriteLock::Mode::kNonBlocking);
+      if (directory_lock.held())
+        sweep_abandoned_locked();
     }
   }
 
@@ -793,8 +826,9 @@ namespace {
   return std::string(text.substr(begin, end - begin));
 }
 
-[[nodiscard]] std::optional<std::string> read_whole(int dir_fd, const std::string &name,
-                                                    uint64_t limit) {
+template <typename Buffer>
+[[nodiscard]] std::optional<Buffer> read_whole(int dir_fd, const std::string &name,
+                                               uint64_t limit) {
   const int fd = openat(dir_fd, name.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
   if (fd < 0)
     return std::nullopt;
@@ -804,7 +838,7 @@ namespace {
     close(fd);
     return std::nullopt;
   }
-  std::string data;
+  Buffer data;
   data.resize(static_cast<size_t>(info.st_size));
   size_t done = 0;
   while (done < data.size()) {
@@ -888,7 +922,8 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
   const std::string manifest_name = key + ".man";
   const std::string object_name = key + ".obj";
   constexpr uint64_t kManifestLimit = 4096;
-  const std::optional<std::string> manifest = read_whole(dir_fd, manifest_name, kManifestLimit);
+  const std::optional<std::string> manifest =
+      read_whole<std::string>(dir_fd, manifest_name, kManifestLimit);
   if (!manifest || !manifest->starts_with(kManifestMagic))
     return {};
 
@@ -913,7 +948,8 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
       return {};
   }
 
-  const std::optional<std::string> object = read_whole(dir_fd, object_name, max_object_bytes());
+  std::optional<std::vector<uint8_t>> object =
+      read_whole<std::vector<uint8_t>>(dir_fd, object_name, max_object_bytes());
   if (!object || std::to_string(object->size()) != *recorded_size)
     return {};
 
@@ -935,7 +971,7 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
     ++hits_;
   }
 #endif
-  return std::vector<uint8_t>(object->begin(), object->end());
+  return std::move(*object);
 }
 
 void TranslationStore::Impl::store(const std::string &key, std::span<const uint8_t> object,

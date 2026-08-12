@@ -27,12 +27,14 @@ import hashlib
 import json
 import os
 import re
+import stat
 import struct
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 ELF_MAGIC = b"\x7fELF"
 ELFCLASS64 = 2
@@ -68,8 +70,8 @@ def is_amdgpu_elf(data: bytes) -> bool:
     )
 
 
-def elf_section(data: bytes, wanted: bytes) -> bytes | None:
-    """Return the contents of section `wanted`, or None.
+def read_elf_section(path: Path, wanted: bytes) -> bytes | None:
+    """Read one ELF section without materializing the host binary.
 
     Done here rather than by shelling out to llvm-objcopy so the script has no
     toolchain dependency: an image build that has ROCm installed does not
@@ -77,41 +79,68 @@ def elf_section(data: bytes, wanted: bytes) -> bytes | None:
     reason for pre-translation to be unavailable.
     """
     try:
-        if len(data) < 64 or not data.startswith(ELF_MAGIC) or data[4] != ELFCLASS64:
-            return None
-        table_offset = struct.unpack_from("<Q", data, 40)[0]
-        entry_size, count, name_index = struct.unpack_from("<HHH", data, 58)
-        if entry_size < 64 or table_offset + entry_size > len(data):
-            return None
-        if count == 0:
-            count = struct.unpack_from("<Q", data, table_offset + 32)[0]
-        if name_index == 0xFFFF:
-            name_index = struct.unpack_from("<I", data, table_offset + 40)[0]
-        if not count or name_index >= count:
-            return None
-        if table_offset + entry_size * count > len(data):
-            return None
-
-        names_header = table_offset + name_index * entry_size
-        names_offset, names_size = struct.unpack_from("<QQ", data, names_header + 24)
-        if names_offset + names_size > len(data):
-            return None
-
-        for index in range(count):
-            header = table_offset + index * entry_size
-            name_offset = struct.unpack_from("<I", data, header)[0]
-            start = names_offset + name_offset
-            if start >= names_offset + names_size:
-                continue
-            end = data.find(b"\0", start, names_offset + names_size)
-            if end < 0 or data[start:end] != wanted:
-                continue
-            section_type = struct.unpack_from("<I", data, header + 4)[0]
-            offset, size = struct.unpack_from("<QQ", data, header + 24)
-            if section_type == SHT_NOBITS or not size or offset + size > len(data):
+        file_size = path.stat().st_size
+        with path.open("rb") as handle:
+            elf_header = handle.read(64)
+            if (
+                len(elf_header) < 64
+                or not elf_header.startswith(ELF_MAGIC)
+                or elf_header[4] != ELFCLASS64
+                or elf_header[5] != ELFDATA2LSB
+            ):
                 return None
-            return data[offset : offset + size]
-    except (struct.error, ValueError):
+            table_offset = struct.unpack_from("<Q", elf_header, 40)[0]
+            entry_size, count, name_index = struct.unpack_from("<HHH", elf_header, 58)
+            if entry_size < 64 or table_offset + entry_size > file_size:
+                return None
+
+            handle.seek(table_offset)
+            first_header = handle.read(entry_size)
+            if len(first_header) != entry_size:
+                return None
+            if count == 0:
+                count = struct.unpack_from("<Q", first_header, 32)[0]
+            if name_index == 0xFFFF:
+                name_index = struct.unpack_from("<I", first_header, 40)[0]
+            table_size = entry_size * count
+            if (
+                not count
+                or name_index >= count
+                or table_offset + table_size > file_size
+            ):
+                return None
+
+            handle.seek(table_offset)
+            table = handle.read(table_size)
+            if len(table) != table_size:
+                return None
+            names_header = name_index * entry_size
+            names_offset, names_size = struct.unpack_from(
+                "<QQ", table, names_header + 24
+            )
+            if names_offset + names_size > file_size:
+                return None
+            handle.seek(names_offset)
+            names = handle.read(names_size)
+            if len(names) != names_size:
+                return None
+
+            for index in range(count):
+                header = index * entry_size
+                name_offset = struct.unpack_from("<I", table, header)[0]
+                if name_offset >= len(names):
+                    continue
+                name_end = names.find(b"\0", name_offset)
+                if name_end < 0 or names[name_offset:name_end] != wanted:
+                    continue
+                section_type = struct.unpack_from("<I", table, header + 4)[0]
+                offset, size = struct.unpack_from("<QQ", table, header + 24)
+                if section_type == SHT_NOBITS or not size or offset + size > file_size:
+                    return None
+                handle.seek(offset)
+                content = handle.read(size)
+                return content if len(content) == size else None
+    except (OSError, struct.error, ValueError):
         return None
     return None
 
@@ -178,8 +207,10 @@ def find_bundler(explicit: str | None) -> str | None:
     return which("clang-offload-bundler")
 
 
-def unbundle_compressed(bundler: str, blob: bytes, target: str) -> list[bytes]:
-    """Return the `target` payloads inside one compressed bundle.
+def unbundle_compressed(
+    bundler: str, blob: bytes, target: str
+) -> tuple[list[tuple[str, bytes]], list[tuple[str, str]]]:
+    """Return successful `target` payloads and per-entry failures.
 
     A compressed bundle cannot be walked with struct.unpack the way a plain one
     can, so this shells out. It does NOT need a GPU -- the container is just
@@ -192,13 +223,16 @@ def unbundle_compressed(bundler: str, blob: bytes, target: str) -> list[bytes]:
         listed = subprocess.run(
             [bundler, "--list", "--type=o", f"--input={source}"],
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
         )
         if listed.returncode:
-            return []
+            raise RuntimeError(
+                f"bundler list failed ({listed.returncode}): {listed.stderr.strip()}"
+            )
 
-        payloads = []
+        payloads: list[tuple[str, bytes]] = []
+        failures: list[tuple[str, str]] = []
         for index, entry_target in enumerate(listed.stdout.split()):
             if not bundle_target_matches(entry_target, target):
                 continue
@@ -212,14 +246,23 @@ def unbundle_compressed(bundler: str, blob: bytes, target: str) -> list[bytes]:
                     f"--input={source}",
                     f"--output={destination}",
                 ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
-            if extracted.returncode == 0 and destination.exists():
-                data = destination.read_bytes()
-                if data:
-                    payloads.append(data)
-        return payloads
+            if extracted.returncode != 0 or not destination.exists():
+                failures.append(
+                    (
+                        entry_target,
+                        f"bundler extraction failed ({extracted.returncode}): "
+                        f"{extracted.stderr.strip()}",
+                    )
+                )
+                continue
+            data = destination.read_bytes()
+            if data:
+                payloads.append((entry_target, data))
+        return payloads, failures
 
 
 # ---------------------------------------------------------------------------
@@ -326,34 +369,81 @@ class Kpack:
 class Found:
     """One extracted code object and where it came from."""
 
-    data: bytes
+    byte_count: int
     origin: dict[str, object]
 
 
 @dataclass
 class Discovery:
-    objects: list[Found] = field(default_factory=list)
+    objects: dict[str, Found] = field(default_factory=dict)
+    extracted_objects: int = 0
+    duplicate_objects: int = 0
     compressed_bundles: list[Path] = field(default_factory=list)
     compressed_unpacked: int = 0
     kpack_archives: list[Path] = field(default_factory=list)
     kpack_skipped: int = 0
     failures: list[dict[str, object]] = field(default_factory=list)
 
+    def add_object(
+        self,
+        data: bytes,
+        origin: dict[str, object],
+        on_unique: Callable[[str, bytes, Found], None] | None,
+    ) -> None:
+        """Deduplicate one object and hand unique bytes to the batch consumer."""
+        self.extracted_objects += 1
+        digest = hashlib.sha256(data).hexdigest()
+        if digest in self.objects:
+            self.duplicate_objects += 1
+            return
+        item = Found(len(data), origin)
+        self.objects[digest] = item
+        if on_unique is None:
+            return
+        try:
+            on_unique(digest, data, item)
+        except OSError as error:
+            self.failures.append({"category": "stage", **origin, "error": str(error)})
 
-def walk(roots: list[Path]):
+
+def walk(roots: list[Path], failures: list[dict[str, object]]):
     seen: set[tuple[int, int]] = set()
     for root in roots:
-        if root.is_file():
+        try:
+            root_info = root.stat()
+        except OSError as error:
+            failures.append(
+                {"category": "stat", "path": str(root), "error": str(error)}
+            )
+            continue
+        if stat.S_ISREG(root_info.st_mode):
             yield root
             continue
-        for directory, _, names in os.walk(root, followlinks=False):
+        if not stat.S_ISDIR(root_info.st_mode):
+            continue
+
+        def record_traversal_error(error: OSError) -> None:
+            failures.append(
+                {
+                    "category": "traversal",
+                    "path": str(error.filename or root),
+                    "error": str(error),
+                }
+            )
+
+        for directory, _, names in os.walk(
+            root, followlinks=False, onerror=record_traversal_error
+        ):
             for name in names:
                 path = Path(directory) / name
                 try:
                     info = path.stat()
-                except OSError:
+                except OSError as error:
+                    failures.append(
+                        {"category": "stat", "path": str(path), "error": str(error)}
+                    )
                     continue
-                if not os.path.isfile(path):
+                if not stat.S_ISREG(info.st_mode):
                     continue
                 # Hard links are common in an install tree; extracting the same
                 # bytes twice would translate them twice.
@@ -369,13 +459,49 @@ def discover(
     target: str,
     kpack: Kpack | None,
     bundler: str | None,
+    on_unique: Callable[[str, bytes, Found], None] | None = None,
     kpack_intentionally_skipped: bool = False,
 ) -> Discovery:
     found = Discovery()
-    # (path, container bytes) for every compressed bundle, resolved after the
-    # walk so one missing tool does not abort the scan.
-    compressed: list[tuple[Path, bytes]] = []
-    for path in walk(roots):
+
+    def unpack_compressed(path: Path, blob: bytes) -> None:
+        if bundler is None:
+            return
+        try:
+            payloads, entry_failures = unbundle_compressed(bundler, blob, target)
+        except (OSError, RuntimeError) as error:
+            found.failures.append(
+                {
+                    "category": "compressed-bundle",
+                    "path": str(path),
+                    "error": str(error),
+                }
+            )
+            return
+        for entry_target, error in entry_failures:
+            found.failures.append(
+                {
+                    "category": "compressed-bundle",
+                    "path": str(path),
+                    "target": entry_target,
+                    "error": error,
+                }
+            )
+        if payloads:
+            found.compressed_unpacked += 1
+        for index, (entry_target, payload) in enumerate(payloads):
+            found.add_object(
+                payload,
+                {
+                    "container": "compressed-bundle",
+                    "path": str(path),
+                    "entry": index,
+                    "target": entry_target,
+                },
+                on_unique,
+            )
+
+    for path in walk(roots, found.failures):
         try:
             with path.open("rb") as handle:
                 header = handle.read(64)
@@ -387,7 +513,13 @@ def discover(
                 is_compressed = header.startswith(COMPRESSED_BUNDLE_MAGIC)
                 if not is_compressed and not header.startswith(ELF_MAGIC):
                     continue
-                data = header + handle.read()
+                if is_compressed and bundler is None:
+                    found.compressed_bundles.append(path)
+                    continue
+                if is_compressed or is_amdgpu_elf(header):
+                    data = header + handle.read()
+                else:
+                    data = None
         except OSError as error:
             found.failures.append(
                 {"category": "read", "path": str(path), "error": str(error)}
@@ -396,65 +528,37 @@ def discover(
 
         if is_compressed:
             found.compressed_bundles.append(path)
-            compressed.append((path, data))
+            unpack_compressed(path, data)
             continue
 
-        if is_amdgpu_elf(data):
+        if data is not None and is_amdgpu_elf(data):
             # A standalone code object. Whether it is for this target is the
             # translator's verdict to give, not ours to guess from the name.
-            found.objects.append(Found(data, {"container": "elf", "path": str(path)}))
+            found.add_object(data, {"container": "elf", "path": str(path)}, on_unique)
             continue
 
-        fatbin = elf_section(data, b".hip_fatbin")
+        fatbin = read_elf_section(path, b".hip_fatbin")
         if fatbin is None:
             continue
         if fatbin.startswith(COMPRESSED_BUNDLE_MAGIC):
             found.compressed_bundles.append(path)
-            compressed.append((path, fatbin))
+            unpack_compressed(path, fatbin)
             continue
         for index, (entry_target, payload) in enumerate(
             parse_clang_offload_bundles(fatbin)
         ):
             if not bundle_target_matches(entry_target, target) or not payload:
                 continue
-            found.objects.append(
-                Found(
-                    payload,
-                    {
-                        "container": "hip-fatbin",
-                        "path": str(path),
-                        "entry": index,
-                        "target": entry_target,
-                    },
-                )
+            found.add_object(
+                payload,
+                {
+                    "container": "hip-fatbin",
+                    "path": str(path),
+                    "entry": index,
+                    "target": entry_target,
+                },
+                on_unique,
             )
-
-    if bundler is not None:
-        for path, blob in compressed:
-            try:
-                payloads = unbundle_compressed(bundler, blob, target)
-            except OSError as error:
-                found.failures.append(
-                    {
-                        "category": "compressed-bundle",
-                        "path": str(path),
-                        "error": str(error),
-                    }
-                )
-                continue
-            if payloads:
-                found.compressed_unpacked += 1
-            for index, payload in enumerate(payloads):
-                found.objects.append(
-                    Found(
-                        payload,
-                        {
-                            "container": "compressed-bundle",
-                            "path": str(path),
-                            "entry": index,
-                        },
-                    )
-                )
 
     for archive in found.kpack_archives:
         if kpack is None:
@@ -476,16 +580,15 @@ def discover(
             continue
         try:
             for member, architecture, data in kpack.objects(archive, target):
-                found.objects.append(
-                    Found(
-                        data,
-                        {
-                            "container": "kpack",
-                            "path": str(archive),
-                            "member": member,
-                            "architecture": architecture,
-                        },
-                    )
+                found.add_object(
+                    data,
+                    {
+                        "container": "kpack",
+                        "path": str(archive),
+                        "member": member,
+                        "architecture": architecture,
+                    },
+                    on_unique,
                 )
         except (OSError, RuntimeError) as error:
             found.failures.append(
@@ -519,7 +622,6 @@ def run_tool(
     store_root: str | None,
     paths: list[Path],
     force: bool,
-    portable: bool,
     fail_on_skipped: bool,
     verbose: bool,
 ) -> tuple[int, str]:
@@ -528,8 +630,6 @@ def run_tool(
         command += ["--store-root", store_root]
     if force:
         command.append("--force")
-    if portable:
-        command.append("--portable")
     if fail_on_skipped:
         command.append("--fail-on-skipped")
     command += [str(path) for path in paths]
@@ -559,7 +659,7 @@ def parse_tool_output(text: str) -> dict[str, int]:
 # ---------------------------------------------------------------------------
 
 
-def parse_arguments() -> argparse.Namespace:
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -624,7 +724,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--portable",
         action="store_true",
-        help="write a prebuilt cache independent of the translator ELF build ID",
+        default=True,
+        help="accepted for packaging compatibility; the domain owns its key policy",
     )
     parser.add_argument(
         "--fail-on-skipped",
@@ -637,11 +738,14 @@ def parse_arguments() -> argparse.Namespace:
         help="report what would be translated and stop",
     )
     parser.add_argument("--verbose", action="store_true", help="echo the tool's output")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = parse_arguments()
+def main(argv: list[str] | None = None) -> int:
+    args = parse_arguments(argv)
+    if args.batch < 1:
+        print("error: --batch must be at least 1", file=sys.stderr)
+        return 2
     roots = args.paths or [DEFAULT_ROOT]
     missing = [root for root in roots if not root.exists()]
     if missing:
@@ -665,6 +769,9 @@ def main() -> int:
     if not args.skip_compressed:
         bundler = find_bundler(args.bundler)
         if bundler is None:
+            if args.bundler is not None:
+                print(f"error: bundler not found: {args.bundler}", file=sys.stderr)
+                return 2
             print(
                 "warning: clang-offload-bundler not found; compressed bundles will be "
                 "reported as skipped. On this ROCm tree those hold the gfx1250 GEMM "
@@ -672,61 +779,31 @@ def main() -> int:
                 file=sys.stderr,
             )
 
-    found = discover(roots, args.target, kpack, bundler, args.skip_kpack)
-
-    # Content-address before translating. An install tree holds the same object
-    # under several names, and the whole point is not to do the work twice.
-    unique: dict[str, Found] = {}
-    duplicates = 0
-    for item in found.objects:
-        digest = hashlib.sha256(item.data).hexdigest()
-        if digest in unique:
-            duplicates += 1
-            continue
-        unique[digest] = item
-
-    print(
-        f"found {len(unique)} unique objects "
-        f"({len(found.objects)} extracted, {duplicates} duplicates), "
-        f"{len(found.kpack_archives)} kpack archives, "
-        f"{found.compressed_unpacked}/{len(found.compressed_bundles)} compressed "
-        "bundles unpacked"
-    )
-    if args.dry_run:
-        return 0 if not found.failures else 1
-
-    tool = locate_tool(args.tool)
-    if tool is None:
-        print("error: rj_pretranslate not found; pass --tool", file=sys.stderr)
-        return 2
-
     totals = {"written": 0, "held": 0, "skipped": 0, "failed": 0}
     tool_failures = 0
     provenance: list[dict[str, object]] = []
+    tool = None if args.dry_run else locate_tool(args.tool)
+    if not args.dry_run and tool is None:
+        print("error: rj_pretranslate not found; pass --tool", file=sys.stderr)
+        return 2
     if args.temporary_root is not None:
         args.temporary_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix="rocjitsu-pretranslate-", dir=args.temporary_root
     ) as temporary:
         staged: list[Path] = []
-        order = sorted(unique.items())
-        for index, (digest, item) in enumerate(order, start=1):
-            path = Path(temporary) / f"{digest}.co"
-            path.write_bytes(item.data)
-            staged.append(path)
-            provenance.append(
-                {"digest": digest, "bytes": len(item.data), **item.origin}
-            )
+        processed = 0
 
-            at_end = index == len(order)
-            if len(staged) < args.batch and not at_end:
-                continue
+        def flush_batch() -> None:
+            nonlocal processed, staged, tool_failures
+            if not staged:
+                return
+            assert tool is not None
             code, output = run_tool(
                 tool,
                 args.store_root,
                 staged,
                 args.force,
-                args.portable,
                 args.fail_on_skipped,
                 args.verbose,
             )
@@ -736,25 +813,60 @@ def main() -> int:
                 sys.stderr.write(output)
             if code != 0:
                 tool_failures += 1
-            for path in staged:
-                path.unlink(missing_ok=True)
+            processed += len(staged)
+            for staged_path in staged:
+                staged_path.unlink(missing_ok=True)
             staged = []
-            if args.progress_every and (index % args.progress_every == 0 or at_end):
-                print(f"pretranslate: {index}/{len(order)} objects", flush=True)
+            if args.progress_every and processed % args.progress_every == 0:
+                print(f"pretranslate: {processed} objects", flush=True)
+
+        def stage_unique(digest: str, data: bytes, item: Found) -> None:
+            path = Path(temporary) / f"{digest}.co"
+            path.write_bytes(data)
+            staged.append(path)
+            provenance.append(
+                {"digest": digest, "bytes": item.byte_count, **item.origin}
+            )
+            if len(staged) == args.batch:
+                flush_batch()
+
+        found = discover(
+            roots,
+            args.target,
+            kpack,
+            bundler,
+            None if args.dry_run else stage_unique,
+            args.skip_kpack,
+        )
+        if not args.dry_run:
+            flush_batch()
+        unique = found.objects
+        print(
+            f"found {len(unique)} unique objects "
+            f"({found.extracted_objects} extracted, "
+            f"{found.duplicate_objects} duplicates), "
+            f"{len(found.kpack_archives)} kpack archives, "
+            f"{found.compressed_unpacked}/{len(found.compressed_bundles)} compressed "
+            "bundles unpacked"
+        )
+        if args.dry_run:
+            return 0 if not found.failures else 1
+        if args.progress_every and processed % args.progress_every != 0:
+            print(f"pretranslate: {processed}/{len(unique)} objects", flush=True)
 
     summary = {
         "target": args.target,
         "roots": [str(root) for root in roots],
         "store_root": args.store_root,
         "unique_objects": len(unique),
-        "duplicate_objects": duplicates,
+        "duplicate_objects": found.duplicate_objects,
         "kpack_archives": len(found.kpack_archives),
         "kpack_archives_skipped": found.kpack_skipped,
         "compressed_bundles": len(found.compressed_bundles),
         "compressed_bundles_unpacked": found.compressed_unpacked,
         "discovery_failures": len(found.failures),
         "fail_on_skipped": args.fail_on_skipped,
-        "portable": args.portable,
+        "portable": True,
         "tool_failures": tool_failures,
         **totals,
     }

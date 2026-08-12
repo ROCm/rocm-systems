@@ -835,9 +835,7 @@ class TestHipKernelProviderRockeHandler:
 
     def test_detect_deeply_nested_file(self, handler, prefix_root):
         """Any file nested below the arch dir routes to that arch."""
-        file_path = (
-            prefix_root / f"{self._ENGINE_DIR}/gfx942/sub/extra/blob.bin"
-        )
+        file_path = prefix_root / f"{self._ENGINE_DIR}/gfx942/sub/extra/blob.bin"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 

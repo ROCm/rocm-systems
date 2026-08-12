@@ -89,7 +89,7 @@ TranslationStore &pretranslation_store() {
   static TranslationStore &store = *new TranslationStore(
       rocjitsu::kGfx1250B0A0Domain, rocjitsu::gfx1250_b0_a0_translator_anchor(),
       rocjitsu::shared_translation_root(rocjitsu::gfx1250_b0_a0_translator_anchor()),
-      TranslationStore::Access::kReadOnly, TranslationStore::KeyMode::kPortablePrebuilt);
+      TranslationStore::Access::kReadOnly, rocjitsu::kGfx1250B0A0KeyMode);
   return store;
 }
 

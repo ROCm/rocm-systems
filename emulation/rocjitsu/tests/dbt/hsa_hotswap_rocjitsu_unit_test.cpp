@@ -1851,7 +1851,7 @@ protected:
                 static_cast<std::streamsize>(bytes.size()));
       ASSERT_TRUE(out.good());
     }
-    const std::string command = std::string(RJ_PRETRANSLATE_TOOL) + " --portable --store-root '" +
+    const std::string command = std::string(RJ_PRETRANSLATE_TOOL) + " --store-root '" +
                                 store_root.path() + "' '" + input.string() + "' > /dev/null 2>&1";
     ASSERT_EQ(std::system(command.c_str()), 0) << command;
     std::filesystem::remove(input);

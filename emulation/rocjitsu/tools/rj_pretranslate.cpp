@@ -74,8 +74,8 @@ void usage(const char *program) {
                "  --store-root DIR  Write here instead of the location derived from\n"
                "                    the translator's own install prefix.\n"
                "  --force           Translate even objects already recorded.\n"
-               "  --portable        Write a prebuilt cache independent of the\n"
-               "                    translator ELF build ID.\n"
+               "  --portable        Accepted for packaging compatibility; this\n"
+               "                    domain always uses its packaged-cache contract.\n"
                "  --fail-on-skipped Exit nonzero if any input is rejected.\n"
                "\n"
                "Each input must be a standalone AMDGPU code object. Extracting\n"
@@ -165,7 +165,6 @@ Outcome pretranslate_one(const char *path, rocjitsu::TranslationStore &store, bo
 int main(int argc, char **argv) {
   std::string root;
   bool force = false;
-  bool portable = false;
   bool fail_on_skipped = false;
   std::vector<const char *> inputs;
 
@@ -178,7 +177,9 @@ int main(int argc, char **argv) {
     if (arg == "--force") {
       force = true;
     } else if (arg == "--portable") {
-      portable = true;
+      // Compatibility with packaging recipes written before the domain owned
+      // its key policy. There is deliberately no mode override: an entry this
+      // product's runtime cannot read is not a useful output.
     } else if (arg == "--fail-on-skipped") {
       fail_on_skipped = true;
     } else if (arg == "--store-root") {
@@ -211,9 +212,7 @@ int main(int argc, char **argv) {
 
   rocjitsu::TranslationStore store(
       rocjitsu::kGfx1250B0A0Domain, rocjitsu::gfx1250_b0_a0_translator_anchor(), root,
-      rocjitsu::TranslationStore::Access::kReadWrite,
-      portable ? rocjitsu::TranslationStore::KeyMode::kPortablePrebuilt
-               : rocjitsu::TranslationStore::KeyMode::kTranslatorBuild);
+      rocjitsu::TranslationStore::Access::kReadWrite, rocjitsu::kGfx1250B0A0KeyMode);
   // Establish this before translating anything. Discovering an unusable root
   // after several minutes of work would be the same result reached expensively.
   if (!store.available()) {

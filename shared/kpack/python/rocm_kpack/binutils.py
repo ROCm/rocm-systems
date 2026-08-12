@@ -238,9 +238,6 @@ class BundledBinary:
         If ``gfx_arch`` is provided, only code objects for that base architecture
         are written. Target features such as ``:xnack+`` do not affect matching.
         """
-        if dest_dir is None:
-            dest_dir = Path(tempfile.mkdtemp())
-
         # Extract code objects once, then derive both the target list and
         # write the files from the same extraction result.
         code_objects = self._extract_code_objects()
@@ -253,6 +250,12 @@ class BundledBinary:
                     f"No code objects for architecture {gfx_arch!r} in {self.file_path}"
                 )
         target_list = self._build_target_list(code_objects)
+
+        # Do not create an owned temporary directory until extraction and
+        # filtering have succeeded. A no-match exception has no context manager
+        # to clean one created earlier.
+        if dest_dir is None:
+            dest_dir = Path(tempfile.mkdtemp())
 
         contents = UnbundledContents(
             self, dest_dir, delete_on_close=delete_on_close, target_list=target_list
@@ -332,13 +335,12 @@ class BundledBinary:
             content = surgery.get_section_content(section)
             return content[: section.virtual_size]
         else:
-            surgery = ElfSurgery.load(self.file_path)
-            section = surgery.find_section(".hip_fatbin")
-            if section is None:
+            content = ElfSurgery.read_section(self.file_path, ".hip_fatbin")
+            if content is None:
                 raise RuntimeError(
-                    f"ELF binary {self.file_path} has no .hip_fatbin section"
+                    f"ELF binary {self.file_path} has no readable .hip_fatbin section"
                 )
-            return surgery.get_section_content(section)
+            return content
 
     def _extract_code_objects(self) -> list[ExtractedCodeObject]:
         """Extract code objects from the fatbin data.

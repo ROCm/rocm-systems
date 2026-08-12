@@ -27,6 +27,13 @@ namespace rocjitsu {
 /// @brief Tree holding this translator's entries, in either tier.
 constexpr std::string_view kGfx1250B0A0Domain = "gfx1250-b0-a0";
 
+/// @brief Key contract shared by the packaged producer and runtime consumer.
+/// @details These entries are built and shipped as one deployment artifact, so
+/// their explicit profile and format revisions, rather than one producer ELF's
+/// build ID, define compatibility.
+constexpr TranslationStore::KeyMode kGfx1250B0A0KeyMode =
+    TranslationStore::KeyMode::kPortablePrebuilt;
+
 /// @brief The single configuration this translator runs under.
 ///
 /// @details Its entry point takes no options, so every request shares one

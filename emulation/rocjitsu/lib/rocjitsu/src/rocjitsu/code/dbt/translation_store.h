@@ -136,7 +136,7 @@ public:
   ///             the portable-prebuilt cache contract. Use portable mode only
   ///             when cache and consumer are distributed as one product.
   TranslationStore(std::string_view domain, const void *translator, std::string_view root,
-                   Access access, KeyMode key_mode = KeyMode::kTranslatorBuild);
+                   Access access, KeyMode key_mode);
 
   ~TranslationStore();
 
