@@ -24,14 +24,14 @@
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/vop3.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/vopd.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3_5/vopd.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/sop2.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/vop3.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/sop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopd.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -104,6 +104,21 @@ TEST_P(DecoderSmokeTest, DecodesCorrectly) {
   EXPECT_EQ(inst->size(), tc.expected_size_bytes) << "Wrong size for arch=" << tc.arch_name;
 }
 
+TEST(Gfx1250DecodeTest, DisassemblesDpp8Selectors) {
+  const uint32_t words[] = {
+      0x7E0040EAu, // v_fract_f32 with the DPP8FI source selector.
+      0x000040CCu, // v204, dpp8:[0,0,1,0,0,0,0,0].
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->size(), 8);
+  EXPECT_EQ(inst->mnemonic(), "v_fract_f32_dpp");
+  EXPECT_EQ(inst->disassemble(), "v_fract_f32_dpp v0, v204 dpp8:[0,0,1,0,0,0,0,0] fi:1");
+}
+
 // AMDGPU ISAs × 2 instructions.
 // CDNA1/2/3/4 and RDNA1/2 share the GFX9/GFX10 s_endpgm encoding (op=1).
 // RDNA3/3.5/4 use the GFX11/GFX12 encoding where s_endpgm moved to op=48.
@@ -136,6 +151,42 @@ INSTANTIATE_TEST_SUITE_P(
       name += info.param.expected_mnemonic;
       return name;
     });
+
+TEST(RawEncodingTest, PreservesScalarLiteralWordsAcrossAmdgpuIsas) {
+  struct Case {
+    rj_code_arch_t arch;
+    const char *arch_name;
+    uint32_t word;
+  };
+  constexpr uint32_t s_mov_b32_literal = 0xBE8000FFu;
+  constexpr uint32_t rdna1_s_mov_b32_literal = 0xBE8003FFu;
+  constexpr Case cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA1, "cdna1", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_CDNA2, "cdna2", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_CDNA3, "cdna3", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna1_s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", s_mov_b32_literal},
+      {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", s_mov_b32_literal},
+  };
+
+  for (const auto &tc : cases) {
+    SCOPED_TRACE(tc.arch_name);
+    const uint32_t words[] = {tc.word, 0x12345678u};
+    auto decoder = Decoder::create(tc.arch);
+    ASSERT_NE(decoder, nullptr) << tc.arch_name;
+    std::unique_ptr<Instruction> inst;
+    ASSERT_NO_THROW(inst.reset(decoder->decode(words))) << tc.arch_name;
+    ASSERT_NE(inst, nullptr) << tc.arch_name;
+    ASSERT_EQ(inst->size(), sizeof(words)) << tc.arch_name;
+    ASSERT_NE(inst->raw_encoding(), nullptr) << tc.arch_name;
+    EXPECT_EQ(inst->raw_encoding()[0], words[0]) << tc.arch_name;
+    EXPECT_EQ(inst->raw_encoding()[1], words[1]) << tc.arch_name;
+  }
+}
 
 TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
   const uint32_t words[] = {
@@ -587,6 +638,49 @@ INSTANTIATE_TEST_SUITE_P(
                        8, "v_dual_dot2acc_f32_bf16 :: v_dual_add_nc_u32",
                        "v_dual_dot2acc_f32_bf16"}),
     [](const ::testing::TestParamInfo<VopdDecodeCase> &info) {
+      std::string name = info.param.arch_name;
+      name += "_";
+      name += info.param.case_name;
+      return name;
+    });
+
+struct InvalidVopdSlotCase {
+  rj_code_arch_t arch;
+  const char *arch_name;
+  const char *case_name;
+  std::array<uint32_t, 3> words;
+};
+
+class InvalidVopdSlotDecodeTest : public ::testing::TestWithParam<InvalidVopdSlotCase> {};
+
+TEST_P(InvalidVopdSlotDecodeTest, RejectsOpcodeOutsideProfileSlot) {
+  const auto &tc = GetParam();
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr) << tc.arch_name;
+
+  EXPECT_THROW(static_cast<void>(decoder->decode(tc.words.data())), util::InvalidInst)
+      << tc.arch_name << " " << tc.case_name;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    VopdSlotValidation, InvalidVopdSlotDecodeTest,
+    ::testing::Values(InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", "invalid_x",
+                                          make_vopdxy_pair(14, 8)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", "invalid_y",
+                                          make_vopdxy_pair(8, 14)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", "invalid_x",
+                                          make_vopdxy_pair(14, 8)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", "invalid_y",
+                                          make_vopdxy_pair(8, 14)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", "invalid_x",
+                                          make_vopdxy_pair(14, 8)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", "invalid_y",
+                                          make_vopdxy_pair(8, 14)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", "invalid_x",
+                                          make_vopdxy_pair(12, 8)},
+                      InvalidVopdSlotCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
+                                          "invalid_y_defined_opcode", make_vopdxy_pair(8, 18)}),
+    [](const ::testing::TestParamInfo<InvalidVopdSlotCase> &info) {
       std::string name = info.param.arch_name;
       name += "_";
       name += info.param.case_name;
