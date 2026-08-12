@@ -20,34 +20,32 @@
  * THE SOFTWARE.
  */
 
-#ifndef PCI_UTIL_H
-#define PCI_UTIL_H
+#ifndef CUID_TEST_UNIT_SHA256_TEST_H_
+#define CUID_TEST_UNIT_SHA256_TEST_H_
 
-#include <cstdint>
-#include <string>
-#include <vector>
+#include "test_base.h"
 
-#include "include/amd_cuid.h"
-
-/// Size of a PCIe extended configuration space, in bytes.
-constexpr size_t kPciConfigSpaceSize = 4096;
-
-class PciUtil {
+// Known-answer tests for the in-tree SHA-256 (FIPS 180-4) used to derive CUIDs.
+class TestSha256Kat : public TestBase {
  public:
-  static amdcuid_status_t read_pci_config_space(std::string bdf, uint8_t* buffer,
-                                                size_t buffer_size, uint16_t offset);
-  static amdcuid_status_t get_pci_dsn_cap_offset(std::string bdf, uint16_t& offset);
-  static amdcuid_status_t get_pci_vsec_cap_offset(std::string bdf, uint16_t& offset);
-
-  // Load a 16-bit little-endian config-space field. Use this instead of
-  // casting the buffer to uint16_t*, which violates alignment and aliasing.
-  static uint16_t load_le16(const uint8_t bytes[2]) {
-    return static_cast<uint16_t>(static_cast<uint16_t>(bytes[0]) |
-                                 (static_cast<uint16_t>(bytes[1]) << 8));
-  }
-
-  // Endianness conversion utilities
-  static uint64_t le64_to_be64(uint64_t value);
+  TestSha256Kat();
+  void SetUp() override;
+  void Run() override;
+  void DisplayTestInfo() override;
+  void DisplayResults() const override;
+  void Close() override;
 };
 
-#endif  // PCI_UTIL_H
+// Known-answer tests for HMAC-SHA-256 (RFC 4231), the keyed derivation the
+// secondary/derived CUID is built from.
+class TestHmacSha256Kat : public TestBase {
+ public:
+  TestHmacSha256Kat();
+  void SetUp() override;
+  void Run() override;
+  void DisplayTestInfo() override;
+  void DisplayResults() const override;
+  void Close() override;
+};
+
+#endif  // CUID_TEST_UNIT_SHA256_TEST_H_

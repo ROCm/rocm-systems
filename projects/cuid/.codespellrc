@@ -1,0 +1,10 @@
+[codespell]
+# AMD/ROCm and CUID domain terms that are not typos:
+#   hsa      - Heterogeneous System Architecture
+#   nd       - appears inside identifiers such as "2nd"
+#   renderD  - DRM device node path (/dev/dri/renderD128)
+#   ans      - "ans" appears in ACPI/SMBIOS field names
+#   BA       - PCI BAR-adjacent identifiers
+ignore-words-list = hsa,nd,renderD,ans,BA,inout,cant,indx,ue
+skip = build,build-*,.git,docs/_build
+quiet-level = 2

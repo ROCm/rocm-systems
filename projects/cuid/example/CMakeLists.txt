@@ -18,15 +18,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-message(
-    "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&"
-)
-message(
-    "                          Cmake amdcuid_example                           "
-)
-message(
-    "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&"
-)
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("                          Cmake amdcuid_example                           ")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 
 message("")
 message("Build Configuration:")
@@ -46,21 +40,14 @@ set(SRC_LIST main.cc)
 
 add_executable(${AMDCUID_EXAMPLE_EXECUTABLE} ${SRC_LIST})
 
-target_include_directories(
-    ${AMDCUID_EXAMPLE_EXECUTABLE}
-    PRIVATE ${CMAKE_SOURCE_DIR}/lib
-)
+target_include_directories(${AMDCUID_EXAMPLE_EXECUTABLE} PRIVATE ${CMAKE_SOURCE_DIR}/lib)
 
 # Link against the CUID library (public API only)
 # The example now uses only the public API defined in amd_cuid.h
 target_link_libraries(${AMDCUID_EXAMPLE_EXECUTABLE} amdcuid_static pthread)
 
 # Install example source into documentation
-install(
-    FILES ${SRC_LIST}
-    DESTINATION ${CMAKE_INSTALL_DOCDIR}
-    COMPONENT ${EXAMPLE_COMPONENT}
-)
+install(FILES ${SRC_LIST} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT ${EXAMPLE_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                  Finished Cmake amdcuid_example                   ")
