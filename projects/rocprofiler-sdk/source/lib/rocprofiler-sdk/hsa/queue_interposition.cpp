@@ -1701,16 +1701,21 @@ ROCP_QUEUE_LOAD_WRITE_INDEX(scacquire, std::memory_order_acquire)
 #define ROCP_SIGNAL_STORE(NAME)                                                                    \
     void signal_##NAME(hsa_signal_t sig, hsa_signal_value_t val)                                   \
     {                                                                                              \
-        /* Count this caller in `registering` BEFORE reading the bypass gate, so shutdown */       \
-        /* cannot observe quiescence while an admitted producer is still on its way to */          \
-        /* register_completion. seq_cst store-load handshake vs finalization: the fetch_add */     \
-        /* (a full barrier) is ordered before the gate's fini_status load; stop pairs it with a */ \
-        /* fence + seq_cst load of registering. */                                                 \
-        get_completion_monitor().registering.fetch_add(1, std::memory_order_seq_cst);              \
-        auto _admission = common::scope_destructor{[]() {                                          \
-            get_completion_monitor().registering.fetch_sub(1, std::memory_order_release);          \
-        }};                                                                                        \
-        if(should_bypass_inline_intercept())                                                       \
+        /* Admit this caller (count it in `registering`) BEFORE checking the shutdown gate, */     \
+        /* so shutdown cannot observe quiescence while an admitted producer is still on its */     \
+        /* way to register_completion. Both sides pivot on seq_cst operations over two atoms: */   \
+        /*   producer: registering.fetch_add(seq_cst) ; shutdown_requested.load(seq_cst) */        \
+        /*   shutdown: shutdown_requested.store(seq_cst) ; registering.load(seq_cst) */            \
+        /* The single seq_cst total order forbids both sides reading the other as empty: if */     \
+        /* shutdown reads registering==0 then this load must observe shutdown_requested==true */   \
+        /* and bail. (This is the standard seq_cst store-load litmus -- no fence needed, unlike */ \
+        /* a mixed seq_cst/acquire pairing.) */                                                    \
+        auto& _mon = get_completion_monitor();                                                     \
+        _mon.registering.fetch_add(1, std::memory_order_seq_cst);                                  \
+        auto _admission = common::scope_destructor{                                                \
+            [&_mon]() { _mon.registering.fetch_sub(1, std::memory_order_release); }};              \
+        if(_mon.shutdown_requested.load(std::memory_order_seq_cst) ||                              \
+           should_bypass_inline_intercept())                                                       \
         {                                                                                          \
             get_next_table()->hsa_signal_##NAME##_fn(sig, val);                                    \
             return;                                                                                \
@@ -1801,7 +1806,11 @@ interposition_sync()
 void
 request_completion_monitor_shutdown()
 {
-    get_completion_monitor().shutdown_requested.store(true, std::memory_order_release);
+    // seq_cst: this store is the shutdown half of the admission handshake. It pairs with
+    // the producer's seq_cst registering.fetch_add + shutdown_requested.load and with
+    // stop_completion_monitor's seq_cst registering.load, so a producer admitted before
+    // this point is always observed by the registering wait below.
+    get_completion_monitor().shutdown_requested.store(true, std::memory_order_seq_cst);
 }
 
 // Stop the monitor: clear running, wake it so it observes the flag, and join. After
@@ -1816,13 +1825,12 @@ stop_completion_monitor()
     if(mon.thread.joinable()) mon.thread.join();
 
     // Wait for any producer admitted before finalization to finish. Each admits itself
-    // (registering++) before reading the bypass gate, so once finalization's
-    // set_fini_status is visible, no new producer can be admitted and this count only
-    // falls. The seq_cst fence completes the store-load handshake with the producer's
-    // admission (its registering++ then fini_status load) so we cannot read
-    // registering==0 while an admitted producer still exists. Then process any entry a
-    // straggler stranded so signals / correlation-id refs are released rather than leaked.
-    std::atomic_thread_fence(std::memory_order_seq_cst);
+    // (registering.fetch_add, seq_cst) before checking the seq_cst shutdown gate, and
+    // request_completion_monitor_shutdown stored shutdown_requested (seq_cst) before this
+    // stop. By the seq_cst total order, any producer that will still reach
+    // register_completion is observed here as registering>0; once it drains to 0 no
+    // admitted producer remains. Then process any entry a straggler stranded so signals /
+    // correlation-id refs are released rather than leaked.
     constexpr auto drain_interval = std::chrono::microseconds{100};
     while(mon.registering.load(std::memory_order_seq_cst) > 0)
         std::this_thread::sleep_for(drain_interval);

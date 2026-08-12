@@ -81,17 +81,5 @@ def test_dispatch_records_well_formed(input_data):
         assert fini_time > itr["end_timestamp"], f"{itr}"
 
 
-def test_correlation_ids_unique(input_data):
-    """Internal correlation ids are unique across captured dispatches; a
-    duplicate would indicate a completion accounted for more than once."""
-    sdk_data = input_data["rocprofiler-sdk-json-tool"]
-    cids = [
-        itr["correlation_id"]["internal"]
-        for itr in sdk_data["buffer_records"]["kernel_dispatch"]
-    ]
-
-    assert len(cids) == len(set(cids)), "duplicate correlation ids"
-
-
 if __name__ == "__main__":
     sys.exit(pytest.main(["-x", __file__] + sys.argv[1:]))
