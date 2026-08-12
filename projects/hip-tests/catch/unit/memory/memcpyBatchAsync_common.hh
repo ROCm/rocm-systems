@@ -40,6 +40,16 @@ inline void requireBufferEquals(const void* buffer, const std::vector<unsigned c
   REQUIRE(diff.first == host_out.end());
 }
 
+// Allocate a buffer holding `contents`, keep it alive in `allocations` and return its address.
+inline void* addBuffer(std::vector<LinearAllocGuard<unsigned char>>& allocations,
+                       const std::vector<unsigned char>& contents, const LinearAllocs alloc_type) {
+  LinearAllocGuard<unsigned char> alloc(alloc_type, contents.size());
+  void* ptr = alloc.ptr();
+  allocations.push_back(std::move(alloc));
+  fillBuffer(ptr, contents, alloc_type);
+  return ptr;
+}
+
 // Allocate the pointer slot that an indirect copy dereferences to reach `target`, keep it alive in
 // `slots` and return the slot address to hand to hipMemcpyBatchAsync in place of `target`.
 inline void* addPointerSlot(std::vector<LinearAllocGuard<void*>>& slots, void* target,
@@ -47,13 +57,52 @@ inline void* addPointerSlot(std::vector<LinearAllocGuard<void*>>& slots, void* t
   LinearAllocGuard<void*> slot(alloc_type, sizeof(void*));
   void* slot_ptr = slot.ptr();
 
-  // The contents of a slot are the address it holds, so the bytes written are the object
-  // representation of `target` rather than a payload the caller supplies.
   const auto* address = reinterpret_cast<const unsigned char*>(&target);
   fillBuffer(slot_ptr, std::vector<unsigned char>(address, address + sizeof(void*)), alloc_type);
 
   slots.push_back(std::move(slot));
   return slot_ptr;
+}
+
+// Buffers and pointer arrays for one indirect-copy batch.
+struct IndirectCopyBuffers {
+  // The buffers the copies must read from and write to. Destinations start zeroed.
+  std::vector<void*> src_ptrs;
+  std::vector<void*> dst_ptrs;
+  // The pointers hipMemcpyBatchAsync receives.
+  std::vector<void*> batch_src_ptrs;
+  std::vector<void*> batch_dst_ptrs;
+  // The pattern written to the src.
+  std::vector<std::vector<unsigned char>> initial_values;
+  // Keeps the source and destination buffers alive.
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  // Keeps alive the slots the caller took from addPointerSlot.
+  std::vector<LinearAllocGuard<void*>> slots;
+};
+
+// Allocate and initialize `count` source and destination buffers.
+inline IndirectCopyBuffers makeIndirectCopyBuffers(const size_t count, const size_t size_in_bytes,
+                                                   const LinearAllocs alloc_type_src,
+                                                   const LinearAllocs alloc_type_dst,
+                                                   const int device_src = 0,
+                                                   const int device_dst = 0) {
+  const std::vector<unsigned char> zeros(size_in_bytes, 0);
+  IndirectCopyBuffers buffers;
+
+  for (size_t i = 0; i < count; ++i) {
+    buffers.initial_values.emplace_back(size_in_bytes, static_cast<unsigned char>(10 + i));
+
+    HIP_CHECK(hipSetDevice(device_src));
+    buffers.src_ptrs.push_back(
+        addBuffer(buffers.allocations, buffers.initial_values.back(), alloc_type_src));
+
+    HIP_CHECK(hipSetDevice(device_dst));
+    buffers.dst_ptrs.push_back(addBuffer(buffers.allocations, zeros, alloc_type_dst));
+  }
+
+  buffers.batch_src_ptrs = buffers.src_ptrs;
+  buffers.batch_dst_ptrs = buffers.dst_ptrs;
+  return buffers;
 }
 
 // Enable peer access from the first device of each pair to the second. Tolerates pairs whose peer
