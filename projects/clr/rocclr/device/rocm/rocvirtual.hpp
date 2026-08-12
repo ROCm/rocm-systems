@@ -28,6 +28,7 @@ namespace amd::roc {
 class Device;
 class Memory;
 struct ProfilingSignal;
+struct RingPublishState;
 class Timestamp;
 
 //! True while the calling thread is inside HsaAmdSignalHandler (async-events thread).
@@ -870,6 +871,8 @@ class VirtualGPU : public device::VirtualDevice {
   void* last_barrier_hw_event_ = nullptr;
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;                //!< Active queue associated with a vgpu
+  //! Publish state for gpu_queue_, owned by the queue pool. nullptr for unshared queues.
+  RingPublishState* ring_publish_ = nullptr;
   bool device_mem_ring_buf_ = false;           //!< Queue ring buffer is in device memory
   bool use_movdir64b_ = false;                 //!< Use MOVDIR64B for AQL packet writes
   //! Cached hardware doorbell for the active queue (UC MMIO). Non-null only when

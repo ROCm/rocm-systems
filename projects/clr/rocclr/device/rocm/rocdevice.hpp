@@ -26,6 +26,8 @@
 #include "device/rocm/rocglinterop.hpp"
 
 
+#include "os/os.hpp"
+
 #include <atomic>
 #include <iostream>
 #include <memory>
@@ -57,6 +59,84 @@ class Memory;
 class Resource;
 class VirtualDevice;
 class PrintfDbg;
+
+// Per-ring slot allocation and publish state. reserve_ hands out slot indices;
+// committed_ is the highest index whose slots are all published and is mirrored
+// into the queue's write_dispatch_id.
+struct alignas(64) RingPublishState {
+  explicit RingPublishState(uint32_t ring_size)
+      : slot_mask_(ring_size - 1), slot_bits_(Log2(ring_size)), ready_(ring_size) {
+    for (auto& b : ready_) b.store(0, std::memory_order_relaxed);
+  }
+
+  // Reserve count slots and return the first index. Does not touch write_dispatch_id.
+  uint64_t Reserve(uint64_t count = 1) {
+    return reserve_.fetch_add(count, std::memory_order_relaxed);
+  }
+
+  struct CommitResult {
+    bool advanced;      // committed_ moved
+    uint64_t frontier;  // one past the last published slot
+  };
+
+  // Mark [index, index+count) published and advance the frontier over all
+  // contiguously-published slots. push_frontier(frontier) stores the new frontier
+  // into write_dispatch_id and runs under the lock so the store stays monotonic.
+  template <typename PushFrontier>
+  CommitResult MarkReadyAndCommit(uint64_t index, uint64_t count, PushFrontier push_frontier) {
+    for (uint64_t i = 0; i < count; ++i) {
+      const uint64_t idx = index + i;
+      ready_[idx & slot_mask_].store(Generation(idx), std::memory_order_release);
+    }
+
+    // Take the lock and re-read committed_ so whoever commits last sweeps up every
+    // ready slot, including ones published out of order by other threads.
+    while (commit_lock_.exchange(1, std::memory_order_acquire) != 0) {
+      amd::Os::spinPause();
+    }
+
+    uint64_t frontier = committed_.load(std::memory_order_relaxed);
+    const uint64_t start = frontier;
+    while (IsReady(frontier)) {
+      ++frontier;
+    }
+    if (frontier != start) {
+      committed_.store(frontier, std::memory_order_release);
+      push_frontier(frontier);
+    }
+
+    commit_lock_.store(0, std::memory_order_release);
+    const bool advanced = frontier > index;
+    return {advanced, frontier};
+  }
+
+ private:
+  // Lap tag stored in ready_, in [1, 254], so 0 always means "not published this lap"
+  // after the ring wraps.
+  uint8_t Generation(uint64_t index) const {
+    return static_cast<uint8_t>(((index >> slot_bits_) % 254) + 1);
+  }
+
+  bool IsReady(uint64_t index) const {
+    return ready_[index & slot_mask_].load(std::memory_order_acquire) == Generation(index);
+  }
+
+  static uint32_t Log2(uint64_t v) {
+    uint32_t bits = 0;
+    while (v > 1) {
+      ++bits;
+      v >>= 1;
+    }
+    return bits;
+  }
+
+  const uint64_t slot_mask_;
+  const uint32_t slot_bits_;
+  std::atomic<uint64_t> reserve_{0};          //!< Next slot index to hand out
+  std::atomic<uint64_t> committed_{0};        //!< Published frontier, mirrored to write_dispatch_id
+  std::atomic<uint32_t> commit_lock_{0};      //!< Guards the frontier scan and store
+  std::vector<std::atomic<uint8_t>> ready_;   //!< Per-slot publish tag
+};
 
 class ProfilingSignal : public amd::ReferenceCountedObject {
  public:
@@ -624,6 +704,9 @@ class Device : public NullDevice {
   //! Look up per-queue extras (metadata ring buffer and placement).
   QueueExtras GetQueueExtras(hsa_queue_t* queue);
 
+  //! Returns the publish state for a pooled ring, or nullptr for unshared queues.
+  RingPublishState* GetRingPublishState(hsa_queue_t* queue);
+
   //! Return the pre-computed metadata packet version header bits
   uint32_t MetadataVersionHeader() const { return metadata_version_header_; }
 
@@ -772,6 +855,9 @@ class Device : public NullDevice {
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
+    //! Per-ring publish state. shared_ptr keeps QueueInfo copyable (required by the
+    //! std::vector<std::map> pool on MSVC).
+    std::shared_ptr<RingPublishState> ringPublish;
 
     // Constructor
     QueueInfo() : refCount(0), hasDedicatedQueue_(false) {}
