@@ -28,10 +28,9 @@ extern "C" {
  *   - AMD AINIC (driver: ionic)
  */
 
-/* Maximum constants */
+/* Maximum constants; MAX_CHANNELS is a sanity bound, not a reservation. */
 #define RCCL_TELEMETRY_MAX_DEVS       16
 #define RCCL_TELEMETRY_MAX_CHANNELS   512
-#define RCCL_TELEMETRY_MAX_QPS        128
 #define RCCL_TELEMETRY_HISTOGRAM_SIZE 16
 
 /* Power-of-two buckets for the WQE payload-size distribution: bucket b holds
@@ -127,6 +126,10 @@ typedef struct {
   uint64_t wqe_completion_histogram[RCCL_TELEMETRY_HISTOGRAM_SIZE];
 } RcclQpStats;
 
+/* Doubling heap blocks; growth only appends, so reads need no lock. */
+#define RCCL_TELEMETRY_BLOCKS 32
+#define RCCL_TELEMETRY_BLOCK0_MIN_LOG2 3
+
 /*
  * Per-channel statistics
  */
@@ -144,11 +147,15 @@ typedef struct {
   uint64_t    num_req_completed;
   int         num_data_qp;
   int         num_cts_qp;
-  RcclQpStats qp[RCCL_TELEMETRY_MAX_QPS];
-  int         num_qps;
-  /* QPs this channel could not track because all RCCL_TELEMETRY_MAX_QPS slots
-   * were taken. Their traffic is missing from every counter above. */
-  int         num_qp_untracked;
+  /* Blocks of RcclQpStats; stored before qp_capacity leaves zero. */
+  void** qp_blocks;
+  /* Allocation bound; runs ahead of num_qps since blocks are powers of 2. */
+  int qp_capacity;
+  int qp_block0_log2;
+  /* Slots handed out; the bound every counter update tests. */
+  int num_qps;
+  /* QPs with no slot; their traffic is missing from every counter above. */
+  int num_qp_untracked;
 } RcclChannelStats;
 
 /*
@@ -172,8 +179,12 @@ typedef struct {
   uint64_t cq_poll_count;
   uint64_t wqe_size_histogram[RCCL_TELEMETRY_WQE_SIZE_BUCKETS];
   int      num_channels;
-  int      num_qp_untracked;  /* sum of the per-channel shortfalls */
-  RcclChannelStats channels[RCCL_TELEMETRY_MAX_CHANNELS];
+  /* Per-channel shortfalls plus channels that could not be tracked. */
+  int num_qp_untracked;
+  /* Blocks of RcclChannelStats; stored before channel_capacity leaves 0. */
+  void** channel_blocks;
+  int channel_capacity;
+  int channel_block0_log2;
 
   /* Scalar hardware counters — filled at flush time, -1 means N/A.
    * Indexed by position in the active per-HW counter table. */
@@ -267,6 +278,43 @@ static inline int64_t rcclTelemetryGetNs(void) {
   return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
+/* Block b holds base << b entries; valid only below the capacity. */
+static inline void rcclTelemetryBlockIndex(int idx, int block0Log2, unsigned int* block, unsigned int* offset) {
+  unsigned int base = 1u << block0Log2;
+  unsigned int b = 31u - (unsigned int)__builtin_clz(((unsigned int)idx >> block0Log2) + 1u);
+  *block = b;
+  *offset = (unsigned int)idx - (base << b) + base;
+}
+
+/* Returns NULL when telemetry is off or the channel has no storage. */
+static inline RcclChannelStats* rcclTelemetryChannel(int devIdx, int chIdx) {
+  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return NULL;
+  RcclDeviceStats* dev = &rcclTelemetryDevs[devIdx];
+  int capacity = __atomic_load_n(&dev->channel_capacity, __ATOMIC_ACQUIRE);
+  if (chIdx < 0 || chIdx >= capacity) return NULL;
+  unsigned int block, offset;
+  rcclTelemetryBlockIndex(chIdx, dev->channel_block0_log2, &block, &offset);
+  return &((RcclChannelStats*)dev->channel_blocks[block])[offset];
+}
+
+/* Setup path only; counter updates must use rcclTelemetryQp(). */
+static inline RcclQpStats* rcclTelemetryQpSlot(RcclChannelStats* ch, int qpIdx) {
+  int capacity = __atomic_load_n(&ch->qp_capacity, __ATOMIC_ACQUIRE);
+  if (qpIdx < 0 || qpIdx >= capacity) return NULL;
+  unsigned int block, offset;
+  rcclTelemetryBlockIndex(qpIdx, ch->qp_block0_log2, &block, &offset);
+  return &((RcclQpStats*)ch->qp_blocks[block])[offset];
+}
+
+/* Bounded by num_qps, not capacity: the last block's tail is unused. */
+static inline RcclQpStats* rcclTelemetryQp(RcclChannelStats* ch, int qpIdx) {
+  int numQps = __atomic_load_n(&ch->num_qps, __ATOMIC_ACQUIRE);
+  if (qpIdx < 0 || qpIdx >= numQps) return NULL;
+  unsigned int block, offset;
+  rcclTelemetryBlockIndex(qpIdx, ch->qp_block0_log2, &block, &offset);
+  return &((RcclQpStats*)ch->qp_blocks[block])[offset];
+}
+
 /**
  * Record transferred bytes on a device.
  * Call after ibv_post_send succeeds (isSend=1) or when receive data is
@@ -316,14 +364,11 @@ static inline void rcclTelemetryCqError(int devIdx) {
  * @param postTs   Timestamp when work request was posted (0 if unmatched)
  */
 static inline void rcclTelemetryWqeComplete(int devIdx, int chIdx, int qpIdx, int64_t postTs) {
-  if (!rcclTelemetryEnabled ||
-      devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
-      chIdx  < 0 || chIdx  >= RCCL_TELEMETRY_MAX_CHANNELS ||
-      qpIdx  < 0 || qpIdx  >= RCCL_TELEMETRY_MAX_QPS)
-    return;
-  
-  RcclChannelStats* ch = &rcclTelemetryDevs[devIdx].channels[chIdx];
-  RcclQpStats* qp = &ch->qp[qpIdx];
+  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
+  if (ch == NULL) return;
+  RcclQpStats* qp = rcclTelemetryQp(ch, qpIdx);
+  if (qp == NULL) return;
+
   __atomic_fetch_add(&qp->num_wqe_rcvd, 1, __ATOMIC_RELAXED);
   __atomic_fetch_add(&ch->num_wqe_rcvd, 1, __ATOMIC_RELAXED);
   
@@ -365,17 +410,15 @@ static inline void rcclTelemetryWqeComplete(int devIdx, int chIdx, int qpIdx, in
  * @param isSend   1 for send, 0 for recv
  */
 static inline void rcclTelemetryWqePosted(int devIdx, int chIdx, int qpIdx, int isSend) {
-  if (!rcclTelemetryEnabled ||
-      devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
-      chIdx  < 0 || chIdx  >= RCCL_TELEMETRY_MAX_CHANNELS ||
-      qpIdx  < 0 || qpIdx  >= RCCL_TELEMETRY_MAX_QPS)
-    return;
-  RcclChannelStats* ch = &rcclTelemetryDevs[devIdx].channels[chIdx];
+  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
+  if (ch == NULL) return;
+  RcclQpStats* qp = rcclTelemetryQp(ch, qpIdx);
+  if (qp == NULL) return;
   if (isSend) {
-    __atomic_fetch_add(&ch->qp[qpIdx].num_wqe_sent, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&qp->num_wqe_sent, 1, __ATOMIC_RELAXED);
     __atomic_fetch_add(&ch->num_wqe_sent, 1, __ATOMIC_RELAXED);
   } else {
-    __atomic_fetch_add(&ch->qp[qpIdx].num_recv_wqe, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&qp->num_recv_wqe, 1, __ATOMIC_RELAXED);
     __atomic_fetch_add(&ch->num_recv_wqe, 1, __ATOMIC_RELAXED);
   }
 }
@@ -391,9 +434,9 @@ static inline void rcclTelemetryWqePosted(int devIdx, int chIdx, int qpIdx, int 
  * @param chIdx    Channel index
  */
 static inline void rcclTelemetryRequestCompleted(int devIdx, int chIdx) {
-  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
-      chIdx < 0 || chIdx >= RCCL_TELEMETRY_MAX_CHANNELS) return;
-  __atomic_fetch_add(&rcclTelemetryDevs[devIdx].channels[chIdx].num_req_completed, 1, __ATOMIC_RELAXED);
+  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
+  if (ch == NULL) return;
+  __atomic_fetch_add(&ch->num_req_completed, 1, __ATOMIC_RELAXED);
 }
 
 /**
@@ -402,13 +445,11 @@ static inline void rcclTelemetryRequestCompleted(int devIdx, int chIdx) {
  * returns without posting.
  */
 static inline void rcclTelemetrySlotMiss(int devIdx, int chIdx, int qpIdx) {
-  if (!rcclTelemetryEnabled ||
-      devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
-      chIdx  < 0 || chIdx  >= RCCL_TELEMETRY_MAX_CHANNELS ||
-      qpIdx  < 0 || qpIdx  >= RCCL_TELEMETRY_MAX_QPS)
-    return;
-  __atomic_fetch_add(&rcclTelemetryDevs[devIdx].channels[chIdx].qp[qpIdx].num_slot_miss,
-                     1, __ATOMIC_RELAXED);
+  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
+  if (ch == NULL) return;
+  RcclQpStats* qp = rcclTelemetryQp(ch, qpIdx);
+  if (qp == NULL) return;
+  __atomic_fetch_add(&qp->num_slot_miss, 1, __ATOMIC_RELAXED);
 }
 
 /**
@@ -418,13 +459,10 @@ static inline void rcclTelemetrySlotMiss(int devIdx, int chIdx, int qpIdx) {
  * @param signalled  1 if the work request carried IBV_SEND_SIGNALED
  */
 static inline void rcclTelemetryCtsSent(int devIdx, int chIdx, int qpIdx, int signalled) {
-  if (!rcclTelemetryEnabled ||
-      devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
-      chIdx  < 0 || chIdx  >= RCCL_TELEMETRY_MAX_CHANNELS ||
-      qpIdx  < 0 || qpIdx  >= RCCL_TELEMETRY_MAX_QPS)
-    return;
-  RcclChannelStats* ch = &rcclTelemetryDevs[devIdx].channels[chIdx];
-  RcclQpStats* qp = &ch->qp[qpIdx];
+  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
+  if (ch == NULL) return;
+  RcclQpStats* qp = rcclTelemetryQp(ch, qpIdx);
+  if (qp == NULL) return;
   __atomic_fetch_add(&qp->num_cts_sent, 1, __ATOMIC_RELAXED);
   __atomic_fetch_add(&ch->num_cts_sent, 1, __ATOMIC_RELAXED);
   if (signalled)
@@ -437,14 +475,11 @@ static inline void rcclTelemetryCtsSent(int devIdx, int chIdx, int qpIdx, int si
  * Record an RDMA_WRITE (withImm=0) or RDMA_WRITE_WITH_IMM (withImm=1) posting.
  */
 static inline void rcclTelemetryWriteWqe(int devIdx, int chIdx, int qpIdx, int withImm) {
-  if (!rcclTelemetryEnabled ||
-      devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
-      chIdx  < 0 || chIdx  >= RCCL_TELEMETRY_MAX_CHANNELS ||
-      qpIdx  < 0 || qpIdx  >= RCCL_TELEMETRY_MAX_QPS)
-    return;
-  RcclQpStats* qp = &rcclTelemetryDevs[devIdx].channels[chIdx].qp[qpIdx];
-  __atomic_fetch_add(withImm ? &qp->num_write_imm_wqe : &qp->num_write_wqe,
-                     1, __ATOMIC_RELAXED);
+  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
+  if (ch == NULL) return;
+  RcclQpStats* qp = rcclTelemetryQp(ch, qpIdx);
+  if (qp == NULL) return;
+  __atomic_fetch_add(withImm ? &qp->num_write_imm_wqe : &qp->num_write_wqe, 1, __ATOMIC_RELAXED);
 }
 
 /**
@@ -477,13 +512,7 @@ static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
  * This only allocates slots; the data/CTS role is per QP and is assigned
  * separately via rcclTelemetrySetQpRole().
  *
- * A channel holds at most RCCL_TELEMETRY_MAX_QPS slots. When fewer than numQps
- * are left, the request is granted in part: *numSlots comes back below numQps
- * and the shortfall is added to num_qp_untracked on the channel and on the
- * device. The caller must leave telQpSlot == -1 on the QPs that got no slot, so
- * that no hot-path hook can charge their events anywhere. That, and counting
- * channel totals only where a QP slot is also counted, is what keeps every
- * channel aggregate equal to the sum over its QP slots.
+ * QPs that got no slot must keep telQpSlot == -1, so nothing charges them.
  *
  * @param devIdx     Device index in rcclTelemetryDevs array
  * @param chIdx      Channel index (typically allocated via atomic counter)
@@ -499,49 +528,7 @@ static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
  *     rcclTelemetrySetQpRole(devIdx, chIdx, qpSlot + q, comm->base.qps[q].isDataQp);
  *   }
  */
-static inline int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots) {
-  if (numSlots) *numSlots = 0;
-  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS || chIdx < 0 ||
-      chIdx >= RCCL_TELEMETRY_MAX_CHANNELS || numQps <= 0) {
-    return -1;
-  }
-  
-  RcclDeviceStats* dstat = &rcclTelemetryDevs[devIdx];
-  RcclChannelStats* ch = &dstat->channels[chIdx];
-  
-  /* Set channel ID (idempotent if called multiple times for same channel) */
-  ch->id = chIdx;
-  
-  /* Allocate QP slots atomically, as many as still fit */
-  int startSlot = __atomic_fetch_add(&ch->num_qps, numQps, __ATOMIC_RELAXED);
-  int granted = RCCL_TELEMETRY_MAX_QPS - startSlot;
-  if (granted > numQps) granted = numQps;
-  if (granted < 0) granted = 0;
-  if (granted < numQps) {
-    /* Give back what did not fit, so num_qps stays a slot count, and report the
-     * QPs that will go untracked instead of dropping them silently. */
-    __atomic_fetch_sub(&ch->num_qps, numQps - granted, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&ch->num_qp_untracked, numQps - granted, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&dstat->num_qp_untracked, numQps - granted, __ATOMIC_RELAXED);
-  }
-  if (granted == 0) return -1;
-  
-  /* Initialize QP slot IDs */
-  for (int q = 0; q < granted; q++) {
-    ch->qp[startSlot + q].id = startSlot + q;
-  }
-  
-  /* Update device's channel count */
-  int cur = __atomic_load_n(&dstat->num_channels, __ATOMIC_RELAXED);
-  while (chIdx + 1 > cur) {
-    if (__atomic_compare_exchange_n(&dstat->num_channels, &cur, chIdx + 1,
-                                    1, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
-      break;
-  }
-  
-  if (numSlots) *numSlots = granted;
-  return startSlot;
-}
+int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots);
 
 /**
  * Assign the data/CTS role of a single telemetry QP slot reserved by
@@ -556,13 +543,11 @@ static inline int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, i
  * @param isDataQp   nonzero for a data QP, zero for a CTS QP
  */
 static inline void rcclTelemetrySetQpRole(int devIdx, int chIdx, int qpIdx, int isDataQp) {
-  if (!rcclTelemetryEnabled ||
-      devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS ||
-      chIdx  < 0 || chIdx  >= RCCL_TELEMETRY_MAX_CHANNELS ||
-      qpIdx  < 0 || qpIdx  >= RCCL_TELEMETRY_MAX_QPS)
-    return;
-  RcclChannelStats* ch = &rcclTelemetryDevs[devIdx].channels[chIdx];
-  ch->qp[qpIdx].is_data_qp = isDataQp ? 1 : 0;
+  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
+  if (ch == NULL) return;
+  RcclQpStats* qp = rcclTelemetryQp(ch, qpIdx);
+  if (qp == NULL) return;
+  qp->is_data_qp = isDataQp ? 1 : 0;
   if (isDataQp)
     __atomic_fetch_add(&ch->num_data_qp, 1, __ATOMIC_RELAXED);
   else

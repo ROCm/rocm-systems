@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <unistd.h>
 #include <errno.h>
 #include <time.h>
@@ -27,6 +28,139 @@ int rcclTelemetryNumDevs = 0;
 static int rcclTelemetryInitialized = 0;
 static char rcclTelemetryStartTime[64];
 static char rcclTelemetryProcessName[256];
+
+/* ---- On-demand storage for channels and QP slots ------------------ */
+
+/* Serializes allocation only; counter updates deliberately take no lock. */
+static pthread_mutex_t rcclTelemetryAllocLock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Appends blocks under rcclTelemetryAllocLock; publishes capacity last. */
+static int rcclTelemetryBlocksGrow(void** blocks, int* block0Log2, int* capacity, int need, size_t entrySize) {
+  if (*capacity == 0) {
+    /* Size block 0 to the first request, so sparse shapes stay small. */
+    int shift = RCCL_TELEMETRY_BLOCK0_MIN_LOG2;
+    while ((1 << shift) < need && shift < 20) shift++;
+    *block0Log2 = shift;
+  }
+
+  const int base = 1 << *block0Log2;
+  int reached = *capacity;
+  /* capacity == base * (2^numBlocks - 1) by construction. */
+  int numBlocks = 0;
+  while (numBlocks < RCCL_TELEMETRY_BLOCKS && base * ((1 << numBlocks) - 1) < reached) numBlocks++;
+
+  while (reached < need && numBlocks < RCCL_TELEMETRY_BLOCKS) {
+    int entries = base << numBlocks;
+    /* Absurd request: stop rather than wrap the running total and spin. */
+    if (entries <= 0 || reached > INT_MAX - entries) break;
+    void* block = calloc((size_t)entries, entrySize);
+    if (block == NULL) break;
+    blocks[numBlocks] = block;
+    numBlocks++;
+    reached += entries;
+    __atomic_store_n(capacity, reached, __ATOMIC_RELEASE);
+  }
+  return reached;
+}
+
+/* Caller holds the lock and has already zeroed the matching capacity. */
+static void rcclTelemetryBlocksFree(void** blocks) {
+  for (int b = 0; b < RCCL_TELEMETRY_BLOCKS; b++) free(blocks[b]);
+}
+
+/* Reserve the block table itself, once per parent. Caller holds the lock. */
+static void** rcclTelemetryBlocksAlloc(void) {
+  return (void**)calloc(RCCL_TELEMETRY_BLOCKS, sizeof(void*));
+}
+
+int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots) {
+  if (numSlots) *numSlots = 0;
+  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS || numQps <= 0) {
+    return -1;
+  }
+
+  RcclDeviceStats* dstat = &rcclTelemetryDevs[devIdx];
+
+  /* No storage for such an index; charge its QPs to the device. */
+  if (chIdx < 0 || chIdx >= RCCL_TELEMETRY_MAX_CHANNELS) {
+    __atomic_fetch_add(&dstat->num_qp_untracked, numQps, __ATOMIC_RELAXED);
+    return -1;
+  }
+
+  pthread_mutex_lock(&rcclTelemetryAllocLock);
+
+  if (dstat->channel_blocks == NULL) dstat->channel_blocks = rcclTelemetryBlocksAlloc();
+  RcclChannelStats* ch = NULL;
+  if (dstat->channel_blocks != NULL) {
+    rcclTelemetryBlocksGrow(dstat->channel_blocks, &dstat->channel_block0_log2, &dstat->channel_capacity, chIdx + 1,
+                            sizeof(RcclChannelStats));
+    ch = rcclTelemetryChannel(devIdx, chIdx);
+  }
+  if (ch == NULL) {
+    __atomic_fetch_add(&dstat->num_qp_untracked, numQps, __ATOMIC_RELAXED);
+    pthread_mutex_unlock(&rcclTelemetryAllocLock);
+    return -1;
+  }
+
+  ch->id = chIdx;
+
+  int startSlot = ch->num_qps;
+  int granted = 0;
+  if (ch->qp_blocks != NULL || (ch->qp_blocks = rcclTelemetryBlocksAlloc()) != NULL) {
+    int capacity = rcclTelemetryBlocksGrow(ch->qp_blocks, &ch->qp_block0_log2, &ch->qp_capacity, startSlot + numQps,
+                                           sizeof(RcclQpStats));
+    granted = capacity - startSlot;
+    if (granted > numQps) granted = numQps;
+    if (granted < 0) granted = 0;
+  }
+
+  /* Publish num_qps with a release store only after the slots exist. */
+  for (int q = 0; q < granted; q++) {
+    rcclTelemetryQpSlot(ch, startSlot + q)->id = startSlot + q;
+  }
+  __atomic_store_n(&ch->num_qps, startSlot + granted, __ATOMIC_RELEASE);
+
+  if (granted < numQps) {
+    /* Allocation failed: report the shortfall instead of dropping it. */
+    __atomic_fetch_add(&ch->num_qp_untracked, numQps - granted, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&dstat->num_qp_untracked, numQps - granted, __ATOMIC_RELAXED);
+  }
+
+  int cur = __atomic_load_n(&dstat->num_channels, __ATOMIC_RELAXED);
+  while (chIdx + 1 > cur) {
+    if (__atomic_compare_exchange_n(&dstat->num_channels, &cur, chIdx + 1, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
+      break;
+  }
+
+  pthread_mutex_unlock(&rcclTelemetryAllocLock);
+
+  if (granted == 0) return -1;
+  if (numSlots) *numSlots = granted;
+  return startSlot;
+}
+
+/* Called after the JSON is written; zeroes each capacity before freeing. */
+static void rcclTelemetryFreeStorage(void) {
+  pthread_mutex_lock(&rcclTelemetryAllocLock);
+  for (int d = 0; d < RCCL_TELEMETRY_MAX_DEVS; d++) {
+    RcclDeviceStats* dev = &rcclTelemetryDevs[d];
+    if (dev->channel_blocks == NULL) continue;
+    int numChannels = dev->channel_capacity;
+    for (int c = 0; c < numChannels; c++) {
+      RcclChannelStats* ch = rcclTelemetryChannel(d, c);
+      if (ch == NULL || ch->qp_blocks == NULL) continue;
+      __atomic_store_n(&ch->qp_capacity, 0, __ATOMIC_RELEASE);
+      rcclTelemetryBlocksFree(ch->qp_blocks);
+      free(ch->qp_blocks);
+      ch->qp_blocks = NULL;
+    }
+    __atomic_store_n(&dev->channel_capacity, 0, __ATOMIC_RELEASE);
+    rcclTelemetryBlocksFree(dev->channel_blocks);
+    free(dev->channel_blocks);
+    dev->channel_blocks = NULL;
+  }
+  pthread_mutex_unlock(&rcclTelemetryAllocLock);
+}
 
 /* ---- Periodic HW-counter sampler (time series for congestion) ------ */
 /* When RCCL_TELEMETRY_SAMPLE_MS > 0, a background thread samples a small
@@ -627,11 +761,13 @@ void rcclTelemetryFlush(void) {
     for (int i = 0; i < rcclTelemetryNumDevs; i++) {
       RcclDeviceStats* d = &rcclTelemetryDevs[i];
       uint64_t wqe_sent = 0, recv_wqe = 0, wqe_rcvd = 0, wqe_comp = 0;
-      for (int c = 0; c < d->num_channels && c < RCCL_TELEMETRY_MAX_CHANNELS; c++) {
-        wqe_sent += d->channels[c].num_wqe_sent;
-        recv_wqe += d->channels[c].num_recv_wqe;
-        wqe_rcvd += d->channels[c].num_wqe_rcvd;
-        wqe_comp += d->channels[c].num_wqe_completed;
+      for (int c = 0; c < d->num_channels; c++) {
+        RcclChannelStats* ch = rcclTelemetryChannel(i, c);
+        if (ch == NULL) continue;
+        wqe_sent += ch->num_wqe_sent;
+        recv_wqe += ch->num_recv_wqe;
+        wqe_rcvd += ch->num_wqe_rcvd;
+        wqe_comp += ch->num_wqe_completed;
       }
       fprintf(stderr, "RCCL NET_TELEMETRY:   dev[%d] roce=%s eth=%s chans=%d "
               "tx=%lu rx=%lu wqe_sent=%lu recv_wqe=%lu wqe_rcvd=%lu wqe_comp=%lu cq_err=%lu\n",
@@ -654,12 +790,12 @@ void rcclTelemetryFlush(void) {
            rcclTelemetryCfg.output_dir, hostname, (int)getpid());
 
   FILE* fp = fopen(filepath, "w");
-  if (fp == NULL) {
-    return;
+  if (fp != NULL) {
+    rcclTelemetryWriteJson(fp);
+    fclose(fp);
   }
 
-  rcclTelemetryWriteJson(fp);
-  fclose(fp);
+  rcclTelemetryFreeStorage();
 }
 
 __attribute__((visibility("default")))
@@ -685,13 +821,13 @@ int rcclTelemetrySwCapture(RcclTelemetrySwSnapshot* out, int maxDevs) {
       s->wqe_completion_histogram[b] = 0;
 
     int nch = __atomic_load_n(&dev->num_channels, __ATOMIC_RELAXED);
-    if (nch > RCCL_TELEMETRY_MAX_CHANNELS) nch = RCCL_TELEMETRY_MAX_CHANNELS;
     for (int c = 0; c < nch; c++) {
-      RcclChannelStats* ch = &dev->channels[c];
+      RcclChannelStats* ch = rcclTelemetryChannel(i, c);
+      if (ch == NULL) continue;
       int nqp = __atomic_load_n(&ch->num_qps, __ATOMIC_RELAXED);
-      if (nqp > RCCL_TELEMETRY_MAX_QPS) nqp = RCCL_TELEMETRY_MAX_QPS;
       for (int q = 0; q < nqp; q++) {
-        RcclQpStats* qp = &ch->qp[q];
+        RcclQpStats* qp = rcclTelemetryQp(ch, q);
+        if (qp == NULL) break;
         s->wqe_sent      += __atomic_load_n(&qp->num_wqe_sent,      __ATOMIC_RELAXED);
         s->recv_wqe      += __atomic_load_n(&qp->num_recv_wqe,      __ATOMIC_RELAXED);
         s->wqe_rcvd      += __atomic_load_n(&qp->num_wqe_rcvd,      __ATOMIC_RELAXED);
@@ -725,6 +861,14 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
    * device index, so registration has to use that same numbering or the labels
    * and the counters end up describing different NICs. */
   if (device_id < 0 || device_id >= RCCL_TELEMETRY_MAX_DEVS) {
+    /* No slot exists to charge this loss to, so warn once instead. */
+    static int warned = 0;
+    if (!__atomic_exchange_n(&warned, 1, __ATOMIC_RELAXED)) {
+      fprintf(stderr,
+              "RCCL NET_TELEMETRY: device %d is outside the %d telemetry device slots, "
+              "its counters are not collected\n",
+              device_id, RCCL_TELEMETRY_MAX_DEVS);
+    }
     return -1;
   }
   int idx = device_id;
@@ -1204,7 +1348,8 @@ static void rcclTelemetryWriteJson(FILE* fp) {
 
     int activeChannels = 0;
     for (int c = 0; c < dev->num_channels; c++) {
-      RcclChannelStats* ch = &dev->channels[c];
+      RcclChannelStats* ch = rcclTelemetryChannel(d, c);
+      if (ch == NULL) continue;
       if (ch->num_qps > 0 || ch->num_qp_untracked > 0 || ch->num_wqe_sent || ch->num_recv_wqe || ch->num_wqe_rcvd ||
           ch->num_wqe_completed)
         activeChannels++;
@@ -1243,7 +1388,8 @@ static void rcclTelemetryWriteJson(FILE* fp) {
     fprintf(fp, "      \"channels\": [\n");
     int chPrinted = 0;
     for (int c = 0; c < dev->num_channels; c++) {
-      RcclChannelStats* ch = &dev->channels[c];
+      RcclChannelStats* ch = rcclTelemetryChannel(d, c);
+      if (ch == NULL) continue;
 
       if (ch->num_qps == 0 && ch->num_data_qp == 0 && ch->num_cts_qp == 0 && ch->num_qp_untracked == 0) continue;
 
@@ -1260,11 +1406,11 @@ static void rcclTelemetryWriteJson(FILE* fp) {
       fprintf(fp, "          \"num_cts_qp\": %d,\n", ch->num_cts_qp);
       fprintf(fp, "          \"num_qp_untracked\": %d,\n", ch->num_qp_untracked);
 
-      int numQps = ch->num_qps;
-      if (numQps > RCCL_TELEMETRY_MAX_QPS) numQps = RCCL_TELEMETRY_MAX_QPS;
+      /* Exactly the slots a counter update can reach, so totals add up. */
+      int numQps = __atomic_load_n(&ch->num_qps, __ATOMIC_ACQUIRE);
       fprintf(fp, "          \"queue_pairs\": [\n");
       for (int q = 0; q < numQps; q++) {
-        RcclQpStats* qp = &ch->qp[q];
+        RcclQpStats* qp = rcclTelemetryQp(ch, q);
 
         fprintf(fp, "            {\n");
         fprintf(fp, "              \"id\": %d,\n", qp->id);
