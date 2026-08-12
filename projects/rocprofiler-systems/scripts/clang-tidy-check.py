@@ -343,7 +343,7 @@ def main() -> int:
     print(f"Running clang-tidy on {len(changed_files)} files ...")
 
     rule_diagnostics: dict[str, list[Diagnostic]] = {}
-    legacy_rule_diagnostics: dict[str, list[Diagnostic]] = {}
+    preexisting_rule_diagnostics: dict[str, list[Diagnostic]] = {}
     any_timed_out = False
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         futures = {
@@ -364,13 +364,15 @@ def main() -> int:
                 target = (
                     rule_diagnostics
                     if in_line_ranges(diagnostic.line, changed_file.line_ranges)
-                    else legacy_rule_diagnostics
+                    else preexisting_rule_diagnostics
                 )
                 for check_name in diagnostic.checks:
                     target.setdefault(check_name, []).append(diagnostic)
 
     print_rule_diagnostics("Detected clang-tidy rules (in this diff):", rule_diagnostics)
-    print_rule_diagnostics("Legacy issues (outside this diff):", legacy_rule_diagnostics)
+    print_rule_diagnostics(
+        "Pre-existing issues (outside this diff):", preexisting_rule_diagnostics
+    )
 
     return 1 if rule_diagnostics or any_timed_out else 0
 
