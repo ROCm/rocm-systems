@@ -2045,6 +2045,10 @@ inline static hipError_t hipInit(unsigned int flags) {
   return hipCUResultTohipError(cuInit(flags));
 }
 
+inline static hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags) {
+  return hipCUDAErrorTohipError(cudaInitDevice(device, deviceFlags, flags));
+}
+
 inline static hipError_t hipDeviceReset() { return hipCUDAErrorTohipError(cudaDeviceReset()); }
 
 inline static hipError_t hipGetLastError() { return hipCUDAErrorTohipError(cudaGetLastError()); }

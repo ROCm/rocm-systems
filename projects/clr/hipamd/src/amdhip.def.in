@@ -81,6 +81,7 @@ hipHostMalloc
 hipHostRegister
 hipHostUnregister
 hipInit
+hipInitDevice
 hipIpcCloseMemHandle
 hipIpcGetMemHandle
 hipIpcOpenMemHandle
