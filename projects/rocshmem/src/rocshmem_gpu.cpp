@@ -854,10 +854,10 @@ ROCSHMEM_DIRECT_CTX_T_MEM_HELPER(get_nbi_wave, NUM_GET_NBI_WAVE, get_nbi_wave)
 #undef ROCSHMEM_DIRECT_CTX_T_MEM_HELPER
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ __noinline__ int direct_ctx_reduce_wg(rocshmem_ctx_t ctx,
-                                                 rocshmem_team_t team,
-                                                 T *dest, const T *source,
-                                                 int nreduce) {
+__device__ __forceinline__ int direct_ctx_reduce_wg(rocshmem_ctx_t ctx,
+                                                    rocshmem_team_t team,
+                                                    T *dest, const T *source,
+                                                    int nreduce) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -869,7 +869,7 @@ __device__ __noinline__ int direct_ctx_reduce_wg(rocshmem_ctx_t ctx,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ __noinline__ int direct_ctx_reduce_scatter_wg(
+__device__ __forceinline__ int direct_ctx_reduce_scatter_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,
     int nreduce) {
   if (nreduce == 0) {
@@ -883,11 +883,11 @@ __device__ __noinline__ int direct_ctx_reduce_scatter_wg(
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ __noinline__ int direct_ctx_reduce_wave(rocshmem_ctx_t ctx,
-                                                   rocshmem_team_t team,
-                                                   T *dest,
-                                                   const T *source,
-                                                   int nreduce) {
+__device__ __forceinline__ int direct_ctx_reduce_wave(rocshmem_ctx_t ctx,
+                                                      rocshmem_team_t team,
+                                                      T *dest,
+                                                      const T *source,
+                                                      int nreduce) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -899,7 +899,7 @@ __device__ __noinline__ int direct_ctx_reduce_wave(rocshmem_ctx_t ctx,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ __noinline__ int direct_ctx_reduce_scatter_wave(
+__device__ __forceinline__ int direct_ctx_reduce_scatter_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,
     int nreduce) {
   if (nreduce == 0) {
@@ -913,7 +913,7 @@ __device__ __noinline__ int direct_ctx_reduce_scatter_wave(
 }
 
 template <typename T>
-__device__ __noinline__ void direct_ctx_broadcast_wg(
+__device__ __forceinline__ void direct_ctx_broadcast_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,
     int nelems, int pe_root) {
   if (nelems == 0) {
@@ -927,7 +927,7 @@ __device__ __noinline__ void direct_ctx_broadcast_wg(
 }
 
 template <typename T>
-__device__ __noinline__ int direct_ctx_broadcast_wave(
+__device__ __forceinline__ int direct_ctx_broadcast_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,
     int nelems, int pe_root) {
   ROCSHMEM_DIRECT_BACKEND_DISPATCH_RET(
@@ -935,11 +935,11 @@ __device__ __noinline__ int direct_ctx_broadcast_wave(
 }
 
 template <typename T>
-__device__ __noinline__ void direct_ctx_alltoall_wg(rocshmem_ctx_t ctx,
-                                                    rocshmem_team_t team,
-                                                    T *dest,
-                                                    const T *source,
-                                                    int nelems) {
+__device__ __forceinline__ void direct_ctx_alltoall_wg(rocshmem_ctx_t ctx,
+                                                       rocshmem_team_t team,
+                                                       T *dest,
+                                                       const T *source,
+                                                       int nelems) {
   if (nelems == 0) {
     return;
   }
@@ -951,11 +951,11 @@ __device__ __noinline__ void direct_ctx_alltoall_wg(rocshmem_ctx_t ctx,
 }
 
 template <typename T>
-__device__ __noinline__ int direct_ctx_alltoall_wave(rocshmem_ctx_t ctx,
-                                                     rocshmem_team_t team,
-                                                     T *dest,
-                                                     const T *source,
-                                                     int nelems) {
+__device__ __forceinline__ int direct_ctx_alltoall_wave(rocshmem_ctx_t ctx,
+                                                        rocshmem_team_t team,
+                                                        T *dest,
+                                                        const T *source,
+                                                        int nelems) {
   if (nelems == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -968,7 +968,7 @@ __device__ __noinline__ int direct_ctx_alltoall_wave(rocshmem_ctx_t ctx,
 
 /* NOTE: no nelems guard, matches Context::alltoallv<T> exactly. */
 template <typename T>
-__device__ __noinline__ void direct_ctx_alltoallv(
+__device__ __forceinline__ void direct_ctx_alltoallv(
     rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest,
     const size_t dest_nelems[], const size_t dest_displs[], T *source,
     const size_t source_nelems[], const size_t source_displs[]) {
@@ -981,11 +981,11 @@ __device__ __noinline__ void direct_ctx_alltoallv(
 }
 
 template <typename T>
-__device__ __noinline__ void direct_ctx_fcollect_wg(rocshmem_ctx_t ctx,
-                                                    rocshmem_team_t team,
-                                                    T *dest,
-                                                    const T *source,
-                                                    int nelems) {
+__device__ __forceinline__ void direct_ctx_fcollect_wg(rocshmem_ctx_t ctx,
+                                                       rocshmem_team_t team,
+                                                       T *dest,
+                                                       const T *source,
+                                                       int nelems) {
   if (nelems == 0) {
     return;
   }
@@ -997,11 +997,11 @@ __device__ __noinline__ void direct_ctx_fcollect_wg(rocshmem_ctx_t ctx,
 }
 
 template <typename T>
-__device__ __noinline__ int direct_ctx_fcollect_wave(rocshmem_ctx_t ctx,
-                                                     rocshmem_team_t team,
-                                                     T *dest,
-                                                     const T *source,
-                                                     int nelems) {
+__device__ __forceinline__ int direct_ctx_fcollect_wave(rocshmem_ctx_t ctx,
+                                                        rocshmem_team_t team,
+                                                        T *dest,
+                                                        const T *source,
+                                                        int nelems) {
   if (nelems == 0) {
     return ROCSHMEM_SUCCESS;
   }
