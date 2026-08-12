@@ -319,16 +319,16 @@ def _build_kernel_and_l0(
     # write) reads straight across the chart at one height.
     ka_l = kernel_arrows["left"]
     ka_r = kernel_arrows["right"]
-    ka_p = kernel_arrows["plain"]
+    ka_b = kernel_arrows["both"]
     kernel_edges_lines = [
         # Row 0 = the "LDS" title row, and the header for every request row below.
         "     [white]Request[/white]",
         "",
         "",
         # SQ_INSTS_LDS counts instructions issued, not data movement, so it splits
-        # into neither reads nor writes: one unstyled, arrow-less line.
+        # into neither reads nor writes: one unstyled, bidirectional line.
         _fmt_edge("LDS", m["lds_req"]),
-        ka_p,
+        ka_b,
         "",
         "",
         "",
@@ -660,7 +660,7 @@ def create_mem_chart_diagram(
     kernel_arrows = {
         "left": "<" + "-" * (kernel_edge_width - 1),
         "right": "-" * (kernel_edge_width - 1) + ">",
-        "plain": "-" * kernel_edge_width,
+        "both": "<" + "-" * (kernel_edge_width - 2) + ">",
     }
 
     # Build layout columns
