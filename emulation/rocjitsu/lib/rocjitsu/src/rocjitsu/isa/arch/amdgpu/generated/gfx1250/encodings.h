@@ -365,9 +365,21 @@ inline constexpr uint16_t kVop3SdstEncOpHi4 = 430;
 
 } // namespace encoding
 
+enum class LiteralSupport : uint8_t {
+  None = 0,
+  Literal32 = 1,
+  Literal64 = 2,
+  Both = 3,
+};
+
+[[nodiscard]] constexpr bool supports_literal(LiteralSupport support, LiteralSupport required) {
+  return (static_cast<uint8_t>(support) & static_cast<uint8_t>(required)) != 0;
+}
+
 class Sop1 : public IsaInstruction<Isa> {
 public:
-  Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn);
+  Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn,
+       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 1);
   bool default_encoding();
   bool has_lit_0();
   bool has_lit64_0();
@@ -378,7 +390,8 @@ public:
 
 class Sopc : public IsaInstruction<Isa> {
 public:
-  Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn);
+  Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn,
+       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 2);
   bool default_encoding();
   bool has_lit_0();
   bool has_lit_1();
@@ -412,7 +425,8 @@ public:
 
 class Sop2 : public IsaInstruction<Isa> {
 public:
-  Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn);
+  Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn,
+       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 2);
   bool default_encoding();
   bool has_lit_0();
   bool has_lit_1();
@@ -437,7 +451,8 @@ public:
 
 class Vop1 : public IsaInstruction<Isa> {
 public:
-  Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+  Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn,
+       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 1);
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
@@ -472,7 +487,8 @@ public:
 
 class Vopc : public IsaInstruction<Isa> {
 public:
-  Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
+  Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn,
+       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 1);
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
@@ -504,7 +520,8 @@ public:
 
 class Vop2 : public IsaInstruction<Isa> {
 public:
-  Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+  Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn,
+       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 1);
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
@@ -543,7 +560,8 @@ public:
 
 class Vop3 : public IsaInstruction<Isa> {
 public:
-  Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn,
+       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 3);
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
@@ -573,7 +591,7 @@ class Vop3p : public IsaInstruction<Isa> {
 public:
   enum class ExtensionDecodePolicy { Decode, Skip };
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn,
-        int num_encoded_sources = 3,
+        LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 3,
         ExtensionDecodePolicy extension_policy = ExtensionDecodePolicy::Decode);
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
@@ -648,7 +666,8 @@ public:
 
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
-  Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+  Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn,
+              LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 3);
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
