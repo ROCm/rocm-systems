@@ -568,7 +568,8 @@ rocprofiler-sdk:
             - gfx950
           expression: simd_count/simd_per_cu
     - name: GL1C_ARB_RET_LEVEL
-      description: "The sum of the number of requests sent to the GL1A for output arbitration in flight. Average GL1A return arbitration latency = GL1C_PERF_SEL_GL1A_RET_LEVEL/GL1C_PERF_SEL_REQ"
+      description: "The sum of the number of requests sent to the GL1A for output arbitration in flight.
+        Average GL1A return arbitration latency = GL1C_PERF_SEL_GL1A_RET_LEVEL/GL1C_PERF_SEL_REQ"
       properties: []
       definitions:
         - architectures:
@@ -5406,7 +5407,9 @@ rocprofiler-sdk:
           block: SQ
           event: 55
     - name: SQ_INST_LEVEL_TEX_LOAD
-      description: "Number of in-flight buffer load, image load, sample, or atomic (with return) instructions. Set next counter to ACCUM_PREV and divide by INST_TEX_LOAD for average latency. Includes FLAT instructions. {level, nondeterministic, C2}"
+      description: "Number of in-flight buffer load, image load, sample, or atomic (with return) instructions.
+        Set next counter to ACCUM_PREV and divide by INST_TEX_LOAD for average latency. Includes FLAT
+        instructions. {level, nondeterministic, C2}"
       properties: []
       definitions:
         - architectures:
@@ -6291,7 +6294,8 @@ rocprofiler-sdk:
           block: SQ
           event: 93
     - name: SQ_VALU_STARVE
-      description: "Number of cycles VALU is starved while waves are present (cycles in which no sq_sp_cmd credits are in use). {nondeterministic, C1}"
+      description: "Number of cycles VALU is starved while waves are present (cycles in which no sq_sp_cmd
+        credits are in use). {nondeterministic, C1}"
       properties: []
       definitions:
         - architectures:
@@ -6372,7 +6376,8 @@ rocprofiler-sdk:
           block: SQ
           event: 106
     - name: SQ_WAIT_CNT_LGKM
-      description: "Number of clock cycles spent waiting for LGKM counter. In units of cycles. {nondeterministic, C1}"
+      description: "Number of clock cycles spent waiting for LGKM counter. In units of cycles. {nondeterministic,
+        C1}"
       properties: []
       definitions:
         - architectures:
@@ -6383,7 +6388,8 @@ rocprofiler-sdk:
           block: SQ
           event: 38
     - name: SQ_WAIT_CNT_VMVS
-      description: "Number of clock cycles spent waiting for VM or VS counter. In units of cycles. {nondeterministic, C1}"
+      description: "Number of clock cycles spent waiting for VM or VS counter. In units of cycles. {nondeterministic,
+        C1}"
       properties: []
       definitions:
         - architectures:
@@ -6394,7 +6400,8 @@ rocprofiler-sdk:
           block: SQ
           event: 37
     - name: SQ_WAIT_DELAY_ALU
-      description: "Number of clock cycles spent waiting for s_delay_alu to finish. {nondeterministic, C1}"
+      description: "Number of clock cycles spent waiting for s_delay_alu to finish. {nondeterministic,
+        C1}"
       properties: []
       definitions:
         - architectures:
@@ -6500,7 +6507,8 @@ rocprofiler-sdk:
           block: SQ
           event: 112
     - name: SQ_WAIT_INST_SCA
-      description: "Number of clock cycles spent waiting for SALU or SMEM instruction issue. In units of cycles. {nondeterministic, C1}"
+      description: "Number of clock cycles spent waiting for SALU or SMEM instruction issue. In units
+        of cycles. {nondeterministic, C1}"
       properties: []
       definitions:
         - architectures:
@@ -6511,7 +6519,8 @@ rocprofiler-sdk:
           block: SQ
           event: 28
     - name: SQ_WAIT_INST_VALU
-      description: "Number of clock cycles spent waiting for VALU instruction issue. In units of cycles. {nondeterministic, C1}"
+      description: "Number of clock cycles spent waiting for VALU instruction issue. In units of cycles.
+        {nondeterministic, C1}"
       properties: []
       definitions:
         - architectures:
@@ -7312,7 +7321,8 @@ rocprofiler-sdk:
           block: TA
           event: 11
     - name: TA_ADDRESSER_FIFO_BUSY
-      description: "Cycles sampler addresser ping-ping buffer, non-sampler balancing RAM, or aligner state machine are busy. Perf_windowing not supported for this counter."
+      description: "Cycles sampler addresser ping-ping buffer, non-sampler balancing RAM, or aligner state
+        machine are busy. Perf_windowing not supported for this counter."
       properties: []
       definitions:
         - architectures:
