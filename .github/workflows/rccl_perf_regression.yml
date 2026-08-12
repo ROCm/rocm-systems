@@ -309,15 +309,20 @@ jobs:
       cancel-in-progress: false
     runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
     # Outermost layer of the timeout nest. Must stay above MAX_QUEUE_SEC (4h)
-    # plus MAX_WAIT_SEC (4h10m) in submit_and_poll.sh, so that script gets to
+    # plus MAX_WAIT_SEC (5h10m) in submit_and_poll.sh, so that script gets to
     # cancel the Slurm job and report *why* rather than being killed here with
     # a bare "exceeded the maximum execution time". See the table in
     # submit_and_poll.sh; retune both together.
     #
+    # 510 -> 560 because MAX_WAIT_SEC went 4h10m -> 5h10m when alltoall_perf
+    # was re-enabled: at 10 groups the circuit-breaker worst case is exactly
+    # 4.0h, so the sbatch --time had to go to 5h to stay a real bound. 4h00
+    # queue + 5h10 run = 9h10, and this is 9h20.
+    #
     # It is also a runner-capacity number, not just a safety net: this runner
     # takes one active job and one queued, so every hour a wedged detect run
     # sits here is an hour no other PR can be tested. It was 540.
-    timeout-minutes: 510
+    timeout-minutes: 560
     steps:
       - name: Run A/B detector (pinned 4-node allocation)
         id: detect
