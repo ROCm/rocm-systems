@@ -242,6 +242,18 @@ TEST(XcdPartitioningTest, VmStepRejectsMultipleEnginePartitions) {
   EXPECT_EQ(rj_vm_run(vm.get(), &ticks_executed), ROCJITSU_STATUS_SUCCESS);
 }
 
+TEST(XcdPartitioningTest, CApiRejectsSocDispatchAcrossEnginePartitions) {
+  auto json = config_json_with_num_threads(CONFIG_PATH, 2);
+  const auto object_start = json.find('{');
+  ASSERT_NE(object_start, std::string::npos);
+  json.insert(object_start + 1, R"("soc_dispatch":true,)");
+
+  rj_vm_t *vm = nullptr;
+  EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &vm),
+            ROCJITSU_STATUS_UNSUPPORTED);
+  EXPECT_EQ(vm, nullptr);
+}
+
 TEST(XcdPartitioningTest, VmStepSucceedsWithSingleEnginePartition) {
   auto json = config_json_with_num_threads(CONFIG_1XCD_PATH, 1);
 

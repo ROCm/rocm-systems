@@ -44,6 +44,7 @@ RJ_DIAGNOSTIC_POP
 #include <limits>
 #include <memory>
 #include <new>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -83,6 +84,24 @@ constexpr uint32_t SOPP_S_NOP = 0xBF800000;
 constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
 
 using namespace rocjitsu;
+
+uint64_t write_kernel_image(amdgpu::GpuMemory *mem, uint64_t addr, const void *code,
+                            size_t code_size, uint32_t sgprs = 104, uint32_t vgprs = 256,
+                            uint32_t user_sgprs = 2) {
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  ((vgprs / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  ((sgprs / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
+
+  mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
+  mem->load_image(static_cast<const uint8_t *>(code), code_size,
+                  addr + sizeof(kernel_descriptor_t));
+  return addr;
+}
 
 struct VmFixture {
   std::unique_ptr<simdojo::SimulationEngine> engine;
@@ -185,6 +204,30 @@ struct VmFixture {
                       addr + sizeof(kernel_descriptor_t));
     return addr;
   }
+};
+
+class WorkgroupPlacementPlugin final : public ExecutionPlugin {
+public:
+  WorkgroupPlacementPlugin() : ExecutionPlugin("workgroup_placement") {}
+
+  void onAmdgpuWorkgroupDispatched(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/,
+                                   uint32_t /*physical_vgpr_count*/, uint32_t /*sgpr_count*/,
+                                   std::span<amdgpu::Wavefront *> wavefronts) override {
+    if (!wavefronts.empty())
+      cu_paths.insert(wavefronts.front()->cu().full_path());
+  }
+
+  void onAmdgpuWorkgroupCompleted(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/) override {
+    ++completed_workgroups;
+  }
+
+  bool saw_xcd(std::string_view xcd_name) const {
+    return std::any_of(cu_paths.begin(), cu_paths.end(),
+                       [&](const auto &path) { return path.find(xcd_name) != std::string::npos; });
+  }
+
+  std::set<std::string> cu_paths;
+  uint32_t completed_workgroups = 0;
 };
 
 enum class SubmitTrigger { DispatchBegin, AfterInstruction };
@@ -2558,6 +2601,89 @@ TEST(AqlDispatchTest, SerialCompletionUnblocksCoResidentSignalWaiter) {
   EXPECT_EQ(completion_signal_value(f.mem(), producer_signal), 0);
   EXPECT_EQ(completion_signal_value(f.mem(), waiter_signal), 0);
   EXPECT_FALSE(f.cu()->has_active_wfs());
+}
+
+TEST(AqlDispatchTest, SocDispatchPrimaryCpCompletesWorkgroupsAcrossXcds) {
+  const char *json = R"({
+    "max_ticks":10000,
+    "num_threads":1,
+    "vm":{"arch":"cdna3"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu0","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]},
+          {"name":"xcd1","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu0","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      }
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+  auto *mem = loaded.memory();
+  ASSERT_NE(soc, nullptr);
+  ASSERT_NE(mem, nullptr);
+  soc->set_soc_dispatch(true);
+
+  auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
+  engine->topology().set_root(loaded.take_root());
+  loaded.wire_links(engine->topology());
+  engine->create();
+
+  auto *primary_cp = soc->xcd(0)->command_processor();
+  ASSERT_NE(primary_cp, nullptr);
+  EXPECT_EQ(soc->assign_queue_cp(), primary_cp);
+  EXPECT_EQ(soc->assign_queue_cp(), primary_cp);
+  ASSERT_EQ(primary_cp->compute_units().size(), 2u);
+  EXPECT_EQ(primary_cp->compute_units()[0], soc->xcd(0)->shader_engine(0)->compute_unit(0));
+  EXPECT_EQ(primary_cp->compute_units()[1], soc->xcd(1)->shader_engine(0)->compute_unit(0));
+
+  auto pg = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<WorkgroupPlacementPlugin>();
+  auto *placement = plugin.get();
+  ASSERT_TRUE(pg->add(std::move(plugin)));
+  soc->set_plugin_group(pg);
+
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  const uint64_t ko = write_kernel_image(mem, 0x1000, code, sizeof(code));
+  constexpr uint64_t kSignal = 0xF0030000;
+  init_completion_signal(mem, kSignal);
+
+  test::AqlQueue queue(mem, primary_cp);
+  queue.submit(make_dispatch_packet(ko, kSignal, /*grid_size_x=*/128));
+
+  for (uint32_t i = 0; i < 10000 && completion_signal_value(mem, kSignal) != 0; ++i)
+    ASSERT_TRUE(engine->step());
+
+  EXPECT_EQ(completion_signal_value(mem, kSignal), 0);
+  EXPECT_EQ(placement->completed_workgroups, 2u);
+  EXPECT_EQ(placement->cu_paths.size(), 2u);
+  EXPECT_TRUE(placement->saw_xcd("xcd0"));
+  EXPECT_TRUE(placement->saw_xcd("xcd1"));
 }
 
 TEST_P(IsaTest, EngineRunsToCompletion) {
