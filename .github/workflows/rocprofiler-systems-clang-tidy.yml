@@ -35,7 +35,13 @@ jobs:
           sparse-checkout: |
             projects/rocprofiler-systems
             .gitmodules
-          submodules: recursive
+          submodules: false
+
+      - name: Checkout rocprofiler-systems submodules
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git submodule update --init --recursive --depth 1 --jobs 4 \
+            projects/rocprofiler-systems
 
       - name: Configure ROCm environment
         run: |
