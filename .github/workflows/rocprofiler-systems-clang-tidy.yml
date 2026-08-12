@@ -67,4 +67,5 @@ jobs:
             --base "origin/${{ github.base_ref }}" \
             --build-path build/debug \
             -j $(nproc) \
+            --timeout 120 \
             --clang-tidy-binary clang-tidy-18
