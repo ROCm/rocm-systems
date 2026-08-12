@@ -55,13 +55,8 @@ static ncclKernelMatch const ncclKerns[3] = {
 };
 
 #ifdef RCCL_ENABLE_GFX950_512
-// [RCCL] Alternate gfx950 kernel set compiled with 512 threads per block, living
-// in a distinct symbol namespace (see src/include/device.h). Selected at runtime
-// via RCCL_GFX950_NTHREADS=512 (comm->use512Kernels). Only present in the gfx950
-// device image; launching these on other arches is never attempted.
-__global__ void ncclDevKernel_Generic_1_512(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-__global__ void ncclDevKernel_Generic_2_512(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-__global__ void ncclDevKernel_Generic_4_512(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+// [RCCL] Alternate gfx950 512-thread kernel set (declarations in device/common.h).
+// Selected at runtime via RCCL_GFX950_NTHREADS=512 (comm->use512Kernels).
 static ncclKernelMatch const ncclKerns512[3] = {
   {(void*)ncclDevKernel_Generic_1_512, true}, {(void*)ncclDevKernel_Generic_2_512, true},
   {(void*)ncclDevKernel_Generic_4_512, true}
@@ -190,16 +185,8 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
   // when the device being initialized is gfx950. In a multi-arch build (e.g.
   // gfx942;gfx950) the *_512 host stubs are registered process-wide but the
   // matching device symbols exist only in the gfx950 device image, so we must
-  // not query/configure them on any other arch. Detect via the gcnArchName
-  // (matches the IsArchMatch(...,"gfx950") convention used elsewhere).
-  bool isGfx950 = false;
-  {
-    int dev = 0;
-    hipDeviceProp_t prop;
-    if (CUDASUCCESS(hipGetDevice(&dev)) && CUDASUCCESS(hipGetDeviceProperties(&prop, dev)))
-      isGfx950 = IsArchMatch(prop.gcnArchName, "gfx950");
-  }
-  if (isGfx950) {
+  // not query/configure them on any other arch.
+  if (cudaArch == 950) {
     for (int k = 0; k < (int)(sizeof(ncclKerns512) / sizeof(ncclKerns512[0])); k++) {
       void* fn = ncclKerns512[k].kernelFn;
       cudaFuncAttributes attr = {0};
