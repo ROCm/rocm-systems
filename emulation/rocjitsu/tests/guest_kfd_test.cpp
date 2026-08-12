@@ -386,6 +386,21 @@ TEST(GuestKfdConcurrencyTest, ConcurrentOpenIoctlAndSysfsRedirect) {
   EXPECT_EQ(sysfs_failures.load(std::memory_order_relaxed), 0);
 }
 
+TEST(GuestKfdLifecycleTest, ReopensAfterLastClose) {
+  if (access(kKfdPath, R_OK | W_OK) != 0)
+    GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
+
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+    ASSERT_GE(fd, 0) << "open attempt " << attempt << " failed: " << std::strerror(errno);
+
+    kfd_ioctl_get_version_args version{};
+    EXPECT_EQ(ioctl(fd, AMDKFD_IOC_GET_VERSION, &version), 0);
+    EXPECT_TRUE(guest_gpu_is_visible());
+    EXPECT_EQ(close(fd), 0);
+  }
+}
+
 TEST(GuestKfdMemoryTest, GuestAllocationMmapOffsetIsRejected) {
   if (access(kKfdPath, R_OK | W_OK) != 0)
     GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);

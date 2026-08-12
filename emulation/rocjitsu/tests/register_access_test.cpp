@@ -10,8 +10,8 @@
 /// in execution_plugin_test.cpp.
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -107,7 +107,7 @@ struct Fixture {
     cfg.lds_size_kb = 64;
     cu = ComputeUnitCore::create("register_access_cu", cfg, &gpu_mem, &l2);
 
-    plugin_group = std::make_shared<ExecutionPluginGroup>();
+    plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto recorder = std::make_unique<RecordingPlugin>();
     plugin = recorder.get();
     plugin_group->add(std::move(recorder));

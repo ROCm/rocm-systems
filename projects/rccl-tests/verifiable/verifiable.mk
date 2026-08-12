@@ -30,8 +30,8 @@ ${HIPIFY_DIR}/rccl_float8.h: $(TEST_VERIFIABLE_SRCDIR)/../src/rccl_float8.h
 $(TEST_VERIFIABLE_BUILDDIR)/verifiable.o: $(HIPIFY_DIR)/verifiable.cu.cpp $(HIPIFY_DIR)/verifiable.h $(HIPIFY_DIR)/rccl_float8.h
 	@printf "Compiling %s\n" $@
 	@mkdir -p $(TEST_VERIFIABLE_BUILDDIR)
-	echo " $(HIPCC) -o $@ $(HIPCUFLAGS) -c $<"
-	$(HIPCC) -o $@ $(HIPCUFLAGS) -c $<
+	echo " $(HIPCC) -fPIC -o $@ $(HIPCUFLAGS) -c $<"
+	$(HIPCC) -fPIC -o $@ $(HIPCUFLAGS) -c $<
 
 $(TEST_VERIFIABLE_BUILDDIR)/libverifiable.so: $(TEST_VERIFIABLE_OBJS)
 	@printf "Creating DSO %s\n" $@

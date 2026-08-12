@@ -319,6 +319,36 @@ endfunction()
 
 # --- Unit / integration test suite ---
 
+add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
+target_link_libraries(
+    rj_decode_fuzz_test
+    PRIVATE rj_decode_fuzz_core GTest::gtest_main
+)
+rj_configure_target(rj_decode_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_decode_fuzz_test rj_decode_fuzz)
+rj_add_gtest_tests(rj_decode_fuzz_test)
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(
+    NAME DecodeDifferentialUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_differential.py -v
+)
+add_test(
+    NAME DecodeSeedExtractorUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_prepare_decode_seeds.py -v
+)
+add_test(
+    NAME DecodeFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_DECODE_FUZZ=$<TARGET_FILE:rj_decode_fuzz>
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_cli.py -v
+)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLUGIN_LOADER_FIXTURE_DIR
         "${CMAKE_CURRENT_BINARY_DIR}/plugin_loader_fixtures"
@@ -354,10 +384,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endfunction()
 
     rj_add_plugin_loader_fixture(good)
-    rj_add_plugin_loader_fixture(
-        badabi
-        PLUGIN_FIXTURE_ABI=::rocjitsu::kPluginAbiVersion+1
-    )
     rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
     rj_add_plugin_loader_fixture(duplicate)
 endif()
@@ -392,9 +418,11 @@ add_executable(
     patch/probe_callable_test.cpp
     patch/probe_clobber_test.cpp
     patch/error_report_test.cpp
+    dbi/dbi_spill_sim_test.cpp
     code/code_object_target_id_test.cpp
     code/amdgpu_code_object_test.cpp
     code/relocation_function_table_test.cpp
+    code/kernel_descriptor_scan_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
     dbt/virtual_lds_dispatch_rewrite_test.cpp
@@ -474,7 +502,9 @@ add_executable(
 if(HAS_DEVICE_KERNELS)
     target_sources(
         rocjitsu_tests
-        PRIVATE dbt/multikernel_indirect_branch_test.cpp
+        PRIVATE
+            dbt/device_kernels_translate_tests.cpp
+            dbt/multikernel_indirect_branch_test.cpp
     )
 endif()
 if(HAS_GFX1250_DEVICE_KERNELS)
@@ -515,7 +545,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_dependencies(
         rocjitsu_tests
         plugin_loader_fixture_good
-        plugin_loader_fixture_badabi
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
     )
@@ -1063,6 +1092,15 @@ if(RJ_HAS_GFX1201_GPU)
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
     add_test(
+        NAME "GuestKfdLifecycleTest.ReopensAfterLastClose"
+        COMMAND
+            ${RJ_CLI} --config
+            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+            $<TARGET_FILE:guest_kfd_test>
+            --gtest_filter=GuestKfdLifecycleTest.ReopensAfterLastClose
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
         NAME "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
         COMMAND
             ${RJ_CLI} --config
@@ -1084,6 +1122,7 @@ if(RJ_HAS_GFX1201_GPU)
         "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
         "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
         "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+        "GuestKfdLifecycleTest.ReopensAfterLastClose"
         "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
         "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
         PROPERTIES TIMEOUT 60 SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
@@ -1095,6 +1134,7 @@ if(RJ_HAS_GFX1201_GPU)
             "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
             "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
             "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+            "GuestKfdLifecycleTest.ReopensAfterLastClose"
             "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
             "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
     )
@@ -2503,34 +2543,6 @@ if(RJ_ENABLE_HIP_TESTS)
             ENVIRONMENT
                 "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
                 "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
-        )
-
-        # --- Profiled plugin group end-to-end test ---
-        rj_add_hip_test(
-            hip_profiled_plugin_test
-            ARCH gfx950
-            SOURCE logging/hip_profiled_plugin_test.hip
-        )
-        set(PROFILED_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/profiled_test_output)
-        set(PROFILED_RUNTIME_DIR ${PROFILED_SINK_DIR}/runtime)
-        file(MAKE_DIRECTORY ${PROFILED_SINK_DIR})
-        file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
-        if(RJ_INSTALL_TESTS)
-            install(
-                FILES
-                    ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
-                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs/tests
-                RENAME profiled.json
-            )
-        endif()
-        rj_add_hip_test_case(
-            hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
-            CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
-            INSTALL_CONFIG "\${RJ_INSTALLED_CONFIG_DIR}/tests/profiled.json"
-            TIMEOUT 30
-            ENVIRONMENT
-                "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
-                "RJ_SINK_DIR=${PROFILED_SINK_DIR}"
         )
 
         add_subdirectory(race-detector)

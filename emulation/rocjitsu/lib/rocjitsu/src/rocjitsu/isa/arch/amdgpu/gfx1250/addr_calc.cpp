@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"

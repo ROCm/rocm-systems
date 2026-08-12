@@ -1,8 +1,9 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/code/patch/instruction_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/builders/spill_builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 
 #include <gtest/gtest.h>
 
@@ -10,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <vector>
 
 namespace rocjitsu {
 namespace {
@@ -252,6 +254,202 @@ TEST(InstructionBuilder, BuildSCmpLgU32) {
             0xBF078002u);
   EXPECT_EQ(build_s_cmp_lg_u32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_GFX1250),
             0xBF078002u);
+}
+
+TEST(InstructionBuilder, BuildVWritelaneB32) {
+  // VOP3: base v_writelane_b32 is 0xD28A0000 (cdna4) / 0xD7610000 (rdna4); vdst
+  // in word0 bits[7:0]; word1 = src0 | src1<<9 with lane 0 as inline const 128.
+  // CDNA3 and CDNA4 share the GFX9 VOP3 encoding.
+  EXPECT_EQ(
+      build_v_writelane_b32(/*vgpr_dst=*/2, /*sgpr_src=*/5, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA3),
+      (std::array<uint32_t, 2>{0xD28A0002u, 0x00010005u}));
+  EXPECT_EQ(build_v_writelane_b32(2, 5, 0, ROCJITSU_CODE_ARCH_CDNA4),
+            (std::array<uint32_t, 2>{0xD28A0002u, 0x00010005u}));
+  EXPECT_EQ(build_v_writelane_b32(2, 5, 0, ROCJITSU_CODE_ARCH_RDNA4),
+            (std::array<uint32_t, 2>{0xD7610002u, 0x00010005u}));
+}
+
+TEST(InstructionBuilder, BuildVReadlaneB32) {
+  // VOP3: base v_readlane_b32 is 0xD2890000 (cdna4) / 0xD7600000 (rdna4); sdst in
+  // word0 bits[7:0]; src0 is a VGPR (256 + index), so v3 -> 0x103.
+  // CDNA3 and CDNA4 share the GFX9 VOP3 encoding.
+  EXPECT_EQ(
+      build_v_readlane_b32(/*sgpr_dst=*/6, /*vgpr_src=*/3, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA3),
+      (std::array<uint32_t, 2>{0xD2890006u, 0x00010103u}));
+  EXPECT_EQ(build_v_readlane_b32(6, 3, 0, ROCJITSU_CODE_ARCH_CDNA4),
+            (std::array<uint32_t, 2>{0xD2890006u, 0x00010103u}));
+  EXPECT_EQ(build_v_readlane_b32(6, 3, 0, ROCJITSU_CODE_ARCH_RDNA4),
+            (std::array<uint32_t, 2>{0xD7600006u, 0x00010103u}));
+}
+
+TEST(InstructionBuilder, BuildScratchStoreDword) {
+  // CDNA3 and CDNA4 (GFX9): FLAT flat_store_dword base 0xDC700000 | seg=1<<14;
+  // word1 = data<<8 | saddr(0x7F)<<16. 2 words.
+  const auto cdna3 =
+      build_scratch_store_dword(/*vdata=*/3, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_EQ(cdna3.size(), 2u);
+  EXPECT_EQ(cdna3[0], 0xDC704040u);
+  EXPECT_EQ(cdna3[1], 0x007F0300u);
+
+  const auto cdna4 = build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_EQ(cdna4.size(), 2u);
+  EXPECT_EQ(cdna4[0], 0xDC704040u);
+  EXPECT_EQ(cdna4[1], 0x007F0300u);
+
+  // RDNA4: VSCRATCH scratch_store_b32 base 0xED068000 | saddr(0x7C); word1 =
+  // vsrc<<23; word2 = ioffset<<8. 3 words.
+  const auto rdna4 = build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_EQ(rdna4.size(), 3u);
+  EXPECT_EQ(rdna4[0], 0xED06807Cu);
+  EXPECT_EQ(rdna4[1], 0x01800000u);
+  EXPECT_EQ(rdna4[2], 0x00004000u);
+}
+
+TEST(InstructionBuilder, BuildScratchLoadDword) {
+  // CDNA3 and CDNA4 (GFX9): FLAT flat_load_dword base 0xDC500000 | seg=1<<14;
+  // word1 = saddr<<16 | vdst<<24. 2 words.
+  const auto cdna3 =
+      build_scratch_load_dword(/*vdst=*/5, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_EQ(cdna3.size(), 2u);
+  EXPECT_EQ(cdna3[0], 0xDC504040u);
+  EXPECT_EQ(cdna3[1], 0x057F0000u);
+
+  const auto cdna4 = build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_EQ(cdna4.size(), 2u);
+  EXPECT_EQ(cdna4[0], 0xDC504040u);
+  EXPECT_EQ(cdna4[1], 0x057F0000u);
+
+  // RDNA4: VSCRATCH scratch_load_b32 base 0xED050000 | saddr(0x7C); word1 = vdst;
+  // word2 = ioffset<<8. 3 words.
+  const auto rdna4 = build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_EQ(rdna4.size(), 3u);
+  EXPECT_EQ(rdna4[0], 0xED05007Cu);
+  EXPECT_EQ(rdna4[1], 0x00000005u);
+  EXPECT_EQ(rdna4[2], 0x00004000u);
+}
+
+TEST(InstructionBuilder, BuildScratchStoreDwordAccVgpr) {
+  // acc=1 sets the CDNA FLAT acc bit (word1 bit 23 = 0x00800000), addressing the
+  // AccVGPR file for the data operand. Same as BuildScratchStoreDword otherwise.
+  const auto cdna3 = build_scratch_store_dword(/*vdata=*/3, /*byte_offset=*/64,
+                                               ROCJITSU_CODE_ARCH_CDNA3, /*acc=*/true);
+  ASSERT_EQ(cdna3.size(), 2u);
+  EXPECT_EQ(cdna3[0], 0xDC704040u);
+  EXPECT_EQ(cdna3[1], 0x00FF0300u);
+
+  const auto cdna4 = build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_CDNA4, /*acc=*/true);
+  ASSERT_EQ(cdna4.size(), 2u);
+  EXPECT_EQ(cdna4[0], 0xDC704040u);
+  EXPECT_EQ(cdna4[1], 0x00FF0300u);
+
+  // RDNA has no AccVGPRs: requesting acc is rejected.
+  EXPECT_THROW((void)build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_RDNA4, /*acc=*/true),
+               util::UnimplementedInst);
+}
+
+TEST(InstructionBuilder, BuildScratchLoadDwordAccVgpr) {
+  // acc=1 sets the CDNA FLAT acc bit (word1 bit 23 = 0x00800000), writing the load
+  // result into the AccVGPR file. Same as BuildScratchLoadDword otherwise.
+  const auto cdna3 = build_scratch_load_dword(/*vdst=*/5, /*byte_offset=*/64,
+                                              ROCJITSU_CODE_ARCH_CDNA3, /*acc=*/true);
+  ASSERT_EQ(cdna3.size(), 2u);
+  EXPECT_EQ(cdna3[0], 0xDC504040u);
+  EXPECT_EQ(cdna3[1], 0x05FF0000u);
+
+  const auto cdna4 = build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_CDNA4, /*acc=*/true);
+  ASSERT_EQ(cdna4.size(), 2u);
+  EXPECT_EQ(cdna4[0], 0xDC504040u);
+  EXPECT_EQ(cdna4[1], 0x05FF0000u);
+
+  EXPECT_THROW((void)build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_RDNA4, /*acc=*/true),
+               util::UnimplementedInst);
+}
+
+TEST(InstructionBuilder, BuildWaitLoadsComplete) {
+  // CDNA3 and CDNA4: s_waitcnt 0 (all counters).
+  EXPECT_EQ(build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA3), 0xBF8C0000u);
+  EXPECT_EQ(build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA4), 0xBF8C0000u);
+  // RDNA4: s_wait_loadcnt 0 (split counter).
+  EXPECT_EQ(build_wait_loads_complete(ROCJITSU_CODE_ARCH_RDNA4), 0xBFC00000u);
+}
+
+TEST(InstructionBuilder, BuildWaitStoresComplete) {
+  // CDNA3 and CDNA4: s_waitcnt 0 (unified vmcnt covers stores).
+  EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_CDNA3), 0xBF8C0000u);
+  EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_CDNA4), 0xBF8C0000u);
+  // RDNA4: s_wait_storecnt 0 (split counter, distinct from s_wait_loadcnt).
+  EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_RDNA4), 0xBFC10000u);
+}
+
+TEST(InstructionBuilder, BuildWaitAllLoadsComplete) {
+  // CDNA3 and CDNA4: one s_waitcnt 0 drains vmcnt+lgkmcnt (VMEM, LDS, scalar).
+  EXPECT_EQ(build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_CDNA3),
+            (std::vector<uint32_t>{0xBF8C0000u}));
+  EXPECT_EQ(build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_CDNA4),
+            (std::vector<uint32_t>{0xBF8C0000u}));
+  // RDNA4 splits the counters and every VGPR-targeting load counter must drain:
+  // s_wait_loadcnt_dscnt 0 (VMEM + LDS -> VGPRs), s_wait_samplecnt 0 (image
+  // sample/gather -> VGPRs), s_wait_bvhcnt 0 (BVH -> VGPRs), then s_wait_kmcnt 0
+  // (scalar -> SGPRs).
+  EXPECT_EQ(build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_RDNA4),
+            (std::vector<uint32_t>{0xBFC80000u, 0xBFC20000u, 0xBFC30000u, 0xBFC70000u}));
+}
+
+// VCC_LO/EXEC_LO scalar-operand codes are resolved per-arch: each case returns
+// its generation's generated table entry. This guards that every generation's
+// table still agrees (and that the well-known 106/126 values have not moved).
+TEST(InstructionBuilder, ScalarOperandCodesMatchGeneratedTables) {
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_CDNA4), 106);
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA4), 126);
+
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_CDNA1), cdna1::OPR_SDST_VCC_LO);
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_CDNA4), cdna4::OPR_SDST_VCC_LO);
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_RDNA2), rdna2::OPR_SDST_VCC_LO);
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_RDNA4), rdna4::OPR_SDST_VCC_LO);
+  EXPECT_EQ(scalar_operand_vcc_lo(ROCJITSU_CODE_ARCH_GFX1250), gfx1250::OPR_SDST_VCC_LO);
+
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA1), cdna1::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_CDNA4), cdna4::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_RDNA2), rdna2::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_RDNA4), rdna4::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(scalar_operand_exec_lo(ROCJITSU_CODE_ARCH_GFX1250), gfx1250::OPR_SDST_EXEC_LO);
+
+  // Inline-constant source for -1 (193), also generation-stable.
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA4), 193);
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA1), cdna1::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_CDNA4), cdna4::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_RDNA2), rdna2::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_RDNA4), rdna4::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(scalar_inline_neg_one(ROCJITSU_CODE_ARCH_GFX1250), gfx1250::OPR_SRC_NEG_INT_MIN);
+
+  // Base for non-negative inline integers (128 = 0), also generation-stable.
+  EXPECT_EQ(kScalarPositiveInlineBase, 128);
+  EXPECT_EQ(kScalarPositiveInlineBase, cdna1::OPR_SRC_POS_INT_MIN);
+  EXPECT_EQ(kScalarPositiveInlineBase, cdna4::OPR_SRC_POS_INT_MIN);
+  EXPECT_EQ(kScalarPositiveInlineBase, rdna2::OPR_SRC_POS_INT_MIN);
+  EXPECT_EQ(kScalarPositiveInlineBase, rdna4::OPR_SRC_POS_INT_MIN);
+  EXPECT_EQ(kScalarPositiveInlineBase, gfx1250::OPR_SRC_POS_INT_MIN);
+}
+
+// M0 moved from 124 (gfx9/gfx10.x) to 125 (gfx11+); each arch resolves to its
+// own generated OPR_SDST_M0.
+TEST(InstructionBuilder, ScalarOperandM0IsPerArch) {
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA1), cdna1::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA2), cdna2::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA3), cdna3::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA4), cdna4::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA1), rdna1::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA2), rdna2::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA3), rdna3::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA3_5), rdna3_5::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA4), rdna4::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_GFX1250), gfx1250::OPR_SDST_M0);
+
+  // gfx9 / gfx10.x = 124; gfx11+ = 125.
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA4), 124);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA2), 124);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA4), 125);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_GFX1250), 125);
 }
 
 } // namespace
