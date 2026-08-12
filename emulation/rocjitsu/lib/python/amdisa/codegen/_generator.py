@@ -9295,7 +9295,7 @@ class CodeGenerator:
                         cpp_includes[0],
                         (
                             self.config.generated_include(
-                                self.isa_spec.arch_name,
+                                self.generated_dir_name,
                                 'execution_backend.h',
                             ),
                             False,

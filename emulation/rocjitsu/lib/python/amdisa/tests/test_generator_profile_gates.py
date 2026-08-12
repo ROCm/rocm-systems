@@ -2697,7 +2697,7 @@ def test_split_execution_ids_name_and_match_callbacks(
             if not ids:
                 continue
             assert '#include "' in model
-            assert '/execution_backend.h"' in model
+            assert f'/generated/{arch_root.name}/execution_backend.h"' in model
             assert not re.search(r'selected_exec_fn\(\d+\)', model)
             selected_ids.extend(ids)
 
