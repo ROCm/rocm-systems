@@ -9,21 +9,21 @@
 # build_rccl.sh auto-detects the projects/rccl cmake subdir in the checkout.
 #
 # The Slurm submit/poll/report scripts these steps call
-# (rccl_build.sbatch, rccl_ab.sbatch, submit_and_poll.sh, format_report.py)
-# are version-controlled in ROCm/cvs, on a branch with further related
-# changes landing before it merges to main:
+# (rccl_build.sbatch, rccl_ab.sbatch, submit_and_poll.sh, format_report.py,
+# sbatch/lib/*.sh) are version-controlled in ROCm/cvs, on a branch with further
+# related changes landing before it merges to main:
 #   https://github.com/ROCm/cvs/tree/aimvt-196-rccl-regression-robustness/ci/rccl_perf_gate
 #
 # Flow per PR:
 #   1. Check out PR head with full history (merge-base resolution needs it).
 #   2. [build job] rccl_build.sbatch: build librccl.so for reference (merge-base)
 #      and candidate (PR head) on a single build node, then template their lib
-#      dirs into a per-run copy of ci_detect.json. This is a single-node CPU
-#      compile with no RDMA/MPI involved, so it runs under its own concurrency
-#      lock instead of the pinned 4-node lock below -- it no longer holds all
-#      4 nodes idle for its ~15-20min duration.
-#   3. [detect job] rccl_ab.sbatch: run the A/B detector on the pinned 4-node
-#      set, using the config the build job produced.
+#      dirs into this run's config. This is a single-node CPU compile with no
+#      RDMA/MPI involved, so it runs under its own concurrency lock instead of
+#      the detect lock below -- it no longer holds all 4 nodes idle for its
+#      duration. Rev-keyed build caching usually makes it seconds, not minutes.
+#   3. [detect job] rccl_ab.sbatch: pre-flight the A/B transport capabilities,
+#      then run the detector on the pinned 4-node set.
 #   4. format_report.py: render verdict to the job summary + PR comment.
 #   5. Advisory mode: job fails hard only on infra/polling errors, not on
 #      a detected regression yet (see PR description).
@@ -31,9 +31,27 @@ name: RCCL Perf Regression Gate
 
 on:
   pull_request:
-    branches: [main, develop]
+    # TEMPORARY -- DO NOT MERGE AS IS.
+    #
+    # Production value is `[main, develop]`. It is pointed at this PR's own
+    # branch so the pipeline can be exercised end to end from CI before it is
+    # let anywhere near real PRs: open a throwaway PR that touches
+    # projects/rccl/** with THIS branch as its base, and the gate runs against
+    # it using the workflow file from this PR (pull_request events resolve the
+    # workflow from the merge commit, so the version under review is the
+    # version that executes).
+    #
+    # Restoring `[main, develop]` is the last commit before this leaves draft.
+    branches: [aimvt-196-rccl-regression-robustness]
     paths:
       - 'projects/rccl/**'
+      # Docs-only and test-only churn cannot move a collective's bandwidth, and
+      # every spurious trigger costs a ~25min slot on a 4-node reservation that
+      # the whole team shares. Exclude what cannot affect the measurement.
+      - '!projects/rccl/**/*.md'
+      - '!projects/rccl/docs/**'
+      - '!projects/rccl/LICENSE*'
+      - '!projects/rccl/**/CODEOWNERS'
       - '.github/workflows/rccl_perf_regression.yml'
   # Allow manual dispatch for testing the pipeline before the workflow is on develop.
   # Inputs mirror what a PR run would supply; omit them to use the defaults
@@ -53,6 +71,23 @@ env:
   RCCL_CI_ROOT: /it-share/rccl-ci
   SLURM_RESERVATION: rccl_ci
   NODELIST: mia1-p01-g[22,26,28,32]
+  # The build deliberately does NOT run in SLURM_RESERVATION. It is a
+  # single-node CPU compile, but it takes its node --exclusive for up to an
+  # hour and is submitted with `sbatch --wait`, so running it inside the 4-node
+  # detect reservation held a quarter of the detect pool while detect was
+  # waiting for all four -- build and detect serialised against each other for
+  # no reason. rccl_dev is a separate pool, so a build and a detect run can now
+  # overlap. Set to an empty string to submit the build to the general
+  # partition instead.
+  SLURM_BUILD_RESERVATION: rccl_dev
+  # Per-run workspace isolation: every run gets its own cvs worktree, cvs-sbatch
+  # copy, build output, config, artifacts and logs under runs/<run_key>/.
+  # run_key is derived from GITHUB_RUN_ID, which is how the build job and the
+  # detect job below find the same workspace. This is the default in
+  # workspace.sh now; it is stated explicitly here because it is the single
+  # switch that makes concurrent runs safe, and a reader of this file should not
+  # have to go read a bash library to discover that.
+  RCCL_CI_WORKSPACE: '1'
 
 permissions:
   contents: read
@@ -66,18 +101,44 @@ jobs:
     # only; workflow_dispatch is unaffected (it already requires repo write
     # access to trigger).
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # Separate lock from the detect job below: build never touches the pinned
-    # nodes, so it shouldn't queue behind another PR's in-flight A/B run.
-    # (Real cross-PR parallelism from this also needs a 2nd self-hosted runner
-    # -- see "Runner capacity" in the PR's known gaps. With one runner, this
-    # still shortens how long the 4-node reservation is held per PR.)
+    # SCOPED PER PR -- this is the fix for the "1 active + 1 queued" starvation.
+    #
+    # A GitHub Actions concurrency group holds at most ONE pending job. When a
+    # third run arrives, the pending one is CANCELLED to make room. With a single
+    # global group that meant PR #3 silently killed PR #2's queued run: the team
+    # saw runs vanish with no explanation and had to re-push to get them back.
+    #
+    # Keying the group by PR removes cross-PR contention entirely, and keeps the
+    # useful half of the old behaviour within a PR: push three times in a row and
+    # the newest push still evicts the older queued one, because they share a key.
+    #
+    # Serialisation of the actual hardware now happens where it belongs -- in
+    # Slurm, whose queue is unbounded and which is the real owner of the pinned
+    # nodes. Slurm queues; it does not curbstomp.
+    #
+    # cancel-in-progress stays FALSE deliberately. Cancelling a GitHub job does
+    # not cancel the Slurm job it submitted, so a true here would orphan
+    # allocations that keep holding nodes. Enabling it needs the scancel trap
+    # tracked as part of the submit/--wait work.
     concurrency:
-      group: rccl-perf-gate-build
+      group: rccl-perf-gate-build-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
+    # Capacity note: build and detect share one runner label today, so they are
+    # serialised by runner availability regardless of the locks above. Once a
+    # second runner is registered, give the build a distinct label (it needs no
+    # GPUs and no RDMA -- just a Slurm submit host) so a build can proceed while
+    # another PR's detect holds the 4-node allocation.
     runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
-    timeout-minutes: 60
+    # Was 60, the same as rccl_build.sbatch's own --time=01:00:00, which left no
+    # room for queue time: a build that waited 20min for a node and then
+    # compiled for 13 was killed here at 60 even though Slurm was happy. Sit
+    # above the Slurm wall clock so Slurm is the one that decides a build has
+    # run too long, and this job only fires if the queue itself is wedged.
+    timeout-minutes: 120
     outputs:
       config_json: ${{ steps.resolve.outputs.config_json }}
+      # '' on workflow_dispatch (no PR to diff), '1'/'0' on pull_request.
+      rccl_changed: ${{ steps.paths.outputs.rccl_changed }}
     steps:
       - name: Checkout PR (full history)
         uses: actions/checkout@v4
@@ -88,14 +149,41 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
+      - name: Reap orphaned per-run configs
+        # Self-healing janitor. The cleanup steps below cover the paths we can
+        # predict, but a runner dying mid-job leaves its copy behind forever on
+        # NFS. Anything older than a day is unambiguously dead: the longest a run
+        # can legally live is the detect job's 540min timeout.
+        run: |
+          find "${RCCL_CI_ROOT}/configs" -maxdepth 1 -name 'ci_detect_run_*.json' \
+            -mmin +1440 -print -delete 2>/dev/null || true
+
       - name: Detect changed paths
         id: paths
         if: github.event_name == 'pull_request'
+        # FAIL CLOSED. The old form ended in `|| echo "rccl_changed=0"`, which
+        # swallowed every possible failure of the git command -- a shallow clone,
+        # a missing base ref, a fetch that didn't complete -- and reported "RCCL
+        # didn't change". BUILD_RCCL then stayed 0, so the detect job ran with
+        # reference and candidate both pointing at the fixed prebuilt lib, found
+        # zero regressions (it was comparing a library to itself), and posted a
+        # green check on a PR that had never been measured. A gate that reports
+        # PASS when its own inputs are broken is worse than no gate.
+        #
+        # So: distinguish "the diff succeeded and matched nothing" (0, skip the
+        # build, legitimately nothing to measure) from "the diff failed" (error
+        # out and let the job fail visibly).
         run: |
-          git diff --name-only origin/${{ github.base_ref }}...HEAD \
-            | grep -q '^projects/rccl/' \
-            && echo "rccl_changed=1" >> "$GITHUB_OUTPUT" \
-            || echo "rccl_changed=0" >> "$GITHUB_OUTPUT"
+          set -o pipefail
+          if ! diff_out="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"; then
+            echo "::error::Could not diff against origin/${{ github.base_ref }}. Refusing to guess whether RCCL changed — a wrong guess here produces a meaningless green gate."
+            exit 1
+          fi
+          if grep -q '^projects/rccl/' <<<"${diff_out}"; then
+            echo "rccl_changed=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "rccl_changed=0" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build reference + candidate librccl (single build node)
         id: resolve
@@ -106,21 +194,76 @@ jobs:
           _CONFIG: ${{ inputs.config || '/it-share/rccl-ci/configs/ci_detect_prod.json' }}
         run: |
           if [[ "${BUILD_RCCL}" == "1" ]]; then
-            # This job's concurrency lock no longer matches the detect job's
-            # lock, so another PR's build can now run while this PR is still
-            # waiting for/running its detect step. Templating the shared prod
-            # config file in place (the old behavior) would let one PR's build
-            # clobber another PR's in-flight detect config -- give every run
-            # its own copy instead.
+            # Give every run its own copy of the config rather than templating
+            # the shared prod file in place: with the locks split, another PR's
+            # build can be running while this PR waits on detect, and in-place
+            # templating would let one clobber the other's lib paths.
+            #
+            # In workspace mode this copy is only the handoff vehicle -- the
+            # build stages it into runs/<run_key>/config.json and templates
+            # THAT, so the shared configs/ dir is never written by a run.
             RUN_CONFIG="${RCCL_CI_ROOT}/configs/ci_detect_run_${{ github.run_id }}.json"
             cp "${_CONFIG}" "${RUN_CONFIG}"
             # Set the output before sbatch runs (not after) so the cleanup-on-
             # failure step below can still find this path if sbatch fails.
             echo "config_json=${RUN_CONFIG}" >> "$GITHUB_OUTPUT"
-            sbatch --wait \
+            # An unset/empty SLURM_BUILD_RESERVATION means "no reservation", not
+            # "inherit the detect one" -- passing --reservation="" is an error,
+            # so the flag has to be omitted entirely in that case.
+            build_res=()
+            if [[ -n "${SLURM_BUILD_RESERVATION:-}" ]]; then
+              build_res=(--reservation="${SLURM_BUILD_RESERVATION}")
+            fi
+            # `sbatch --wait` on its own leaks the allocation. Killing the
+            # sbatch client does not cancel the job it submitted, so when this
+            # step is stopped -- timeout-minutes, a cancelled run, a runner
+            # restart -- the build keeps going and keeps its node --exclusive
+            # until its 1h wall clock runs out, with nobody left to read the
+            # result. submit_and_poll.sh already learned this lesson for the
+            # detect job; the build needs the same trap.
+            #
+            # --parsable makes sbatch print the job id on submission and then
+            # block as usual, so run it in the background, read the id out of
+            # its output, and `wait` for the real exit status. That keeps
+            # --wait's exit-code mapping (which is the reason to use it) while
+            # giving the trap something to scancel.
+            sb_out="$(mktemp)"
+            build_job=""
+            cleanup_build() {
+              local rc=$?
+              trap - EXIT INT TERM HUP
+              if [[ -n "${build_job}" && "${build_done:-0}" != "1" ]]; then
+                echo "::warning::cancelling build job ${build_job}; this step is exiting (rc=${rc}) while it is still allocated"
+                scancel "${build_job}" 2>/dev/null || true
+              fi
+              rm -f "${sb_out}"
+              exit "${rc}"
+            }
+            trap cleanup_build EXIT INT TERM HUP
+
+            sbatch --parsable --wait \
               --export="ALL,CANDIDATE_SRC=${CANDIDATE_SRC},BASE_REF=${BASE_REF},CONFIG_JSON=${RUN_CONFIG}" \
-              --reservation="${SLURM_RESERVATION}" \
-              "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/rccl_build.sbatch"
+              "${build_res[@]}" \
+              "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/rccl_build.sbatch" >"${sb_out}" 2>&1 &
+            sb_pid=$!
+
+            # The id lands in the first line within a second of submission. Give
+            # it 30s, but do not fail if it never shows -- an sbatch that could
+            # not submit has nothing to cancel, and `wait` below reports why.
+            for _ in $(seq 1 30); do
+              build_job="$(grep -m1 -oE '^[0-9]+' "${sb_out}" 2>/dev/null || true)"
+              [[ -n "${build_job}" ]] && break
+              sleep 1
+            done
+            echo "build slurm job: ${build_job:-<unknown>}"
+
+            set +e
+            wait "${sb_pid}"
+            sb_rc=$?
+            set -e
+            build_done=1
+            cat "${sb_out}"
+            [[ "${sb_rc}" -eq 0 ]] || exit "${sb_rc}"
           else
             echo "config_json=${_CONFIG}" >> "$GITHUB_OUTPUT"
           fi
@@ -129,7 +272,8 @@ jobs:
         # Covers the case the detect job's own cleanup step can't: if sbatch
         # fails after the per-run config copy was made, `detect` never runs
         # (needs: build), so nothing else removes this file from NFS.
-        if: failure()
+        # cancelled() is included because a cancelled run skips detect too.
+        if: failure() || cancelled()
         env:
           _CONFIG: ${{ steps.resolve.outputs.config_json }}
         run: |
@@ -139,15 +283,41 @@ jobs:
 
   detect:
     needs: build
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # Serialise: the pinned calibration nodes can host only one A/B job at a
-    # time, and thresholds are only valid there. Do NOT cancel in-progress (a
-    # running allocation must finish cleanly to release the nodes).
+    # Two conditions, and the second is the interesting one.
+    #
+    # Skip detect on a PR that changed nothing under projects/rccl (the workflow
+    # file itself is in the paths filter, so this happens). With BUILD_RCCL=0 both
+    # sides of the comparison point at the same prebuilt library, so the run would
+    # measure a build against itself and report a guaranteed, meaningless PASS
+    # after holding the 4-node reservation for ~25 minutes. A skipped job is an
+    # honest "not applicable"; a green check on an A=A run is a lie that costs
+    # hardware to tell. The detector now refuses such runs on its own too -- this
+    # just avoids queueing them in the first place.
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      && (github.event_name != 'pull_request' || needs.build.outputs.rccl_changed == '1')
+    # Also scoped per PR -- see the long note on the build job's lock. The pinned
+    # 4-node set is still used by exactly one job at a time; that is enforced by
+    # Slurm (--nodelist + --exclusive), which queues rather than cancelling.
+    # Holding a global GitHub lock here as well bought nothing and cost every
+    # third PR its queued run.
+    #
+    # Never cancel-in-progress: a running allocation must finish cleanly to
+    # release the nodes, and a cancelled GitHub job leaves the Slurm job running.
     concurrency:
-      group: rccl-perf-gate-pinned-nodes
+      group: rccl-perf-gate-detect-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
     runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
-    timeout-minutes: 540
+    # Outermost layer of the timeout nest. Must stay above MAX_QUEUE_SEC (4h)
+    # plus MAX_WAIT_SEC (4h10m) in submit_and_poll.sh, so that script gets to
+    # cancel the Slurm job and report *why* rather than being killed here with
+    # a bare "exceeded the maximum execution time". See the table in
+    # submit_and_poll.sh; retune both together.
+    #
+    # It is also a runner-capacity number, not just a safety net: this runner
+    # takes one active job and one queued, so every hour a wedged detect run
+    # sits here is an hour no other PR can be tested. It was 540.
+    timeout-minutes: 510
     steps:
       - name: Run A/B detector (pinned 4-node allocation)
         id: detect
@@ -167,32 +337,74 @@ jobs:
           echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
           exit "${code}"
 
+      - name: Resolve this run's artifact dir
+        id: art
+        if: always()
+        # In workspace mode the detector writes to runs/<run_key>/artifacts, not
+        # to the shared ab_artifacts/. Reading the shared path would render a
+        # report left there by some earlier run and post it on this PR as if it
+        # were this run's verdict -- a stale green is the worst possible failure
+        # mode for a gate. Ask workspace.sh rather than re-deriving the run key
+        # here, so there is one source of truth for it; with the flag off it
+        # returns the legacy shared path and this line still holds.
+        run: |
+          HELPER="${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/lib/workspace.sh"
+          ART=""
+          if [[ -f "${HELPER}" ]]; then
+            ART="$(bash "${HELPER}" --print-artifacts 2>/dev/null)" || ART=""
+          fi
+          if [[ -z "${ART}" ]]; then
+            # Helper missing or failed: the cluster's cvs checkout predates it.
+            # Fall back to the legacy shared dir and say so loudly rather than
+            # emitting an empty path that would silently resolve to "/".
+            ART="${RCCL_CI_ROOT}/ab_artifacts"
+            echo "::warning::workspace.sh --print-artifacts unavailable; falling back to ${ART}. If RCCL_CI_WORKSPACE=1 this report may be from a different run — update the cvs checkout on the cluster."
+          fi
+          echo "dir=${ART}" >> "$GITHUB_OUTPUT"
+          echo "Artifact dir: ${ART}"
+          ls -la "${ART}" 2>/dev/null || echo "(artifact dir absent)"
+
       - name: Render report
         if: always()
+        env:
+          _ART: ${{ steps.art.outputs.dir }}
         run: |
+          REPORT="${_ART}/ab_regression_report.json"
+          if [[ ! -f "${REPORT}" ]]; then
+            # Say so plainly instead of letting format_report.py traceback, and
+            # never fall back to another directory's report.
+            echo "::warning::No report at ${REPORT} — the detector did not produce one."
+            echo "### RCCL Perf Regression Gate" >> "${GITHUB_STEP_SUMMARY}"
+            echo "" >> "${GITHUB_STEP_SUMMARY}"
+            echo "No report was produced for this run (\`${REPORT}\` is missing)." >> "${GITHUB_STEP_SUMMARY}"
+            echo "See the detector step log above for the failure." >> "${GITHUB_STEP_SUMMARY}"
+            printf 'No report was produced for this run.\n' > "${RUNNER_TEMP}/rccl_report.md"
+            exit 0
+          fi
           python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
-            "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
+            "${REPORT}" \
             --no-exit-code \
             --output "${RUNNER_TEMP}/rccl_report.md"
           cat "${RUNNER_TEMP}/rccl_report.md" >> "${GITHUB_STEP_SUMMARY}"
-
-      - name: Post / update PR comment
-        if: always() && github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
-        with:
-          header: rccl-perf-gate
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          path: ${{ runner.temp }}/rccl_report.md
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rccl-ab-report
+          # Namespaced per run+attempt: with runs no longer serialised by a
+          # global lock, a fixed name would collide across concurrent runs.
+          name: rccl-ab-report-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          # Only paths under THIS run's artifact dir. rccl_runs.log used to be the
+          # shared /it-share/rccl-ci/ab_artifacts/rccl_runs.log, which every run
+          # appends to and never truncates -- a ~70MB cumulative file containing
+          # other PRs' command lines and output, re-uploaded in full on every run.
+          # In workspace mode steps.art.outputs.dir is per-run, so this is now
+          # only our own log.
           path: |
-            /it-share/rccl-ci/ab_artifacts/ab_regression_report.json
-            /it-share/rccl-ci/ab_artifacts/ab_derived_thresholds.json
-            /it-share/rccl-ci/ab_artifacts/rccl_runs.log
+            ${{ steps.art.outputs.dir }}/ab_regression_report.json
+            ${{ steps.art.outputs.dir }}/ab_derived_thresholds.json
+            ${{ steps.art.outputs.dir }}/rccl_runs.log
 
       - name: Clean up per-run config copy
         if: always()
@@ -219,7 +431,115 @@ jobs:
           # Advisory mode (see PR description): report the verdict but don't
           # fail the job on a detected regression yet. Infra failures above
           # still fail hard regardless of mode.
-          python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
-            "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
-            --no-exit-code \
-            --output /dev/null
+          REPORT="${{ steps.art.outputs.dir }}/ab_regression_report.json"
+          if [[ ! -f "${REPORT}" ]]; then
+            echo "::error::Detector exited ${code} but produced no report at ${REPORT}."
+            exit 2
+          fi
+          # "No usable verdict" is an infra failure, not an advisory finding. The
+          # advisory carve-out exists so a real, measured regression doesn't block
+          # a PR while the gate earns trust — it was never meant to cover a run
+          # that failed to measure anything. Those must fail hard, or the gate
+          # spends its advisory period reporting green on runs it never made.
+          python3 - "${REPORT}" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          reports = d.get("reports", {}) or {}
+          trust = d.get("trustworthy")
+          if trust is None:
+              trust = bool(reports) and all(
+                  r.get("summary", {}).get("trustworthy", False) for r in reports.values())
+          if not trust:
+              for why in (d.get("untrustworthy_reasons") or ["report predates the trustworthy flag"]):
+                  print(f"::error::{why}")
+              print("::error::Detector produced NO USABLE VERDICT — failing the gate. "
+                    "This is not a regression finding; it means the run could not measure.")
+              sys.exit(2)
+          n = sum(r.get("summary", {}).get("regressions", 0) for r in reports.values())
+          prov = d.get("provenance") or {}
+          print(f"Verdict source: cvs@{prov.get('cvs_sha')} thresholds={d.get('thresholds_source')}")
+          print(f"::notice::{n} confirmed regression(s) (advisory mode: not failing the PR)")
+          PY
+
+  # ---------------------------------------------------------------------------
+  # The PR comment lives in its own always() job.
+  #
+  # It used to be a step inside `detect`, which meant it only ran when detect ran.
+  # Every way the pipeline can fail EARLIER -- the build job failing, the runner
+  # dying, the concurrency lock cancelling the run, detect being skipped -- left
+  # the sticky comment showing the PREVIOUS attempt's verdict, with a timestamp
+  # nobody reads and no indication it was stale. Reviewers acted on a green
+  # comment for a run that had been dead for twenty minutes.
+  #
+  # A sticky comment is a claim about the current state of the PR. If the pipeline
+  # cannot make that claim, it has to say so, in the same place it would have said
+  # PASS. So: separate job, needs both, if: always(), and it renders SOMETHING for
+  # every terminal state of the two jobs above.
+  # ---------------------------------------------------------------------------
+  report:
+    needs: [build, detect]
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Compose comment
+        id: compose
+        env:
+          _BUILD: ${{ needs.build.result }}
+          _DETECT: ${{ needs.detect.result }}
+          _CHANGED: ${{ needs.build.outputs.rccl_changed }}
+          _RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          OUT="${RUNNER_TEMP}/rccl_comment.md"
+          hdr="### RCCL Perf Regression Gate"
+          foot="[run log](${_RUN_URL}) · attempt ${{ github.run_attempt }} · commit \`${{ github.event.pull_request.head.sha }}\`"
+
+          emit() { printf '%s\n\n%s\n\n%s\n' "${hdr}" "$1" "${foot}" > "${OUT}"; }
+
+          if [[ "${_BUILD}" != "success" ]]; then
+            emit ":x: **Not measured.** The build job ended \`${_BUILD}\`, so no A/B comparison ran. This is an infrastructure result, not a statement about your change."
+          elif [[ "${_DETECT}" == "skipped" ]]; then
+            if [[ "${_CHANGED}" == "0" ]]; then
+              emit ":white_check_mark: **Not applicable.** This PR changes nothing under \`projects/rccl/\`, so there is no RCCL build to compare and the 4-node detector was not run."
+            else
+              emit ":warning: **Not measured.** The detector job was skipped. This is an infrastructure result, not a statement about your change."
+            fi
+          elif [[ "${_DETECT}" == "cancelled" ]]; then
+            emit ":warning: **Not measured.** The detector job was cancelled before it produced a verdict."
+          else
+            HELPER="${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/lib/workspace.sh"
+            ART=""
+            [[ -f "${HELPER}" ]] && ART="$(bash "${HELPER}" --print-artifacts 2>/dev/null)" || true
+            [[ -n "${ART}" ]] || ART="${RCCL_CI_ROOT}/ab_artifacts"
+            REPORT="${ART}/ab_regression_report.json"
+            if [[ -f "${REPORT}" ]]; then
+              python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
+                "${REPORT}" --no-exit-code --output "${RUNNER_TEMP}/rccl_body.md" \
+                && emit "$(cat "${RUNNER_TEMP}/rccl_body.md")" \
+                || emit ":warning: **Not measured.** A report exists at \`${REPORT}\` but could not be rendered."
+            else
+              emit ":x: **Not measured.** The detector job ended \`${_DETECT}\` and produced no report. This is an infrastructure result, not a statement about your change."
+            fi
+          fi
+          cat "${OUT}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Post / update PR comment
+        uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
+        with:
+          header: rccl-perf-gate
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ runner.temp }}/rccl_comment.md
+
+      - name: Reap this run's per-run config
+        if: always()
+        env:
+          _CONFIG: ${{ needs.build.outputs.config_json }}
+        run: |
+          # Last line of defence: detect's own cleanup step doesn't run if detect
+          # never ran. This job always does.
+          case "${_CONFIG}" in
+            "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
+          esac
