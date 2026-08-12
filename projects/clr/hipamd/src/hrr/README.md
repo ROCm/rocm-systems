@@ -120,7 +120,11 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `HIP_HRR_REPLAY_NO_RESCAN` | off | Disable suballoc pointer rescan at replay |
 | `HIP_HRR_PTR_RELAX` | off | Disable replay-side stale-pointer guard (debug only) |
 | `HIP_HRR_REPLAY_FORCE_EXT_CIJK` | off | Force external Cijk kernel binding workaround (debug) |
-| `HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL` | `0` | Dump pointer translation map at event ordinal `N` (debug) |
+| `HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL` | `0` | Dump pointer translation map, and the allocation each argument lands in, at kernel ordinal `N` (debug) |
+| `HIP_HRR_REPLAY_SCAN_ARGS_ORDINAL` | `0` | Before kernel `N`, read back each pointer argument's allocation and report words that are recorded addresses (debug) |
+| `HIP_HRR_REPLAY_SCAN_ARGS_BYTES` | `4096` | Per-allocation cap for the argument scan |
+| `HIP_HRR_REPLAY_SCAN_H2D` | off | Report recorded addresses inside replayed H2D payloads (debug) |
+| `HIP_HRR_REPLAY_EXPLAIN_ADDR` | unset | At the scan ordinal, report whether an address is recorded, live, or neither, and whether the GPU can read it (debug) |
 
 ### D2H validation
 

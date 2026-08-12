@@ -841,6 +841,22 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         fprintf(stderr,
                 "[HRR ptr-dump] kernel #%zu \"%s\" recorded->live pointer args:\n",
                 kernel_ordinal, compact_kernel_name(kernel_name).c_str());
+        // Name the allocation each argument lands in. Pinned host memory is
+        // worth calling out: the application fills it with ordinary CPU
+        // stores, which no HIP call reports, so replay hands the kernel a
+        // freshly allocated buffer that never received those writes.
+        for (auto& [idx, rec, live] : dbg_ptrs) {
+            void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
+            AllocKind akind = AllocKind::Device;
+            if (live && ctx.live_alloc_of(live, &abase, &asize, &arec, &akind))
+                fprintf(stderr, "[HRR ptr-dump]   arg[%u] recorded=0x%llx -> live=%p "
+                        "(%s allocation 0x%llx+%zu, +%lld)\n", idx,
+                        (unsigned long long)rec, live,
+                        PlaybackContext::alloc_kind_name(akind),
+                        (unsigned long long)arec, asize,
+                        (long long)(reinterpret_cast<uint64_t>(live) -
+                                    reinterpret_cast<uint64_t>(abase)));
+        }
         for (auto& [idx, rec, live] : dbg_ptrs)
             fprintf(stderr, "[HRR ptr-dump]   arg[%u] recorded=0x%llx -> live=%p\n",
                     idx, (unsigned long long)rec, live);
@@ -849,6 +865,70 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         fflush(stderr);
     }
 
+    // Read back what this kernel is about to read, looking for capture-time
+    // addresses. Arguments are translated on the way in, so a recorded pointer
+    // reaching the GPU has to arrive inside a buffer instead — written by an
+    // earlier kernel, or by the host into memory it shares with the device.
+    // Either way nothing rewrote it, and the kernel dereferences an address
+    // that belongs to the capturing process.
+    if (ctx.scan_args_ordinal && kernel_ordinal == ctx.scan_args_ordinal) {
+        (void)hipDeviceSynchronize();
+        if (const char* a = std::getenv("HIP_HRR_REPLAY_EXPLAIN_ADDR")) {
+            uint64_t v = strtoull(a, nullptr, 0);
+            fprintf(stderr, "[HRR arg-scan] 0x%llx is %s\n",
+                    (unsigned long long)v, ctx.explain_addr(v).c_str());
+            // Whether the allocation map says an address is live and whether the
+            // GPU can actually reach it are different questions, and a fault on
+            // an address the map calls live means the map is the thing that is
+            // wrong. Ask the runtime directly.
+            uint64_t probe = 0;
+            hipError_t pr = hipMemcpy(&probe, reinterpret_cast<void*>(v),
+                                      sizeof(probe), hipMemcpyDeviceToHost);
+            fprintf(stderr, "[HRR arg-scan] reading 8 bytes at 0x%llx: %s",
+                    (unsigned long long)v, hipGetErrorString(pr));
+            if (pr == hipSuccess)
+                fprintf(stderr, " (value 0x%llx)", (unsigned long long)probe);
+            fprintf(stderr, "\n");
+        }
+        const size_t cap = ctx.scan_args_bytes;
+        const auto ranges = ctx.recorded_ranges();
+        std::vector<uint8_t> host(cap);
+        fprintf(stderr, "[HRR arg-scan] kernel #%zu \"%s\": reading %zu bytes "
+                "behind each pointer argument\n", kernel_ordinal,
+                compact_kernel_name(kernel_name).c_str(), cap);
+        for (auto& [idx, rec, live] : dbg_ptrs) {
+            if (!live) continue;
+            // Scan from the start of the enclosing allocation, not from the
+            // argument, so bytes ahead of the pointer are covered too.
+            void*    abase    = live;
+            size_t   asize    = 0;
+            uint64_t arec     = rec;
+            ctx.live_alloc_of(live, &abase, &asize, &arec);
+            size_t n = asize ? std::min(cap, asize) : cap;
+            n -= n % 8;
+            if (!n) continue;
+            if (hipMemcpy(host.data(), abase, n, hipMemcpyDeviceToHost) != hipSuccess) {
+                fprintf(stderr, "[HRR arg-scan]   arg[%u]: unreadable\n", idx);
+                continue;
+            }
+            size_t hits = 0;
+            for (size_t off = 0; off + 8 <= n; off += 8) {
+                uint64_t w; memcpy(&w, host.data() + off, 8);
+                uint64_t base = 0; size_t sz = 0;
+                if (!PlaybackContext::range_contains(ranges, w, &base, &sz)) continue;
+                if (++hits <= 8)
+                    fprintf(stderr, "[HRR arg-scan]   arg[%u] allocation 0x%llx "
+                            "+%zu holds 0x%llx — recorded allocation 0x%llx+%zu\n",
+                            idx, (unsigned long long)arec, off,
+                            (unsigned long long)w, (unsigned long long)base, sz);
+            }
+            if (hits)
+                fprintf(stderr, "[HRR arg-scan]   arg[%u]: %zu recorded addresses "
+                        "in %zu bytes of allocation 0x%llx\n", idx, hits, n,
+                        (unsigned long long)arec);
+        }
+        fflush(stderr);
+    }
 
     // Skip HIP event timing during graph capture: recording events on a
     // captured stream inserts them into the graph and invalidates the
@@ -2412,6 +2492,36 @@ static bool hrr_d2h_validate(PlaybackContext& ctx, const char* tag, uint64_t seq
     return false;
 }
 
+// A recorded H2D payload is replayed byte for byte, so any device pointer the
+// application had placed in that host buffer arrives on the GPU as a
+// capture-time address: nothing in the pointer-translation path ever sees it.
+// Report those words rather than translate them — a payload is opaque bytes,
+// and a value that merely looks like an address may be data.
+static void scan_h2d_payload(PlaybackContext& ctx, const void* blob, size_t n,
+                             uint64_t dst_rec) {
+    const uint8_t* p = static_cast<const uint8_t*>(blob);
+    const auto ranges = ctx.recorded_ranges();
+    size_t hits = 0;
+    for (size_t off = 0; off + 8 <= n; off += 8) {
+        uint64_t w;
+        memcpy(&w, p + off, 8);
+        uint64_t base = 0;
+        size_t   sz   = 0;
+        if (!PlaybackContext::range_contains(ranges, w, &base, &sz)) continue;
+        if (++hits <= 4)
+            fprintf(stderr,
+                    "[HRR h2d-scan] payload for 0x%llx +%zu holds 0x%llx — a "
+                    "recorded address in allocation 0x%llx+%zu\n",
+                    (unsigned long long)dst_rec, off, (unsigned long long)w,
+                    (unsigned long long)base, sz);
+    }
+    if (hits)
+        fprintf(stderr,
+                "[HRR h2d-scan] payload for 0x%llx: %zu recorded addresses in "
+                "%zu bytes\n",
+                (unsigned long long)dst_rec, hits, n);
+}
+
 // This mirrors the captured API exactly — hipMemcpyAsync on the default stream
 // (stream_rec==0, translated to nullptr) must still use the async variant.
 static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
@@ -2442,6 +2552,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                     (unsigned long long)dst_rec, copy_sz, avail);
             copy_sz = avail;
         }
+        if (ctx.scan_h2d) scan_h2d_payload(ctx, blob, copy_sz, dst_rec);
         if (is_async)
             r = hipMemcpyAsync(dst, blob, copy_sz, hipMemcpyHostToDevice, stream);
         else
