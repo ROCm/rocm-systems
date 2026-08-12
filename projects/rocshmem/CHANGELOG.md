@@ -1,5 +1,35 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.6.0 for ROCm x.x.x
+## Unreleased - rocSHMEM 3.7.0 for ROCm 10.1
+
+## rocSHMEM 3.6.0 for ROCm 10.0
+
+### Added
+* Added new APIs:
+   * `rocshmem_broadcast_wave`
+   * `rocshmem_fcollect_wave`
+   * `rocshmem_alltoall_wave`
+   * `rocshmem_reduce_wave`
+   * `rocshmem_reducescatter_wave`
+* Added support for some tile-granular collectives for the IPC backend:
+   * `rocshmem_tile_broadcast`
+   * `rocshmem_tile_broadcast_wave`
+   * `rocshmem_tile_broadcast_wg`
+   * `rocshmem_ctx_tile_broadcast`
+   * `rocshmem_ctx_tile_broadcast_wave`
+   * `rocshmem_ctx_tile_broadcast_wg`
+   * `rocshmem_tile_allgather`
+   * `rocshmem_tile_allgather_wave`
+   * `rocshmem_tile_allgather_wg`
+   * `rocshmem_ctx_tile_allgather`
+   * `rocshmem_ctx_tile_allgather_wave`
+   * `rocshmem_ctx_tile_allgather_wg`
+* Added single node support for gfx1250 / MI455X
+* Added support for HIP Fabric Handles
+
+### Changed
+* Drop LLC dependency when compiling HSCO objects
+
+
 ## rocSHMEM 3.5.0 for ROCm 7.14
 
 ### Added
@@ -8,6 +38,8 @@
    * `rocshmem_calloc`
    * `rocshmem_buffer_unregister_all`
    * `rocshmem_buffer_register/unregister` for GDA backend
+   * `rocshmem_buffer_register_symmetric` for IPC and GDA backends
+   * `rocshmem_buffer_unregister_symmetric` for IPC and GDA backends
    * `rocshmem_reduce_on_stream`
    * `rocshmem_team_split_2D`
 * Added tile-granular RMA operations for the IPC backend
@@ -54,6 +86,7 @@
   * `OVERRIDE_NIC_FIRMWARE_CHECK`
   * `ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX`
   * `ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX`
+  * `ROCSHMEM_MAX_SYMM_REGIONS`
 * Added VMM POSIX memory allocator (`USE_HEAP_DEVICE_VMM_POSIX`)
    * Uses HIP Virtual Memory Management (VMM) APIs for fine-grained memory control
    * Requires ROCm 7.0+ and Linux kernel 5.6+

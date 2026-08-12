@@ -19,12 +19,13 @@ include_guard(DIRECTORY)
 set_and_check(@PACKAGE_NAME@_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
 set_and_check(@PACKAGE_NAME@_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
 
-# When fmt was an imported package at build time, the exported targets (in
-# particular the static library) reference fmt::fmt as a link requirement, so
-# the fmt package must be discoverable before the targets file is included;
-# otherwise downstream consumers hit unresolved fmt symbols. Left empty when fmt
-# was vendored, since the target is then not part of this package's interface.
-@PROFILER_HUB_FMT_FIND_DEPENDENCY@
+# When fmt, spdlog, and/or rocprofiler-sdk-rocpd were imported packages at
+# build time, the exported targets (in particular the static library)
+# reference them as link requirements, so those packages must be discoverable
+# before the targets file is included; otherwise downstream consumers hit
+# unresolved symbols. Left empty for any dependency that was vendored instead,
+# since that target is then not part of this package's interface.
+@PROFILER_HUB_FIND_DEPENDENCIES@
 include("${CMAKE_CURRENT_LIST_DIR}/@PACKAGE_NAME@-targets.cmake")
 
 include(FindPackageHandleStandardArgs)

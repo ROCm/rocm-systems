@@ -28,8 +28,8 @@
  * Bucket layout mirrors nccl_device_wrapper.h exactly:
  *   [A] Always-on    — no preprocessor gate.
  *   [B] Always-on    — ncclCoopAny + LSA barrier session thunks.
- *   [C] Stubbed-out  — #if 0; ready to enable once RCCL syncs in
- *                      ncclGin* / composite ncclBarrierSession.
+ *   [C] Always-on    — GIN + composite ncclBarrierSession thunks, enabled
+ *                      now that the NCCL v2.29.x GIN sync landed them.
  */
 
 #include "nccl_device_wrapper.h"
@@ -74,8 +74,16 @@ NCCL_IR_EXPORT void ncclCoopAnyInitWarp(ncclCoopAny* coop) {
 NCCL_IR_EXPORT void ncclCoopAnyInitLanes(ncclCoopAny* coop, ncclCoopMask_t lane_mask) {
   ::new (coop) ncclCoopAny(ncclCoopLanes(lane_mask));
 }
-NCCL_IR_EXPORT void ncclCoopAnyInitWarpSpan(ncclCoopAny* coop, int warp0, int nWarps, int id) {
+NCCL_IR_EXPORT void ncclCoopAnyInitWarpSpan(ncclCoopAny* coop, int warp0, int nWarps, int id, void* barrierLds) {
+#if defined(__HIP_PLATFORM_AMD__)
+  /* barrierLds is a kernel-owned __shared__ slot array; the bitcode build has no
+   * function-local LDS of its own (see coop.h), so the WarpSpan barrier uses this. */
+  ::new (coop) ncclCoopAny(ncclCoopWarpSpan(warp0, nWarps, id,
+                           static_cast<ncclCoopNamedBarrierSlot*>(barrierLds)));
+#else
+  (void)barrierLds;
   ::new (coop) ncclCoopAny(ncclCoopWarpSpan(warp0, nWarps, id));
+#endif
 }
 NCCL_IR_EXPORT void ncclCoopAnyInitCta(ncclCoopAny* coop) {
   ::new (coop) ncclCoopAny(ncclCoopCta{});
@@ -140,18 +148,20 @@ void ncclLsaBarrierSessionSync(ncclLsaBarrierSession_C* session,
 
 
 /* ========================================================================
- * [C] GIN + composite Barrier Session bodies (disabled)
+ * [C] GIN + composite Barrier Session bodies
  *
- * Carried over from NCCL v2.29.2-1. Will become usable once RCCL imports:
- * usable once RCCL imports:
- *   - ncclGin / ncclGin_C
+ * Enabled now that the NCCL v2.29.x GIN sync landed the prerequisites in
+ * RCCL:
+ *   - ncclGin / ncclGin_C                         (nccl_device/gin.h)
  *   - ncclGinBarrierSession<Coop>, ncclGinBarrierHandle, ncclGinFenceLevel
- *   - composite ncclBarrierSession<Coop>
+ *                                                 (nccl_device/gin_barrier.h)
+ *   - composite ncclBarrierSession<Coop>          (nccl_device/barrier.h)
  *
- * Remove the #if 0 guard when those land (ncclCoopAny is unconditionally
- * available).
+ * These templates are gated on the upstream __CUDACC__ in the shared
+ * headers; hipify rewrites it to __HIPCC__ in the staged copy fed to this
+ * -x hip bitcode build, so they instantiate without any shared-header
+ * change. ncclCoopAny is unconditionally available.
  * ======================================================================*/
-#if 0  /* TODO(rccl-ir): enable once RCCL grows ncclGin* / composite Barrier */
 
 /* GIN barrier session */
 NCCL_IR_EXPORT void ncclGinBarrierSessionInit(
@@ -197,8 +207,6 @@ NCCL_IR_EXPORT void ncclBarrierSessionSync(
     ncclGinFenceLevel fence) {
   session->bar.sync(coop, order, fence);
 }
-
-#endif  /* 0 -- GIN / composite Barrier bodies */
 
 #endif  /* NCCL_CHECK_CUDACC */
 

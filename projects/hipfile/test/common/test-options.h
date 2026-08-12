@@ -31,6 +31,7 @@ parseCli(args::ArgumentParser &parser, int argc, char **argv)
 struct SystemTestOptions {
     std::string ais_capable_dir;
     uint32_t    sleep_seconds;
+    bool        allow_skip_fastpath{false};
     void        parseTestOptions(int argc, char **argv)
     {
         args::ArgumentParser            parser{"System test options"};
@@ -42,11 +43,16 @@ struct SystemTestOptions {
         args::ValueFlag<uint32_t>       sleep_on_exit_arg(parser, "seconds", "Sleep before returning to main",
                                                           args::Matcher{"sleep-on-exit"}, 0U,
                                                           args::Options::Single);
+        args::Flag                      allow_skip_fastpath_arg(
+            parser, "allow-skip-fastpath",
+            "Skip fastpath-only tests instead of failing when fastpath is unavailable",
+            args::Matcher{"allow-skip-fastpath"});
 
         parseCli(parser, argc, argv);
 
-        ais_capable_dir = args::get(ais_capable_dir_arg);
-        sleep_seconds   = args::get(sleep_on_exit_arg);
+        ais_capable_dir     = args::get(ais_capable_dir_arg);
+        sleep_seconds       = args::get(sleep_on_exit_arg);
+        allow_skip_fastpath = args::get(allow_skip_fastpath_arg);
     }
 };
 

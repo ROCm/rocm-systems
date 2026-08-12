@@ -378,17 +378,18 @@ Each function should do **ONE** thing well. If you use "and" to describe what it
 
 ```python
 def create_df_pmc(
-    raw_data_root_dir: str,
-    nodes: Optional[list[str]],
-    spatial_multiplexing: bool,
+    raw_data_dir: str,
     kernel_verbose: int,
     verbose: int,
     config_dict: dict[str, Any],
 ) -> pd.DataFrame:
     """Load all raw pmc counters and join into one dataframe."""
-    # Single responsibility: create and return a DataFrame.
-    # Delegates the details to a focused helper.
-    return _create_single_df_pmc(...)
+    # Single responsibility: load counters into a DataFrame and return it.
+    df = pd.read_csv(Path(raw_data_dir) / "pmc_perf.csv")
+    if config_dict.get("format_rocprof_output") == "rocpd":
+        df = utils_analysis.process_rocpd_csv(df)
+    kernel_name_shortener(df, kernel_verbose)
+    return df
 ```
 
 **Bad:** Multiple responsibilities
@@ -427,9 +428,11 @@ def pre_processing(self) -> None:
         # Each operation delegated to a focused helper
         workload.raw_pmc = file_io.create_df_pmc(...)
 
-        if args.spatial_multiplexing:
-            workload.raw_pmc = self.spatial_multiplex_merge_counters(
-                workload.raw_pmc
+        if self._profiling_config.get("iteration_multiplexing") is not None:
+            workload.raw_pmc = self.iteration_multiplex_impute_counters(
+                workload.raw_pmc,
+                policy=self._profiling_config["iteration_multiplexing"],
+                workload_dir=Path(path_info[0]),
             )
 
         file_io.create_df_kernel_top_stats(...)
@@ -452,9 +455,9 @@ def pre_processing(self) -> None:
         for csv_file in Path(path_info[0]).rglob("*.csv"):
             # ... lots of processing
 
-        # 30 lines of inline merge logic
-        if args.spatial_multiplexing:
-            # ... complex merging
+        # 30 lines of inline imputation logic
+        if self._profiling_config.get("iteration_multiplexing"):
+            # ... complex counter imputation
 
         # 40 lines of inline stats creation
         # ... more processing

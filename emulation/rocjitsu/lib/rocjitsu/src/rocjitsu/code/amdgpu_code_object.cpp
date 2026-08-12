@@ -5,9 +5,19 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/file_io.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
+#include "rocjitsu/isa/target_registry.h"
 
+#include "hsa/AMDHSAKernelDescriptor.h" // Check SGPR allocation
+
+#include <algorithm>
 #include <cstring>
+#include <iterator>
+#include <optional>
+#include <span>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -48,36 +58,15 @@ bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC
 using detail::fits_in_bounds;
 
 rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
-  uint32_t mach = flags & EF_AMDGPU_MACH;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX90A)
-    return ROCJITSU_CODE_TARGET_GFX90A;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX942)
-    return ROCJITSU_CODE_TARGET_GFX942;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX950)
-    return ROCJITSU_CODE_TARGET_GFX950;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1200)
-    return ROCJITSU_CODE_TARGET_GFX1200;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1201)
-    return ROCJITSU_CODE_TARGET_GFX1201;
-  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX1250)
-    return ROCJITSU_CODE_TARGET_GFX1250;
-  return ROCJITSU_CODE_TARGET_INVALID;
+  const IsaGpuTargetDescription *binding =
+      default_isa_target_registry().find_gpu_target_by_elf_machine(flags & EF_AMDGPU_MACH);
+  return binding == nullptr ? ROCJITSU_CODE_TARGET_INVALID : binding->public_id;
 }
 
-rj_code_target_id_t target_from_triple(const std::string &triple) {
-  if (triple == "gfx90a")
-    return ROCJITSU_CODE_TARGET_GFX90A;
-  if (triple == "gfx942")
-    return ROCJITSU_CODE_TARGET_GFX942;
-  if (triple == "gfx950")
-    return ROCJITSU_CODE_TARGET_GFX950;
-  if (triple == "gfx1200")
-    return ROCJITSU_CODE_TARGET_GFX1200;
-  if (triple == "gfx1201")
-    return ROCJITSU_CODE_TARGET_GFX1201;
-  if (triple == "gfx1250")
-    return ROCJITSU_CODE_TARGET_GFX1250;
-  return ROCJITSU_CODE_TARGET_INVALID;
+rj_code_target_id_t target_from_code_object_id(std::string_view id) {
+  const IsaGpuTargetDescription *binding =
+      default_isa_target_registry().find_gpu_target_by_code_object_id(id);
+  return binding == nullptr ? ROCJITSU_CODE_TARGET_INVALID : binding->public_id;
 }
 
 } // namespace
@@ -171,7 +160,7 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size,
   load_sections();
   if (!is_valid_)
     return;
-  target_id_ = target_from_triple(target_triple_);
+  target_id_ = target_from_code_object_id(target_triple_);
 }
 
 AmdGpuCodeObject::~AmdGpuCodeObject() = default;
@@ -273,6 +262,62 @@ void AmdGpuCodeObject::load_sections() {
 uint64_t AmdGpuCodeObject::kernel_descriptor_offset(const std::string &kernel_name) const {
   auto it = kd_offsets_.find(kernel_name);
   return it != kd_offsets_.end() ? it->second : 0;
+}
+
+namespace {
+
+// CDNA targets encode the wavefront SGPR count in the descriptor even when the
+// granulated field is 0; RDNA-style targets treat a granulated 0 as "use the
+// fixed per-wave SGPR pool". Mirrors the command processor's
+// sgpr_count_is_descriptor_encoded(); kept as the short, stable CDNA
+// list so a new non-CDNA family falls through to the RDNA-style branch by
+// default. (Canonical copy: code/dbt/kernel_descriptor_translator.cpp.)
+[[nodiscard]] bool is_cdna_arch(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
+// Decode one kernel descriptor's per-wave SGPR count from its granulated field.
+[[nodiscard]] uint32_t sgpr_count_from_granulated(uint32_t granulated, rj_code_arch_t arch) {
+  // Descriptor-encoded (granulated != 0, or a CDNA target): (granulated + 1) * 8.
+  // Otherwise the field is an RDNA-style sentinel and the wave owns the fixed
+  // per-wave SGPR pool.
+  if (granulated != 0 || is_cdna_arch(arch))
+    return (granulated + 1) * 8;
+  return amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF;
+}
+
+} // namespace
+
+std::optional<uint32_t>
+AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch,
+                                        std::span<const KernelDescriptorInfo> kernels) {
+  namespace kd = rocr::llvm::amdhsa;
+
+  std::optional<uint32_t> min_count;
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    const uint32_t granulated = AMDHSA_BITS_GET(
+        kernel.descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+    const uint32_t count = sgpr_count_from_granulated(granulated, arch);
+    min_count = min_count ? std::min(*min_count, count) : count;
+  }
+  return min_count;
+}
+
+std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch) const {
+  const std::span<const uint8_t> image{reinterpret_cast<const uint8_t *>(image_data()),
+                                       image_size()};
+  // Discover descriptors through the shared scanner rather than re-walking sections
+  // here. scan_kernel_descriptors() filters to a single .text extent, so visit each
+  // text section to cover every kernel, then reduce via the span overload.
+  std::vector<KernelDescriptorInfo> kernels;
+  for (const Section *text : text_sections()) {
+    std::vector<KernelDescriptorInfo> found =
+        scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+    kernels.insert(kernels.end(), std::make_move_iterator(found.begin()),
+                   std::make_move_iterator(found.end()));
+  }
+  return min_kernel_sgpr_count(arch, kernels);
 }
 
 } // namespace rocjitsu

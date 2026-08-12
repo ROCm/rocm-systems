@@ -202,6 +202,8 @@ public:
   inline void IncSharedReference() { desc_.flags.is_imported_from_same_process++; }
   inline uint32_t DecSharedReference() { return (desc_.flags.is_imported_from_same_process == 0) ? 0 : --desc_.flags.is_imported_from_same_process; }
   inline bool IsSharedFromSameProcess() const { return desc_.flags.is_imported_from_same_process > 0; }
+  inline uint32_t IncMappingCount() { return ++mapping_count_; }
+  inline uint32_t DecMappingCount() { return (mapping_count_ == 0) ? 0 : --mapping_count_; }
   inline bool IsPhysicalCreated() const { return is_phymem_created; }
 
   WinAllocationHandle GetAllocationHandle(size_t index) const { return alloc_handles_ptr_[index]; }
@@ -264,6 +266,9 @@ private:
 
   bool is_phymem_created = false; // status of physical memory allocation
   bool is_sysmem_locked_ = false; // kSystem allocation pinned via D3DKMTLock2
+
+  // Number of outstanding GPU mappings of a user pointer.
+  uint32_t mapping_count_ = 1;
 
   DISALLOW_COPY_AND_ASSIGN(GpuMemory);
 };

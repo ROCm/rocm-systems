@@ -123,6 +123,46 @@ struct CodeObjectCorrelation
     Pal::uint32       reserved         : 31; /// Bitflags reserved for future use
 };
 
+/// Identifies shader types inside RDF chunks
+enum class ApiShaderType : Pal::uint32
+{
+    Compute  = 0, ///< API compute shader
+    Task     = 1, ///< API task shader
+    Vertex   = 2, ///< API vertex shader
+    Hull     = 3, ///< API hull shader
+    Domain   = 4, ///< API domain shader
+    Geometry = 5, ///< API geometry shader
+    Mesh     = 6, ///< API mesh shader
+    Pixel    = 7, ///< API pixel shader
+};
+
+/// Ensure RDF shader types match PAL shader types for simple conversion
+static_assert(static_cast<Pal::uint32>(Pal::ShaderType::Cs)   == static_cast<Pal::uint32>(ApiShaderType::Compute));
+static_assert(static_cast<Pal::uint32>(Pal::ShaderType::Task) == static_cast<Pal::uint32>(ApiShaderType::Task));
+static_assert(static_cast<Pal::uint32>(Pal::ShaderType::Vs)   == static_cast<Pal::uint32>(ApiShaderType::Vertex));
+static_assert(static_cast<Pal::uint32>(Pal::ShaderType::Hs)   == static_cast<Pal::uint32>(ApiShaderType::Hull));
+static_assert(static_cast<Pal::uint32>(Pal::ShaderType::Ds)   == static_cast<Pal::uint32>(ApiShaderType::Domain));
+static_assert(static_cast<Pal::uint32>(Pal::ShaderType::Gs)   == static_cast<Pal::uint32>(ApiShaderType::Geometry));
+static_assert(static_cast<Pal::uint32>(Pal::ShaderType::Mesh) == static_cast<Pal::uint32>(ApiShaderType::Mesh));
+static_assert(static_cast<Pal::uint32>(Pal::ShaderType::Ps)   == static_cast<Pal::uint32>(ApiShaderType::Pixel));
+
+/// "PsoCorrelation" RDF chunk identifier & version
+constexpr char        ShaderObjectCorrelationChunkId[TextIdentifierSize] = "SOCorrelation";
+constexpr Pal::uint32 ShaderObjectCorrelationChunkVersion                = 1;
+
+struct ShaderObjectCorrelationHeader
+{
+    Pal::uint32 count; /// Number of Shader Correlations in this chunk
+};
+
+/// Payload for the "ShaderObjectCorrelation" RDF chunks
+struct ShaderObjectCorrelation
+{
+    Pal::uint64   apiPsoHash;          /// Hash of the API-level Pipeline State Object
+    Pal::uint64   apiShaderObjectHash; /// Hash of the API-level Shader Object
+    ApiShaderType apiShaderType;       /// Type of the shader
+};
+
 } // namespace TraceChunk
 
 /// CodeObject Trace Source name & version
@@ -143,6 +183,11 @@ public:
     Pal::Result RegisterLibrary(const Pal::IShaderLibrary* pLibrary, const RegisterLibraryInfo& clientInfo);
     Pal::Result UnregisterLibrary(const Pal::IShaderLibrary* pLibrary);
 
+#if PAL_BUILD_CODE_OBJECT_INTERFACE
+    Pal::Result RegisterCodeObject(const Pal::ICodeObject* pCodeObject, const RegisterCodeObjectInfo& clientInfo);
+    Pal::Result UnregisterCodeObject(const Pal::ICodeObject* pCodeObject);
+#endif
+
     Pal::Result RegisterElfBinary(const ElfBinaryInfo& elfBinaryInfo);
     Pal::Result UnregisterElfBinary(const ElfBinaryInfo& elfBinaryInfo);
 
@@ -156,11 +201,7 @@ public:
     virtual void OnTraceAccepted(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override;
     virtual void OnTraceBegin(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override { }
     virtual void OnTraceEnd(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override { }
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939
-    virtual void OnPostambleEnd(
-        Pal::uint32      gpuIndex,
-        Pal::ICmdBuffer* pCmdBuf) override { }
-#endif
+    virtual void OnPostambleEnd(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override { }
     virtual void OnTraceFinished() override;
 
     virtual const char* GetName()    const override { return CodeObjectTraceSourceName; }
@@ -173,8 +214,13 @@ private:
     Pal::Result AddCodeObjectLoadEvent(
         const Pal::IShaderLibrary*          pLibrary,
         TraceChunk::CodeObjectLoadEventType eventType);
+#if PAL_BUILD_CODE_OBJECT_INTERFACE
     Pal::Result AddCodeObjectLoadEvent(
-        const Pal::IPipeline*               pLibrary,
+        const Pal::ICodeObject*             pCodeObject,
+        TraceChunk::CodeObjectLoadEventType eventType);
+#endif
+    Pal::Result AddCodeObjectLoadEvent(
+        const Pal::IPipeline*               pPipeline,
         TraceChunk::CodeObjectLoadEventType eventType);
     Pal::Result AddCodeObjectLoadEvent(
         const ElfBinaryInfo&                elfBinaryInfo,
@@ -184,6 +230,7 @@ private:
     Pal::Result WriteLoaderEventsChunk();
     Pal::Result WritePsoCorrelationChunk();
     Pal::Result WriteCoCorrelationChunk();
+    Pal::Result WriteSoCorrelationChunk();
 
     struct CodeObjectDatabaseRecord
     {
@@ -195,11 +242,12 @@ private:
 
     Pal::uint32 m_traceGpuIndex;
 
-    Util::RWLock                                                        m_registerPipelineLock;
-    Util::Vector<CodeObjectDatabaseRecord*,         1, Pal::IPlatform>  m_codeObjectRecords;
-    Util::Vector<TraceChunk::CodeObjectLoadEvent,   1, Pal::IPlatform>  m_loadEventRecords;
-    Util::Vector<TraceChunk::PsoCorrelation,        1, Pal::IPlatform>  m_psoCorrelationRecords;
-    Util::Vector<TraceChunk::CodeObjectCorrelation, 1, Pal::IPlatform>  m_coCorrelationRecords;
+    Util::RWLock                                                          m_registerPipelineLock;
+    Util::Vector<CodeObjectDatabaseRecord*,           1, Pal::IPlatform>  m_codeObjectRecords;
+    Util::Vector<TraceChunk::CodeObjectLoadEvent,     1, Pal::IPlatform>  m_loadEventRecords;
+    Util::Vector<TraceChunk::PsoCorrelation,          1, Pal::IPlatform>  m_psoCorrelationRecords;
+    Util::Vector<TraceChunk::CodeObjectCorrelation,   1, Pal::IPlatform>  m_coCorrelationRecords;
+    Util::Vector<TraceChunk::ShaderObjectCorrelation, 1, Pal::IPlatform>  m_soCorrelationRecords;
 
     // API hashes -> internal pipeline hash (-> child code object hashes)
     Util::HashSet<Pal::uint64, Pal::IPlatform, Util::JenkinsHashFunc>   m_registeredApiHashes;

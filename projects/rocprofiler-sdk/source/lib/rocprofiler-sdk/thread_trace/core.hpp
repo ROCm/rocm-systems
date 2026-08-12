@@ -74,7 +74,10 @@ struct thread_trace_parameter_pack
     uint64_t buffer_size        = DEFAULT_BUFFER_SIZE;
     uint64_t perf_exclude_mask  = 0;
     bool     no_detail_simd     = false;
-    bool     triple_buffering   = false;
+    /// Number of CPU staging buffers in the producer/consumer pipeline.
+    /// 1 = single buffer (synchronous, no async copy).
+    /// Values >= 3 enable the async copy pipeline. 2 is rejected at the API layer.
+    size_t num_buffers = 1;
 
     bool bSerialize = false;
 
@@ -133,7 +136,7 @@ private:
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
-    std::thread                       consumer{};
+    std::vector<std::thread>          consumers{};
     std::thread                       producer{};
     std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
 };
@@ -201,6 +204,13 @@ public:
         std::unique_lock<std::mutex> lk(agent_mut);
         return params.find(id) != params.end();
     }
+    bool requires_queue_intercept()
+    {
+        std::unique_lock<std::mutex> lk(agent_mut);
+        for(const auto& [_, pack] : params)
+            if(pack.perfcounter_ctrl != 0 && !pack.perfcounters.empty()) return true;
+        return false;
+    }
 
     const auto& get_agents() const { return agents; }
 
@@ -214,9 +224,16 @@ private:
     std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
 };
 
-/// Install the thread trace service for newly created contexts.
+/// Install the thread trace service for newly created contexts (builds per-agent
+/// resources; does not program hardware).
 void
 initialize(HsaApiTable* table);
+
+/// Replay start_context() for device thread trace contexts requested before
+/// hsa_init(). Must be called after the HSA queue infrastructure is initialized
+/// (see registration.cpp), not from initialize().
+void
+start_active_contexts();
 
 /// Tear down shared resources when the runtime shuts down.
 void

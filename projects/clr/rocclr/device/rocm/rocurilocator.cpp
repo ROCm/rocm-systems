@@ -10,65 +10,64 @@
 #include <sstream>
 
 namespace amd::roc {
-hsa_status_t UriLocator::createUriRangeTable() {
-  auto execCb = [](hsa_executable_t exec, void* data) -> hsa_status_t {
-    int execState = 0;
-    hsa_status_t status;
-    status = Hsa::executable_get_info(exec, HSA_EXECUTABLE_INFO_STATE, &execState);
-    if (status != HSA_STATUS_SUCCESS) return status;
-    if (execState != HSA_EXECUTABLE_STATE_FROZEN) return status;
+std::vector<UriLocator::UriRange>& UriLocator::table() {
+  static auto* t = new std::vector<UriRange>();
+  return *t;
+}
 
-    auto loadedCodeObjectCb = [](hsa_executable_t exec, hsa_loaded_code_object_t lcobj,
-                                 void* data) -> hsa_status_t {
-      hsa_status_t result;
-      uint64_t loadBAddr = 0, loadSize = 0;
-      uint32_t uriLen = 0;
-      int64_t delta = 0;
-      uint64_t* argsCb = static_cast<uint64_t*>(data);
-      hsa_ven_amd_loader_1_03_pfn_t* fnTab =
-          reinterpret_cast<hsa_ven_amd_loader_1_03_pfn_t*>(argsCb[0]);
-      std::vector<UriRange>* rangeTab = reinterpret_cast<std::vector<UriRange>*>(argsCb[1]);
+std::mutex& UriLocator::tableMutex() {
+  static auto* m = new std::mutex();
+  return *m;
+}
 
-      if (!fnTab->hsa_ven_amd_loader_loaded_code_object_get_info) return HSA_STATUS_ERROR;
+void UriLocator::recordCodeObjects(hsa_executable_t exec) {
+  hsa_ven_amd_loader_1_03_pfn_t fn_table;
+  if (Hsa::system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(fn_table),
+                                            &fn_table) != HSA_STATUS_SUCCESS ||
+      fn_table.hsa_ven_amd_loader_executable_iterate_loaded_code_objects == nullptr) {
+    return;
+  }
 
-      result = fnTab->hsa_ven_amd_loader_loaded_code_object_get_info(
-          lcobj, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE, (void*)&loadBAddr);
-      if (result != HSA_STATUS_SUCCESS) return result;
+  struct CbArgs {
+    hsa_ven_amd_loader_1_03_pfn_t* fn;
+    std::vector<UriRange> ranges;
+  } args{&fn_table, {}};
 
-      result = fnTab->hsa_ven_amd_loader_loaded_code_object_get_info(
-          lcobj, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE, (void*)&loadSize);
-      if (result != HSA_STATUS_SUCCESS) return result;
+  fn_table.hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
+      exec,
+      [](hsa_executable_t, hsa_loaded_code_object_t lcobj, void* data) -> hsa_status_t {
+        auto* a = static_cast<CbArgs*>(data);
+        auto get = a->fn->hsa_ven_amd_loader_loaded_code_object_get_info;
+        if (get == nullptr) return HSA_STATUS_ERROR;
+        uint64_t base = 0, size = 0;
+        int64_t delta = 0;
+        uint32_t uriLen = 0;
+        if (get(lcobj, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE, &base) !=
+                HSA_STATUS_SUCCESS ||
+            get(lcobj, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE, &size) !=
+                HSA_STATUS_SUCCESS ||
+            get(lcobj, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_DELTA, &delta) !=
+                HSA_STATUS_SUCCESS ||
+            get(lcobj, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI_LENGTH, &uriLen) !=
+                HSA_STATUS_SUCCESS) {
+          return HSA_STATUS_SUCCESS;
+        }
+        std::string uri(uriLen, '\0');
+        if (get(lcobj, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI, uri.data()) !=
+            HSA_STATUS_SUCCESS) {
+          return HSA_STATUS_SUCCESS;
+        }
+        a->ranges.push_back(UriRange{base, base + size - 1, delta, std::move(uri)});
+        return HSA_STATUS_SUCCESS;
+      },
+      &args);
 
-      result = fnTab->hsa_ven_amd_loader_loaded_code_object_get_info(
-          lcobj, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI_LENGTH, (void*)&uriLen);
-      if (result != HSA_STATUS_SUCCESS) return result;
-
-      result = fnTab->hsa_ven_amd_loader_loaded_code_object_get_info(
-          lcobj, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_DELTA, (void*)&delta);
-      if (result != HSA_STATUS_SUCCESS) return result;
-
-      char* uri = new char[uriLen + 1];
-      uri[uriLen] = '\0';
-      result = fnTab->hsa_ven_amd_loader_loaded_code_object_get_info(
-          lcobj, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI, (void*)uri);
-      if (result != HSA_STATUS_SUCCESS) return result;
-      rangeTab->push_back(
-          UriRange{loadBAddr, loadBAddr + loadSize - 1, delta, std::string{uri, uriLen + 1}});
-      delete[] uri;
-      return HSA_STATUS_SUCCESS;
-    };
-
-    uint64_t* args = static_cast<uint64_t*>(data);
-    hsa_ven_amd_loader_1_03_pfn_t* fnExtTab =
-        reinterpret_cast<hsa_ven_amd_loader_1_03_pfn_t*>(args[0]);
-    return fnExtTab->hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
-        exec, loadedCodeObjectCb, data);
-  };
-
-  if (!fn_table_.hsa_ven_amd_loader_iterate_executables) return HSA_STATUS_ERROR;
-
-  uint64_t callbackArgs[2] = {(uint64_t)&fn_table_, (uint64_t)&rangeTab_};
-  return fn_table_.hsa_ven_amd_loader_iterate_executables(execCb, (void*)callbackArgs);
+  if (!args.ranges.empty()) {
+    std::lock_guard<std::mutex> lock(tableMutex());
+    auto& tab = table();
+    tab.insert(tab.end(), std::make_move_iterator(args.ranges.begin()),
+               std::make_move_iterator(args.ranges.end()));
+  }
 }
 
 // Encoding of uniform-resource-identifier(URI) is detailed in
@@ -128,26 +127,14 @@ std::pair<uint64_t, uint64_t> UriLocator::decodeUriAndGetFd(UriInfo& uri,
 }
 
 UriLocator::UriInfo UriLocator::lookUpUri(uint64_t device_pc) {
-  UriInfo errorstate{"", 0};
+  std::lock_guard<std::mutex> lock(tableMutex());
+  // Reverse order so that if an address range was reused, the most recent load wins.
+  auto& tab = table();
+  for (auto it = tab.rbegin(); it != tab.rend(); ++it)
+    if (it->startAddr_ <= device_pc && device_pc <= it->endAddr_)
+      return UriInfo{it->Uri_.c_str(), it->elfDelta_};
 
-  if (!init_) {
-    hsa_status_t result;
-    result = Hsa::system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(fn_table_),
-                                                   &fn_table_);
-    if (result != HSA_STATUS_SUCCESS) return errorstate;
-    result = createUriRangeTable();
-    if (result != HSA_STATUS_SUCCESS) {
-      rangeTab_.clear();
-      return errorstate;
-    }
-    init_ = true;
-  }
-
-  for (auto& seg : rangeTab_)
-    if (seg.startAddr_ <= device_pc && device_pc <= seg.endAddr_)
-      return UriInfo{seg.Uri_.c_str(), seg.elfDelta_};
-
-  return errorstate;
+  return UriInfo{"", 0};
 }
 }  // namespace amd::roc
 #endif

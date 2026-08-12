@@ -74,15 +74,31 @@ def _to_float(tok):
         return None
 
 
+def _is_int(tok):
+    try:
+        int(tok)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def parse_perf_output(text):
     """
     Parse rccl-tests perf table output into structured rows.
 
     rccl-tests prints two performance triplets per size -- out-of-place then
-    in-place -- each ``time algbw busbw #wrong``. Leading columns are
-    ``size count type`` and, for reduction collectives, ``redop root``. We anchor
-    on the trailing 8 numeric columns so the parser works for both reduction and
-    non-reduction collectives regardless of how many label columns precede them.
+    in-place -- each ``time algbw busbw #wrong``. A data row is::
+
+        size count type [redop root] <8 perf columns> [algo proto nchannels]
+
+    The leading label columns are ``size count type`` plus, for reduction
+    collectives, a ``redop root`` pair; some builds also append ``algo proto
+    nchannels`` after the final ``#wrong``. We anchor the 8 perf columns from
+    the FRONT -- immediately after the label columns -- and ignore anything that
+    follows, so the parser is robust to the presence or absence of both the
+    ``redop root`` label pair and the trailing ``algo proto nchannels`` block.
+    Anchoring on the tail would break the moment a build appends trailing
+    columns, shifting non-numeric ``algo``/``proto`` strings into the perf slots.
 
     Returns (rows, avg_busbw) where rows is a list of per-(size, place) dicts and
     avg_busbw is the run's "Avg bus bandwidth" summary line if present.
@@ -103,48 +119,126 @@ def parse_perf_output(text):
             continue
 
         toks = line.split()
-        # Need at least: size count type + 8 trailing perf columns.
+        # Minimum data row: size count type + 8 perf columns.
         if len(toks) < 11:
             continue
         if not toks[0].isdigit() or not toks[1].isdigit():
             continue
 
-        tail = toks[-8:]
-        oop_time, oop_alg, oop_bus = _to_float(tail[0]), _to_float(tail[1]), _to_float(tail[2])
-        ip_time, ip_alg, ip_bus = _to_float(tail[4]), _to_float(tail[5]), _to_float(tail[6])
-        # A real data row has numeric perf columns; header/units lines do not.
+        # Leading label columns: size count type, then an optional redop/root
+        # pair. redop is a non-numeric word (sum/none/prod/...); root is an int
+        # (often -1) that only ever appears immediately after redop.
+        dtype = toks[2]
+        idx = 3
+        redop = None
+        root = None
+        if _to_float(toks[idx]) is None:
+            redop = toks[idx]
+            idx += 1
+            if idx < len(toks) and _is_int(toks[idx]):
+                root = toks[idx]
+                idx += 1
+
+        # The 8 perf columns start right after the labels; trailing columns
+        # (algo proto nchannels), if any, are ignored.
+        if idx + 8 > len(toks):
+            continue
+        perf = toks[idx:idx + 8]
+        oop_time, oop_alg, oop_bus = _to_float(perf[0]), _to_float(perf[1]), _to_float(perf[2])
+        ip_time, ip_alg, ip_bus = _to_float(perf[4]), _to_float(perf[5]), _to_float(perf[6])
+        # A real data row has numeric time/bandwidth columns; header/units lines
+        # do not. #wrong (perf[3]/perf[7]) may be "N/A" when checking is off, so
+        # it is kept as-is rather than required to be numeric.
         if None in (oop_time, oop_alg, oop_bus, ip_time, ip_alg, ip_bus):
             continue
 
         size = int(toks[0])
         count = int(toks[1])
-        dtype = toks[2]
-        mid = toks[3:len(toks) - 8]  # 0..2 of {redop, root}
-        redop = mid[0] if len(mid) >= 1 else None
-        root = mid[1] if len(mid) >= 2 else None
 
         rows.append({
             "size_bytes": size, "count_elements": count, "dtype": dtype,
             "redop": redop, "root": root, "place": "out_of_place",
             "time_us": oop_time, "algbw_gbs": oop_alg, "busbw_gbs": oop_bus,
-            "wrong": tail[3],
+            "wrong": perf[3],
         })
         rows.append({
             "size_bytes": size, "count_elements": count, "dtype": dtype,
             "redop": redop, "root": root, "place": "in_place",
             "time_us": ip_time, "algbw_gbs": ip_alg, "busbw_gbs": ip_bus,
-            "wrong": tail[7],
+            "wrong": perf[7],
         })
 
     return rows, avg_busbw
 
 
+def parse_coverage_index_html(index_html_path):
+    """
+    Parse the authoritative overall coverage summary from llvm-cov's
+    ``index.html`` ``Totals`` row. This is the correct source for a run's overall
+    percentages: unlike the ``--show-functions`` text report (which has only
+    per-file ``TOTAL`` lines and no grand total), the HTML ``Totals`` row is the
+    single run-wide roll-up.
+
+    The ``Totals`` columns are, in order, Function, Line, Region, Branch -- note
+    this differs from the plain ``llvm-cov report`` column order -- each formatted
+    ``PCT% (covered/total)``. Returns a dict with ``regions_pct``,
+    ``functions_pct``, ``lines_pct``, ``branches_pct`` (branch may be None on
+    older llvm-cov) plus a ``raw`` sub-dict, or None if the file is absent or the
+    ``Totals`` row can't be found.
+    """
+    if not index_html_path or not os.path.isfile(index_html_path):
+        return None
+    try:
+        with open(index_html_path, encoding="utf-8", errors="replace") as f:
+            html = f.read()
+    except OSError:
+        return None
+
+    m = re.search(r"Totals</pre>.*?</tr>", html, re.S)
+    if not m:
+        return None
+    # Each tuple is (pct, covered, total). index.html order: Function, Line,
+    # Region, Branch. Branch may be absent, so require only the first three.
+    # NB: column order reflects current llvm-cov HTML; revisit if it changes.
+    vals = re.findall(r">\s*([0-9.]+)%\s*\((\d+)/(\d+)\)", m.group(0))
+    if len(vals) < 3:
+        return None
+
+    order = ["functions", "lines", "regions", "branches"]
+    totals = {}
+    for i, name in enumerate(order):
+        if i < len(vals):
+            pct, covered, total = vals[i]
+            totals[name] = {"pct": float(pct), "covered": int(covered), "total": int(total)}
+
+    def _pct(name):
+        return totals[name]["pct"] if name in totals else None
+
+    return {
+        "regions_pct": _pct("regions"),
+        "functions_pct": _pct("functions"),
+        "lines_pct": _pct("lines"),
+        "branches_pct": _pct("branches"),
+        "raw": {"source": "index.html", "totals": totals},
+    }
+
+
 def parse_coverage_report(report_txt_path):
     """
-    Parse the ``TOTAL`` line of an llvm-cov ``report`` text file into coverage
-    percentages. llvm-cov emits, in order, region / function / line / branch
-    coverage, each with a trailing ``NN.NN%`` column. Returns None if the file is
-    absent or has no TOTAL line.
+    Parse the grand-``TOTAL`` line of a *plain* ``llvm-cov report`` text file
+    (one produced WITHOUT ``--show-functions``) into coverage percentages. A
+    plain report's ``TOTAL`` columns are, in order, region / function / line /
+    branch, each with a trailing ``NN.NN%``.
+
+    This is a last-resort fallback for :func:`parse_coverage_index_html`. Do NOT
+    rely on it for a ``--show-functions`` report (e.g.
+    ``function_coverage_report.txt``): that report emits one ``TOTAL`` line *per
+    file* and has no grand total, so any single ``TOTAL`` is a per-file figure,
+    not the run's overall coverage. To avoid silently emitting a bogus per-file
+    total, this returns None when it sees more than one ``TOTAL`` line.
+
+    Returns None if the file is absent, has no ``TOTAL`` line, or looks like a
+    per-file ``--show-functions`` report.
     """
     if not report_txt_path or not os.path.isfile(report_txt_path):
         return None
@@ -154,15 +248,22 @@ def parse_coverage_report(report_txt_path):
     except OSError:
         return None
 
-    total_line = next((ln for ln in lines if ln.strip().startswith("TOTAL")), None)
-    if not total_line:
+    total_lines = [ln for ln in lines if ln.strip().startswith("TOTAL")]
+    if not total_lines:
         return None
+    # More than one TOTAL => a per-file --show-functions report with no grand
+    # total; refuse rather than mistake the first per-file TOTAL for the overall.
+    if len(total_lines) > 1:
+        return None
+    total_line = total_lines[0]
 
-    pcts = [float(p) for p in re.findall(r"([0-9]+\.[0-9]+)%", total_line)]
-    # Region, Function, Line, Branch (branch may be absent in older llvm-cov).
+    pcts = [float(p) for p in re.findall(r"([0-9.]+)%", total_line)]
+    # Plain report order: Region, Function, Line, Branch (branch may be absent).
+    # NB: column order reflects current llvm-cov `report`; revisit if a future
+    # llvm-cov reorders columns.
     keys = ["regions_pct", "functions_pct", "lines_pct", "branches_pct"]
     cov = {k: (pcts[i] if i < len(pcts) else None) for i, k in enumerate(keys)}
-    cov["raw"] = {"total_line": total_line.strip(), "percents": pcts}
+    cov["raw"] = {"source": "plain-report", "total_line": total_line.strip(), "percents": pcts}
     return cov
 
 
@@ -331,13 +432,31 @@ class ResultsEmitter:
                               json.dumps(self.manifest["coverage"], indent=2, default=str))
 
             # Bundle captured logs + coverage report into the run dir so the
-            # tarball is self-contained for the dashboard scrape.
+            # tarball is self-contained for the dashboard scrape. Every
+            # per-test log is kept -- the logs are the raw test/perf evidence
+            # and the fallback source if in-run parsing regresses.
             if log_dir and os.path.isdir(log_dir):
                 dst = os.path.join(run_dir, "logs")
-                shutil.copytree(log_dir, dst, dirs_exist_ok=True)
+                # A single odd/unreadable file (dangling symlink, FIFO, core
+                # dump) must not abort the whole tarball write, so failures
+                # here degrade to a partial log bundle rather than no results.
+                try:
+                    shutil.copytree(log_dir, dst, dirs_exist_ok=True,
+                                    ignore_dangling_symlinks=True)
+                except (shutil.Error, OSError) as e:
+                    log.warning("results_emitter: some per-test logs could "
+                                "not be bundled: %s", e)
             if report_dir and os.path.isdir(report_dir):
                 dst = os.path.join(run_dir, "report")
-                shutil.copytree(report_dir, dst, dirs_exist_ok=True)
+                # A single odd/unreadable file (dangling symlink, FIFO, core
+                # dump) must not abort the whole tarball write, so failures
+                # here degrade to a partial report bundle rather than no results.
+                try:
+                    shutil.copytree(report_dir, dst, dirs_exist_ok=True,
+                                    ignore_dangling_symlinks=True)
+                except (shutil.Error, OSError) as e:
+                    log.warning("results_emitter: some coverage report files "
+                                "could not be bundled: %s", e)
 
             tarball = os.path.join(self.results_dir, f"{self.run_id}.tar.gz")
             tmp_tar = f"{tarball}.tmp"

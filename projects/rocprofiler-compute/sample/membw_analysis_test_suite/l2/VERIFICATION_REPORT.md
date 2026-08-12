@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-27
 **System:** 2x MI350X GPUs (gfx950), 256 CUs, 128 TCC channels, 4 MB L2 per XCD (8 XCDs)
-**Tool:** `src/rocprof-compute analyze -p <path> -b 30 --membw-analysis --experimental`
+**Tool:** `src/rocprof-compute analyze -p <path> -b 30 --experimental --membw-analysis`
 **Profiling data:** `/tmp/l2_profile_results/`
 
 ## Hardware Spec Cross-Reference (MI350 TCC Perfmon List)

@@ -16,8 +16,9 @@ DECLARE_RCCL_PFN(ncclAllReduceWithBias);
 static pthread_once_t initOnceControl = PTHREAD_ONCE_INIT;
 
 static void initOnceFunc() {
-  void *librccl = dlopen("librccl.so", RTLD_NOLOAD);
-  pfn_ncclAllReduceWithBias = (PFN_ncclAllReduceWithBias) dlsym(librccl, "ncclAllReduceWithBias");
+  // Resolve optional RCCL symbol from the already-loaded librccl.so.1 (via DT_NEEDED).
+  // Avoid dlopen("librccl.so") which can double-load in build trees with non-symlinked libs.
+  pfn_ncclAllReduceWithBias = (PFN_ncclAllReduceWithBias) dlsym(RTLD_DEFAULT, "ncclAllReduceWithBias");
 }
 
 void AllReduceGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
@@ -48,7 +49,7 @@ testResult_t AllReduceInitData(struct threadArgs* args, ncclDataType_t type, ncc
   return testSuccess;
 }
 
-void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+void AllReduceGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize) / 1.0E9 / sec;
 
   *algBw = baseBw;
@@ -57,6 +58,7 @@ void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, doubl
 }
 
 testResult_t AllReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
+  if (deviceImpl != 0) return testNotImplemented;
   char* sptr = (char*)sendbuff + sendoffset;
   char* rptr = (char*)recvbuff + recvoffset;
   
@@ -73,7 +75,9 @@ struct testColl allReduceTest = {
   AllReduceGetCollByteCount,
   AllReduceInitData,
   AllReduceGetBw,
-  AllReduceRunColl
+  AllReduceRunColl,
+  NULL,
+  NULL
 };
 
 void AllReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
@@ -120,7 +124,10 @@ testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine ncclTestEngine = {
-  .getBuffSize = AllReduceGetBuffSize,
-  .runTest = AllReduceRunTest
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ AllReduceGetBuffSize,
+  /* .runTest = */ AllReduceRunTest,
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+  /* .initCommConfig = */ nullptr,
+#endif
 };

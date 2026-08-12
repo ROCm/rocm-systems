@@ -23,6 +23,7 @@ logging.basicConfig(level=logging.INFO)
 class TestRCCL:
     def test_rccl_unittests(self):
         # Executing rccl gtest from rccl repo
+        # Validate the packaged RCCL unit-test binary.
         environ_vars = os.environ.copy()
         # Expect at least 2 GPUs for RCCL collectives
         gpu_count = get_visible_gpu_count(

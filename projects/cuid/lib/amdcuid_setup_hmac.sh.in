@@ -1,0 +1,48 @@
+#!/bin/sh
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# Provisions the HMAC key used by libamdcuid to generate stable CUIDs.
+# Template processed by CMake to substitute @AMDCUID_SHARED_CONFIG_DIR@.
+# Do not edit the generated script directly; edit this .in template instead.
+#
+# Idempotent — safe to run on reinstalls and upgrades. An existing key is
+# never overwritten so existing CUID files remain valid.
+
+CONFIG_DIR="@AMDCUID_SHARED_CONFIG_DIR@"
+HMAC_KEY_FILE="$CONFIG_DIR/hmac_key.bin"
+
+mkdir -p "$CONFIG_DIR"
+chmod 755 "$CONFIG_DIR"
+
+if [ ! -f "$HMAC_KEY_FILE" ]; then
+    echo "Generating HMAC key at $HMAC_KEY_FILE..."
+    # openssl is already a hard dependency (libssl); use it to produce 32 bytes
+    # of cryptographically-random key material and immediately restrict access.
+    if ! openssl rand -out "$HMAC_KEY_FILE" 32; then
+        echo "ERROR: Failed to generate HMAC key with openssl." >&2
+        rm -f "$HMAC_KEY_FILE"
+        exit 1
+    fi
+    chmod 600 "$HMAC_KEY_FILE"
+    chown root:root "$HMAC_KEY_FILE"
+else
+    echo "HMAC key already exists at $HMAC_KEY_FILE; leaving it unchanged."
+fi

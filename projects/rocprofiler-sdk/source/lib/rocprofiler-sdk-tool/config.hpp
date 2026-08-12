@@ -114,6 +114,7 @@ struct config : output_config
     bool   demangle                      = get_env("ROCPROF_DEMANGLE_KERNELS", true);
     bool   truncate                      = get_env("ROCPROF_TRUNCATE_KERNELS", false);
     bool   kernel_trace                  = get_env("ROCPROF_KERNEL_TRACE", false);
+    bool   hip_graph_trace               = get_env("ROCPROF_HIP_GRAPH_TRACE", false);
     bool   hsa_core_api_trace            = get_env("ROCPROF_HSA_CORE_API_TRACE", false);
     bool   hsa_amd_ext_api_trace         = get_env("ROCPROF_HSA_AMD_EXT_API_TRACE", false);
     bool   hsa_image_ext_api_trace       = get_env("ROCPROF_HSA_IMAGE_EXT_API_TRACE", false);
@@ -133,9 +134,12 @@ struct config : output_config
     bool   rocdecode_api_trace           = get_env("ROCPROF_ROCDECODE_API_TRACE", false);
     bool   rocjpeg_api_trace             = get_env("ROCPROF_ROCJPEG_API_TRACE", false);
     bool   ompt_trace                    = get_env("ROCPROF_OMPT_TRACE", false);
+    bool   rocshmem_api_trace            = get_env("ROCPROF_ROCSHMEM_API_TRACE", false);
+    bool   hipfile_api_trace             = get_env("ROCPROF_HIPFILE_API_TRACE", false);
     bool   list_metrics                  = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file      = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   advanced_thread_trace         = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
+    bool   att_no_intercept              = get_env("ROCPROF_ATT_NO_INTERCEPT", false);
     bool   att_serialize_all             = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
     bool   enable_signal_handlers        = get_env("ROCPROF_SIGNAL_HANDLERS", true);
     bool   enable_process_sync           = get_env("ROCPROF_PROCESS_SYNC", false);
@@ -156,8 +160,8 @@ struct config : output_config
     std::string mpi_size_env_variable = get_env(mpi_size_env_var_name, "");
     uint64_t    att_param_shader_engine_mask =
         get_env<uint64_t>("ROCPROF_ATT_PARAM_SHADER_ENGINE_MASK", 0x1);
-    // 256MB
-    uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x10000000);
+    // 384MB
+    uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x18000000);
     uint64_t att_param_simd_select = get_env<uint64_t>("ROCPROF_ATT_PARAM_SIMD_SELECT", 0xF);
     uint64_t att_param_target_cu   = get_env<uint64_t>("ROCPROF_ATT_PARAM_TARGET_CU", 1);
     uint64_t att_param_perf_ctrl   = get_env<uint64_t>("ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL", 0);
@@ -207,6 +211,7 @@ inline auto
 config::get_attach_invariants() const
 {
     return std::make_tuple(kernel_trace,
+                           hip_graph_trace,
                            hsa_core_api_trace,
                            hsa_amd_ext_api_trace,
                            hsa_image_ext_api_trace,
@@ -223,6 +228,7 @@ config::get_attach_invariants() const
                            rocjpeg_api_trace,
                            ompt_trace,
                            advanced_thread_trace,
+                           att_no_intercept,
                            att_serialize_all,
                            att_param_shader_engine_mask,
                            att_param_buffer_size,
@@ -240,7 +246,9 @@ config::get_attach_invariants() const
                            counter_groups_random_seed,
                            counter_groups_interval,
                            benchmark_mode,
-                           spm_counter_collection);
+                           spm_counter_collection,
+                           rocshmem_api_trace,
+                           hipfile_api_trace);
 }
 
 inline bool
@@ -273,6 +281,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_NAMED_MEMBER("benchmark_mode", benchmark_mode_env);
 
     CFG_SERIALIZE_MEMBER(kernel_trace);
+    CFG_SERIALIZE_MEMBER(hip_graph_trace);
     CFG_SERIALIZE_MEMBER(hsa_core_api_trace);
     CFG_SERIALIZE_MEMBER(hsa_amd_ext_api_trace);
     CFG_SERIALIZE_MEMBER(hsa_image_ext_api_trace);
@@ -293,6 +302,8 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(rocjpeg_api_trace);
     CFG_SERIALIZE_MEMBER(ompt_trace);
     CFG_SERIALIZE_MEMBER(ompt_trace_operations);
+    CFG_SERIALIZE_MEMBER(rocshmem_api_trace);
+    CFG_SERIALIZE_MEMBER(hipfile_api_trace);
 
     CFG_SERIALIZE_MEMBER(mpi_rank);
     CFG_SERIALIZE_MEMBER(mpi_size);
@@ -329,6 +340,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(pc_sampling_unit_value);
 
     CFG_SERIALIZE_MEMBER(advanced_thread_trace);
+    CFG_SERIALIZE_MEMBER(att_no_intercept);
     CFG_SERIALIZE_MEMBER(att_serialize_all);
     CFG_SERIALIZE_MEMBER(att_param_shader_engine_mask);
     CFG_SERIALIZE_MEMBER(att_param_buffer_size);

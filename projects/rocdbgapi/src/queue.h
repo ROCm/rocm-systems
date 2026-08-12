@@ -59,14 +59,60 @@ public:
     running    /* The queue is running.  */
   };
 
-protected:
-  os_queue_snapshot_entry_t m_os_queue_info;
+  /* A displaced instruction ptr holds the address of an instruction in
+     device accessible memory.  The address is returned to the queue when the
+     displaced instruction ptr is destructed.  */
+  using displaced_instruction_ptr_t
+    = utils::unique_resource_t<agent_address_t,
+                               std::function<void (agent_address_t)>>;
+
+  class dummy_dispatch_t : public dispatch_t
+  {
+  private:
+    class dummy_descriptor_t : public architecture_t::kernel_descriptor_t
+    {
+    public:
+      dummy_descriptor_t (process_t &process)
+        : architecture_t::kernel_descriptor_t (process, 0)
+      {
+      }
+      global_address_t entry_address () const override { return 0; }
+      bool is_at_kernel_entry (global_address_t /* pc  */) const override
+      {
+        return false;
+      }
+    } m_dummy_descriptor;
+
+  public:
+    dummy_dispatch_t (queue_t &queue)
+      : dispatch_t (AMD_DBGAPI_DISPATCH_NONE, queue, 0),
+        m_dummy_descriptor (queue.process ())
+    {
+    }
+
+    const architecture_t::kernel_descriptor_t &
+    kernel_descriptor () const override
+    {
+      return m_dummy_descriptor;
+    }
+
+    void get_info (amd_dbgapi_dispatch_info_t /* query  */,
+                   size_t /* value_size  */,
+                   void * /* value  */) const override
+    {
+      dbgapi_assert_not_reached ("should not call this");
+    }
+  };
 
 private:
   state_t m_state{ state_t::running };
   epoch_t m_mark{ 0 };
 
   const agent_t &m_agent;
+
+protected:
+  os_queue_snapshot_entry_t m_os_queue_info;
+  dummy_dispatch_t m_dummy_dispatch;
 
   /* Called whenever the queue changes state.  */
   virtual void queue_state_changed () {}
@@ -78,8 +124,8 @@ public:
 
   queue_t (amd_dbgapi_queue_id_t queue_id, const agent_t &agent,
            const os_queue_snapshot_entry_t &os_queue_info)
-    : handle_object (queue_id), m_os_queue_info (os_queue_info),
-      m_agent (agent)
+    : handle_object (queue_id), m_agent (agent),
+      m_os_queue_info (os_queue_info), m_dummy_dispatch (*this)
   {
   }
 
@@ -113,6 +159,25 @@ public:
   /* Return the address of the memory holding the queue packets.  */
   std::variant<host_address_t, agent_address_t> address () const;
 
+  virtual void wave_state_changed (const wave_t &wave) = 0;
+
+  /* Return the address of a park instruction.  */
+  virtual agent_address_t park_instruction_address () = 0;
+  /* Return the address of a terminating instruction.  */
+  virtual agent_address_t terminating_instruction_address () = 0;
+
+  /* Return the wave's scratch memory region (address and size).  */
+  virtual std::pair<agent_address_t /* address */,
+                    amd_dbgapi_size_t /* size */>
+  scratch_memory_region (
+    const architecture_t::cwsr_record_t &cwsr_record) const;
+
+  /* Return a pointer to device accessible memory containing the given
+     instruction bytes.  */
+  virtual displaced_instruction_ptr_t
+  allocate_displaced_instruction (const instruction_t &instruction)
+    = 0;
+
   /* Return the size of the memory holding the queue packets.  */
   amd_dbgapi_size_t size () const;
 
@@ -137,6 +202,8 @@ public:
   void get_info (amd_dbgapi_queue_info_t query, size_t value_size,
                  void *value) const;
 
+  dummy_dispatch_t &dummy_dispatch () { return m_dummy_dispatch; }
+
   const agent_t &agent () const { return m_agent; }
   process_t &process () const;
   const architecture_t &architecture () const;
@@ -146,14 +213,6 @@ public:
 
 class compute_queue_t : public queue_t
 {
-public:
-  /* A displaced instruction ptr holds the address of an instruction in
-     device accessible memory.  The address is returned to the queue when the
-     displaced instruction ptr is destructed.  */
-  using displaced_instruction_ptr_t
-    = utils::unique_resource_t<agent_address_t,
-                               std::function<void (agent_address_t)>>;
-
 protected:
   struct context_save_area_header_s
   {
@@ -165,44 +224,6 @@ protected:
     uint32_t debugger_memory_size;
   };
 
-  class dummy_dispatch_t : public dispatch_t
-  {
-  private:
-    class dummy_descriptor_t : public architecture_t::kernel_descriptor_t
-    {
-    public:
-      dummy_descriptor_t (process_t &process)
-        : architecture_t::kernel_descriptor_t (process, 0)
-      {
-      }
-      global_address_t entry_address () const override { return 0; }
-      bool is_at_kernel_entry (global_address_t /* pc  */) const override
-      {
-        return false;
-      }
-    } m_dummy_descriptor;
-
-  public:
-    dummy_dispatch_t (compute_queue_t &queue)
-      : dispatch_t (AMD_DBGAPI_DISPATCH_NONE, queue, 0),
-        m_dummy_descriptor (queue.process ())
-    {
-    }
-
-    const architecture_t::kernel_descriptor_t &
-    kernel_descriptor () const override
-    {
-      return m_dummy_descriptor;
-    }
-
-    void get_info (amd_dbgapi_dispatch_info_t /* query  */,
-                   size_t /* value_size  */,
-                   void * /* value  */) const override
-    {
-      dbgapi_assert_not_reached ("should not call this");
-    }
-  } m_dummy_dispatch;
-
   /* Number of waves in the running state.  Only holds a value when the queue
      is suspended.  */
   std::optional<size_t> m_waves_running{};
@@ -213,14 +234,14 @@ protected:
   uint16_t m_debugger_memory_next_chunk{ 0 };
   std::vector<uint16_t> m_debugger_memory_free_chunks{};
 
-  std::optional<displaced_instruction_ptr_t> m_park_instruction_ptr{};
-  std::optional<displaced_instruction_ptr_t> m_terminating_instruction_ptr{};
-
   /* The memory reserved by the thunk library for the debugger is used to store
      instruction buffers.  Instruction buffers are lazily allocated from the
      reserved memory, and when freed, their index is returned to a free list.
      Each wave is guaranteed its own unique instruction buffer.  */
   std::optional<agent_address_t> m_debugger_memory_base{};
+
+  std::optional<displaced_instruction_ptr_t> m_park_instruction_ptr{};
+  std::optional<displaced_instruction_ptr_t> m_terminating_instruction_ptr{};
 
   std::optional<amd_dbgapi_os_queue_packet_id_t> m_read_packet_id{};
   std::optional<amd_dbgapi_os_queue_packet_id_t> m_write_packet_id{};
@@ -247,29 +268,20 @@ protected:
 public:
   compute_queue_t (amd_dbgapi_queue_id_t queue_id, const agent_t &agent,
                    const os_queue_snapshot_entry_t &os_queue_info)
-    : queue_t (queue_id, agent, os_queue_info), m_dummy_dispatch (*this)
+    : queue_t (queue_id, agent, os_queue_info)
   {
   }
 
-  void wave_state_changed (const wave_t &wave);
+  void wave_state_changed (const wave_t &wave) override;
 
   bool is_all_stopped () const override;
 
-  /* Return the address of a park instruction.  */
-  virtual agent_address_t park_instruction_address ();
-  /* Return the address of a terminating instruction.  */
-  virtual agent_address_t terminating_instruction_address ();
+  agent_address_t park_instruction_address () override;
 
-  /* Return the wave's scratch memory region (address and size).  */
-  virtual std::pair<agent_address_t /* address */,
-                    amd_dbgapi_size_t /* size */>
-  scratch_memory_region (
-    const architecture_t::cwsr_record_t &cwsr_record) const;
+  agent_address_t terminating_instruction_address () override;
 
-  /* Return a pointer to device accessible memory containing the given
-     instruction bytes.  */
   virtual displaced_instruction_ptr_t
-  allocate_displaced_instruction (const instruction_t &instruction);
+  allocate_displaced_instruction (const instruction_t &instruction) override;
 
   amd_dbgapi_os_queue_type_t type () const override
   {

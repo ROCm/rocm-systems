@@ -62,6 +62,7 @@ For example, in a venv, passing `ROCPROFSYS_TEST_EXECUTABLE=$(which python3)` sh
 | `ROCPROFSYS_USE_ROCPD` | Enable/disable ROCpd validation (`ON`/`OFF`) | `ON` if available |
 | `ROCPROFSYS_VALIDATE_PERFETTO` | Enable/disable Perfetto validation (`ON`/`OFF`) | `ON` if available |
 | `ROCPROFSYS_TRACE_PROC_SHELL` | Path to trace_processor_shell binary | Auto-detected |
+| `ROCPROFSYS_DISABLE_TEST_CACHE` | Disables caching used by the tests | `OFF` |
 | `ROCM_PATH` | Path to ROCm installation | `/opt/rocm` |
 
 #### Perfetto GLIBC Issue
