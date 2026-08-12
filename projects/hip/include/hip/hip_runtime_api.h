@@ -2310,11 +2310,11 @@ hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device);
  * @param [in] device Device ordinal
  *
  * Returns identifying information (@p luid and @p deviceNodeMask) that allows the device to be
- * matched with graphics APIs. The LUID is only valid on Windows; on other platforms the returned
- * @p luid is zero-filled and @p deviceNodeMask is set to 0.
+ * matched with graphics APIs. The LUID is only valid on Windows; on other platforms this function
+ * returns #hipErrorNotSupported and does not modify @p luid or @p deviceNodeMask.
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue, #hipErrorNotInitialized,
- * #hipErrorDeinitialized
+ * #hipErrorDeinitialized, #hipErrorNotSupported
  */
 hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device);
 /**

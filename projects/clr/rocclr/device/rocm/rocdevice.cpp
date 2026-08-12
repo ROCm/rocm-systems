@@ -1078,12 +1078,24 @@ bool Device::populateOCLDeviceConstants() {
     info_.luidLowPart_ = localUID.low;
     info_.luidHighPart_ = localUID.high;
 #if defined(_WIN32)
-    // Setup the node mask from this agent's position in the GPU list
-    for (uint32_t i = 0; i < gpu_agents_.size(); ++i) {
-      if (gpu_agents_[i].handle == bkendDevice_.handle) {
-        info_.luidDeviceNodeMask_ = 1u << i;
+    // Node mask = this agent's index within its adapter (LUID). Agents sharing a
+    // LUID form a linked adapter; a standalone adapter reports 0x1.
+    uint32_t luidNodeIndex = 0;
+    for (const auto& siblingAgent : gpu_agents_) {
+      if (siblingAgent.handle == bkendDevice_.handle) {
         break;
       }
+      hsa_luid_t siblingUID = {0};
+      if ((HSA_STATUS_SUCCESS ==
+           Hsa::agent_get_info(siblingAgent,
+                               static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
+                               &siblingUID)) &&
+          (siblingUID.low == localUID.low) && (siblingUID.high == localUID.high)) {
+        ++luidNodeIndex;
+      }
+    }
+    if (luidNodeIndex < 32) {
+      info_.luidDeviceNodeMask_ = 1u << luidNodeIndex;
     }
 #endif
   }
