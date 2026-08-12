@@ -852,6 +852,37 @@ target_compile_definitions(
     PRIVATE ROCPD_DB_V3_BRACKET_NAME_PATH="${ROCPD_DB_V3_BRACKET_NAME_PATH}"
 )
 
+# Real v4.0 capture fixture (DL-017): rebuilt at build time from a committed,
+# un-templated SQL dump of the original captured binary
+# (bd54a356ac:tests/unit/rocpd_v4.db). Unlike the synthetic fixtures above,
+# this dump carries no {{uuid}}/{{guid}} placeholders -- the literal values
+# are the real capture's identity and are read straight into sqlite3.
+set(_v4rc_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_realcapture_data.sql)
+
+set(ROCPD_DB_V4_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4.db
+)
+add_custom_command(
+    OUTPUT ${ROCPD_DB_V4_PATH}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V4_PATH}
+    COMMAND
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_PATH} ".read ${_v4rc_data_src}"
+    DEPENDS ${_v4rc_data_src}
+    COMMENT "Generating real v4.0 capture test fixture from committed SQL dump"
+    VERBATIM
+)
+add_custom_target(
+    profiler-hub_v4_realcapture_fixture
+    DEPENDS ${ROCPD_DB_V4_PATH}
+)
+add_dependencies(profiler-hub_unit_tests profiler-hub_v4_realcapture_fixture)
+
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE ROCPD_DB_V4_PATH="${ROCPD_DB_V4_PATH}"
+)
+
 gtest_discover_tests(
     profiler-hub_unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}

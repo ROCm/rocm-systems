@@ -2786,6 +2786,19 @@ TEST_F(reader_v4_amb_cls_test, v4_ambiguous_classification_track_flagged)
     EXPECT_TRUE(counter_track->ambiguous_classification);
 }
 
+TEST_F(reader_v4_amb_cls_test, v4_non_ambiguous_track_not_flagged)
+{
+    // The main v4 fixture has no overlapping track_ids; no track should be flagged.
+    auto storage = std::make_unique<profiler_hub::storage_t>(ROCPD_DB_V4_PATH, "");
+    auto reader  = std::make_shared<profiler_hub::reader_t>(std::move(storage));
+
+    for(const auto& t : reader->get_tracks())
+    {
+        EXPECT_FALSE(t->ambiguous_classification)
+            << "unexpected ambiguous_classification on track id=" << t->id.value;
+    }
+}
+
 // ============================================================================
 // Track-scoped API tests — v4.0 synthetic counter fixture (rocpd_v4_counter.db)
 // Built at configure time from committed SQL. Exists solely to exercise the
