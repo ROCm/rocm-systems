@@ -179,7 +179,19 @@ def _tidy_args(args: argparse.Namespace) -> list[str]:
 def get_enabled_checks(args: argparse.Namespace, sample_file: str) -> list[str]:
     """Resolve the effective check list clang-tidy will apply to `sample_file`."""
     command = [args.clang_tidy_binary, "-list-checks", *_tidy_args(args), sample_file]
-    result = subprocess.run(command, capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+    except FileNotFoundError:
+        sys.exit(f"error: clang-tidy binary '{args.clang_tidy_binary}' not found")
+    if result.returncode != 0:
+        detail = result.stderr.strip() or "clang-tidy -list-checks failed"
+        print(
+            _color(f"warning: could not resolve check list: {detail}", "yellow"),
+            file=sys.stderr,
+        )
+        return []
     checks = []
     in_list = False
     for line in result.stdout.splitlines():
