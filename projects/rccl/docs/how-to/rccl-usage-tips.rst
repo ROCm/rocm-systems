@@ -537,3 +537,19 @@ To suspend or resume several communicators together, wrap the calls in
    NCCLCHECK(ncclCommSuspend(commB, NCCL_SUSPEND_MEM));
    NCCLCHECK(ncclGroupEnd());
 
+   // ... later, the matching resume ...
+
+   NCCLCHECK(ncclGroupStart());
+   NCCLCHECK(ncclCommResume(commA));
+   NCCLCHECK(ncclCommResume(commB));
+   NCCLCHECK(ncclGroupEnd());
+
+.. note::
+
+   The grouped form is required when a single process owns one communicator per
+   GPU, as created by ``ncclCommInitAll``. Every ``ncclCommSuspend`` and
+   ``ncclCommResume`` call is collective over all ranks of its communicator, and
+   here those ranks are the other communicators owned by the same thread, so an
+   ungrouped call blocks waiting for ranks that the thread only reaches after
+   that call returns.
+

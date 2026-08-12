@@ -36,6 +36,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Added Pythonic API bindings under `bindings/nccl4py/` (RCCL fork of NVIDIA `nccl4py` v0.2.0). Provides Python access to RCCL collectives via Cython bindings, an on-disk `cuda.core` HIP shim for ROCm hosts without `cuda-bindings` / `cuda-core`, and RCCL-only collective wrappers (`ncclAllReduceWithBias`, `ncclAllToAllv`).
 * Added RCCL examples to the repository.
 * Added `RCCL host API` pull-in from NCCL 2.30.
+* Added communicator suspend and resume (`ncclCommSuspend`, `ncclCommResume`, `ncclCommMemStats`), which releases the dynamic GPU memory of an idle communicator and reacquires it later without destroying the communicator.
 
 ### Changed
 * Enabled WarpSpeed auto mode for grow communicators.
