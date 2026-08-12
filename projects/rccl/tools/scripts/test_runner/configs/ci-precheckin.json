@@ -1,7 +1,7 @@
 {
   "system_configurations": {
     "name": "RCCL CI-PreCheckin",
-    "description": "A port of RCCL Math-CI precheckin pipeline."
+    "description": "A port of RCCL Math-CI precheckin pipeline. DISABLED TESTS: AlltoAllv.OutOfPlace removed 2026-08-12 -- hangs on gfx950 (single-rank ncclInt32 OutOfPlace); see AICOMRCCL-1900. Re-add its unit_tests entry once fixed."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
@@ -53,7 +53,6 @@
         {"name": "Scatter.InPlace", "description": "Scatter in-place", "test_filter": "Scatter.InPlace", "timeout": 300},
         {"name": "Scatter.OutOfPlace", "description": "Scatter out-of-place", "test_filter": "Scatter.OutOfPlace", "timeout": 300},
         {"name": "AlltoAll.OutOfPlace", "description": "AlltoAll out-of-place", "test_filter": "AlltoAll.OutOfPlace", "timeout": 300},
-        {"name": "AlltoAllv.OutOfPlace", "description": "AlltoAllv out-of-place", "test_filter": "AlltoAllv.OutOfPlace", "timeout": 300},
         {"name": "AllReduce.InPlaceGraph", "description": "AllReduce in-place graph-capture path", "test_filter": "AllReduce.InPlaceGraph"},
         {"name": "AllReduce.ManagedMem", "description": "AllReduce managed-memory path", "test_filter": "AllReduce.ManagedMem"},
         {"name": "AllReduce.UserBufferRegistration", "description": "AllReduce user-buffer registration path", "test_filter": "AllReduce.UserBufferRegistration"},
