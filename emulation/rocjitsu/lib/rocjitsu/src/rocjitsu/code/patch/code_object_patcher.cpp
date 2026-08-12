@@ -1131,6 +1131,36 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
   return false;
 }
 
+bool CodeObjectPatcher::has_rocr_rejected_none_relocation() const {
+  if (image_.size() < sizeof(Elf64_Ehdr))
+    return false;
+
+  const auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
+  const auto shdrs = section_headers();
+  if (shdrs.empty())
+    return false;
+
+  for (const Elf64_Shdr &relocs : shdrs) {
+    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        relocs.sh_size % sizeof(Elf64_Rela) != 0 ||
+        !image_contains_range(image_.size(), relocs.sh_offset, relocs.sh_size)) {
+      continue;
+    }
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t relocation_index = 0; relocation_index < count; ++relocation_index) {
+      Elf64_Rela relocation{};
+      std::memcpy(&relocation,
+                  image_.data() + relocs.sh_offset + relocation_index * sizeof(relocation),
+                  sizeof(relocation));
+      if (classify_rocr_none_relocation(header, shdrs, relocs, relocation.r_info) ==
+          RocrNoneRelocationAction::Rejected) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
   if (text_size_ == 0)
     return false;
@@ -1198,6 +1228,10 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
         r_info = rel.r_info;
         r_offset = rel.r_offset;
       }
+      if (classify_rocr_none_relocation(header, shdrs, relocs, r_info) !=
+          RocrNoneRelocationAction::NotNone) {
+        continue;
+      }
       if (!elf_relocation_place_is_allocated(header, shdrs, relocs, r_offset))
         continue;
       const uint32_t sym_index = elf_reloc_sym(r_info);
@@ -1246,7 +1280,8 @@ bool CodeObjectPatcher::replace_text(
     return false;
   if (!image_contains_range(image_.size(), text_offset_, text_size_))
     return false;
-  if (!text_relocations.empty() && has_unsupported_relocation_to_text())
+  if (!text_relocations.empty() &&
+      (has_rocr_rejected_none_relocation() || has_unsupported_relocation_to_text()))
     return false;
   const auto text_placements =
       build_text_placement_index(text_size_, new_text.size(), text_relocations);

@@ -69,6 +69,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -8551,25 +8552,25 @@ TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
   EXPECT_EQ(checked_rules, 40u);
   EXPECT_EQ(no_success_rules, 1u);
   const std::vector<uint32_t> expected_no_success_rule_keys = {
-      (static_cast<uint32_t>(gfx1250::encoding::kSop1) << 16) | gfx1250::kSBarrierSignalIsfirstSop1,
+      (static_cast<uint32_t>(cdna5::encoding::kSop1) << 16) | cdna5::kSBarrierSignalIsfirstSop1,
   };
   EXPECT_EQ(no_success_rule_keys, expected_no_success_rule_keys);
   const std::vector<uint32_t> expected_block_context_rule_keys = {
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) | gfx1250::kVWmmaI3216x16x64Iu8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) |
-          gfx1250::kVSwmmacI3216x16x128Iu8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVimage) << 16) | gfx1250::kTensorLoadToLdsVimage,
-      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) | gfx1250::kClusterLoadB32Vglobal,
-      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) | gfx1250::kClusterLoadB64Vglobal,
-      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) | gfx1250::kClusterLoadB128Vglobal,
-      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) |
-          gfx1250::kClusterLoadAsyncToLdsB8Vglobal,
-      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) |
-          gfx1250::kClusterLoadAsyncToLdsB32Vglobal,
-      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) |
-          gfx1250::kClusterLoadAsyncToLdsB64Vglobal,
-      (static_cast<uint32_t>(gfx1250::encoding::kVglobal) << 16) |
-          gfx1250::kClusterLoadAsyncToLdsB128Vglobal,
+      (static_cast<uint32_t>(cdna5::encoding::kVop3p) << 16) | cdna5::kVWmmaI3216x16x64Iu8Vop3p,
+      (static_cast<uint32_t>(cdna5::encoding::kVop3p) << 16) |
+          cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
+      (static_cast<uint32_t>(cdna5::encoding::kVimage) << 16) | cdna5::kTensorLoadToLdsVimage,
+      (static_cast<uint32_t>(cdna5::encoding::kVglobal) << 16) | cdna5::kClusterLoadB32Vglobal,
+      (static_cast<uint32_t>(cdna5::encoding::kVglobal) << 16) | cdna5::kClusterLoadB64Vglobal,
+      (static_cast<uint32_t>(cdna5::encoding::kVglobal) << 16) | cdna5::kClusterLoadB128Vglobal,
+      (static_cast<uint32_t>(cdna5::encoding::kVglobal) << 16) |
+          cdna5::kClusterLoadAsyncToLdsB8Vglobal,
+      (static_cast<uint32_t>(cdna5::encoding::kVglobal) << 16) |
+          cdna5::kClusterLoadAsyncToLdsB32Vglobal,
+      (static_cast<uint32_t>(cdna5::encoding::kVglobal) << 16) |
+          cdna5::kClusterLoadAsyncToLdsB64Vglobal,
+      (static_cast<uint32_t>(cdna5::encoding::kVglobal) << 16) |
+          cdna5::kClusterLoadAsyncToLdsB128Vglobal,
   };
   EXPECT_EQ(block_context_rule_keys, expected_block_context_rule_keys);
 
@@ -8613,9 +8614,9 @@ TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
                                                  rocjitsu::ProcessorRevision::Unspecified);
   EXPECT_FALSE(legacy_translator.supports_rewrite_discharge());
   constexpr auto selector_230 =
-      gfx1250::build_sop1(gfx1250::kSMovB64Sop1, {.ssrc0 = 230, .sdst = 10});
+      cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 230, .sdst = 10});
   constexpr auto selector_231 =
-      gfx1250::build_sop1(gfx1250::kSMovB64Sop1, {.ssrc0 = 231, .sdst = 10});
+      cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 231, .sdst = 10});
   const auto low = rocjitsu::decode_one(selector_230[0], ROCJITSU_CODE_ARCH_GFX1250);
   const auto high = rocjitsu::decode_one(selector_231[0], ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(low, nullptr);
@@ -8641,88 +8642,88 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
     samples.push_back(std::move(words));
   };
 
-  add_sample(gfx1250::build_sopp(gfx1250::kSClauseSopp, {.simm16 = 4}));
-  add_sample(gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+  add_sample(cdna5::build_sopp(cdna5::kSClauseSopp, {.simm16 = 4}));
+  add_sample(cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
                                   {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
 
   constexpr auto regular_scale =
-      gfx1250::build_vop3p(0x35, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 0});
+      cdna5::build_vop3p(0x35, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 0});
   constexpr auto scale16 =
-      gfx1250::build_vop3p(0x3a, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 0});
+      cdna5::build_vop3p(0x3a, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 0});
   constexpr auto scale_body =
-      gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
                            {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48});
   add_compound_sample(regular_scale, scale_body);
   add_compound_sample(scale16, scale_body);
 
-  add_sample(gfx1250::build_vop3p(gfx1250::kVWmmaI3216x16x64Iu8Vop3p,
+  add_sample(cdna5::build_vop3p(cdna5::kVWmmaI3216x16x64Iu8Vop3p,
                                   {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
-  add_sample(gfx1250::build_vop3p(gfx1250::kVSwmmacI3216x16x128Iu8Vop3p,
+  add_sample(cdna5::build_vop3p(cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
                                   {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
 
   for (const uint16_t opcode : {
-           gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-           gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p,
-           gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p,
-           gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p,
+           cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+           cdna5::kVWmmaF3216x16x128Fp8Bf8Vop3p,
+           cdna5::kVWmmaF3216x16x128Bf8Fp8Vop3p,
+           cdna5::kVWmmaF3216x16x128Bf8Bf8Vop3p,
        }) {
-    add_sample(gfx1250::build_vop3p(opcode, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
+    add_sample(cdna5::build_vop3p(opcode, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
   }
   for (const uint16_t opcode : {
-           gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p,
-           gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p,
-           gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p,
-           gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p,
+           cdna5::kVWmmaF1616x16x128Fp8Fp8Vop3p,
+           cdna5::kVWmmaF1616x16x128Fp8Bf8Vop3p,
+           cdna5::kVWmmaF1616x16x128Bf8Fp8Vop3p,
+           cdna5::kVWmmaF1616x16x128Bf8Bf8Vop3p,
        }) {
-    add_sample(gfx1250::build_vop3p(opcode, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
+    add_sample(cdna5::build_vop3p(opcode, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
   }
   add_sample(
-      gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p,
+      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                            {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 40, .src2 = 256 + 64}));
 
-  add_sample(gfx1250::build_vimage(
-      gfx1250::kTensorLoadToLdsVimage,
+  add_sample(cdna5::build_vimage(
+      cdna5::kTensorLoadToLdsVimage,
       {.vaddr4 = 124, .vaddr0 = 8, .vaddr1 = 0, .vaddr2 = 124, .vaddr3 = 124}));
   add_sample(
-      gfx1250::build_vop3(gfx1250::kVCvtF32Fp8Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22}));
-  add_sample(gfx1250::build_vop3(gfx1250::kVCvtPkFp8F32Vop3,
+      cdna5::build_vop3(cdna5::kVCvtF32Fp8Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22}));
+  add_sample(cdna5::build_vop3(cdna5::kVCvtPkFp8F32Vop3,
                                  {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2}));
-  add_sample(gfx1250::build_vop3(gfx1250::kVCvtSrFp8F32Vop3,
+  add_sample(cdna5::build_vop3(cdna5::kVCvtSrFp8F32Vop3,
                                  {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2}));
 
-  constexpr gfx1250::VdsBuilderFields ds2_fields{
+  constexpr cdna5::VdsBuilderFields ds2_fields{
       .offset0 = 3, .offset1 = 5, .addr = 20, .data0 = 30, .data1 = 40, .vdst = 50};
   for (const uint16_t opcode : {
-           gfx1250::kDsStore2addrB32Vds,
-           gfx1250::kDsStore2addrStride64B32Vds,
-           gfx1250::kDsStorexchg2addrRtnB32Vds,
-           gfx1250::kDsStorexchg2addrStride64RtnB32Vds,
-           gfx1250::kDsLoad2addrB32Vds,
-           gfx1250::kDsLoad2addrStride64B32Vds,
-           gfx1250::kDsStore2addrB64Vds,
-           gfx1250::kDsStore2addrStride64B64Vds,
-           gfx1250::kDsStorexchg2addrRtnB64Vds,
-           gfx1250::kDsStorexchg2addrStride64RtnB64Vds,
-           gfx1250::kDsLoad2addrB64Vds,
-           gfx1250::kDsLoad2addrStride64B64Vds,
+           cdna5::kDsStore2addrB32Vds,
+           cdna5::kDsStore2addrStride64B32Vds,
+           cdna5::kDsStorexchg2addrRtnB32Vds,
+           cdna5::kDsStorexchg2addrStride64RtnB32Vds,
+           cdna5::kDsLoad2addrB32Vds,
+           cdna5::kDsLoad2addrStride64B32Vds,
+           cdna5::kDsStore2addrB64Vds,
+           cdna5::kDsStore2addrStride64B64Vds,
+           cdna5::kDsStorexchg2addrRtnB64Vds,
+           cdna5::kDsStorexchg2addrStride64RtnB64Vds,
+           cdna5::kDsLoad2addrB64Vds,
+           cdna5::kDsLoad2addrStride64B64Vds,
        }) {
-    add_sample(gfx1250::build_vds(opcode, ds2_fields));
+    add_sample(cdna5::build_vds(opcode, ds2_fields));
   }
-  add_sample(gfx1250::build_vds(gfx1250::kDsStoreAddtidB32Vds,
+  add_sample(cdna5::build_vds(cdna5::kDsStoreAddtidB32Vds,
                                 {.offset0 = 0x34, .offset1 = 0x12, .data0 = 16}));
-  add_sample(gfx1250::build_vds(gfx1250::kDsLoadAddtidB32Vds,
+  add_sample(cdna5::build_vds(cdna5::kDsLoadAddtidB32Vds,
                                 {.offset0 = 0x34, .offset1 = 0x12, .vdst = 8}));
 
   for (const uint16_t opcode : {
-           gfx1250::kClusterLoadB32Vglobal,
-           gfx1250::kClusterLoadB64Vglobal,
-           gfx1250::kClusterLoadB128Vglobal,
-           gfx1250::kClusterLoadAsyncToLdsB8Vglobal,
-           gfx1250::kClusterLoadAsyncToLdsB32Vglobal,
-           gfx1250::kClusterLoadAsyncToLdsB64Vglobal,
-           gfx1250::kClusterLoadAsyncToLdsB128Vglobal,
+           cdna5::kClusterLoadB32Vglobal,
+           cdna5::kClusterLoadB64Vglobal,
+           cdna5::kClusterLoadB128Vglobal,
+           cdna5::kClusterLoadAsyncToLdsB8Vglobal,
+           cdna5::kClusterLoadAsyncToLdsB32Vglobal,
+           cdna5::kClusterLoadAsyncToLdsB64Vglobal,
+           cdna5::kClusterLoadAsyncToLdsB128Vglobal,
        }) {
-    add_sample(gfx1250::build_vglobal(opcode, {.saddr = 4, .vdst = 8, .vaddr = 12}));
+    add_sample(cdna5::build_vglobal(opcode, {.saddr = 4, .vdst = 8, .vaddr = 12}));
   }
 
   std::vector<const rocjitsu::TranslationRule *> residual_rules;
@@ -14009,7 +14010,9 @@ translate_gfx1250_indexed_flat_scratch_destination(uint32_t gpr_index_control) {
 }
 
 /// @brief Translate a single-instruction gfx1250 kernel with the B0-to-A0 profile.
-[[nodiscard]] std::vector<uint32_t> translate_gfx1250_b0_to_a0_words(std::vector<uint32_t> words) {
+[[nodiscard]] std::vector<uint32_t>
+translate_gfx1250_b0_to_a0_words(std::vector<uint32_t> words,
+                                 rocjitsu::TranslationTraceCallback trace_callback = {}) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   words.push_back(kGfx1250SEndpgm);
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
@@ -14019,6 +14022,8 @@ translate_gfx1250_indexed_flat_scratch_destination(uint32_t gpr_index_control) {
       ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
       gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
                                rocjitsu::ProcessorRevision::Gfx1250A0));
+  if (trace_callback)
+    translator.set_trace_callback(std::move(trace_callback));
   auto result = translator.translate(source);
   EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
@@ -14042,7 +14047,22 @@ translate_gfx1250_indexed_flat_scratch_destination(uint32_t gpr_index_control) {
 TEST(BinaryTranslatorE2E, Gfx1250RewritesScalarFlatScratchBase64BitSourceForA0) {
   const auto source = cdna5::build_sop1(
       cdna5::kSMovB64Sop1, {.ssrc0 = static_cast<uint8_t>(kFlatScratchBaseHiSelector), .sdst = 10});
-  const auto out = translate_gfx1250_b0_to_a0_words({source[0]});
+  struct TraceClassification {
+    const rocjitsu::InstructionLegalization *legalization;
+    bool copied_original;
+    bool semantic_lowering;
+    bool changed;
+  };
+  std::optional<TraceClassification> rewrite_trace;
+  const auto out = translate_gfx1250_b0_to_a0_words(
+      {source[0]}, [&](const rocjitsu::TranslationTraceEvent &event) {
+        if (event.source_words.size() != source.size() || event.source_words[0] != source[0])
+          return;
+        rewrite_trace = {.legalization = event.legalization,
+                         .copied_original = event.copied_original,
+                         .semantic_lowering = event.semantic_lowering,
+                         .changed = event.changed};
+      });
   ASSERT_GE(out.size(), 2u);
 
   EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector)
@@ -14050,6 +14070,12 @@ TEST(BinaryTranslatorE2E, Gfx1250RewritesScalarFlatScratchBase64BitSourceForA0) 
   // Only the source selector changes: destination, opcode, and encoding stay.
   EXPECT_EQ(out[0] & ~0xffu, source[0] & ~0xffu);
   EXPECT_EQ(out.size(), 2u) << "a scalar rewrite must not add instructions";
+  ASSERT_TRUE(rewrite_trace.has_value());
+  EXPECT_EQ(rewrite_trace->legalization, nullptr)
+      << "registered instruction rewrites are not opcode legalizations";
+  EXPECT_FALSE(rewrite_trace->copied_original);
+  EXPECT_TRUE(rewrite_trace->semantic_lowering);
+  EXPECT_TRUE(rewrite_trace->changed);
 }
 
 // A 64-bit read in the first scalar source position of a two-source encoding.

@@ -384,7 +384,36 @@ inline constexpr bool elf_symbol_is_executable_entry(uint8_t symbol_type) {
 /// @brief Whether this supported ET_DYN section uses ROCr's dynamic relocation policy.
 inline constexpr bool is_et_dyn_rocr_dynamic_relocation_section(const Elf64_Ehdr &ehdr,
                                                                 const Elf64_Shdr &relocs) {
-  return ehdr.e_type == ET_DYN && relocs.sh_info == SHN_UNDEF;
+  return ehdr.e_type == ET_DYN && relocs.sh_type == SHT_RELA && relocs.sh_info == SHN_UNDEF;
+}
+
+/// @brief ROCr's handling of an R_AMDGPU_NONE record before place or symbol lookup.
+enum class RocrNoneRelocationAction : uint8_t {
+  NotNone,
+  Ignored,
+  Rejected,
+};
+
+/// @brief Classify R_AMDGPU_NONE using the relocation section shape ROCr materializes.
+///
+/// @details ROCr only materializes SHT_RELA relocation sections. In modern ET_DYN code
+/// objects it skips sections with a valid explicit target, but sends target-less sections
+/// through dynamic relocation processing, whose type switch rejects R_AMDGPU_NONE. A
+/// nonzero sh_info that is out of range or names SHT_NULL does not prove that ROCr will see
+/// an explicit target, so keep that malformed shape fail-closed as well. This classification
+/// deliberately does not inspect r_offset, sh_link, the symbol index, or the addend.
+inline constexpr RocrNoneRelocationAction
+classify_rocr_none_relocation(const Elf64_Ehdr &ehdr, std::span<const Elf64_Shdr> shdrs,
+                              const Elf64_Shdr &relocs, uint64_t relocation_info) {
+  if (elf_reloc_type(relocation_info) != R_AMDGPU_NONE)
+    return RocrNoneRelocationAction::NotNone;
+  if (ehdr.e_type != ET_DYN || relocs.sh_type != SHT_RELA)
+    return RocrNoneRelocationAction::Ignored;
+  if (relocs.sh_info == SHN_UNDEF || relocs.sh_info >= shdrs.size() ||
+      shdrs[relocs.sh_info].sh_type == SHT_NULL) {
+    return RocrNoneRelocationAction::Rejected;
+  }
+  return RocrNoneRelocationAction::Ignored;
 }
 
 /// @brief How a relocation reference to an ordinary symbol in rewritten .text must be handled.

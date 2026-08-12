@@ -95,7 +95,7 @@ void print_help() {
       << "  --skip-failed-kernels          Preserve failed kernels and continue other kernels\n"
       << "  --verify-idempotence           Require a same-architecture second pass to be "
          "unchanged\n"
-      << "  --verify-rewrite-discharge     Require no implemented rewrite trigger in final output\n"
+      << "  --verify-rewrite-discharge     Require no registered rewrite trigger in final output\n"
       << "  --show-all-translations         Include unchanged identity mappings in diff output\n"
       << "  --list-code-objects             List extractable code objects and exit\n"
       << "  --help                          Show this help\n\n"

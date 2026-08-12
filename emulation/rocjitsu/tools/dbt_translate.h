@@ -130,7 +130,7 @@ struct TranslateOutput {
   bool idempotence_verified = false;
   /// @brief True when the requested final-output applicability scan was attempted.
   bool rewrite_discharge_checked = false;
-  /// @brief True when no implemented rewrite remained actionable.
+  /// @brief True when no registered rewrite remained actionable.
   bool rewrite_discharge_verified = false;
 
   /// @brief True if translation produced no error diagnostics.

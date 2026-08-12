@@ -107,11 +107,19 @@ public:
   /// remap relocation places that land in .text — replace_text() only shifts
   /// relocation offsets for whole sections moved *after* .text. An in-.text
   /// relocation would therefore be applied to the wrong translated bytes.
-  /// R_AMDGPU_NONE is inert and has no relocation place to preserve.
+  /// R_AMDGPU_NONE performs no write at its relocation place. Runtime acceptance
+  /// of that record is checked separately by has_rocr_rejected_none_relocation().
   /// BinaryTranslator uses this to fail closed instead of miscompiling. Real
   /// AMDHSA kernel code objects carry no such relocations, so this rejects only
   /// genuinely unsupported inputs.
   [[nodiscard]] bool has_relocations_within_text() const;
+
+  /// @brief True if ROCr rejects an R_AMDGPU_NONE record before DBT can rewrite the image.
+  ///
+  /// @details Target-less SHT_RELA sections in ET_DYN code objects are processed as
+  /// dynamic relocations, where ROCr has no R_AMDGPU_NONE case. Detect those records by
+  /// section mode and type alone, before consulting their place or symbol metadata.
+  [[nodiscard]] bool has_rocr_rejected_none_relocation() const;
 
   /// @brief True if any relocation references .text in a form DBT cannot remap.
   ///

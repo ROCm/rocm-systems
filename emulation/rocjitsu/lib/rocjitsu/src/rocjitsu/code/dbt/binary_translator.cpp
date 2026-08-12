@@ -651,8 +651,10 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
     if (relocs.sh_info != SHN_UNDEF) {
       if (relocs.sh_info >= shdrs.size())
         return std::nullopt;
-      if ((shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) == 0)
+      if (shdrs[relocs.sh_info].sh_type != SHT_NULL &&
+          (shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) == 0) {
         continue;
+      }
     }
     if (relocs.sh_entsize != sizeof(Elf64_Rela) || relocs.sh_size % sizeof(Elf64_Rela) != 0 ||
         !elf_image_contains(image, relocs.sh_offset, relocs.sh_size)) {
@@ -665,17 +667,21 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
       std::memcpy(&relocation,
                   image.data() + relocs.sh_offset + relocation_index * sizeof(Elf64_Rela),
                   sizeof(relocation));
+      const uint32_t relocation_type = elf_reloc_type(relocation.r_info);
+      const uint32_t symbol_index = elf_reloc_sym(relocation.r_info);
+      const RocrNoneRelocationAction none_action =
+          classify_rocr_none_relocation(ehdr, shdrs, relocs, relocation.r_info);
+      if (none_action == RocrNoneRelocationAction::Rejected)
+        return std::nullopt;
+      if (none_action == RocrNoneRelocationAction::Ignored)
+        continue;
       if (!elf_relocation_place_is_allocated(ehdr, shdrs, relocs, relocation.r_offset))
         continue;
 
-      const uint32_t relocation_type = elf_reloc_type(relocation.r_info);
-      const uint32_t symbol_index = elf_reloc_sym(relocation.r_info);
       const bool rocr_dynamic = is_et_dyn_rocr_dynamic_relocation_section(ehdr, relocs);
-      if (!rocr_dynamic && relocation_type == R_AMDGPU_NONE)
-        continue;
       const bool may_require_text_symbol_classification =
-          symbol_index != 0 && (!rocr_dynamic || relocation_type == R_AMDGPU_NONE ||
-                                rocr_dynamic_relocation_uses_symbol_value(relocation_type));
+          symbol_index != 0 &&
+          (!rocr_dynamic || rocr_dynamic_relocation_uses_symbol_value(relocation_type));
       if (may_require_text_symbol_classification) {
         if (relocs.sh_link >= shdrs.size())
           return std::nullopt;
@@ -2031,19 +2037,7 @@ BinaryTranslator::lookup_legalization(const Instruction &inst) const {
     legalization = gfx1250_b0_to_a0_legalization(inst);
   else if (legalization_lookup_)
     legalization = legalization_lookup_(inst.encoding_id(), inst.opcode());
-  if (legalization != nullptr)
-    return legalization;
-
-  if (semantic_translator_ != nullptr && semantic_translator_->has_instruction_rewrite(inst)) {
-    static constexpr InstructionLegalization kRegisteredRewrite{
-        .src_opcode = 0,
-        .src_encoding_id = 0,
-        .action = Action::Expand,
-        .target_opcode = 0,
-    };
-    return &kRegisteredRewrite;
-  }
-  return nullptr;
+  return legalization;
 }
 
 void BinaryTranslator::set_trace_callback(TranslationTraceCallback callback) {
@@ -2095,6 +2089,13 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     const auto image = std::span<const uint8_t>(result.elf_bytes);
     const auto text_bytes =
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
+    if (text_bytes.size() % sizeof(uint32_t) != 0) {
+      append_rewrite_discharge_error(
+          result.diagnostics,
+          "rewrite-discharge verification found a partial instruction word in final output",
+          text_bytes.size() - text_bytes.size() % sizeof(uint32_t));
+      return;
+    }
 
     KernelDescriptorTranslator descriptor_parser(host_arch_, host_arch_);
     const auto descriptor_translations = descriptor_parser.translate_image(
@@ -2125,7 +2126,6 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     // delaying CFG construction preserves the existing contextual behavior for
     // tensor, cluster-load, and IU8-WMMA sequence checks.
     std::vector<TranslationDiagnostic> streaming_diagnostics;
-    const auto *instruction_words = reinterpret_cast<const uint32_t *>(text->data());
     const size_t instruction_word_count = text->size() / sizeof(uint32_t);
     size_t instruction_word_index = 0;
     uint64_t instruction_offset = 0;
@@ -2139,8 +2139,9 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
         break;
       }
 
-      if (host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
-          instruction_words[instruction_word_index] == 0) {
+      uint32_t first_word = 0;
+      std::memcpy(&first_word, text_bytes.data() + instruction_offset, sizeof(first_word));
+      if (host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && first_word == 0) {
         ++instruction_word_index;
         instruction_offset += sizeof(uint32_t);
         continue;
@@ -2151,31 +2152,54 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
         ++next_block_leader;
       }
 
-      std::unique_ptr<Instruction> inst(
-          decoder->decode(&instruction_words[instruction_word_index], instruction_offset));
-      if (semantic_translator_->residual_rewrite_needs_basic_block(*inst)) {
-        needs_basic_block = true;
-        break;
+      // Generated AMDGPU decoders accept only a raw pointer. Decode from a
+      // bounded, zero-padded lookahead so a truncated multiword prefix cannot
+      // read beyond the executable section. gfx1250 VOP3PX2 is the current
+      // maximum-width encoding at four DWORDs.
+      constexpr size_t kMaxDecodedInstructionWords = 4;
+      std::array<uint32_t, kMaxDecodedInstructionWords> decode_words{};
+      const size_t remaining_words = instruction_word_count - instruction_word_index;
+      const size_t lookahead_words = std::min(remaining_words, decode_words.size());
+      std::memcpy(decode_words.data(), text_bytes.data() + instruction_offset,
+                  lookahead_words * sizeof(uint32_t));
+      std::unique_ptr<Instruction> inst(decoder->decode(decode_words.data(), instruction_offset));
+      if (inst->size() <= 0 || inst->size() % static_cast<int>(sizeof(uint32_t)) != 0) {
+        append_rewrite_discharge_error(
+            result.diagnostics,
+            "rewrite-discharge verification decoded an invalid instruction size in final output",
+            instruction_offset);
+        return;
       }
+      const size_t instruction_size = static_cast<size_t>(inst->size());
+      const size_t decoded_words = instruction_size / sizeof(uint32_t);
+      if (decoded_words > decode_words.size() || decoded_words > remaining_words) {
+        append_rewrite_discharge_error(
+            result.diagnostics,
+            "rewrite-discharge verification found a truncated instruction in final output",
+            instruction_offset, std::string(inst->mnemonic()));
+        return;
+      }
+      if (semantic_translator_->residual_rewrite_needs_basic_block(*inst))
+        needs_basic_block = true;
       if (semantic_translator_->instruction_local_residual_rewrite_applies(*inst)) {
         append_rewrite_discharge_error(streaming_diagnostics,
-                                       "implemented rewrite remains actionable in final output",
+                                       "registered rewrite remains actionable in final output",
                                        inst->src_loc(), std::string(inst->mnemonic()));
       }
-
-      const size_t instruction_size = static_cast<size_t>(inst->size());
-      instruction_word_index += instruction_size / sizeof(uint32_t);
+      instruction_word_index += decoded_words;
       instruction_offset += instruction_size;
     }
 
+    invalid_block_leader |= next_block_leader != block_leaders.size();
+    invalid_block_leader |= instruction_offset != text_bytes.size();
+    if (invalid_block_leader) {
+      append_rewrite_discharge_error(
+          result.diagnostics,
+          "rewrite-discharge verification found an invalid final executable entry");
+      return;
+    }
+
     if (!needs_basic_block) {
-      invalid_block_leader |= next_block_leader != block_leaders.size();
-      if (invalid_block_leader) {
-        append_rewrite_discharge_error(
-            result.diagnostics,
-            "rewrite-discharge verification found an invalid final executable entry");
-        return;
-      }
       const bool found_residual = !streaming_diagnostics.empty();
       result.diagnostics.insert(result.diagnostics.end(),
                                 std::make_move_iterator(streaming_diagnostics.begin()),
@@ -2200,10 +2224,11 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
           continue;
         found_residual = true;
         append_rewrite_discharge_error(result.diagnostics,
-                                       "implemented rewrite remains actionable in final output",
+                                       "registered rewrite remains actionable in final output",
                                        inst.src_loc(), std::string(inst.mnemonic()));
       }
     }
+
     result.rewrite_discharge_verified = !found_residual;
   } catch (const std::exception &error) {
     append_rewrite_discharge_error(
@@ -2234,6 +2259,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       result.elf_bytes.assign(image, image + obj.image_size());
     return result;
   };
+
+  if (options_.verify_rewrite_discharge && options_.skip_failed_kernels) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "rewrite-discharge verification cannot be combined with skip-failed-kernels");
+    return leave_unchanged();
+  }
 
   if (obj.image_size() < sizeof(Elf64_Ehdr)) {
     append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
@@ -2273,6 +2304,18 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   }
 
   CodeObjectPatcher patcher(obj);
+
+  // ROCr materializes target-less SHT_RELA sections as dynamic relocations and
+  // rejects R_AMDGPU_NONE there. Reject by record identity before place, symbol,
+  // executable-entry, or even data-only handling so unusable metadata cannot
+  // change the result.
+  if (patcher.has_rocr_rejected_none_relocation()) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "code object has R_AMDGPU_NONE outside a valid explicit-target relocation "
+                 "section; ROCr rejects this dynamic relocation form");
+    return leave_unchanged();
+  }
+
   auto text = patcher.text_bytes();
   if (auto refusal =
           translation_refusal(patcher, guest_arch_, host_arch_, target_mach_, options_)) {

@@ -62,7 +62,7 @@ synthetic_residual_rewrite(const rocjitsu::tools::TranslateOptions &options) {
        .guest_offset = std::nullopt,
        .output_offset = 4,
        .mnemonic = "s_clause",
-       .message = "implemented rewrite remains actionable in final output",
+       .message = "registered rewrite remains actionable in final output",
        .required_work = {}});
   result.errors.push_back({.exit_code = 3, .message = "translation failed"});
   return result;
@@ -487,7 +487,7 @@ TEST(RjDbtTranslateRewriteDischarge, ReportsSyntheticResidualThroughCli) {
   EXPECT_TRUE(contains(stdout_text, "rewrite_discharge: not-verified")) << stdout_text;
   EXPECT_TRUE(contains(stderr_text, "residual-rewrite output:.text+0x0004 s_clause"))
       << stderr_text;
-  EXPECT_TRUE(contains(stderr_text, "implemented rewrite remains actionable in final output"))
+  EXPECT_TRUE(contains(stderr_text, "registered rewrite remains actionable in final output"))
       << stderr_text;
 }
 

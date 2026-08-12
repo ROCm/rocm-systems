@@ -82,6 +82,7 @@ AmdGpuCodeObject::AmdGpuCodeObject(AmdGpuCodeObject &&other) noexcept
   header_ = std::move(other.header_);
   sections_ = std::move(other.sections_);
   text_sections_ = std::move(other.text_sections_);
+  executable_nobits_sections_ = std::move(other.executable_nobits_sections_);
   allocated_executable_sections_ = std::move(other.allocated_executable_sections_);
   rodata_sections_ = std::move(other.rodata_sections_);
 }
@@ -196,16 +197,21 @@ void AmdGpuCodeObject::load_sections() {
 
   for (size_t section_index = 0; section_index < section_hdrs.size(); ++section_index) {
     const Elf64_Shdr &shdr = section_hdrs[section_index];
-    if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS)
+    if (shdr.sh_type == SHT_NULL)
+      continue;
+    const bool allocated_executable =
+        (shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR);
+    if (shdr.sh_type == SHT_NOBITS && !allocated_executable)
       continue;
     if (shdr.sh_name >= shstrtab.sh_size) {
-      if ((shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR)) {
+      if (allocated_executable) {
         is_valid_ = false;
         return;
       }
       continue;
     }
-    if (!fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size())) {
+    if (shdr.sh_type != SHT_NOBITS &&
+        !fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size())) {
       is_valid_ = false;
       return;
     }
@@ -214,14 +220,26 @@ void AmdGpuCodeObject::load_sections() {
     std::string sec_name(shstrtab_data + shdr.sh_name,
                          strnlen(shstrtab_data + shdr.sh_name, max_len));
 
-    auto sec_data = std::make_unique<char[]>(shdr.sh_size);
-    std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
+    std::unique_ptr<char[]> sec_data;
+    if (shdr.sh_type != SHT_NOBITS) {
+      sec_data = std::make_unique<char[]>(shdr.sh_size);
+      std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
+    }
+    // SHT_NOBITS has no executable bytes to decode. Retain allocated executable
+    // metadata above so the translator's sole-PROGBITS-.text gate rejects the
+    // layout, but keep all_sections() restricted to readable section data.
+    if (shdr.sh_type == SHT_NOBITS) {
+      executable_nobits_sections_.emplace_back(
+          std::make_unique<HsaSection>(sec_name, nullptr, shdr, section_index));
+      allocated_executable_sections_.push_back(executable_nobits_sections_.back().get());
+      continue;
+    }
+
     sections_.emplace_back(
         std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr, section_index));
 
-    if ((shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR))
+    if (allocated_executable)
       allocated_executable_sections_.push_back(sections_.back().get());
-
     if (sec_name == ".text")
       text_sections_.push_back(sections_.back().get());
     else if (sec_name == ".rodata")

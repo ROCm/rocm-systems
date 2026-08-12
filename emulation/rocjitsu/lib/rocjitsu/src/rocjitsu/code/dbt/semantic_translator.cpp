@@ -20,7 +20,7 @@ namespace {
 
 /// @brief Select the handwritten rewrite registry for one ISA pair.
 /// @details Most ISA pairs currently have only an opcode table and do not offer
-/// complete rewrite-discharge verification.
+/// complete registry-level rewrite-discharge verification.
 [[nodiscard]] RewriteRegistry rewrite_registry_for(rj_code_arch_t guest, rj_code_arch_t host,
                                                    ProcessorRevision input_revision,
                                                    ProcessorRevision output_revision) {

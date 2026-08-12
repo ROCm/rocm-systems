@@ -111,8 +111,9 @@ public:
   /// @returns Vector of pointers to .text sections.
   const std::vector<const Section *> &text_sections() const { return text_sections_; }
 
-  /// @brief Runtime-loaded sections containing executable bytes.
-  /// @returns Sections carrying both SHF_ALLOC and SHF_EXECINSTR.
+  /// @brief Runtime-loaded ranges declared executable by ELF metadata.
+  /// @returns Sections carrying both SHF_ALLOC and SHF_EXECINSTR, including
+  ///          unmaterialized SHT_NOBITS ranges used for layout validation.
   const std::vector<const Section *> &allocated_executable_sections() const {
     return allocated_executable_sections_;
   }

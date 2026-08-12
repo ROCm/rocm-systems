@@ -49,9 +49,9 @@ Options:
   failure or byte difference makes the command fail. This option cannot be
   combined with `--skip-failed-kernels` or `--list-code-objects`.
 - `--verify-rewrite-discharge`: scan the final gfx1250 B0-to-A0 output with the
-  applicability checks registered by its implemented rewrites. The command
-  fails if any of those rewrites remains actionable. This option cannot
-  be combined with `--skip-failed-kernels` or `--list-code-objects`.
+  applicability checks owned by its opcode and operand rewrite registry. The
+  command fails if any registered rewrite remains actionable. This option
+  cannot be combined with `--skip-failed-kernels` or `--list-code-objects`.
 - `--list-code-objects`: list extractable code objects and exit.
 - `--help`: print command-line help.
 
@@ -102,8 +102,8 @@ intended to expose such instability while developing or auditing the translator.
 
 ## Rewrite-discharge Verification
 
-Use `--verify-rewrite-discharge` to check that the complete gfx1250 B0-to-A0
-translation discharged the applicability conditions of its implemented
+Use `--verify-rewrite-discharge` to check that gfx1250 B0-to-A0 translation
+discharged the applicability conditions of its registered opcode and operand
 rewrites:
 
 ```sh
@@ -124,6 +124,11 @@ verification. Every rule in an audited profile must explicitly register either
 a residual predicate and its required decode context, or a no-success contract;
 a no-success rule that later begins emitting output fails its registry contract
 instead of silently escaping verification.
+
+This is deliberately a registry-level guarantee. It does not certify separate
+pipeline augmentations that are not selected through the rewrite registry, such
+as WMMA completion-wait insertion; those remain covered by their existing
+implementation-specific tests.
 
 Translation and final verification require every runtime-loaded executable byte
 to reside in one `SHF_ALLOC | SHF_EXECINSTR` section named `.text`. Inputs with

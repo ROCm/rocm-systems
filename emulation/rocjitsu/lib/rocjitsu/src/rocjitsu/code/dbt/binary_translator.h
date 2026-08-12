@@ -134,7 +134,7 @@ struct BinaryTranslatorOptions {
   /// same code object are not blocked by one untranslated kernel.
   bool skip_failed_kernels = false;
 
-  /// @brief Opt in to an offline audit for implemented rewrites still actionable in final output.
+  /// @brief Audit registered rewrites that remain actionable in final output.
   ///
   /// @details The audit is available only for translation profiles with registered semantic or
   /// operand-level residual checks. Requesting it for any other profile produces an error
@@ -148,7 +148,7 @@ struct TranslatedCodeObject {
   rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID; ///< Host ISA architecture.
   std::vector<TranslationDiagnostic> diagnostics;        ///< Translation warnings/errors.
   bool rewrite_discharge_checked = false;                ///< Final output scan was attempted.
-  bool rewrite_discharge_verified = false; ///< No implemented rewrite remained actionable.
+  bool rewrite_discharge_verified = false; ///< No registered rewrite remained actionable.
 
   /// @brief True if translation produced no error diagnostics.
   ///
