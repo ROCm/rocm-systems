@@ -125,7 +125,7 @@ endif()
 set(CLI_DEPENDS
     rocprofv3-list-avail rocprofiler-sdk-tool rocprofiler-sdk-tool-kokkosp
     rocprofiler-sdk-shared-library rocprofiler-sdk-roctx-shared-library
-    rocprofiler-sdk-rocpd-shared-library)
+    rocprofiler-sdk-rocpd-shared-library transpose)
 add_custom_target(rocprofv3-avail-cli-dependencies)
 foreach(_TARGET IN LISTS CLI_DEPENDS)
     if(TARGET ${_TARGET})
@@ -141,7 +141,7 @@ rocprofiler_add_integration_validate_test(
     BUNDLE_TESTS
     ARGS --rocm-path ${rocprofiler-sdk_ROOT_DIR} --rocprofv3-avail
          $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> --rocprofv3
-         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -x
+         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --transpose $<TARGET_FILE:transpose>
     TIMEOUT 300
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"

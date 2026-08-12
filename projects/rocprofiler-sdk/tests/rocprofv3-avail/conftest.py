@@ -45,6 +45,12 @@ def pytest_addoption(parser):
         default=None,
         help="Path to the rocprofv3 executable",
     )
+    parser.addoption(
+        "--transpose",
+        action="store",
+        default=None,
+        help="Path to the transpose application used for the tracing case",
+    )
 
 
 @pytest.fixture
