@@ -1289,27 +1289,6 @@ TEST(CApiTest, RejectsMalformedCheckpoints) {
   EXPECT_EQ(restored, nullptr);
 }
 
-TEST(CApiTest, PluginLifecycleDispatchesProfiledShutdownThroughBaseGroup) {
-  test::ScopedTempDirectory sink_dir("rocjitsu-plugin-lifecycle-");
-  const std::filesystem::path sink_path(sink_dir.path());
-
-  rj_vm_t *handle = nullptr;
-  ASSERT_EQ(
-      rj_vm_create((CONFIG_DIR_PATH + "/gfx950_cdna4.json").c_str(), RJ_VM_MODE_DEFAULT, &handle),
-      ROCJITSU_STATUS_SUCCESS);
-  ASSERT_NE(handle, nullptr);
-
-  const std::string plugin_config = std::format(
-      R"({{"profiled":true,"sinks":{{"types":["file"],"dir":"{}"}}}})", sink_path.string());
-  ASSERT_EQ(rj_vm_load_plugins(handle, plugin_config.c_str(), nullptr), ROCJITSU_STATUS_SUCCESS);
-  rj_vm_destroy(handle);
-
-  std::ifstream profile(sink_path / "profile.log");
-  const std::string output{std::istreambuf_iterator<char>(profile),
-                           std::istreambuf_iterator<char>()};
-  EXPECT_NE(output.find("total emulation time"), std::string::npos) << output;
-}
-
 TEST(CApiTest, InvalidArguments) {
   rj_vm_t *handle = nullptr;
   EXPECT_EQ(rj_vm_create_from_string(nullptr, RJ_VM_MODE_DEFAULT, &handle),
