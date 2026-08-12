@@ -4,6 +4,9 @@ This document records every corpus case in each target's skip-list JSON,
 grouped by observed outcome. The JSON files are the source of truth for active
 CI skips, and their case sets match this document.
 
+**Suspected defects and timeout causes are tracked in
+[rocm-systems issue #9933](https://github.com/ROCm/rocm-systems/issues/9933).**
+
 Classification buckets:
 
 - **functional failure**: failed for a non-timeout reason, such as an incorrect result or segmentation fault.
