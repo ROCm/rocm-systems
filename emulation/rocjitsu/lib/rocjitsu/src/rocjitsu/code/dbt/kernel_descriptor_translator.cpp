@@ -76,7 +76,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return supports_wave_size<rdna3_5::Isa>(wf);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return supports_wave_size<rdna4::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return supports_wave_size<cdna5::Isa>(wf);
   default:
     return false;
@@ -103,7 +103,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return rdna3_5::Isa::WF_SIZE;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::Isa::WF_SIZE;
   default:
     return 64;
@@ -130,7 +130,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return rdna3_5::Isa::MAX_VGPRS_PER_WF;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     // gfx1250 extends each encoded VGPR operand with dynamic high-bank bits.
     // Descriptor validation must allow the complete addressable register
     // range even though its inherited RDNA base describes one 256-VGPR bank.
@@ -160,7 +160,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return HasAccVgpr<rdna3_5::Isa>;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return HasAccVgpr<rdna4::Isa>;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return HasAccVgpr<cdna5::Isa>;
   default:
     return false;
@@ -311,7 +311,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 }
 
 [[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) {
-  return arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250;
+  return arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 [[nodiscard]] std::optional<uint32_t>
@@ -833,7 +833,7 @@ Rsrc3Layout rsrc3_layout(rj_code_arch_t arch) {
     return Rsrc3Layout::Gfx11;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return Rsrc3Layout::Gfx120;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return Rsrc3Layout::Gfx125;
   default:
     return Rsrc3Layout::Incompatible;
