@@ -640,7 +640,8 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
         internal_putmem_wave(reinterpret_cast<void *>(&pWrk[off_send]),
           reinterpret_cast<void *>(&dst[off_send + off_seg]),
           chunk_size * sizeof(T), send_pe, send_pe, wf_info);
-
+      
+        fence();
         if (is_thread_zero_in_wave()) {
           qps[send_pe].quiet(wf_info);
           wait_val = seg + 100;
@@ -651,6 +652,7 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
       #endif /* __gfx90a__ */
           wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
         }
+        fence();
 
         if (iter < PE_size - 1) {
           for (int j = wf_tid; j < chunk_size; j += WF_SIZE) {
