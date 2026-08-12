@@ -334,12 +334,12 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
         return result;
     };
 
-    const RdmaResourceCounts before = readRdmaResourceCounts();
+    const RdmaResourceCounts before = CaptureRdmaResources();
     RunMultiThreadedIndependent(0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
         return runSendRecv(threadIdx, pair);
     });
     MPI_Barrier(MPI_COMM_WORLD);
-    AssertNoRdmaLeaks(before, readRdmaResourceCounts(), "threaded SimpleSendRecv");
+    AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded SimpleSendRecv");
 }
 
 TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
@@ -720,12 +720,12 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
         return result;
     };
 
-    const RdmaResourceCounts before = readRdmaResourceCounts();
+    const RdmaResourceCounts before = CaptureRdmaResources();
     RunMultiThreadedIndependent(0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
         return runSequentialTransfers(threadIdx, pair.sendComm, pair.recvComm);
     });
     MPI_Barrier(MPI_COMM_WORLD);
-    AssertNoRdmaLeaks(before, readRdmaResourceCounts(), "threaded MultipleSequentialTransfers");
+    AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded MultipleSequentialTransfers");
 }
 
 TEST_F(NetIbMPITest, LargeTransfer) {
