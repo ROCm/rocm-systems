@@ -199,7 +199,9 @@ HIP Record & Replay
 ===================
 
 HIP Record & Replay (HRR) captures HIP API traces into a binary archive and replays them on a live
-GPU for bug reproduction and validation.
+GPU for bug reproduction and validation. HRR captures every HIP API call made by an application into
+a binary archive (.hrr directory), then replays that archive against a live GPU to reproduce the
+original workload — including multi-threaded submission, graph execution, and GPU memory transfers. 
 
 As described in https://github.com/ROCm/rocm-systems/blob/develop/projects/clr/hipamd/src/hrr/README.md
 HRR allows you to capture and replay runtime operations of a HIP kernel, letting you replay the
