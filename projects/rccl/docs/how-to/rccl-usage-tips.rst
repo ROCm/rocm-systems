@@ -195,16 +195,14 @@ commands.
    amd-smi set --gpu all --compute-partition CPX
    amd-smi set --gpu all --memory-partition NPS4
 
-MI350X partition mode differences
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+MI350X/MI355X partition modes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Unlike the MI300X, the MI350X doesn't support NPS4 memory partitioning; it
-supports only NPS1 and NPS2. On the MI350X, CPX compute partitioning pairs
-with NPS2 memory partitioning instead of NPS4:
+For MI350X/MI355X, RCCL supports the DPX compute partitioning mode and the NPS2 memory partitioning mode.
 
 .. code-block:: shell
 
-   amd-smi set --gpu all --compute-partition CPX
+   amd-smi set --gpu all --compute-partition DPX
    amd-smi set --gpu all --memory-partition NPS2
 
 RCCL performance with CPX and NPS4 on MI300X
@@ -300,7 +298,7 @@ RCCL channel tuning for multi-node MI350X (ROCm 7.14 / RCCL 2.30.4)
 --------------------------------------------------------------------
 
 Starting with RCCL 2.30.4 (ROCm 7.14), the default number of communication
-channels for multi-node collectives on MI350X has been reduced from 64 to 48,
+channels for multi-node collectives on MI350X/MI355X in SPX mode has been reduced from 64 to 48,
 leaving additional Compute Units (CUs) free for compute kernels that run
 concurrently with communication. For computation-bound workloads that rely
 heavily on communication-computation overlap, staying with this default may
