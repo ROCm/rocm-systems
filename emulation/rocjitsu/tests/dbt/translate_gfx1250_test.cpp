@@ -2460,6 +2460,157 @@ TEST(BinaryTranslatorE2E, Gfx1250CompactConditionalLayoutIsIdempotent) {
   EXPECT_EQ(second.elf_bytes, result.elf_bytes);
 }
 
+// A sized FUNC symbol over a compiler long jump, translated twice, asserting the WHOLE ELF image
+// rather than just `.text` -- metadata drift is invisible to a text-only comparison.
+//
+// Scope warning, stated because the name would otherwise overclaim: this does NOT reproduce the
+// st_size overshoot fixed in binary_translator.cpp (block ends inside a preserved marked window
+// mapping to the running output size). That needs the symbol's extent to end exactly on the
+// window's consumer offset in the SECOND pass's view, which depends on where the first pass placed
+// the regenerated window -- not something this fixture can pin without hard-coding a layout. It
+// was verified against the fixture with the fix reverted and still passed. The overshoot is
+// currently covered only by --verify-idempotence on a large device image; a targeted case for it
+// is still missing.
+// An address-taken body is emitted once, as an adopted root, so a scope that does not own it must
+// not clone it -- cloning is what made re-translation diverge. That reasoning covers the INDIRECT
+// edges only. A direct s_call_b64 leaves a BranchFixup in the calling scope, and
+// patch_direct_branch_fixups() resolves it against that scope's own layout, so dropping the body
+// there makes the call unresolvable. Kernel 1 calls the helper directly; the pointer slot adopts it
+// into kernel 0's scope.
+TEST(BinaryTranslatorE2E, Gfx1250KeepsDirectlyCalledHelperThatIsAlsoAddressTaken) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  constexpr uint16_t kReturnSreg = 30;
+  const std::vector<uint32_t> words = {
+      kGfx1250SEndpgm, // word 0: kernel 0 entry
+      kGfx1250SNop,    // word 1: padding
+      rocjitsu::build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_GFX1250), // word 2: kernel 1
+      kGfx1250SEndpgm,                                                        // word 3
+      kGfx1250SNop,                                                           // word 4: helper
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),   // word 5: return
+  };
+
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
+      words, /*kernel1_entry_word=*/2, {{.offset_word = 4, .words = 2}});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  rocjitsu::BinaryTranslator verifier(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto second = verifier.translate(translated);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+  EXPECT_EQ(second.elf_bytes, result.elf_bytes);
+}
+
+// block_for_offset() answers with the block CONTAINING an offset, so a pointer naming the literal
+// word of a two-word instruction would otherwise be adopted as a function entry and seeded with the
+// ABI's entry VGPR_MSB state. Refusing is the only safe answer: there is no instruction boundary
+// there to relocate a body from.
+//
+// This pins the required behaviour, not the mechanism. The refusal here survives disabling
+// adopt()'s exact-start check, because a mid-instruction offset has no placement either way and
+// relocate_relative_text_addends() then fails. Isolating that check needs a unit test on adopt();
+// what this guards is that the object is never quietly accepted.
+TEST(BinaryTranslatorE2E, Gfx1250RefusesFunctionPointerIntoTheMiddleOfAnInstruction) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint16_t kPcSreg = 4;
+  constexpr uint16_t kGfx1250SAddNcU64Opcode = 83;
+  constexpr uint16_t kLiteralOperand = 255;
+  const std::vector<uint32_t> words = {
+      kGfx1250SEndpgm, // word 0: kernel entry
+      rocjitsu::build_sop2_encoding(ROCJITSU_CODE_ARCH_GFX1250, kGfx1250SAddNcU64Opcode, kPcSreg,
+                                    kPcSreg, kLiteralOperand), // word 1: two-word instruction
+      0x00000010u,                                             // word 2: its literal
+      kGfx1250SEndpgm,                                         // word 3
+  };
+
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      words, /*text_function_words=*/1, /*text_function_offset_words=*/2,
+      /*function_pointer_table_target_words=*/2);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok())
+      << "a pointer into the middle of an instruction must not be adopted as a function entry";
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250SizedFunctionSymbolEndingInsideMarkedWindowKeepsItsSize) {
+  constexpr uint16_t kPcSreg = 4;
+  constexpr uint16_t kGfx1250SAddNcU64Opcode = 83;
+  constexpr uint16_t kLiteralOperand = 255;
+  constexpr uint32_t kTargetOffset = 140000;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  // The leading nop must be the long-transfer marker, not a plain nop: only a marked window is
+  // preserved across a pass, and only a preserved window has interior offsets that emission
+  // skips. A plain nop makes the consumer compact instead, which never exercises the mapping.
+  std::vector<uint32_t> words = {
+      rocjitsu::build_s_nop(rocjitsu::kLongDirectBranchMarkerNopImmediate,
+                            ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_sop2_encoding(ROCJITSU_CODE_ARCH_GFX1250, kGfx1250SAddNcU64Opcode, kPcSreg,
+                                    kPcSreg, kLiteralOperand),
+      kTargetOffset - 2 * sizeof(uint32_t),
+      rocjitsu::build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  words.resize(kTargetOffset / sizeof(uint32_t),
+               rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
+  words.push_back(kGfx1250SEndpgm);
+
+  // Four words: the marker, the getpc, and its two-word delta add. The extent therefore ends
+  // exactly on the setpc -- strictly inside the window, which spans marker through consumer.
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      words, /*text_function_words=*/4, /*text_function_offset_words=*/0);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto first = translator.translate(source);
+  ASSERT_TRUE(first.ok()) << (first.diagnostics.empty() ? "" : first.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(first.elf_bytes.data(), first.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  rocjitsu::BinaryTranslator verifier(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto second = verifier.translate(translated);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+
+  // The window is regenerated at its reserved size, so the symbol keeps its four words. Mapping
+  // the extent to kernel_text.size() instead would report the whole window and round st_size up.
+  const auto first_symbol = rocjitsu::test_support::find_elf_symbol_for_test(first.elf_bytes, "kernel");
+  ASSERT_TRUE(first_symbol.has_value());
+  EXPECT_EQ(first_symbol->st_size, 4 * sizeof(uint32_t));
+  const auto second_symbol = rocjitsu::test_support::find_elf_symbol_for_test(second.elf_bytes, "kernel");
+  ASSERT_TRUE(second_symbol.has_value());
+  EXPECT_EQ(second_symbol->st_size, first_symbol->st_size);
+
+  EXPECT_EQ(second.elf_bytes, first.elf_bytes);
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250CompilerLongJumpCompactsIdempotentlyAfterPaddingNop) {
   constexpr uint16_t kPcSreg = 4;
   constexpr uint16_t kGfx1250SAddNcU64Opcode = 83;
@@ -6007,7 +6158,17 @@ TEST(BinaryTranslatorE2E, PatchesRecoveredSetpcTargetAfterRelocation) {
   // and grows only if final placement requires the canonical long form.
   EXPECT_EQ(target_words[0], build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[1], build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand));
-  EXPECT_EQ(target_words[2], kOriginalGetpcDelta);
+  // The consumer became a branch window, leaving this builder dead -- and the compaction that
+  // drops the unreachable word has to move its delta with it. Pinning the SOURCE delta, as this
+  // test once did, asserted a builder measured against the pre-relocation layout: unreachable at
+  // runtime, but on a re-translation indistinguishable from a live producer of an unrelocated code
+  // address.
+  constexpr uint32_t kRelocatedGetpcDelta =
+      5 * sizeof(uint32_t) - /*the getpc leaves the address of the next instruction=*/
+      sizeof(uint32_t);
+  static_assert(kRelocatedGetpcDelta != kOriginalGetpcDelta,
+                "compaction must actually move the target, or this assertion proves nothing");
+  EXPECT_EQ(target_words[2], kRelocatedGetpcDelta);
   EXPECT_EQ(target_words[3], build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0));
   EXPECT_EQ(target_words[4], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[5], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
@@ -6046,7 +6207,17 @@ TEST(BinaryTranslatorE2E, PatchesRecoveredSwappcTargetAfterRelocation) {
   ASSERT_GE(translated.text_sections()[0]->size(), 6 * sizeof(uint32_t));
   EXPECT_EQ(target_words[0], build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[1], build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand));
-  EXPECT_EQ(target_words[2], kOriginalGetpcDelta);
+  // The consumer became a call window, leaving this builder dead -- and the same compaction that
+  // moves the target has to move its delta with it. Pinning the SOURCE delta here, as this test
+  // once did, asserted a builder still measured against the pre-relocation layout: unreachable at
+  // runtime, but on a re-translation indistinguishable from a live producer of an unrelocated code
+  // address, which is a code object whose translation is not a fixed point.
+  constexpr uint32_t kRelocatedGetpcDelta =
+      5 * sizeof(uint32_t) - /*the getpc leaves the address of the next instruction=*/
+      sizeof(uint32_t);
+  static_assert(kRelocatedGetpcDelta != kOriginalGetpcDelta,
+                "compaction must actually move the target, or this assertion proves nothing");
+  EXPECT_EQ(target_words[2], kRelocatedGetpcDelta);
   EXPECT_EQ(target_words[3], build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0));
   // The target is non-returning, so relocation drops the dead continuation
   // and compacts the target immediately after the call.
@@ -6203,12 +6374,25 @@ TEST(BinaryTranslatorE2E, TranslatesSwappcCallWhenCalleeSetpcBranchesToReturn) {
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   ASSERT_GE(translated.text_sections()[0]->size(), 12 * sizeof(uint32_t));
   EXPECT_EQ(target_words[0], build_s_getpc_b64(kCallTargetSreg, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[2], kOriginalCallTargetDelta);
+  // Both consumers became transfer windows, so both builders are dead -- but each must still name
+  // the instruction it originally named, at that instruction's relocated home. The source builders
+  // point at the callee entry (0x20) and at the return setpc (0x38); compaction drops the
+  // unreachable words between them, landing those at target words 6 and 11. Asserting the SOURCE
+  // deltas here, as this test once did, pinned builders measured against the pre-relocation layout
+  // -- unreachable at runtime, yet on a re-translation indistinguishable from live producers of
+  // unrelocated code addresses, which is a code object whose translation is not a fixed point.
+  constexpr uint32_t kWordBytes = sizeof(uint32_t);
+  constexpr uint32_t kRelocatedCallTargetDelta = (6 - 1) * kWordBytes;
+  constexpr uint32_t kRelocatedReturnTargetDelta = (11 - 7) * kWordBytes;
+  static_assert(kRelocatedCallTargetDelta != kOriginalCallTargetDelta &&
+                    kRelocatedReturnTargetDelta != kOriginalReturnTargetDelta,
+                "compaction must actually move both targets, or these assertions prove nothing");
+  EXPECT_EQ(target_words[2], kRelocatedCallTargetDelta);
   EXPECT_EQ(target_words[4], build_s_call_b64(kReturnSreg, 1))
       << "the swappc call window should patch directly to the compact callee body";
   EXPECT_EQ(target_words[5], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[6], build_s_getpc_b64(kReturnTargetSreg, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[8], kOriginalReturnTargetDelta);
+  EXPECT_EQ(target_words[8], kRelocatedReturnTargetDelta);
   EXPECT_EQ(target_words[10], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3))
       << "the callee's recovered setpc window is what reaches the return block";
   EXPECT_EQ(target_words[11], build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA3));
@@ -6247,7 +6431,19 @@ TEST(BinaryTranslatorE2E, PatchesOneRecoveredBuilderUsedByTwoSetpcConsumers) {
   ASSERT_GE(translated.text_sections()[0]->size(), 8 * sizeof(uint32_t));
   EXPECT_EQ(target_words[0], build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[1], build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand));
-  EXPECT_EQ(target_words[2], kOriginalGetpcDelta);
+  // Both consumers became direct-transfer windows, which leaves this builder dead -- but dead is
+  // not the same as free to be wrong. The unreachable gap at source 0x1c is dropped by compaction,
+  // so the shared target moves from source 0x20 to target word 7 and the delta from the
+  // instruction after the getpc must follow it. Asserting the SOURCE delta here, as this test once
+  // did, pinned a builder still measured against the pre-relocation layout: harmless to run, since
+  // the windows supersede it, but indistinguishable on a re-translation from a live producer of an
+  // unrelocated code address, and so a code object whose translation is not a fixed point.
+  constexpr uint32_t kRelocatedGetpcDelta =
+      7 * sizeof(uint32_t) - /*the getpc leaves the address of the next instruction=*/
+      sizeof(uint32_t);
+  static_assert(kRelocatedGetpcDelta != kOriginalGetpcDelta,
+                "compaction must actually move the target, or this assertion proves nothing");
+  EXPECT_EQ(target_words[2], kRelocatedGetpcDelta);
   EXPECT_EQ(target_words[3], build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0));
   EXPECT_EQ(target_words[4], cdna3::build_sopp(cdna3::kSCbranchScc1Sopp, {.simm16 = 1})[0]);
   EXPECT_EQ(target_words[5], rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3));
@@ -9297,13 +9493,14 @@ TEST(BinaryTranslatorE2E, Gfx1250AdoptsDeviceFunctionBodyReachedByNoScope) {
   EXPECT_EQ(text_words_at_relative64_addend(result.elf_bytes, 2),
             (std::vector<uint32_t>{kGfx1250SNop, kGfx1250SEndpgm}));
 }
-// The same shape with the pointer array's own symbol stripped. Adoption is driven by the
-// discovered function tables, and discovery needs a qualifying `STT_OBJECT` around the slot, so a
-// compiler-anonymous pointer array names no adoptable body. That boundary is pinned here rather
-// than left unstated: the body is still dropped, its addend still has nowhere to point, and
-// replace_text() still refuses the object -- the behavior that predates adoption. Widening it
-// needs reachability asked of the raw relocations rather than of the tables.
-TEST(BinaryTranslatorE2E, Gfx1250RefusesDeviceFunctionBodyHeldByAnUnnamedPointerSlot) {
+// The same shape with the pointer array's own symbol stripped, which is what a compiler-anonymous
+// pointer array looks like. Adoption asks the raw `R_AMDGPU_RELATIVE64` relocations which bodies
+// are address-taken, not just the function tables discovery can name, so the slot still names an
+// adoptable body even though no `STT_OBJECT` wraps it. The table assertion below is what keeps
+// this distinct from the test above: it proves the adoption came from the relocation rather than
+// from table discovery. A separately compiled device library reaches most of its functions exactly
+// this way, so refusing here would refuse every such object.
+TEST(BinaryTranslatorE2E, Gfx1250AdoptsDeviceFunctionBodyHeldByAnUnnamedPointerSlot) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr uint32_t kGfx1250SNop = 0xBF800000u;
   const std::vector<uint32_t> words = {
@@ -9325,8 +9522,51 @@ TEST(BinaryTranslatorE2E, Gfx1250RefusesDeviceFunctionBodyHeldByAnUnnamedPointer
                                rocjitsu::ProcessorRevision::Gfx1250A0));
   const auto result = translator.translate(source);
 
-  EXPECT_FALSE(result.ok());
-  EXPECT_EQ(result.elf_bytes, image);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  ASSERT_TRUE(result.dispatchable());
+  EXPECT_NE(result.elf_bytes, image);
+  // Accepting the object is not the property worth pinning -- landing the pointer on the right
+  // bytes is. The addend must name the adopted body, not whatever now occupies its original range.
+  EXPECT_EQ(text_words_at_relative64_addend(result.elf_bytes, 2),
+            (std::vector<uint32_t>{kGfx1250SNop, kGfx1250SEndpgm}));
+}
+
+// An unprovable call through a pointer, in an object whose only code-address producer is an
+// anonymous RELATIVE64 slot. This reaches the producer gate guarding the relocated-by-construction
+// permission: with no discovered table and no getpc builder the object used to look producerless,
+// so the unresolved s_swap_pc_i64 took the rejection path even though the addend naming its callee
+// is discovered, adopted and relocated here. A separately compiled device library is this shape.
+TEST(BinaryTranslatorE2E, Gfx1250AllowsUnprovableCallWhenOnlyProducerIsAnAnonymousPointerSlot) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kGfx1250SNop = 0xBF800000u;
+  // s_swap_pc_i64 s[30:31], s[0:1]. Nothing writes s[0:1], so recovery cannot name a target and
+  // the consumer stays unresolved, which is the only way to reach the gate.
+  constexpr uint32_t kGfx1250SwapPcS30FromS0 = 0xBE9E4900u;
+  const std::vector<uint32_t> words = {
+      kGfx1250SwapPcS30FromS0, kGfx1250SEndpgm, kGfx1250SNop, kGfx1250SNop, kGfx1250SEndpgm,
+  };
+
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      words, /*text_function_words=*/2, /*text_function_offset_words=*/3,
+      /*function_pointer_table_target_words=*/3,
+      /*name_function_pointer_table_with_symbol=*/false);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_TRUE(rocjitsu::discover_relocation_function_tables(source).empty())
+      << "the slot must stay anonymous, or the producer comes from table discovery instead";
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  ASSERT_TRUE(result.dispatchable());
+  EXPECT_EQ(text_words_at_relative64_addend(result.elf_bytes, 2),
+            (std::vector<uint32_t>{kGfx1250SNop, kGfx1250SEndpgm}));
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataRangeBoundsAfterRelocation) {
@@ -12240,7 +12480,7 @@ TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteKeepsTheXcntDrain) {
 TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteOmitsAnUnneededXcntDrain) {
   constexpr uint64_t kWord = sizeof(uint32_t);
   constexpr uint16_t kPcSreg = 8;
-  constexpr uint16_t kLiteralOperand = 255;
+  constexpr uint16_t kLiteral64Operand = 254;
   std::vector<uint8_t> text(8 * kWord, 0);
   rocjitsu::KernelTextLayout layout;
   layout.body_end = text.size();
@@ -12260,10 +12500,14 @@ TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteOmitsAnUnneededXcntDrain
       rocjitsu::patch_recovered_builder_fixups(text, layout, ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(patched.ok) << patched.message;
 
+  // The point of this case is that no XCNT drain precedes the add -- the first word of the range
+  // is the add itself. The literal width is incidental to that, but it is asserted exactly rather
+  // than loosely: the rewrite deliberately emits the literal64 form so the relocation lattice,
+  // which models only that encoding, can still see this builder on a later translation pass.
   uint32_t first = 0;
   std::memcpy(&first, text.data() + kWord, sizeof(first));
   EXPECT_EQ(first, rocjitsu::build_sop2_encoding(ROCJITSU_CODE_ARCH_GFX1250, cdna5::kSAddNcU64Sop2,
-                                                 kPcSreg, kPcSreg, kLiteralOperand));
+                                                 kPcSreg, kPcSreg, kLiteral64Operand));
 }
 
 TEST(BinaryTranslatorE2E, RecoveredBuilderReuseRejectsDisagreeingXcntDrain) {

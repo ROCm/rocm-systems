@@ -144,4 +144,39 @@ analyze_relocation_pairs(std::span<const std::unique_ptr<BasicBlock>> blocks,
 [[nodiscard]] std::vector<RelocationFunctionTable>
 discover_relocation_function_tables(const AmdGpuCodeObject &object);
 
+/// @brief `.text`-relative offsets of every sized `STT_FUNC` symbol in the code object.
+///
+/// @details These are function entries, which makes them block leaders. A separately compiled
+/// device library reaches most of its functions only through a pointer, so nothing in the decoded
+/// instruction stream names them and CFG construction would otherwise let the padding before such
+/// a function fall through into its body -- leaving the entry in the middle of a block, where it
+/// cannot be adopted as a root or seeded with the ABI's architectural entry state.
+///
+/// Like the relocation tables above, and unlike anything derived from recovered dataflow, this set
+/// is a fixed property of the input: the same symbols are found whether or not the object has
+/// already been translated, so using it to partition `.text` stays a fixed point.
+///
+/// @returns Sorted, unique offsets. Empty when the object has no symbol table, more than one
+/// `.text`, or no qualifying symbol.
+[[nodiscard]] std::vector<uint64_t>
+discover_text_function_symbol_offsets(const AmdGpuCodeObject &object);
+
+/// @brief Function entries named by an `R_AMDGPU_RELATIVE64` addend landing in `.text`.
+///
+/// @details Each such addend is a stored function pointer, so its target is an address-taken body
+/// that must be emitted and whose new placement the addend is rewritten to. discover_relocation_
+/// function_tables() finds only the subset held by a qualifying `STT_OBJECT`; a compiler-anonymous
+/// pointer array carries no such symbol, and its targets are just as dereferenced. Addends are ELF
+/// data, so like symbols they are a fixed property of the input and safe to partition `.text` by.
+///
+/// @param function_entry_offsets Sorted function-entry offsets, from
+///        discover_text_function_symbol_offsets(). A target is reported only when it is one of
+///        these. Callers make every target a block leader and an adopted root seeded with the
+///        ABI's entry state, which is only meaningful at a function boundary, so an addend that
+///        names a mid-function label is omitted instead of guessed at -- leaving it unadopted, and
+///        its object refused by relocate_relative_text_addends().
+[[nodiscard]] std::vector<uint64_t>
+discover_relative_text_addend_targets(const AmdGpuCodeObject &object,
+                                      std::span<const uint64_t> function_entry_offsets);
+
 } // namespace rocjitsu

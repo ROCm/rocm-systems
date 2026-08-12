@@ -263,7 +263,165 @@ void run_pair_dataflow(std::span<const std::unique_ptr<BasicBlock>> blocks,
                        std::vector<RelocationTableDispatch> *dispatches,
                        std::vector<PcRelativeAddressBuilder> *address_builders);
 
+/// @brief Whether @p vaddr falls inside a section the loader maps.
+///
+/// @details `SHT_NOBITS` still counts: `.bss` occupies no file bytes but is allocated and
+/// writable at run time, so a relocation destined there is a real stored pointer.
+[[nodiscard]] bool vaddr_in_allocated_section(std::span<const Elf64_Shdr> sections,
+                                              uint64_t vaddr) {
+  for (const Elf64_Shdr &section : sections) {
+    if ((section.sh_flags & SHF_ALLOC) == 0 || section.sh_size == 0)
+      continue;
+    if (vaddr >= section.sh_addr && vaddr - section.sh_addr < section.sh_size)
+      return true;
+  }
+  return false;
+}
+
+/// @brief Section-header index of the code object's single `.text`.
+///
+/// @details Symbol values are only interpretable against the section a symbol belongs to, so every
+/// symbol walk here needs the index to compare `st_shndx` against. The section header table is the
+/// authority: match the header whose file offset, address and size are all the ones the parsed
+/// `.text` reports.
+[[nodiscard]] std::optional<size_t> text_section_index(std::span<const Elf64_Shdr> sections,
+                                                       const Section &text) {
+  for (size_t index = 0; index < sections.size(); ++index) {
+    const Elf64_Shdr &section = sections[index];
+    if (section.sh_offset == text.sectionOffset() && section.sh_addr == text.vaddr() &&
+        section.sh_size == text.size())
+      return index;
+  }
+  return std::nullopt;
+}
+
 } // namespace
+
+std::vector<uint64_t> discover_text_function_symbol_offsets(const AmdGpuCodeObject &object) {
+  const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
+  const std::span<const uint8_t> image(bytes, object.image_size());
+  Elf64_Ehdr ehdr{};
+  if (!read_object(image, 0, ehdr) || ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
+      !range_in_image(image, ehdr.e_shoff,
+                      static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr)))
+    return {};
+
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+
+  if (object.text_sections().size() != 1)
+    return {};
+  const Section &text = *object.text_sections().front();
+  const uint64_t text_vaddr = text.vaddr();
+  const uint64_t text_size = text.size();
+  // Without the section index a symbol value cannot be interpreted. Refuse to guess: returning
+  // nothing costs the caller its extra split points, while guessing would invent them.
+  const auto text_index = text_section_index(sections, text);
+  if (!text_index)
+    return {};
+
+  std::vector<uint64_t> offsets;
+  for (const Elf64_Shdr &symtab : sections) {
+    if ((symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) ||
+        symtab.sh_entsize != sizeof(Elf64_Sym) ||
+        !range_in_image(image, symtab.sh_offset, symtab.sh_size))
+      continue;
+    const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Sym symbol{};
+      if (!read_object(image, symtab.sh_offset + index * sizeof(Elf64_Sym), symbol))
+        continue;
+      if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeFunc || symbol.st_size == 0)
+        continue;
+      // The symbol has to belong to `.text` before its value means anything here. This is what
+      // makes the ET_REL branch below safe: st_value is section-relative there, so a sized
+      // function in some other section would otherwise be read as an offset near the start of
+      // `.text` and split a real block. SHN_UNDEF and the other reserved indices are excluded by
+      // the same test, since none of them equal the text index.
+      if (symbol.st_shndx != *text_index)
+        continue;
+      // ET_REL symbol values are already section-relative; every other kind is a virtual address.
+      uint64_t offset = symbol.st_value;
+      if (ehdr.e_type != ET_REL) {
+        if (symbol.st_value < text_vaddr)
+          continue;
+        offset = symbol.st_value - text_vaddr;
+      }
+      if (offset >= text_size || (offset % sizeof(uint32_t)) != 0)
+        continue;
+      offsets.push_back(offset);
+    }
+  }
+  std::ranges::sort(offsets);
+  offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
+  return offsets;
+}
+
+std::vector<uint64_t>
+discover_relative_text_addend_targets(const AmdGpuCodeObject &object,
+                                      std::span<const uint64_t> function_entry_offsets) {
+  const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
+  const std::span<const uint8_t> image(bytes, object.image_size());
+  Elf64_Ehdr ehdr{};
+  if (!read_object(image, 0, ehdr) || ehdr.e_type != ET_DYN ||
+      ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
+      !range_in_image(image, ehdr.e_shoff,
+                      static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr)))
+    return {};
+
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+
+  if (object.text_sections().size() != 1)
+    return {};
+  const Section &text = *object.text_sections().front();
+  const uint64_t text_vaddr = text.vaddr();
+  const uint64_t text_size = text.size();
+
+  std::vector<uint64_t> targets;
+  for (const Elf64_Shdr &relocs : sections) {
+    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        !range_in_image(image, relocs.sh_offset, relocs.sh_size))
+      continue;
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Rela rela{};
+      if (!read_object(image, relocs.sh_offset + index * sizeof(Elf64_Rela), rela))
+        continue;
+      // RELATIVE64 is the symbol-less form: the loader stores load_bias + r_addend, so a nonzero
+      // symbol index means some other relocation kind that reuses the type number, not a stored
+      // pointer whose value this pass can predict.
+      if (elf_reloc_type(rela.r_info) != R_AMDGPU_RELATIVE64 || elf_reloc_sym(rela.r_info) != 0 ||
+          rela.r_addend < 0)
+        continue;
+      // The destination has to be memory the loader actually writes. A relocation carried only by
+      // non-loaded metadata never produces a runtime code pointer, so admitting it would let the
+      // code-address audit believe a dynamic transfer is accounted for when nothing holds its
+      // target -- exactly the claim that permits an otherwise unresolved indirect branch.
+      if (!vaddr_in_allocated_section(sections, rela.r_offset))
+        continue;
+      const auto addend = static_cast<uint64_t>(rela.r_addend);
+      if (addend < text_vaddr)
+        continue;
+      const uint64_t offset = addend - text_vaddr;
+      if (offset >= text_size || (offset % sizeof(uint32_t)) != 0)
+        continue;
+      // Only a function entry may be reported. Callers turn each target into a block leader and an
+      // adopted root, and an adopted root is seeded with the ABI's architectural entry state --
+      // both of which are claims about a function boundary, and neither of which is true of a
+      // mid-function label a pointer happens to name. A target with no sized STT_FUNC symbol at
+      // exactly that offset is therefore left out rather than guessed at, which keeps it
+      // unadopted; relocate_relative_text_addends() then finds no placement for its addend and
+      // refuses the object, which is the conservative outcome.
+      if (!std::ranges::binary_search(function_entry_offsets, offset))
+        continue;
+      targets.push_back(offset);
+    }
+  }
+  std::ranges::sort(targets);
+  targets.erase(std::ranges::unique(targets).begin(), targets.end());
+  return targets;
+}
 
 std::vector<RelocationFunctionTable>
 discover_relocation_function_tables(const AmdGpuCodeObject &object) {
