@@ -50,8 +50,12 @@ handling continues to work.
 - A WSL2 Ubuntu distribution.
 - The `dxgkrnl` module present in the guest (verify with
   `ls /sys/module/dxgkrnl`).
+- `librocdxg.so.1` installed and resolvable via `dlopen` (the WSL backend
+  loads it at `amdsmi_init()`; without it, calls return
+  `AMDSMI_STATUS_DRIVER_NOT_LOADED`).
 - `libdxcore.so`, provided by the WSL installation
-  (`/usr/lib/wsl/lib/libdxcore.so`).
+  (`/usr/lib/wsl/lib/libdxcore.so`) — a transitive dependency of
+  `librocdxg`, not something you need to install directly.
 
 ## Building with the WSL backend
 

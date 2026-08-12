@@ -8,9 +8,16 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
  */
 
 #ifdef ENABLE_WSL_BACKEND
@@ -74,32 +81,6 @@ static void copy_string(char* dst, const std::string& src) {
 }
 
 #ifdef AMDSMI_HAS_ROCDXG_SMI
-static amdsmi_status_t rocdxg_to_amdsmi_status(HSAKMT_STATUS status) {
-  switch (status) {
-    case HSAKMT_STATUS_SUCCESS:
-      return AMDSMI_STATUS_SUCCESS;
-    case HSAKMT_STATUS_INVALID_PARAMETER:
-    case HSAKMT_STATUS_INVALID_HANDLE:
-    case HSAKMT_STATUS_INVALID_NODE_UNIT:
-      return AMDSMI_STATUS_INVAL;
-    case HSAKMT_STATUS_NO_MEMORY:
-      return AMDSMI_STATUS_OUT_OF_RESOURCES;
-    case HSAKMT_STATUS_BUFFER_TOO_SMALL:
-      return AMDSMI_STATUS_INSUFFICIENT_SIZE;
-    case HSAKMT_STATUS_NOT_IMPLEMENTED:
-      return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
-    case HSAKMT_STATUS_NOT_SUPPORTED:
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-    case HSAKMT_STATUS_UNAVAILABLE:
-      return AMDSMI_STATUS_SETTING_UNAVAILABLE;
-    case HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED:
-    case HSAKMT_STATUS_KERNEL_COMMUNICATION_ERROR:
-      return AMDSMI_STATUS_DRIVER_NOT_LOADED;
-    default:
-      return AMDSMI_STATUS_API_FAILED;
-  }
-}
-
 static void copy_rocdxg_string(char* dst, const char* src) {
   if (dst == nullptr) return;
   std::memset(dst, 0, AMDSMI_MAX_STRING_LENGTH);
@@ -312,7 +293,7 @@ amdsmi_status_t WSLGPUBackend::Shutdown() {
 amdsmi_status_t WSLGPUBackend::load_device_info() const {
   std::call_once(device_info_once_, [this]() {
     HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_device_info(node_id_, &device_info_);
-    device_info_status_ = rocdxg_to_amdsmi_status(hstatus);
+    device_info_status_ = hsakmt_to_amdsmi(hstatus);
   });
   return device_info_status_;
 }
@@ -444,7 +425,7 @@ amdsmi_status_t WSLGPUBackend::GetMemoryUsage(amdsmi_memory_type_t mem_type, uin
     *used = usage.vram_used_mb * 1024 * 1024;
     return AMDSMI_STATUS_SUCCESS;
   }
-  return rocdxg_to_amdsmi_status(hstatus);
+  return hsakmt_to_amdsmi(hstatus);
 #else
   (void)mem_type;
   return AMDSMI_STATUS_NOT_SUPPORTED;
@@ -458,7 +439,7 @@ amdsmi_status_t WSLGPUBackend::GetTempMetric(amdsmi_temperature_type_t sensor_ty
 #ifdef AMDSMI_HAS_ROCDXG_SMI
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_temperature(
       node_id_, static_cast<uint32_t>(sensor_type), static_cast<uint32_t>(metric), temperature);
-  return rocdxg_to_amdsmi_status(hstatus);
+  return hsakmt_to_amdsmi(hstatus);
 #else
   (void)sensor_type;
   (void)metric;
@@ -475,7 +456,7 @@ amdsmi_status_t WSLGPUBackend::GetVoltMetric(amdsmi_voltage_type_t sensor_type,
   if (voltage == nullptr) return AMDSMI_STATUS_INVAL;
   rocdxg_smi_power_info_t power = {};
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_power_info(node_id_, &power);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+  if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   *voltage = power.gfx_voltage;
   return AMDSMI_STATUS_SUCCESS;
 #else
@@ -500,7 +481,7 @@ amdsmi_status_t WSLGPUBackend::GetPowerInfo(amdsmi_power_info_t* info) {
 #ifdef AMDSMI_HAS_ROCDXG_SMI
   rocdxg_smi_power_info_t power = {};
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_power_info(node_id_, &power);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+  if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   info->current_socket_power = power.current_socket_power;
   info->average_socket_power = power.current_socket_power;
   info->socket_power = power.current_socket_power;
@@ -519,7 +500,7 @@ amdsmi_status_t WSLGPUBackend::GetBusyPercent(uint32_t* gpu_busy_percent) {
 #ifdef AMDSMI_HAS_ROCDXG_SMI
   rocdxg_smi_gpu_metrics_info_t metrics = {};
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_gpu_metrics_info(node_id_, &metrics);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+  if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   *gpu_busy_percent = metrics.average_gfx_activity;
   return AMDSMI_STATUS_SUCCESS;
 #else
@@ -532,7 +513,7 @@ amdsmi_status_t WSLGPUBackend::GetGpuActivity(amdsmi_engine_usage_t* info) {
 #ifdef AMDSMI_HAS_ROCDXG_SMI
   rocdxg_smi_gpu_metrics_info_t metrics = {};
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_gpu_metrics_info(node_id_, &metrics);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+  if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   std::memset(info, 0, sizeof(*info));
   info->gfx_activity = metrics.average_gfx_activity;
   info->umc_activity = metrics.average_umc_activity;
@@ -548,7 +529,7 @@ amdsmi_status_t WSLGPUBackend::GetClockInfo(amdsmi_clk_type_t clk_type, amdsmi_c
   rocdxg_smi_clock_info_t rocdxg_info = {};
   HSAKMT_STATUS hstatus =
       g_wsl_syms.rocdxg_smi_get_clock_info(node_id_, static_cast<uint32_t>(clk_type), &rocdxg_info);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+  if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   std::memset(info, 0, sizeof(*info));
   info->clk = rocdxg_info.clk;
   info->min_clk = rocdxg_info.min_clk;
@@ -567,7 +548,7 @@ amdsmi_status_t WSLGPUBackend::GetPcieInfo(amdsmi_pcie_info_t* info) {
 #ifdef AMDSMI_HAS_ROCDXG_SMI
   rocdxg_smi_pcie_info_t rocdxg_info = {};
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_pcie_info(node_id_, &rocdxg_info);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+  if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   std::memset(info, 0, sizeof(*info));
   info->pcie_static.max_pcie_width = rocdxg_info.max_pcie_width;
   info->pcie_static.max_pcie_speed = rocdxg_info.max_pcie_speed;
@@ -626,8 +607,10 @@ amdsmi_status_t WSLGPUBackend::GetGpuCacheInfo(amdsmi_gpu_cache_info_t* info) {
   amdsmi_status_t r = load_device_info();
   if (r != AMDSMI_STATUS_SUCCESS) return r;
   const auto& c = device_info_.cache;
+  static_assert(ROCDXG_SMI_MAX_CACHE_TYPES <= AMDSMI_MAX_CACHE_TYPES,
+                "rocdxg cache array no longer fits amdsmi's cache array");
   info->num_cache_types =
-      std::min(c.num_cache_types, static_cast<uint32_t>(AMDSMI_MAX_CACHE_TYPES));
+      std::min(c.num_cache_types, static_cast<uint32_t>(ROCDXG_SMI_MAX_CACHE_TYPES));
   for (uint32_t i = 0; i < info->num_cache_types; ++i) {
     info->cache[i].cache_size = c.cache[i].cache_size_kb;
     info->cache[i].cache_level = c.cache[i].cache_level;
@@ -648,7 +631,9 @@ amdsmi_status_t WSLGPUBackend::GetFwInfo(amdsmi_fw_info_t* info) {
   amdsmi_status_t r = load_device_info();
   if (r != AMDSMI_STATUS_SUCCESS) return r;
   const auto& fw = device_info_.fw;
-  info->num_fw_info = std::min(fw.num_fw_info, static_cast<uint32_t>(AMDSMI_FW_ID__MAX));
+  const uint32_t src_max =
+      std::min(fw.num_fw_info, static_cast<uint32_t>(ROCDXG_SMI_MAX_FW_ENTRIES));
+  info->num_fw_info = std::min(src_max, static_cast<uint32_t>(AMDSMI_FW_ID__MAX));
   for (uint32_t i = 0; i < info->num_fw_info; ++i) {
     info->fw_info_list[i].fw_id = static_cast<amdsmi_fw_block_t>(fw.entries[i].fw_id);
     info->fw_info_list[i].fw_version = fw.entries[i].fw_version;
@@ -668,7 +653,7 @@ amdsmi_status_t WSLGPUBackend::GetFanSpeed(uint32_t /* sensor_ind */, int64_t* s
 #ifdef AMDSMI_HAS_ROCDXG_SMI
   rocdxg_smi_gpu_metrics_info_t metrics = {};
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_gpu_metrics_info(node_id_, &metrics);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+  if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   *speed = static_cast<int64_t>(metrics.current_fan_speed_percent);
   return AMDSMI_STATUS_SUCCESS;
 #else
@@ -703,7 +688,7 @@ amdsmi_status_t WSLGPUBackend::GetGpuMetricsInfo(amdsmi_gpu_metrics_t* info) {
 #ifdef AMDSMI_HAS_ROCDXG_SMI
   rocdxg_smi_gpu_metrics_info_t metrics = {};
   HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_gpu_metrics_info(node_id_, &metrics);
-  if (hstatus != HSAKMT_STATUS_SUCCESS) return rocdxg_to_amdsmi_status(hstatus);
+  if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
 
   // rocdxg temperatures are in degrees C (uint32_t); amdsmi_gpu_metrics_t uses uint16_t degrees C.
   info->temperature_edge = static_cast<uint16_t>(metrics.temperature_edge);

@@ -1722,7 +1722,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
 #ifdef ENABLE_WSL_BACKEND
   if (gpu_device->backend()) {
     uint64_t used = 0, total = 0;
-    amdsmi_status_t r = gpu_device->backend()->GetMemoryUsage(AMDSMI_MEM_TYPE_VRAM, &used);
+    r = gpu_device->backend()->GetMemoryUsage(AMDSMI_MEM_TYPE_VRAM, &used);
     if (r != AMDSMI_STATUS_SUCCESS) return r;
     r = gpu_device->backend()->GetMemoryTotal(AMDSMI_MEM_TYPE_VRAM, &total);
     if (r != AMDSMI_STATUS_SUCCESS) return r;

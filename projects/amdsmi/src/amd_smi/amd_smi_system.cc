@@ -51,7 +51,6 @@
 #include "rocm_smi/rocm_smi_logger.h"
 
 namespace amd::smi {
-namespace {}  // namespace
 
 AMDSmiSystem& AMDSmiSystem::getInstance() {
   static AMDSmiSystem instance;
@@ -380,6 +379,8 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
     return amd::smi::rsmi_to_amdsmi_status(ret);
   }
 
+  // The init of libdrm depends on rsmi_init
+  // libdrm is optional, ignore the error even if init fail.
   amdsmi_status_t amd_smi_status = drm_.init();
 
   uint32_t device_count = 0;

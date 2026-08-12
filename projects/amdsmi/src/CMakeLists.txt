@@ -173,7 +173,7 @@ function(amdsmi_configure_common_target _TARGET)
     )
 
     if(ENABLE_WSL_BACKEND)
-        target_compile_definitions(${_TARGET} PRIVATE ENABLE_WSL_BACKEND AMDSMI_ENABLE_WSL_BACKEND)
+        target_compile_definitions(${_TARGET} PRIVATE ENABLE_WSL_BACKEND)
         target_include_directories(${_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include)
     endif()
 
