@@ -309,9 +309,9 @@ class CodeGenerator:
         # _fieldless_canonical_value).
         self._fieldless_canon_cache: dict[str, int] | None = None
         self._emitter = _SemanticEmitter(isa_spec, semantics)
-        # Split profiles assign a dense, generation-local ID to every concrete
-        # instruction class. The matching immutable callback table is emitted
-        # after all instruction classes have been generated.
+        # Split profiles assign a dense, named ID to every concrete instruction
+        # class. The matching immutable callback table is emitted after all
+        # instruction classes have been generated.
         self._split_execution_classes: list[str] = []
 
     def _split_execute_expr(self, class_name: str) -> str:
@@ -322,9 +322,10 @@ class CodeGenerator:
         if classes is None:
             classes = []
             self._split_execution_classes = classes
-        instruction_id = len(classes)
+        if class_name in classes:
+            raise ValueError(f'duplicate split execution class: {class_name}')
         classes.append(class_name)
-        return f'selected_exec_fn({instruction_id})'
+        return f'selected_exec_fn(InstructionExecutionId::{class_name})'
 
     def _supports_simm64_literal_operands(self) -> bool:
         return 'OPR_SIMM64' in self.isa_spec.operand_types
@@ -1180,6 +1181,9 @@ class CodeGenerator:
         arch = self.isa_spec.arch_name
         generated_arch = self.config.generated_include(arch)
         handwritten_arch = self.config.handwritten_include(arch)
+        execution_ids = ''.join(
+            f'  {class_name},\n' for class_name in self._split_execution_classes
+        )
         header = textwrap.dedent(f'''\
             {CppFile._prologue_comment()}
             #pragma once
@@ -1189,6 +1193,15 @@ class CodeGenerator:
 
             namespace rocjitsu {{
             namespace {arch} {{
+
+            /// @brief Named entries for the dense execution callback table.
+            ///
+            /// Model constructors use these names instead of opaque ordinals.
+            /// Keep this enum and kInstructionCallbacks generated from the same
+            /// ordered class list.
+            enum class InstructionExecutionId : size_t {{
+            {execution_ids}  Count,
+            }};
 
             const IsaExecutionBackend &execution_backend();
 
@@ -1221,8 +1234,11 @@ class CodeGenerator:
                   *static_cast<Isa::Context *>(context));
             }}
 
-            constexpr std::array<Instruction::ExecuteFn, {len(self._split_execution_classes)}>
-                kInstructionCallbacks{{{{
+            constexpr size_t kInstructionCallbackCount =
+                static_cast<size_t>(InstructionExecutionId::Count);
+            using InstructionCallbackTable =
+                std::array<Instruction::ExecuteFn, kInstructionCallbackCount>;
+            constexpr InstructionCallbackTable kInstructionCallbacks{{{{
             {entries}    }}}};
 
             }} // namespace
@@ -1311,6 +1327,10 @@ class CodeGenerator:
 
         vopd_slot_constants = '\n'.join(
             f'constexpr uint16_t k{op.enum_name} = {op.opcode};' for op in vopd_slot_ops
+        )
+        vopd_execution_slot_constants = '\n'.join(
+            f'[[maybe_unused]] constexpr uint16_t k{op.enum_name} = {op.opcode};'
+            for op in vopd_slot_ops
         )
         vopd_op_name_cases = '\n'.join(
             f'  case k{op.enum_name}:\n    return "{op.mnemonic}";'
@@ -1879,6 +1899,7 @@ class CodeGenerator:
         if self.isa_spec.profile.split_execution_sources:
             vopd_impl_includes = textwrap.dedent('''\
                 #include "@GENERATED_BASE@/@ARCH@/vopd.h"
+                #include "@GENERATED_BASE@/@ARCH@/execution_backend.h"
                 #include "util/except.h"
                 #include <format>
                 #include <string>
@@ -2273,7 +2294,7 @@ class CodeGenerator:
                 'namespace rocjitsu {\n'
                 f'namespace {arch} {{\n\n'
                 'namespace {\n'
-                f'{vopd_slot_constants}\n'
+                f'{vopd_execution_slot_constants}\n'
                 '} // namespace\n\n'
                 f'{execution_impl}\n\n'
                 f'}} // namespace {arch}\n'
@@ -9041,6 +9062,13 @@ class CodeGenerator:
                 if profile.split_execution_sources:
                     model_cpp_includes = [
                         cpp_includes[0],
+                        (
+                            self.config.generated_include(
+                                self.isa_spec.arch_name,
+                                'execution_backend.h',
+                            ),
+                            False,
+                        ),
                         ('util/except.h', False),
                     ]
                     if is_mem_enc:
@@ -10300,7 +10328,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         simd_private_decl = ''
         execution_backend_public_decl = ''
         packed_16bit_field = ''
-        if uses_packed_16bit_sources:
+        if uses_packed_16bit_sources or self.isa_spec.profile.split_execution_sources:
             simd_public_decl = '  bool simd_capable() const override;\n'
             simd_private_decl = (
                 '  void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,\n'
@@ -10308,6 +10336,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,\n'
                 '                        const uint32_t *vals, uint64_t mask) const override;\n'
             )
+        if uses_packed_16bit_sources:
             packed_16bit_field = (
                 '  bool packed_16bit_source_ = false;\n'
                 '  bool packed_16bit_dst_ = false;\n'
@@ -10345,6 +10374,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             )
             execution_decls += (
                 '  std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const override;\n'
+                '  std::optional<uint32_t> simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const override;\n'
                 '  const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;\n'
                 '  amdgpu::VgprStorage *simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const override;\n'
                 '  amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const override;\n'
@@ -10370,6 +10400,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '    uint64_t (Operand::*read_scalar64)(const amdgpu::Wavefront &) const = nullptr;\n'
                 '    void (Operand::*write_scalar64)(amdgpu::Wavefront &, uint64_t) const = nullptr;\n'
                 '    std::optional<uint32_t> (Operand::*simd_vgpr_base)(const amdgpu::Wavefront &) const = nullptr;\n'
+                '    std::optional<uint32_t> (Operand::*simd_vgpr_base_mut)(amdgpu::Wavefront &) const = nullptr;\n'
                 '    const amdgpu::VgprStorage *(Operand::*simd_vgpr_storage)(const amdgpu::Wavefront &) const = nullptr;\n'
                 '    amdgpu::VgprStorage *(Operand::*simd_vgpr_storage_mut)(amdgpu::Wavefront &) const = nullptr;\n'
                 '    amdgpu::ConstVgprStoragePair64 (Operand::*simd_vgpr_storage64)(const amdgpu::Wavefront &) const = nullptr;\n'
@@ -10394,6 +10425,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  uint64_t read_scalar64_exec(const amdgpu::Wavefront &) const;\n'
                 '  void write_scalar64_exec(amdgpu::Wavefront &, uint64_t) const;\n'
                 '  std::optional<uint32_t> simd_vgpr_base_exec(const amdgpu::Wavefront &) const;\n'
+                '  std::optional<uint32_t> simd_vgpr_base_mut_exec(amdgpu::Wavefront &) const;\n'
                 '  const amdgpu::VgprStorage *simd_vgpr_storage_exec(const amdgpu::Wavefront &) const;\n'
                 '  amdgpu::VgprStorage *simd_vgpr_storage_mut_exec(amdgpu::Wavefront &) const;\n'
                 '  amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64_exec(const amdgpu::Wavefront &) const;\n'
@@ -10637,6 +10669,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     Operand::simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const {
                       decltype(ExecutionBackend::simd_vgpr_base) callback =
                           execution_backend_ ? execution_backend_->simd_vgpr_base : nullptr;
+                      return callback ? (this->*callback)(wf) : std::nullopt;
+                    }
+
+                    std::optional<uint32_t>
+                    Operand::simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const {
+                      decltype(ExecutionBackend::simd_vgpr_base_mut) callback =
+                          execution_backend_ ? execution_backend_->simd_vgpr_base_mut : nullptr;
                       return callback ? (this->*callback)(wf) : std::nullopt;
                     }
 
@@ -11028,6 +11067,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     bool Operand::simd_capable() const {
                       if (delegate())
                         return delegate()->simd_capable();
+                      if (!reads_value())
+                        return false;
                       if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_))
                         return false;
                       if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
@@ -11041,6 +11082,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         amdgpu::RegisterAccess(wf).read_chunk(*delegate(), lane_base, count, out);
                         return;
                       }
+                      if (!reads_value()) {
+                        std::fill_n(out, count, 0u);
+                        return;
+                      }
+                      assert(lane_base <= wf.wf_size());
+                      assert(count <= wf.wf_size() - lane_base);
                       if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_,
                                                    encoding_value_)) {
                         for (uint32_t i = 0; i < count; ++i)
@@ -11062,6 +11109,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base,
                                                    uint32_t count, const uint32_t *vals,
                                                    uint64_t mask) const {
+                      if (!is_writable())
+                        return;
+                      assert(lane_base <= wf.wf_size());
+                      assert(count <= wf.wf_size() - lane_base);
                       if (packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_,
                                                 encoding_value_)) {
                         for (uint32_t i = 0; i < count; ++i)
@@ -11070,23 +11121,94 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         return;
                       }
                       auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this);
-                      if (!off)
-                        throw std::logic_error("write_lane_chunk called on non-VGPR operand type");
+                      if (!off) {
+                        for (uint32_t i = 0; i < count; ++i)
+                          if (mask & (1ULL << i))
+                            write_lane_exec(wf, lane_base + i, vals[i]);
+                        return;
+                      }
                       uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
                       uint32_t reg = wf.vgpr_alloc().base + voff;
                       uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
                       if ((mask & full_mask) == full_mask) {
-                        uint8_t *dst = wf.cu().raw_cu().raw_vgpr_data(reg);
+                        uint8_t *dst = raw_compute_unit(wf.cu()).raw_vgpr_data(reg);
                         std::memcpy(dst + lane_base * sizeof(uint32_t), vals,
                                     count * sizeof(uint32_t));
                         return;
                       }
                       for (uint32_t i = 0; i < count; ++i)
                         if (mask & (1ULL << i))
-                          wf.cu().raw_cu().write_vgpr(reg, lane_base + i, vals[i]);
+                          raw_compute_unit(wf.cu()).write_vgpr(reg, lane_base + i, vals[i]);
                     }
 
                     ''')
+        elif self.isa_spec.profile.split_execution_sources:
+            simd_methods = textwrap.dedent('''\
+                bool Operand::simd_capable() const {
+                  if (delegate())
+                    return delegate()->simd_capable();
+                  if (!reads_value())
+                    return false;
+                  return Isa::simd_capable_value(opr_type_, encoding_value_);
+                }
+
+                void Operand::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base,
+                                              uint32_t count, uint32_t *out) const {
+                  if (delegate()) {
+                    amdgpu::RegisterAccess(wf).read_chunk(*delegate(), lane_base, count, out);
+                    return;
+                  }
+                  if (!reads_value()) {
+                    std::fill_n(out, count, 0u);
+                    return;
+                  }
+                  assert(lane_base <= wf.wf_size());
+                  assert(count <= wf.wf_size() - lane_base);
+                  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+                    uint32_t voff =
+                        wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+                    uint64_t lane_mask =
+                        count == 0 ? 0
+                                   : util::mask<uint64_t>(static_cast<int>(count)) << lane_base;
+                    auto region = amdgpu::RegisterAccess(wf.cu()).read_vgpr_region(
+                        wf.vgpr_alloc().base + voff, 1, lane_mask);
+                    std::copy_n(region.lanes().begin() + lane_base, count, out);
+                    return;
+                  }
+                  std::fill_n(out, count,
+                              Isa::simd_broadcast_value(wf, opr_type_, encoding_value_));
+                }
+
+                void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base,
+                                               uint32_t count, const uint32_t *vals,
+                                               uint64_t mask) const {
+                  if (!is_writable())
+                    return;
+                  assert(lane_base <= wf.wf_size());
+                  assert(count <= wf.wf_size() - lane_base);
+                  auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this);
+                  if (!off) {
+                    for (uint32_t i = 0; i < count; ++i)
+                      if (mask & (1ULL << i))
+                        write_lane_exec(wf, lane_base + i, vals[i]);
+                    return;
+                  }
+                  uint32_t voff =
+                      wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+                  uint32_t reg = wf.vgpr_alloc().base + voff;
+                  uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
+                  if ((mask & full_mask) == full_mask) {
+                    uint8_t *dst = raw_compute_unit(wf.cu()).raw_vgpr_data(reg);
+                    std::memcpy(dst + lane_base * sizeof(uint32_t), vals,
+                                count * sizeof(uint32_t));
+                    return;
+                  }
+                  for (uint32_t i = 0; i < count; ++i)
+                    if (mask & (1ULL << i))
+                      raw_compute_unit(wf.cu()).write_vgpr(reg, lane_base + i, vals[i]);
+                }
+
+                ''')
 
         packed_16bit_write_lane_prefix = ''
         if uses_packed_16bit_sources:
@@ -11116,8 +11238,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + '\n'
             '} // namespace\n'
             '\n'
-            '// Isa::-scoped SIMD traits — see rocjitsu/isa/isa_operand_simd_inl.h\n'
-            '// for the templated callers in AmdgpuIsaOperand<Isa>.\n'
+            '// ISA-scoped SIMD traits are used directly by split execution output.\n'
+            '// Non-split profiles consume them through AmdgpuIsaOperand<Isa>.\n'
             + _resolved_vgpr_offset_body
             + _resolved_vgpr_offset_with_wf_body
             + '\n\n'
@@ -11217,12 +11339,20 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                   return std::nullopt;
                 }
 
+                std::optional<uint32_t>
+                Operand::simd_vgpr_base_mut_exec(amdgpu::Wavefront &wf) const {
+                  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
+                    return wf.vgpr_alloc().base +
+                           (wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off);
+                  return std::nullopt;
+                }
+
                 const amdgpu::VgprStorage *
                 Operand::simd_vgpr_storage_exec(const amdgpu::Wavefront &wf) const {
                   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
                     uint32_t voff =
                         wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
-                    return &wf.cu().raw_cu().template raw_vgpr_reg<64>(
+                    return &raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(
                         wf.vgpr_alloc().base + voff);
                   }
                   return nullptr;
@@ -11233,7 +11363,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
                     uint32_t voff =
                         wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
-                    return &wf.cu().raw_cu().template raw_vgpr_reg<64>(
+                    return &raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(
                         wf.vgpr_alloc().base + voff);
                   }
                   return nullptr;
@@ -11245,8 +11375,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     uint32_t voff =
                         wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
                     uint32_t reg = wf.vgpr_alloc().base + voff;
-                    return {&wf.cu().raw_cu().template raw_vgpr_reg<64>(reg),
-                            &wf.cu().raw_cu().template raw_vgpr_reg<64>(reg + 1)};
+                    return {&raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(reg),
+                            &raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(reg + 1)};
                   }
                   return {nullptr, nullptr};
                 }
@@ -11257,8 +11387,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     uint32_t voff =
                         wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
                     uint32_t reg = wf.vgpr_alloc().base + voff;
-                    return {&wf.cu().raw_cu().template raw_vgpr_reg<64>(reg),
-                            &wf.cu().raw_cu().template raw_vgpr_reg<64>(reg + 1)};
+                    return {&raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(reg),
+                            &raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(reg + 1)};
                   }
                   return {nullptr, nullptr};
                 }
@@ -11269,7 +11399,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
                     uint32_t voff =
                         wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
-                    wf.cu().raw_cu().notify_vgpr_read(
+                    raw_compute_unit(wf.cu()).notify_vgpr_read(
                         &wf, wf.vgpr_alloc().base + voff, lane_mask, byte_mask);
                   }
                 }
@@ -11280,7 +11410,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
                     uint32_t voff =
                         wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
-                    wf.cu().raw_cu().notify_vgpr_read(
+                    raw_compute_unit(wf.cu()).notify_vgpr_read(
                         &wf, wf.vgpr_alloc().base + voff, lane_mask, byte_mask);
                   }
                 }
@@ -11292,8 +11422,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     uint32_t voff =
                         wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
                     uint32_t reg = wf.vgpr_alloc().base + voff;
-                    wf.cu().raw_cu().notify_vgpr_read(&wf, reg, lane_mask, byte_mask);
-                    wf.cu().raw_cu().notify_vgpr_read(&wf, reg + 1, lane_mask, byte_mask);
+                    raw_compute_unit(wf.cu()).notify_vgpr_read(&wf, reg, lane_mask, byte_mask);
+                    raw_compute_unit(wf.cu()).notify_vgpr_read(&wf, reg + 1, lane_mask, byte_mask);
                   }
                 }
 
@@ -11304,8 +11434,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     uint32_t voff =
                         wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
                     uint32_t reg = wf.vgpr_alloc().base + voff;
-                    wf.cu().raw_cu().notify_vgpr_read(&wf, reg, lane_mask, byte_mask);
-                    wf.cu().raw_cu().notify_vgpr_read(&wf, reg + 1, lane_mask, byte_mask);
+                    raw_compute_unit(wf.cu()).notify_vgpr_read(&wf, reg, lane_mask, byte_mask);
+                    raw_compute_unit(wf.cu()).notify_vgpr_read(&wf, reg + 1, lane_mask, byte_mask);
                   }
                 }
 
@@ -11315,7 +11445,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
                     uint32_t voff =
                         wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
-                    wf.cu().raw_cu().notify_vgpr_write(
+                    raw_compute_unit(wf.cu()).notify_vgpr_write(
                         &wf, wf.vgpr_alloc().base + voff, lane_mask, byte_mask);
                   }
                 }
@@ -11327,8 +11457,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     uint32_t voff =
                         wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
                     uint32_t reg = wf.vgpr_alloc().base + voff;
-                    wf.cu().raw_cu().notify_vgpr_write(&wf, reg, lane_mask, byte_mask);
-                    wf.cu().raw_cu().notify_vgpr_write(&wf, reg + 1, lane_mask, byte_mask);
+                    raw_compute_unit(wf.cu()).notify_vgpr_write(&wf, reg, lane_mask, byte_mask);
+                    raw_compute_unit(wf.cu()).notify_vgpr_write(&wf, reg + 1, lane_mask, byte_mask);
                   }
                 }
 
@@ -11346,6 +11476,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       &Operand::read_scalar64_exec,
                       &Operand::write_scalar64_exec,
                       &Operand::simd_vgpr_base_exec,
+                      &Operand::simd_vgpr_base_mut_exec,
                       &Operand::simd_vgpr_storage_exec,
                       &Operand::simd_vgpr_storage_mut_exec,
                       &Operand::simd_vgpr_storage64_exec,
@@ -11374,6 +11505,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                            backend.read_scalar64 != nullptr &&
                            backend.write_scalar64 != nullptr &&
                            backend.simd_vgpr_base != nullptr &&
+                           backend.simd_vgpr_base_mut != nullptr &&
                            backend.simd_vgpr_storage != nullptr &&
                            backend.simd_vgpr_storage_mut != nullptr &&
                            backend.simd_vgpr_storage64 != nullptr &&
@@ -11389,6 +11521,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       full_execution_backend()));
                 }
                 ''')
+            execution_code = execution_code.replace(
+                'raw_compute_unit(wf.cu())',
+                'amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu())',
+            )
             resolve_code = cgen.Line(execution_code)
         class_impl.execution_target(
             self.isa_spec.profile.split_execution_sources
@@ -11438,6 +11574,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     (self.config.generated_include(arch, 'operand.h'), False),
                     ('rocjitsu/isa/isa_operand_simd_inl.h', False),
                     ('rocjitsu/vm/amdgpu/compute_unit.h', False),
+                    ('rocjitsu/vm/amdgpu/operand_execution_access.h', False),
                     ('rocjitsu/vm/amdgpu/register_access.h', False),
                     ('rocjitsu/vm/amdgpu/wavefront.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h', False),
