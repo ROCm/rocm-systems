@@ -31,6 +31,7 @@ def nic_perf_env(rocprof_config) -> dict[str, str]:
         "ROCPROFSYS_PAPI_EVENTS": f"{rocprof_config.capabilities.papi_nic_events}",
         "ROCPROFSYS_SAMPLING_DELAY": "0.05",
         "PAPI_NET_REFRESH_LATENCY": "100000",
+        "ROCPROFSYS_TRACE_LEGACY": "ON",
     }
 
 
@@ -84,7 +85,7 @@ class TestNIC(RocprofsysTest):
         self.assert_regex(result)
         self.assert_perfetto(
             result,
-            counter_names=["rx:byte", "rx:packet", "tx:byte", "tx:packet"],
+            counter_names=["receive byte", "receive packet", "transmit byte", "transmit packet"],
             pass_regex=self.PERFETTO_PASS_REGEX,
             fail_regex=self.PERFETTO_FAIL_REGEX,
         )

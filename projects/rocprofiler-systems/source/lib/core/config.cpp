@@ -1331,7 +1331,16 @@ configure_settings(bool _init)
     for(auto itr : timemory::linux::capability::cap_decode(*_cap_data))
         if(itr == CAP_SYS_ADMIN) _has_cap_sys_admin = true;
 
-    if(_paranoid > 2 && !_has_cap_sys_admin)
+    // The PAPI net component reads /proc/net/dev and does not use perf_event.
+    // Bypass the perf_event_paranoid gate when all PAPI events use the net:::
+    // prefix so NIC profiling works without requiring perf_event_paranoid <= 2.
+    auto _papi_events_vec = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
+    bool _all_net_events =
+        !_papi_events_vec.empty() &&
+        std::all_of(_papi_events_vec.begin(), _papi_events_vec.end(),
+                    [](const std::string& _e) { return _e.starts_with("net:::"); });
+
+    if(_paranoid > 2 && !_has_cap_sys_admin && !_all_net_events)
     {
         LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
                     "Disabling PAPI (requires a value <= 2)",
@@ -1346,6 +1355,13 @@ configure_settings(bool _init)
         trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
         trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
         _config->get_papi_events() = std::string{};
+    }
+    else if(_paranoid > 2 && !_has_cap_sys_admin && _all_net_events)
+    {
+        LOG_INFO("perf_event_paranoid={} but all PAPI events use the net component "
+                 "(reads /proc/net/dev, no perf_event required). "
+                 "Proceeding with NIC profiling.",
+                 _paranoid);
     }
     else
     {
