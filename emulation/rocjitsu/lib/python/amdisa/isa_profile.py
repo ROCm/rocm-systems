@@ -702,6 +702,15 @@ class _AmdgpuProfileBase(IsaProfile):
     _SKIP_DPP_SDWA: bool = False
 
     @property
+    def split_execution_sources(self) -> bool:
+        """Split every built-in AMDGPU target into model and execution sources.
+
+        Custom profiles may override this for compatibility with the generator's
+        non-split fallback, which remains covered independently.
+        """
+        return True
+
+    @property
     def flt_name_map(self) -> dict[float, str]:
         return _FLOAT_NAME_MAP
 
@@ -1821,10 +1830,6 @@ class Gfx1250Profile(Rdna4Profile):
 
     @property
     def uses_packed_16bit_e32_source_selectors(self) -> bool:
-        return True
-
-    @property
-    def split_execution_sources(self) -> bool:
         return True
 
     @property

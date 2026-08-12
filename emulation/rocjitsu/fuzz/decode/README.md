@@ -8,6 +8,10 @@ the largest supported encoding while letting the decoder report the actual 4,
 only. Canonical target IDs and their registered aliases are accepted, including
 `gfx950`, `gfx1201`, and `gfx1250`.
 
+The fuzz executable links the model-only AMDGPU registry. It therefore carries
+the generated decoder and disassembler code for every AMDGPU target without
+linking the execution backends, VM, simdojo, or DBT implementation.
+
 LLVM comparison is a separate offline process. `decode_differential.py` invokes
 a caller-selected `llvm-mc`, compares only the first instruction in each
 window, and writes structured mismatch records. LLVM is therefore neither a
