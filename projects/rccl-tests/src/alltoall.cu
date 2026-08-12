@@ -7,6 +7,7 @@
 
 #include "cuda_runtime.h"
 #include "common.h"
+#include "gin_sdma_devtime.h"  // shared device-side (wall_clock64) timing scaffold
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
@@ -253,8 +254,13 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
+// Collective body, factored out of the __global__ entry so it can be invoked
+// either once (production kernel) or in a persistent skip+loop (device-timing
+// kernel). It re-derives all per-call sync state at entry (GIN re-reads the
+// accumulated signal), so calling it back-to-back in a loop yields a sequence of
+// complete, correct alltoalls with no external bookkeeping.
 template <typename T>
-__global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+__device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   int ginContext = 0;
   unsigned int signalIndex = blockIdx.x;
   ncclGin gin { devComm, ginContext };
@@ -285,8 +291,20 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
 }
 
+// Production entry: one collective call. Thin wrapper over the body so the
+// device-timed kernel and the production path share identical code.
 template <typename T>
-__global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+__global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+  ginAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
+}
+
+// Hybrid LSA+GIN alltoall: CTA 0 handles remote peers via GIN,
+// CTAs 1..N handle intra-node peers via LSA.
+// GIN barrier is scoped to CTA 0 only (barrierCount=1), costing
+// O(nRanks) signals once, not O(nCTAs x nRanks).
+// LSA CTAs use their own lsaBarrier (pure intra-node, no GIN signals).
+template <typename T>
+__device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclTeam world = ncclTeamWorld(devComm);
   ncclTeam lsa = ncclTeamLsa(devComm);
   const int startLsa = world.rank - lsa.rank;
@@ -342,6 +360,54 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
     }
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
   }
+}
+
+// Production entry: one collective call. Thin wrapper over the body so the
+// device-timed kernel and the production path share identical code.
+template <typename T>
+__global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+  hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
+}
+
+// Device-side timing kernels (rocSHMEM AllToAll methodology, AICOMRCCL-1459).
+// A single persistent launch runs (skip + loop) back-to-back collective bodies
+// and brackets only the timed region with the GPU fixed-frequency wall clock
+// (wall_clock64()), so the reported span excludes host launch, teardown, and
+// stream/graph overhead -- it is the pure device-function execution time.
+//
+// skip warmup iterations run first (steady-state caches/queues, discarded).
+// At i == skip every CTA records its start stamp; after the final iteration
+// every CTA records its end stamp. The host reduces min(start)/max(end) across
+// CTAs (the grid's true busy window) and MAX across ranks (the slowest rank
+// closes the collective), then divides by loop for per-iteration latency.
+//
+// Because the body re-derives all per-call sync state at entry (GIN re-reads the
+// accumulated signal; LSA rebuilds its barrier session), looping is correct with
+// no extra signal bookkeeping.
+template <typename T>
+__global__ void GinAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int loop, int skip, long long* start_time, long long* end_time) {
+  for (int i = 0; i < skip + loop; i++) {
+    if (i == skip) {
+      __syncthreads();
+      if (threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
+    }
+    ginAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
+}
+
+template <typename T>
+__global__ void HybridAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int loop, int skip, long long* start_time, long long* end_time) {
+  for (int i = 0; i < skip + loop; i++) {
+    if (i == skip) {
+      __syncthreads();
+      if (threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
+    }
+    hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
 }
 #endif
 #endif
@@ -400,6 +466,93 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
   return testSuccess;
 }
 
+// Device-side (in-kernel wall_clock64) timing for AllToAll (GIN and Hybrid
+// tiers). Opt-in via NCCL_GIN_ANVIL_DEVICE_TIMING (legacy
+// NCCL_GIN_ANVIL_A2A_DEVICE_TIMING): launches the persistent timed kernel once
+// for the current size, brackets only the (skip+loop) steady-state collectives
+// with the GPU wall clock, reduces the grid busy window (min start .. max end
+// over CTAs) and the slowest rank (MPI MAX), and reports the per-iteration
+// device latency. loop/skip come from NCCL_GIN_ANVIL_A2A_DEVTIME_LOOP/_SKIP
+// (default 10/10); auto-reduce for very large chunks is opt-in via
+// NCCL_GIN_ANVIL_A2A_DEVTIME_AUTOREDUCE=1. The timed kernel launches with the
+// same <<<deviceCtaCount, 512>>> grid the production path uses, and selects the
+// GIN (deviceImpl 3) or Hybrid (deviceImpl 4) body to match RunColl.
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec) {
+  static const int devTiming = []() {
+    const char* e = getenv("NCCL_GIN_ANVIL_DEVICE_TIMING");          // generic (all collectives)
+    if (!(e && *e)) e = getenv("NCCL_GIN_ANVIL_A2A_DEVICE_TIMING");  // legacy A2A-specific name
+    return (e && *e) ? atoi(e) : 0;
+  }();
+  if (!devTiming) return testSuccess;
+
+  static const int loopEnv = gin_devtime::envInt("NCCL_GIN_ANVIL_A2A_DEVTIME_LOOP", 10);  // rocSHMEM default
+  static const int skipEnv = gin_devtime::envInt("NCCL_GIN_ANVIL_A2A_DEVTIME_SKIP", 10);  // rocSHMEM default
+
+  const size_t count = args->nbytes / wordSize(type);
+  if (count == 0 || loopEnv < 1) return testSuccess;
+  const size_t perPeerBytes = count * wordSize(type);
+
+  // By default use the exact skip/loop counts at every size so the device-timing
+  // window matches the host tests' -w/-n. Opt in to auto-reducing iteration
+  // counts for very large chunks (bounded runtime; per-call copy dominates) via
+  // NCCL_GIN_ANVIL_A2A_DEVTIME_AUTOREDUCE=1.
+  static const int autoReduce = gin_devtime::envInt("NCCL_GIN_ANVIL_A2A_DEVTIME_AUTOREDUCE", 0);
+  int loop = loopEnv, skip = skipEnv;
+  if (autoReduce) {
+    if (perPeerBytes >= (size_t)64 * 1024 * 1024) { loop = loop < 2 ? loop : 2; skip = skip < 1 ? skip : 1; }
+    else if (perPeerBytes >= (size_t)8 * 1024 * 1024) { loop = loop < 4 ? loop : 4; skip = skip < 2 ? skip : 2; }
+  }
+
+  int gridCtas = deviceCtaCount;
+  if (gridCtas < 1) gridCtas = 1;
+
+  // Match the kernel RunColl would launch for the selected -D device impl.
+  const bool hybrid = (deviceImpl == 4);
+  auto kernel = hybrid ? SPECIALIZE_KERNEL(HybridAlltoAllTimedKernel, type, op)
+                       : SPECIALIZE_KERNEL(GinAlltoAllTimedKernel, type, op);
+  const char* tierName = hybrid ? "HYB" : "GIN";
+  if (kernel == nullptr) return testSuccess;
+
+  // Shared scaffold: allocates per-CTA start/end stamps, launches the timed kernel,
+  // reduces min(start)..max(end) over CTAs and MPI-MAX across ranks -> per-iter us.
+  double devUs = 0.0;
+  TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
+      [&](int i, long long* d_start, long long* d_end) {
+        ncclDevComm* devComm = args->devComms + i;
+        ncclWindow_t sendwin = (ncclWindow_t)args->sendRegHandles[i];
+        ncclWindow_t recvwin = (ncclWindow_t)args->recvRegHandles[i];
+        kernel<<<gridCtas, 512, 0, args->streams[i]>>>(sendwin, 0, recvwin, 0, count, root, *devComm, loop, skip, d_start, d_end);
+      },
+      &devUs));
+
+  int nRanksGlobal = args->nProcs * args->nThreads * args->nGpus;
+
+  // Mode 2 (device-time-only): hand the per-iteration latency (seconds) back to
+  // BenchTime, which reports it as THE time/busbw metric on the normal result
+  // line. Stay silent here so that line is not split.
+  if (outDeltaSec != nullptr) {
+    *outDeltaSec = devUs * 1.0e-6;
+    return testSuccess;
+  }
+
+  // Mode 1 (augment): print the extra device-only line next to the graph numbers.
+  if (args->proc == 0 && args->thread == 0 && devUs > 0.0) {
+    double sec = devUs * 1.0e-6;
+    double algBw = (double)(perPeerBytes * (size_t)nRanksGlobal) / 1.0e9 / sec;
+    double busBw = algBw * ((double)(nRanksGlobal - 1) / (double)nRanksGlobal);
+    printf("#[a2a-devtime] size %12zu B  tier %-3s  ctas %2d  loop %2d skip %2d  devtime %10.2f us  algbw %8.2f GB/s  busbw %8.2f GB/s\n",
+           perPeerBytes * (size_t)nRanksGlobal, tierName, gridCtas, loop, skip, devUs, algBw, busBw);
+    fflush(stdout);
+  }
+  return testSuccess;
+}
+#else
+testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec) {
+  return testSuccess;  // device API path not available in this build
+}
+#endif
+
 struct testColl alltoAllTest = {
   "AlltoAll",
   AlltoAllGetCollByteCount,
@@ -407,7 +560,9 @@ struct testColl alltoAllTest = {
   AlltoAllGetBw,
   AlltoAllRunColl,
   NULL,
-  NULL
+  NULL,
+  NULL,
+  AlltoAllDeviceTime
 };
 
 void AlltoAllGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
