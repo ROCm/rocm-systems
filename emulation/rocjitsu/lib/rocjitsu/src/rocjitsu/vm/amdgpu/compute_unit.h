@@ -797,7 +797,14 @@ template <simdojo::ExecMode Mode, GpuIsa Isa>
 class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
   using Vgpr = simdojo::VectorReg<Isa::WF_SIZE, uint32_t>;
-  using VgprFile = simdojo::RegisterFile<Vgpr, simdojo::RegisterFileStorage::SOFTWARE_LAZY>;
+  static constexpr uint32_t MAX_ACCVGPR_PHYSICAL_LIMIT =
+      Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : ACC_VGPR_OFFSET + Isa::MAX_ACC_VGPRS_PER_WF;
+  static constexpr uint32_t MAX_VGPRS_PER_BLOCK =
+      std::max(Isa::MAX_ADDRESSABLE_VGPRS_PER_WF, MAX_ACCVGPR_PHYSICAL_LIMIT);
+  static constexpr size_t MAX_VGPR_FILE_REGISTERS =
+      static_cast<size_t>(Isa::MAX_WF_SLOTS) * MAX_VGPRS_PER_BLOCK;
+  using VgprFile = simdojo::RegisterFile<Vgpr, simdojo::RegisterFileStorage::SOFTWARE_LAZY,
+                                         MAX_VGPR_FILE_REGISTERS>;
 
   /// @brief Construct an ISA-parameterized compute unit.
   /// @param name Human-readable name (e.g., "cu0").

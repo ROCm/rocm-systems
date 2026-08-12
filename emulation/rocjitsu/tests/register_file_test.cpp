@@ -18,14 +18,22 @@ namespace {
 using simdojo::RegisterFile;
 using simdojo::RegisterFileStorage;
 
-using SoftwareLazyUint32Storage = simdojo::detail::SoftwareLazyRegisterStorage<uint32_t>;
+constexpr size_t SOFTWARE_LAZY_TEST_CAPACITY = 4096;
+template <typename RegType>
+using SoftwareLazyTestStorage =
+    simdojo::detail::SoftwareLazyRegisterStorage<RegType, SOFTWARE_LAZY_TEST_CAPACITY>;
+template <typename RegType>
+using SoftwareLazyTestFile =
+    RegisterFile<RegType, RegisterFileStorage::SOFTWARE_LAZY, SOFTWARE_LAZY_TEST_CAPACITY>;
+
+using SoftwareLazyUint32Storage = SoftwareLazyTestStorage<uint32_t>;
 static_assert(!std::is_copy_constructible_v<SoftwareLazyUint32Storage>);
 static_assert(!std::is_copy_assignable_v<SoftwareLazyUint32Storage>);
 static_assert(!std::is_move_constructible_v<SoftwareLazyUint32Storage>);
 static_assert(!std::is_move_assignable_v<SoftwareLazyUint32Storage>);
 template <typename File>
 concept HasContiguousData = requires(File &file) { file.data(); };
-using SoftwareLazyUint32File = RegisterFile<uint32_t, RegisterFileStorage::SOFTWARE_LAZY>;
+using SoftwareLazyUint32File = SoftwareLazyTestFile<uint32_t>;
 static_assert(!HasContiguousData<SoftwareLazyUint32File>);
 
 TEST(RegisterFileTest, ContiguousStorageClearsReusedBlock) {
@@ -44,7 +52,7 @@ TEST(RegisterFileTest, ContiguousStorageClearsReusedBlock) {
 
 TEST(RegisterFileTest, SoftwareLazyStorageMaterializesOnlyMutableChunks) {
   using Vgpr = simdojo::VectorReg<64, uint32_t>;
-  using Storage = simdojo::detail::SoftwareLazyRegisterStorage<Vgpr>;
+  using Storage = SoftwareLazyTestStorage<Vgpr>;
   Storage storage;
   constexpr uint32_t regs_per_chunk = Storage::registers_per_chunk();
   static_assert(regs_per_chunk > 1);
@@ -74,9 +82,23 @@ TEST(RegisterFileTest, SoftwareLazyStorageMaterializesOnlyMutableChunks) {
   EXPECT_EQ(const_storage[regs_per_chunk][0], 0u);
 }
 
+TEST(RegisterFileTest, SoftwareLazyStorageSupportsFixedCapacityBoundary) {
+  using Vgpr = simdojo::VectorReg<64, uint32_t>;
+  using Storage = simdojo::detail::SoftwareLazyRegisterStorage<Vgpr, 32>;
+  static_assert(Storage::registers_per_chunk() == 16);
+
+  Storage storage;
+  storage.init(32);
+  storage[31][63] = 0xA5A5A5A5u;
+
+  const Storage &const_storage = storage;
+  EXPECT_EQ(const_storage[31][63], 0xA5A5A5A5u);
+  EXPECT_EQ(storage.materialized_chunk_count(), 1u);
+}
+
 TEST(RegisterFileTest, SoftwareLazyStorageClearsReusedUnalignedBlock) {
   using Vgpr = simdojo::VectorReg<64, uint32_t>;
-  using File = RegisterFile<Vgpr, RegisterFileStorage::SOFTWARE_LAZY>;
+  using File = SoftwareLazyTestFile<Vgpr>;
   File file("software_lazy");
   file.init(/*total_regs=*/48, /*regs_per_block=*/24);
 
@@ -111,7 +133,7 @@ TEST(RegisterFileTest, SoftwareLazyStorageClearsReusedUnalignedBlock) {
 
 TEST(RegisterFileTest, SoftwareLazyStorageReclaimsAlignedBlocksDuringChurn) {
   using Vgpr = simdojo::VectorReg<64, uint32_t>;
-  using File = RegisterFile<Vgpr, RegisterFileStorage::SOFTWARE_LAZY>;
+  using File = SoftwareLazyTestFile<Vgpr>;
   constexpr uint32_t regs_per_block = 512;
   File file("software_lazy");
   file.init(/*total_regs=*/2 * regs_per_block, regs_per_block);
@@ -144,8 +166,8 @@ TEST(RegisterFileTest, SoftwareLazyStorageReclaimsAlignedBlocksDuringChurn) {
 
 TEST(RegisterFileTest, SoftwareLazyLogicalRangeTraversalAndCopyCrossChunks) {
   using Vgpr = simdojo::VectorReg<64, uint32_t>;
-  using Storage = simdojo::detail::SoftwareLazyRegisterStorage<Vgpr>;
-  using File = RegisterFile<Vgpr, RegisterFileStorage::SOFTWARE_LAZY>;
+  using Storage = SoftwareLazyTestStorage<Vgpr>;
+  using File = SoftwareLazyTestFile<Vgpr>;
   constexpr uint32_t regs_per_chunk = Storage::registers_per_chunk();
   constexpr uint32_t reg_count = 2 * regs_per_chunk + 1;
   File file("software_lazy");
@@ -173,8 +195,8 @@ TEST(RegisterFileTest, SoftwareLazyLogicalRangeTraversalAndCopyCrossChunks) {
 
 TEST(RegisterFileTest, SoftwareLazySparseCopyPreservesAbsentZeroChunks) {
   using Vgpr = simdojo::VectorReg<64, uint32_t>;
-  using Storage = simdojo::detail::SoftwareLazyRegisterStorage<Vgpr>;
-  using File = RegisterFile<Vgpr, RegisterFileStorage::SOFTWARE_LAZY>;
+  using Storage = SoftwareLazyTestStorage<Vgpr>;
+  using File = SoftwareLazyTestFile<Vgpr>;
   constexpr uint32_t regs_per_chunk = Storage::registers_per_chunk();
   constexpr uint32_t reg_count = 3 * regs_per_chunk;
   File file("software_lazy");
@@ -199,7 +221,7 @@ TEST(RegisterFileTest, SoftwareLazySparseCopyPreservesAbsentZeroChunks) {
 
 #if GTEST_HAS_DEATH_TEST && !defined(NDEBUG)
 TEST(RegisterFileDeathTest, ConstAccessToFreedBlockAsserts) {
-  using File = RegisterFile<uint32_t, RegisterFileStorage::SOFTWARE_LAZY>;
+  using File = SoftwareLazyTestFile<uint32_t>;
   File file("software_lazy");
   file.init(/*total_regs=*/16, /*regs_per_block=*/8);
 
@@ -211,7 +233,7 @@ TEST(RegisterFileDeathTest, ConstAccessToFreedBlockAsserts) {
 }
 
 TEST(RegisterFileDeathTest, MutableAccessToFreedBlockAsserts) {
-  using File = RegisterFile<uint32_t, RegisterFileStorage::SOFTWARE_LAZY>;
+  using File = SoftwareLazyTestFile<uint32_t>;
   File file("software_lazy");
   file.init(/*total_regs=*/16, /*regs_per_block=*/8);
 

@@ -53,7 +53,9 @@ std::string make_single_se_gfx1250_config(uint32_t num_cus) {
          R"({"name":")" +
          cu_range +
          R"(","type":"compute_unit","config":[)"
-         R"({"key":"num_wf_slots","value":"80"},)"
+         R"({"key":"num_wf_slots","value":")" +
+         std::to_string(kGfx1250WaveSlotsPerCu) +
+         R"("},)"
          R"({"key":"sgprs_per_wf","value":"128"},)"
          R"({"key":"vgprs_per_wf","value":"1024"},)"
          R"({"key":"lds_size_kb","value":"160"})"

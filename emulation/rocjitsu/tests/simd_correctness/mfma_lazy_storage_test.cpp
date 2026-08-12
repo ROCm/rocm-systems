@@ -15,7 +15,7 @@ using namespace mma_exact;
 
 constexpr uint32_t WF_SIZE = 64;
 using MfmaVgpr = simdojo::VectorReg<WF_SIZE, uint32_t>;
-using MfmaLazyStorage = simdojo::detail::SoftwareLazyRegisterStorage<MfmaVgpr>;
+using MfmaLazyStorage = simdojo::detail::SoftwareLazyRegisterStorage<MfmaVgpr, 1024>;
 
 TEST(MfmaLazyStorageTest, F16SpecInputCrossesChunkBoundary) {
   SKIP_IF_NO_SIMD();

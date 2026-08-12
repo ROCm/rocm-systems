@@ -13,6 +13,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <span>
@@ -31,7 +32,7 @@ enum class RegisterFileStorage {
 
 namespace detail {
 
-template <typename RegType> class ContiguousRegisterStorage {
+template <typename RegType, size_t MaxRegisters> class ContiguousRegisterStorage {
 public:
   void init(uint32_t count) { data_.assign(count, RegType{}); }
 
@@ -83,8 +84,9 @@ private:
 /// allocating. Mutable access materializes and zero-initializes the containing
 /// chunk. The storage retains CU-global register indices but deliberately does
 /// not expose a single contiguous pointer spanning multiple chunks.
-template <typename RegType> class SoftwareLazyRegisterStorage {
+template <typename RegType, size_t MaxRegisters> class SoftwareLazyRegisterStorage {
 public:
+  static_assert(MaxRegisters > 0);
   static_assert(std::is_trivially_copyable_v<RegType>);
   static_assert(std::is_trivially_destructible_v<RegType>);
 
@@ -96,9 +98,10 @@ public:
 
   void init(uint32_t count) {
     assert(total_regs_ == 0 && "SoftwareLazyRegisterStorage already initialized");
+    assert(count <= MaxRegisters && "register count exceeds lazy storage capacity");
+    if (count > MaxRegisters)
+      std::abort();
     total_regs_ = count;
-    const size_t chunk_count = (static_cast<size_t>(count) + REGS_PER_CHUNK - 1) / REGS_PER_CHUNK;
-    chunks_.resize(chunk_count);
   }
 
   void reset(uint32_t base, uint32_t count) {
@@ -247,6 +250,7 @@ private:
   static constexpr size_t TARGET_CHUNK_BYTES = 4096;
   static constexpr uint32_t REGS_PER_CHUNK =
       static_cast<uint32_t>(std::max<size_t>(1, TARGET_CHUNK_BYTES / sizeof(RegType)));
+  static constexpr size_t MAX_CHUNKS = (MaxRegisters + REGS_PER_CHUNK - 1) / REGS_PER_CHUNK;
 
   struct Chunk {
     std::array<RegType, REGS_PER_CHUNK> registers{};
@@ -268,14 +272,14 @@ private:
   }
 
   inline static const RegType zero_register_{};
-  std::vector<std::unique_ptr<Chunk>> chunks_;
+  std::array<std::unique_ptr<Chunk>, MAX_CHUNKS> chunks_{};
   uint32_t total_regs_ = 0;
 };
 
-template <typename RegType, RegisterFileStorage Storage>
-using RegisterStorage =
-    std::conditional_t<Storage == RegisterFileStorage::CONTIGUOUS,
-                       ContiguousRegisterStorage<RegType>, SoftwareLazyRegisterStorage<RegType>>;
+template <typename RegType, RegisterFileStorage Storage, size_t MaxRegisters>
+using RegisterStorage = std::conditional_t<Storage == RegisterFileStorage::CONTIGUOUS,
+                                           ContiguousRegisterStorage<RegType, MaxRegisters>,
+                                           SoftwareLazyRegisterStorage<RegType, MaxRegisters>>;
 
 } // namespace detail
 
@@ -298,8 +302,9 @@ using RegisterStorage =
 ///
 /// @tparam RegType Register element type (default: uint32_t).
 /// @tparam Storage Backing-store layout (default: contiguous storage).
+/// @tparam MaxRegisters Maximum logical register count for fixed-capacity storage.
 template <typename RegType = uint32_t,
-          RegisterFileStorage Storage = RegisterFileStorage::CONTIGUOUS>
+          RegisterFileStorage Storage = RegisterFileStorage::CONTIGUOUS, size_t MaxRegisters = 0>
 class RegisterFile : public Component {
 public:
   explicit RegisterFile(std::string name) : Component(std::move(name)) {}
@@ -438,7 +443,9 @@ public:
   /// allocated blocks and must stop accessing each block when it is freed.
   /// @returns Mutable pointer to the first register.
   RegType *data()
-    requires requires(detail::RegisterStorage<RegType, Storage> &storage) { storage.data(); }
+    requires requires(detail::RegisterStorage<RegType, Storage, MaxRegisters> &storage) {
+      storage.data();
+    }
   {
     return data_.data();
   }
@@ -448,7 +455,9 @@ public:
   /// allocated blocks and must stop accessing each block when it is freed.
   /// @returns Const pointer to the first register.
   const RegType *data() const
-    requires requires(const detail::RegisterStorage<RegType, Storage> &storage) { storage.data(); }
+    requires requires(const detail::RegisterStorage<RegType, Storage, MaxRegisters> &storage) {
+      storage.data();
+    }
   {
     return data_.data();
   }
@@ -474,7 +483,7 @@ public:
   /// @brief Count chunks with materialized backing storage.
   /// @returns Number of currently materialized chunks.
   [[nodiscard]] size_t materialized_chunk_count() const
-    requires requires(const detail::RegisterStorage<RegType, Storage> &storage) {
+    requires requires(const detail::RegisterStorage<RegType, Storage, MaxRegisters> &storage) {
       storage.materialized_chunk_count();
     }
   {
@@ -501,11 +510,11 @@ private:
     return block < free_blocks_.size() && !free_blocks_[block];
   }
 
-  detail::RegisterStorage<RegType, Storage> data_; ///< Register backing storage.
-  uint32_t total_regs_ = 0;                        ///< Total registers.
-  uint32_t regs_per_block_ = 0;                    ///< Registers per block.
-  std::vector<bool> free_blocks_;                  ///< One bit per block (true = free).
-  std::vector<bool> needs_reset_;                  ///< Blocks dirtied by prior allocation.
+  detail::RegisterStorage<RegType, Storage, MaxRegisters> data_; ///< Register backing storage.
+  uint32_t total_regs_ = 0;                                      ///< Total registers.
+  uint32_t regs_per_block_ = 0;                                  ///< Registers per block.
+  std::vector<bool> free_blocks_; ///< One bit per block (true = free).
+  std::vector<bool> needs_reset_; ///< Blocks dirtied by prior allocation.
 };
 
 } // namespace simdojo
