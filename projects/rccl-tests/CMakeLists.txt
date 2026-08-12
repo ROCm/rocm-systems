@@ -21,7 +21,6 @@ option(USE_MPI                     "Build RCCL-tests with MPI support."         
 option(ENABLE_DEVICE_API           "Build with NCCL Device API support (GIN)."    OFF)
 option(ENABLE_ROCSHMEM             "Build with rocshmem GIN backend support."     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
-option(BUILD_TESTS                 "Build the GIN-SDMA host unit test suite"      OFF)
 
 if (NOT CMAKE_BUILD_TYPE)
   message(WARNING "CMAKE_BUILD_TYPE is not defined. Setting to Release")
@@ -263,13 +262,6 @@ set(ROCM_USE_DEV_COMPONENT OFF)  # This repo doesn't have a dev component
 
 # Add all of the tests
 add_subdirectory(src)
-
-# GIN-SDMA host unit test suite (opt-in via -DBUILD_TESTS=ON). Pure host C++,
-# no GPU required; runs under ctest.
-if (BUILD_TESTS)
-  enable_testing()
-  add_subdirectory(test)
-endif()
 
 rocm_setup_version(VERSION "2.14.1")
 

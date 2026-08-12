@@ -4,13 +4,13 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host unit tests for the pure GIN-SDMA put-segmentation math in
-// projects/rccl-tests/src/gin_sdma_collective_policy.h. These validate the
-// exact loop that common.h::ginPutChunked drives on device -- the header is
-// compiled here as plain host C++ (GIN_SDMA_HOST_ONLY drops the
-// __host__ __device__ attributes), and the same ginPutSegmentCount /
-// ginPutSegmentAt functions are called by the __global__ kernels, so exercising
-// them here exercises the real segmentation code with no GPU.
+// Host unit tests for the pure GIN Anvil-SDMA put-segmentation math in
+// projects/rccl/src/include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h.
+// These validate the exact loop that ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>
+// drives on device -- the header is compiled here as plain host C++
+// (GIN_SDMA_HOST_ONLY drops the __host__ __device__ attributes), and the same
+// ginPutSegmentCount / ginPutSegmentAt functions are called by the SDMA backend
+// Put, so exercising them here exercises the real segmentation code with no GPU.
 //
 // Invariants asserted for every transfer size:
 //   * no segment exceeds the 128 MiB single-copy cap (kGinPutSegBytes),
@@ -23,7 +23,8 @@
 #include <cstddef>
 #include <vector>
 
-#include "gin_sdma_collective_policy.h"
+#define GIN_SDMA_HOST_ONLY 1
+#include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h"
 
 using namespace gin_sdma;
 
@@ -32,7 +33,7 @@ namespace {
 constexpr size_t kMiB = 1024ull * 1024;
 constexpr size_t kGiB = 1024ull * kMiB;
 
-// The clamp ginPutChunked actually uses: 128 MiB (min of the reliability and
+// The clamp the backend Put actually uses: 128 MiB (min of the reliability and
 // correctness limits). Kept in lockstep with the header so a future change to
 // either constant is caught here.
 TEST(GinPutSeg, SegLimitIsMinOfBothCaps) {

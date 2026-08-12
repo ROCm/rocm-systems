@@ -23,7 +23,9 @@
 #
 # These drive the real GinHybridAlltoAllKernel (deviceImpl 3, NCCL_GIN_TYPE=5)
 # at per-peer transfer sizes that cross the two single-descriptor limits the
-# 128 MiB put clamp (common.h::ginPutChunked) guards:
+# 128 MiB SDMA copy clamp guards. The clamp now lives in the Anvil-SDMA backend
+# Put (ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>), which segments every
+# gin.put() into <=128 MiB SDMA copies; the kernels just call plain gin.put():
 #
 #   1. >128 MiB/peer  -- exercises the new multi-segment put loop.
 #   2. >1 GiB/peer    -- crosses the 30-bit (1 GiB) count-field boundary, where

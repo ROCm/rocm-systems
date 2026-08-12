@@ -248,10 +248,12 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   int nthreads = blockDim.x * gridDim.x;
 
-  /* send to all peers via GIN (chunked to <=128 MiB/put; see common.h::ginPutChunked) */
+  /* send to all peers via GIN; the Anvil-SDMA backend segments large puts
+   * internally (<=128 MiB per SDMA copy) so a single gin.put() is safe at any
+   * size and needs no application-side chunking. */
   const size_t size = count * sizeof(T);
   for (int r=tid; r<devComm.nRanks; r+=nthreads) {
-    ginPutChunked(gin, ncclTeamWorld(devComm), r,
+    gin.put(ncclTeamWorld(devComm), r,
         recvwin, recvoffset + devComm.rank * size,
         sendwin, sendoffset + r * size,
         size, ncclGin_SignalInc{signalIndex});
@@ -298,13 +300,13 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
     int nthreads = blockDim.x;
 
     for (int r = tid; r < startLsa; r += nthreads) {
-      ginPutChunked(gin, world, r,
+      gin.put(world, r,
           recvwin, recvoffset + world.rank * size,
           sendwin, sendoffset + r * size,
           size, ncclGin_SignalInc{signalIndex});
     }
     for (int r = startLsa + lsaSize + tid; r < world.nRanks; r += nthreads) {
-      ginPutChunked(gin, world, r,
+      gin.put(world, r,
           recvwin, recvoffset + world.rank * size,
           sendwin, sendoffset + r * size,
           size, ncclGin_SignalInc{signalIndex});
