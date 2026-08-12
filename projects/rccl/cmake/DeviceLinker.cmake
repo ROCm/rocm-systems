@@ -236,6 +236,17 @@ file(STRINGS "${SPECIALIZED_FILES_TXT}" SPECIALIZED_ENTRIES)
 list(LENGTH SPECIALIZED_ENTRIES DL_KERNEL_COUNT)
 message(STATUS "Device Linker: ${DL_KERNEL_COUNT} specialized kernels")
 
+# [RCCL] Shorter source list for the gfx950 512-thread kernel set: only the
+# unroll factors that set is built for (see unrolls_512 in generate.py). Used
+# below to build rccl_device_gfx950_512 from far fewer shards.
+set(SPECIALIZED_FILES_512_TXT "${GEN_DIR}/specialized_files_512.txt")
+set(SPECIALIZED_ENTRIES_512 "")
+if(EXISTS "${SPECIALIZED_FILES_512_TXT}")
+  file(STRINGS "${SPECIALIZED_FILES_512_TXT}" SPECIALIZED_ENTRIES_512)
+  list(LENGTH SPECIALIZED_ENTRIES_512 DL_KERNEL_COUNT_512)
+  message(STATUS "Device Linker: ${DL_KERNEL_COUNT_512} specialized kernels for gfx950 512-thread set")
+endif()
+
 # ---------------------------------------------------------------------------
 # Guard evaluation: skip kernels whose #if guard excludes a GPU target.
 # ---------------------------------------------------------------------------
@@ -354,7 +365,34 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   if(RCCL_BUILD_GFX950_512 AND DL_GPU_TARGET STREQUAL "gfx950")
     set(_dev_target_512 "rccl_device_${DL_GPU_TARGET}_512")
 
-    add_library(${_dev_target_512} OBJECT ${ARCH_SOURCES})
+    # [RCCL] Build the 512-thread set from the shorter unroll-2-only source list.
+    # The unroll-1 (single-node, capped at 256 threads) and unroll-4 (never
+    # auto-selected) kernels reuse the 256-thread set at runtime, so compiling
+    # their *_512 variants would be dead weight. Reuses the guard filtering (the
+    # arch is always gfx950 here). Falls back to the full list if the 512 file is
+    # missing (older generate.py).
+    set(ARCH_SOURCES_512 "")
+    if(SPECIALIZED_ENTRIES_512)
+      foreach(ENTRY ${SPECIALIZED_ENTRIES_512})
+        if(NOT ENTRY MATCHES "^([^ ]+) +([^ ]+) *(.*)")
+          continue()
+        endif()
+        set(CPP_FILE "${CMAKE_MATCH_1}")
+        set(_entry_guard "${CMAKE_MATCH_3}")
+        dl_evaluate_guard("${_entry_guard}" "${DL_GPU_TARGET}" _guard_ok)
+        if(NOT _guard_ok)
+          continue()
+        endif()
+        list(APPEND ARCH_SOURCES_512 "${SPECIALIZED_DIR}/${CPP_FILE}")
+      endforeach()
+    else()
+      set(ARCH_SOURCES_512 ${ARCH_SOURCES})
+    endif()
+    list(LENGTH ARCH_SOURCES_512 _dl_built_512)
+    message(STATUS "Device Linker [${DL_GPU_TARGET} 512]: ${_dl_built_512} kernels to build (unroll-2 only)")
+
+    add_library(${_dev_target_512} OBJECT ${ARCH_SOURCES_512})
+    set_source_files_properties(${ARCH_SOURCES_512} PROPERTIES LANGUAGE RCCLDEV)
     set_target_properties(${_dev_target_512} PROPERTIES LINKER_LANGUAGE RCCLDEV)
 
     target_compile_options(${_dev_target_512} PRIVATE

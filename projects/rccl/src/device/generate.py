@@ -15,6 +15,16 @@ all_algos     = ["TREE","RING", "", "", "", "", "PAT"]
 all_accs      = ["0", "1"]
 all_pipelines = ["0", "1"]
 all_unrolls   = ["1", "2", "4"]
+# [RCCL] Unroll factors that the alternate gfx950 512-thread-per-block kernel set
+# is built for. The 512-thread set only helps launches that actually run with
+# more than 256 threads, which on gfx950 is the multi-node path (unroll 2). The
+# single-node path uses unroll 1 but is capped at 256 threads
+# (RCCL_SINGLE_NODE_MAX_NTHREADS, see rcclOptThreadBlockSize), and unroll 4 is
+# never auto-selected on gfx950 (see commSetUnrollFactor). So the 512 set is
+# built for unroll 2 only; the host falls back to the 256-thread kernels for the
+# other unrolls (see rcclSelectKernelFn in enqueue.cc). These sources are gated
+# at compile time by -DRCCL_NTHREADS_512 (device_table.h / common.h / common.cu).
+unrolls_512   = ["2"]
 # User-buffer registration mode (compile-time UserRegMode template parameter):
 #   "0" = runtime / not-applicable (single kernel, current behavior)
 #   "1" = registered user buffer   (LL128 Direct path bypasses cache)
@@ -447,6 +457,12 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
   out("typedef void(*ncclDevFuncPtr_t)();\n\n")
   for unroll in all_unrolls:
     index[unroll] = 0
+    # [RCCL] The gfx950 512-thread set (-DRCCL_NTHREADS_512) only builds/dispatches
+    # unroll 2 (see unrolls_512), so the other unroll tables would reference *_512
+    # specialized symbols that are never compiled into that set. Gate them out.
+    table_needs_512_guard = unroll not in unrolls_512
+    if table_needs_512_guard:
+      out("#ifndef RCCL_NTHREADS_512\n")
     out("static __device__ ncclDevFuncPtr_t const RCCL_NT_SYM(ncclDevFuncTable_%s)[] = {\n" % unroll)
     for fn in primary_funcs:
       if fn.unroll != unroll: continue
@@ -458,6 +474,8 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
         out("/*%4d*/ RCCL_NT_SYM(%s),\n" % (index[unroll], sym))
       index[unroll] += 1
     out("nullptr};\n")
+    if table_needs_512_guard:
+      out("#endif\n")
     out("\n")
   out("#endif // USE_INDIRECT_FUNCTION_CALL || RCCL_DEVICE_LINKER\n\n")
 
@@ -710,4 +728,16 @@ with open(os.path.join(gensrc, "specialized_files.txt"), "w") as f:
   for filename, func_name, guard, _ in specialized_filelist:
     f.write("%s %s %s\n" % (filename, func_name, guard or ""))
 
+# [RCCL] Subset of specialized files needed by the gfx950 512-thread kernel set.
+# Only the unroll factors in unrolls_512 are compiled with -DRCCL_NTHREADS_512
+# (the single-node/unroll-1 and unroll-4 paths reuse the 256-thread kernels), so
+# the 512 object library builds from this shorter list to save build time and
+# binary size. See cmake/DeviceLinker.cmake (rccl_device_gfx950_512).
+specialized_filelist_512 = [e for e in specialized_filelist if e[3].unroll in unrolls_512]
+with open(os.path.join(gensrc, "specialized_files_512.txt"), "w") as f:
+  for filename, func_name, guard, _ in specialized_filelist_512:
+    f.write("%s %s %s\n" % (filename, func_name, guard or ""))
+
 print("-- Generated %d specialized kernel files in %s" % (len(specialized_filelist), specialized_dir))
+print("-- gfx950 512-thread set uses %d of them (unroll %s)" %
+      (len(specialized_filelist_512), ",".join(unrolls_512)))

@@ -596,9 +596,16 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       SpecializedRunWorkBatch().run();
     } else {
 #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
+#if defined(RCCL_NTHREADS_512)
+      // [RCCL] The gfx950 512-thread set is built for unroll 2 only (single-node
+      // is capped at 256 threads and unroll 4 is never selected on gfx950), so
+      // the unroll-1/4 dispatch tables are not compiled into this set.
+      RCCL_NT_SYM(ncclDevFuncTable_2)[ncclShmem.funcId]();
+#else
       if (COLL_UNROLL == 1) RCCL_NT_SYM(ncclDevFuncTable_1)[ncclShmem.funcId]();
       else if (COLL_UNROLL == 2) RCCL_NT_SYM(ncclDevFuncTable_2)[ncclShmem.funcId]();
       else RCCL_NT_SYM(ncclDevFuncTable_4)[ncclShmem.funcId]();
+#endif
 #else
       if (COLL_UNROLL == 1) NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
       else if (COLL_UNROLL == 2) NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
@@ -635,9 +642,13 @@ __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRI
 // in a distinct symbol namespace (see src/include/device.h). Selected at runtime
 // via RCCL_GFX950_NTHREADS=512 (comm->use512Kernels). Only present in the gfx950
 // device image; launching these on other arches is never attempted.
-__global__ void ncclDevKernel_Generic_1_512(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+//
+// Only the unroll-2 kernel is built: the 512-thread set only benefits launches
+// that actually use more than 256 threads, which on gfx950 is the multi-node
+// (unroll 2) path. Single-node uses unroll 1 but is capped at 256 threads
+// (RCCL_SINGLE_NODE_MAX_NTHREADS) and unroll 4 is never auto-selected, so those
+// fall back to the 256-thread kernels (see rcclSelectKernelFn in enqueue.cc).
 __global__ void ncclDevKernel_Generic_2_512(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-__global__ void ncclDevKernel_Generic_4_512(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 #endif
 
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \

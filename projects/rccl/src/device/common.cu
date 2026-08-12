@@ -22,18 +22,26 @@ struct RunWorkNop {
 // RCCL_NT_SYM() renames these to *_512 when compiling the alternate gfx950
 // 512-thread device dispatcher (-DRCCL_NTHREADS_512), giving distinct __global__
 // entry points and a distinct 512-thread func table (see device.h / common.h).
+//
+// The 512-thread set is built for unroll 2 only (single-node/unroll-1 is capped
+// at 256 threads and unroll 4 is never selected on gfx950), so the unroll-1 and
+// unroll-4 generic dispatchers are emitted only for the default 256-thread set.
+#ifndef RCCL_NTHREADS_512
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__
   void RCCL_NT_SYM(ncclDevKernel_Generic_1)(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*Unroll*/ 1>(&argsStorage.args);
 }
+#endif
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__
   void RCCL_NT_SYM(ncclDevKernel_Generic_2)(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*Unroll*/ 2>(&argsStorage.args);
 }
+#ifndef RCCL_NTHREADS_512
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__
   void RCCL_NT_SYM(ncclDevKernel_Generic_4)(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*Unroll*/ 4>(&argsStorage.args);
 }
+#endif
 
 // [RCCL] Host-side stubs for the 512-thread generic kernels. The host launch
 // path (enqueue.cc) takes the address of these symbols to launch the 512-thread
@@ -41,18 +49,12 @@ __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__
 // compiling common.cu.cpp for the host with the embedded fat binary
 // (RCCL_HOST_FATBIN_COMPILE) so the device dispatcher compiles above emit exactly
 // one kernel set each (avoiding duplicate device symbols at link time).
+// Only the unroll-2 stub is emitted: the 512-thread set is built for unroll 2
+// only (see the device dispatcher above and enqueue.cc/ncclKerns512).
 #if defined(RCCL_ENABLE_GFX950_512) && defined(RCCL_HOST_FATBIN_COMPILE)
-__launch_bounds__(512, 1) __global__
-  void ncclDevKernel_Generic_1_512(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*Unroll*/ 1>(&argsStorage.args);
-}
 __launch_bounds__(512, 1) __global__
   void ncclDevKernel_Generic_2_512(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*Unroll*/ 2>(&argsStorage.args);
-}
-__launch_bounds__(512, 1) __global__
-  void ncclDevKernel_Generic_4_512(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*Unroll*/ 4>(&argsStorage.args);
 }
 #endif
 
