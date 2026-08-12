@@ -21,12 +21,15 @@
 /// OPR_SSRC_SPECIAL_SCC, OPR_VCC) whose `to_special_reg_class()` names the class
 /// directly. A special register named through a *generic selector* field instead
 /// (e.g. `s_mov_b32 exec_lo, 0`, where EXEC_LO is encoding value 126 in the
-/// OPR_SDST selector) is not yet surfaced: `to_register_ref()` maps only the
-/// SGPR/VGPR/AccVGPR selector ranges and `to_special_reg_class()` keys only on
-/// the operand type, so such an effect appears in neither `defs`/`uses` nor the
-/// ordinary projection. Closing this gap is a generator change (map special
-/// selector values to their RegClass) plus a regen, and is left as follow-up
-/// work; consumers must not assume selector-encoded EXEC/VCC/M0 writes are
+/// OPR_SDST selector) *does* decode to a special `RegisterRef` via
+/// `to_register_ref()`, but that ref collapses the LO/HI halves (and, for TTMP,
+/// the register index) into one class-wide singleton — an imprecise
+/// representation — so InstDefUse drops it: only ordinary SGPR/VGPR/AccVGPR refs
+/// from `to_register_ref()` are recorded, and such selector-encoded specials
+/// appear in neither `defs`/`uses` nor the ordinary projection. Surfacing them
+/// precisely is follow-up work (a generator change mapping special selector
+/// values to their RegClass, plus width-aware special storage); until then,
+/// consumers must not assume selector-encoded EXEC/VCC/M0 reads or writes are
 /// visible here.
 
 #pragma once

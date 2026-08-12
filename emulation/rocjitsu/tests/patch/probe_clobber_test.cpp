@@ -178,10 +178,11 @@ TEST(ProbeClobber, DetectsExplicitFlatScratchWrite) {
   EXPECT_FALSE(summary->touches_m0);
 }
 
-// A body that writes both an ordinary SGPR (s5) and EXEC. InstDefUse now carries
-// EXEC as a singleton member of its def set, but ordinary_clobbers is built from
-// the ordinary projection, so s5 must appear there while no special member does.
-// The EXEC write is still surfaced separately via touches_exec.
+// A body that writes both an ordinary SGPR (s5) and EXEC (via the s_mov_b32
+// exec_lo selector). ordinary_clobbers is built from InstDefUse's ordinary
+// projection, so s5 appears there while no special member does. The
+// selector-encoded EXEC write is not surfaced by InstDefUse; it is caught
+// separately by scan_special_state and reported via touches_exec.
 TEST(ProbeClobber, SpecialWritesDoNotLeakIntoOrdinaryClobbers) {
   const auto callable = make_callable({kSMovS5_0, kSMovExecLo_0, kSSetpcS30S31});
   std::string err;

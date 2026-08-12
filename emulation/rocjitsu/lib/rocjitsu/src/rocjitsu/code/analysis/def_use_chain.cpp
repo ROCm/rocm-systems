@@ -20,6 +20,20 @@ namespace {
   return ref.cls == RegClass::VGPR || ref.cls == RegClass::ACC_VGPR;
 }
 
+// InstDefUse surfaces only ordinary register-file refs (SGPR/VGPR/AccVGPR)
+// through to_register_ref(). A generic selector operand can decode to a special
+// register (e.g. EXEC_LO/EXEC_HI in an OPR_SDST field), but that ref collapses
+// the LO/HI halves (and, for TTMP, the register index) into one class-wide
+// singleton, so it is dropped here rather than recorded imprecisely. Genuinely
+// fieldless special operands are surfaced instead through to_special_reg_class().
+// See def_use_chain.h.
+[[nodiscard]] std::optional<RegisterRef> ordinary_register_ref(const Operand &op) {
+  auto ref = op.to_register_ref();
+  if (ref && is_special_reg_class(ref->cls))
+    return std::nullopt;
+  return ref;
+}
+
 /// @brief Distinguishes a use (may-read) expansion from a def (must-write) one.
 /// @details When the VGPR-MSB bank is unknown, a USE conservatively reads any of
 /// the four candidate tuples (a sound may-read over-approximation), but a DEF must
@@ -76,7 +90,7 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
     const auto *op = inst.dst_operand(i);
     if (op == nullptr)
       continue;
-    if (auto ref = op->to_register_ref()) {
+    if (auto ref = ordinary_register_ref(*op)) {
       expand_operand_register(defs, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Def,
                               unknown_vgpr_defs);
       has_vector_def |= is_vector_def(*ref);
@@ -95,7 +109,7 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
     const auto *op = inst.src_operand(i);
     if (op == nullptr)
       continue;
-    if (auto ref = op->to_register_ref())
+    if (auto ref = ordinary_register_ref(*op))
       expand_operand_register(uses, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Use,
                               unknown_vgpr_defs);
     else if (auto sc = op->to_special_reg_class())
@@ -121,7 +135,7 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
   for (const Operand *op : implicit_use_operand_list) {
     if (op == nullptr)
       continue;
-    if (auto ref = op->to_register_ref())
+    if (auto ref = ordinary_register_ref(*op))
       expand_operand_register(uses, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Use,
                               unknown_vgpr_defs);
   }

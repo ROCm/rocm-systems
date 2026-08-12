@@ -760,6 +760,31 @@ TEST(SpecialEffectAnalysis, SaveexecReportsExecAndSccFromDecodedOperands) {
   EXPECT_FALSE(du.defs.ordinary_only().has_specials());
 }
 
+// Counterpart to the fieldless case above: a special register named through a
+// *generic selector* field (s_mov_b32 exec_lo/exec_hi, where EXEC_LO/HI are
+// encoding values 126/127 in the OPR_SDST selector) decodes to a special
+// RegisterRef, but its class-wide singleton representation would collapse the
+// LO/HI halves. InstDefUse deliberately drops such selector-encoded specials
+// rather than record them imprecisely, so EXEC appears in neither defs nor uses.
+TEST(SpecialEffectAnalysis, SelectorEncodedExecWriteIsNotSurfaced) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const uint32_t word :
+       {0xbefe0080u /* s_mov_b32 exec_lo, 0 */, 0xbeff0080u /* s_mov_b32 exec_hi, 0 */}) {
+    const std::array<uint32_t, 2> words{word, 0u};
+    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), "s_mov_b32") << std::hex << word;
+
+    InstDefUse du(*inst);
+    EXPECT_FALSE(du.defs.has_specials()) << std::hex << word;
+    EXPECT_FALSE(du.uses.has_specials()) << std::hex << word;
+    // The dropped EXEC ref must not leak into the ordinary files either.
+    EXPECT_EQ(du.defs.ordinary_size(), 0u) << std::hex << word;
+  }
+}
+
 TEST(SpecialEffectAnalysis, OrdinaryInstructionReportsNoSpecialEffects) {
   // A plain vector op with only ordinary register operands exposes no special
   // effects -- both special sets stay empty.
