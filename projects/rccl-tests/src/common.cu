@@ -156,7 +156,7 @@ std::string rccl_output_file;
 std::string rccl_output_format;
 static int report_cputime = 0;
 static int report_timestamps = 0;
-static int deviceImpl = 0;
+int deviceImpl = 0;  // non-static: per-collective device-timing hooks read this to pick the matching timed kernel
 int unalign = 0;
 int memory_report = 0;
 
@@ -946,10 +946,26 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   Barrier(args);
 
+  // Device-time-only mode (NCCL_GIN_ANVIL_DEVICE_TIMING=2, legacy
+  // NCCL_GIN_ANVIL_A2A_DEVICE_TIMING=2): for collectives that provide a
+  // device-timing hook, skip the host/graph timed loop entirely and report the
+  // in-kernel wall_clock64 measurement as the metric. Warmup and datacheck still
+  // run (correctness). Mode 1 keeps the normal timed loop and augments with an
+  // extra line; mode 0 is off.
+  int devTimeMode = 0;
+  if (deviceImpl != 0 && args->collTest->deviceTime != nullptr) {
+    const char* e = getenv("NCCL_GIN_ANVIL_DEVICE_TIMING");
+    if (!(e && *e)) e = getenv("NCCL_GIN_ANVIL_A2A_DEVICE_TIMING");
+    devTimeMode = (e && *e) ? atoi(e) : 0;
+  }
+  // Device-time-only applies to the out-of-place pass (the reported metric). The
+  // in-place pass keeps normal timing so its column stays valid.
+  const bool deviceOnly = (devTimeMode == 2) && (in_place == 0);
+
 #if HIP_VERSION >= 50221310
   std::vector<cudaGraph_t> graphs(args->nGpus);
   std::vector<cudaGraphExec_t> graphExec(args->nGpus);
-  if (cudaGraphLaunches >= 1) {
+  if (cudaGraphLaunches >= 1 && !deviceOnly) {
     // Begin cuda graph capture
     for (int i=0; i<args->nGpus; i++) {
       // Thread local mdoe is needed for:
@@ -968,25 +984,27 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   double collOnlySec = 0;
   int pairedEvents = record && blocking_coll == 3;
   timer tim;
-  for (int iter = 0; iter < iters; iter++) {
-    double t0 = tim.elapsed();
-    if (agg_iters>1) NCCLCHECK(ncclGroupStart());
-    if (record) TESTCHECK(recordEvents(args, iters, iter));
-    for (int aiter = 0; aiter < agg_iters; aiter++) {
-      TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
-    }
-    if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
-    if (blocking_coll == 3) {
-      TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
-      if (pairedEvents) TESTCHECK(recordEvents(args, iters, iter, 1));
-      collOnlySec += tim.elapsed() - t0;
-      Barrier(args);
+  if (!deviceOnly) {
+    for (int iter = 0; iter < iters; iter++) {
+      double t0 = tim.elapsed();
+      if (agg_iters>1) NCCLCHECK(ncclGroupStart());
+      if (record) TESTCHECK(recordEvents(args, iters, iter));
+      for (int aiter = 0; aiter < agg_iters; aiter++) {
+        TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
+      }
+      if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
+      if (blocking_coll == 3) {
+        TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+        if (pairedEvents) TESTCHECK(recordEvents(args, iters, iter, 1));
+        collOnlySec += tim.elapsed() - t0;
+        Barrier(args);
+      }
     }
   }
   if (record && !pairedEvents) TESTCHECK(recordEvents(args, iters, iters));
 
 #if HIP_VERSION >= 50221310
-  if (cudaGraphLaunches >= 1) {
+  if (cudaGraphLaunches >= 1 && !deviceOnly) {
     // HIP (and CUDA) graph limitation: in single-process multi-GPU mode (-g N),
     // graph nodes are associated with the calling thread's current device at
     // capture time, not the stream's device. RCCL internally calls cudaSetDevice()
@@ -1057,10 +1075,19 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     TESTCHECK(destroyEvents(args, iters));
   }
 
-  Allreduce(args, &deltaSec, average);
+  if (!deviceOnly) Allreduce(args, &deltaSec, average);
+
+  if (deviceOnly) {
+    // The reported metric is the in-kernel wall_clock64 device latency
+    // (per iteration, max across ranks), measured by the collective's hook.
+    double deviceDeltaSec = 0.0;
+    TESTCHECK(args->collTest->deviceTime(args, type, op, root, in_place, &deviceDeltaSec));
+    deltaSec = deviceDeltaSec;
+    cputimeSec = deviceDeltaSec;
+  }
 
 #if HIP_VERSION >= 50221310
-  if (cudaGraphLaunches >= 1) {
+  if (cudaGraphLaunches >= 1 && !deviceOnly) {
     //destroy cuda graph
     for (int i=0; i<args->nGpus; i++) {
 #ifdef __HIP_PLATFORM_AMD__
@@ -1195,6 +1222,13 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   args->bw[0] += busBw;
   args->bw_count[0]++;
+
+  // Mode 1 (augment): print an extra device-only line alongside the normal
+  // graph/hipEvent numbers above. Mode 2 already reported device time as THE
+  // metric before getBw, so no extra line here.
+  if (in_place == 0 && devTimeMode == 1) {
+    TESTCHECK(args->collTest->deviceTime(args, type, op, root, in_place, nullptr));
+  }
   return testSuccess;
 }
 
