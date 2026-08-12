@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/amd_hsa_queue.h"
@@ -17,6 +18,7 @@ RJ_DIAGNOSTIC_POP
 #include <atomic>
 #include <cstring>
 #include <format>
+#include <set>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -31,7 +33,9 @@ void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
           os << std::format("CT: wg_complete d={} wg={} completed={}/{}", dispatch_id, wg_id,
                             entry.completed_wgs, entry.total_wgs);
         });
-        drain_completions(queues);
+        // Completion callbacks can run from CU worker threads. The CP drains
+        // completions after dispatch fan-out rejoins, keeping cache flushes and
+        // signal firing on the CP path.
         return;
       }
     }
@@ -169,8 +173,16 @@ void CompletionTracker::fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t 
 }
 
 void CompletionTracker::flush_caches(uint32_t vmid) {
-  for (auto *cu : cus_)
-    cu->flush_all(vmid);
+  std::set<L2Cache *> flushed_l2s;
+  for (auto *cu : cus_) {
+    cu->flush_l1(vmid);
+    if (auto *l2 = cu->l2(); l2 && flushed_l2s.insert(l2).second)
+      l2->flush_all(vmid);
+  }
+  for (auto *l2 : l2_caches_) {
+    if (l2 && flushed_l2s.insert(l2).second)
+      l2->flush_all(vmid);
+  }
 }
 
 bool CompletionTracker::all_complete(const std::vector<HwQueueState> &queues) const {

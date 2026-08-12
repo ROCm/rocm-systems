@@ -84,6 +84,8 @@ void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {
   plugin_group_ = plugin_group ? plugin_group : ExecutionPluginGroup::empty_group();
   for (auto *xcd : xcds_)
     xcd->set_plugin_group(plugin_group_);
+  if (plugin_group_->requires_serial_hot_hooks())
+    for_each_cp([](auto *cp) { cp->set_dispatch_threads(1); });
 }
 
 void SoC::flush_all() {

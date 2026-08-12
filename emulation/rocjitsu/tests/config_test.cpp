@@ -41,6 +41,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 namespace {
 
@@ -90,6 +91,83 @@ TEST(ConfigLoaderTest, LoadCdna2Config) {
   EXPECT_LE(loaded.device.simd_count, loaded.device.num_shader_engines *
                                           loaded.device.num_shader_arrays_per_engine *
                                           loaded.device.num_cu_per_sh * loaded.device.simd_per_cu);
+}
+
+std::pair<uint32_t, uint32_t> run_two_spi_dispatch() {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"cdna3"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu0","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"10"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]},
+            {"name":"se1","type":"shader_engine","children":[
+              {"name":"cu0","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"10"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.cp.req_1","dst":"xcd0.se1.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10},
+        {"src":"xcd0.se1.cu0.req","dst":"xcd0.l2.cpl_1","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+
+  simdojo::SimulationEngine engine(loaded.engine_config);
+  engine.topology().set_root(loaded.take_root());
+  loaded.wire_links(engine.topology());
+  engine.create();
+
+  rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
+  soc->set_plugin_group(rocjitsu::test::make_dispatch_count_group(&dispatch_count));
+
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  ((256 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  ((104 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+
+  constexpr uint64_t KD_ADDR = 0x1000;
+  soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
+  soc->memory()->write32(KD_ADDR + sizeof(kernel_descriptor_t), 0xFFFFFFFF);
+
+  auto *xcd = soc->xcd(0);
+  auto *cp = xcd->command_processor();
+  cp->set_dispatch_threads(2);
+  assert(cp->dispatch_threads() == 2);
+
+  test::AqlQueue queue(soc->memory(), cp);
+  queue.dispatch(KD_ADDR, 128, 64);
+
+  engine.step();
+
+  return {dispatch_count->for_cu(xcd->shader_engine(0)->compute_unit(0)),
+          dispatch_count->for_cu(xcd->shader_engine(1)->compute_unit(0))};
 }
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
@@ -1242,6 +1320,13 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   auto *se = soc->xcd(0)->shader_engine(0);
   EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(0)), 1u);
   EXPECT_EQ(dispatch_count->for_cu(se->compute_unit(1)), 1u);
+}
+
+TEST(ConfigLoaderTest, DispatchPlacementDoesNotFollowHostThreadCount) {
+  auto [se0_wfs, se1_wfs] = run_two_spi_dispatch();
+
+  EXPECT_EQ(se0_wfs, 2u);
+  EXPECT_EQ(se1_wfs, 0u);
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {
