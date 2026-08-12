@@ -245,7 +245,7 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
 
 __device__ void rocshmem_putmem(void *dest, const void *source, size_t nelems,
                                  int pe) {
-  [[clang::always_inline]] rocshmem_ctx_putmem(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
+  rocshmem_ctx_putmem(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
 template <typename T>
@@ -275,7 +275,7 @@ __device__ void rocshmem_get(T *dest, const T *source, size_t nelems, int pe) {
 
 __device__ void rocshmem_putmem_nbi(void *dest, const void *source,
                                      size_t nelems, int pe) {
-  [[clang::always_inline]] rocshmem_ctx_putmem_nbi(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
+  rocshmem_ctx_putmem_nbi(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
 }
 
 template <typename T>
@@ -1410,9 +1410,9 @@ __device__ void rocshmem_ctx_threadfence_system(rocshmem_ctx_t ctx) {
   direct_ctx_threadfence_system(ctx);
 }
 
-__device__ void rocshmem_ctx_putmem(rocshmem_ctx_t ctx, void *dest,
-                                     const void *source, size_t nelems,
-                                     int pe) {
+__device__ __attribute__((used)) __forceinline__ void rocshmem_ctx_putmem(
+    rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems,
+    int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::ctx_putmem (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
@@ -1468,9 +1468,9 @@ __device__ void rocshmem_get(rocshmem_ctx_t ctx, T *dest, const T *source,
   direct_ctx_get<T>(ctx, dest, source, nelems, pe_in_world);
 }
 
-__device__ void rocshmem_ctx_putmem_nbi(rocshmem_ctx_t ctx, void *dest,
-                                         const void *source, size_t nelems,
-                                         int pe) {
+__device__ __attribute__((used)) __forceinline__ void rocshmem_ctx_putmem_nbi(
+    rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems,
+    int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::ctx_putmem_nbi (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
@@ -2312,7 +2312,8 @@ __device__ void rocshmem_get_nbi_wave(rocshmem_ctx_t ctx, T *dest,
 }
 
 #define ROCSHMEM_CTX_PUTMEM_SIGNAL_DEF(SUFFIX)                                             \
-  __device__ void rocshmem_ctx_putmem_signal##SUFFIX(rocshmem_ctx_t ctx,                   \
+  __device__ __attribute__((used)) __forceinline__                                        \
+  void rocshmem_ctx_putmem_signal##SUFFIX(rocshmem_ctx_t ctx,                              \
                                                       void *dest, const void *source,      \
                                                       size_t nelems,                       \
                                                       uint64_t *sig_addr, uint64_t signal, \
