@@ -41,9 +41,9 @@ Classification buckets:
 - `cts.gfx942.fpsan.fpsan_mfma_cdna3_fp8_test`
 - `cts.gfx942.fpsan.fpsan_mfma_cdna3_xf32_test`
 - `cts.gfx942.fpsan.fpsan_smfmac_cdna3_test`
-- `hip_matmul_matvec::m256_n1_k1024`
-- `hip_streamk_simple::m256_n256_k256`
-- `hip_streamk_two_tile::m256_n256_k256`
+- `kernels.gfx942.hip-matmul.hip_matmul_matvec.m256_n1_k1024`
+- `kernels.gfx942.hip-stream-k.hip_streamk_simple.m256_n256_k256`
+- `kernels.gfx942.hip-stream-k.hip_streamk_two_tile.m256_n256_k256`
 - `llama.gfx942.backend_ops.MUL_MAT.017115bdd15b`
 - `llama.gfx942.backend_ops.MUL_MAT.38225d8678d3`
 - `llama.gfx942.backend_ops.MUL_MAT.48f89386e558`
@@ -85,13 +85,14 @@ Classification buckets:
 - `llama.gfx942.backend_ops.MUL_MAT_ID.501e10751a9a`
 - `llama.gfx942.backend_ops.MUL_MAT_ID.dbedbadd142a`
 
-### possible hang or freeze: 5
+### possible hang or freeze: 6
 
 - `llama.gfx942.backend_ops.LIGHTNING_INDEXER.28d7def07117`
 - `llama.gfx942.backend_ops.MUL_MAT.462ccb738b08`
 - `llama.gfx942.backend_ops.MUL_MAT_ID_FUSION.b3d0befaa714`
 - `llama.gfx942.backend_ops.MUL_MAT_ID_FUSION.dfb1ed5ca4e9`
 - `llama.gfx942.backend_ops.MUL_MAT_ID_FUSION.f6f7601c1c97`
+- `kernels.gfx942.rocblas.rocblas_sgemm.large_2048x2048`
 
 ## gfx950
 
@@ -132,7 +133,7 @@ Classification buckets:
 - `llama.gfx950.backend_ops.MUL_MAT_ID.501e10751a9a`
 - `llama.gfx950.backend_ops.MUL_MAT_ID.dbedbadd142a`
 
-### possible hang or freeze: 8
+### possible hang or freeze: 7
 
 - `llama.gfx950.backend_ops.LIGHTNING_INDEXER.28d7def07117`
 - `llama.gfx950.backend_ops.MUL_MAT.462ccb738b08`
@@ -140,8 +141,7 @@ Classification buckets:
 - `llama.gfx950.backend_ops.MUL_MAT_ID_FUSION.b3d0befaa714`
 - `llama.gfx950.backend_ops.MUL_MAT_ID_FUSION.dfb1ed5ca4e9`
 - `llama.gfx950.backend_ops.MUL_MAT_ID_FUSION.f6f7601c1c97`
-- `rocblas_sgemm::fuzz_iter4`
-- `rocblas_sgemm::large_2048x2048`
+- `kernels.gfx950.rocblas.rocblas_sgemm.large_2048x2048`
 
 ## gfx1100
 
@@ -199,7 +199,7 @@ Classification buckets:
 
 ### possible hang or freeze: 8
 
-- `rocblas_sgemm::large_2048x2048`
+- `kernels.gfx1100.rocblas.rocblas_sgemm.large_2048x2048`
 - `llama.gfx1100.backend_ops.LIGHTNING_INDEXER.28d7def07117`
 - `llama.gfx1100.backend_ops.MUL_MAT_ID.4c6f0c369254`
 - `llama.gfx1100.backend_ops.MUL_MAT_ID.501e10751a9a`
@@ -249,7 +249,7 @@ Classification buckets:
 - `cts.gfx1201.int_isa.int_isa_rdna4_wmma_i32_16x16x16_iu4_w64_test`
 - `cts.gfx1201.int_isa.int_isa_rdna4_wmma_i32_16x16x16_iu8_w64_test`
 - `cts.gfx1201.int_isa.int_isa_rdna4_wmma_i32_16x16x32_iu4_w64_test`
-- `hip_matmul_matvec::m256_n1_k1024`
+- `kernels.gfx1201.hip-matmul.hip_matmul_matvec.m256_n1_k1024`
 - `llama.gfx1201.backend_ops.GATED_DELTA_NET.05b63a4322c6`
 - `llama.gfx1201.backend_ops.GATED_DELTA_NET.5615f586b1ca`
 - `llama.gfx1201.backend_ops.GATED_DELTA_NET.5a41ca1b14ff`
@@ -338,23 +338,23 @@ Classification buckets:
 - `llama.gfx1201.backend_ops.TOPK_MOE.91b601cce199`
 - `llama.gfx1201.backend_ops.TOPK_MOE.ba01fa21e49a`
 - `llama.gfx1201.backend_ops.TOPK_MOE.fa7a6e1ee615`
-- `rocblas_sgemm::alpha_beta`
-- `rocblas_sgemm::beta_zero`
-- `rocblas_sgemm::fuzz_iter0`
-- `rocblas_sgemm::fuzz_iter1`
-- `rocblas_sgemm::fuzz_iter2`
-- `rocblas_sgemm::fuzz_iter3`
-- `rocblas_sgemm::fuzz_iter4`
-- `rocblas_sgemm::large_2048x2048`
-- `rocblas_sgemm::rect_16x32x8`
-- `rocblas_sgemm::rect_1x64x1`
-- `rocblas_sgemm::rect_64x1x64`
-- `rocblas_sgemm::rect_7x11x13`
-- `rocblas_sgemm::square_16x16`
-- `rocblas_sgemm::square_32x32`
-- `rocblas_sgemm::square_4x4`
-- `rocblas_sgemm::square_8x8`
-- `rocblas_sgemm::tiny_2x2x3`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.alpha_beta`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.beta_zero`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.fuzz_iter0`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.fuzz_iter1`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.fuzz_iter2`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.fuzz_iter3`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.fuzz_iter4`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.large_2048x2048`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.rect_16x32x8`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.rect_1x64x1`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.rect_64x1x64`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.rect_7x11x13`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.square_16x16`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.square_32x32`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.square_4x4`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.square_8x8`
+- `kernels.gfx1201.rocblas.rocblas_sgemm.tiny_2x2x3`
 
 ### long-running test: 1
 
@@ -394,4 +394,4 @@ Classification buckets:
 
 ### possible hang or freeze: 1
 
-- `rocblas_sgemm::large_2048x2048`
+- `kernels.gfx1250.rocblas.rocblas_sgemm.large_2048x2048`

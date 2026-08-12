@@ -3,19 +3,18 @@
     "iree.gfx950.e2e.pack_i8.static_pack_vnni_lhs_large"
   ],
   "cts": [
-    "cts.gfx950.fpsan.fpsan_mfma_gfx950_test",
+    "cts.gfx950.fpsan.fpsan_amdgcn_math_extra_test",
+    "cts.gfx950.fpsan.fpsan_atomic_test",
     "cts.gfx950.fpsan.fpsan_cvt_scalef32_fp4_gfx950_test",
     "cts.gfx950.fpsan.fpsan_cvt_scalef32_fp6_gfx950_test",
     "cts.gfx950.fpsan.fpsan_cvt_scalef32_sr_gfx950_test",
-    "cts.gfx950.fpsan.fpsan_atomic_test",
     "cts.gfx950.fpsan.fpsan_hip_device_test",
-    "cts.gfx950.fpsan.fpsan_amdgcn_math_extra_test",
     "cts.gfx950.fpsan.fpsan_mfma_gfx950_scaled_test",
-    "cts.gfx950.fpsan.fpsan_mfma_gfx950_smfmac_test"
+    "cts.gfx950.fpsan.fpsan_mfma_gfx950_smfmac_test",
+    "cts.gfx950.fpsan.fpsan_mfma_gfx950_test"
   ],
   "kernels": [
-    "rocblas_sgemm::fuzz_iter4",
-    "rocblas_sgemm::large_2048x2048"
+    "kernels.gfx950.rocblas.rocblas_sgemm.large_2048x2048"
   ],
   "llama": [
     "llama.gfx950.backend_ops.LIGHTNING_INDEXER.28d7def07117",
