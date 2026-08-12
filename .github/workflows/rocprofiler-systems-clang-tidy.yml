@@ -62,5 +62,4 @@ jobs:
           python3 scripts/clang-tidy-check.py \
             --base "origin/${{ github.base_ref }}" \
             --build-path build/debug \
-            --clang-tidy-binary clang-tidy-18 \
-            --timeout 300
+            --clang-tidy-binary clang-tidy-18
