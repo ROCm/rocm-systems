@@ -74,6 +74,7 @@ The example above is intentionally minimal and single-threaded.
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned) |
+| `cpu_dispatch_threads` | int | Shared CPU CU-dispatch worker-pool size per SoC in functional mode (0 = auto: hardware threads, capped at 32; 1 = serial) |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
@@ -111,6 +112,12 @@ eight-workgroup clusters are two chunks, and on an eight-XCD SoC six XCDs take
 an empty share and run nothing. Fan-out also reaches only the XCDs of the SoC
 that owns the queue -- so in the two-GPU example above, one dispatch occupies at
 most the partitions covering its own GPU.
+
+`cpu_dispatch_threads` controls how much accepted CU work can execute in
+parallel on host threads. The configured budget is shared by all command
+processors in one SoC; it does not change queue ownership, XCD fan-out, or which
+SPI or CU accepts the next workgroup. In clocked mode the effective value is
+always 1.
 
 ### Topology
 

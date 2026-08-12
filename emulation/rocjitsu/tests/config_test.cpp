@@ -503,6 +503,62 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
   EXPECT_EQ(xcd->shader_engine(0)->compute_unit(0)->config().functional_quantum, 7u);
 }
 
+TEST(ConfigLoaderTest, ExecModeClockedStringSelectsClockedMode) {
+  const char *json = R"({
+    "max_ticks": 1000,
+    "num_threads": 1,
+    "exec_mode": "clocked",
+    "vm": { "arch": "cdna3" },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" }
+        ]
+      }
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(loaded.exec_mode, simdojo::ExecMode::CLOCKED);
+}
+
+TEST(ConfigLoaderTest, ComputeUnitFunctionalQuantumUsesDeclarativeValue) {
+  const char *json = R"({
+    "max_ticks": 1000,
+    "num_threads": 1,
+    "vm": { "arch": "cdna3" },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" },
+          {
+            "name": "xcd0", "type": "xcd",
+            "children": [
+              { "name": "l2", "type": "l2_cache" },
+              { "name": "cp", "type": "command_processor" },
+              {
+                "name": "se0", "type": "shader_engine",
+                "children": [{
+                  "name": "cu0", "type": "compute_unit",
+                  "config": [{ "key": "functional_quantum", "value": "37" }]
+                }]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  EXPECT_EQ(cu->functional_quantum(), 37u);
+}
+
 TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
   const char *json = R"({
     "max_ticks": 5000,
@@ -1825,6 +1881,52 @@ TEST(CheckpointTest, RoundTripsWorkgroupCoordinates) {
   EXPECT_EQ(restored_wf->wg_coord(), (std::array<uint32_t, 3>{3, 5, 7}));
 }
 
+std::string functional_dispatch_threads_config(uint32_t threads) {
+  return R"({"max_ticks":1000,"num_threads":1,"exec_mode":"functional",
+    "cpu_dispatch_threads":)" +
+         std::to_string(threads) + R"(,
+    "vm":{"arch":"cdna3"},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd[0:2]","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"}
+      ]}
+    ]}}})";
+}
+
+TEST(CApiTest, FunctionalDispatchThreadsPropagateExplicitAndAutoValues) {
+  auto run_case = [](uint32_t configured, std::optional<uint32_t> expected) {
+    const std::string json = functional_dispatch_threads_config(configured);
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    ASSERT_NE(raw, nullptr);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
+
+    uint32_t cp_count = 0;
+    handle->soc->for_each_cp([&](auto *cp) {
+      ++cp_count;
+      if (expected) {
+        EXPECT_EQ(cp->dispatch_threads(), *expected);
+      } else {
+        EXPECT_GE(cp->dispatch_threads(), 1u);
+        EXPECT_LE(cp->dispatch_threads(), 32u);
+      }
+    });
+    EXPECT_EQ(cp_count, 2u);
+    if (expected) {
+      EXPECT_EQ(handle->soc->dispatch_threads(), *expected);
+    } else {
+      EXPECT_GE(handle->soc->dispatch_threads(), 1u);
+      EXPECT_LE(handle->soc->dispatch_threads(), 32u);
+    }
+  };
+
+  run_case(/*configured=*/7, /*expected=*/7);
+  run_case(/*configured=*/0, /*expected=*/std::nullopt);
+}
+
 TEST(CApiTest, CreateAndDestroyFromString) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"cdna3"},
@@ -1861,7 +1963,7 @@ TEST(CApiTest, CreateAndDestroyFromString) {
 
 TEST(CApiTest, ClockedDispatchStaysEventDriven) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
-    "exec_mode":"clocked",
+    "exec_mode":"clocked","cpu_dispatch_threads":8,
     "vm":{"arch":"cdna3"},
     "topology":{
       "root":{
@@ -1893,7 +1995,7 @@ TEST(CApiTest, ClockedDispatchStaysEventDriven) {
   ASSERT_NE(raw, nullptr);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
   auto *cp = handle->soc->xcd(0)->command_processor();
-  cp->set_dispatch_threads(8);
+  EXPECT_EQ(handle->soc->dispatch_threads(), 1u);
   EXPECT_EQ(cp->dispatch_threads(), 1u);
 
   using namespace rocr::llvm::amdhsa;
