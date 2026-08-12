@@ -57,8 +57,9 @@ def test_data_structure(input_data):
 
 
 def test_dispatch_count(input_data):
-    """Every graph kernel dispatch was captured. A dropped completion (the
-    failure mode of the old handler pool) would leave records missing."""
+    """Every graph kernel dispatch was captured. The workload synchronizes each
+    replay, so every completion retires before the process exits and the count is
+    exact; a dropped completion leaves records missing."""
     sdk_data = input_data["rocprofiler-sdk-json-tool"]
     dispatches = sdk_data["buffer_records"]["kernel_dispatch"]
 

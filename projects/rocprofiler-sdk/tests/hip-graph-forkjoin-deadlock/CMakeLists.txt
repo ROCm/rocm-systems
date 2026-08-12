@@ -21,12 +21,12 @@
 # SOFTWARE.
 
 #
-# Regression coverage for the queue-interposition completion-handler deadlock: a
-# multi-stream HIP-graph fork/join workload produces many concurrent, mutually dependent
-# completion signals. Under the previous per-signal blocking handler pool this deadlocked
-# (the execute step would hang until TIMEOUT); the single monitor thread that waits on all
-# signals at once completes normally. The validate step additionally confirms the expected
-# dispatch records were emitted.
+# Queue-interposition completion path under concurrency: a multi-stream HIP-graph
+# fork/join workload produces many mutually dependent completion signals in flight at
+# once. The execute step asserts the workload still makes progress when the number of
+# concurrent completions far exceeds any fixed number of handler threads -- a handler
+# design that blocks one thread per signal cannot complete this workload and hits TIMEOUT.
+# The validate step confirms every dispatch record was emitted.
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -38,8 +38,8 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 
 # width=8 depth=8 replays=30: enough concurrent barrier-coupled branches to saturate the
-# completion path. The TIMEOUT is the failure signal for the deadlock -- the workload
-# completes in a few seconds when healthy.
+# completion path. The TIMEOUT is the failure signal -- the workload completes in a few
+# seconds when healthy.
 rocprofiler_add_integration_execute_test(
     hip-graph-forkjoin-deadlock
     TARGET hip-graph-forkjoin
