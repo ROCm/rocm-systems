@@ -51,19 +51,24 @@ dereference (`CR2: 0x120`).
 
 **Applies to:** ROCm amdgpu `roc-7.2.x` and later.
 
-### 0004-vfu-stub-amdkfd-drm-client-create.patch
+## Module parameters
 
-**Problem:** `amdgpu_amdkfd_drm_client_create` is called from `amdgpu_pci_probe`
-during device initialization. It triggers `amdgpu_vm_init` which crashes with
-a NULL pointer dereference at offset 0x1c8 because `adev->vm_manager` fields
-are not fully initialized at probe time in vfio-user emulation.
+### `vm_update_mode=3`
 
-The crash call stack:
-  `amdgpu_vm_init+0x359 ← amdgpu_driver_open_kms ← drm_client_init ←`
-  `amdgpu_amdkfd_drm_client_create ← amdgpu_pci_probe+0x325`
+Always pass this when loading amdgpu in a vfio-user VM:
 
-**Fix:** Return 0 immediately from `amdgpu_amdkfd_drm_client_create`. KFD
-topology registration still works; the DRM client is only needed for KFD
-internal GPU memory operations not yet supported in vfio-user emulation.
+```sh
+modprobe amdgpu discovery=2 fw_load_type=0 ip_block_mask=0xF vm_update_mode=3
+```
 
-**Applies to:** ROCm amdgpu `roc-7.2.x` and later.
+**Why:** By default amdgpu uses SDMA to update VM page tables. SDMA is not
+enabled (`ip_block_mask` bit 4 not set) because it requires CP firmware.
+Without SDMA initialized, any path through `amdgpu_vm_init →
+amdgpu_vm_sdma_prepare` will crash with a NULL `entity->rq` in
+`drm_sched_job_init`. This affects both the probe-time DRM client creation
+(`amdgpu_amdkfd_drm_client_create`) and the per-open `amdgpu_driver_open_kms`
+path that rocminfo triggers.
+
+`vm_update_mode=3` forces CPU-based VM page table updates (no SDMA), which
+works correctly in vfio-user emulation. This is a documented module parameter
+(see `modinfo amdgpu | grep vm_update_mode`).
