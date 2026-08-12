@@ -27,6 +27,9 @@ __global__ void nKernel(float* y) {
   y[tid] = y[tid] + 1.0f;
 }
 
+// wall_clock64() is an AMD device builtin, so this test is AMD-only.
+#if HT_AMD
+
 __global__ void verifyStreamPacketOrder(uint32_t* sequence_value, uint32_t expected_value,
                                         uint32_t* ordering_errors, uint64_t delay_cycles) {
   if (blockIdx.x != 0 || threadIdx.x != 0) {
@@ -131,6 +134,8 @@ HIP_TEST_CASE(Unit_hipMultiStream_SharedHwQueuePacketOrdering) {
   HIP_CHECK(hipFree(ordering_errors));
   HIP_CHECK(hipFree(sequence_values));
 }
+
+#endif  // HT_AMD
 
 HIP_TEST_CASE(Unit_hipMultiStream_sameDevice) {
   constexpr int num_streams{8};
