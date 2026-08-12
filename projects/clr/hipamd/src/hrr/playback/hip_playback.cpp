@@ -624,7 +624,8 @@ static void decode_kernel_args(
     std::vector<void*>& arg_ptrs,
     std::vector<std::vector<uint8_t>>& arg_storage,
     RegionLaunchState* rls = nullptr,
-    std::vector<std::tuple<unsigned, uint64_t, void*>>* dbg_ptrs_out = nullptr) {
+    std::vector<std::tuple<unsigned, uint64_t, void*>>* dbg_ptrs_out = nullptr,
+    std::string* dbg_args_out = nullptr) {
     (void)kernel_name;
     std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_sink;
     const bool dbg_dump_ptrs = (dbg_ptrs_out != nullptr);
@@ -639,6 +640,23 @@ static void decode_kernel_args(
 
         const uint8_t* data = p;
         p += arg_size;
+
+        // Every argument as capture classified it, for --dump-ptrs. A pointer
+        // reaching the GPU untranslated is invisible in the translated-pointer
+        // list precisely because nothing translated it, so the raw bytes are
+        // what identifies it.
+        if (dbg_args_out) {
+            char line[128];
+            snprintf(line, sizeof(line), "  arg[%u] kind=%u size=%u words:", i,
+                     value_kind, arg_size);
+            *dbg_args_out += line;
+            for (uint16_t off = 0; off + 8 <= arg_size; off += 8) {
+                uint64_t w; memcpy(&w, data + off, 8);
+                snprintf(line, sizeof(line), " 0x%llx", (unsigned long long)w);
+                *dbg_args_out += line;
+            }
+            *dbg_args_out += "\n";
+        }
 
         // value_kind 3 carries a trailing list of embedded-pointer byte offsets.
         std::vector<uint16_t> ptr_offsets;
@@ -668,16 +686,16 @@ static void decode_kernel_args(
             if (!live && rec_ptr != 0 && ctx.regions_enabled)
                 live = ctx.regions.materialize_for(ctx, rec_ptr);
 
+            // A pointer-typed argument does not always hold a pointer. Kernels
+            // pass sentinels in these slots — aiter's MLA decode kernel takes a
+            // literal 1 in one — and substituting null for a value that does
+            // not resolve changes what the kernel does, silently and only on
+            // replay. Pass the recorded value through instead: a sentinel keeps
+            // its meaning, and a pointer HRR really did lose track of faults at
+            // a recognisably recorded address rather than at null.
             if (!live && rec_ptr != 0) {
-                // Counted and reported, but still handed to the kernel as null.
-                // Forwarding the recorded address instead would be worse than
-                // useless: the driver tends to reproduce a VA layout across
-                // runs, so a capture-time address is quite likely to be mapped
-                // in the replay process too, and the kernel would then scribble
-                // over an unrelated live buffer with nothing to show for it. A
-                // null dereference stops at the first kernel that uses the
-                // pointer, which is the failure worth having.
                 ctx.untranslated_ptr_args.fetch_add(1, std::memory_order_relaxed);
+                live = reinterpret_cast<void*>(rec_ptr);
                 static std::mutex mu;
                 static std::set<std::string> warned;
                 char key[160];
@@ -687,7 +705,7 @@ static void decode_kernel_args(
                 if (first)
                     fprintf(stderr,
                             "[HRR] '%s' arg[%u]: recorded 0x%llx is in no known "
-                            "allocation — passing null\n",
+                            "allocation — passing it through unchanged\n",
                             compact_kernel_name(kernel_name).c_str(), i,
                             (unsigned long long)rec_ptr);
             } else {
@@ -883,8 +901,10 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     // Optional recorded->live pointer dump for one target kernel (diff tooling).
     const bool dbg_dump_ptrs = (ctx.dump_ptrs_ordinal != 0);
     std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_ptrs;  // (arg_idx, recorded, live)
+    std::string dbg_args;
     decode_kernel_args(ctx, p, end, num_args, kernel_name, arg_ptrs,
-                       arg_storage, &rls, dbg_dump_ptrs ? &dbg_ptrs : nullptr);
+                       arg_storage, &rls, dbg_dump_ptrs ? &dbg_ptrs : nullptr,
+                       dbg_dump_ptrs ? &dbg_args : nullptr);
 
     // Launch-attribute tail: u32 count, u32 per-entry stride, then the
     // entries. Every launch payload carries it (count 0 for a plain launch).
@@ -941,6 +961,8 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         for (auto& [idx, rec, live] : dbg_ptrs)
             fprintf(stderr, "[HRR ptr-dump]   arg[%u] recorded=0x%llx -> live=%p\n",
                     idx, (unsigned long long)rec, live);
+        fprintf(stderr, "[HRR ptr-dump] all recorded arguments as captured:\n%s",
+                dbg_args.c_str());
         fflush(stderr);
     }
 
