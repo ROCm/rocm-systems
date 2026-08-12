@@ -172,10 +172,6 @@ inline hipError_t getSwapExpectedReturn(const LinearAllocs alloc_type_a,
   return hipErrorNotSupported;
 }
 
-// An indirect copy is classified from the pointers handed to hipMemcpyBatchAsync, so the allocation
-// types below are those of the pointer slot on an indirect side and of the buffer on a direct side.
-// Only the device of the stream the batch is enqueued on decides indirect support, so a peer copy
-// whose buffers live elsewhere still follows `stream_device`.
 inline hipError_t getIndirectExpectedReturn(const LinearAllocs alloc_type_src,
                                             const LinearAllocs alloc_type_dst,
                                             const int device_src = 0, const int device_dst = 0,
