@@ -8,11 +8,12 @@
 // 
 // Includes tests for tensor data mover logic
 
+#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
+
 #include "DeviceTestBase.hpp"
 #include <limits>
 #include <hip/hip_bfloat16.h>
 
-//#ifdef __gfx1250__
 #include "tdm/asyncCopy.h"
 
 namespace RcclUnitTesting
@@ -222,4 +223,4 @@ TEST_F(TestAsyncDataCopierTileApi, Double) {
 }
 
 }  // namespace RcclUnitTesting
-//#endif // __gfx1250__
+#endif // __gfx1250__ && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)

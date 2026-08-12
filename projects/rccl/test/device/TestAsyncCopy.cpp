@@ -21,6 +21,8 @@
 // produces a correct copy (the policy is baked into the async instructions as
 // their immediate cpol operand).
 
+#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
+
 #include "DeviceTestBase.hpp"
 
 #include <cstdint>
@@ -379,3 +381,4 @@ protected:
 TEST_F(AsyncCachePolicyTest, NonDefaultPolicy) { run(6000, 2048, 64, 256); }
 
 }  // namespace RcclUnitTesting
+#endif // __gfx1250__ && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
