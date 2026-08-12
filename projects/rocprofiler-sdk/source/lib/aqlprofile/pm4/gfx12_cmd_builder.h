@@ -800,6 +800,24 @@ public:
     {
         BuildCopyRegDataPacket(cmd, get_addr(reg), dst_addr, size, wait);
     }
+
+    void BuildReadGPUClockPacket(CmdBuffer* cmd_buffer, uint64_t* dst) override
+    {
+        const auto addr   = reinterpret_cast<uint64_t>(dst);
+        uint32_t   header = MakePacket3Header(PACKET3_COPY_DATA, 6 * sizeof(uint32_t));
+        uint32_t   control =
+            PACKET3_COPY_DATA__SRC_SEL(PACKET3_COPY_DATA__SRC_SEL__GPU_CLOCK_COUNT) |
+            PACKET3_COPY_DATA__SRC_TEMPORAL(PACKET3_COPY_DATA__SRC_TEMPORAL__LU) |
+            PACKET3_COPY_DATA__DST_SEL(PACKET3_COPY_DATA__DST_SEL__TC_L2) |
+            PACKET3_COPY_DATA__DST_TEMPORAL(PACKET3_COPY_DATA__DST_TEMPORAL__LU) |
+            PACKET3_COPY_DATA__WR_CONFIRM(PACKET3_COPY_DATA__WR_CONFIRM__WAIT_FOR_CONFIRMATION) |
+            PACKET3_COPY_DATA__COUNT_SEL(PACKET3_COPY_DATA__COUNT_SEL__64_BITS_OF_DATA);
+        uint32_t dst_lo = PACKET3_COPY_DATA__DST_64B_ADDR_LO(Low32(addr) >> 3);
+        uint32_t dst_hi = PACKET3_COPY_DATA__DST_ADDR_HI(High32(addr));
+
+        uint32_t packet[6] = {header, control, 0, 0, dst_lo, dst_hi};
+        APPEND_COMMAND_WRAPPER(cmd_buffer, packet);
+    }
 };
 
 }  // namespace pm4_builder

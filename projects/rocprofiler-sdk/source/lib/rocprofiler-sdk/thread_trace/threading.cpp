@@ -26,6 +26,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <algorithm>
@@ -39,6 +40,32 @@ namespace rocprofiler
 namespace thread_trace
 {
 constexpr double SQTT_BANDWIDTH_DEFAULT = 60E9;  // 60GB/s, for wiggle room
+
+rocprofiler_thread_trace_timestamp_t
+convert_timestamp(rocprofiler_agent_id_t agent_id, uint64_t gpu_clock)
+{
+    auto result      = rocprofiler_thread_trace_timestamp_t{};
+    result.gpu_clock = gpu_clock;
+    if(gpu_clock == 0) return result;
+
+    // KFD queues do not carry an HSA agent; resolve it from the SDK agent ID.
+    auto hsa_agent = agent::get_hsa_agent(agent_id);
+    if(!hsa_agent) return result;
+
+    auto* ext_table = hsa::get_amd_ext_table();
+    if(ext_table == nullptr ||
+       ext_table->hsa_amd_profiling_convert_tick_to_system_domain_fn == nullptr)
+        return result;
+
+    auto status = ext_table->hsa_amd_profiling_convert_tick_to_system_domain_fn(
+        *hsa_agent, gpu_clock, &result.system_clock);
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        result.system_clock = 0;
+        ROCP_CI_LOG(ERROR) << "Failed to convert thread trace GPU clock: " << status;
+    }
+    return result;
+}
 
 namespace
 {
@@ -104,6 +131,9 @@ consumer_loop(
         shader_data.agent            = agent_id;
         shader_data.flags = static_cast<rocprofiler_thread_trace_shader_data_flags_t>(slot.flags);
 
+        shader_data.start_timestamp = slot.start_timestamp;
+        shader_data.end_timestamp   = slot.end_timestamp;
+
         callback_fn(shader_data, userdata);
 
         // Hand the slot back to the producer.
@@ -146,6 +176,8 @@ producer_loop(
     bool     do_sleep{false};
     uint64_t next_chunk_index = 0;
 
+    auto current_ts = rocprofiler_thread_trace_timestamp_t{};
+
     auto sleep_fn = [&]() {
         sched_yield();
         std::this_thread::sleep_for(std::chrono::microseconds(interval_microseconds));
@@ -173,7 +205,9 @@ producer_loop(
                                 int      flags,
                                 size_t   slot_idx,
                                 bool     isHeader    = false,
-                                uint64_t read_offset = 0) {
+                                uint64_t read_offset = 0,
+                                rocprofiler_thread_trace_timestamp_t start_ts = {},
+                                rocprofiler_thread_trace_timestamp_t end_ts = {}) {
         auto t0 = std::chrono::system_clock::now();
 
         auto& buffer       = buffers[slot_idx];
@@ -182,6 +216,8 @@ producer_loop(
         buffer.se_id       = buffer_packet.shader_engine_id;
         buffer.chunk_index = next_chunk_index++;
         buffer.read_offset = read_offset;
+        buffer.start_timestamp = start_ts;
+        buffer.end_timestamp = end_ts;
 
         if(!isHeader)
             parameters.copy_data_fn(queue, buffer.memory, src, size);
@@ -217,6 +253,10 @@ producer_loop(
     auto iterate_trace = [&]() {
         size_t idx  = wait_for_free_slot();
         auto   wptr = iterate_data(buffer_packet);
+        auto clock = buffer_packet.get_gpu_clock();
+        if(current_ts.gpu_clock == 0)
+            current_ts = convert_timestamp(queue.agent_id, clock.start);
+        auto end_ts = convert_timestamp(queue.agent_id, clock.latest);
         buffer_packet.reset_current_buffer();
         int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
         if(wptr.status == HSA_STATUS_ERROR_OUT_OF_RESOURCES)
@@ -232,7 +272,8 @@ producer_loop(
             wptr.size = 0;
         }
         ROCP_INFO << "Iterate data with size: " << wptr.size;
-        send_to_consumer(wptr.data, wptr.size, flags, idx);
+        send_to_consumer(wptr.data, wptr.size, flags, idx, false, 0, current_ts, end_ts);
+        current_ts = end_ts;
     };
 
     std::array<uint64_t, 4> header_plus_zeros{};  // Used for warmup the decoder path
@@ -274,6 +315,10 @@ producer_loop(
         if(!att_queue_submit(queue, &buffer_packet.query_status, &submit_signal)) return;
         signal_wait(submit_signal);
 
+        // The completed query also orders the initial start packet before reading its clock.
+        if(current_ts.gpu_clock == 0)
+            current_ts = convert_timestamp(queue.agent_id, buffer_packet.get_gpu_clock().start);
+
         if(auto status = buffer_packet.query_buffer_status())
         {
             if(status->gpu_full)
@@ -299,6 +344,7 @@ producer_loop(
             // the swap has executed.
             if(!att_queue_submit(queue, &status->packet, &submit_signal)) return;
             signal_wait(submit_signal);
+            auto swap_ts = convert_timestamp(queue.agent_id, buffer_packet.get_gpu_clock().latest);
 
             ROCP_FATAL_IF(status->size != buffer_size)
                 << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
@@ -317,7 +363,8 @@ producer_loop(
             }
 
             send_to_consumer(
-                status->data, buffer_size, flags, slot_idx, false, status->read_offset);
+                status->data, buffer_size, flags, slot_idx, false, status->read_offset, current_ts, swap_ts);
+            current_ts = swap_ts;
 
             if(cpu_full)
             {
@@ -325,6 +372,9 @@ producer_loop(
                 send_header();
 
                 if(!parameters.restart_trace(parameters.control_packet)) return;
+                // Restart submission is asynchronous. Read its clock after the next completed
+                // query (or the final stop), just as for the initial start packet.
+                current_ts = {};
             }
             // The status_query test verifies we immediately poll again after consuming a
             // buffer, so skip the backoff when a flip just occurred.

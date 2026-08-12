@@ -294,6 +294,8 @@ forward_cut(agent_state_t&                         state,
     shader_data.read_offset      = 0;
     shader_data.agent            = state.id;
     shader_data.flags            = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
+    shader_data.start_timestamp  = original.start_timestamp;
+    shader_data.end_timestamp    = original.end_timestamp;
 
     auto userdata  = rocprofiler_user_data_t{};
     userdata.value = capture_id.fetch_add(1);
