@@ -159,7 +159,7 @@ TEST(Gfx1250ExecutionTest, IreeF16ReductionTailKeepsLane31Sum) {
   ASSERT_EQ(wf->wf_size(), 32u);
   wf->set_exec(0xffffffffu);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
@@ -281,7 +281,7 @@ TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics)
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   ASSERT_TRUE(cdna5::Operand::full_execution_backend_complete());
   amdgpu::RegisterAccess regs(*wf);
@@ -386,7 +386,7 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
       cu->write_vgpr(vgpr_base + 1, lane, 0u);
     }
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
     const auto compare_base =
         cdna5::build_vop3(cdna5::kVCmpLtI64Vop3, {.vdst = 0, .src0 = 255, .src1 = 256});
@@ -420,7 +420,7 @@ TEST(Gfx1250LiteralOperandTest, ScalarMaskOperandsRejectLiteralMarkers) {
     const char *name;
     std::array<uint32_t, 2> encoding;
   };
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   for (const uint16_t marker : {uint16_t{254}, uint16_t{255}}) {
     const std::array test_cases{
@@ -460,7 +460,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32LiteralReplicatesAndUsesAvailableSimdPath) 
                                              {.vdst = 0, .src0 = 255, .src1 = 128, .opsel_hi = 3});
     const std::array add_words{add_base[0], add_base[1], literal};
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> add(decoder->decode(add_words.data()));
     ASSERT_NE(add, nullptr);
@@ -549,7 +549,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
     if (test_case.operation == Operation::Fma)
       base[0] |= uint32_t{1} << 14; // pad_14 is the src2 high-half selector.
     const std::array words{base[0], base[1], kLiteral};
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
     ASSERT_NE(instruction, nullptr);
@@ -607,7 +607,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorFallsBack
   const auto base = cdna5::build_vop3p(cdna5::kVPkAddF32Vop3p,
                                        {.vdst = 4, .src0 = 255, .src1 = 258, .opsel_hi = 2});
   const std::array words{base[0], base[1], kLiteral};
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
   ASSERT_NE(instruction, nullptr);
@@ -655,7 +655,7 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
       const auto words = cdna5::build_vop3p(
           test_case.opcode,
           {.vdst = 4, .neg_hi = 2, .src0 = 256, .src1 = 258, .opsel_hi = 3, .neg = 1});
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
       ASSERT_NE(decoder, nullptr);
       std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
       ASSERT_NE(instruction, nullptr);
@@ -764,7 +764,7 @@ TEST(Gfx1250ExecutionTest, PkF32EveryNondefaultSelectorGateFallsBackToScalar) {
           test_case.ternary ? cdna5::kVPkFmaF32Vop3p : cdna5::kVPkAddF32Vop3p, fields);
       if (test_case.op_sel_hi_2 != 0u)
         words[0] |= uint32_t{1} << 14;
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
       ASSERT_NE(decoder, nullptr);
       std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
       ASSERT_NE(instruction, nullptr);
@@ -835,7 +835,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
         cdna5::kVPkFmaF32Vop3p,
         {.vdst = 6, .neg_hi = 4, .src0 = 256, .src1 = 258, .src2 = 260, .opsel_hi = 3, .neg = 2});
     words[0] |= uint32_t{1} << 14; // pad_14 is the src2 high-half selector.
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
     ASSERT_NE(instruction, nullptr);
@@ -895,7 +895,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
 }
 
 TEST(Gfx1250DecodeTest, Vop3pRejectsLiteral64SelectorInEverySourcePosition) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   for (const cdna5::Vop3pBuilderFields fields : {
@@ -909,7 +909,7 @@ TEST(Gfx1250DecodeTest, Vop3pRejectsLiteral64SelectorInEverySourcePosition) {
 }
 
 TEST(Gfx1250DecodeTest, BinaryVop3pIgnoresLiteral64SelectorInUnusedSrc2) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   for (const uint32_t opcode : {cdna5::kVPkAddF32Vop3p, cdna5::kVPkMulF32Vop3p}) {
@@ -956,7 +956,7 @@ TEST(Gfx1250ExecutionTest, Wave32ScalarVccHiWritePreservesUpperHalf) {
   wf->set_exec(0xffff0000u);
   wf->set_vcc(0);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   const uint32_t words[] = {0x8c6b7e6bu, 0}; // s_or_b32 vcc_hi, vcc_hi, exec_lo

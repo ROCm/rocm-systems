@@ -63,7 +63,7 @@ TEST(Gfx1250SimulationTest, SAddPcI64WrapsAtUnsignedBoundaries) {
   const auto add_one = cdna5::build_sop1(cdna5::kSAddPcI64Sop1, {.ssrc0 = 129});
   const auto add_minus_one = cdna5::build_sop1(cdna5::kSAddPcI64Sop1, {.ssrc0 = 193});
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> increment(decoder->decode(add_one.data()));
   std::unique_ptr<Instruction> decrement(decoder->decode(add_minus_one.data()));
@@ -1070,7 +1070,7 @@ TEST(Gfx1250SimulationTest, VopdFmamkUsesSrc2HighBank) {
   cu->write_vgpr(vb + kAddend, 0, std::bit_cast<uint32_t>(100.0f));
   cu->write_vgpr(vb + kSrc2Bank * kBankStride + kAddend, 0, std::bit_cast<uint32_t>(4.0f));
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
   ASSERT_NE(inst, nullptr);
@@ -1205,7 +1205,7 @@ TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
   constexpr uint32_t kM0ByteBase = 0x1000;
   wf->set_m0(kM0ByteBase);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t kLane0Data = 0x12345678u;
@@ -1371,7 +1371,7 @@ TEST(Gfx1250ExecutionTest, Vopd3CndmaskAppliesB32NegModifiers) {
   wf->set_exec(0x3u);
   wf->set_vcc(0x1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decoder->decode(cndmask.data()));
   ASSERT_NE(inst, nullptr);

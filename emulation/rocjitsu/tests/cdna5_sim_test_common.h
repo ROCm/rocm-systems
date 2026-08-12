@@ -319,7 +319,7 @@ inline uint32_t read_global_u32(amdgpu::GpuMemory &memory, uint64_t addr) {
 
 inline std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 3> &words,
                                                    std::string_view expected_mnemonic) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   if (!decoder) {
     ADD_FAILURE() << "Decoder::create() returned nullptr for gfx1250";
     return nullptr;

@@ -395,7 +395,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitEntersBarrierState) {
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->state(), amdgpu::WfState::RUNNING);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   const std::array<uint32_t, 2> wait_words = {0xBF940000u, 0u};
@@ -422,7 +422,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitReleasesOnlyAfterAllSiblingsWait) {
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   const std::array<uint32_t, 2> wait_words = {0xBF940000u, 0u};
