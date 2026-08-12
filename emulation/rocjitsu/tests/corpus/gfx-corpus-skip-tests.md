@@ -6,12 +6,13 @@ CI skips, and their case sets match this document.
 
 Classification buckets:
 
-- **functional failure**: failed for a reason unrelated to a timeout
-- **long-running test**: exceeded the standard timeout (~15s) but passed with
-  an extended timeout (~30s)
+- **functional failure**: failed for a non-timeout reason, such as an incorrect result or segmentation fault.
+- **long-running test**: exceeded the standard timeout (~15s when run
+  serially, without multi-worker overhead) but passed with an extended timeout
+  (~30s).
 - **possible hang or freeze**: exceeded the extended timeout (~30s), either
-  because execution remained too slow or stopped making progress
-- **flaky**: passed normally but failed intermittently
+  because execution remained too slow or stopped making progress.
+- **flaky**: usually passed but failed intermittently.
 
 ## Pinned revisions
 

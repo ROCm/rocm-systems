@@ -346,7 +346,7 @@ jobs:
           corpus_test_flags=(
             --workers "${PYTEST_WORKERS}" \
             --llama-build-workers "${BUILD_WORKERS}" \
-            --soft-timeout 15 \
+            --soft-timeout 20 \
             --hard-timeout 30 \
             --rerun-failed \
             --warn-perf \
