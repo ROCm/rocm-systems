@@ -81,6 +81,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi set -L/--clk-limit <clk> max <value>` not enforcing caps that fall between clock levels**.
+  - For `mclk` and `fclk` ONLY, which expose a discrete DPM table, the requested `max` is now rounded down to the nearest selectable clock level, so the enforced limit never exceeds the requested value.
+  - `sclk` supports a continuous frequency range, so its requested `max` is honored exactly (e.g. `600` enforces a limit of 600MHz) and is not snapped.
+
 - **Fixed `amd-smi set --ptl-status` silently failing to change PTL state**.  
   - The set path wrote `"1"`/`"0"` to the `ptl/ptl_enable` sysfs node, which only accepts `"enabled"`/`"disabled"`; the driver ignored the numeric write while the API still reported success. The state now changes as expected, and a rejected write returns a real error instead of a generic success.
 
@@ -110,11 +114,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ## amd_smi_lib for ROCm 7.14.0
 
 ### Added
-
-- **Added an experimental, opt-in WSL (WDDM/dxg) GPU backend**.
-  - Built only with `-DENABLE_WSL_BACKEND=ON` (off by default); native builds and packages are unchanged.
-  - A subset of GPU queries is answered through the WDDM path and unsupported queries return `AMDSMI_STATUS_NOT_SUPPORTED`.
-  - Reads real GPU telemetry through `librocdxg` (`rocdxg_smi_*` APIs); fields with no WDDM equivalent return `AMDSMI_STATUS_NOT_SUPPORTED`. See [Using AMD SMI under WSL](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-wsl-mode.html).
 
 - **Added NIC processor discovery and information API surface**.  
   - New C APIs: `amdsmi_get_nic_processor_handles()`, `amdsmi_get_nic_device_bdf()`, `amdsmi_get_nic_fw_info()`, `amdsmi_get_nic_port_statistics()`, and `amdsmi_get_nic_vendor_statistics()`.

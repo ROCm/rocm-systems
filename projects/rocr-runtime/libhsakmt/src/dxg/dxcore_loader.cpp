@@ -15,9 +15,7 @@ namespace thunk {
 namespace dxcore {
 
 DxcoreLoader::DxcoreLoader()
-    : dxcore_handle_(nullptr)
-    , init_flag_()
-    , pfn_D3DKMTCreateAllocation2(nullptr)
+    : pfn_D3DKMTCreateAllocation2(nullptr)
     , pfn_D3DKMTDestroyAllocation2(nullptr)
     , pfn_D3DKMTMapGpuVirtualAddress(nullptr)
     , pfn_D3DKMTReserveGpuVirtualAddress(nullptr)
@@ -53,8 +51,8 @@ DxcoreLoader::DxcoreLoader()
     , pfn_D3DKMTEnumAdapters3(nullptr)
     , pfn_D3DKMTQueryResourceInfo(nullptr)
     , pfn_D3DKMTOpenResource(nullptr)
-    , pfn_D3DKMTEnumProcesses(nullptr)
-    , pfn_D3DKMTQueryVideoMemoryInfo(nullptr) {
+    , dxcore_handle_(nullptr)
+    , init_flag_() {
 }
 
 DxcoreLoader::~DxcoreLoader() {
@@ -87,6 +85,8 @@ bool DxcoreLoader::Initialize() {
 
 void DxcoreLoader::Shutdown() {
     if (dxcore_handle_) {
+        // CloseLib follows the platform API convention: true/nonzero means the
+        // library was unloaded successfully, false means the unload failed.
         if (!rocr::os::CloseLib(dxcore_handle_)) {
             pr_err("[DxcoreLoader] Cannot unload libdxcore.so: %s\n", rocr::os::DlError());
         } else {
@@ -150,15 +150,6 @@ bool DxcoreLoader::LoadDxcoreApis() {
     LOAD_DXCORE_API(D3DKMTSubmitCommandToHwQueue);
 
     #undef LOAD_DXCORE_API
-
-    // Optional WSL2 dxgkrnl exports. Older libdxcore builds may not expose
-    // these, so callers must probe the function pointer before use.
-    DXCORE_PFN(D3DKMTEnumProcesses) =
-        (DXCORE_DEF(D3DKMTEnumProcesses)*)rocr::os::GetExportAddress(
-            dxcore_handle_, "D3DKMTEnumProcesses");
-    DXCORE_PFN(D3DKMTQueryVideoMemoryInfo) =
-        (DXCORE_DEF(D3DKMTQueryVideoMemoryInfo)*)rocr::os::GetExportAddress(
-            dxcore_handle_, "D3DKMTQueryVideoMemoryInfo");
 
     pr_info("[DxcoreLoader] All DXCore APIs loaded successfully\n");
     return true;

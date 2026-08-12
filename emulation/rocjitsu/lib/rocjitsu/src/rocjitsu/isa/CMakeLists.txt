@@ -10,6 +10,8 @@ rj_add_object_library(rocjitsu_isa
     target_registry.cpp
 )
 
+set(RJ_AMDGPU_GENERATED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/arch/amdgpu/generated")
+
 add_subdirectory(arch/amdgpu/cdna1)
 add_subdirectory(arch/amdgpu/cdna2)
 add_subdirectory(arch/amdgpu/cdna3)
@@ -36,6 +38,10 @@ get_property(
     _rj_builtin_amdgpu_isa_providers
     GLOBAL
     PROPERTY RJ_BUILTIN_ISA_PROVIDERS
+)
+set_property(
+    GLOBAL
+    PROPERTY RJ_BUILTIN_AMDGPU_ISA_PROVIDERS ${_rj_builtin_amdgpu_isa_providers}
 )
 rj_add_isa_target_registry(
     rocjitsu_amdgpu_isa_registry

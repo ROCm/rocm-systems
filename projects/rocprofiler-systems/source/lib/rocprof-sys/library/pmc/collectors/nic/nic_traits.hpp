@@ -222,7 +222,6 @@ struct nic_traits
                              "AI NIC",
                              "AI NIC",
                              0,
-                             0,
                              {} };
 
             get_agent_manager_instance().insert_agent(cur_agent);
