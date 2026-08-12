@@ -189,7 +189,7 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
       // construction below still fails closed if a reachable path enters the
       // hole, except for the exact clang unreachable-stub bodies recognized
       // there.
-      if (arch == ROCJITSU_CODE_ARCH_GFX1250 && inst_data[pc] == 0) {
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && inst_data[pc] == 0) {
         ++pc;
         byte_offset += sizeof(uint32_t);
         continue;
@@ -290,11 +290,11 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
         const bool decode_gap =
             i >= decoded.size() ? next_offset < section_end : decoded[i]->src_loc() != next_offset;
         if (!terminates) {
-          const bool reaches_gfx1250_zero = decode_gap && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+          const bool reaches_gfx1250_zero = decode_gap && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
                                             next_offset < section_end &&
                                             inst_data[next_offset / sizeof(uint32_t)] == 0;
           const bool is_gfx1250_section_end_stub =
-              decoded_section_end && arch == ROCJITSU_CODE_ARCH_GFX1250;
+              decoded_section_end && arch == ROCJITSU_CODE_ARCH_CDNA5;
           if ((reaches_gfx1250_zero || is_gfx1250_section_end_stub) &&
               current->is_gfx1250_clang_unreachable_stub()) {
             current->has_terminator_ = true;

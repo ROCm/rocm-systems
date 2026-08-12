@@ -165,7 +165,7 @@ bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return false;
   default:
     throw util::UnimplementedInst("unified VGPR allocation for target architecture");
