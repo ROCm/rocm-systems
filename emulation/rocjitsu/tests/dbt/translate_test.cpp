@@ -15907,8 +15907,7 @@ constexpr uint16_t kFlatScratchBaseLoSelector = 230;
 /// @brief Scalar selector naming the high half of the flat-scratch base.
 constexpr uint16_t kFlatScratchBaseHiSelector = 231;
 /// @brief Dependency wait required before a generated flat-scratch selector read.
-constexpr auto kFlatScratchSelectorWait =
-    cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = 0});
+constexpr auto kFlatScratchSelectorWait = cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = 0});
 
 /// @brief Translate a gfx1250 kernel that forces destination staging while GPR indexing is active.
 [[nodiscard]] rocjitsu::TranslatedCodeObject
@@ -15929,10 +15928,9 @@ translate_gfx1250_indexed_flat_scratch_destination(uint32_t gpr_index_control) {
   // Reading every ordinary scalar register after the affected instruction
   // leaves no SGPR pair to borrow, forcing the destination-staging decision.
   for (uint16_t base = 0; base + 1 <= 101; base += 2) {
-    words.push_back(
-        cdna5::build_sop2(cdna5::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
-                                                    .ssrc1 = static_cast<uint8_t>(base + 1),
-                                                    .sdst = 102})[0]);
+    words.push_back(cdna5::build_sop2(cdna5::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
+                                                            .ssrc1 = static_cast<uint8_t>(base + 1),
+                                                            .sdst = 102})[0]);
   }
   words.push_back(kGfx1250SEndpgm);
 
@@ -16235,10 +16233,9 @@ TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingExecutesInMatchingNonzeroBank
       cdna5::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256 + 2});
   std::vector<uint32_t> words = {set_vgpr_msb[0], vector_read[0], vector_read[1]};
   for (uint16_t base = 0; base + 1 <= 101; base += 2) {
-    words.push_back(
-        cdna5::build_sop2(cdna5::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
-                                                    .ssrc1 = static_cast<uint8_t>(base + 1),
-                                                    .sdst = 102})[0]);
+    words.push_back(cdna5::build_sop2(cdna5::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
+                                                            .ssrc1 = static_cast<uint8_t>(base + 1),
+                                                            .sdst = 102})[0]);
   }
   words.push_back(kGfx1250SEndpgm);
 
@@ -16301,10 +16298,9 @@ TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingRejectsMismatchedBanks) {
       cdna5::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256 + 2});
   std::vector<uint32_t> words = {set_vgpr_msb[0], vector_read[0], vector_read[1]};
   for (uint16_t base = 0; base + 1 <= 101; base += 2) {
-    words.push_back(
-        cdna5::build_sop2(cdna5::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
-                                                    .ssrc1 = static_cast<uint8_t>(base + 1),
-                                                    .sdst = 102})[0]);
+    words.push_back(cdna5::build_sop2(cdna5::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
+                                                            .ssrc1 = static_cast<uint8_t>(base + 1),
+                                                            .sdst = 102})[0]);
   }
   words.push_back(kGfx1250SEndpgm);
 
@@ -16359,10 +16355,9 @@ TEST(BinaryTranslatorE2E, Gfx1250FailsClosedWhenFlatScratchTemporariesAlias) {
       cdna5::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256});
   std::vector<uint32_t> words = {vector_read[0], vector_read[1]};
   for (uint16_t base = 0; base + 1 <= 101; base += 2) {
-    words.push_back(
-        cdna5::build_sop2(cdna5::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
-                                                    .ssrc1 = static_cast<uint8_t>(base + 1),
-                                                    .sdst = 102})[0]);
+    words.push_back(cdna5::build_sop2(cdna5::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
+                                                            .ssrc1 = static_cast<uint8_t>(base + 1),
+                                                            .sdst = 102})[0]);
   }
   words.push_back(kGfx1250SEndpgm);
 
