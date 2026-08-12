@@ -210,7 +210,7 @@ Classification buckets:
 
 ## gfx1201
 
-### functional failure: 143
+### functional failure: 142
 
 - `cts.gfx1201.fpsan.fpsan_amdgcn_ldexp_test`
 - `cts.gfx1201.fpsan.fpsan_amdgcn_math_extra_test`
@@ -292,7 +292,6 @@ Classification buckets:
 - `llama.gfx1201.backend_ops.MUL_MAT.965b6be4d678`
 - `llama.gfx1201.backend_ops.MUL_MAT.9a612f547630`
 - `llama.gfx1201.backend_ops.MUL_MAT.9c792f73463d`
-- `llama.gfx1201.backend_ops.MUL_MAT.9f4865116d4b`
 - `llama.gfx1201.backend_ops.MUL_MAT.a78a57b1b164`
 - `llama.gfx1201.backend_ops.MUL_MAT.adeb0e6159c1`
 - `llama.gfx1201.backend_ops.MUL_MAT.af983043c5ee`
@@ -368,6 +367,11 @@ Classification buckets:
 - `llama.gfx1201.backend_ops.MUL_MAT_ID_FUSION.b3d0befaa714`
 - `llama.gfx1201.backend_ops.MUL_MAT_ID_FUSION.dfb1ed5ca4e9`
 - `llama.gfx1201.backend_ops.MUL_MAT_ID_FUSION.f6f7601c1c97`
+
+### flaky: 2
+
+- `llama.gfx1201.backend_ops.MUL_MAT.9f4865116d4b` # usually fails with SIGSEGV, but occasionally passes.
+- `llama.gfx1201.backend_ops.MUL_MAT_ID.3cc5b1d93af9` # rarely fails with SIGSEGV (10%).
 
 ## gfx1250
 

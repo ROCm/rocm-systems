@@ -125,6 +125,7 @@
     "llama.gfx1201.backend_ops.MUL_MAT.faa09334a5c1",
     "llama.gfx1201.backend_ops.MUL_MAT.fbddae989c1d",
     "llama.gfx1201.backend_ops.MUL_MAT_ID.297df3b5f822",
+    "llama.gfx1201.backend_ops.MUL_MAT_ID.3cc5b1d93af9",
     "llama.gfx1201.backend_ops.MUL_MAT_ID.4c6f0c369254",
     "llama.gfx1201.backend_ops.MUL_MAT_ID.4d3788c41bef",
     "llama.gfx1201.backend_ops.MUL_MAT_ID.501e10751a9a",
