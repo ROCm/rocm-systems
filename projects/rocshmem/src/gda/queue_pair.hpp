@@ -306,6 +306,17 @@ class QueuePair {
       int64_t atomic_data, int64_t atomic_cmp, ActiveWFInfo &wf_info);
 
   /**
+   * @brief Non-fetching atomic with an explicit remote key and comparand.
+   *
+   * Provided for the GIN GDA device consumers, which call
+   * QueuePair::atomic_nofetch(dest, rkey, value, cond, wf_info) directly.
+   * cond mirrors the atomic_cas comparand convention; pass 0 for a plain
+   * non-fetching add.
+   */
+  __device__ void atomic_nofetch(void *dest, uint32_t rkey, int64_t value,
+      int64_t cond, ActiveWFInfo &wf_info);
+
+  /**
    * @brief Explicit-key non-blocking put/get.
    *
    * get_nbi's default-key form derives the remote key from the QP heap key and

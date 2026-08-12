@@ -405,6 +405,12 @@ __device__ int64_t QueuePair::atomic_cas_nofetch(void *dest, uint32_t rkey,
                       wf_info);
 }
 
+__device__ void QueuePair::atomic_nofetch(void *dest, uint32_t rkey,
+    int64_t value, int64_t cond, ActiveWFInfo &wf_info) {
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  post_wqe_amo(dst, rkey, gda_op_atomic_fa, value, cond, wf_info);
+}
+
 __device__ void QueuePair::get_nbi(void *dest, uint32_t lkey,
     const void *source, uint32_t rkey, size_t length, ActiveWFInfo &wf_info) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
