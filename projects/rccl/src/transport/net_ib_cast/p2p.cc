@@ -858,7 +858,7 @@ static inline ncclResult_t IbCastRequestComplete(struct ncclIbRequest* r, int* d
     int telCh = r->base->isSend
       ? ((struct ncclIbSendComm*)(r->base))->telChId
       : ((struct ncclIbRecvComm*)(r->base))->telChId;
-    rcclTelemetryChannelCompleted(telDev, telCh, r->tel_post_ts > 0);
+    rcclTelemetryRequestCompleted(telDev, telCh);
   }
   if (sizes && r->type == NCCL_NET_IB_REQ_RECV) {
     TRACE(NCCL_NET, "NET/IB: %s: Recv request completed (req=%p, comm=%p, id=%ld, type=%s, nreqs=%d)", __func__, r,

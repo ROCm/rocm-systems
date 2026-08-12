@@ -1086,15 +1086,15 @@ ib_recv_dev_list:
     int numQpsForDev = 0;
     for (int q = 0; q < comm->base.nqps; q++)
       if (comm->base.qps[q].devIndex == i) numQpsForDev++;
-    int startSlot = rcclTelemetrySetupChannel(ibDevN, channelId, numQpsForDev);
-    if (startSlot >= 0) {
-      int slotOffset = 0;
-      for (int q = 0; q < comm->base.nqps; q++) {
-        if (comm->base.qps[q].devIndex != i) continue;
-        int telSlot = startSlot + slotOffset++;
-        comm->base.qps[q].telQpSlot = telSlot;
-        rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, comm->base.qps[q].isDataQp);
-      }
+    int numSlots = 0;
+    int startSlot = rcclTelemetrySetupChannel(ibDevN, channelId, numQpsForDev, &numSlots);
+    int slotOffset = 0;
+    for (int q = 0; q < comm->base.nqps && slotOffset < numSlots; q++) {
+      if (comm->base.qps[q].devIndex != i) continue;
+      // QPs past the granted slots keep telQpSlot == -1 and stay untracked.
+      int telSlot = startSlot + slotOffset++;
+      comm->base.qps[q].telQpSlot = telSlot;
+      rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, comm->base.qps[q].isDataQp);
     }
   }
 
@@ -1782,17 +1782,17 @@ ib_recv:
     int numQpsForDev = 0;
     for (int q = 0; q < rComm->base.nqps; q++)
       if (rComm->base.qps[q].devIndex == i) numQpsForDev++;
-    int startSlot = rcclTelemetrySetupChannel(telIbDevN, channelId, numQpsForDev);
-    if (startSlot >= 0) {
-      int slotOffset = 0;
-      for (int q = 0; q < rComm->base.nqps; q++) {
-        if (rComm->base.qps[q].devIndex != i) continue;
-        int telSlot = startSlot + slotOffset++;
-        rComm->base.qps[q].telQpSlot = telSlot;
-        // ncclIbQp::isDataQp is false for every receiver QP because it only
-        // drives AINIC QP creation. Classify by who actually posts CTS.
-        rcclTelemetrySetQpRole(telIbDevN, channelId, telSlot, !IbCastRecvCommQpPostsCts(rComm, q));
-      }
+    int numSlots = 0;
+    int startSlot = rcclTelemetrySetupChannel(telIbDevN, channelId, numQpsForDev, &numSlots);
+    int slotOffset = 0;
+    for (int q = 0; q < rComm->base.nqps && slotOffset < numSlots; q++) {
+      if (rComm->base.qps[q].devIndex != i) continue;
+      // QPs past the granted slots keep telQpSlot == -1 and stay untracked.
+      int telSlot = startSlot + slotOffset++;
+      rComm->base.qps[q].telQpSlot = telSlot;
+      // ncclIbQp::isDataQp is false for every receiver QP because it only
+      // drives AINIC QP creation. Classify by who actually posts CTS.
+      rcclTelemetrySetQpRole(telIbDevN, channelId, telSlot, !IbCastRecvCommQpPostsCts(rComm, q));
     }
   }
 

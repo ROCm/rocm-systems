@@ -1205,7 +1205,7 @@ static void rcclTelemetryWriteJson(FILE* fp) {
     int activeChannels = 0;
     for (int c = 0; c < dev->num_channels; c++) {
       RcclChannelStats* ch = &dev->channels[c];
-      if (ch->num_qps > 0 || ch->num_wqe_sent || ch->num_recv_wqe || ch->num_wqe_rcvd ||
+      if (ch->num_qps > 0 || ch->num_qp_untracked > 0 || ch->num_wqe_sent || ch->num_recv_wqe || ch->num_wqe_rcvd ||
           ch->num_wqe_completed)
         activeChannels++;
     }
@@ -1225,6 +1225,7 @@ static void rcclTelemetryWriteJson(FILE* fp) {
     fprintf(fp, "      \"cq_poll_count\": %lu,\n", (unsigned long)dev->cq_poll_count);
     fprintf(fp, "      \"num_channels\": %d,\n", dev->num_channels);
     fprintf(fp, "      \"active_channels\": %d,\n", activeChannels);
+    fprintf(fp, "      \"num_qp_untracked\": %d,\n", dev->num_qp_untracked);
 
     /* WQE payload-size distribution; only populated buckets are emitted. */
     fprintf(fp, "      \"wqe_size_stats\": [");
@@ -1244,8 +1245,7 @@ static void rcclTelemetryWriteJson(FILE* fp) {
     for (int c = 0; c < dev->num_channels; c++) {
       RcclChannelStats* ch = &dev->channels[c];
 
-      if (ch->num_qps == 0 && ch->num_data_qp == 0 && ch->num_cts_qp == 0)
-        continue;
+      if (ch->num_qps == 0 && ch->num_data_qp == 0 && ch->num_cts_qp == 0 && ch->num_qp_untracked == 0) continue;
 
       if (chPrinted > 0) fprintf(fp, ",\n");
       fprintf(fp, "        {\n");
@@ -1255,11 +1255,15 @@ static void rcclTelemetryWriteJson(FILE* fp) {
       fprintf(fp, "          \"num_wqe_rcvd\": %lu,\n", (unsigned long)ch->num_wqe_rcvd);
       fprintf(fp, "          \"num_wqe_completed\": %lu,\n", (unsigned long)ch->num_wqe_completed);
       fprintf(fp, "          \"num_cts_sent\": %lu,\n", (unsigned long)ch->num_cts_sent);
+      fprintf(fp, "          \"num_req_completed\": %lu,\n", (unsigned long)ch->num_req_completed);
       fprintf(fp, "          \"num_data_qp\": %d,\n", ch->num_data_qp);
       fprintf(fp, "          \"num_cts_qp\": %d,\n", ch->num_cts_qp);
+      fprintf(fp, "          \"num_qp_untracked\": %d,\n", ch->num_qp_untracked);
 
+      int numQps = ch->num_qps;
+      if (numQps > RCCL_TELEMETRY_MAX_QPS) numQps = RCCL_TELEMETRY_MAX_QPS;
       fprintf(fp, "          \"queue_pairs\": [\n");
-      for (int q = 0; q < ch->num_qps; q++) {
+      for (int q = 0; q < numQps; q++) {
         RcclQpStats* qp = &ch->qp[q];
 
         fprintf(fp, "            {\n");
@@ -1292,7 +1296,7 @@ static void rcclTelemetryWriteJson(FILE* fp) {
         }
         fprintf(fp, "              ]\n");
 
-        fprintf(fp, "            }%s\n", (q < ch->num_qps - 1) ? "," : "");
+        fprintf(fp, "            }%s\n", (q < numQps - 1) ? "," : "");
       }
       fprintf(fp, "          ]\n");
 
