@@ -138,7 +138,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
     };
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return {
         .supports_wgp_mode = false,
         .descriptor_sgpr_count_encoded = false,

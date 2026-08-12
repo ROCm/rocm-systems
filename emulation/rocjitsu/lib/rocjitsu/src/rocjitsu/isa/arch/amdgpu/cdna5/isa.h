@@ -74,7 +74,7 @@ struct Isa : amdgpu::RdnaIsaBase {
   // high-bank indexing rather than RDNA4 DISABLE_PERF.
   static constexpr bool MODE_HAS_GPR_IDX_EN = true;
   static constexpr uint32_t MAX_ADDRESSABLE_VGPRS_PER_WF =
-      isa_properties(ROCJITSU_CODE_ARCH_GFX1250).max_addressable_vgprs_per_wf;
+      isa_properties(ROCJITSU_CODE_ARCH_CDNA5).max_addressable_vgprs_per_wf;
 
   static std::optional<uint32_t> resolved_vgpr_offset(OperandType opr_type, int ev);
   static std::optional<uint32_t> resolved_vgpr_offset(const amdgpu::Wavefront &wf,
@@ -88,7 +88,7 @@ struct Isa : amdgpu::RdnaIsaBase {
 
 namespace rocjitsu {
 
-template <> struct IsaTrait<ROCJITSU_CODE_ARCH_GFX1250> {
+template <> struct IsaTrait<ROCJITSU_CODE_ARCH_CDNA5> {
   using type = cdna5::Isa;
 };
 
