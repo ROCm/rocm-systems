@@ -347,6 +347,11 @@ def parse_args() -> argparse.Namespace:
             "staged/unstaged changes on top."
         ),
     )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Suppress the per-file progress output",
+    )
     return parser.parse_args()
 
 
@@ -424,7 +429,8 @@ def main() -> int:
     print_changed_files(changed_files)
 
     print("Running clang-tidy ...")
-    results = run_checks(changed_files, args, repo_root, on_complete=report_progress)
+    on_complete = None if args.no_progress else report_progress
+    results = run_checks(changed_files, args, repo_root, on_complete=on_complete)
     aggregated = aggregate_diagnostics(results)
 
     print_rule_diagnostics(

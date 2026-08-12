@@ -40,6 +40,7 @@ def _args(**overrides) -> argparse.Namespace:
         "jobs": 4,
         "timeout": None,
         "base": None,
+        "no_progress": False,
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -201,6 +202,19 @@ def test_run_checks_returns_one_result_per_file_and_reports_progress(monkeypatch
     assert counters == list(range(1, len(files) + 1))
     assert {t for _, t, _ in calls} == {len(files)}
     assert {cf.path for _, _, cf in calls} == {f.path for f in files}
+
+
+# --------------------------------------------------------------------------- #
+# parse_args --no-progress
+# --------------------------------------------------------------------------- #
+def test_parse_args_no_progress_flag(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--build-path", "/build", "--no-progress"])
+    assert ctc.parse_args().no_progress is True
+
+
+def test_parse_args_progress_default(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--build-path", "/build"])
+    assert ctc.parse_args().no_progress is False
 
 
 def test_run_checks_without_callback(monkeypatch):

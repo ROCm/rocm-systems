@@ -61,4 +61,5 @@ jobs:
           python3 scripts/clang-tidy-check.py \
             --base "origin/${{ github.base_ref }}" \
             --build-path build/debug \
+            --no-progress \
             --clang-tidy-binary clang-tidy-18
