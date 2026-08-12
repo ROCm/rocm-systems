@@ -382,6 +382,9 @@ struct formatter<hipGraphNodeParams> : rocprofiler::hip::details::base_formatter
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 8
             case hipGraphNodeTypeBatchMemOp:
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 32
+            case hipGraphNodeTypeExtMemcpyBatch:
+#endif
             case hipGraphNodeTypeCount:
             {
                 break;

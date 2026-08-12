@@ -1152,6 +1152,25 @@ typedef struct hipBatchMemOpNodeParams {
   unsigned int flags;
 } hipBatchMemOpNodeParams;
 
+/**
+ * Parameters for a batch-of-1D-copies graph node.
+ *
+ * Mirrors the arguments of #hipMemcpyBatchAsync. The node deep-copies every array,
+ * so the caller's storage need not outlive the call.
+ *
+ * Used by hipGraphAddExtMemcpyBatchNode, hipGraphExtMemcpyBatchNodeGetParams,
+ * hipGraphExtMemcpyBatchNodeSetParams and hipGraphExecExtMemcpyBatchNodeSetParams.
+ */
+typedef struct hipExtMemcpyBatchNodeParams {
+  void** dsts;                  ///< Array of \p count destination pointers.
+  void** srcs;                  ///< Array of \p count source pointers.
+  size_t* sizes;                ///< Array of \p count copy sizes in bytes. None may be zero.
+  size_t count;                 ///< Number of copies in the batch.
+  hipMemcpyAttributes* attrs;   ///< Array of \p numAttrs attributes, or NULL.
+  size_t* attrsIdxs;            ///< Array of \p numAttrs copy indices each attribute starts at.
+  size_t numAttrs;              ///< Number of entries in \p attrs and \p attrsIdxs.
+} hipExtMemcpyBatchNodeParams;
+
 // Stream per thread
 /** Implicit stream per application thread.*/
 #define hipStreamPerThread ((hipStream_t)2)
@@ -1573,6 +1592,7 @@ typedef enum hipGraphNodeType {
   hipGraphNodeTypeMemcpyFromSymbol = 12,   ///< MemcpyFromSymbol node
   hipGraphNodeTypeMemcpyToSymbol = 13,     ///< MemcpyToSymbol node
   hipGraphNodeTypeBatchMemOp = 14,         ///< BatchMemOp node
+  hipGraphNodeTypeExtMemcpyBatch = 15,     ///< Batch of 1D memcpy node
   hipGraphNodeTypeCount
 } hipGraphNodeType;
 
@@ -9201,6 +9221,88 @@ hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node, void* dst, const v
 hipError_t hipGraphExecMemcpyNodeSetParams1D(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                              void* dst, const void* src, size_t count,
                                              hipMemcpyKind kind);
+
+/**
+ * @brief Creates a node that performs a batch of 1D copies and adds it to a graph.[BETA]
+ *
+ * @param [out] pGraphNode      - Pointer to the graph node that is created.
+ * @param [in] graph            - Instance of the graph to add the created node to.
+ * @param [in] pDependencies    - const pointer to the dependencies of the node.
+ * @param [in] numDependencies  - Number of dependencies.
+ * @param [in] nodeParams       - Parameters describing the batch. See
+ *                                #hipExtMemcpyBatchNodeParams.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * The batch is submitted as a single node, so the copies are unordered with respect to each
+ * other. Every copy must resolve to the same device, and host-to-host copies are rejected with
+ * #hipErrorNotSupported, because neither can be expressed as work on a single graph node.
+ *
+ * @warning This API is marked as beta, meaning, while this is feature complete,
+ * it is still open to changes and may have outstanding issues.
+ *
+ * @see hipMemcpyBatchAsync, hipGraphExtMemcpyBatchNodeGetParams,
+ * hipGraphExtMemcpyBatchNodeSetParams
+ */
+hipError_t hipGraphAddExtMemcpyBatchNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                         const hipGraphNode_t* pDependencies,
+                                         size_t numDependencies,
+                                         const hipExtMemcpyBatchNodeParams* nodeParams);
+
+/**
+ * @brief Returns a batch memcpy node's parameters.[BETA]
+ *
+ * @param [in] node            - Node to get the parameters for.
+ * @param [out] pNodeParams    - Pointer to return the parameters.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * The arrays returned in \p pNodeParams are owned by the node. They remain valid until the node
+ * is destroyed or its parameters are modified, and must not be modified directly.
+ *
+ * @warning This API is marked as beta, meaning, while this is feature complete,
+ * it is still open to changes and may have outstanding issues.
+ *
+ * @see hipGraphAddExtMemcpyBatchNode, hipGraphExtMemcpyBatchNodeSetParams
+ */
+hipError_t hipGraphExtMemcpyBatchNodeGetParams(hipGraphNode_t node,
+                                               hipExtMemcpyBatchNodeParams* pNodeParams);
+
+/**
+ * @brief Sets a batch memcpy node's parameters.[BETA]
+ *
+ * @param [in] node          - Node to set the parameters for.
+ * @param [in] pNodeParams   - Parameters to copy.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * @warning This API is marked as beta, meaning, while this is feature complete,
+ * it is still open to changes and may have outstanding issues.
+ *
+ * @see hipGraphAddExtMemcpyBatchNode, hipGraphExtMemcpyBatchNodeGetParams
+ */
+hipError_t hipGraphExtMemcpyBatchNodeSetParams(hipGraphNode_t node,
+                                               const hipExtMemcpyBatchNodeParams* pNodeParams);
+
+/**
+ * @brief Sets the parameters for a batch memcpy node in the given graphExec.[BETA]
+ *
+ * @param [in] hGraphExec  - The executable graph in which to set the specified node.
+ * @param [in] node        - Batch memcpy node from the graph the graphExec was instantiated from.
+ * @param [in] pNodeParams - Updated parameters to set.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * The number of copies in \p pNodeParams must match the count the node was instantiated with;
+ * only the pointers, sizes and attributes may change.
+ *
+ * @warning This API is marked as beta, meaning, while this is feature complete,
+ * it is still open to changes and may have outstanding issues.
+ *
+ * @see hipGraphAddExtMemcpyBatchNode, hipGraphExtMemcpyBatchNodeSetParams
+ */
+hipError_t hipGraphExecExtMemcpyBatchNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+                                                   const hipExtMemcpyBatchNodeParams* pNodeParams);
 
 /**
  * @brief Creates a memcpy node to copy from a symbol on the device and adds it to a graph.

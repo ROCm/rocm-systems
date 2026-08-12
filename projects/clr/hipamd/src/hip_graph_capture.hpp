@@ -106,6 +106,10 @@ hipError_t capturehipStreamBatchMemOp(hipStream_t& stream, unsigned int& count,
                                       hipStreamBatchMemOpParams*& paramArray,
                                       unsigned int& flags);
 
+hipError_t capturehipMemcpyBatchAsync(hipStream_t& stream, void**& dsts, void**& srcs,
+                                      size_t*& sizes, size_t& count, hipMemcpyAttributes*& attrs,
+                                      size_t*& attrsIdxs, size_t& numAttrs, size_t*& failIdx);
+
 hipError_t capturehipStreamWaitValue32(hipStream_t& stream, void*& ptr, uint32_t& value,
                                        unsigned int& flags, uint32_t& mask);
 

@@ -28,6 +28,8 @@ const char* GetGraphNodeTypeString(uint32_t op) {
     CASE_STRING(hipGraphNodeTypeMemFree, MemFreeNode)
     CASE_STRING(hipGraphNodeTypeMemcpyFromSymbol, MemcpyFromSymbolNode)
     CASE_STRING(hipGraphNodeTypeMemcpyToSymbol, MemcpyToSymbolNode)
+    CASE_STRING(hipGraphNodeTypeBatchMemOp, BatchMemOpNode)
+    CASE_STRING(hipGraphNodeTypeExtMemcpyBatch, ExtMemcpyBatchNode)
     default:
       case_string = "Unknown node type";
   };

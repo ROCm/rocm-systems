@@ -703,6 +703,10 @@ local:
 hip_7.15 {
 global:
     hipMemGetDefaultMemPool;
+    hipGraphAddExtMemcpyBatchNode;
+    hipGraphExtMemcpyBatchNodeGetParams;
+    hipGraphExtMemcpyBatchNodeSetParams;
+    hipGraphExecExtMemcpyBatchNodeSetParams;
 local:
     *;
 } hip_7.14;

@@ -560,4 +560,8 @@ hipExecutionCtxRecordEvent
 hipExecutionCtxSynchronize
 hipExecutionCtxWaitEvent
 hipMemGetDefaultMemPool
+hipGraphAddExtMemcpyBatchNode
+hipGraphExtMemcpyBatchNodeGetParams
+hipGraphExtMemcpyBatchNodeSetParams
+hipGraphExecExtMemcpyBatchNodeSetParams
 @HSA_EXPORTS@
