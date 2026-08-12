@@ -26,7 +26,7 @@ namespace RCCLRmaTests
 namespace
 {
 
-// Mirrors NCCL_GIN_MAX_SEGMENTS in src/transport/net_ib/gin.cc (not exposed to
+// Mirrors NCCL_RMA_MAX_SEGMENTS in src/transport/net_ib/gin.cc (not exposed to
 // the test target); update if the backend cap changes.
 constexpr int    kGinMaxSegments = 16;
 
@@ -135,6 +135,18 @@ protected:
             return nullptr;
         auto buf = std::make_unique<MultiSegmentVmmBuffer>();
         if (!AllocMultiSegmentVmm(dev, nSegments, segBytes, buf.get()))
+            return nullptr;
+        vmmBuffers_.push_back(std::move(buf));
+        return vmmBuffers_.back().get();
+    }
+
+    MultiSegmentVmmBuffer* AllocDeepEpElastic(size_t gpuBytes, size_t cpuBytes)
+    {
+        int dev = 0;
+        if (hipGetDevice(&dev) != hipSuccess)
+            return nullptr;
+        auto buf = std::make_unique<MultiSegmentVmmBuffer>();
+        if (!AllocDeepEpElasticVmm(dev, gpuBytes, cpuBytes, buf.get()))
             return nullptr;
         vmmBuffers_.push_back(std::move(buf));
         return vmmBuffers_.back().get();
@@ -278,7 +290,7 @@ TEST_F(RmaMultiSegmentMPITest, IGetMultiSegment)
 // per-segment offset on both the remote (source) and local (dest) sides. Mirrors
 // IPutCrossSegmentBoundaryAtOffset for the read opcode (only whole-buffer IGet
 // was covered before).
-TEST_F(GinMultiSegmentMPITest, IGetCrossSegmentBoundaryAtOffset)
+TEST_F(RmaMultiSegmentMPITest, IGetCrossSegmentBoundaryAtOffset)
 {
     if (!SetUpFixture(2, 2)) return;
 
@@ -310,7 +322,7 @@ TEST_F(GinMultiSegmentMPITest, IGetCrossSegmentBoundaryAtOffset)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  gin_->iget(ginCtx_, 0, /*remoteOff=*/off, srcMh, kSize,
+                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/off, srcMh, kSize,
                              /*localOff=*/off, dstMh, /*peerRank=*/1, &req));
         ASSERT_TRUE(PollUntilDone(req));
 
@@ -325,11 +337,62 @@ TEST_F(GinMultiSegmentMPITest, IGetCrossSegmentBoundaryAtOffset)
     Barrier();
 }
 
+// DeepEP Engram pattern (DeepEP/csrc/kernels/backend/symmetric.hpp and
+// DeepEP/csrc/kernels/elastic/engram.hpp): one symmetric VMM window contains a
+// large GPU receive segment followed by an independently-sized CPU storage
+// segment. An IGet reads from a non-zero offset in the remote CPU segment into a
+// different non-zero offset in the local GPU segment. This specifically guards
+// independent local and remote registration-relative offset tracking.
+TEST_F(RmaMultiSegmentMPITest, DeepEP_EngramMixedWindowIGet)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    constexpr size_t kMiB        = 1024 * 1024;
+    constexpr size_t kGpuBytes   = 4 * kMiB;
+    constexpr size_t kCpuBytes   = 2 * kMiB;
+    constexpr size_t kRemoteOff  = kGpuBytes + 4096;
+    constexpr size_t kLocalOff   = 64 * 1024;
+    constexpr size_t kPayload    = 128 * 1024;
+    constexpr uint8_t kSentinel  = 0xD7;
+
+    MultiSegmentVmmBuffer* window = AllocDeepEpElastic(kGpuBytes, kCpuBytes);
+    if (SyncSkip(window == nullptr))
+        GTEST_SKIP() << "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime";
+
+    if (worldRank_ == 1)
+        FillBuf(static_cast<uint8_t*>(window->ptr) + kRemoteOff, kPayload, /*seed=*/0x4D);
+    if (worldRank_ == 0)
+        FillSentinel(window->ptr, kGpuBytes, kSentinel);
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    if (SyncSkip(!AllTookMultiSegPath()))
+        GTEST_SKIP() << "DeepEP window did not take the multi-segment GIN registration path";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iget(rmaCtx_, 0,
+                             /*remoteOff=*/kRemoteOff, mh, kPayload,
+                             /*localOff=*/kLocalOff, mh, /*peerRank=*/1, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+        EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(window->ptr) + kLocalOff,
+                              kPayload, /*seed=*/0x4D))
+            << "DeepEP-style CPU-to-GPU IGet corrupted data";
+        EXPECT_TRUE(AllSentinel(window->ptr, kLocalOff, kSentinel));
+        EXPECT_TRUE(AllSentinel(static_cast<uint8_t*>(window->ptr) + kLocalOff + kPayload,
+                                kGpuBytes - kLocalOff - kPayload, kSentinel));
+    }
+    Barrier();
+}
+
 // Receiver-side flush over a multi-segment buffer: after a plain iput, rank 1
 // must fence EVERY physical segment via iflush (one loopback read per segment)
 // before reading. Exercises the multi-segment flush path; a segment-0-only
 // flush faults here on a multi-segment handle.
-TEST_F(GinMultiSegmentMPITest, IFlushMultiSegment)
+TEST_F(RmaMultiSegmentMPITest, IFlushMultiSegment)
 {
     if (!SetUpFixture(2, 2)) return;
 
@@ -355,7 +418,7 @@ TEST_F(GinMultiSegmentMPITest, IFlushMultiSegment)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  gin_->iput(ginCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, &req));
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -363,7 +426,7 @@ TEST_F(GinMultiSegmentMPITest, IFlushMultiSegment)
     if (worldRank_ == 1)
     {
         void* freq = nullptr;
-        EXPECT_EQ(ncclSuccess, gin_->iflush(ginCtx_, 0, recvMh, /*peerRank=*/0, &freq))
+        EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
             << "multi-segment iflush post failed";
         EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
         EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0x3C))
@@ -377,7 +440,7 @@ TEST_F(GinMultiSegmentMPITest, IFlushMultiSegment)
 // iflush fences EVERY physical segment (no offset/size args), it must fence the
 // touched segments and leave the untouched sentinel bytes intact. Complements
 // IFlushMultiSegment (which flushes after a full-window iput).
-TEST_F(GinMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
+TEST_F(RmaMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
 {
     if (!SetUpFixture(2, 2)) return;
 
@@ -409,7 +472,7 @@ TEST_F(GinMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  gin_->iput(ginCtx_, 0, /*srcOff=*/off, sendMh, kSize,
+                  rma_->iput(rmaCtx_, 0, /*srcOff=*/off, sendMh, kSize,
                              /*dstOff=*/off, recvMh, /*peerRank=*/1, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
@@ -418,7 +481,7 @@ TEST_F(GinMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
     if (worldRank_ == 1)
     {
         void* freq = nullptr;
-        EXPECT_EQ(ncclSuccess, gin_->iflush(ginCtx_, 0, recvMh, /*peerRank=*/0, &freq))
+        EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
             << "multi-segment iflush post failed after partial put";
         EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
 
@@ -439,7 +502,7 @@ TEST_F(GinMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
 // which the multi-segment change must not regress -- is otherwise untested. No
 // AllTookMultiSegPath gate: a single-segment buffer intentionally does NOT take
 // the per-segment path.
-TEST_F(GinMultiSegmentMPITest, IFlushSingleSegmentRegression)
+TEST_F(RmaMultiSegmentMPITest, IFlushSingleSegmentRegression)
 {
     if (!SetUpFixture(2, 2)) return;
 
@@ -461,7 +524,7 @@ TEST_F(GinMultiSegmentMPITest, IFlushSingleSegmentRegression)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  gin_->iput(ginCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, &req));
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -469,7 +532,7 @@ TEST_F(GinMultiSegmentMPITest, IFlushSingleSegmentRegression)
     if (worldRank_ == 1)
     {
         void* freq = nullptr;
-        EXPECT_EQ(ncclSuccess, gin_->iflush(ginCtx_, 0, recvMh, /*peerRank=*/0, &freq))
+        EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
             << "single-segment iflush post failed";
         EXPECT_TRUE(PollUntilDone(freq)) << "single-segment flush did not complete";
         EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0x2D))
@@ -649,7 +712,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSizeSweepAtBoundaryOffset)
     }
 }
 
-// NEGATIVE: a buffer spanning more than NCCL_GIN_MAX_SEGMENTS must be rejected
+// NEGATIVE: a buffer spanning more than NCCL_RMA_MAX_SEGMENTS must be rejected
 // with ncclInvalidUsage (no truncation, no crash). Gated on the path being live.
 TEST_F(RmaMultiSegmentMPITest, RegisterExceedsMaxSegmentsRejected)
 {

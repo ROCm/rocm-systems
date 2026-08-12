@@ -41,7 +41,7 @@ NCCL_PARAM(RMADisable, "RMA_DISABLE", 0);
 // consumer paths recognize AMD host segments.
 static inline bool ncclSymIsHostSegment(CUmemLocationType type) {
   if (type == CU_MEM_LOCATION_TYPE_HOST_NUMA) return true;
-#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION >= 71200
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
   if (type == CU_MEM_LOCATION_TYPE_HOST) return true;
 #endif
   return false;

@@ -17,6 +17,7 @@
 
 #include "nccl.h"
 #include "net.h" // ncclIbRegMrDmaBufMultiSeg
+#include "rocmwrap.h"
 
 namespace RCCLNetIbTests {
 
@@ -100,7 +101,7 @@ inline void FreeMultiSegmentVmm(MultiSegmentVmmBuffer& b) {
 // (without touching *mhandle) if the dma-buf export API is unavailable at build
 // time (older HIP), so callers can SKIP.
 inline ncclResult_t RegisterMultiSegmentMr(void* comm, const MultiSegmentVmmBuffer& b, void** mhandle) {
-#if HIP_VERSION >= 71260540
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
     std::vector<void*>    segAddrs(b.nSegments);
     std::vector<size_t>   segLens(b.nSegments);
     std::vector<uint64_t> segOffsets(b.nSegments, 0ULL);

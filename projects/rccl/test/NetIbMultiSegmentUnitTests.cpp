@@ -173,6 +173,59 @@ TEST(NetIbSplit, AsymmetricLayoutsSplitAtBothBoundaries) {
     EXPECT_EQ(sum, total);
 }
 
+// Local and remote API buffers may begin at different offsets within their
+// respective registrations. Splitting must preserve both offsets rather than
+// treating the request-relative offset as registration-relative.
+TEST(NetIbSplit, IndependentLocalAndRemoteStartOffsets) {
+    Layout local  = MakeUniform(kBase, kSeg, 4);
+    Layout remote = MakeUniform(0x900000000ULL, kSeg / 2, 8);
+    SplitTables lt = MakeTables(local), rt = MakeTables(remote);
+    ncclIbSegSlice out[8];
+    const uint64_t localOff  = kSeg + 512;
+    const uint64_t remoteOff = kSeg / 2 - 512;
+    int ns = ncclIbSplitTransferAtOffsets(
+        lt.n(), lt.va.data(), lt.off.data(),
+        rt.n(), rt.va.data(), rt.off.data(),
+        localOff, remoteOff, 2048, out, 8);
+    ASSERT_EQ(ns, 2);
+    EXPECT_EQ(out[0].localAddr, kBase + localOff);
+    EXPECT_EQ(out[0].remoteAddr, 0x900000000ULL + remoteOff);
+    EXPECT_EQ(out[0].len, 512u);
+    EXPECT_EQ(out[0].localSeg, 1);
+    EXPECT_EQ(out[0].remoteSeg, 0);
+    EXPECT_EQ(out[1].localAddr, kBase + localOff + 512);
+    EXPECT_EQ(out[1].remoteAddr, 0x900000000ULL + kSeg / 2);
+    EXPECT_EQ(out[1].len, 1536u);
+    EXPECT_EQ(out[1].localSeg, 1);
+    EXPECT_EQ(out[1].remoteSeg, 1);
+}
+
+// DeepEP Engram uses one unequal [GPU][CPU] window and reads remote CPU storage
+// into a different offset in the local GPU segment. Preserve that consumer
+// geometry as a host-only regression for independent offset/key selection.
+TEST(NetIbSplit, DeepEP_EngramCpuToGpuOffsets) {
+    constexpr uint64_t gpuBytes = 6u * 1024 * 1024;
+    constexpr uint64_t cpuBytes = 2u * 1024 * 1024;
+    constexpr uint64_t remoteBase = 0x900000000ULL;
+    Layout local{{kBase, kBase + gpuBytes}, {gpuBytes, cpuBytes}};
+    Layout remote{{remoteBase, remoteBase + gpuBytes}, {gpuBytes, cpuBytes}};
+    SplitTables lt = MakeTables(local), rt = MakeTables(remote);
+    ncclIbSegSlice out[4];
+    const uint64_t localOff = 64 * 1024;
+    const uint64_t remoteOff = gpuBytes + 4096;
+    const uint64_t len = 128 * 1024;
+    int ns = ncclIbSplitTransferAtOffsets(
+        lt.n(), lt.va.data(), lt.off.data(),
+        rt.n(), rt.va.data(), rt.off.data(),
+        localOff, remoteOff, len, out, 4);
+    ASSERT_EQ(ns, 1);
+    EXPECT_EQ(out[0].localSeg, 0);
+    EXPECT_EQ(out[0].remoteSeg, 1);
+    EXPECT_EQ(out[0].localAddr, kBase + localOff);
+    EXPECT_EQ(out[0].remoteAddr, remoteBase + remoteOff);
+    EXPECT_EQ(out[0].len, len);
+}
+
 // Full-buffer transfer over a symmetric N-segment layout yields N slices.
 TEST(NetIbSplit, FullBufferProducesOneSlicePerSegment) {
     Layout L = MakeUniform(kBase, kSeg, 4);

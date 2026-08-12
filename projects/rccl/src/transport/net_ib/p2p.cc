@@ -159,20 +159,35 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
       // Local segment offset/VA tables (contiguous VMM VAs => linear addresses).
       uint64_t lVA[NCCL_IB_MAX_SEGMENTS], lOff[NCCL_IB_MAX_SEGMENTS + 1];
       int nLocal;
+      uint64_t localReqOff = 0;
       if (mh && mh->nSegments > 1) {
         nLocal = mh->nSegments;
         for (int s = 0; s < nLocal; s++) { lVA[s] = mh->segStart[s]; lOff[s] = mh->segStart[s] - mh->segStart[0]; }
         lOff[nLocal] = lOff[nLocal - 1] + mh->segLen[nLocal - 1];
+        if (localBase < mh->segStart[0]) return ncclInternalError;
+        localReqOff = localBase - mh->segStart[0];
       } else {
         nLocal = 1; lVA[0] = localBase; lOff[0] = 0; lOff[1] = reqs[r]->send.size;
       }
       // Remote segment tables published by the receiver in the CTS FIFO.
       uint64_t rVA[NCCL_IB_MAX_SEGMENTS], rOff[NCCL_IB_MAX_SEGMENTS + 1];
       int nRemote;
+      uint64_t remoteReqOff = 0;
       if (slots[r].nSegments > 1) {
         nRemote = slots[r].nSegments;
-        for (int s = 0; s < nRemote; s++) { rVA[s] = slots[r].segStart[s]; rOff[s] = slots[r].segStart[s] - slots[r].addr; }
-        rOff[nRemote] = slots[r].size;
+        for (int s = 0; s < nRemote; s++) {
+          rVA[s] = slots[r].segStart[s];
+          rOff[s] = slots[r].segStart[s] - slots[r].segStart[0];
+        }
+        if (remoteBase < slots[r].segStart[0]) return ncclInternalError;
+        remoteReqOff = remoteBase - slots[r].segStart[0];
+        uint64_t remoteReqEnd = remoteReqOff + slots[r].size;
+        if (remoteReqEnd < remoteReqOff) return ncclInternalError;
+        // The wire publishes segment starts but not the registration's final
+        // length. Trim starts beyond this receive and use its end as the final
+        // boundary; no send for this CTS entry may legally pass that point.
+        while (nRemote > 1 && rOff[nRemote - 1] >= remoteReqEnd) nRemote--;
+        rOff[nRemote] = remoteReqEnd;
       } else {
         nRemote = 1; rVA[0] = remoteBase; rOff[0] = 0; rOff[1] = slots[r].size;
       }
@@ -195,8 +210,10 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
         w++;
       } else {
         struct ncclIbSegSlice slices[2 * NCCL_IB_MAX_SEGMENTS];
-        int ns = ncclIbSplitTransfer(nLocal, lVA, lOff, nRemote, rVA, rOff,
-                                     sendOffsets[r], chunkLen[r], slices, 2 * NCCL_IB_MAX_SEGMENTS);
+        int ns = ncclIbSplitTransferAtOffsets(
+            nLocal, lVA, lOff, nRemote, rVA, rOff,
+            localReqOff + sendOffsets[r], remoteReqOff + sendOffsets[r],
+            chunkLen[r], slices, 2 * NCCL_IB_MAX_SEGMENTS);
         if (ns <= 0) {
           WARN("NET/IB: multi-segment send split failed (data=%p off=%u len=%u)", reqs[r]->send.data, sendOffsets[r], chunkLen[r]);
           return ncclInternalError;

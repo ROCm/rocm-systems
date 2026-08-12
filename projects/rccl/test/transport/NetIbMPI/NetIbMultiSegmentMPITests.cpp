@@ -64,10 +64,10 @@ protected:
         return f != 0;
     }
 
-    bool GdrSupported() {
+    bool PtrSupported(int mask) {
         ncclNetProperties_t props; memset(&props, 0, sizeof(props));
         if (GetDeviceProperties(0, &props) != ncclSuccess) return false;
-        return (props.ptrSupport & NCCL_PTR_CUDA) != 0;
+        return (props.ptrSupport & mask) != 0;
     }
 
     static void FillDevice(void* dptr, size_t size, uint8_t seed) {
@@ -86,30 +86,38 @@ protected:
         return true;
     }
 
-    // One-directional transfer of [off, off+size) (rank1 -> rank0) on an
-    // established connection, with data verification on the receiver. With
-    // Option B, size/off may span multiple physical segments.
-    void SendRecvChunk(ConnectionPair& pair, void* sBuf, void* rBuf,
-                       size_t off, size_t size, int tag, uint8_t seed) {
+    // One-directional transfer (rank1 -> rank0) with independent source and
+    // destination registration-relative offsets. This is the general form
+    // required by DeepEP-style per-peer window layouts.
+    void SendRecvChunkAtOffsets(ConnectionPair& pair, void* sBuf, void* rBuf,
+                                size_t srcOff, size_t dstOff, size_t size,
+                                int tag, uint8_t seed) {
         const int rank = MPIEnvironment::world_rank;
         void* req = nullptr;
         if (rank == 0) {
-            void* buf = static_cast<uint8_t*>(rBuf) + off;
+            void* buf = static_cast<uint8_t*>(rBuf) + dstOff;
             PostSingleRecv(pair.recvComm, buf, size, tag, recvMh_, &req);
             int sz = 0;
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
         } else {
-            FillDevice(static_cast<uint8_t*>(sBuf) + off, size, seed);
-            void* buf = static_cast<uint8_t*>(sBuf) + off;
+            FillDevice(static_cast<uint8_t*>(sBuf) + srcOff, size, seed);
+            void* buf = static_cast<uint8_t*>(sBuf) + srcOff;
             PostSendWithRetry(pair.sendComm, buf, size, tag, sendMh_, &req);
             int sz = 0;
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
         }
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0)
-            EXPECT_TRUE(VerifyDevice(static_cast<uint8_t*>(rBuf) + off, size, seed))
-                << "data mismatch off=" << off << " size=" << size;
+            EXPECT_TRUE(VerifyDevice(static_cast<uint8_t*>(rBuf) + dstOff, size, seed))
+                << "data mismatch srcOff=" << srcOff << " dstOff=" << dstOff
+                << " size=" << size;
         MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    // Common same-offset form used by the original test matrix.
+    void SendRecvChunk(ConnectionPair& pair, void* sBuf, void* rBuf,
+                       size_t off, size_t size, int tag, uint8_t seed) {
+        SendRecvChunkAtOffsets(pair, sBuf, rBuf, off, off, size, tag, seed);
     }
 
     // Common setup: prerequisites, GDR, allocate an nSeg window, connect, and
@@ -124,7 +132,10 @@ protected:
                                        false, kMinGpusPerNode, kNoNodeLimit))
             return false;
         int ndev = 0; AssertInitAndGetDevices(&ndev);
-        if (SyncSkip(!GdrSupported())) { skipReason_ = "GDR (NCCL_PTR_CUDA) not supported"; return false; }
+        if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) {
+            skipReason_ = "DMA-BUF registration not supported";
+            return false;
+        }
         MultiSegmentVmmBuffer* buf = AllocSym(nSeg);
         if (SyncSkip(buf == nullptr)) { skipReason_ = "multi-segment VMM allocation unavailable"; return false; }
         lastBuf_ = buf;
@@ -182,6 +193,23 @@ TEST_F(NetIbMultiSegmentMPITest, IntraSegmentOffsetSelection) {
     }
 }
 
+// DeepEP-style per-peer windows use different source and destination offsets
+// for one logical transfer. Exercise that pattern on the classic CTS-FIFO wire:
+// the sender starts in segment 1 while the receiver starts in segment 0, so a
+// shared registration-relative cursor would select the wrong lkey or rkey.
+TEST_F(NetIbMultiSegmentMPITest, DeepEP_AsymmetricOffsetTransfer) {
+    ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
+    if (!SetupRegistered(kNumSegments, pair, guard, &mh, &comm)) SETUP_OR_SKIP();
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+    sendMh_ = recvMh_ = mh;
+
+    const size_t srcOff = lastBuf_->segSize + 4096; // sender segment 1
+    const size_t dstOff = 64 * 1024;                // receiver segment 0
+    const size_t size   = 128 * 1024;
+    SendRecvChunkAtOffsets(pair, lastBuf_->ptr, lastBuf_->ptr,
+                           srcOff, dstOff, size, /*tag=*/350, /*seed=*/0xD3);
+}
+
 // OPTION B FLAGSHIP: a single transfer that straddles a segment boundary now
 // SUCCEEDS -- the sender splits the RDMA write at the receiver's boundary using
 // the per-segment rkeys published in the CTS FIFO. Data must arrive intact.
@@ -213,7 +241,7 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
     int ndev = 0; AssertInitAndGetDevices(&ndev);
-    if (SyncSkip(!GdrSupported())) GTEST_SKIP() << "GDR not supported";
+    if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) GTEST_SKIP() << "DMA-BUF registration not supported";
 
     const int rank = MPIEnvironment::world_rank;
     MultiSegmentVmmBuffer* big = AllocSym(kMaxSegments + 1);
@@ -337,7 +365,7 @@ TEST_F(NetIbMultiSegmentMPITest, HostAndDeviceSingleSegmentRegression) {
     }
 
     // --- Device memory (NCCL_PTR_CUDA), single contiguous MR via regMr. ---
-    if (!SyncSkip(!GdrSupported())) {
+    if (!SyncSkip(!PtrSupported(NCCL_PTR_CUDA))) {
         void* dptr = nullptr;
         bool allocOk = (hipMalloc(&dptr, size) == hipSuccess);
         void* mh = nullptr;

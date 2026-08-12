@@ -1017,6 +1017,95 @@ protected:
         (void)numHostSegments;
 #endif
     }
+
+    /**
+     * @brief Reproduce DeepEP ElasticSymmetricMemory exactly: a 2 MiB-aligned
+     *        contiguous VA range containing one GPU segment followed by one
+     *        independently-sized CPU segment.
+     */
+    void createDeepEpElasticBuffer(int dev,
+                                   size_t numGpuBytes,
+                                   size_t numCpuBytes,
+                                   MultiSegmentBuffer& buf)
+    {
+        constexpr size_t kDeepEpAlignment = 2 * 1024 * 1024;
+        buf = MultiSegmentBuffer{};
+        ASSERT_GT(numGpuBytes, 0u);
+        ASSERT_GT(numCpuBytes, 0u);
+        ASSERT_EQ(numGpuBytes % kDeepEpAlignment, 0u);
+        ASSERT_EQ(numCpuBytes % kDeepEpAlignment, 0u);
+
+        hipMemAllocationProp gpuProp = {};
+        gpuProp.type                            = hipMemAllocationTypePinned;
+        gpuProp.location.type                   = hipMemLocationTypeDevice;
+        gpuProp.location.id                     = dev;
+        gpuProp.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
+        gpuProp.allocFlags.gpuDirectRDMACapable = 1;
+
+        hipMemAllocationProp cpuProp = {};
+        cpuProp.type                = hipMemAllocationTypePinned;
+        cpuProp.location.type       = hipMemLocationTypeHost;
+        cpuProp.location.id         = 0;
+        cpuProp.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+
+        size_t gpuGran = 0, cpuGran = 0;
+        if (hipMemGetAllocationGranularity(&gpuGran, &gpuProp, hipMemAllocationGranularityMinimum) != hipSuccess ||
+            hipMemGetAllocationGranularity(&cpuGran, &cpuProp, hipMemAllocationGranularityMinimum) != hipSuccess ||
+            gpuGran == 0 || cpuGran == 0 ||
+            kDeepEpAlignment % gpuGran != 0 || kDeepEpAlignment % cpuGran != 0) {
+            return;
+        }
+
+        const size_t totalSize = numGpuBytes + numCpuBytes;
+        hipDeviceptr_t vaBase = 0;
+        if (hipMemAddressReserve(&vaBase, totalSize, kDeepEpAlignment, 0, 0) != hipSuccess) {
+            return;
+        }
+
+        std::vector<hipMemGenericAllocationHandle_t> handles(2, 0);
+        int mapped = 0;
+        auto cleanup = [&]() {
+            if (mapped > 0) HIP_EXPECT(hipMemUnmap(vaBase, numGpuBytes));
+            if (mapped > 1) {
+                HIP_EXPECT(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(
+                                          reinterpret_cast<uintptr_t>(vaBase) + numGpuBytes),
+                                      numCpuBytes));
+            }
+            for (auto h : handles) if (h != 0) HIP_EXPECT(hipMemRelease(h));
+            HIP_EXPECT(hipMemAddressFree(vaBase, totalSize));
+        };
+
+        if (hipMemCreate(&handles[0], numGpuBytes, &gpuProp, 0) != hipSuccess ||
+            hipMemMap(vaBase, numGpuBytes, 0, handles[0], 0) != hipSuccess) {
+            cleanup();
+            return;
+        }
+        mapped = 1;
+
+        hipDeviceptr_t cpuVa = reinterpret_cast<hipDeviceptr_t>(
+            reinterpret_cast<uintptr_t>(vaBase) + numGpuBytes);
+        if (hipMemCreate(&handles[1], numCpuBytes, &cpuProp, 0) != hipSuccess ||
+            hipMemMap(cpuVa, numCpuBytes, 0, handles[1], 0) != hipSuccess) {
+            cleanup();
+            return;
+        }
+        mapped = 2;
+
+        hipMemAccessDesc accessDesc = {};
+        accessDesc.location.type    = hipMemLocationTypeDevice;
+        accessDesc.location.id      = dev;
+        accessDesc.flags            = hipMemAccessFlagsProtReadWrite;
+        if (hipMemSetAccess(vaBase, numGpuBytes, &accessDesc, 1) != hipSuccess ||
+            hipMemSetAccess(cpuVa, numCpuBytes, &accessDesc, 1) != hipSuccess) {
+            cleanup();
+            return;
+        }
+
+        buf.vaBase      = vaBase;
+        buf.segmentSize = 0; // segments intentionally have different sizes
+        buf.totalSize   = totalSize;
+        buf.handles     = std::move(handles);
+    }
 };
 
 /**
@@ -1432,6 +1521,74 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
          << "' in log - the symmetric-window multi-segment LSA registration "
             "(symMemoryMapLsaTeam) did not fire for the elastic (host-backed) buffer";
  }
+
+/**
+ * @brief DeepEP ElasticSymmetricMemory constructor pattern
+ *        (DeepEP/csrc/kernels/backend/symmetric.hpp and nccl.cu).
+ *
+ * DeepEP reserves one 2 MiB-aligned VA range, maps an independently-sized GPU
+ * allocation at the front and CPU allocation at the back, registers the full
+ * range with NCCL_WIN_STRICT_ORDERING, then resolves its local LSA pointer.
+ * Unlike Symmetric_Elastic_Lsa, this intentionally uses two non-uniform
+ * segments and the same window flags/API sequence as DeepEP.
+ */
+TEST_F(UBR_MultiSegment, DeepEP_ElasticWindowRegistration)
+{
+    if (!validateTestPrerequisites(/*min_processes=*/2)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+    ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
+    ASSERT_TRUE(isElasticBufferRegisterEnabled())
+        << "NCCL_ELASTIC_BUFFER_REGISTER must not be 0 for DeepEP elastic memory";
+    ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+
+    int dev = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+
+    // Mirrors DeepEP's [[[workspace] GPU buffer] CPU storage] geometry. The
+    // unequal lengths ensure this is not reduced to the uniform test pattern.
+    constexpr size_t kGpuBytes = 6 * 1024 * 1024;
+    constexpr size_t kCpuBytes = 2 * 1024 * 1024;
+
+    MultiSegmentBuffer buf;
+    ASSERT_NO_FATAL_FAILURE(createDeepEpElasticBuffer(dev, kGpuBytes, kCpuBytes, buf));
+    if (buf.totalSize == 0) {
+        GTEST_SKIP() << "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime";
+    }
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+
+    ncclWindow_t win = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase,
+                                         buf.totalSize, &win,
+                                         NCCL_WIN_STRICT_ORDERING));
+    auto winCleanup = makeScopeGuard([&]() {
+        if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
+    });
+    ASSERT_MPI_NE(win, nullptr);
+
+    MPI_Comm localComm = MPI_COMM_NULL;
+    ASSERT_MPI_EQ(MPI_SUCCESS,
+                  MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0,
+                                      MPI_INFO_NULL, &localComm));
+    int localRank = 0;
+    ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Comm_rank(localComm, &localRank));
+    ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Comm_free(&localComm));
+
+    void* mappedWindow = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclGetLsaDevicePointer(win, 0, localRank, &mappedWindow));
+    ASSERT_MPI_NE(mappedWindow, nullptr);
+
+    REGLogChecker checker = getLogChecker();
+    TEST_INFO("DeepEP_ElasticWindowRegistration: %s (log size: %zu bytes)",
+              checker.getSummary().c_str(), checker.getContentLength());
+    ASSERT_TRUE(checker.hasNumSegments(2))
+        << "Expected two segments for DeepEP [GPU][CPU] elastic window";
+}
  
  /**
   * @brief Elastic buffer registration gating: a host-backed symmetric window must be rejected when

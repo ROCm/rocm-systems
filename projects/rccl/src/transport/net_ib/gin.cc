@@ -568,7 +568,7 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
 
   // Count physical segments; ROCm/HIP describes only the first per export,
   // so multi-segment ranges register one MR per segment below.
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   if (type == NCCL_PTR_CUDA && ncclCuMemEnable()) {
     CUdeviceptr base = 0;
     size_t baseSize = 0;
@@ -594,7 +594,7 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
     localVas[0] = (uintptr_t)data;
     localRkeys[0] = rmaMrHandle->mrHandle[0]->mrs[0]->rkey;
   } else {
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
     uintptr_t segPtr = (uintptr_t)data;
     size_t remaining = size;
     size_t cum = 0;

@@ -2417,7 +2417,7 @@ fail:
 // boundary. When a guard fails the function returns an error and the caller
 // declines registration, so the collective falls back to staging buffers
 // instead of the fatal QP path.
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
 static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* netComm, void* buffer,
                                        size_t totalSize, int numSegments, ncclTopoGdrMode useGdr, void** handle) {
   ncclResult_t ret = ncclSuccess;
