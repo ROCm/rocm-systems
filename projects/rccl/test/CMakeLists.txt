@@ -256,11 +256,20 @@ if(BUILD_TESTS)
 
   # A real shared library, unlike the net plugin above: ProfilerPluginCloseTests checks
   # that RCCL unloads an external profiler plugin, so it needs a separately loadable
-  # object. Its path reaches the test through the generator expression below.
+  # object. The test looks for it next to its own binary, which holds both in the build
+  # tree and in an install; the build-tree path is passed only as a fallback.
   add_library(rccl-test-profiler-stub SHARED plugin/profiler_stub_plugin.cpp)
   add_dependencies(rccl-UnitTests rccl-test-profiler-stub)
   target_compile_definitions(rccl-UnitTests PRIVATE
-    RCCL_TEST_PROFILER_STUB_PATH="$<TARGET_FILE:rccl-test-profiler-stub>")
+    RCCL_TEST_PROFILER_STUB_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-stub>"
+    RCCL_TEST_PROFILER_STUB_BUILD_PATH="$<TARGET_FILE:rccl-test-profiler-stub>")
+
+  # Deliberately not rocm_install(): that sends libraries to the library directory and
+  # adds them to the package export set, while this stub has to ship beside the test
+  # binaries that rocm_install() puts in CMAKE_INSTALL_BINDIR.
+  install(TARGETS rccl-test-profiler-stub
+    LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT tests)
 
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
