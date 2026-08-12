@@ -2153,6 +2153,35 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     assert 'src0.clear_delegate();' not in body
 
 
+def test_generated_dpp8_disassembly_uses_encoding_state(
+    amdgpu_generated_root: Path,
+) -> None:
+    for arch in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'gfx1250'):
+        encodings_cpp = (amdgpu_generated_root / arch / 'encodings.cpp').read_text()
+        encodings_h = (amdgpu_generated_root / arch / 'encodings.h').read_text()
+        generated_cpp = '\n'.join(
+            path.read_text() for path in (amdgpu_generated_root / arch).glob('*.cpp')
+        )
+
+        vop1_modifiers = encodings_cpp[
+            encodings_cpp.index('void Vop1::build_modifiers') :
+        ]
+        vop1_modifiers = vop1_modifiers[: vop1_modifiers.index('\n\n')]
+
+        assert 'append_dpp8_disassembly' in encodings_cpp
+        assert 'auto *inst = &inst_;' not in vop1_modifiers
+        for class_name in ('Vop1', 'Vop2', 'Vopc', 'Vop3', 'Vop3p', 'Vop3SdstEnc'):
+            class_match = re.search(
+                rf'class {class_name}\b.*?\n}};', encodings_h, flags=re.DOTALL
+            )
+            assert class_match is not None
+            assert 'owned_mnemonic_' not in class_match.group()
+        assert 'dpp8_mnemonic' not in generated_cpp
+        assert re.search(r'\? "v_add_f16_dpp"\s*: "v_add_f16_e32"', generated_cpp)
+        if arch not in ('rdna1', 'rdna2'):
+            assert re.search(r'"v_rcp_f16_e64_dpp"\s*: "v_rcp_f16"', generated_cpp)
+
+
 def test_generated_sdwa_uses_shared_source_staging(
     amdgpu_generated_root: Path,
 ) -> None:
@@ -2955,6 +2984,14 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
 
     assert codegen._supports_gfx1250_scaled_wmma_vop3px2()
     assert 'VWmmaScaleF32Vop3px2' in (codegen._emit_gfx1250_scaled_wmma_vop3px2_class())
+    model_impl = ' '.join(
+        codegen._emit_gfx1250_scaled_wmma_vop3px2_impls().model[0].split()
+    )
+    assert (
+        'reinterpret_cast<const OpEncoding *>(inst + 2), '
+        'selected_exec_fn(0), 3, Vop3p::ExtensionDecodePolicy::Skip),'
+    ) in model_impl
+
     helpers = codegen._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers()
     assert 'isVop3pOp' in helpers
     assert 'isWmmaScaleF32Vop3px2' not in helpers
@@ -3006,6 +3043,38 @@ def test_vopd_dispatch_uses_primary_decode_table(
     assert 'Decoder::decodeVopd(const MachineInst *opcode)' in decoder
     assert 'is_vopd' not in (arch_root / 'vopd.h').read_text()
     assert 'is_vopd' not in (arch_root / 'vopd.cpp').read_text()
+
+
+def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
+    gfx1250_generated_root: Path,
+):
+    encodings_h = (gfx1250_generated_root / 'encodings.h').read_text()
+    encodings_cpp = (gfx1250_generated_root / 'encodings.cpp').read_text()
+    vop3p_cpp = ' '.join((gfx1250_generated_root / 'vop3p.cpp').read_text().split())
+
+    assert 'enum class ExtensionDecodePolicy { Decode, Skip };' in encodings_h
+    assert 'int num_encoded_sources = 3' in encodings_h
+    assert (
+        'ExtensionDecodePolicy extension_policy = ExtensionDecodePolicy::Decode'
+        in encodings_h
+    )
+
+    constructor = _generated_constructor_body(encodings_cpp, 'Vop3p')
+    guard = 'if (extension_policy == ExtensionDecodePolicy::Decode) {'
+    guarded_suffix = constructor.split(guard, 1)[1]
+    guarded_body, constructor_suffix = guarded_suffix.rsplit('\n  }\n}', 1)
+    assert not constructor_suffix.strip()
+    for extension_step in (
+        'throw util::InvalidInst("Vop3p does not support Literal64", "")',
+        'has_lit_0()',
+        'inst_.src0 == amdgpu::SRC_DPP',
+        'amdgpu::dpp::is_src_dpp8(inst_.src0)',
+        'std::memcpy(raw_words_.data(), inst, size_)',
+        'raw_encoding_ = raw_words_.data()',
+    ):
+        assert extension_step in guarded_body
+
+    assert 'selected_exec_fn(1250), 3, Vop3p::ExtensionDecodePolicy::Skip)' in vop3p_cpp
 
 
 @pytest.mark.parametrize(
@@ -3166,6 +3235,11 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'make_src0(y_bits, true, false, 0, srcy0)' in cpp
     assert 'make_src0(x_bits, false, has_literal_, literal_, srcx0)' in cpp
     assert 'make_src0(y_bits, false, has_literal_, literal_, srcy0)' in cpp
+    assert 'if (!is_valid_opcode(opx_, kVopdXOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opy_, kVopdYOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opx_, kVopd3XOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opy_, kVopd3YOpcodeMask))' in cpp
+    assert 'if (vdstx < y_end && vdsty < x_end)' in cpp
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' in exec_cpp
     src_neg_start = exec_cpp.index('bool Vopd::uses_src_neg_modifier')

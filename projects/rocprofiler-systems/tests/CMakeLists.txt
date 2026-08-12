@@ -48,11 +48,6 @@ set_target_properties(
 # test_categories.yaml drives tier (quick/standard/comprehensive/full) label
 # injection at CTest-generate time (see conftest.py:_load_test_categories).
 set(ROCPROFSYS_TEST_CATEGORIES_YAML ${CMAKE_CURRENT_LIST_DIR}/test_categories.yaml)
-configure_file(
-    ${ROCPROFSYS_TEST_CATEGORIES_YAML}
-    ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/test_categories.yaml
-    COPYONLY
-)
 
 add_custom_target(
     copy-test-files
@@ -78,6 +73,7 @@ add_custom_target(
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
 )
 add_dependencies(copy-test-files rocprof-sys-capchk)
+add_dependencies(generate-pytest-ctests copy-test-files)
 
 # ------------------------------------------------------------------------------#
 #

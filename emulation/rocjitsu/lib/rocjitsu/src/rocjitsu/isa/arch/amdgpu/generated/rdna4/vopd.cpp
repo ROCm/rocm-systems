@@ -37,6 +37,13 @@ constexpr uint16_t kVopdAddNcU32 = 16;
 constexpr uint16_t kVopdLshlrevB32 = 17;
 constexpr uint16_t kVopdAndB32 = 18;
 
+constexpr uint64_t kVopdXOpcodeMask = 0x0000000000003FFFULL;
+constexpr uint64_t kVopdYOpcodeMask = 0x0000000000073FFFULL;
+
+bool is_valid_opcode(uint16_t opcode, uint64_t mask) {
+  return opcode < 64 && (mask & (1ULL << opcode));
+}
+
 Operand make_src0(uint32_t bits, [[maybe_unused]] bool vopd3, bool use_literal, uint32_t literal,
                   uint16_t encoded) {
   if (use_literal && encoded == 255)
@@ -215,6 +222,10 @@ Vopd::Vopd(const MachineInst *inst)
   encoding_id_ = 0x32;
   opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
   opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
+  if (!is_valid_opcode(opx_, kVopdXOpcodeMask))
+    throw util::InvalidInst("invalid VOPD X opcode", "");
+  if (!is_valid_opcode(opy_, kVopdYOpcodeMask))
+    throw util::InvalidInst("invalid VOPD Y opcode", "");
   uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
   uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
   uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
