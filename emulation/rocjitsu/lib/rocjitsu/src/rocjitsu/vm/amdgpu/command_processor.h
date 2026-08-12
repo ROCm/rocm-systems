@@ -149,6 +149,11 @@ public:
   }
 
   void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }
+  void set_dispatch_spis(std::vector<ShaderProcessorInput *> spis) {
+    spis_ = std::move(spis);
+    next_spi_ = 0;
+    round_robin_spis_ = true;
+  }
 
   void add_compute_unit(ComputeUnitCore *cu) {
     auto port_id = static_cast<simdojo::PortID>(dispatch_ports_.size());
@@ -312,6 +317,8 @@ private:
   std::vector<simdojo::Port *> dispatch_ports_;
 
   size_t next_cu_ = 0;
+  size_t next_spi_ = 0;
+  bool round_robin_spis_ = false;
   size_t next_queue_idx_ = 0;
   // Almost always accessed under hw_queue_mutex_, but the teardown path in
   // handle_doorbell() must clear it AFTER unlocking (stop_doorbell_monitor() joins

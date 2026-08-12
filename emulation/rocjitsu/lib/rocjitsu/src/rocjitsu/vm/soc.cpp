@@ -18,7 +18,7 @@ void SoC::consolidate_dispatch_to_primary() {
   auto *primary = xcds_[0]->command_processor();
   if (!primary)
     return;
-  // Register every other XCD's SPIs, CUs, and L2s with the primary CP.
+  // Register every other XCD's CUs and L2s with the primary CP.
   // add_compute_unit repoints each CU's command processor to the primary, so
   // workgroup-completion notifications route to the single dispatcher's
   // completion tracker. Each CU keeps its own XCD's L2 for memory traffic; the
@@ -31,9 +31,22 @@ void SoC::consolidate_dispatch_to_primary() {
       auto *se = x->shader_engine(s);
       for (uint32_t c = 0; c < se->num_compute_units(); ++c)
         primary->add_compute_unit(se->compute_unit(c));
-      primary->add_spi(&se->spi());
     }
   }
+
+  // Interleave SPIs by XCD so the CP's persistent SPI round-robin reaches
+  // another XCD before returning to the next shader engine on the first XCD.
+  std::vector<amdgpu::ShaderProcessorInput *> dispatch_spis;
+  uint32_t max_shader_engines = 0;
+  for (auto *x : xcds_)
+    max_shader_engines = std::max(max_shader_engines, x->num_shader_engines());
+  for (uint32_t s = 0; s < max_shader_engines; ++s) {
+    for (auto *x : xcds_) {
+      if (s < x->num_shader_engines())
+        dispatch_spis.push_back(&x->shader_engine(s)->spi());
+    }
+  }
+  primary->set_dispatch_spis(std::move(dispatch_spis));
   soc_dispatch_ = true;
 }
 

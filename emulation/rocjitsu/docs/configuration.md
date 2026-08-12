@@ -56,7 +56,7 @@ The example above is intentionally minimal and single-threaded.
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned) |
-| `cpu_dispatch_threads` | int | CPU CU-dispatch worker-pool size per command processor in functional mode (0 = auto: hardware threads, capped at 32; 1 = serial) |
+| `cpu_dispatch_threads` | int | Shared CPU CU-dispatch worker budget per SoC in functional mode (0 = auto: hardware threads, capped at 32; 1 = serial) |
 | `soc_dispatch` | bool | Consolidate cross-XCD dispatch onto each SoC's primary CP for single-stream multi-XCD work distribution; requires `num_threads: 1` |
 | `exec_mode` | string | `"functional"` or `"cycle"` |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |

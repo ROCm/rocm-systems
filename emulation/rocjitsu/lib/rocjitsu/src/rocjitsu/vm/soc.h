@@ -126,6 +126,7 @@ public:
   /// @brief Request single-global-dispatcher mode (config soc_dispatch). Applied
   /// during initialize() once the topology is built.
   void set_soc_dispatch(bool enable) { soc_dispatch_requested_ = enable; }
+  bool soc_dispatch() const { return soc_dispatch_; }
 
   /// @brief Give the primary CP every XCD's SPIs/CUs so one dispatch spreads
   /// its workgroups across all XCDs (opt-in via config soc_dispatch). Idempotent.

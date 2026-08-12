@@ -2805,7 +2805,15 @@ TEST(AqlDispatchTest, SocDispatchPrimaryCpCompletesWorkgroupsAcrossXcds) {
             {"name":"cp","type":"command_processor"},
             {"name":"se0","type":"shader_engine","children":[
               {"name":"cu0","type":"compute_unit","config":[
-                {"key":"num_wf_slots","value":"1"},
+                {"key":"num_wf_slots","value":"10"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]},
+            {"name":"se1","type":"shader_engine","children":[
+              {"name":"cu0","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"10"},
                 {"key":"sgprs_per_wf","value":"104"},
                 {"key":"vgprs_per_wf","value":"256"},
                 {"key":"lds_size_kb","value":"64"}
@@ -2817,7 +2825,15 @@ TEST(AqlDispatchTest, SocDispatchPrimaryCpCompletesWorkgroupsAcrossXcds) {
             {"name":"cp","type":"command_processor"},
             {"name":"se0","type":"shader_engine","children":[
               {"name":"cu0","type":"compute_unit","config":[
-                {"key":"num_wf_slots","value":"1"},
+                {"key":"num_wf_slots","value":"10"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]},
+            {"name":"se1","type":"shader_engine","children":[
+              {"name":"cu0","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"10"},
                 {"key":"sgprs_per_wf","value":"104"},
                 {"key":"vgprs_per_wf","value":"256"},
                 {"key":"lds_size_kb","value":"64"}
@@ -2845,9 +2861,9 @@ TEST(AqlDispatchTest, SocDispatchPrimaryCpCompletesWorkgroupsAcrossXcds) {
   ASSERT_NE(primary_cp, nullptr);
   EXPECT_EQ(soc->assign_queue_cp(), primary_cp);
   EXPECT_EQ(soc->assign_queue_cp(), primary_cp);
-  ASSERT_EQ(primary_cp->compute_units().size(), 2u);
+  ASSERT_EQ(primary_cp->compute_units().size(), 4u);
   EXPECT_EQ(primary_cp->compute_units()[0], soc->xcd(0)->shader_engine(0)->compute_unit(0));
-  EXPECT_EQ(primary_cp->compute_units()[1], soc->xcd(1)->shader_engine(0)->compute_unit(0));
+  EXPECT_EQ(primary_cp->compute_units()[2], soc->xcd(1)->shader_engine(0)->compute_unit(0));
 
   auto pg = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<WorkgroupPlacementPlugin>();
