@@ -21,24 +21,42 @@
 // THE SOFTWARE.
 
 #include "lib/common/sha256.hpp"
-#include "lib/common/defines.hpp"
-#include "lib/common/logging.hpp"
-#include "lib/common/mpl.hpp"
 
-#include <unistd.h>
+// defines.hpp and mpl.hpp were included but never used. logging.hpp supplies
+// only the misuse diagnostic below; it is pulled in when this file is built as
+// part of rocprofiler-sdk and stubbed out otherwise, so that this translation
+// unit -- like the header -- can be compiled standalone by other components
+// that want SHA-256 without taking a dependency on rocprofiler's logging.
+#if defined(__has_include)
+#    if __has_include("lib/common/logging.hpp")
+#        include "lib/common/logging.hpp"
+#    endif
+#endif
+#if !defined(ROCP_CI_LOG_IF)
+#    include <iostream>
+#    define ROCP_CI_LOG_IF(LEVEL, COND)                                                            \
+        if(false) ::std::cerr
+#endif
+
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <string>
-#include <vector>
 
 namespace rocprofiler
 {
 namespace common
 {
+void
+secure_zero(void* p, size_t n)
+{
+    auto* volatile q = static_cast<volatile unsigned char*>(p);
+    while(n-- > 0)
+        *q++ = 0;
+}
+
 sha256::sha256() { reset(); }
 
 sha256::sha256(const std::string& data)
@@ -94,7 +112,7 @@ sha256::finalize()
         std::memset(m_data.data(), 0, 56);
     }
 
-    m_bitlen += m_datalen * 8;
+    m_bitlen += static_cast<uint64_t>(m_datalen) * 8;
     for(int j = 0; j < 8; ++j)
         m_data[63 - j] = static_cast<uint8_t>((m_bitlen >> (8 * j)) & 0xFF);
 
@@ -120,6 +138,20 @@ sha256::rawdigest()
     finalize();
 
     return m_state;
+}
+
+void
+sha256::digest(uint8_t out[SHA256_DIGEST_SIZE])
+{
+    finalize();
+
+    for(int j = 0; j < 8; ++j)
+    {
+        out[j * 4 + 0] = static_cast<uint8_t>((m_state[j] >> 24) & 0xFF);
+        out[j * 4 + 1] = static_cast<uint8_t>((m_state[j] >> 16) & 0xFF);
+        out[j * 4 + 2] = static_cast<uint8_t>((m_state[j] >> 8) & 0xFF);
+        out[j * 4 + 3] = static_cast<uint8_t>((m_state[j]) & 0xFF);
+    }
 }
 
 uint32_t
@@ -170,8 +202,10 @@ sha256::transform()
     uint32_t m[64];
     for(int i = 0; i < 16; ++i)
     {
-        m[i] = (m_data[i * 4] << 24) | (m_data[i * 4 + 1] << 16) | (m_data[i * 4 + 2] << 8) |
-               (m_data[i * 4 + 3]);
+        m[i] = (static_cast<uint32_t>(m_data[static_cast<size_t>(i) * 4]) << 24) |
+               (static_cast<uint32_t>(m_data[static_cast<size_t>(i) * 4 + 1]) << 16) |
+               (static_cast<uint32_t>(m_data[static_cast<size_t>(i) * 4 + 2]) << 8) |
+               (static_cast<uint32_t>(m_data[static_cast<size_t>(i) * 4 + 3]));
     }
     for(int i = 16; i < 64; ++i)
     {
@@ -209,21 +243,25 @@ sha256::transform()
     m_state[5] += f;
     m_state[6] += g;
     m_state[7] += h;
+
+    secure_zero(m, sizeof(m));
 }
 
 void
 sha256::reset()
 {
-    m_state   = {0x6a09e667,
-               0xbb67ae85,
-               0x3c6ef372,
-               0xa54ff53a,
-               0x510e527f,
-               0x9b05688c,
-               0x1f83d9ab,
-               0x5be0cd19};
-    m_datalen = 0;
-    m_bitlen  = 0;
+    m_state     = {0x6a09e667,
+                   0xbb67ae85,
+                   0x3c6ef372,
+                   0xa54ff53a,
+                   0x510e527f,
+                   0x9b05688c,
+                   0x1f83d9ab,
+                   0x5be0cd19};
+    m_data      = {};
+    m_datalen   = 0;
+    m_bitlen    = 0;
+    m_finalized = false;
 }
 }  // namespace common
 }  // namespace rocprofiler
