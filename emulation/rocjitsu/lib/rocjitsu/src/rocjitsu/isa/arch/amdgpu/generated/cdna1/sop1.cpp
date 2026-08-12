@@ -5,24 +5,15 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/sop1.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "util/except.h"
-#include "util/log.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <format>
-#include <limits>
 
 namespace rocjitsu {
 namespace cdna1 {
 
 SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
-    : Sop1("s_mov_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMovB32Sop1>()),
+    : Sop1("s_mov_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SMovB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -36,10 +27,9 @@ SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
   flags_ |= RESULT_COPY;
 }
 
-void SMovB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mov_b32_sop1(*this, wf); }
-
 SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
-    : Sop1("s_mov_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMovB64Sop1>()),
+    : Sop1("s_mov_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SMovB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -54,10 +44,9 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
   flags_ |= RESULT_COPY;
 }
 
-void SMovB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mov_b64_sop1(*this, wf); }
-
 SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
-    : Sop1("s_cmov_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCmovB32Sop1>()),
+    : Sop1("s_cmov_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmovB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -73,14 +62,11 @@ SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= PREDICATED_DEF;
-}
-
-void SCmovB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmov_b32_sop1(*this, wf);
 }
 
 SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
-    : Sop1("s_cmov_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCmovB64Sop1>()),
+    : Sop1("s_cmov_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmovB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -99,12 +85,9 @@ SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
   flags_ |= PREDICATED_DEF;
 }
 
-void SCmovB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmov_b64_sop1(*this, wf);
-}
-
 SNotB32Sop1::SNotB32Sop1(const MachineInst *inst)
-    : Sop1("s_not_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNotB32Sop1>()),
+    : Sop1("s_not_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SNotB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -119,11 +102,10 @@ SNotB32Sop1::SNotB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
-
-void SNotB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_not_b32_sop1(*this, wf); }
 
 SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
-    : Sop1("s_not_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNotB64Sop1>()),
+    : Sop1("s_not_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SNotB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -140,10 +122,9 @@ SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SNotB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_not_b64_sop1(*this, wf); }
-
 SWqmB32Sop1::SWqmB32Sop1(const MachineInst *inst)
-    : Sop1("s_wqm_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SWqmB32Sop1>()),
+    : Sop1("s_wqm_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SWqmB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -159,10 +140,9 @@ SWqmB32Sop1::SWqmB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SWqmB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wqm_b32_sop1(*this, wf); }
-
 SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
-    : Sop1("s_wqm_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SWqmB64Sop1>()),
+    : Sop1("s_wqm_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SWqmB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -179,10 +159,9 @@ SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SWqmB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wqm_b64_sop1(*this, wf); }
-
 SBrevB32Sop1::SBrevB32Sop1(const MachineInst *inst)
-    : Sop1("s_brev_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBrevB32Sop1>()),
+    : Sop1("s_brev_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SBrevB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -195,12 +174,9 @@ SBrevB32Sop1::SBrevB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SBrevB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_brev_b32_sop1(*this, wf);
-}
-
 SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
-    : Sop1("s_brev_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBrevB64Sop1>()),
+    : Sop1("s_brev_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SBrevB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -212,15 +188,11 @@ SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-}
-
-void SBrevB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_brev_b64_sop1(*this, wf);
 }
 
 SBcnt0I32B32Sop1::SBcnt0I32B32Sop1(const MachineInst *inst)
     : Sop1("s_bcnt0_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBcnt0I32B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBcnt0I32B32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -234,15 +206,11 @@ SBcnt0I32B32Sop1::SBcnt0I32B32Sop1(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
-}
-
-void SBcnt0I32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bcnt0_i32_b32_sop1(*this, wf);
 }
 
 SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
     : Sop1("s_bcnt0_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBcnt0I32B64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBcnt0I32B64Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -259,13 +227,9 @@ SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SBcnt0I32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bcnt0_i32_b64_sop1(*this, wf);
-}
-
 SBcnt1I32B32Sop1::SBcnt1I32B32Sop1(const MachineInst *inst)
     : Sop1("s_bcnt1_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBcnt1I32B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBcnt1I32B32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -281,13 +245,9 @@ SBcnt1I32B32Sop1::SBcnt1I32B32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SBcnt1I32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bcnt1_i32_b32_sop1(*this, wf);
-}
-
 SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
     : Sop1("s_bcnt1_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBcnt1I32B64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBcnt1I32B64Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -304,13 +264,9 @@ SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SBcnt1I32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bcnt1_i32_b64_sop1(*this, wf);
-}
-
 SFf0I32B32Sop1::SFf0I32B32Sop1(const MachineInst *inst)
     : Sop1("s_ff0_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SFf0I32B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SFf0I32B32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -321,15 +277,11 @@ SFf0I32B32Sop1::SFf0I32B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
-}
-
-void SFf0I32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ff0_i32_b32_sop1(*this, wf);
 }
 
 SFf0I32B64Sop1::SFf0I32B64Sop1(const MachineInst *inst)
     : Sop1("s_ff0_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SFf0I32B64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SFf0I32B64Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -341,15 +293,11 @@ SFf0I32B64Sop1::SFf0I32B64Sop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-}
-
-void SFf0I32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ff0_i32_b64_sop1(*this, wf);
 }
 
 SFf1I32B32Sop1::SFf1I32B32Sop1(const MachineInst *inst)
     : Sop1("s_ff1_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SFf1I32B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SFf1I32B32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -360,15 +308,11 @@ SFf1I32B32Sop1::SFf1I32B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
-}
-
-void SFf1I32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ff1_i32_b32_sop1(*this, wf);
 }
 
 SFf1I32B64Sop1::SFf1I32B64Sop1(const MachineInst *inst)
     : Sop1("s_ff1_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SFf1I32B64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SFf1I32B64Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -380,15 +324,11 @@ SFf1I32B64Sop1::SFf1I32B64Sop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-}
-
-void SFf1I32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ff1_i32_b64_sop1(*this, wf);
 }
 
 SFlbitI32B32Sop1::SFlbitI32B32Sop1(const MachineInst *inst)
     : Sop1("s_flbit_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SFlbitI32B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SFlbitI32B32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -401,13 +341,9 @@ SFlbitI32B32Sop1::SFlbitI32B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SFlbitI32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_flbit_i32_b32_sop1(*this, wf);
-}
-
 SFlbitI32B64Sop1::SFlbitI32B64Sop1(const MachineInst *inst)
     : Sop1("s_flbit_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SFlbitI32B64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SFlbitI32B64Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -421,13 +357,9 @@ SFlbitI32B64Sop1::SFlbitI32B64Sop1(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void SFlbitI32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_flbit_i32_b64_sop1(*this, wf);
-}
-
 SFlbitI32Sop1::SFlbitI32Sop1(const MachineInst *inst)
     : Sop1("s_flbit_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SFlbitI32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SFlbitI32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -440,13 +372,9 @@ SFlbitI32Sop1::SFlbitI32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SFlbitI32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_flbit_i32_sop1(*this, wf);
-}
-
 SFlbitI32I64Sop1::SFlbitI32I64Sop1(const MachineInst *inst)
     : Sop1("s_flbit_i32_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SFlbitI32I64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SFlbitI32I64Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -460,13 +388,9 @@ SFlbitI32I64Sop1::SFlbitI32I64Sop1(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
-void SFlbitI32I64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_flbit_i32_i64_sop1(*this, wf);
-}
-
 SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
     : Sop1("s_sext_i32_i8", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSextI32I8Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SSextI32I8Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -478,15 +402,11 @@ SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-}
-
-void SSextI32I8Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sext_i32_i8_sop1(*this, wf);
 }
 
 SSextI32I16Sop1::SSextI32I16Sop1(const MachineInst *inst)
     : Sop1("s_sext_i32_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSextI32I16Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SSextI32I16Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -500,13 +420,9 @@ SSextI32I16Sop1::SSextI32I16Sop1(const MachineInst *inst)
                     reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void SSextI32I16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sext_i32_i16_sop1(*this, wf);
-}
-
 SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
     : Sop1("s_bitset0_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitset0B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBitset0B32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   src_operands_[0] = &sdst;
@@ -518,15 +434,11 @@ SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
-}
-
-void SBitset0B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitset0_b32_sop1(*this, wf);
 }
 
 SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
     : Sop1("s_bitset0_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitset0B64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBitset0B64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   src_operands_[0] = &sdst;
@@ -540,13 +452,9 @@ SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SBitset0B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitset0_b64_sop1(*this, wf);
-}
-
 SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
     : Sop1("s_bitset1_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitset1B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBitset1B32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   src_operands_[0] = &sdst;
@@ -560,13 +468,9 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SBitset1B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitset1_b32_sop1(*this, wf);
-}
-
 SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
     : Sop1("s_bitset1_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitset1B64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBitset1B64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   src_operands_[0] = &sdst;
@@ -580,13 +484,9 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SBitset1B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitset1_b64_sop1(*this, wf);
-}
-
 SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
     : Sop1("s_getpc_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SGetpcB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SGetpcB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       pc(64, OperandType::OPR_PC, 0) {
   dst_operands_[0] = &sdst;
@@ -596,13 +496,9 @@ SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
   pc.apply_fieldless_caps(false, false, false);
 }
 
-void SGetpcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::RegisterAccess(wf).write_scalar64(sdst, wf.pc + size_);
-}
-
 SSetpcB64Sop1::SSetpcB64Sop1(const MachineInst *inst)
     : Sop1("s_setpc_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSetpcB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SSetpcB64Sop1)),
       ssrc0(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       pc(64, OperandType::OPR_PC, 0) {
   src_operands_[0] = &ssrc0;
@@ -618,13 +514,9 @@ SSetpcB64Sop1::SSetpcB64Sop1(const MachineInst *inst)
   flags_ |= INDIRECT_BRANCH;
 }
 
-void SSetpcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0) - size_;
-}
-
 SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
     : Sop1("s_swappc_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSwappcB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SSwappcB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       pc(64, OperandType::OPR_PC, 0), pc_in(64, OperandType::OPR_PC, 0) {
@@ -644,14 +536,9 @@ SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
   flags_ |= INDIRECT_CALL;
 }
 
-void SSwappcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t next_pc = wf.pc + size_;
-  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0) - size_;
-  amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
-}
-
 SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)
-    : Sop1("s_rfe_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SRfeB64Sop1>()),
+    : Sop1("s_rfe_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SRfeB64Sop1)),
       ssrc0(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       pc(64, OperandType::OPR_PC, 0) {
   src_operands_[0] = &ssrc0;
@@ -666,11 +553,9 @@ SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)
   pc.apply_fieldless_caps(false, false, false);
 }
 
-void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_rfe_b64_sop1(*this, wf); }
-
 SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_and_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndSaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndSaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -694,13 +579,9 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SAndSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_saveexec_b64_sop1(*this, wf);
-}
-
 SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_or_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SOrSaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SOrSaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -725,13 +606,9 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
   flags_ |= RESULT_OR;
 }
 
-void SOrSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_or_saveexec_b64_sop1(*this, wf);
-}
-
 SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_xor_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SXorSaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SXorSaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -753,15 +630,11 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
-}
-
-void SXorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_xor_saveexec_b64_sop1(*this, wf);
 }
 
 SAndn2SaveexecB64Sop1::SAndn2SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_andn2_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndn2SaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndn2SaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -783,15 +656,11 @@ SAndn2SaveexecB64Sop1::SAndn2SaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
-}
-
-void SAndn2SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_andn2_saveexec_b64_sop1(*this, wf);
 }
 
 SOrn2SaveexecB64Sop1::SOrn2SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_orn2_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SOrn2SaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SOrn2SaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -813,15 +682,11 @@ SOrn2SaveexecB64Sop1::SOrn2SaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
-}
-
-void SOrn2SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_orn2_saveexec_b64_sop1(*this, wf);
 }
 
 SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_nand_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SNandSaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SNandSaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -843,15 +708,11 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
-}
-
-void SNandSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_nand_saveexec_b64_sop1(*this, wf);
 }
 
 SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_nor_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SNorSaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SNorSaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -873,15 +734,11 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
-}
-
-void SNorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_nor_saveexec_b64_sop1(*this, wf);
 }
 
 SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_xnor_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SXnorSaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SXnorSaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -905,13 +762,9 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SXnorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_xnor_saveexec_b64_sop1(*this, wf);
-}
-
 SQuadmaskB32Sop1::SQuadmaskB32Sop1(const MachineInst *inst)
     : Sop1("s_quadmask_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SQuadmaskB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SQuadmaskB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -927,13 +780,9 @@ SQuadmaskB32Sop1::SQuadmaskB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SQuadmaskB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_quadmask_b32_sop1(*this, wf);
-}
-
 SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
     : Sop1("s_quadmask_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SQuadmaskB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SQuadmaskB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -950,13 +799,9 @@ SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SQuadmaskB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_quadmask_b64_sop1(*this, wf);
-}
-
 SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)
     : Sop1("s_movrels_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMovrelsB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SMovrelsB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       m0(32, OperandType::OPR_SDST_M0, 124) {
@@ -972,23 +817,9 @@ SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t index = wf.m0() & 0xFFu;
-  uint32_t width_words = static_cast<uint32_t>(ssrc0.size_bits() / 32);
-  uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + index * width_words;
-  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
-  if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(
-        sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
-  } else {
-    amdgpu::RegisterAccess(wf).write_scalar(sdst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
-  }
-}
-
 SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
     : Sop1("s_movrels_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMovrelsB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SMovrelsB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       m0(32, OperandType::OPR_SDST_M0, 124) {
@@ -1005,23 +836,9 @@ SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t index = wf.m0() & 0xFFu;
-  uint32_t width_words = static_cast<uint32_t>(ssrc0.size_bits() / 32);
-  uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + index * width_words;
-  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
-  if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(
-        sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
-  } else {
-    amdgpu::RegisterAccess(wf).write_scalar(sdst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
-  }
-}
-
 SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
     : Sop1("s_movreld_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMovreldB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SMovreldB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       m0(32, OperandType::OPR_SDST_M0, 124) {
@@ -1037,23 +854,9 @@ SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t index = wf.m0() & 0xFFu;
-  uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
-  uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + index * width_words;
-  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
-  if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
-                                              amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
-  } else {
-    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
-  }
-}
-
 SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
     : Sop1("s_movreld_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMovreldB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SMovreldB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       m0(32, OperandType::OPR_SDST_M0, 124) {
@@ -1070,23 +873,9 @@ SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t index = wf.m0() & 0xFFu;
-  uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
-  uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + index * width_words;
-  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
-  if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
-                                              amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
-  } else {
-    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
-  }
-}
-
 SCbranchJoinSop1::SCbranchJoinSop1(const MachineInst *inst)
     : Sop1("s_cbranch_join", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCbranchJoinSop1>()),
+           selected_exec_fn(InstructionExecutionId::SCbranchJoinSop1)),
       ssrc0(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126), pc(64, OperandType::OPR_PC, 0) {
   src_operands_[0] = &ssrc0;
@@ -1102,12 +891,9 @@ SCbranchJoinSop1::SCbranchJoinSop1(const MachineInst *inst)
   pc.apply_fieldless_caps(false, false, false);
 }
 
-void SCbranchJoinSop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cbranch_join_sop1(*this, wf);
-}
-
 SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
-    : Sop1("s_abs_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAbsI32Sop1>()),
+    : Sop1("s_abs_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SAbsI32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1123,11 +909,9 @@ SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SAbsI32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_abs_i32_sop1(*this, wf); }
-
 SSetGprIdxIdxSop1::SSetGprIdxIdxSop1(const MachineInst *inst)
     : Sop1("s_set_gpr_idx_idx", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSetGprIdxIdxSop1>()),
+           selected_exec_fn(InstructionExecutionId::SSetGprIdxIdxSop1)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       m0(32, OperandType::OPR_SDST_M0, 124), m0_in(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &ssrc0;
@@ -1143,13 +927,9 @@ SSetGprIdxIdxSop1::SSetGprIdxIdxSop1(const MachineInst *inst)
   m0_in.apply_fieldless_caps(false, false, false);
 }
 
-void SSetGprIdxIdxSop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_set_gpr_idx_idx_sop1(*this, wf);
-}
-
 SAndn1SaveexecB64Sop1::SAndn1SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_andn1_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndn1SaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndn1SaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1171,15 +951,11 @@ SAndn1SaveexecB64Sop1::SAndn1SaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
-}
-
-void SAndn1SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_andn1_saveexec_b64_sop1(*this, wf);
 }
 
 SOrn1SaveexecB64Sop1::SOrn1SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_orn1_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SOrn1SaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SOrn1SaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1201,15 +977,11 @@ SOrn1SaveexecB64Sop1::SOrn1SaveexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
-}
-
-void SOrn1SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_orn1_saveexec_b64_sop1(*this, wf);
 }
 
 SAndn1WrexecB64Sop1::SAndn1WrexecB64Sop1(const MachineInst *inst)
     : Sop1("s_andn1_wrexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndn1WrexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndn1WrexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1231,15 +1003,11 @@ SAndn1WrexecB64Sop1::SAndn1WrexecB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
-}
-
-void SAndn1WrexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_andn1_wrexec_b64_sop1(*this, wf);
 }
 
 SAndn2WrexecB64Sop1::SAndn2WrexecB64Sop1(const MachineInst *inst)
     : Sop1("s_andn2_wrexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndn2WrexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndn2WrexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1263,13 +1031,9 @@ SAndn2WrexecB64Sop1::SAndn2WrexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SAndn2WrexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_andn2_wrexec_b64_sop1(*this, wf);
-}
-
 SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
     : Sop1("s_bitreplicate_b64_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitreplicateB64B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBitreplicateB64B32Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -1280,10 +1044,6 @@ SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
-}
-
-void SBitreplicateB64B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitreplicate_b64_b32_sop1(*this, wf);
 }
 
 } // namespace cdna1

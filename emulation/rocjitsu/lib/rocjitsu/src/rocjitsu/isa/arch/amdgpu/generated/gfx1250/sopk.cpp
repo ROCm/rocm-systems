@@ -5,13 +5,15 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/sopk.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
 #include "util/except.h"
 
 namespace rocjitsu {
 namespace gfx1250 {
 
 SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
-    : Sopk("s_movk_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(180)),
+    : Sopk("s_movk_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SMovkI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   dst_operands_[0] = &sdst;
@@ -21,7 +23,8 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
 }
 
 SVersionSopk::SVersionSopk(const MachineInst *inst)
-    : Sopk("s_version", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(181)),
+    : Sopk("s_version", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SVersionSopk)),
       simm16(16, OperandType::OPR_VERSION, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
@@ -29,7 +32,8 @@ SVersionSopk::SVersionSopk(const MachineInst *inst)
 }
 
 SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
-    : Sopk("s_cmovk_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(182)),
+    : Sopk("s_cmovk_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmovkI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -44,7 +48,8 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
 }
 
 SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
-    : Sopk("s_addk_co_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(183)),
+    : Sopk("s_addk_co_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SAddkCoI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -58,7 +63,8 @@ SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
 }
 
 SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
-    : Sopk("s_mulk_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(184)),
+    : Sopk("s_mulk_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SMulkI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &sdst;
@@ -69,7 +75,8 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
 }
 
 SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
-    : Sopk("s_getreg_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(185)),
+    : Sopk("s_getreg_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SGetregB32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   dst_operands_[0] = &sdst;
@@ -79,7 +86,8 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
 }
 
 SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
-    : Sopk("s_setreg_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(186)),
+    : Sopk("s_setreg_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SSetregB32Sopk)),
       simm16(16, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst) {
   dst_operands_[0] = &simm16;
@@ -102,7 +110,8 @@ void SSetregB32Sopk::implicit_use_operands(
 }
 
 SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
-    : Sopk("s_setreg_imm32_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(187)),
+    : Sopk("s_setreg_imm32_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SSetregImm32B32Sopk)),
       simm16(16, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       literal(32, OperandType::OPR_SIMM32, 0) {
   dst_operands_[0] = &simm16;
@@ -126,7 +135,8 @@ void SSetregImm32B32Sopk::implicit_use_operands(
 }
 
 SCallI64Sopk::SCallI64Sopk(const MachineInst *inst)
-    : Sopk("s_call_i64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(188)),
+    : Sopk("s_call_i64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCallI64Sopk)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       pc(64, OperandType::OPR_PC, 0), pc_in(64, OperandType::OPR_PC, 0) {

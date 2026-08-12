@@ -7,6 +7,7 @@
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 
 #include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
@@ -41,6 +42,12 @@ constexpr int k64BitOperand = 64;
 /// the general-purpose file, so a borrowed pair must stay below it.
 constexpr uint16_t kMaxOrdinarySgpr = 105;
 
+/// @brief Complete any producer of the aliased s102:s103 state before reading
+/// the architectural flat-scratch selectors.
+[[nodiscard]] uint32_t flat_scratch_selector_wait() {
+  return gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = 0})[0];
+}
+
 /// @brief Width of a vector source field wide enough to name a scalar value.
 /// @details The compact vector formats give their second source an eight-bit
 /// field that indexes the vector file directly, so it can hold the selector's
@@ -60,6 +67,8 @@ struct EncodingSourceFields {
   std::array<SourceField, 3> fields{};
   uint8_t count = 0;
   bool vector = false; ///< True when sources are read by the vector ALU.
+  /// True when this EXEC-masked encoding may stage through an overwritten destination.
+  bool destination_stageable = false;
 };
 
 /// @brief Identify the base encoding from its self-describing high bits.
@@ -81,21 +90,29 @@ struct EncodingSourceFields {
   if ((word0 >> 30) == 2) // SOP2
     return EncodingSourceFields{.fields = {{{0, 0, 8}, {0, 8, 8}}}, .count = 2, .vector = false};
   if ((word0 >> 26) == 53) // VOP3
-    return EncodingSourceFields{
-        .fields = {{{1, 0, 9}, {1, 9, 9}, {1, 18, 9}}}, .count = 3, .vector = true};
+    return EncodingSourceFields{.fields = {{{1, 0, 9}, {1, 9, 9}, {1, 18, 9}}},
+                                .count = 3,
+                                .vector = true,
+                                .destination_stageable = true};
   // VOP3P shares VOP3's second-word source layout but not its leading bits, and
   // its packed sources are 64 bits wide, so it reaches the selector the same way.
   if ((word0 >> 24) == 204) // VOP3P
-    return EncodingSourceFields{
-        .fields = {{{1, 0, 9}, {1, 9, 9}, {1, 18, 9}}}, .count = 3, .vector = true};
+    return EncodingSourceFields{.fields = {{{1, 0, 9}, {1, 9, 9}, {1, 18, 9}}},
+                                .count = 3,
+                                .vector = true,
+                                .destination_stageable = true};
   if ((word0 >> 25) == 63) // VOP1
-    return EncodingSourceFields{.fields = {{{0, 0, 9}}}, .count = 1, .vector = true};
+    return EncodingSourceFields{
+        .fields = {{{0, 0, 9}}}, .count = 1, .vector = true, .destination_stageable = true};
   if ((word0 >> 25) == 62) // VOPC
     return EncodingSourceFields{.fields = {{{0, 0, 9}, {0, 9, 8}}}, .count = 2, .vector = true};
   // VOP2 is the remaining format whose leading bit is clear; the compact
   // formats above are tested first, so reaching here identifies it.
   if ((word0 >> 31) == 0) // VOP2
-    return EncodingSourceFields{.fields = {{{0, 0, 9}, {0, 9, 8}}}, .count = 2, .vector = true};
+    return EncodingSourceFields{.fields = {{{0, 0, 9}, {0, 9, 8}}},
+                                .count = 2,
+                                .vector = true,
+                                .destination_stageable = true};
   return std::nullopt;
 }
 
@@ -238,6 +255,95 @@ instruction_words(const Instruction &inst, uint64_t offset, std::span<const uint
   return false;
 }
 
+[[nodiscard]] bool register_ranges_overlap(uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
+                                           uint16_t rhs_width) {
+  return lhs_base < static_cast<uint32_t>(rhs_base) + rhs_width &&
+         rhs_base < static_cast<uint32_t>(lhs_base) + lhs_width;
+}
+
+/// @brief Reuse an overwritten destination pair to stage the flat-scratch base.
+///
+/// @details Two 32-bit vector moves can read the low and high special selectors
+/// on A0 even though a 64-bit vector source cannot. The gfx1250 A0 source-
+/// operand table assigns selectors 230 and 231 to the two 32-bit halves; the
+/// corresponding VOP1 encodings also round-trip through llvm-mc for gfx1250.
+/// The destination is safe
+/// scratch only when it is exactly one VGPR pair, no other source aliases it,
+/// and each rewritten source role selects the same physical VGPR bank as the
+/// destination role. Tied operands are rejected by the explicit-source scan;
+/// gfx1250 partial-write and read-modify-write destinations are rejected by the
+/// separate implicit-use scan. Unknown or mismatched banking fails closed.
+///
+/// The staging moves are EXEC-masked VALU operations. They are safe here because
+/// the instruction they precede is also an EXEC-masked VALU operation; an
+/// encoding with different lane-mask semantics must not use this fallback.
+[[nodiscard]] std::optional<uint16_t> reusable_destination_pair(const Instruction &inst,
+                                                                const EncodingSourceFields &layout,
+                                                                std::span<const uint32_t> words,
+                                                                const LivenessAnalysis &liveness) {
+  if (!layout.destination_stageable || inst.num_dst_operands() != 1 ||
+      !liveness.global_vgpr_usage_is_complete())
+    return std::nullopt;
+
+  const Operand *dst = inst.dst_operand(0);
+  if (dst == nullptr)
+    return std::nullopt;
+  const auto dst_ref = dst->to_register_ref();
+  if (!dst_ref || dst_ref->cls != RegClass::VGPR || dst_ref->width != 2 ||
+      static_cast<uint32_t>(dst_ref->index) + dst_ref->width > 256u)
+    return std::nullopt;
+  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, dst->vgpr_msb_role());
+  if (!dst_bank)
+    return std::nullopt;
+  const uint16_t dst_phys =
+      static_cast<uint16_t>(dst_ref->index + static_cast<uint16_t>(*dst_bank) * 256u);
+
+  bool found_rewritable_source = false;
+  for (int index = 0; index < inst.num_src_operands(); ++index) {
+    const Operand *src = inst.src_operand(index);
+    if (src == nullptr)
+      continue;
+    const bool rewritable = index < static_cast<int>(layout.count) &&
+                            is_flat_scratch_base_64bit_source(inst, index, layout, words);
+    if (rewritable) {
+      found_rewritable_source = true;
+      const auto src_bank = liveness.vgpr_msb_bank_before(inst, src->vgpr_msb_role());
+      if (!src_bank || *src_bank != *dst_bank)
+        return std::nullopt;
+      continue;
+    }
+
+    const auto src_ref = src->to_register_ref();
+    if (!src_ref || src_ref->cls != RegClass::VGPR)
+      continue;
+    if (static_cast<uint32_t>(src_ref->index) + src_ref->width > 256u)
+      return std::nullopt;
+    const auto src_bank = liveness.vgpr_msb_bank_before(inst, src->vgpr_msb_role());
+    if (!src_bank) {
+      if (register_ranges_overlap(dst_ref->index, dst_ref->width, src_ref->index, src_ref->width))
+        return std::nullopt;
+      continue;
+    }
+    const uint16_t src_phys =
+        static_cast<uint16_t>(src_ref->index + static_cast<uint16_t>(*src_bank) * 256u);
+    if (register_ranges_overlap(dst_phys, dst_ref->width, src_phys, src_ref->width))
+      return std::nullopt;
+  }
+
+  RegisterSet implicit_uses;
+  inst.implicit_uses(implicit_uses);
+  bool implicit_alias = false;
+  implicit_uses.for_each([&](RegisterRef ref) {
+    if (ref.cls == RegClass::VGPR &&
+        register_ranges_overlap(dst_ref->index, dst_ref->width,
+                                static_cast<uint16_t>(ref.index & 0xffu), ref.width))
+      implicit_alias = true;
+  });
+  if (implicit_alias || !found_rewritable_source)
+    return std::nullopt;
+  return dst_ref->index;
+}
+
 } // namespace
 
 bool gfx1250_reads_flat_scratch_base_64bit(const Instruction &inst) {
@@ -290,6 +396,37 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
   const int rewritable = std::min(inst.num_src_operands(), static_cast<int>(layout->count));
   std::vector<uint32_t> prologue;
   std::optional<uint16_t> borrowed_pair;
+  std::optional<uint16_t> staged_vgpr_pair;
+  if (layout->vector) {
+    borrowed_pair = liveness.find_free_sgpr_pair(&inst);
+    if (!borrowed_pair || *borrowed_pair + 1 > kMaxOrdinarySgpr) {
+      borrowed_pair.reset();
+      staged_vgpr_pair = reusable_destination_pair(inst, *layout, *words, liveness);
+      if (!staged_vgpr_pair) {
+        return ExpandResult::failed(
+            "gfx1250 flat-scratch-base rewrite could not allocate safe temporary storage",
+            {"Free an aligned SGPR pair or a non-aliasing destination VGPR pair around this "
+             "instruction."});
+      }
+    }
+    if (borrowed_pair) {
+      prologue.push_back(flat_scratch_selector_wait());
+      // No descriptor growth is involved. This target's scalar file is fixed
+      // rather than sized by the descriptor, and the translator does not write
+      // the legacy granulated field for it, so raising a requirement here would
+      // change nothing. The bound that matters is that the pair stays inside the
+      // architecturally addressable range, which the check above enforces.
+      const auto move = gfx1250::build_sop1(gfx1250::kSMovB64Sop1,
+                                            {.ssrc0 = static_cast<uint8_t>(kFlatScratchBaseLo),
+                                             .sdst = static_cast<uint8_t>(*borrowed_pair)});
+      // Appended one word at a time rather than as an iterator range: the
+      // range form of insert() reduces to a bulk copy whose bounds GCC cannot
+      // relate back to a single-element std::array, and it reports the
+      // one-past-the-end pointer as an out-of-bounds access.
+      for (const uint32_t word : move)
+        prologue.push_back(word);
+    }
+  }
   for (int i = 0; i < rewritable; ++i) {
     if (!is_flat_scratch_base_64bit_source(inst, i, *layout, *words))
       continue;
@@ -306,31 +443,30 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
       continue;
     }
 
-    // A vector read takes the base from an ordinary SGPR pair. One scalar move
-    // serves every affected source position in this instruction.
-    if (!borrowed_pair) {
-      borrowed_pair = liveness.find_free_sgpr_pair(&inst);
-      if (!borrowed_pair || *borrowed_pair + 1 > kMaxOrdinarySgpr) {
-        return ExpandResult::failed(
-            "gfx1250 flat-scratch-base rewrite could not allocate a dead SGPR pair",
-            {"Free an aligned SGPR pair around this instruction."});
-      }
-      // No descriptor growth is involved. This target's scalar file is fixed
-      // rather than sized by the descriptor, and the translator does not write
-      // the legacy granulated field for it, so raising a requirement here would
-      // change nothing. The bound that matters is that the pair stays inside the
-      // architecturally addressable range, which the check above enforces.
-      const auto move = gfx1250::build_sop1(gfx1250::kSMovB64Sop1,
-                                            {.ssrc0 = static_cast<uint8_t>(kFlatScratchBaseLo),
-                                             .sdst = static_cast<uint8_t>(*borrowed_pair)});
-      // Appended one word at a time rather than as an iterator range: the
-      // range form of insert() reduces to a bulk copy whose bounds GCC cannot
-      // relate back to a single-element std::array, and it reports the
-      // one-past-the-end pointer as an out-of-bounds access.
-      for (const uint32_t word : move)
-        prologue.push_back(word);
+    // One temporary serves every affected source position in this instruction.
+    if (staged_vgpr_pair) {
+      set_word_field((*words)[field.word], 256u + *staged_vgpr_pair, field.shift, field.width);
+      continue;
     }
     set_word_field((*words)[field.word], *borrowed_pair, field.shift, field.width);
+  }
+
+  if (staged_vgpr_pair) {
+    std::vector<uint32_t> replacement;
+    using Pipeline = HazardTracker::Pipeline;
+    HazardTracker hazards;
+    const auto low = gfx1250::build_vop1(
+        gfx1250::kVMovB32Vop1,
+        {.src0 = kFlatScratchBaseLo, .vdst = static_cast<uint8_t>(*staged_vgpr_pair)});
+    const auto high = gfx1250::build_vop1(
+        gfx1250::kVMovB32Vop1,
+        {.src0 = kFlatScratchBaseHi, .vdst = static_cast<uint8_t>(*staged_vgpr_pair + 1)});
+    replacement.push_back(flat_scratch_selector_wait());
+    hazards.emit_raw(replacement, low[0]);
+    hazards.emit(replacement, high[0], Pipeline::VALU);
+    hazards.emit(replacement, (*words)[0], Pipeline::VALU);
+    replacement.insert(replacement.end(), words->begin() + 1, words->end());
+    return ExpandResult::success(std::move(replacement));
   }
 
   prologue.insert(prologue.end(), words->begin(), words->end());
