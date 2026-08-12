@@ -1265,7 +1265,63 @@ elseif(ENABLE_ROCSHMEM_GIN)
   # GIN device templates (Put/Flush/etc.) reference rocshmem device symbols.
   # With the device linker (default), per-arch .bc files are injected directly
   # into the per-arch device link step via DeviceLinker.cmake.
-  # Host symbols from GIN plugins are left unresolved via --allow-shlib-undefined.
+  #
+  # Pull the SDMA host objects out of librocshmem.a, so apps that only run the
+  # SDMA backend do not have to link it. Seeding by symbol survives upstream
+  # file renames:
+  #   - the five SDMA entry points bring in the sdma factory and anvil engine
+  #   - rocshmem::ibv is a data symbol, so the loader wants it even on this path
+  # The GDA plugin's host symbols stay unresolved. Pulling them in needs the
+  # device side constmem registration this build mode cannot provide yet, so
+  # GDA still expects the executable to link librocshmem.a.
+  set(_gin_rocshmem_syms
+    gin_anvil_sdma_probe
+    gin_anvil_sdma_create
+    gin_anvil_sdma_destroy
+    gin_anvil_sdma_get_num_channels
+    gin_anvil_sdma_get_channel_stride
+    _ZN8rocshmem3ibvE)
+  set(_gin_rocshmem_undefine "")
+  foreach(_sym ${_gin_rocshmem_syms})
+    list(APPEND _gin_rocshmem_undefine -u ${_sym})
+  endforeach()
+
+  set(_gin_rocshmem_object "${CMAKE_CURRENT_BINARY_DIR}/rocshmem_host.o")
+  set(_gin_rocshmem_archive_name "librocshmem_gin_host.a")
+  set(_gin_rocshmem_archive "${CMAKE_CURRENT_BINARY_DIR}/${_gin_rocshmem_archive_name}")
+  if(TARGET rocshmem_static)
+    set(_gin_rocshmem_depends rocshmem_static)
+  else()
+    set(_gin_rocshmem_depends ${ROCSHMEM_LIBRARY})
+  endif()
+
+  add_custom_command(
+    OUTPUT  ${_gin_rocshmem_object}
+    COMMAND ${CMAKE_LINKER} -r ${_gin_rocshmem_undefine} ${ROCSHMEM_LIBRARY} -o ${_gin_rocshmem_object}
+    DEPENDS ${_gin_rocshmem_depends}
+    COMMENT "Extracting GIN host objects from librocshmem.a"
+    VERBATIM)
+
+  # An app that links rocshmem itself exports the same globals, and with
+  # -rdynamic its copies would interpose ours. Both modules would then run
+  # constructors and destructors over one object, which double frees at exit.
+  # --exclude-libs makes our copies local so each module keeps its own state.
+  # It only accepts archives, hence the wrapper, and unlike objcopy it runs
+  # inside the link so COMDAT groups stay intact.
+  add_custom_command(
+    OUTPUT  ${_gin_rocshmem_archive}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${_gin_rocshmem_archive}
+    COMMAND ${CMAKE_AR} rcs ${_gin_rocshmem_archive} ${_gin_rocshmem_object}
+    DEPENDS ${_gin_rocshmem_object}
+    COMMENT "Packaging GIN host objects into ${_gin_rocshmem_archive_name}"
+    VERBATIM)
+  add_custom_target(gin_rocshmem_host_objects DEPENDS ${_gin_rocshmem_archive})
+
+  add_dependencies(rccl gin_rocshmem_host_objects)
+  target_link_libraries(rccl PRIVATE ${_gin_rocshmem_archive})
+  target_link_options(rccl PRIVATE "LINKER:--exclude-libs,${_gin_rocshmem_archive_name}")
+  # anvil.cpp calls hsaKmt* directly. hsa-runtime64 is already linked above.
+  target_link_libraries(rccl PRIVATE hsakmt)
   target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 

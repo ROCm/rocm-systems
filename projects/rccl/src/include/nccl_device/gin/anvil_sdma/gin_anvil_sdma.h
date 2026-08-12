@@ -28,7 +28,13 @@ NCCL_DEVICE_INLINE bool anvilCtxValid(ncclGinAnvilSdmaGPUContext* rsCtx) {
   return rsCtx != nullptr && loadConst(&rsCtx->layoutMagic) == NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
 }
 
+// Defining this in a host only build leaves an undefined __hip_fatbin_<hash>
+// that nothing provides. The host pass still parses the code below, so declare it.
+#ifdef __HIP_DEVICE_COMPILE__
 __attribute__((weak)) __device__ uint64_t anvilGinDummySignal;
+#else
+extern __device__ uint64_t anvilGinDummySignal;
+#endif
 
 NCCL_DEVICE_INLINE uint64_t* anvilSignalPtrOrDummy(ncclGinAnvilSdmaGPUContext* rsCtx, ncclGinSignal_t signalId) {
   if (!anvilCtxValid(rsCtx)) return &anvilGinDummySignal;

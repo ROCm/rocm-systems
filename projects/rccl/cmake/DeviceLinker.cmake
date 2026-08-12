@@ -352,7 +352,9 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   # present in the device ELF — they cannot be imported from a shared library.
   set(_rocshmem_bitcode_arg "")
   set(_rocshmem_link_depends "")
-  if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_INSTALL_DIR)
+  # Not ENABLE_ROCSHMEM_GIN: no object here references rocSHMEM, and the full
+  # device bitcode carries unresolved IPC and RO symbols that break the ELF load.
+  if(ENABLE_ROCSHMEM AND ROCSHMEM_INSTALL_DIR)
     set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
     set(_rocshmem_bitcode_arg "--rocshmem-bitcode=${_rocshmem_bc}")
     if(TARGET rocshmem_static)
