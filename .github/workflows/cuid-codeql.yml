@@ -32,6 +32,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      packages: read
       security-events: write
 
     strategy:
@@ -75,34 +76,6 @@ jobs:
 
           echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
-      - name: Build and Install OpenSSL 3.0 (if needed)
-        run: |
-          set -e
-          OPENSSL_VER=$(openssl version | awk '{print $2}')
-          echo "Current OpenSSL version: $OPENSSL_VER"
-          if [[ "$OPENSSL_VER" != 3.* ]]; then
-             echo "Installing OpenSSL 3.0..."
-             if command -v apt-get &> /dev/null; then
-                 apt-get update
-                 apt-get install -y wget build-essential zlib1g-dev perl
-             elif command -v dnf &> /dev/null; then
-                 dnf install -y wget make gcc perl zlib-devel perl-core
-             elif command -v zypper &> /dev/null; then
-                 zypper install -y wget make gcc perl zlib-devel perl-core
-             fi
-             cd /tmp
-             wget https://github.com/openssl/openssl/releases/download/openssl-3.0.12/openssl-3.0.12.tar.gz
-             tar -xzvf openssl-3.0.12.tar.gz
-             cd openssl-3.0.12
-             ./config
-             make -j $(nproc)
-             make install
-             ldconfig
-             echo "OPENSSL_ROOT_DIR=/usr/local" >> $GITHUB_ENV
-          else
-             echo "OpenSSL 3.0+ already installed."
-          fi
-
       - name: Build CUID
         run: |
           set -e
@@ -110,7 +83,7 @@ jobs:
           rm -rf $BUILD_FOLDER
           mkdir -p $BUILD_FOLDER
           cd $BUILD_FOLDER
-          cmake ${{ env.PROJECT_DIR }} -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_ROOT_DIR }}
+          cmake ${{ env.PROJECT_DIR }}
           make -j $(nproc)
 
       - name: Perform CodeQL Analysis
