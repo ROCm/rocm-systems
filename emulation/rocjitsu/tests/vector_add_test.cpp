@@ -87,7 +87,7 @@ void run_vector_add(uint32_t dispatch_threads, VectorAddRunResult &result) {
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
-  soc->for_each_cp([dispatch_threads](auto *cp) { cp->set_dispatch_threads(dispatch_threads); });
+  soc->set_dispatch_threads(dispatch_threads);
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());

@@ -421,10 +421,10 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       return std::make_unique<amdgpu::MemorySideCache>(n);
     };
 
-    f["command_processor"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,
+    f["command_processor"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode,
                                 rj_code_arch_t arch, rj_code_target_id_t,
                                 amdgpu::GpuMemory *) -> std::unique_ptr<simdojo::Component> {
-      auto cp = std::make_unique<amdgpu::CommandProcessor>(n);
+      auto cp = std::make_unique<amdgpu::CommandProcessor>(n, mode);
       cp->configure_for_arch(arch);
       return cp;
     };
