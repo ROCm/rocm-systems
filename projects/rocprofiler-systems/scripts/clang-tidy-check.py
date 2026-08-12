@@ -37,7 +37,11 @@ _ANSI = {
 
 
 def _color(text: str, *codes: str) -> str:
-    """Wrap `text` in ANSI codes when the output is not a dumb terminal."""
+    """Color `text` with ANSI codes.
+
+    Skips coloring when NO_COLOR is set or the terminal can't render them
+    (TERM=dumb).
+    """
     if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
         return text
     prefix = "".join(_ANSI[c] for c in codes if c in _ANSI)
@@ -65,6 +69,7 @@ class Diagnostic:
 
 
 def in_line_ranges(line: int, ranges: list[tuple[int, int]]) -> bool:
+    """Return True if `line` falls within any of the given (start, end) ranges."""
     return any(start <= line <= end for start, end in ranges)
 
 
@@ -286,6 +291,7 @@ def print_rule_diagnostics(
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--build-path",
@@ -328,6 +334,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Run clang-tidy over changed files and print the results; return an exit code."""
     args = parse_args()
     repo_root = get_repo_root()
 
