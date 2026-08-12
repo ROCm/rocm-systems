@@ -358,16 +358,22 @@ def _parse_cdna_specs(*names: str):
     return specs
 
 
-def test_gfx1250_parser_separates_logical_arch_directory_and_cpp_namespace():
-    isa_xml = _mrisa_dir() / 'amdgpu_isa_gfx1250.xml'
-    if not isa_xml.is_file():
-        pytest.skip('gfx1250 machine-readable ISA XML not available')
+def test_parser_separates_logical_arch_directory_and_cpp_namespace():
+    class IdentityOverrideRdna4Profile(Rdna4Profile):
+        @property
+        def generated_dir_name(self) -> str:
+            return 'test_generated_rdna4'
 
-    spec = Parser(str(isa_xml), Gfx1250Profile()).isa_spec
+        @property
+        def cpp_namespace(self) -> str:
+            return 'test_rdna4_namespace'
 
-    assert spec.arch_name == 'gfx1250'
-    assert spec.generated_dir_name == 'cdna5'
-    assert spec.cpp_namespace == 'cdna5'
+    isa_xml = _mrisa_dir() / 'amdgpu_isa_rdna4.xml'
+    spec = Parser(str(isa_xml), IdentityOverrideRdna4Profile()).isa_spec
+
+    assert spec.arch_name == 'rdna4'
+    assert spec.generated_dir_name == 'test_generated_rdna4'
+    assert spec.cpp_namespace == 'test_rdna4_namespace'
 
 
 @pytest.mark.parametrize(
