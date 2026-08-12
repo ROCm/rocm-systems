@@ -171,15 +171,52 @@ def get_changed_files(repo_root: str, base: str | None) -> list[ChangedFile]:
     return list(changed.values())
 
 
-def get_enabled_checks(args: argparse.Namespace, sample_file: str) -> list[str]:
-    """Resolve the effective check list clang-tidy will apply to `sample_file`."""
-    command = [args.clang_tidy_binary, "-list-checks"]
+def _clang_tidy(
+    args: argparse.Namespace, *extra: str, timeout: float | None = None
+) -> subprocess.CompletedProcess:
+    """Run clang-tidy with the shared `-checks`/`-p` flags plus `extra`.
+
+    clang-tidy's exit code reflects diagnostics anywhere in the file (not just
+    the diff), so it is not a reliable success signal; callers inspect the
+    captured output instead. Propagates TimeoutExpired when `timeout` elapses.
+    """
+    command = [args.clang_tidy_binary]
     if args.checks:
         command.append(f"-checks={args.checks}")
     command.append(f"-p={args.build_path}")
-    command.append(sample_file)
+    command.extend(extra)
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        check=False,
+    )
 
-    result = subprocess.run(command, capture_output=True, text=True)
+
+def run_clang_tidy(
+    args: argparse.Namespace, file_path: str, timeout: float | None
+) -> tuple[str, bool]:
+    """Run clang-tidy on `file_path` for the diff scan; return (output, ok).
+
+    Adapts `_clang_tidy` for the parallel loop: merges stdout+stderr (clang-tidy
+    writes diagnostics to both) and turns a timeout into `ok=False` instead of a
+    raised exception. clang-tidy's exit code reflects diagnostics anywhere in the
+    file, not just the diff, so it is not a reliable success signal; only a
+    timeout counts as a run failure.
+    """
+    try:
+        proc = _clang_tidy(args, file_path, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return f"Timed out after {timeout}s on {file_path}\n", False
+    return proc.stdout + proc.stderr, True
+
+
+def get_enabled_checks(args: argparse.Namespace, sample_file: str) -> list[str]:
+    """Resolve the effective check list clang-tidy will apply to `sample_file`."""
+    result = _clang_tidy(args, "-list-checks", sample_file)
     checks = []
     in_list = False
     for line in result.stdout.splitlines():
@@ -207,29 +244,6 @@ def print_changed_files(changed_files: list[ChangedFile]) -> None:
         ranges = ", ".join(f"{start}-{end}" for start, end in changed_file.line_ranges)
         print(f"  {changed_file.path} (lines {ranges})")
     print()
-
-
-def build_command(file_path: str, args: argparse.Namespace) -> list[str]:
-    command = [args.clang_tidy_binary]
-    if args.checks:
-        command.append(f"-checks={args.checks}")
-    command.append(f"-p={args.build_path}")
-    command.append(file_path)
-    return command
-
-
-def run_clang_tidy(command: list[str], timeout: float | None) -> tuple[str, bool]:
-    """Run a clang-tidy command, returning its output and whether it completed.
-
-    clang-tidy's own exit code reflects diagnostics anywhere in the file
-    (including pre-existing issues outside the diff), so it is not a
-    reliable success signal here; only a timeout counts as a run failure.
-    """
-    try:
-        proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return f"Timed out after {timeout}s: {' '.join(command)}\n", False
-    return proc.stdout + proc.stderr, True
 
 
 def parse_diagnostics(output: str, repo_root: str) -> list[Diagnostic]:
@@ -333,7 +347,8 @@ def main() -> int:
         futures = {
             pool.submit(
                 run_clang_tidy,
-                build_command(os.path.join(repo_root, changed_file.path), args),
+                args,
+                os.path.join(repo_root, changed_file.path),
                 args.timeout,
             ): changed_file
             for changed_file in changed_files
