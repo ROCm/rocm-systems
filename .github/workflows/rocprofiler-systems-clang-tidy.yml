@@ -6,8 +6,6 @@ on:
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-clang-tidy.yml'
-      - 'projects/rocprofiler-systems/.clang-tidy'
-      - 'projects/rocprofiler-systems/scripts/clang-tidy-check.py'
       - 'projects/rocprofiler-systems/**'
       - '!**/*.md'
       - '!**/*.rtf'
