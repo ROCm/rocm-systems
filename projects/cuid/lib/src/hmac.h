@@ -6,23 +6,18 @@
 
 #include "include/amd_cuid.h"
 #include <cstddef>
-#include <fstream>
-#include <iostream>
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
+#include <cstdint>
 #include <string>
 
 #define key_length 32
 #define hash_length 32
 
-// cuid_hmac uses a pimpl to hide the crypto-backend context entirely.
-// The active backend is selected at compile time:
-//   _WIN32                              -> Windows CNG  (BCrypt)
-//   OpenSSL >= 3.0  (all other platforms) -> EVP_MAC API
-//   OpenSSL <  3.0  (all other platforms) -> HMAC_CTX API
+// cuid_hmac wraps HMAC-SHA-256 over the in-tree SHA-256 (see sha256.h). There
+// is one implementation on every platform; the pimpl is retained only to keep
+// the class layout stable for existing callers.
 class cuid_hmac {
 private:
-  struct Impl; // defined in hmac.cc per-backend
+  struct Impl; // defined in hmac.cc
   Impl *impl_;
   uint8_t *key;
   size_t key_len;
