@@ -160,6 +160,11 @@ struct PlaybackContext {
     // bytes are restored verbatim, so a pointer among them reaches the GPU
     // untranslated no matter how well kernel arguments are handled.
     bool scan_h2d = false;
+    // Report every kernel that takes a pointer into host memory. Replay
+    // reallocates those buffers but cannot refill them: the application writes
+    // them with ordinary CPU stores, which no HIP call reports. A kernel
+    // reading one is reading data the archive never captured.
+    bool audit_host_args = false;
     bool verbose           = false;
     bool validate_d2h      = false;  // perform D2H validation against captured expected data
     std::string kernel_filter;
