@@ -296,6 +296,62 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint
   return AMDSMI_STATUS_SUCCESS;
 }
 
+bool smi_amdgpu_parse_od_clk_range(std::istream& od_stream, amdsmi_clk_type_t domain,
+                                   unsigned int* max_freq, unsigned int* min_freq) {
+  // Section header (and its GFXCLK/MCLK/FCLK alias) whose levels feed this
+  // domain's user-defined range.
+  const char* od_header = nullptr;
+  const char* alias_header = nullptr;
+  switch (domain) {
+    case AMDSMI_CLK_TYPE_GFX:
+      od_header = "OD_SCLK:";
+      alias_header = "GFXCLK:";
+      break;
+    case AMDSMI_CLK_TYPE_MEM:
+      od_header = "OD_MCLK:";
+      alias_header = "MCLK:";
+      break;
+    case AMDSMI_CLK_TYPE_DF:
+      od_header = "OD_FCLK:";
+      alias_header = "FCLK:";
+      break;
+    default:
+      return false;
+  }
+
+  unsigned int max = 0;
+  unsigned int min = UINT_MAX;
+  bool in_domain = false;
+  bool found = false;
+  char str[10];
+  unsigned int dpm_level, freq;
+  for (std::string line; getline(od_stream, line);) {
+    // A recognized header selects the active domain; a non-matching one ends it.
+    if (line.compare("GFXCLK:") == 0 || line.compare("OD_SCLK:") == 0 ||
+        line.compare("MCLK:") == 0 || line.compare("OD_MCLK:") == 0 || line.compare("FCLK:") == 0 ||
+        line.compare("OD_FCLK:") == 0) {
+      in_domain = line.compare(od_header) == 0 || line.compare(alias_header) == 0;
+      continue;
+    }
+    if (!in_domain) {
+      continue;
+    }
+    if (sscanf(line.c_str(), "%u: %d%9s", &dpm_level, &freq, str) <= 2) {
+      continue;  // skip lines that don't conform to the format
+    }
+    found = true;
+    if (freq > max) max = freq;
+    if (freq < min) min = freq;
+  }
+
+  if (!found || max == 0) {
+    return false;
+  }
+  *max_freq = max;
+  *min_freq = min;
+  return true;
+}
+
 amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_clk_type_t domain,
                                       int* max_freq, int* min_freq, int* num_dpm,
                                       int* sleep_state_freq) {
@@ -355,80 +411,16 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
   dpm = 0;
   sleep_freq = UINT_MAX;
   current_freq = 0;
-  // if getting sclk, mclk or fclk info, read pp_od_clk_voltage for min and max info
+  // sclk/mclk/fclk expose a user-defined range in pp_od_clk_voltage. When that
+  // file is missing, or present but omits this domain's section (e.g. no
+  // OD_FCLK on MI45x), fall back to deriving min/max from the pp_dpm_* levels
+  // below.
   if (sclk || mclk || fclk) {
     std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
-    unsigned int smax = 0;
-    unsigned int mmax = 0;
-    unsigned int fmax = 0;
-    unsigned int smin = UINT_MAX;
-    unsigned int mmin = UINT_MAX;
-    unsigned int fmin = UINT_MAX;
-
-    // if pp_od_clk_voltage is not found, then go back to using the original pp_dpm files
-    if (!smclk_ranges.is_open()) {
+    if (!smi_amdgpu_parse_od_clk_range(smclk_ranges, domain, &max, &min)) {
       sclk = false;
       mclk = false;
       fclk = false;
-    } else {
-      // using enum to switch between recording for sclk, mclk, or fclk
-      enum ClkType { PARSING_SCLK = 0, PARSING_MCLK = 1, PARSING_FCLK = 2 };
-      ClkType current_clk_type = PARSING_SCLK;
-      unsigned int dpm_level, freq;
-      for (std::string line; getline(smclk_ranges, line);) {
-        if (line.compare("GFXCLK:") == 0 || line.compare("OD_SCLK:") == 0) {
-          current_clk_type = PARSING_SCLK;
-          continue;
-        } else if (line.compare("MCLK:") == 0 || line.compare("OD_MCLK:") == 0) {
-          current_clk_type = PARSING_MCLK;
-          continue;
-        } else if (line.compare("FCLK:") == 0 || line.compare("OD_FCLK:") == 0) {
-          current_clk_type = PARSING_FCLK;
-          continue;
-        }
-        if (sscanf(line.c_str(), "%u: %d%9s", &dpm_level, &freq, str) <= 2) {
-          // skip lines that don't conform to the format
-          continue;
-        }
-        if (current_clk_type == PARSING_SCLK) {
-          if (freq > smax) smax = freq;
-          if (freq < smin) smin = freq;
-        } else if (current_clk_type == PARSING_MCLK) {
-          if (freq > mmax) mmax = freq;
-          if (freq < mmin) mmin = freq;
-        } else if (current_clk_type == PARSING_FCLK) {
-          if (freq > fmax) fmax = freq;
-          if (freq < fmin) fmin = freq;
-        }
-      }
-
-      // pp_od_clk_voltage may omit a domain that lacks overdrive support
-      // (e.g. no OD_FCLK section on MI45x), leaving its parsed max at 0. In
-      // that case clear the flag so the pp_dpm_* loop below derives min/max.
-      if (sclk) {
-        if (smax > 0) {
-          max = smax;
-          min = smin;
-        } else {
-          sclk = false;
-        }
-      } else if (mclk) {
-        if (mmax > 0) {
-          max = mmax;
-          min = mmin;
-        } else {
-          mclk = false;
-        }
-      } else if (fclk) {
-        if (fmax > 0) {
-          max = fmax;
-          min = fmin;
-        } else {
-          fclk = false;
-        }
-      }
-
-      smclk_ranges.close();
     }
   }
   // obtain rest of info from regular pp_dpm_* files.
