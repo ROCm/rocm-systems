@@ -17,6 +17,7 @@ endif()
 
 set(_forbidden_symbols
     "::execute_impl("
+    "::execution_backend()"
     "_exec("
     "rocjitsu::amdgpu::ComputeUnitCore"
     "ds_calculate_addresses("
@@ -34,12 +35,31 @@ foreach(_forbidden IN LISTS _forbidden_symbols)
 endforeach()
 
 # Keep the denylist from passing vacuously if the model objects disappear from
-# the final link.
-set(_required_symbol "rocjitsu::gfx1250::Decoder::decode(unsigned int const*)")
-string(FIND "${_symbols}" "${_required_symbol}" _match)
-if(_match EQUAL -1)
-    message(
-        FATAL_ERROR
-        "model-only binary is missing model symbol: ${_required_symbol}"
+# the final link. Aggregate consumers provide a comma-separated architecture
+# list; existing gfx1250-only checks retain their decoder-symbol assertion.
+if(REQUIRED_MODEL_ARCHES)
+    string(REPLACE "," ";" _required_arches "${REQUIRED_MODEL_ARCHES}")
+    foreach(_arch IN LISTS _required_arches)
+        set(_required_symbol
+            "rocjitsu::${_arch}::create_model_target_decoder()"
+        )
+        string(FIND "${_symbols}" "${_required_symbol}" _match)
+        if(_match EQUAL -1)
+            message(
+                FATAL_ERROR
+                "model-only binary is missing model symbol: ${_required_symbol}"
+            )
+        endif()
+    endforeach()
+else()
+    set(_required_symbol
+        "rocjitsu::gfx1250::Decoder::decode(unsigned int const*)"
     )
+    string(FIND "${_symbols}" "${_required_symbol}" _match)
+    if(_match EQUAL -1)
+        message(
+            FATAL_ERROR
+            "model-only binary is missing model symbol: ${_required_symbol}"
+        )
+    endif()
 endif()

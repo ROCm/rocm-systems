@@ -460,10 +460,10 @@ static ncclResult_t commFree(ncclComm_t comm) {
     comm->tempBuff = nullptr;
   }
 
-  // Free hierarchical AG resources
-  if (comm->hierarchicalAGTempBuffer) {
-    NCCLCHECK(ncclCudaFree(comm->hierarchicalAGTempBuffer, comm->memManager));
-    comm->hierarchicalAGTempBuffer = nullptr;
+  // Free hierarchical AG/RS resources
+  if (comm->hierarchicalTempBuffer) {
+    NCCLCHECK(ncclCudaFree(comm->hierarchicalTempBuffer, comm->memManager));
+    comm->hierarchicalTempBuffer = nullptr;
   }
   if (comm->hierarchicalIntraComm) {
     NCCLCHECK(ncclCommDestroy(comm->hierarchicalIntraComm));
@@ -699,7 +699,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->hierarchicalIntraComm = nullptr;
   comm->hierarchicalInterComm = nullptr;
   comm->hierarchicalCommsInitialized = false;
-  comm->hierarchicalAGTempBuffer = nullptr;
+  comm->hierarchicalTempBuffer = nullptr;
+  // Enable PAT for interComm hierarchical collectives
   comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
 
   // Try to create a CUDA object right away. If there is something wrong with
@@ -2735,11 +2736,12 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     NCCLCHECK(ncclMemAlloc((void**)&comm->localSizes, nLocal * sizeof(size_t)));
     NCCLCHECK(ncclMemAlloc((void**)&comm->gatheredSizes, nGather * sizeof(size_t)));
   }
-
-  // Initialize hierarchical sub-communicators and temp buffer
-  if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && rcclParamHierarchicalAllGather() == 1) {
+  
+  // Initialize hierarchical sub-communicators and temp buffers
+  if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1 &&
+      (rcclParamHierarchicalAllGather() == 1 || rcclParamHierarchicalReduceScatter() == 1)) {
     if (comm->minLocalRanks != comm->maxLocalRanks) {
-      INFO(NCCL_INIT, "Hierarchical AllGather: non-uniform GPU count per node, skipping hierarchical allgather");
+      INFO(NCCL_INIT, "Hierarchical collectives: non-uniform GPU count per node, skipping hierarchical setup");
     } else {
       // Hierarchical Shuffle kernel assumes compact rank ordering.
       // rank R == rankToNode[R] * localRanks + rankToLocalRank[R] for every R.
@@ -2752,7 +2754,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         }
       }
       if (!compactRanks) {
-        INFO(NCCL_INIT, "Hierarchical AllGather: non-compact rank ordering, skipping hierarchical allgather");
+        INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
       } else {
         int node_id = comm->rankToNode[comm->rank];
         int local_rank = comm->rankToLocalRank[comm->rank];
@@ -2763,12 +2765,13 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
         NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
         comm->forcePatEnable = false;
-        size_t tempBufSize = (comm->nNodes >= 32) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE
-                             : (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2
-                                                    : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 4;
-        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize, comm->memManager), res, fail);
+        // inherit PXN disable from parent comm
+        comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
+        size_t tempBufSize = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
+                                                            rcclParamHierarchicalReduceScatter() == 1);
+        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
         comm->hierarchicalCommsInitialized = true;
-        INFO(NCCL_INIT, "Hierarchical AllGather: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
+        INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
              comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
       }
     }
