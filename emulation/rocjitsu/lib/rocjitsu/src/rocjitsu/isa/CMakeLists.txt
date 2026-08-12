@@ -39,6 +39,10 @@ get_property(
     GLOBAL
     PROPERTY RJ_BUILTIN_ISA_PROVIDERS
 )
+set_property(
+    GLOBAL
+    PROPERTY RJ_BUILTIN_AMDGPU_ISA_PROVIDERS ${_rj_builtin_amdgpu_isa_providers}
+)
 rj_add_isa_target_registry(
     rocjitsu_amdgpu_isa_registry
     PROVIDERS ${_rj_builtin_amdgpu_isa_providers}

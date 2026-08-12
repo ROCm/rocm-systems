@@ -502,6 +502,7 @@ enum class VopdOp : uint16_t {
   MovB32 = 8,
   CndmaskB32 = 9,
   FmaF32 = 19,
+  FmaF64 = 32,
 };
 
 struct VopdSlot {
@@ -4350,6 +4351,27 @@ TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesVop3px2Pair) {
             "v_wmma_scale_f32_16x16x128_f8f6f4 v[6:13], v[18:33], v[52:67], 0, v0, v4");
 }
 
+TEST(Gfx1250DecodeTest, WmmaScalePairDoesNotConsumeEmbeddedExtensions) {
+  constexpr uint32_t extension_selectors[] = {255u, 250u, 233u, 234u};
+  for (const uint32_t embedded_src0 : extension_selectors) {
+    SCOPED_TRACE(embedded_src0);
+    const uint32_t words[] = {
+        0xCC350000u,
+        0x20020700u,
+        0xCC330000u,
+        0xD600D400u | embedded_src0,
+    };
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->size(), sizeof(words));
+    for (size_t i = 0; i < std::size(words); ++i)
+      EXPECT_EQ(inst->raw_encoding()[i], words[i]);
+  }
+}
+
 TEST(Gfx1250DecodeTest, WmmaScale16F8f6f4ConsumesVop3px2Pair) {
   const uint32_t words[] = {
       0xCC3A0000u,
@@ -4547,6 +4569,50 @@ TEST(Gfx1250DecodeTest, VopdSourceOperandsFollowPrintedSlots) {
   EXPECT_EQ(inst->src_operand(2)->name(), "s11");
   ASSERT_TRUE(inst->src_operand(2)->to_register_ref().has_value());
   EXPECT_EQ(*inst->src_operand(2)->to_register_ref(), (RegisterRef{RegClass::SGPR, 11, 1}));
+}
+
+TEST(Gfx1250DecodeTest, VopdRejectsInvalidOpcodes) {
+  const std::array<std::array<uint32_t, 3>, 2> words = {{
+      // Opcode 18 is valid in the Y slot, but not the X slot.
+      {0xCF000000u | (18u << 18) | (3u << 12), 0, 0},
+      // Opcode 32 is valid in the X slot, but not the Y slot.
+      {0xCF000000u | (3u << 18) | (32u << 12), 0, 0},
+  }};
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &encoding : words)
+    EXPECT_THROW(static_cast<void>(decoder->decode(encoding.data())), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, PublicDecoderReportsInvalidVopdEncoding) {
+  const uint32_t words[] = {
+      (0x32u << 26) | (12u << 22) | (8u << 17), // Opcode 12 is not an X op.
+      0,
+  };
+
+  rj_code_decoder_t *decoder = nullptr;
+  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_GFX1250, &decoder), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *inst = reinterpret_cast<rj_code_inst_t *>(static_cast<uintptr_t>(1));
+  EXPECT_EQ(rj_code_decoder_decode(decoder, words, &inst), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(inst, nullptr);
+  rj_code_decoder_destroy(decoder);
+}
+
+TEST(Gfx1250DecodeTest, Vopd3RejectsOverlappingDestinations) {
+  const std::array<std::array<uint32_t, 3>, 2> words = {{
+      make_vopd3_pair({.op = VopdOp::CndmaskB32, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 10},
+                      {.op = VopdOp::MulF32, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 10}),
+      make_vopd3_pair({.op = VopdOp::FmaF64, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 10},
+                      {.op = VopdOp::MulF32, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 11}),
+  }};
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &encoding : words)
+    EXPECT_THROW(static_cast<void>(decoder->decode(encoding.data())), util::InvalidInst);
 }
 
 TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {

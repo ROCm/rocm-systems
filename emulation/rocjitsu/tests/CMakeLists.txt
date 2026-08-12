@@ -319,6 +319,36 @@ endfunction()
 
 # --- Unit / integration test suite ---
 
+add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
+target_link_libraries(
+    rj_decode_fuzz_test
+    PRIVATE rj_decode_fuzz_core GTest::gtest_main
+)
+rj_configure_target(rj_decode_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_decode_fuzz_test rj_decode_fuzz)
+rj_add_gtest_tests(rj_decode_fuzz_test)
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(
+    NAME DecodeDifferentialUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_differential.py -v
+)
+add_test(
+    NAME DecodeSeedExtractorUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_prepare_decode_seeds.py -v
+)
+add_test(
+    NAME DecodeFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_DECODE_FUZZ=$<TARGET_FILE:rj_decode_fuzz>
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_cli.py -v
+)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLUGIN_LOADER_FIXTURE_DIR
         "${CMAKE_CURRENT_BINARY_DIR}/plugin_loader_fixtures"
