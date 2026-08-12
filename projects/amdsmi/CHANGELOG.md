@@ -85,6 +85,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `rev_id` was also assigned from the device-info structure before the `AMDGPU_INFO_DEV_INFO` query populated it. Every such path already returned an error, so this was not observable through a checked return, but the value no longer contradicts the status.
   - `amdsmi_asic_info_t` is now reset through one shared initializer used by every backend, so a field a backend cannot supply keeps its not-supported value rather than a plausible zero.
 
+- **Fixed the widened `amdsmi_gpu_metrics_t` accumulators reporting `4294967295` instead of `N/A`**.  
+  - The five accumulator counters were widened from 32-bit to 64-bit, but the amdgpu metrics table still reports them at 32 bits. Copying the table's "unset" sentinel into the wider field zero-extended it from `0xFFFFFFFF` to `0x00000000FFFFFFFF`, so it no longer matched the 64-bit sentinel every consumer checks against. `amdsmi_get_gpu_metrics_info()` and `amd-smi metric` reported an unsupported `gfx_activity_acc` / `mem_activity_acc` as a literal `4294967295` rather than `N/A`. The sentinel is now widened along with the value.
+
 ### Upcoming Changes
 
 - **UUIDs will be replaced by CUIDs in an upcoming version**.  
