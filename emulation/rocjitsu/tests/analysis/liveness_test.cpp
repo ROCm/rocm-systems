@@ -523,12 +523,12 @@ TEST(CfgAnalysis, Gfx1250ClassifiesImplicitUnreachableStubTerminator) {
            false},
       Case{"section-final clang unreachable stub", {0xb9800641u, 1u}, true, true, false},
       Case{"ordinary fallthrough",
-           {build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), 0},
+           {build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5), 0},
            false,
            false,
            true},
       Case{"architectural terminator",
-           {build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), 0},
+           {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), 0},
            true,
            false,
            false},
@@ -537,9 +537,9 @@ TEST(CfgAnalysis, Gfx1250ClassifiesImplicitUnreachableStubTerminator) {
   for (const auto &test_case : cases) {
     SCOPED_TRACE(test_case.name);
     TestCodeObject co(test_case.words);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
-    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
     ASSERT_EQ(blocks.size(), 1u);
     EXPECT_EQ(blocks[0]->has_terminator(), test_case.has_terminator);
@@ -552,17 +552,17 @@ TEST(CfgAnalysis, Gfx1250ClassifiesImplicitUnreachableStubTerminator) {
 TEST(CfgAnalysis, DirectCallToImplicitNonreturningTargetDropsFallthrough) {
   constexpr uint16_t kReturnSreg = 30;
   std::vector<uint32_t> words = {
-      rocjitsu::build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_GFX1250),
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x04 continuation.
+      rocjitsu::build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_CDNA5),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x04 continuation.
       0xb9800641u,
       1u,
       0, // 0x08 clang unreachable-stub target followed by padding.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   auto *caller = block_starting_at(blocks, 0);
   auto *continuation = block_starting_at(blocks, 4);
@@ -1940,14 +1940,14 @@ TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithPrefetch) {
       // 0x40: s_add_co_ci_u32.
       cdna5::build_sop1(cdna5::kSSetPcI64Sop1,
                         {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x44: s_set_pc_i64.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),          // 0x48: not a target.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),          // 0x4c: shared target.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5),            // 0x48: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),            // 0x4c: shared target.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   auto *sub_consumer = block_starting_at(blocks, 44);
   auto *add_consumer = block_starting_at(blocks, 68);
@@ -2016,14 +2016,14 @@ TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithXcntWaitAndPrefetch) {
       // 0x40: s_add_co_ci_u32.
       cdna5::build_sop1(cdna5::kSSetPcI64Sop1,
                         {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x44: add consumer.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),          // 0x48: not a target.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),          // 0x4c: shared target.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5),            // 0x48: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),            // 0x4c: shared target.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   auto *sub_consumer = block_starting_at(blocks, 44);
   auto *add_consumer = block_starting_at(blocks, 68);
@@ -2097,14 +2097,14 @@ TEST(CfgAnalysis, Gfx1250SignedDeltaRejectsMoveClobberingTemporary) {
       // 0x40: s_add_co_ci_u32.
       cdna5::build_sop1(cdna5::kSSetPcI64Sop1,
                         {.ssrc0 = kPcSreg, .sdst = 0})[0], // 0x44: s_set_pc_i64.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),          // 0x48: not a target.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),          // 0x4c: shared target.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5),            // 0x48: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),            // 0x4c: shared target.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   // Clobbering the temporary on the subtract half breaks that half of the paired
   // signed-delta template. Because the two halves cross-validate to the same static
@@ -2136,16 +2136,16 @@ TEST(CfgAnalysis, IndirectRecoveryPrefilterAdmitsGfx1250LaneStashSwapPc) {
       0xD7600000u,
       0x0201012Cu, // 0x20: v_readlane_b32 s0, v44, 0.
       0xD7600001u,
-      0x0201032Cu,                                // 0x28: v_readlane_b32 s1, v44, 1.
-      0xBE9E4900u,                                // 0x30: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x34: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x38: target.
+      0x0201032Cu,                              // 0x28: v_readlane_b32 s1, v44, 1.
+      0xBE9E4900u,                              // 0x30: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x34: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x38: target.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   auto *consumer = block_starting_at(blocks, 48);
   auto *target = block_starting_at(blocks, 56);
@@ -2179,16 +2179,16 @@ TEST(CfgAnalysis, Gfx1250WideVgprWriteInvalidatesStashedLane) {
       0xD7600000u,
       0x0201012Cu, // 0x28: v_readlane_b32 s0, v44, 0.
       0xD7600001u,
-      0x0201032Cu,                                // 0x30: v_readlane_b32 s1, v44, 1.
-      0xBE9E4900u,                                // 0x38: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x40: would-be target.
+      0x0201032Cu,                              // 0x30: v_readlane_b32 s1, v44, 1.
+      0xBE9E4900u,                              // 0x38: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x3c: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: would-be target.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   size_t total_fixups = 0;
   for (const auto &block : blocks)
@@ -2214,16 +2214,16 @@ TEST(CfgAnalysis, Gfx1250CarriesLaneStashAcrossProvenBlockBoundary) {
       0xD7600000u,
       0x0201012Cu, // 0x24: v_readlane_b32 s0, v44, 0.
       0xD7600001u,
-      0x0201032Cu,                                // 0x2c: v_readlane_b32 s1, v44, 1.
-      0xBE9E4900u,                                // 0x34: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x38: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: would-be target.
+      0x0201032Cu,                              // 0x2c: v_readlane_b32 s1, v44, 1.
+      0xBE9E4900u,                              // 0x34: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x38: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x3c: would-be target.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   auto *consumer = block_starting_at(blocks, 52);
   ASSERT_NE(consumer, nullptr);
@@ -2253,24 +2253,24 @@ TEST(CfgAnalysis, Gfx1250UnreachablePostRocrAbortBlockDoesNotPoisonLaneStash) {
       0xD761002Cu,
       0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
       0xD761002Cu,
-      0x02010201u,                                 // 0x18: lane 1 <- s1.
-      live_branch[0],                              // 0x20: -> join at 0x30.
-      build_s_trap(ROCJITSU_CODE_ARCH_GFX1250, 2), // 0x24: abort terminator.
-      dead_branch[0],                              // 0x28: dead edge -> 0x30.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),  // 0x2c: dead padding.
+      0x02010201u,                               // 0x18: lane 1 <- s1.
+      live_branch[0],                            // 0x20: -> join at 0x30.
+      build_s_trap(ROCJITSU_CODE_ARCH_CDNA5, 2), // 0x24: abort terminator.
+      dead_branch[0],                            // 0x28: dead edge -> 0x30.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5),  // 0x2c: dead padding.
       0xD7600000u,
       0x0201012Cu, // 0x30: v_readlane_b32 s0, v44, 0.
       0xD7600001u,
-      0x0201032Cu,                                // 0x38: lane 1 -> s1.
-      call[0],                                    // 0x40: s_swap_pc_i64.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x44: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x48: target.
+      0x0201032Cu,                              // 0x38: lane 1 -> s1.
+      call[0],                                  // 0x40: s_swap_pc_i64.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x44: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x48: target.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, {},
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5, {},
                                   ExternalEntryPolicy::ExplicitOnly);
 
   auto *consumer = block_starting_at(blocks, 64);
@@ -2289,10 +2289,10 @@ TEST(CfgAnalysis, Gfx1250ExplicitOnlyRecoversLaneStashInRecoveredCallee) {
       0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
       0xA980FE00u,
       20u,
-      0u,          // 0x04: s_add_nc_u64 ..., lit64(20) -> helper 0x18.
-      0xBE9E4900u, // 0x10: outer s_swap_pc_i64 -> 0x18.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x14: outer continuation.
-      0xBE804700u,                                // 0x18: helper s_get_pc_i64.
+      0u,                                       // 0x04: s_add_nc_u64 ..., lit64(20) -> helper 0x18.
+      0xBE9E4900u,                              // 0x10: outer s_swap_pc_i64 -> 0x18.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x14: outer continuation.
+      0xBE804700u,                              // 0x18: helper s_get_pc_i64.
       0xA980FE00u,
       60u,
       0u, // 0x1c: s_add_nc_u64 ..., lit64(60) -> target 0x58.
@@ -2303,18 +2303,18 @@ TEST(CfgAnalysis, Gfx1250ExplicitOnlyRecoversLaneStashInRecoveredCallee) {
       0xD7600000u,
       0x0201012Cu, // 0x38: v_readlane_b32 s0, v44, 0.
       0xD7600001u,
-      0x0201032Cu,                                // 0x40: lane 1 -> s1.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x48: padding.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x4c: padding.
-      0xBE9E4900u,                                // 0x50: inner call -> 0x58.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x54: inner continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x58: inner target.
+      0x0201032Cu,                              // 0x40: lane 1 -> s1.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5), // 0x48: padding.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5), // 0x4c: padding.
+      0xBE9E4900u,                              // 0x50: inner call -> 0x58.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x54: inner continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x58: inner target.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, {},
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5, {},
                                   ExternalEntryPolicy::ExplicitOnly);
 
   auto *outer_consumer = block_starting_at(blocks, 16);
@@ -2342,24 +2342,24 @@ TEST(CfgAnalysis, Gfx1250DirectCallKillsCarriedLaneStash) {
       0x02010000u, // 0x10: v_writelane_b32 v48, s0, 0.
       0xD7610030u,
       0x02010201u, // 0x18: v_writelane_b32 v48, s1, 1.
-      rocjitsu::build_s_call_b64(kReturnSreg, 7, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_call_b64(kReturnSreg, 7, ROCJITSU_CODE_ARCH_CDNA5),
       // 0x20: direct call -> callee at 0x40.
       0xD7600000u,
       0x02010130u, // 0x24: continuation reads the pre-call low half.
       0xD7600001u,
-      0x02010330u,                                // 0x2c: continuation reads the high half.
-      0xBE9E4900u,                                // 0x34: stale s_swap_pc_i64.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x38: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: stale target.
-      clobber[0],                                 // 0x40: callee clobbers v48.
-      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+      0x02010330u,                              // 0x2c: continuation reads the high half.
+      0xBE9E4900u,                              // 0x34: stale s_swap_pc_i64.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x38: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x3c: stale target.
+      clobber[0],                               // 0x40: callee clobbers v48.
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA5),
       // 0x44: callee return.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   size_t total_fixups = 0;
   for (const auto &block : blocks)
@@ -2382,24 +2382,24 @@ TEST(CfgAnalysis, Gfx1250CalleeSavedLaneStashSurvivesDirectCall) {
       0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
       0xD761002Cu,
       0x02010201u, // 0x18: v_writelane_b32 v44, s1, 1.
-      rocjitsu::build_s_call_b64(kReturnSreg, 7, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_call_b64(kReturnSreg, 7, ROCJITSU_CODE_ARCH_CDNA5),
       // 0x20: direct call -> callee at 0x40.
       0xD7600000u,
       0x0201012Cu, // 0x24: continuation reads the surviving low half.
       0xD7600001u,
-      0x0201032Cu,                                // 0x2c: reads the high half.
-      0xBE9E4900u,                                // 0x34: recovered s_swap_pc_i64.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x38: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: stashed target.
-      clobber[0],                                 // 0x40: callee clobbers caller-saved v48.
-      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+      0x0201032Cu,                              // 0x2c: reads the high half.
+      0xBE9E4900u,                              // 0x34: recovered s_swap_pc_i64.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x38: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x3c: stashed target.
+      clobber[0],                               // 0x40: callee clobbers caller-saved v48.
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA5),
       // 0x44: callee return.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   const IndirectCallFixup *continuation_fixup = nullptr;
   for (const auto &block : blocks) {
@@ -2432,24 +2432,24 @@ TEST(CfgAnalysis, Gfx1250BankedLaneStashDoesNotSurviveDirectCall) {
       0x02010000u, // 0x14: v_writelane_b32 physical v300, s0, 0.
       0xD761002Cu,
       0x02010201u, // 0x1c: v_writelane_b32 physical v300, s1, 1.
-      rocjitsu::build_s_call_b64(kReturnSreg, 7, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_call_b64(kReturnSreg, 7, ROCJITSU_CODE_ARCH_CDNA5),
       // 0x24: direct call -> callee at 0x44.
       0xD7600000u,
       0x0201012Cu, // 0x28: continuation reads physical v300 lane 0.
       0xD7600001u,
-      0x0201032Cu,                                // 0x30: reads physical v300 lane 1.
-      0xBE9E4900u,                                // 0x38: must remain dynamic.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x40: stale target.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x44: conforming callee body.
-      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+      0x0201032Cu,                              // 0x30: reads physical v300 lane 1.
+      0xBE9E4900u,                              // 0x38: must remain dynamic.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x3c: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: stale target.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5), // 0x44: conforming callee body.
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA5),
       // 0x48: callee return.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   size_t total_fixups = 0;
   for (const auto &block : blocks)
@@ -2494,19 +2494,19 @@ TEST(CfgAnalysis, Gfx1250IndirectCallKillsCarriedLaneStash) {
       0xD7600000u,
       0x02010130u, // 0x34: continuation reads the pre-call low half.
       0xD7600001u,
-      0x02010330u,                                // 0x3c: reads the high half.
-      stale_call[0],                              // 0x44: stale indirect call.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x48: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x4c: stale target.
-      clobber[0],                                 // 0x50: callee clobbers v48.
-      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+      0x02010330u,                              // 0x3c: reads the high half.
+      stale_call[0],                            // 0x44: stale indirect call.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x48: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x4c: stale target.
+      clobber[0],                               // 0x50: callee clobbers v48.
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA5),
       // 0x54: callee return.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   size_t total_fixups = 0;
   const IndirectCallFixup *call_fixup = nullptr;
@@ -2559,19 +2559,19 @@ TEST(CfgAnalysis, Gfx1250CalleeSavedLaneStashSurvivesIndirectCall) {
       0xD7600000u,
       0x0201012Cu, // 0x34: continuation reads the surviving low half.
       0xD7600001u,
-      0x0201032Cu,                                // 0x3c: reads the high half.
-      stale_call[0],                              // 0x44: continuation indirect call.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x48: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x4c: stashed target.
-      clobber[0],                                 // 0x50: callee clobbers caller-saved v48.
-      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+      0x0201032Cu,                              // 0x3c: reads the high half.
+      stale_call[0],                            // 0x44: continuation indirect call.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x48: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x4c: stashed target.
+      clobber[0],                               // 0x50: callee clobbers caller-saved v48.
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA5),
       // 0x54: callee return.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   const IndirectCallFixup *continuation_fixup = nullptr;
   for (const auto &block : blocks) {
@@ -2609,16 +2609,16 @@ TEST(CfgAnalysis, Gfx1250SeedsTextEntryWithLoopBackedgeForLaneStash) {
       0xD7600000u,
       0x0201012Cu, // 0x28: v_readlane_b32 s0, v44, 0.
       0xD7600001u,
-      0x0201032Cu,                                // 0x30: v_readlane_b32 s1, v44, 1.
-      call[0],                                    // 0x38: cross-block consumer.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x40: target.
+      0x0201032Cu,                              // 0x30: v_readlane_b32 s1, v44, 1.
+      call[0],                                  // 0x38: cross-block consumer.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x3c: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: target.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   auto *consumer = block_starting_at(blocks, 56);
   ASSERT_NE(consumer, nullptr);
@@ -2644,22 +2644,22 @@ TEST(CfgAnalysis, Gfx1250ExplicitKernelEntryClearsIncomingLaneStash) {
       0xD761002Cu,
       0x02010201u, // 0x18: v_writelane_b32 v44, s1, 1.
       branch[0],   // 0x20: -> independently launchable entry B at 0x28.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x24: skipped.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5), // 0x24: skipped.
       0xD7600000u,
       0x0201012Cu, // 0x28: entry B reads v44 lane 0.
       0xD7600001u,
-      0x0201032Cu,                                // 0x30: reads v44 lane 1.
-      call[0],                                    // 0x38: must remain dynamic.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: continuation.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x40: padding.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x44: A's target.
+      0x0201032Cu,                              // 0x30: reads v44 lane 1.
+      call[0],                                  // 0x38: must remain dynamic.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x3c: continuation.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5), // 0x40: padding.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x44: A's target.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   constexpr std::array<uint64_t, 1> extra_leaders{40};
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5, extra_leaders);
 
   size_t total_fixups = 0;
   for (const auto &block : blocks)
@@ -2688,15 +2688,15 @@ TEST(CfgAnalysis, Gfx1250A0UsesLowByteOfVgprMsb) {
       0xD7600000u,
       0x0201012Cu, // 0x28: v_readlane_b32 s0, physical v44, 0.
       0xD7600001u,
-      0x0201032Cu,                                // 0x30: v_readlane_b32 s1, physical v44, 1.
-      0xBE9E4900u,                                // 0x38: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: target/continuation.
+      0x0201032Cu,                              // 0x30: v_readlane_b32 s1, physical v44, 1.
+      0xBE9E4900u,                              // 0x38: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x3c: target/continuation.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   auto *consumer = block_starting_at(blocks, 56);
   ASSERT_NE(consumer, nullptr);
@@ -2730,16 +2730,16 @@ TEST(CfgAnalysis, Gfx1250DoesNotRecoverLaneStashWithDifferingRoleBanks) {
       0xD7600000u,
       0x0201012Cu, // 0x24: v_readlane_b32 s0, v44, 0 (physical v44 under SRC0 bank 0).
       0xD7600001u,
-      0x0201032Cu,                                // 0x2c: v_readlane_b32 s1, v44, 1.
-      0xBE9E4900u,                                // 0x34: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x38: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: would-be target.
+      0x0201032Cu,                              // 0x2c: v_readlane_b32 s1, v44, 1.
+      0xBE9E4900u,                              // 0x34: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x38: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x3c: would-be target.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   size_t total_fixups = 0;
   for (const auto &block : blocks)
@@ -2772,15 +2772,15 @@ TEST(CfgAnalysis, Gfx1250InheritsBankAlongProvenCfgEdge) {
       0x0201012Cu,
       0xD7600001u, // 0x30: v_readlane_b32 s1, v44, 1.
       0x0201032Cu,
-      0xBE9E4900u,                                // 0x38: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x40: target.
+      0xBE9E4900u,                              // 0x38: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x3c: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: target.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
   auto *consumer = block_starting_at(blocks, 56);
   ASSERT_NE(consumer, nullptr);
@@ -2823,12 +2823,12 @@ TEST(CfgAnalysis, Gfx1250DoesNotReuseStashFromSkippedFallthroughPredecessor) {
       0x0201012Cu,
       0xD7600001u, // 0x30: v_readlane_b32 s1, v44, 1.
       0x0201032Cu,
-      0xBE9E4900u,                                // 0x38: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: would-be target / continuation.
+      0xBE9E4900u,                              // 0x38: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x3c: would-be target / continuation.
   };
 
   TestCodeObject co(std::move(words));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   // Assert on the recovery pass output directly: the must-reaching-definition
@@ -2859,7 +2859,7 @@ TEST(CfgAnalysis, Gfx1250DoesNotReuseStashFromSkippedFallthroughPredecessor) {
 
   const auto fixups = discover_indirect_branch_edges(
       std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size()), text,
-      ROCJITSU_CODE_ARCH_GFX1250);
+      ROCJITSU_CODE_ARCH_CDNA5);
   EXPECT_TRUE(fixups.empty()) << "must-dataflow must not reuse a skipped-path stash";
 }
 
@@ -2950,14 +2950,14 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbResolvesPhysicalRegisterBank) {
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({set_vgpr_msb[0], move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -2987,14 +2987,14 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDestinationBank) {
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB16Vop1, {.src0 = 128, .vdst = 1});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({set_dst_bank_two[0], move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3019,14 +3019,14 @@ TEST(LivenessAnalysis, Gfx1250D16LoadImplicitUseResolvesDestinationBank) {
   constexpr auto load = cdna5::build_vflat(cdna5::kFlatLoadD16U8Vflat, {.vdst = 1});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({set_dst_bank_two[0], load[0], load[1], load[2], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   LivenessAnalysis liveness(KernelBlockScope(scope), nullptr, options);
@@ -3052,14 +3052,14 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDespiteExplicitBank0Alias) 
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB16Vop1, {.src0 = 256 + 1, .vdst = 1});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({set_dst_bank_two[0], move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3085,14 +3085,14 @@ TEST(LivenessAnalysis, Gfx1250SwapImplicitReadsResolvePerRole) {
   constexpr auto swap = cdna5::build_vop1(cdna5::kVSwapB16Vop1, {.src0 = 256 + 2, .vdst = 1});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({set_banks[0], swap[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3138,14 +3138,14 @@ TEST(LivenessAnalysis, Gfx1250DppPreserveReadResolvesToDstBank) {
   constexpr uint32_t kDppWord1Partial = (0x7u << 28) | (0xFu << 24) | 2u;
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({set_banks[0], kDppMovWord0, kDppWord1Partial, end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3172,14 +3172,14 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseUnknownBankReadsEveryCandidate) {
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB16Vop1, {.src0 = 128, .vdst = 1});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({setreg[0], move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3206,14 +3206,14 @@ TEST(LivenessAnalysis, Gfx1250UnknownBankDefMakesEveryCandidateGloballyUsed) {
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 1});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({setreg[0], move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3245,14 +3245,14 @@ TEST(LivenessAnalysis, Gfx1250RelativeVgprAccessDisablesGlobalUnusedQuery) {
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovrelsB32Vop1, {.src0 = 256, .vdst = 2});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3268,14 +3268,14 @@ TEST(LivenessAnalysis, Gfx1250SwaprelDisablesGlobalUnusedQuery) {
   constexpr auto swap = cdna5::build_vop1(cdna5::kVSwaprelB32Vop1, {.src0 = 256, .vdst = 2});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({swap[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3296,14 +3296,14 @@ TEST(LivenessAnalysis, Gfx1250GprIndexModeWriteDisablesGlobalUnusedQuery) {
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 256, .vdst = 0});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({setreg[0], move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3327,14 +3327,14 @@ TEST(LivenessAnalysis, Gfx1250ImmediateGprIndexModeWriteUsesLiteralValue) {
   for (uint32_t literal : {0u, 1u}) {
     SCOPED_TRACE(literal);
     TestCodeObject co({setreg[0], literal, move[0], end[0]});
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
-    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_EQ(blocks.size(), 1u);
     auto scope = block_scope(blocks);
 
     LivenessAnalysisOptions options;
-    options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    options.arch = ROCJITSU_CODE_ARCH_CDNA5;
     options.entry_block = scope.front();
     options.text = text_span(co);
     const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3422,14 +3422,14 @@ TEST(LivenessAnalysis, Gfx1250DynamicModeWriteConservativelyUsesEveryBank) {
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({setreg[0], move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3457,14 +3457,14 @@ TEST(LivenessAnalysis, Gfx1250FullLiteralModeWriteRecoversKnownBank) {
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({dynamic_setreg[0], literal_setreg[0], 2u << 14, move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3497,14 +3497,14 @@ TEST(LivenessAnalysis, Gfx1250TruncatedLiteralModeWriteMarksBanksAmbiguous) {
   // told the text ends right after the setreg encoding word at offset 4 (its
   // literal at offset 8 is out of range).
   TestCodeObject co({set_bank_two[0], literal_setreg[0], 0xe4u << 12, move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   // Truncate the text span to 8 bytes: the setreg (at offset 4) has no readable
   // literal at offset 8.
@@ -3531,14 +3531,14 @@ TEST(LivenessAnalysis, Gfx1250PartialLiteralModeWriteUsesUnmaskedVgprFields) {
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({set_bank_one[0], literal_setreg[0], 3u << 14, move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3565,14 +3565,14 @@ TEST(LivenessAnalysis, Gfx1250ImmediateModeWriteRecoversBanksOutsideRequestedSli
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({dynamic_setreg[0], literal_setreg[0], 2u << 14, move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3594,14 +3594,14 @@ TEST(LivenessAnalysis, Gfx1250LiteralModeWriteTracksEveryRole) {
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({literal_setreg[0], kModeFields, move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3624,14 +3624,14 @@ TEST(LivenessAnalysis, Gfx1250ImmediateNonModeWriteDoesNotChangeBanks) {
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({literal_setreg[0], 0x000ff000u, move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3656,15 +3656,15 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinRequiresPredecessorsToAgree) {
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co(
       {branch_to_else[0], set_bank_two[0], branch_to_join[0], set_bank_zero[0], move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   auto scope = block_scope(blocks);
   BasicBlock *join = block_starting_at(blocks, 16);
   ASSERT_NE(join, nullptr);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3686,15 +3686,15 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinPreservesAgreeingBank) {
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co(
       {branch_to_else[0], set_bank_two[0], branch_to_join[0], set_bank_two[0], move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   auto scope = block_scope(blocks);
   BasicBlock *join = block_starting_at(blocks, 16);
   ASSERT_NE(join, nullptr);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -3727,13 +3727,13 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
   constexpr auto move = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 257, .vdst = 0});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({branch_over[0], set_bank_zero[0], set_bank_two[0], move[0], end[0]});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
   auto scope = block_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.entry_block = scope.front();
   options.text = text_span(co);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
@@ -4490,7 +4490,7 @@ std::unique_ptr<Instruction> decode_cdna4(const std::array<uint32_t, 2> &words) 
 }
 
 std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 2> &words) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
 }
 
@@ -4841,7 +4841,7 @@ TEST(GeneratedInstDefUse, D16HiLoadReadsDestination) {
 }
 
 TEST(GeneratedInstDefUse, WritelaneReadsDestinationGfx1250) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint32_t, 4> words{0xD7610005U, 0x00000404U, 0U, 0U};
   std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
