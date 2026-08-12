@@ -5,25 +5,16 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vopc.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
 
 namespace rocjitsu {
 namespace cdna4 {
 
 VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_class_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpClassF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpClassF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -57,35 +48,9 @@ VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_class_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_class_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxClassF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxClassF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -123,69 +88,9 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_class_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpClassF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpClassF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -206,13 +111,9 @@ VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_class_f64_vopc(*this, wf);
-}
-
 VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_class_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxClassF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxClassF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -237,49 +138,9 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_class_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpClassF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpClassF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -314,35 +175,9 @@ VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_class_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_class_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxClassF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxClassF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -381,75 +216,9 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0_raw = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    bool match = false;
-    uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
-    uint16_t f16_mant = s0_raw & 0x3FF;
-    bool f16_sign = (s0_raw & 0x8000) != 0;
-    bool is_nan = (f16_exp == 0x1F) && (f16_mant != 0);
-    bool is_inf = (f16_exp == 0x1F) && (f16_mant == 0);
-    bool is_zero = (f16_exp == 0) && (f16_mant == 0);
-    bool is_denorm = (f16_exp == 0) && (f16_mant != 0);
-    bool is_normal = (f16_exp >= 1) && (f16_exp <= 30);
-    if ((mask & 0x001) && is_nan && (s0_raw & 0x0200) == 0)
-      match = true;
-    if ((mask & 0x002) && is_nan && (s0_raw & 0x0200) != 0)
-      match = true;
-    if ((mask & 0x004) && is_inf && f16_sign)
-      match = true;
-    if ((mask & 0x008) && is_normal && f16_sign)
-      match = true;
-    if ((mask & 0x010) && is_denorm && f16_sign)
-      match = true;
-    if ((mask & 0x020) && is_zero && f16_sign)
-      match = true;
-    if ((mask & 0x040) && is_zero && !f16_sign)
-      match = true;
-    if ((mask & 0x080) && is_denorm && !f16_sign)
-      match = true;
-    if ((mask & 0x100) && is_normal && !f16_sign)
-      match = true;
-    if ((mask & 0x200) && is_inf && !f16_sign)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_f_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpFF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpFF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -484,35 +253,9 @@ VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpFF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_f_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -547,35 +290,9 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_lt_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -610,35 +327,9 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_eq_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -673,35 +364,9 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_le_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -736,35 +401,9 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_gt_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lg_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLgF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLgF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -799,35 +438,9 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_lg_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -862,35 +475,9 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_ge_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_o_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpOF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpOF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -925,35 +512,9 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_o_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_u_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpUF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpUF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -988,35 +549,9 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_u_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nge_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgeF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNgeF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -1051,35 +586,9 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_nge_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nlg_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNlgF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNlgF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -1114,35 +623,9 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_nlg_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ngt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgtF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNgtF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -1177,35 +660,9 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_ngt_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nle_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNleF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNleF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -1240,35 +697,9 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_nle_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_neq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeqF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeqF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -1303,35 +734,9 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_neq_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nlt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNltF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNltF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -1366,35 +771,9 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_nlt_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpTruF16Vopc::VCmpTruF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_tru_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTruF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpTruF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -1429,35 +808,9 @@ VCmpTruF16Vopc::VCmpTruF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpTruF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_tru_f16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_f_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -1496,43 +849,9 @@ VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -1571,48 +890,9 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -1651,48 +931,9 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -1731,48 +972,9 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -1811,48 +1013,9 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lg_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLgF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLgF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -1891,48 +1054,9 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 < s1 || s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -1971,48 +1095,9 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_o_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxOF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxOF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -2051,48 +1136,9 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!std::isnan(s0) && !std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_u_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxUF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxUF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -2131,48 +1177,9 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nge_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgeF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNgeF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -2211,48 +1218,9 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 >= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nlg_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNlgF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNlgF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -2291,48 +1259,9 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 < s1 || s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ngt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgtF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNgtF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -2371,48 +1300,9 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nle_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNleF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNleF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -2451,48 +1341,9 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 <= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_neq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeqF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeqF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -2531,48 +1382,9 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nlt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNltF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNltF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -2611,48 +1423,9 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 < s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxTruF16Vopc::VCmpxTruF16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_tru_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTruF16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTruF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -2691,43 +1464,9 @@ VCmpxTruF16Vopc::VCmpxTruF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTruF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_f_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpFF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpFF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -2761,35 +1500,9 @@ VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpFF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_f_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -2823,35 +1536,9 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_lt_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -2885,35 +1572,9 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_eq_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -2947,35 +1608,9 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_le_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -3009,35 +1644,9 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_gt_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLgF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLgF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -3071,35 +1680,9 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_lg_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -3133,35 +1716,9 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_ge_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_o_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpOF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpOF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -3195,35 +1752,9 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_o_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_u_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpUF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpUF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -3257,35 +1788,9 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_u_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgeF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNgeF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -3319,35 +1824,9 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_nge_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nlg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNlgF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNlgF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -3381,35 +1860,9 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_nlg_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ngt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgtF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNgtF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -3443,35 +1896,9 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_ngt_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nle_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNleF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNleF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -3505,35 +1932,9 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_nle_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_neq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeqF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeqF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -3567,35 +1968,9 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_neq_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nlt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNltF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNltF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -3629,35 +2004,9 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_nlt_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpTruF32Vopc::VCmpTruF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_tru_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTruF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpTruF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -3691,35 +2040,9 @@ VCmpTruF32Vopc::VCmpTruF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpTruF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_tru_f32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_f_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -3757,43 +2080,9 @@ VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -3831,46 +2120,9 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -3908,46 +2160,9 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -3985,46 +2200,9 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -4062,46 +2240,9 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLgF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLgF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -4139,46 +2280,9 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 < s1 || s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -4216,46 +2320,9 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_o_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxOF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxOF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -4293,46 +2360,9 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!std::isnan(s0) && !std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_u_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxUF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxUF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -4370,46 +2400,9 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgeF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNgeF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -4447,46 +2440,9 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 >= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nlg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNlgF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNlgF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -4524,46 +2480,9 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 < s1 || s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ngt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgtF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNgtF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -4601,46 +2520,9 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nle_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNleF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNleF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -4678,46 +2560,9 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 <= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_neq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeqF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeqF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -4755,46 +2600,9 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nlt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNltF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNltF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -4832,46 +2640,9 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 < s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxTruF32Vopc::VCmpxTruF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_tru_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTruF32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTruF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -4909,43 +2680,9 @@ VCmpxTruF32Vopc::VCmpxTruF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTruF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::F32, dpp_src1_,
-                                 wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_f_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpFF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpFF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -4966,13 +2703,9 @@ VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpFF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_f_f64_vopc(*this, wf);
-}
-
 VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -4993,13 +2726,9 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lt_f64_vopc(*this, wf);
-}
-
 VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5020,13 +2749,9 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_eq_f64_vopc(*this, wf);
-}
-
 VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5047,13 +2772,9 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_le_f64_vopc(*this, wf);
-}
-
 VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5074,13 +2795,9 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_gt_f64_vopc(*this, wf);
-}
-
 VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lg_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLgF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLgF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5101,13 +2818,9 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lg_f64_vopc(*this, wf);
-}
-
 VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5128,13 +2841,9 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ge_f64_vopc(*this, wf);
-}
-
 VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_o_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpOF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpOF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5155,13 +2864,9 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_o_f64_vopc(*this, wf);
-}
-
 VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_u_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpUF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpUF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5182,13 +2887,9 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_u_f64_vopc(*this, wf);
-}
-
 VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nge_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgeF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNgeF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5209,13 +2910,9 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nge_f64_vopc(*this, wf);
-}
-
 VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nlg_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNlgF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNlgF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5236,13 +2933,9 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nlg_f64_vopc(*this, wf);
-}
-
 VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ngt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgtF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNgtF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5263,13 +2956,9 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ngt_f64_vopc(*this, wf);
-}
-
 VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nle_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNleF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNleF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5290,13 +2979,9 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nle_f64_vopc(*this, wf);
-}
-
 VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_neq_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeqF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeqF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5317,13 +3002,9 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_neq_f64_vopc(*this, wf);
-}
-
 VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nlt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNltF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNltF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5344,13 +3025,9 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nlt_f64_vopc(*this, wf);
-}
-
 VCmpTruF64Vopc::VCmpTruF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_tru_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTruF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpTruF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -5371,13 +3048,9 @@ VCmpTruF64Vopc::VCmpTruF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpTruF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_tru_f64_vopc(*this, wf);
-}
-
 VCmpxFF64Vopc::VCmpxFF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_f_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5402,21 +3075,9 @@ VCmpxFF64Vopc::VCmpxFF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5441,24 +3102,9 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5483,24 +3129,9 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5525,24 +3156,9 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5567,24 +3183,9 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lg_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLgF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLgF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5609,24 +3210,9 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 < s1 || s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5651,24 +3237,9 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_o_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxOF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxOF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5693,24 +3264,9 @@ VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (!std::isnan(s0) && !std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_u_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxUF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxUF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5735,24 +3291,9 @@ VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nge_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgeF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNgeF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5777,24 +3318,9 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (!(s0 >= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nlg_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNlgF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNlgF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5819,24 +3345,9 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (!(s0 < s1 || s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ngt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgtF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNgtF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5861,24 +3372,9 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (!(s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nle_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNleF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNleF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5903,24 +3399,9 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (!(s0 <= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_neq_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeqF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeqF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5945,24 +3426,9 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nlt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNltF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNltF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -5987,24 +3453,9 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (!(s0 < s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxTruF64Vopc::VCmpxTruF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_tru_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTruF64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTruF64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -6029,21 +3480,9 @@ VCmpxTruF64Vopc::VCmpxTruF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTruF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpFI16Vopc::VCmpFI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_f_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpFI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpFI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6078,35 +3517,9 @@ VCmpFI16Vopc::VCmpFI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpFI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_f_i16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6141,35 +3554,9 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_lt_i16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6204,35 +3591,9 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_eq_i16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6267,35 +3628,9 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_le_i16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6330,35 +3665,9 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_gt_i16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6393,35 +3702,9 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_ne_i16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6456,35 +3739,9 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_ge_i16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpTI16Vopc::VCmpTI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_t_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpTI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6519,35 +3776,9 @@ VCmpTI16Vopc::VCmpTI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpTI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_t_i16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpFU16Vopc::VCmpFU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_f_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpFU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpFU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6582,35 +3813,9 @@ VCmpFU16Vopc::VCmpFU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpFU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_f_u16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6645,35 +3850,9 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_lt_u16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6708,35 +3887,9 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_eq_u16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6771,35 +3924,9 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_le_u16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6834,35 +3961,9 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_gt_u16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6897,35 +3998,9 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_ne_u16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -6960,35 +4035,9 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_ge_u16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpTU16Vopc::VCmpTU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_t_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpTU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -7023,35 +4072,9 @@ VCmpTU16Vopc::VCmpTU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpTU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_t_u16_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxFI16Vopc::VCmpxFI16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_f_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -7090,43 +4113,9 @@ VCmpxFI16Vopc::VCmpxFI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -7165,46 +4154,9 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -7243,46 +4195,9 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -7321,46 +4236,9 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -7399,46 +4277,9 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ne_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -7477,46 +4318,9 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -7555,46 +4359,9 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane) & 0xFFFF);
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxTI16Vopc::VCmpxTI16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_t_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTI16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -7633,43 +4400,9 @@ VCmpxTI16Vopc::VCmpxTI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxFU16Vopc::VCmpxFU16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_f_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -7708,43 +4441,9 @@ VCmpxFU16Vopc::VCmpxFU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -7783,46 +4482,9 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -7861,46 +4523,9 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -7939,46 +4564,9 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -8017,46 +4605,9 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ne_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -8095,46 +4646,9 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -8173,46 +4687,9 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxTU16Vopc::VCmpxTU16Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_t_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTU16Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -8251,43 +4728,9 @@ VCmpxTU16Vopc::VCmpxTU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_f_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpFI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpFI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -8321,35 +4764,9 @@ VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpFI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_f_i32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -8383,35 +4800,9 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_lt_i32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -8445,35 +4836,9 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_eq_i32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -8507,35 +4872,9 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_le_i32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -8569,35 +4908,9 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_gt_i32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -8631,35 +4944,9 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_ne_i32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -8693,35 +4980,9 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_ge_i32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_t_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpTI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -8755,35 +5016,9 @@ VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpTI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_t_i32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_f_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpFU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpFU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -8817,35 +5052,9 @@ VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpFU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_f_u32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -8879,35 +5088,9 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_lt_u32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -8941,35 +5124,9 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_eq_u32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -9003,35 +5160,9 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_le_u32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -9065,35 +5196,9 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_gt_u32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -9127,35 +5232,9 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_ne_u32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -9189,35 +5268,9 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_ge_u32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_t_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpTU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -9251,35 +5304,9 @@ VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpTU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  amdgpu::execute_v_cmp_t_u32_vopc(*this, wf);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_f_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -9317,43 +5344,9 @@ VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -9391,46 +5384,9 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -9468,46 +5424,9 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -9545,46 +5464,9 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -9622,46 +5504,9 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ne_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -9699,46 +5544,9 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -9776,46 +5584,9 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_t_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTI32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -9853,43 +5624,9 @@ VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_f_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -9927,43 +5664,9 @@ VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -10001,46 +5704,9 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -10078,46 +5744,9 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -10155,46 +5784,9 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -10232,46 +5824,9 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ne_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -10309,46 +5864,9 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -10386,46 +5904,9 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_t_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTU32Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -10463,43 +5944,9 @@ VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t dpp_old_vcc_ = wf.vcc();
-  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
-    throw util::UnimplementedInst(mnemonic());
-  if (inst_.src0 == amdgpu::SRC_SDWA) {
-    amdgpu::sdwa::stage_source(*src_operands_[0], sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
-                               sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::NONE, dpp_src0_,
-                               wf);
-    if (num_src_ > 1)
-      amdgpu::sdwa::stage_source(vsrc1, sdwa_src1_sel_, sdwa_src1_sext_, sdwa_src1_neg_,
-                                 sdwa_src1_abs_, amdgpu::sdwa::SourceModifierFormat::NONE,
-                                 dpp_src1_, wf);
-  }
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {
-    uint64_t cmp_result = wf.vcc();
-    uint32_t sb = wf.sgpr_alloc().base;
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));
-    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,
-                                          static_cast<uint32_t>(cmp_result >> 32));
-    wf.set_vcc(dpp_old_vcc_);
-  }
-}
-
 VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_f_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpFI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpFI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10520,13 +5967,9 @@ VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpFI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_f_i64_vopc(*this, wf);
-}
-
 VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10547,13 +5990,9 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lt_i64_vopc(*this, wf);
-}
-
 VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10574,13 +6013,9 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpEqI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_eq_i64_vopc(*this, wf);
-}
-
 VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10601,13 +6036,9 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_le_i64_vopc(*this, wf);
-}
-
 VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10628,13 +6059,9 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_gt_i64_vopc(*this, wf);
-}
-
 VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10655,13 +6082,9 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ne_i64_vopc(*this, wf);
-}
-
 VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10682,13 +6105,9 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ge_i64_vopc(*this, wf);
-}
-
 VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_t_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpTI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10709,13 +6128,9 @@ VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpTI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_t_i64_vopc(*this, wf);
-}
-
 VCmpFU64Vopc::VCmpFU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_f_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpFU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpFU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10736,13 +6151,9 @@ VCmpFU64Vopc::VCmpFU64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpFU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_f_u64_vopc(*this, wf);
-}
-
 VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10763,13 +6174,9 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lt_u64_vopc(*this, wf);
-}
-
 VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10790,13 +6197,9 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpEqU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_eq_u64_vopc(*this, wf);
-}
-
 VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10817,13 +6220,9 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpLeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_le_u64_vopc(*this, wf);
-}
-
 VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10844,13 +6243,9 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_gt_u64_vopc(*this, wf);
-}
-
 VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10871,13 +6266,9 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpNeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ne_u64_vopc(*this, wf);
-}
-
 VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10898,13 +6289,9 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpGeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ge_u64_vopc(*this, wf);
-}
-
 VCmpTU64Vopc::VCmpTU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_t_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpTU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
@@ -10925,13 +6312,9 @@ VCmpTU64Vopc::VCmpTU64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VCmpTU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_t_u64_vopc(*this, wf);
-}
-
 VCmpxFI64Vopc::VCmpxFI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_f_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -10956,21 +6339,9 @@ VCmpxFI64Vopc::VCmpxFI64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -10995,24 +6366,9 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11037,24 +6393,9 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11079,24 +6420,9 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11121,24 +6447,9 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ne_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11163,24 +6474,9 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11205,24 +6501,9 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxTI64Vopc::VCmpxTI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_t_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTI64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTI64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11247,21 +6528,9 @@ VCmpxTI64Vopc::VCmpxTI64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxFU64Vopc::VCmpxFU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_f_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11286,21 +6555,9 @@ VCmpxFU64Vopc::VCmpxFU64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11325,24 +6582,9 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11367,24 +6609,9 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11409,24 +6636,9 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11451,24 +6663,9 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ne_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11493,24 +6690,9 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11535,24 +6717,9 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
-}
-
 VCmpxTU64Vopc::VCmpxTU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_t_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTU64Vopc>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTU64Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -11575,18 +6742,6 @@ VCmpxTU64Vopc::VCmpxTU64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
-}
-
-void VCmpxTU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_vcc(result);
-  wf.set_exec(result);
 }
 
 } // namespace cdna4

@@ -369,6 +369,7 @@ def test_generated_operand_tracks_literal32_widening_without_literal64_provenanc
 
     generator.gen_operand()
     operand_cpp = (tmp_path / 'rdna4' / 'operand.cpp').read_text()
+    operand_exec_cpp = (tmp_path / 'rdna4' / 'operand_exec.cpp').read_text()
     operand_h = (tmp_path / 'rdna4' / 'operand.h').read_text()
 
     assert 'enum class Literal32Widening' in operand_h
@@ -379,8 +380,8 @@ def test_generated_operand_tracks_literal32_widening_without_literal64_provenanc
     assert 'literal32_display' not in operand_h
     assert 'Operand operand(size_bits, OperandType::OPR_SIMM32' in operand_cpp
     assert 'operand.literal32_widening_ = widening;' in operand_cpp
-    assert operand_cpp.count('if (literal32_widening_)') == 2
-    assert operand_cpp.count('return widened_literal32_value();') == 2
+    assert operand_exec_cpp.count('if (literal32_widening_)') == 2
+    assert operand_exec_cpp.count('return widened_literal32_value();') == 2
     assert 'case Literal32Widening::Replicate32:' in operand_cpp
     assert (
         'return (static_cast<uint64_t>(literal_value) << 32) | literal_value;'

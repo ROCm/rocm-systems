@@ -9,7 +9,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
 #include <cstdint>
@@ -425,6 +425,7 @@ public:
 class Vop1 : public IsaInstruction<Isa> {
 public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
@@ -482,6 +483,7 @@ public:
 class Vop2 : public IsaInstruction<Isa> {
 public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();

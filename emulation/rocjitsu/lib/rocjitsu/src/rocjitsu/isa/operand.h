@@ -24,6 +24,8 @@ namespace rocjitsu {
 template <typename Isa> class AmdgpuIsaOperand;
 
 namespace amdgpu {
+class ComputeUnitCore;
+class InstructionComputeUnitView;
 class RegisterAccess;
 class Wavefront;
 
@@ -501,8 +503,9 @@ public:
 /// (e.g. RISC-V) inherit directly from `IsaOperand` and use the base
 /// `Operand` defaults.
 ///
-/// The declaration remains in the core ISA layer because conventional targets
-/// and split model/execution targets share it. Execution-only definitions live
+/// This remains as the generator fallback for AMDGPU profiles that opt out of
+/// split execution sources. Built-in AMDGPU targets use `IsaOperand` plus a
+/// per-target execution table instead. Execution-only fallback definitions live
 /// in `isa_operand_simd_inl.h`.
 ///
 /// @tparam Isa AMDGPU arch ISA traits providing the SIMD helpers above.
