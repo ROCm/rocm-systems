@@ -228,9 +228,12 @@ reason was not seen at that offset.
 
 An instruction that no sample landed on keeps its row, with empty counts.
 
+The ``Source`` column and the ``source/`` folder are populated only when the
+target app was built with debug info; see the :ref:`note <pc-sampling-note>`.
+
 .. _pc-sampling-note:
 
 .. note::
 
   * PC sampling now only shows assembly instructions collected in our record of pc samples and not all instructions of compiled code are represented.
-  * To associate PC sampling info back to HIP source code, you need to build the profiling target app with ``-g`` to keep the symbols. Otherwise, PC sampling info will be only associated with assembly lines.
+  * Source information requires the target app to be built with debug info (for example ``hipcc -g``). Without it, samples map to assembly only: profile mode captures no source files, the terminal table's ``source_line`` shows ``N/A``, and the ``Source`` column of the per-kernel CSV is empty.
