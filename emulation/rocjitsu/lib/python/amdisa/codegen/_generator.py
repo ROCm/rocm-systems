@@ -10765,6 +10765,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 error = 'InvalidVgprSourceSelector'
             elif operand_type in (
                 'OPR_SSRC',
+                'OPR_SSRC_BARRIER_ID',
                 'OPR_SSRC_NOLDS',
                 'OPR_SSRC_NOLIT',
                 'OPR_SSRC_SPECIAL_SCC',
@@ -12350,6 +12351,18 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         word = (enc_val << (32 - self.isa_spec.profile.max_enc_bits)) | (
             inst.opcode << op_field.bit_offset
         )
+        for operand in inst.explicit_operands:
+            if operand.operand_type != 'OPR_SSRC_BARRIER_ID':
+                continue
+            operand_field = next(
+                (field for field in enc.ucode_fields if field.name == operand.name),
+                None,
+            )
+            if operand_field is not None:
+                # The zero selector is reserved for barrier IDs. Encode the
+                # inline integer zero instead so the execution smoke fixture
+                # remains a valid instruction.
+                word |= 128 << operand_field.bit_offset
         return word & 0xFFFFFFFF, (word >> 32) & 0xFFFFFFFF
 
     def gen_test_encodings(self) -> None:

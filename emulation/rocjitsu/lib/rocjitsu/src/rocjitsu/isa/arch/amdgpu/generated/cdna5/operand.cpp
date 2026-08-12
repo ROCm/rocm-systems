@@ -85,6 +85,11 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
                                              (encoding_value >= 240 && encoding_value <= 248) ||
                                              (encoding_value >= 253 && encoding_value <= 255)))
     defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+  if (opr_type == OperandType::OPR_SSRC_BARRIER_ID &&
+      !((encoding_value >= 125 && encoding_value <= 125) ||
+        (encoding_value >= 128 && encoding_value <= 159) ||
+        (encoding_value >= 193 && encoding_value <= 196)))
+    defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
   if (opr_type == OperandType::OPR_SSRC_LANESEL &&
       !((encoding_value >= 0 && encoding_value <= 125) ||
         (encoding_value >= 128 && encoding_value <= 191)))
@@ -125,6 +130,11 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
                                              (encoding_value >= 235 && encoding_value <= 236) ||
                                              (encoding_value >= 240 && encoding_value <= 248) ||
                                              (encoding_value >= 253 && encoding_value <= 255)))
+    defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
+  if (opr_type == OperandType::OPR_SSRC_BARRIER_ID &&
+      !((encoding_value >= 125 && encoding_value <= 125) ||
+        (encoding_value >= 128 && encoding_value <= 159) ||
+        (encoding_value >= 193 && encoding_value <= 196)))
     defer_encoding_error(EncodingError::InvalidScalarSourceSelector);
   if (opr_type == OperandType::OPR_SSRC_LANESEL &&
       !((encoding_value >= 0 && encoding_value <= 125) ||

@@ -24,19 +24,23 @@
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
@@ -233,6 +237,56 @@ TEST(OperandSelectorDecodeTest, Cdna1RestrictedScalarSourceRejectsLiteralSelecto
 
   cdna1::Operand invalid(32, cdna1::OperandType::OPR_SSRC_NOLIT, 255);
   EXPECT_THROW(invalid.validate_encoding(), util::InvalidInst);
+}
+
+TEST(OperandSelectorDecodeTest, Gfx1250AndRdna4ValidateBarrierIdSelectors) {
+  auto validate = [](rj_code_arch_t arch, const char *arch_name, auto build, uint8_t negative_max) {
+    SCOPED_TRACE(arch_name);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+
+    const std::array<uint8_t, 5> valid = {125, 128, 159, 193, negative_max};
+    for (const uint8_t selector : valid) {
+      SCOPED_TRACE(static_cast<int>(selector));
+      const auto words = build(selector);
+      std::unique_ptr<Instruction> inst;
+      ASSERT_NO_THROW(inst.reset(decoder->decode(words.data())));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(inst->num_src_operands(), 1);
+      ASSERT_NE(inst->src_operand(0), nullptr);
+      EXPECT_EQ(inst->src_operand(0)->encoding_value(), selector);
+    }
+
+    for (const uint8_t selector : std::array<uint8_t, 4>{0, 126, 160, 192}) {
+      SCOPED_TRACE(static_cast<int>(selector));
+      const auto words = build(selector);
+      EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+    }
+
+    constexpr uint32_t kLiteralValue = 7;
+    const auto literal = build(255);
+    const std::array<uint32_t, 2> literal_words = {literal[0], kLiteralValue};
+    std::unique_ptr<Instruction> literal_inst;
+    ASSERT_NO_THROW(literal_inst.reset(decoder->decode(literal_words.data())));
+    ASSERT_NE(literal_inst, nullptr);
+    ASSERT_EQ(literal_inst->num_src_operands(), 1);
+    ASSERT_NE(literal_inst->src_operand(0), nullptr);
+    EXPECT_EQ(literal_inst->src_operand(0)->encoding_value(), kLiteralValue);
+    EXPECT_EQ(literal_inst->size(), static_cast<int>(sizeof(literal_words)));
+  };
+
+  validate(
+      ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
+      [](uint8_t selector) {
+        return gfx1250::build_sop1(gfx1250::kSBarrierSignalIsfirstSop1, {.ssrc0 = selector});
+      },
+      196);
+  validate(
+      ROCJITSU_CODE_ARCH_RDNA4, "rdna4",
+      [](uint8_t selector) {
+        return rdna4::build_sop1(rdna4::kSBarrierSignalIsfirstSop1, {.ssrc0 = selector});
+      },
+      194);
 }
 
 TEST(RawEncodingTest, PreservesScalarLiteralWordsAcrossAmdgpuIsas) {

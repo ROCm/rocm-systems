@@ -12463,6 +12463,29 @@ TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnExcludedBarrierSignalIsfirst) {
       "s_barrier_signal_isfirst cannot name barrier id -3 (inline selector 195)"));
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnReservedBarrierSignalSelector) {
+  constexpr uint8_t kReservedSelector = 0;
+  constexpr auto barrier =
+      gfx1250::build_sop1(gfx1250::kSBarrierSignalIsfirstSop1, {.ssrc0 = kReservedSelector});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({barrier[0], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_FALSE(result.dispatchable());
+  EXPECT_EQ(result.elf_bytes, image) << "a fail-closed translation must leave the object unchanged";
+  EXPECT_TRUE(
+      rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                     "invalid scalar source selector at .text byte offset 0"));
+}
+
 // Every other barrier id must survive translation unchanged. This operand
 // admits inline constants and M0; the neighbouring inline ids and an M0 source
 // therefore cover the supported spellings.
@@ -16621,7 +16644,7 @@ TEST(BinaryTranslatorE2E, Gfx1250ReportsOncePerDeferredMnemonicWithinOneTranslat
 TEST(BinaryTranslatorE2E, Gfx1250ReportsSeparatelyForEachDeferredMnemonic) {
   const uint32_t deferred = gfx1250_deferred_word();
   const uint32_t barrier_state =
-      cdna5::build_sop1(cdna5::kSGetBarrierStateSop1, {.ssrc0 = 0, .sdst = 0})[0];
+      cdna5::build_sop1(cdna5::kSGetBarrierStateSop1, {.ssrc0 = 128, .sdst = 0})[0];
   auto translator = make_gfx1250_b0_to_a0_translator();
   const auto result = translate_gfx1250_b0_to_a0_result(
       translator, {deferred, barrier_state, deferred, barrier_state});

@@ -2216,6 +2216,26 @@ def test_generated_operand_validates_scalar_selector_families(
     )
 
 
+def test_generated_operand_validates_barrier_id_selectors(
+    gfx1250_generated_root: Path, rdna4_generated_root: Path
+):
+    for root, negative_max in (
+        (gfx1250_generated_root, 196),
+        (rdna4_generated_root, 194),
+    ):
+        operand = ''.join((root / 'operand.cpp').read_text().split())
+        assert 'opr_type==OperandType::OPR_SSRC_BARRIER_ID&&' in operand
+        assert '(encoding_value>=125&&encoding_value<=125)' in operand
+        assert '(encoding_value>=128&&encoding_value<=159)' in operand
+        assert f'(encoding_value>=193&&encoding_value<={negative_max})' in operand
+
+        test_encodings = (root / 'test_encodings.h').read_text()
+        assert '"s_barrier_signal_isfirst", {0xBE804F80U' in test_encodings
+
+    gfx1250_test_encodings = (gfx1250_generated_root / 'test_encodings.h').read_text()
+    assert '"s_get_barrier_state", {0xBE805080U' in gfx1250_test_encodings
+
+
 def test_gfx1250_generated_operand_validates_lane_selectors(
     gfx1250_generated_root: Path,
 ):
