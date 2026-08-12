@@ -68,15 +68,37 @@ def in_line_ranges(line: int, ranges: list[tuple[int, int]]) -> bool:
     return any(start <= line <= end for start, end in ranges)
 
 
+def _git(git_args: list[str], cwd: str | None = None) -> str:
+    """Run a git command, returning stdout; exit with git's own error on failure.
+
+    Surfaces git's stderr (e.g. the "detected dubious ownership ... call
+    `git config --global --add safe.directory <path>`" hint) instead of an
+    opaque CalledProcessError traceback.
+    """
+
+    try:
+        result = subprocess.run(
+            ["git", *git_args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+    except FileNotFoundError:
+        sys.exit("error: 'git' not found on PATH")
+    except subprocess.CalledProcessError as exc:
+        message = exc.stderr.strip() or f"git {' '.join(git_args)} failed"
+        sys.exit(f"error: {message}")
+
+    return result.stdout
+
+
 def get_repo_root() -> str:
     """Return the top-level directory of the current git repository."""
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout.strip()
+    return _git(["rev-parse", "--show-toplevel"]).strip()
 
 
 def get_diff_changed_files(repo_root: str, base: str | None) -> dict[str, ChangedFile]:
@@ -87,13 +109,7 @@ def get_diff_changed_files(repo_root: str, base: str | None) -> dict[str, Change
     changes on top, in one pass.
     """
     ref = base or "HEAD"
-    diff = subprocess.run(
-        ["git", "diff", "--no-color", "-U0", ref],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
+    diff = _git(["diff", "--no-color", "-U0", ref], cwd=repo_root)
 
     changed: dict[str, ChangedFile] = {}
     current_path: str | None = None
@@ -129,13 +145,9 @@ def get_diff_changed_files(repo_root: str, base: str | None) -> dict[str, Change
 
 def get_untracked_changed_files(repo_root: str) -> dict[str, ChangedFile]:
     """Return new (untracked) source files, each spanning its full line range."""
-    paths = subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.splitlines()
+    paths = _git(
+        ["ls-files", "--others", "--exclude-standard"], cwd=repo_root
+    ).splitlines()
 
     untracked: dict[str, ChangedFile] = {}
     for path in paths:
