@@ -144,11 +144,13 @@ add_rccl_test(alltoall)
 if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
     target_compile_definitions(alltoall_perf PRIVATE ENABLE_ROCSHMEM_GIN)
     target_compile_options(alltoall_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
-    target_link_libraries(alltoall_perf PRIVATE roc::rocshmem)
-    # -rdynamic exports symbols so librccl.so can resolve rocshmem host functions
-    # from this executable (librccl.so is built with ENABLE_ROCSHMEM_GIN which
-    # leaves rocshmem host symbols unresolved)
-    target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags} -rdynamic)
+    # --whole-archive: librccl.so (ENABLE_ROCSHMEM_GIN) leaves rocshmem host
+    # symbols unresolved (--allow-shlib-undefined).  The executable must pull
+    # in ALL rocshmem symbols (not just those it references directly) so that
+    # -rdynamic exports them for librccl.so to resolve at runtime.
+    target_link_libraries(alltoall_perf PRIVATE
+        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
+    target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
 endif()
 if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem AND RCCL_SOURCE_DIR)
     add_executable(gin_rocshmem_gda_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu)
@@ -160,11 +162,11 @@ if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem AND RCCL_SOURCE_DIR)
         ${ROCSHMEM_SOURCE_DIR}/include
         ${ROCSHMEM_INSTALL_DIR}/include
     )
-    target_compile_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc --offload-arch=${GPU_TARGETS} -xhip)
+    target_compile_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc -xhip)
     target_link_libraries(gin_rocshmem_gda_factory_test PRIVATE
-        roc::rccl roc::rocshmem
+        roc::rccl -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive
         $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>)
-    target_link_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc --hip-link --offload-arch=${GPU_TARGETS} -rdynamic)
+    target_link_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc --hip-link -rdynamic)
     set_target_properties(gin_rocshmem_gda_factory_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 endif()
 add_rccl_test(alltoallv)

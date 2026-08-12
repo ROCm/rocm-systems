@@ -915,10 +915,14 @@ else()
   message(STATUS "HIP_VMM_UNCACHED_MEMORY disabled")
 endif()
 
-# ==== rocSHMEM integration (optional) ====
-# ENABLE_ROCSHMEM: full rocshmem (device + host), links librocshmem.a into librccl.so
-# ENABLE_ROCSHMEM_GIN: GIN host code only (no device deps), rocshmem host symbols
-#   resolved at runtime from the executable that links librocshmem.a
+# ==== rocSHMEM integration (optional, mutually exclusive) ====
+# ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
+#   via -fgpu-rdc --hip-link.  Does not enable GIN plugins.
+# ENABLE_ROCSHMEM_GIN: GIN plugins (GDA, SDMA).  Device symbols (QueuePair)
+#   resolved via per-arch bitcode in the device linker pipeline +
+#   -mlink-builtin-bitcode for symmetric kernels.  Host symbols left unresolved
+#   (--allow-shlib-undefined), resolved at runtime from the executable.
+#   Does not enable alltoall_wg offload.
 if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   add_rocshmem_targets()
   # Ensure rocSHMEM is fully built/installed before compiling rccl
@@ -936,13 +940,11 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
     if (ROCSHMEM_BUILD_DIR)
       target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR})
     else()
-      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
     endif()
   endif()
 endif()
 if (ENABLE_ROCSHMEM)
-  # Moved to where rocSHMEM target_links
-  ## target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${IBVERBS})
 endif()
 
@@ -1260,10 +1262,10 @@ if(ENABLE_ROCSHMEM)
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 elseif(ENABLE_ROCSHMEM_GIN)
-  # Only the SDMA backend is enabled here (see gin_device_common.h), and its
-  # device code is header-only, so no rocshmem device bitcode is needed.
-  # The SDMA host symbols are resolved at runtime from the executable that
-  # links librocshmem.a, so leave them unresolved in librccl.so.
+  # GIN device templates (Put/Flush/etc.) reference rocshmem device symbols.
+  # With the device linker (default), per-arch .bc files are injected directly
+  # into the per-arch device link step via DeviceLinker.cmake.
+  # Host symbols from GIN plugins are left unresolved via --allow-shlib-undefined.
   target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 

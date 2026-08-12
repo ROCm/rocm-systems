@@ -40,23 +40,17 @@
 #endif
 
 
-// GDA calls rocshmem::QueuePair methods, which live in rocSHMEM's device
-// bitcode and must be resolved by an -fgpu-rdc device link. Only ENABLE_ROCSHMEM
-// provides that. Under ENABLE_ROCSHMEM_GIN the symmetric kernels are built as
-// non-RDC fat objects, which self-link at compile time with no way to pull in
-// external bitcode, so enabling GDA there leaves QueuePair undefined.
+// GIN rocshmem device templates (GDA, SDMA) gate on ENABLE_ROCSHMEM_GIN.
 #ifndef NCCL_GIN_ROCSHMEM_GDA_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM)
+#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
 #define NCCL_GIN_ROCSHMEM_GDA_ENABLE 1
 #else
 #define NCCL_GIN_ROCSHMEM_GDA_ENABLE 0
 #endif
 #endif
 
-// SDMA is header-only (anvil_device.hpp inlines everything), so it needs no
-// bitcode and is safe in either build mode.
 #ifndef NCCL_GIN_ANVIL_SDMA_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && (defined(ENABLE_ROCSHMEM_GIN) || defined(ENABLE_ROCSHMEM))
+#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 1
 #else
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 0

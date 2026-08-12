@@ -108,8 +108,25 @@ option(QP_TRACKING                             "Enable per-device QP tracking"  
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
-option(ENABLE_ROCSHMEM                         "Link librocshmem.a into librccl.so (full rocSHMEM device+host integration)" OFF)
-option(ENABLE_ROCSHMEM_GIN                     "Compile GIN rocshmem plugins; symbols resolved at runtime by the executable" OFF)
+# rocSHMEM integration (mutually exclusive — enabling both causes duplicate
+# rocshmem state between librccl.so and the executable at runtime):
+#   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
+#     via -fgpu-rdc --hip-link.  Does not enable GIN plugins.
+#   ENABLE_ROCSHMEM_GIN: GIN plugins (GDA, SDMA).  Device symbols (QueuePair)
+#     resolved via per-arch bitcode injection; host symbols resolved at runtime
+#     from the executable.  Does not enable alltoall_wg offload.
+option(ENABLE_ROCSHMEM                         "Full rocSHMEM: link librocshmem.a into librccl.so (alltoall_wg offload)" OFF)
+option(ENABLE_ROCSHMEM_GIN                     "GIN plugins: device bitcode injected at build, host resolved at runtime" OFF)
+if(ENABLE_ROCSHMEM AND ENABLE_ROCSHMEM_GIN)
+  message(FATAL_ERROR "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are mutually exclusive")
+endif()
+# ENABLE_ROCSHMEM links librocshmem.a via -fgpu-rdc --hip-link, which is
+# incompatible with the device linker pipeline (device.elf can't resolve
+# rocshmem API symbols from the .a).
+if(ENABLE_ROCSHMEM AND ENABLE_DEVICE_LINKER)
+  message(STATUS "ENABLE_ROCSHMEM requires -fgpu-rdc --hip-link; disabling device linker")
+  set(ENABLE_DEVICE_LINKER OFF)
+endif()
 set(ROCSHMEM_CMAKE_OPTIONS ""  CACHE STRING    "Extra cmake options passed to the rocSHMEM ExternalProject build")
 option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
