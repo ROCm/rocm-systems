@@ -976,3 +976,36 @@ TEST(GpuUnit, PlxTemperatureFromAFakeApuDeviceIsNotSupported) {
             AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_EQ(temperature, -1);
 }
+
+// The v1.4 table keeps these counters at 32 bits while the public fields are 64.
+// An unreported counter must stay unreported on the way up, and a real one must
+// keep its value.
+TEST(GpuUnit, StaticMetricsTableUnsetAccumulatorsReadAsNotReported) {
+  PRINT_VERBOSITY();
+
+  using Table = amd::smi::AMDGpuMetrics_v14_t;
+  auto blob = BuildMetricsBlob(sizeof(Table), 1, 4, static_cast<uint16_t>(sizeof(Table)));
+  const uint32_t unset = UINT32_MAX;
+  const uint32_t reading = 1234;
+  std::memcpy(blob.data() + offsetof(Table, m_gfx_activity_acc), &unset, sizeof(unset));
+  std::memcpy(blob.data() + offsetof(Table, m_mem_activity_acc), &reading, sizeof(reading));
+
+  FakeMetricsDevice fake_device("static_acc_sentinel_v1_4");
+  fake_device.WriteMetrics(blob);
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+  const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+  ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+
+  EXPECT_EQ(metrics.gfx_activity_acc, UINT64_MAX);
+  EXPECT_EQ(metrics.mem_activity_acc, uint64_t{reading});
+}
+
+TEST(GpuUnit, DynamicMetricsNarrowerUnsetAccumulatorStaysUnset) {
+  const auto out = ToPublicMetrics(BuildDynamicBlob(
+      {{AttrId::GFX_ACTIVITY_ACC, {UINT32_MAX}}, {AttrId::MEM_ACTIVITY_ACC, {1234}}},
+      AttrType::TYPE_UINT32));
+  EXPECT_EQ(out.gfx_activity_acc, UINT64_MAX);
+  EXPECT_EQ(out.mem_activity_acc, 1234u);
+}

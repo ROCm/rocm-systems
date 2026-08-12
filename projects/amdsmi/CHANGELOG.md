@@ -267,6 +267,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi` using the `amdsmi` Python library of another ROCm install**.  
   - When `ROCM_PATH` or `ROCM_HOME` named a different ROCm install, `amd-smi` loaded that install's library, so it either failed with an `AttributeError` or reported the other install's library and ROCm versions. `ROCM_PATH` and `ROCM_HOME` no longer redirect which `amdsmi` Python package `amd-smi` loads.
 
+- **Fixed the widened `amdsmi_gpu_metrics_t` accumulators reporting `4294967295` instead of `N/A`**.  
+  - `amdsmi_get_gpu_metrics_info()` and `amd-smi metric` reported an unsupported `gfx_activity_acc`, `mem_activity_acc`, `pcie_nak_sent_count_acc`, `pcie_nak_rcvd_count_acc` or `pcie_lc_perf_other_end_recovery` as a literal `4294967295` instead of `N/A`.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
