@@ -32,8 +32,8 @@ rocprofiler_add_unit_test(
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-# Pure transforms of a DXG (WSL) KMT node record: no GPU, DXG thunk or HSA runtime
-# is involved, so this runs anywhere.
+# Pure transforms of a DXG (WSL) KMT node record: no GPU, DXG thunk or HSA runtime is
+# involved, so this runs anywhere.
 set(ROCPROFILER_LIB_WSL_DXG_TEST_SOURCES wsl_dxg_topology.cpp)
 
 add_executable(wsl-dxg-topology-tests)
@@ -56,8 +56,8 @@ rocprofiler_add_unit_test(
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-# The librocdxg (WSL) read sequence driven by a fake thunk and a fake dynamic
-# loader. No dlopen, no real thunk and no GPU, so this runs anywhere too.
+# The librocdxg (WSL) read sequence driven by a fake thunk and a fake dynamic loader. No
+# dlopen, no real thunk and no GPU, so this runs anywhere too.
 set(ROCPROFILER_LIB_WSL_DXG_THUNK_TEST_SOURCES wsl_dxg_thunk.cpp)
 
 add_executable(wsl-dxg-thunk-tests)
