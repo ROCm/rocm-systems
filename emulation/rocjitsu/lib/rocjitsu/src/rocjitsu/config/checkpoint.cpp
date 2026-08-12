@@ -9,7 +9,7 @@
 #include "flatbuffers/flatbuffers.h"
 
 #include <algorithm>
-#include <cstring>
+#include <cstddef>
 #include <fstream>
 #include <stdexcept>
 #include <vector>
@@ -26,26 +26,23 @@ serialize_vgpr_block(flatbuffers::FlatBufferBuilder &builder, const amdgpu::Comp
   const size_t block_bytes = static_cast<size_t>(cu.vgpr_allocation_block_size()) * register_bytes;
   uint8_t *serialized = nullptr;
   const auto offset = builder.CreateUninitializedVector<uint8_t>(block_bytes, &serialized);
-  for (uint32_t reg = 0; reg < cu.vgpr_allocation_block_size(); ++reg) {
-    std::memcpy(serialized + static_cast<size_t>(reg) * register_bytes,
-                cu.raw_vgpr_data(base + reg), register_bytes);
-  }
+  cu.copy_raw_vgprs_to(base, cu.vgpr_allocation_block_size(),
+                       {reinterpret_cast<std::byte *>(serialized), block_bytes});
   return offset;
 }
 
-void restore_vgpr_block(amdgpu::ComputeUnitCore &cu, uint32_t base,
-                        const flatbuffers::Vector<uint8_t> &stored) {
+/// Restore sparse checkpoint data into a freshly allocated, zeroed VGPR block.
+/// Zero source registers are skipped to preserve lazy backing; this is a full
+/// restore, rather than a merge, only while the destination begins entirely
+/// zeroed.
+void restore_vgpr_block_into_zeroed_storage(amdgpu::ComputeUnitCore &cu, uint32_t base,
+                                            const flatbuffers::Vector<uint8_t> &stored) {
   const size_t register_bytes = static_cast<size_t>(cu.wf_size()) * sizeof(uint32_t);
   const size_t block_bytes = static_cast<size_t>(cu.vgpr_allocation_block_size()) * register_bytes;
   const size_t copy_size = std::min<size_t>(stored.size(), block_bytes);
-  for (size_t offset = 0; offset < copy_size; offset += register_bytes) {
-    const size_t bytes = std::min(register_bytes, copy_size - offset);
-    const uint8_t *source = stored.data() + offset;
-    if (std::any_of(source, source + bytes, [](uint8_t value) { return value != 0; })) {
-      std::memcpy(cu.raw_vgpr_data(base + static_cast<uint32_t>(offset / register_bytes)), source,
-                  bytes);
-    }
-  }
+  cu.restore_raw_vgprs_into_zeroed_storage(
+      base, cu.vgpr_allocation_block_size(),
+      {reinterpret_cast<const std::byte *>(stored.data()), copy_size});
 }
 
 /// @brief Serialize the SoC configuration into a FlatBuffer SimulationConfig.
@@ -288,8 +285,10 @@ LoadedConfig restore_checkpoint(const std::string &path) {
             }
           }
 
+          // dispatch_wf_at() has just allocated this block, so RegisterFile::allocate()'s
+          // zero-state postcondition satisfies the sparse restore helper's precondition.
           if (auto *vgprs = wf_state->vgprs())
-            restore_vgpr_block(*cu, wf->vgpr_alloc().base, *vgprs);
+            restore_vgpr_block_into_zeroed_storage(*cu, wf->vgpr_alloc().base, *vgprs);
         }
       }
     }

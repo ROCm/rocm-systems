@@ -446,6 +446,7 @@ add_executable(
     waitcnt_counter_test.cpp
     register_access_test.cpp
     register_file_test.cpp
+    simd_correctness/mfma_lazy_storage_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
     isa_target_registry_test.cpp

@@ -1052,12 +1052,11 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   lower_wf->halt();
   const uint32_t acc0 = wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
   const uint32_t acc_last = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1;
-  constexpr uint32_t wave64_regs_per_chunk = 4096 / (64 * sizeof(uint32_t));
-  const uint32_t acc_before_chunk_boundary = acc0 + wave64_regs_per_chunk - 1;
-  const uint32_t acc_after_chunk_boundary = acc0 + wave64_regs_per_chunk;
+  const uint32_t acc_quarter = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 4;
+  const uint32_t acc_midpoint = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 2;
   cu->write_vgpr(acc0, 0, 0xA55A0001u);
-  cu->write_vgpr(acc_before_chunk_boundary, 63, 0xA55A003Fu);
-  cu->write_vgpr(acc_after_chunk_boundary, 63, 0xA55A103Fu);
+  cu->write_vgpr(acc_quarter, 63, 0xA55A003Fu);
+  cu->write_vgpr(acc_midpoint, 63, 0xA55A103Fu);
   cu->write_vgpr(acc_last, 0, 0xDEADBEEFu);
   cu->write_vgpr(acc_last, 63, 0xFEEDFACEu);
 
@@ -1080,11 +1079,11 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 0),
             0xA55A0001u);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
-                                       wave64_regs_per_chunk - 1,
+                                       cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 4,
                                    63),
             0xA55A003Fu);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
-                                       wave64_regs_per_chunk,
+                                       cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 2,
                                    63),
             0xA55A103Fu);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
@@ -1134,11 +1133,10 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->wf_size(), 32u);
   wf->set_exec_raw(0xDEADBEEF0000000FULL);
-  constexpr uint32_t wave32_regs_per_chunk = 4096 / (32 * sizeof(uint32_t));
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
   const uint32_t vgpr_last = vgpr_base + cu->vgpr_allocation_block_size() - 1;
-  cu->write_vgpr(vgpr_base + wave32_regs_per_chunk - 1, 31, 0x1234001Fu);
-  cu->write_vgpr(vgpr_base + wave32_regs_per_chunk, 31, 0x5678001Fu);
+  cu->write_vgpr(vgpr_base + 1, 31, 0x1234001Fu);
+  cu->write_vgpr(vgpr_base + cu->vgpr_allocation_block_size() / 2, 31, 0x5678001Fu);
   cu->write_vgpr(vgpr_last, 31, 0x9ABC001Fu);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
@@ -1157,9 +1155,9 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   ASSERT_NE(restored_wf, nullptr);
   EXPECT_EQ(restored_wf->exec(), 0xFULL);
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
-  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + wave32_regs_per_chunk - 1, 31),
-            0x1234001Fu);
-  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + wave32_regs_per_chunk, 31),
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + 1, 31), 0x1234001Fu);
+  EXPECT_EQ(restored_cu->read_vgpr(
+                restored_wf->vgpr_alloc().base + restored_cu->vgpr_allocation_block_size() / 2, 31),
             0x5678001Fu);
   EXPECT_EQ(restored_cu->read_vgpr(
                 restored_wf->vgpr_alloc().base + restored_cu->vgpr_allocation_block_size() - 1, 31),

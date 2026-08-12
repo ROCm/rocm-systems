@@ -6,8 +6,12 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <type_traits>
+#include <vector>
 
 namespace {
 
@@ -136,6 +140,61 @@ TEST(RegisterFileTest, SoftwareLazyStorageReclaimsAlignedBlocksDuringChurn) {
 
   file.free(regs_per_block);
   EXPECT_EQ(file.materialized_chunk_count(), 0u);
+}
+
+TEST(RegisterFileTest, SoftwareLazyLogicalRangeTraversalAndCopyCrossChunks) {
+  using Vgpr = simdojo::VectorReg<64, uint32_t>;
+  using Storage = simdojo::detail::SoftwareLazyRegisterStorage<Vgpr>;
+  using File = RegisterFile<Vgpr, RegisterFileStorage::SOFTWARE_LAZY>;
+  constexpr uint32_t regs_per_chunk = Storage::registers_per_chunk();
+  constexpr uint32_t reg_count = 2 * regs_per_chunk + 1;
+  File file("software_lazy");
+  file.init(reg_count, reg_count);
+  ASSERT_EQ(file.allocate(reg_count), 0);
+
+  const size_t byte_count = static_cast<size_t>(reg_count) * sizeof(Vgpr) - 3;
+  std::vector<std::byte> source(byte_count);
+  for (size_t idx = 0; idx < source.size(); ++idx)
+    source[idx] = static_cast<std::byte>((idx * 37 + 11) & 0xFF);
+  file.copy_from(0, reg_count, source);
+
+  std::vector<std::byte> copied(byte_count);
+  const File &const_file = file;
+  const_file.copy_to(0, reg_count, copied);
+  EXPECT_EQ(copied, source);
+
+  uint32_t visited = 0;
+  const_file.for_each(0, reg_count, [&](const Vgpr &reg) {
+    EXPECT_EQ(reg[0], file[visited][0]);
+    ++visited;
+  });
+  EXPECT_EQ(visited, reg_count);
+}
+
+TEST(RegisterFileTest, SoftwareLazySparseCopyPreservesAbsentZeroChunks) {
+  using Vgpr = simdojo::VectorReg<64, uint32_t>;
+  using Storage = simdojo::detail::SoftwareLazyRegisterStorage<Vgpr>;
+  using File = RegisterFile<Vgpr, RegisterFileStorage::SOFTWARE_LAZY>;
+  constexpr uint32_t regs_per_chunk = Storage::registers_per_chunk();
+  constexpr uint32_t reg_count = 3 * regs_per_chunk;
+  File file("software_lazy");
+  file.init(reg_count, reg_count);
+  ASSERT_EQ(file.allocate(reg_count), 0);
+
+  std::vector<std::byte> source(static_cast<size_t>(reg_count) * sizeof(Vgpr));
+  source[7] = std::byte{0x5A};
+  source[2 * regs_per_chunk * sizeof(Vgpr) + 13] = std::byte{0xA5};
+  file.copy_nonzero_from(0, reg_count, source);
+  EXPECT_EQ(file.materialized_chunk_count(), 2u);
+
+  std::vector<std::byte> copied(source.size());
+  const File &const_file = file;
+  const_file.copy_to(0, reg_count, copied);
+  EXPECT_EQ(copied, source);
+
+  const_file.for_each(regs_per_chunk, regs_per_chunk,
+                      [](const Vgpr &reg) { EXPECT_EQ(reg[0], 0u); });
+  EXPECT_EQ(file.materialized_chunk_count(), 2u);
 }
 
 #if GTEST_HAS_DEATH_TEST && !defined(NDEBUG)

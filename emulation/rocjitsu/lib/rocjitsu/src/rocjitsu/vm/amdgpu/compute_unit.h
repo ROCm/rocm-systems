@@ -35,10 +35,13 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -509,6 +512,35 @@ public:
   /// @returns Mutable pointer to one register's raw lane data.
   virtual uint8_t *raw_vgpr_data(uint32_t base) = 0;
 
+  /// @brief Visit a logical physical-VGPR range in register order.
+  /// @details Each callback span contains exactly one register's lanes. Backing
+  /// storage boundaries are not observable through this interface.
+  template <typename Function>
+  void for_each_raw_vgpr(uint32_t base, uint32_t count, Function &&function) const {
+    using FunctionType = std::remove_reference_t<Function>;
+    static_assert(std::is_object_v<FunctionType>, "VGPR visitors must be callable objects");
+    static_assert(std::is_invocable_v<FunctionType &, std::span<const uint32_t>>,
+                  "VGPR visitor must accept a const lane span");
+    for_each_raw_vgpr_impl(base, count, &function,
+                           [](const void *context, std::span<const uint32_t> lanes) {
+                             if constexpr (std::is_const_v<FunctionType>) {
+                               (*static_cast<const FunctionType *>(context))(lanes);
+                             } else {
+                               (*static_cast<FunctionType *>(const_cast<void *>(context)))(lanes);
+                             }
+                           });
+  }
+
+  /// @brief Copy raw bytes from a logical physical-VGPR range.
+  virtual void copy_raw_vgprs_to(uint32_t base, uint32_t count,
+                                 std::span<std::byte> destination) const = 0;
+
+  /// @brief Restore raw bytes into a logically zero physical-VGPR range.
+  /// @details Zero source runs remain unmaterialized, so this is a full restore
+  /// only when every destination byte is initially zero.
+  virtual void restore_raw_vgprs_into_zeroed_storage(uint32_t base, uint32_t count,
+                                                     std::span<const std::byte> source) = 0;
+
   /// @brief Read a VGPR lane directly from physical storage.
   /// @details This deliberately bypasses plugin observation and is reserved
   /// for VM storage operations. Instruction code receives
@@ -579,6 +611,10 @@ protected:
 
   /// @brief Count the number of free VGPR allocation blocks.
   virtual uint32_t free_vgpr_blocks() const = 0;
+
+  using RawVgprVisitor = void (*)(const void *, std::span<const uint32_t>);
+  virtual void for_each_raw_vgpr_impl(uint32_t base, uint32_t count, const void *context,
+                                      RawVgprVisitor visitor) const = 0;
 
   /// @brief Update wavefront states (WAITCNT, BARRIER, ENDING transitions).
   void update_wf_states();
@@ -825,6 +861,16 @@ public:
     return reinterpret_cast<uint8_t *>(&vgpr_file_[base]);
   }
 
+  void copy_raw_vgprs_to(uint32_t base, uint32_t count,
+                         std::span<std::byte> destination) const override {
+    vgpr_file_.copy_to(base, count, destination);
+  }
+
+  void restore_raw_vgprs_into_zeroed_storage(uint32_t base, uint32_t count,
+                                             std::span<const std::byte> source) override {
+    vgpr_file_.copy_nonzero_from(base, count, source);
+  }
+
   /// @brief Return the VGPR register file (typed, only on concrete CU).
   /// @returns Const reference to the VGPR register file.
   const VgprFile &vgpr_file() const { return vgpr_file_; }
@@ -841,6 +887,16 @@ protected:
   void free_vgprs(uint32_t base) override { vgpr_file_.free(base); }
 
   uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
+
+  void for_each_raw_vgpr_impl(uint32_t base, uint32_t count, const void *context,
+                              ComputeUnitCore::RawVgprVisitor visitor) const override {
+    static_assert(sizeof(Vgpr) == Isa::WF_SIZE * sizeof(uint32_t),
+                  "VectorReg must be layout-compatible with raw lane storage");
+    vgpr_file_.for_each(base, count, [&](const Vgpr &reg) {
+      visitor(context,
+              {reinterpret_cast<const uint32_t *>(&reg), static_cast<size_t>(Isa::WF_SIZE)});
+    });
+  }
 
 public:
   uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
