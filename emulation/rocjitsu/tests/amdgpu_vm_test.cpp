@@ -4505,20 +4505,24 @@ TEST(AqlDispatchTest, PoolContinuationLetsPeerCommandProcessorSatisfyPollingWave
       {"name":"xcd0","type":"xcd","children":[
         {"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},
         {"name":"se0","type":"shader_engine","children":[
-          {"name":"cu0","type":"compute_unit","config":[
+          {"name":"cu[0:2]","type":"compute_unit","config":[
             {"key":"num_wf_slots","value":"1"},{"key":"sgprs_per_wf","value":"104"},
             {"key":"vgprs_per_wf","value":"256"},{"key":"lds_size_kb","value":"64"}]}]}]},
       {"name":"xcd1","type":"xcd","children":[
         {"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},
         {"name":"se0","type":"shader_engine","children":[
-          {"name":"cu0","type":"compute_unit","config":[
+          {"name":"cu[0:2]","type":"compute_unit","config":[
             {"key":"num_wf_slots","value":"1"},{"key":"sgprs_per_wf","value":"104"},
             {"key":"vgprs_per_wf","value":"256"},{"key":"lds_size_kb","value":"64"}]}]}]}
     ]},"links":[
       {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+      {"src":"xcd0.cp.req_1","dst":"xcd0.se0.cu1.cpl","latency":1,"weight":2},
       {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10},
+      {"src":"xcd0.se0.cu1.req","dst":"xcd0.l2.cpl_1","latency":1,"weight":10},
       {"src":"xcd1.cp.req_0","dst":"xcd1.se0.cu0.cpl","latency":1,"weight":2},
-      {"src":"xcd1.se0.cu0.req","dst":"xcd1.l2.cpl_0","latency":1,"weight":10}
+      {"src":"xcd1.cp.req_1","dst":"xcd1.se0.cu1.cpl","latency":1,"weight":2},
+      {"src":"xcd1.se0.cu0.req","dst":"xcd1.l2.cpl_0","latency":1,"weight":10},
+      {"src":"xcd1.se0.cu1.req","dst":"xcd1.l2.cpl_1","latency":1,"weight":10}
     ]}})";
   auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
   auto *soc_ptr = loaded.soc();
@@ -6005,7 +6009,7 @@ TEST(AqlDispatchTest, ActiveDispatchSurvivesPoolToSerialTransition) {
 }
 
 TEST(AqlDispatchTest, LivePluginReplacementPreservesPoolDuringActiveDispatch) {
-  VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+  VmFixture f("cdna4", /*num_cus=*/2, /*num_wf_slots=*/1);
   f.soc_ptr->set_dispatch_threads(2);
   auto serial_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   ASSERT_TRUE(serial_group->add(std::make_unique<LiveSerializedHotHookPlugin>()));
@@ -6048,6 +6052,45 @@ uint64_t instructions_visible_at_tick_ten(uint32_t dispatch_threads) {
 TEST(AqlDispatchTest, PoolPreservesSerialQuantumSpacingAroundPeerEvent) {
   EXPECT_EQ(instructions_visible_at_tick_ten(/*dispatch_threads=*/1), 1024u);
   EXPECT_EQ(instructions_visible_at_tick_ten(/*dispatch_threads=*/2), 1024u);
+}
+
+TEST(AqlDispatchTest, PoolDispatchIntoActiveCuPreservesResidentDueTick) {
+  VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/2);
+  f.cp()->set_dispatch_threads(2);
+  auto code = make_multi_quantum_nop_kernel();
+  const uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+
+  step_until_first_quantum(f, f.cu());
+  auto *resident = f.cu()->wf(0);
+  ASSERT_NE(resident, nullptr);
+
+  // Advance between the resident wave's first and second due ticks, then add a
+  // second wave to its partially occupied CU. Scheduling the newcomer must not
+  // pull the resident wave's already-established continuation forward.
+  simdojo::Event advance_event{f.cp(), simdojo::EventType::TIMER_CALLBACK,
+                               [](simdojo::Tick, simdojo::Message *) {}};
+  f.engine->schedule_event_async(&advance_event, 10);
+  ASSERT_TRUE(f.engine->step());
+
+  queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+  ASSERT_TRUE(f.engine->step());
+  ASSERT_EQ(f.cu()->num_wfs(), 2u);
+
+  uint64_t resident_instructions = 0;
+  bool sampled = false;
+  simdojo::Event sample_event{f.cp(), simdojo::EventType::TIMER_CALLBACK,
+                              [&](simdojo::Tick, simdojo::Message *) {
+                                resident_instructions = resident->trace_inst_count_;
+                                sampled = true;
+                              }};
+  f.engine->schedule_event_async(&sample_event, 20);
+  for (uint32_t i = 0; i < 4 && !sampled; ++i)
+    ASSERT_TRUE(f.engine->step());
+
+  ASSERT_TRUE(sampled);
+  EXPECT_EQ(resident_instructions, f.cu()->functional_quantum());
 }
 
 TEST(AqlDispatchTest, PoolTracksIndependentCuDueTicks) {

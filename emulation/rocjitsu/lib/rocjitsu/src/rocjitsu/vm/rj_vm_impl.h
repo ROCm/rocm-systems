@@ -14,7 +14,23 @@
 #include "simdojo/sim/simulation.h"
 
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <vector>
+
+namespace rocjitsu::detail {
+
+/// Resolve the functional CU-dispatch width for each SoC.
+///
+/// A nonzero configured value is a per-SoC width. Zero selects an automatic
+/// host-wide budget, capped at 32, which is divided as evenly as possible
+/// across the SoCs. Every SoC retains a minimum width of one (serial dispatch).
+std::vector<uint32_t> resolve_cpu_dispatch_thread_budgets(uint32_t configured_threads,
+                                                          uint32_t hardware_threads,
+                                                          size_t soc_count);
+
+} // namespace rocjitsu::detail
 
 struct rj_vm_t : rocjitsu::RefCounted {
   std::unique_ptr<simdojo::SimulationEngine> engine;

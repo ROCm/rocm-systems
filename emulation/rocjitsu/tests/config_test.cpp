@@ -31,6 +31,7 @@ RJ_DIAGNOSTIC_POP
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -41,6 +42,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1441,6 +1443,127 @@ TEST(ConfigLoaderTest, DispatchPlacementDoesNotFollowHostThreadCount) {
   EXPECT_EQ(se1_wfs, 0u);
 }
 
+std::string functional_quantum_checkpoint_config(uint32_t first, uint32_t second) {
+  return R"({"max_ticks":10000,"num_threads":1,"exec_mode":"functional",
+    "vm":{"arch":"cdna3"},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu0","type":"compute_unit","config":[
+            {"key":"functional_quantum","value":")" +
+         std::to_string(first) + R"("}]},
+          {"name":"cu1","type":"compute_unit","config":[
+            {"key":"functional_quantum","value":")" +
+         std::to_string(second) + R"("}]}
+        ]}
+      ]}
+    ]}}})";
+}
+
+test::ScopedTempFile write_legacy_quantum_checkpoint() {
+  flatbuffers::FlatBufferBuilder builder;
+  auto arch = builder.CreateString("cdna3");
+  // The legacy writer supplied only the first four values. With the original
+  // wire default of zero, functional_quantum was absent from the table.
+  auto cu_config = fb::CreateComputeUnitConfig(builder, 1, 104, 256, 64);
+  auto se_config = fb::CreateShaderEngineConfig(builder, 1, cu_config);
+  auto xcd_config = fb::CreateXcdConfig(builder, 1, se_config);
+  auto gpu_config = fb::CreateAmdgpuConfig(builder, 1, 0, xcd_config);
+  auto vm_config = fb::CreateVirtualMachineConfig(builder, arch, gpu_config);
+  auto exec_mode = builder.CreateString("functional");
+  auto simulation_config = fb::CreateSimulationConfig(builder, 10000, 1, exec_mode, vm_config);
+
+  auto cu_name = builder.CreateString("gpu_soc.xcd0.se0.cu0");
+  std::vector<flatbuffers::Offset<fb::WavefrontState>> no_wavefronts;
+  auto wavefronts = builder.CreateVector(no_wavefronts);
+  // Supply only legacy fields so the appended per-CU quantum marker is absent.
+  auto cu_state = fb::CreateComputeUnitState(builder, cu_name, wavefronts, 0);
+  std::vector<flatbuffers::Offset<fb::ComputeUnitState>> cu_state_offsets{cu_state};
+  auto cu_states = builder.CreateVector(cu_state_offsets);
+  auto checkpoint = fb::CreateSimulationCheckpoint(builder, 0, simulation_config, cu_states);
+  builder.Finish(checkpoint);
+
+  test::ScopedTempFile file("rocjitsu-legacy-quantum-checkpoint-");
+  file.write(std::string_view(reinterpret_cast<const char *>(builder.GetBufferPointer()),
+                              builder.GetSize()));
+  return file;
+}
+
+TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
+  auto checkpoint_file = write_legacy_quantum_checkpoint();
+  auto bytes = read_binary_file(checkpoint_file.path());
+  const auto *checkpoint = fb::GetSimulationCheckpoint(bytes.data());
+  ASSERT_NE(checkpoint, nullptr);
+  ASSERT_NE(checkpoint->config(), nullptr);
+  ASSERT_NE(checkpoint->config()->vm(), nullptr);
+  ASSERT_NE(checkpoint->config()->vm()->gpu(), nullptr);
+  ASSERT_NE(checkpoint->config()->vm()->gpu()->xcd(), nullptr);
+  ASSERT_NE(checkpoint->config()->vm()->gpu()->xcd()->shader_engine(), nullptr);
+  const auto *legacy_config =
+      checkpoint->config()->vm()->gpu()->xcd()->shader_engine()->compute_unit();
+  ASSERT_NE(legacy_config, nullptr);
+  EXPECT_FALSE(
+      flatbuffers::IsFieldPresent(legacy_config, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM));
+  ASSERT_NE(checkpoint->compute_units(), nullptr);
+  ASSERT_EQ(checkpoint->compute_units()->size(), 1u);
+  EXPECT_FALSE(checkpoint->compute_units()->Get(0)->functional_quantum_present());
+
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  auto *cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  EXPECT_EQ(cu->config().functional_quantum, amdgpu::ComputeUnitCore::kFunctionalQuantum);
+}
+
+TEST(CheckpointTest, RoundTripsExplicitUnboundedFunctionalQuantum) {
+  const std::string json = functional_quantum_checkpoint_config(0, 0);
+  auto source = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *source_se = source.soc()->xcd(0)->shader_engine(0);
+  ASSERT_EQ(source_se->compute_unit(0)->config().functional_quantum, 0u);
+
+  test::ScopedTempFile checkpoint_file("rocjitsu-zero-quantum-checkpoint-");
+  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config);
+
+  auto bytes = read_binary_file(checkpoint_file.path());
+  const auto *checkpoint = fb::GetSimulationCheckpoint(bytes.data());
+  ASSERT_NE(checkpoint, nullptr);
+  const auto *serialized_config =
+      checkpoint->config()->vm()->gpu()->xcd()->shader_engine()->compute_unit();
+  ASSERT_NE(serialized_config, nullptr);
+  EXPECT_TRUE(
+      flatbuffers::IsFieldPresent(serialized_config, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM));
+  EXPECT_EQ(serialized_config->functional_quantum(), 0u);
+  ASSERT_NE(checkpoint->compute_units(), nullptr);
+  ASSERT_EQ(checkpoint->compute_units()->size(), 2u);
+  const auto *first_state = checkpoint->compute_units()->Get(0);
+  ASSERT_NE(first_state, nullptr);
+  EXPECT_TRUE(first_state->functional_quantum_present());
+  EXPECT_EQ(first_state->functional_quantum(), 0u);
+
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
+  EXPECT_EQ(restored_se->compute_unit(0)->config().functional_quantum, 0u);
+  EXPECT_EQ(restored_se->compute_unit(1)->config().functional_quantum, 0u);
+}
+
+TEST(CheckpointTest, RoundTripsHeterogeneousFunctionalQuantum) {
+  const std::string json = functional_quantum_checkpoint_config(7, 37);
+  auto source = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *source_se = source.soc()->xcd(0)->shader_engine(0);
+  ASSERT_EQ(source_se->compute_unit(0)->config().functional_quantum, 7u);
+  ASSERT_EQ(source_se->compute_unit(1)->config().functional_quantum, 37u);
+
+  test::ScopedTempFile checkpoint_file("rocjitsu-heterogeneous-quantum-checkpoint-");
+  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config);
+
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
+  EXPECT_EQ(restored_se->compute_unit(0)->config().functional_quantum, 7u);
+  EXPECT_EQ(restored_se->compute_unit(1)->config().functional_quantum, 37u);
+}
+
 TEST(CheckpointTest, SaveAndRestoreMemory) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,"exec_mode":"clocked",
     "vm":{"arch":"cdna3"},
@@ -1881,7 +2004,7 @@ TEST(CheckpointTest, RoundTripsWorkgroupCoordinates) {
   EXPECT_EQ(restored_wf->wg_coord(), (std::array<uint32_t, 3>{3, 5, 7}));
 }
 
-std::string functional_dispatch_threads_config(uint32_t threads) {
+std::string functional_dispatch_threads_config(uint32_t threads, uint32_t num_cus = 7) {
   return R"({"max_ticks":1000,"num_threads":1,"exec_mode":"functional",
     "cpu_dispatch_threads":)" +
          std::to_string(threads) + R"(,
@@ -1890,7 +2013,11 @@ std::string functional_dispatch_threads_config(uint32_t threads) {
       {"name":"vram","type":"gpu_memory"},
       {"name":"xcd[0:2]","type":"xcd","children":[
         {"name":"l2","type":"l2_cache"},
-        {"name":"cp","type":"command_processor"}
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu[0:)" +
+         std::to_string(num_cus) + R"(]","type":"compute_unit"}
+        ]}
       ]}
     ]}}})";
 }
@@ -1924,7 +2051,59 @@ TEST(CApiTest, FunctionalDispatchThreadsPropagateExplicitAndAutoValues) {
   };
 
   run_case(/*configured=*/7, /*expected=*/7);
-  run_case(/*configured=*/0, /*expected=*/std::nullopt);
+  const auto auto_budget = detail::resolve_cpu_dispatch_thread_budgets(
+      /*configured_threads=*/0, std::thread::hardware_concurrency(), /*soc_count=*/1);
+  ASSERT_EQ(auto_budget.size(), 1u);
+  run_case(/*configured=*/0, /*expected=*/std::min(auto_budget.front(), 7u));
+}
+
+TEST(CApiTest, ExplicitFunctionalDispatchThreadsClampToSingleCuCapacity) {
+  const std::string json = functional_dispatch_threads_config(/*threads=*/7, /*num_cus=*/1);
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
+
+  EXPECT_EQ(handle->soc->dispatch_threads(), 1u);
+  EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*handle->soc), 0u);
+  handle->soc->for_each_cp([](auto *cp) {
+    ASSERT_EQ(cp->compute_units().size(), 1u);
+    EXPECT_EQ(cp->dispatch_threads(), 1u);
+  });
+}
+
+TEST(CApiTest, AutoFunctionalDispatchThreadsClampToSingleCuCapacity) {
+  const std::string json = functional_dispatch_threads_config(/*threads=*/0, /*num_cus=*/1);
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
+
+  EXPECT_EQ(handle->soc->dispatch_threads(), 1u);
+  EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*handle->soc), 0u);
+  handle->soc->for_each_cp([](auto *cp) {
+    ASSERT_EQ(cp->compute_units().size(), 1u);
+    EXPECT_EQ(cp->dispatch_threads(), 1u);
+  });
+}
+
+TEST(CApiTest, AutoFunctionalDispatchBudgetAppliesToEveryGpu) {
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create((CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json").c_str(),
+                         RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
+
+  ASSERT_NE(handle->vm, nullptr);
+  ASSERT_EQ(handle->vm->num_socs(), 4u);
+  const auto expected = detail::resolve_cpu_dispatch_thread_budgets(
+      /*configured_threads=*/0, std::thread::hardware_concurrency(), handle->vm->num_socs());
+  ASSERT_EQ(expected.size(), handle->vm->num_socs());
+  for (uint32_t i = 0; i < handle->vm->num_socs(); ++i)
+    EXPECT_EQ(handle->vm->soc(i)->dispatch_threads(), expected[i]) << "SoC " << i;
 }
 
 TEST(CApiTest, CreateAndDestroyFromString) {
@@ -2060,6 +2239,54 @@ TEST(CApiTest, CheckpointRoundTrip) {
   int active = 1;
   EXPECT_EQ(rj_vm_step(restored.get(), &active), ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(restored_cu->num_wfs(), 0u);
+}
+
+TEST(CApiTest, CheckpointRoundTripPreservesFunctionalDispatchControls) {
+  const char *json = R"({
+    "max_ticks":10000,"num_threads":1,"exec_mode":"functional",
+    "cpu_dispatch_threads":3,
+    "vm":{"arch":"cdna3"},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd[0:2]","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu[0:3]","type":"compute_unit","config":[
+            {"key":"num_wf_slots","value":"10"},
+            {"key":"sgprs_per_wf","value":"104"},
+            {"key":"vgprs_per_wf","value":"256"},
+            {"key":"lds_size_kb","value":"64"},
+            {"key":"functional_quantum","value":"37"}
+          ]}
+        ]}
+      ]}
+    ]}}})";
+
+  auto source_config = write_temp_config(json);
+  rj_vm_t *raw_source = nullptr;
+  ASSERT_EQ(rj_vm_create(source_config.path().c_str(), RJ_VM_MODE_DEFAULT, &raw_source),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_source, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
+
+  EXPECT_EQ(source->soc->dispatch_threads(), 3u);
+  EXPECT_EQ(source->soc->xcd(0)->shader_engine(0)->compute_unit(0)->config().functional_quantum,
+            37u);
+
+  test::ScopedTempFile checkpoint("rocjitsu-c-api-checkpoint-controls-");
+  ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint.path().c_str(), 42),
+            ROCJITSU_STATUS_SUCCESS);
+
+  rj_vm_t *raw_restored = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(checkpoint.path().c_str(), &raw_restored),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_restored, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(raw_restored, &rj_vm_destroy);
+
+  EXPECT_EQ(restored->soc->dispatch_threads(), 3u);
+  EXPECT_EQ(restored->soc->xcd(0)->shader_engine(0)->compute_unit(0)->config().functional_quantum,
+            37u);
 }
 
 TEST(CApiTest, RejectsMalformedCheckpoints) {

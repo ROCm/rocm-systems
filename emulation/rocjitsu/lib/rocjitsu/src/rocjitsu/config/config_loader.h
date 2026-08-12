@@ -80,7 +80,9 @@ struct LoadedConfig {
   uint32_t num_gpus = 1;                ///< Number of simulated GPU instances.
   std::vector<KfdDeviceConfig> devices; ///< Per-GPU configs (populated when num_gpus > 1).
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
-  uint32_t cpu_dispatch_threads = 0; ///< Shared SoC dispatch pool (0 = auto, capped at 32).
+  /// Requested functional dispatch width. Automatic mode uses a host-wide
+  /// budget capped at 32; each SoC's effective width is CU-capacity-clamped.
+  uint32_t cpu_dispatch_threads = 0;
 
   /// @brief Return the SoC from the topology root.
   SoC *soc();

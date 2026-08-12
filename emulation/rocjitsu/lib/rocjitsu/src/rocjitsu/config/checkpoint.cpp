@@ -107,8 +107,14 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
       num_cus = se->num_compute_units();
       if (num_cus > 0) {
         const auto &cu_cfg = se->compute_unit(0)->config();
+        // Store an explicit zero even though it is the stable wire default. It
+        // means unbounded for a new checkpoint, while field absence remains the
+        // legacy signal that restore should use ComputeUnitCore's native default.
+        builder.ForceDefaults(true);
         fb_cu = fb::CreateComputeUnitConfig(builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf,
-                                            cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb);
+                                            cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb,
+                                            cu_cfg.functional_quantum);
+        builder.ForceDefaults(false);
       }
     }
   }
@@ -119,7 +125,7 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
   auto fb_vm = fb::CreateVirtualMachineConfig(builder, arch_str, fb_gpu);
 
   return fb::CreateSimulationConfig(builder, engine_config.max_ticks, engine_config.num_threads,
-                                    exec_mode_str, fb_vm);
+                                    exec_mode_str, fb_vm, 0, 0, soc.dispatch_threads());
 }
 
 /// @brief Reconstruct a VirtualMachine::Config from a stored FlatBuffer config.
@@ -150,6 +156,12 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
           cu_cfg.sgprs_per_wf = cu->sgprs_per_wf();
           cu_cfg.vgprs_per_wf = cu->vgprs_per_wf();
           cu_cfg.lds_size_kb = cu->lds_size_kb();
+          // An absent field is a legacy checkpoint. Keep Config's native
+          // default instead of changing the FlatBuffers wire default: changing
+          // a scalar default makes old and new schemas non-conforming, and an
+          // old omitted zero would otherwise be reinterpreted as 1024.
+          if (flatbuffers::IsFieldPresent(cu, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM))
+            cu_cfg.functional_quantum = cu->functional_quantum();
         }
       }
     }
@@ -234,7 +246,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 
         auto name = builder.CreateString(cu->name());
         auto wfs_vec = builder.CreateVector(wf_offsets);
-        auto cus = fb::CreateComputeUnitState(builder, name, wfs_vec, 0);
+        auto cus = fb::CreateComputeUnitState(builder, name, wfs_vec, 0,
+                                              cu->config().functional_quantum, true);
         cu_offsets.push_back(cus);
       }
     }
@@ -332,6 +345,8 @@ LoadedConfig restore_checkpoint(const std::string &path) {
       if (!cu_state)
         continue;
       auto *cu = all_cus[i];
+      if (cu_state->functional_quantum_present())
+        cu->set_functional_quantum(cu_state->functional_quantum());
       if (auto *wf_states = cu_state->wavefronts()) {
         for (auto *wf_state : *wf_states) {
           uint32_t num_sgprs =
@@ -407,6 +422,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   LoadedConfig result;
   result.engine_config = engine_config;
   result.exec_mode = vm_config.soc.exec_mode;
+  result.cpu_dispatch_threads = fb_config->cpu_dispatch_threads();
   result.build_result.root = std::move(soc);
   result.build_result.memory = mem_ptr;
   return result;
