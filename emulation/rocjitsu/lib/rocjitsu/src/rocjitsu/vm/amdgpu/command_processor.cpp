@@ -276,7 +276,8 @@ uint32_t initial_mode_from_compute_pgm_rsrc1(uint32_t rsrc1, rj_code_arch_t arch
 
 } // namespace
 
-CommandProcessor::CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {
+CommandProcessor::CommandProcessor(std::string name, simdojo::ExecMode exec_mode)
+    : simdojo::Component(std::move(name)), exec_mode_(exec_mode) {
   // register_queue() may start the doorbell monitor before startup(), so the
   // event must already have a handler when the queue becomes visible.
   doorbell_event_.set_handler(
@@ -285,15 +286,20 @@ CommandProcessor::CommandProcessor(std::string name) : simdojo::Component(std::m
 
 CommandProcessor::~CommandProcessor() { stop_doorbell_monitor(); }
 
+void CommandProcessor::set_shared_dispatch_pool(CpuDispatchPool *pool) {
+  shared_dispatch_pool_ = pool;
+  if (shared_dispatch_pool_)
+    local_dispatch_pool_.reset();
+}
+
 void CommandProcessor::set_dispatch_threads(uint32_t threads) {
   threads = std::max(threads, 1u);
-  if (plugin_group_->requires_serial_hot_hooks())
+  if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL || plugin_group_->requires_serial_hot_hooks())
     threads = 1;
   if (dispatch_threads_ == threads)
     return;
   dispatch_threads_ = threads;
-  for (auto *spi : spis_)
-    spi->reset_dispatch_pool();
+  local_dispatch_pool_.reset();
 }
 
 void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
@@ -1855,6 +1861,37 @@ bool CommandProcessor::has_active_cus() const {
   return false;
 }
 
+FunctionalQuantumResult CommandProcessor::run_active_cus_once() {
+  active_cu_scratch_.clear();
+  if (!spis_.empty()) {
+    for (auto *spi : spis_)
+      spi->append_active_cus(active_cu_scratch_);
+  } else {
+    for (auto *cu : cus_) {
+      if (cu->has_active_wfs())
+        active_cu_scratch_.push_back(cu);
+    }
+  }
+
+  if (active_cu_scratch_.empty())
+    return {};
+
+  uint32_t effective_threads =
+      std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(active_cu_scratch_.size()));
+  if (shared_dispatch_pool_)
+    return shared_dispatch_pool_->run(active_cu_scratch_, effective_threads);
+  if (effective_threads > 1) {
+    if (!local_dispatch_pool_ || local_dispatch_pool_->thread_count() < effective_threads)
+      local_dispatch_pool_ = std::make_unique<CpuDispatchPool>(effective_threads);
+    return local_dispatch_pool_->run(active_cu_scratch_, effective_threads);
+  }
+
+  FunctionalQuantumResult result;
+  for (auto *cu : active_cu_scratch_)
+    result.merge(cu->run_quantum());
+  return result;
+}
+
 rocr::llvm::amdhsa::kernel_descriptor_t
 CommandProcessor::read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid,
                                          [[maybe_unused]] bool host_accessible) {
@@ -2606,23 +2643,12 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   // references; worker completion callbacks continue to use only the queue
   // mutex.
   auto run_dispatch_workers = [&]() {
-    if (dispatch_threads_ <= 1 || !has_active_cus())
+    if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL || dispatch_threads_ <= 1 || !has_active_cus())
       return FunctionalQuantumResult{};
     lock.unlock();
-    // Wavefront execution is driven by the SPIs, which own the worker pools;
-    // the CP only orchestrates queue fetch, dispatch, and completion. SPI-less
-    // topologies (direct add_compute_unit test harnesses) fall back to driving
-    // the CUs directly.
-    FunctionalQuantumResult result;
-    if (!spis_.empty()) {
-      for (auto *spi : spis_)
-        result.merge(spi->run_active_cus_once(dispatch_threads_));
-    } else {
-      for (auto *cu : cus_) {
-        if (cu->has_active_wfs())
-          result.merge(cu->run_quantum());
-      }
-    }
+    // One shared pool and thread budget covers the CP's complete active-CU
+    // batch instead of retaining a separate pool for every SPI.
+    FunctionalQuantumResult result = run_active_cus_once();
     lock.lock();
     if (completion_)
       completion_->drain_completions(new_queue_states_);

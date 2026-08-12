@@ -14,7 +14,6 @@
 #define ROCJITSU_VM_AMDGPU_SPI_H_
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 #include "util/bit.h"
@@ -152,38 +151,13 @@ public:
     return false;
   }
 
-  /// @brief Execute one functional quantum on each active CU.
-  ///
-  /// @details Drives wavefront execution for this SE's CUs, fanning out
-  /// across up to @p threads host threads via an SPI-owned worker pool.
-  /// @returns Whether any CU ran and whether one requested an event-loop yield.
-  FunctionalQuantumResult run_active_cus_once(uint32_t threads) {
-    // Reused across calls (one dispatch thread drives an SPI) to avoid a heap
-    // allocation on every dispatch quantum.
-    active_scratch_.clear();
+  /// @brief Append this SPI's active CUs to a command-processor work batch.
+  void append_active_cus(std::vector<ComputeUnitCore *> &active) const {
     for (auto *cu : cus_) {
       if (cu->has_active_wfs())
-        active_scratch_.push_back(cu);
+        active.push_back(cu);
     }
-    if (active_scratch_.empty())
-      return {};
-    auto &active = active_scratch_;
-
-    uint32_t effective_threads = std::min<uint32_t>(threads, static_cast<uint32_t>(active.size()));
-    FunctionalQuantumResult result;
-    if (effective_threads > 1) {
-      if (!dispatch_pool_ || dispatch_pool_->thread_count() < effective_threads)
-        dispatch_pool_ = std::make_unique<CpuDispatchPool>(effective_threads);
-      result = dispatch_pool_->run(active, effective_threads);
-    } else {
-      for (auto *cu : active)
-        result.merge(cu->run_quantum());
-    }
-    return result;
   }
-
-  /// @brief Tear down the worker pool (e.g., on thread-count change).
-  void reset_dispatch_pool() { dispatch_pool_.reset(); }
 
   /// @brief Check if any WGs are queued or any CU is active.
   bool has_pending() const {
@@ -334,9 +308,6 @@ private:
   std::unordered_map<uint64_t, WgpReservation> resident_wgp_workgroups_;
   std::vector<std::deque<WgRequest>> pipe_queues_;
   size_t next_pipe_ = 0;
-  std::unique_ptr<CpuDispatchPool> dispatch_pool_; ///< Drives wavefront execution on host threads.
-  std::vector<ComputeUnitCore *>
-      active_scratch_; ///< Reused active-CU list for run_active_cus_once.
 };
 
 } // namespace amdgpu
