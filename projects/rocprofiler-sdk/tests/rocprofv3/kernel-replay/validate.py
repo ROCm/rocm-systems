@@ -37,6 +37,7 @@
 # (The app verifies its own results in the generate step, guarding the restored data itself.)
 
 import collections
+import math
 import sys
 
 import pytest
@@ -221,6 +222,47 @@ def test_each_pass_collects_distinct_batch(json_data, expected_passes, common_co
             f"dispatch {dispatch_id} ({entry['kernel']}) expected {expected_passes} distinct "
             f"per-pass counters, got {sorted(unique_per_pass)}"
         )
+
+
+def test_no_duplicate_pass_records(json_data):
+    # Metric 5: exactly one counter record per (dispatch, replay_pass).
+    #
+    # _records_by_dispatch keys passes by index, so a second record for a pass overwrites
+    # the first and the duplicate becomes invisible to every other check. A replay that
+    # delivered a pass's completion twice would validate clean, which matters because
+    # missed-versus-duplicated completion delivery is the failure mode the routing work
+    # in this area is about. Counted on the raw records, before any aggregation.
+    seen = collections.Counter()
+    for rec in _counter_records(_sdk(json_data)):
+        seen[(_dispatch_id(rec), _pass_index(rec))] += 1
+    duplicated = {key: count for key, count in seen.items() if count > 1}
+    assert (
+        not duplicated
+    ), "duplicate counter records for (dispatch_id, replay_pass): " + ", ".join(
+        f"{key} x{count}" for key, count in sorted(duplicated.items())
+    )
+
+
+def test_counter_values_are_finite_and_nonnegative(json_data):
+    # Metric 6: a floor under the per-pass unique counters.
+    #
+    # The shared counters are cross-checked across passes, but a counter that appears in
+    # only one --pmc group has nothing to compare against, so a corrupt readout there is
+    # invisible. This does not prove such a value is correct -- there is no oracle without
+    # hardware knowledge -- it only rejects values that cannot be counts. Zero is allowed:
+    # a kernel that uses no LDS legitimately reports SQ_INSTS_LDS as 0.
+    sdk = _sdk(json_data)
+    id_to_name = _counter_id_to_name(sdk)
+    bad = []
+    for rec in _counter_records(sdk):
+        for sub in rec.get("records", []):
+            value = float(sub["value"])
+            name = id_to_name.get(int(sub["counter_id"]["handle"]), "?")
+            if math.isnan(value) or math.isinf(value) or value < 0:
+                bad.append(
+                    f"dispatch {_dispatch_id(rec)} pass {_pass_index(rec)} {name}={value}"
+                )
+    assert not bad, "counter values that cannot be counts: " + "; ".join(bad[:10])
 
 
 def test_pass_index_maps_to_requested_group(json_data, common_counters, pass_groups):

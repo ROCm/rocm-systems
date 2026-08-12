@@ -259,6 +259,32 @@ def shared_counter_missing_in_one_pass(doc):
             _drop(rec, "SQ_INSTS_VALU")
 
 
+def pass_records_duplicated(doc):
+    """Every pass's completion delivered twice."""
+    records = _records(doc)
+    _replace_records(doc, records + [copy.deepcopy(rec) for rec in records])
+
+
+def one_pass_delivered_twice(doc):
+    """A single pass's completion delivered twice, the rest once."""
+    records = _records(doc)
+    extra = [copy.deepcopy(rec) for rec in records if rec["replay_pass"] == 2]
+    _replace_records(doc, records + extra)
+
+
+def unique_counter_value_corrupt(doc):
+    """A per-pass unique counter reads a value that cannot be a count."""
+    for rec in _records(doc):
+        if rec["replay_pass"] == 2:
+            _set(rec, PASS_GROUPS[2], -1.0)
+
+
+def unique_counter_value_nan(doc):
+    for rec in _records(doc):
+        if rec["replay_pass"] == 3:
+            _set(rec, PASS_GROUPS[3], float("nan"))
+
+
 # id -> (description, mutation)
 FAILURE_MODES = {
     "loop_exited_early": ("replay loop stopped one pass short", loop_exited_early),
@@ -308,6 +334,22 @@ FAILURE_MODES = {
     "shared_counter_missing_in_one_pass": (
         "a shared counter is absent from one pass",
         shared_counter_missing_in_one_pass,
+    ),
+    "pass_records_duplicated": (
+        "every pass delivered twice",
+        pass_records_duplicated,
+    ),
+    "one_pass_delivered_twice": (
+        "one pass delivered twice",
+        one_pass_delivered_twice,
+    ),
+    "unique_counter_value_corrupt": (
+        "a unique counter reads negative",
+        unique_counter_value_corrupt,
+    ),
+    "unique_counter_value_nan": (
+        "a unique counter reads NaN",
+        unique_counter_value_nan,
     ),
 }
 
