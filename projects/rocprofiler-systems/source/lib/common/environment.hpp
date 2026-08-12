@@ -15,6 +15,7 @@
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
