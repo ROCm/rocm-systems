@@ -3955,6 +3955,153 @@ hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGra
   }));
 }
 
+static hipError_t ValidateExtMemcpyBatchNodeParams(const hipExtMemcpyBatchNodeParams* params,
+                                                   size_t* failIdx = nullptr) {
+  if (params == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  return ihipValidateMemcpyBatch(params->dsts, params->srcs, params->sizes, params->sizesDst,
+                                 params->waits, params->signals, params->count, params->attrs,
+                                 params->attrsIdxs, params->numAttrs, failIdx);
+}
+
+hipError_t hipGraphAddExtMemcpyBatchNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                         const hipGraphNode_t* pDependencies,
+                                         size_t numDependencies,
+                                         const hipExtMemcpyBatchNodeParams* nodeParams) {
+  HIP_INIT_API(hipGraphAddExtMemcpyBatchNode, pGraphNode, graph, pDependencies, numDependencies,
+               nodeParams);
+  if (pGraphNode == nullptr || graph == nullptr ||
+      (numDependencies > 0 && pDependencies == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hipError_t status = ValidateExtMemcpyBatchNodeParams(nodeParams);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
+  }
+
+  hip::GraphNode* node = new hip::GraphExtMemcpyBatchNode(nodeParams);
+  status = ihipGraphAddNode(node, reinterpret_cast<hip::Graph*>(graph),
+                            reinterpret_cast<hip::GraphNode* const*>(pDependencies),
+                            numDependencies);
+  *pGraphNode = reinterpret_cast<hipGraphNode_t>(node);
+  HIP_RETURN(status);
+}
+
+hipError_t hipGraphExtMemcpyBatchNodeGetParams(hipGraphNode_t node,
+                                               hipExtMemcpyBatchNodeParams* pNodeParams) {
+  HIP_INIT_API(hipGraphExtMemcpyBatchNodeGetParams, node, pNodeParams);
+  hip::GraphNode* graph_node = reinterpret_cast<hip::GraphNode*>(node);
+  if (!hip::GraphNode::isNodeValid(graph_node) || pNodeParams == nullptr ||
+      graph_node->GetType() != hipGraphNodeTypeExtMemcpyBatch) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  reinterpret_cast<hip::GraphExtMemcpyBatchNode*>(graph_node)->GetParams(pNodeParams);
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipGraphExtMemcpyBatchNodeSetParams(hipGraphNode_t node,
+                                               const hipExtMemcpyBatchNodeParams* pNodeParams) {
+  HIP_INIT_API(hipGraphExtMemcpyBatchNodeSetParams, node, pNodeParams);
+  hip::GraphNode* graph_node = reinterpret_cast<hip::GraphNode*>(node);
+  if (!hip::GraphNode::isNodeValid(graph_node) ||
+      graph_node->GetType() != hipGraphNodeTypeExtMemcpyBatch) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hipError_t status = ValidateExtMemcpyBatchNodeParams(pNodeParams);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
+  }
+  HIP_RETURN(reinterpret_cast<hip::GraphExtMemcpyBatchNode*>(graph_node)->SetParams(pNodeParams));
+}
+
+hipError_t hipGraphExecExtMemcpyBatchNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+                                                   const hipExtMemcpyBatchNodeParams* pNodeParams) {
+  HIP_INIT_API(hipGraphExecExtMemcpyBatchNodeSetParams, hGraphExec, node, pNodeParams);
+  hip::GraphNode* graph_node = reinterpret_cast<hip::GraphNode*>(node);
+  hip::GraphExecBase* graphExec = reinterpret_cast<hip::GraphExecBase*>(hGraphExec);
+  if (!hip::GraphExecBase::isGraphExecValid(graphExec) ||
+      !hip::GraphNode::isNodeValid(graph_node) ||
+      graph_node->GetType() != hipGraphNodeTypeExtMemcpyBatch) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hipError_t status = ValidateExtMemcpyBatchNodeParams(pNodeParams);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
+  }
+
+  hip::GraphNode* clonedNode = graphExec->GetClonedNode(graph_node);
+  if (clonedNode == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  // Topology is fixed once instantiated, and the batch size is part of the work the node was
+  // scheduled with, so only the contents of the batch may be updated.
+  auto* batchNode = reinterpret_cast<hip::GraphExtMemcpyBatchNode*>(clonedNode);
+  if (batchNode->GetCount() != pNodeParams->count) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  HIP_RETURN(batchNode->SetParams(pNodeParams));
+}
+
+static hipError_t CaptureExtMemcpyBatchNode(hipStream_t stream,
+                                            const hipExtMemcpyBatchNodeParams& nodeParams,
+                                            size_t* failIdx) {
+  hipError_t status = ValidateExtMemcpyBatchNodeParams(&nodeParams, failIdx);
+  if (status != hipSuccess) {
+    return status;
+  }
+
+  hip::Stream* capture_stream = reinterpret_cast<hip::Stream*>(stream);
+  hip::GraphNode* node = new hip::GraphExtMemcpyBatchNode(&nodeParams);
+  status = ihipGraphAddNode(node, capture_stream->GetCaptureGraph(),
+                            capture_stream->GetLastCapturedNodes().data(),
+                            capture_stream->GetLastCapturedNodes().size());
+  if (status != hipSuccess) {
+    return status;
+  }
+  capture_stream->SetLastCapturedNode(node);
+  return hipSuccess;
+}
+
+hipError_t capturehipMemcpyBatchAsync(hipStream_t& stream, void**& dsts, void**& srcs,
+                                      size_t*& sizes, size_t& count, hipMemcpyAttributes*& attrs,
+                                      size_t*& attrsIdxs, size_t& numAttrs, size_t*& failIdx) {
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
+          "[hipGraph] Current capture node MemcpyBatch on stream : %p", stream);
+  std::vector<hipExtMemcpyAttributes> extAttrs = ihipToExtMemcpyAttributes(attrs, numAttrs);
+
+  hipExtMemcpyBatchNodeParams nodeParams{};
+  nodeParams.dsts = dsts;
+  nodeParams.srcs = srcs;
+  nodeParams.sizes = sizes;
+  nodeParams.count = count;
+  nodeParams.attrs = extAttrs.empty() ? nullptr : extAttrs.data();
+  nodeParams.attrsIdxs = attrsIdxs;
+  nodeParams.numAttrs = numAttrs;
+  return CaptureExtMemcpyBatchNode(stream, nodeParams, failIdx);
+}
+
+hipError_t capturehipExtMemcpyBatchAsync(hipStream_t& stream, void**& dsts, void**& srcs,
+                                         size_t*& sizes, size_t*& sizesDst,
+                                         hipExtMemcpyWait*& waits, hipExtMemcpySignal*& signals,
+                                         size_t& count, hipExtMemcpyAttributes*& attrs,
+                                         size_t*& attrsIdxs, size_t& numAttrs) {
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
+          "[hipGraph] Current capture node ExtMemcpyBatch on stream : %p", stream);
+  hipExtMemcpyBatchNodeParams nodeParams{};
+  nodeParams.dsts = dsts;
+  nodeParams.srcs = srcs;
+  nodeParams.sizes = sizes;
+  nodeParams.sizesDst = sizesDst;
+  nodeParams.waits = waits;
+  nodeParams.signals = signals;
+  nodeParams.count = count;
+  nodeParams.attrs = attrs;
+  nodeParams.attrsIdxs = attrsIdxs;
+  nodeParams.numAttrs = numAttrs;
+  return CaptureExtMemcpyBatchNode(stream, nodeParams, /*failIdx=*/nullptr);
+}
+
 hipError_t capturehipStreamBatchMemOp(hipStream_t& stream, unsigned int& count,
                                       hipStreamBatchMemOpParams*& paramArray,
                                       unsigned int& flags) {

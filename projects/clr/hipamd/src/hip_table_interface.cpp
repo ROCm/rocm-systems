@@ -3397,3 +3397,31 @@ hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget t
   return hip::GetHipDispatchTable()->hipDeviceFlushGPUDirectRDMAWrites_fn(target, scope);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipGraphAddExtMemcpyBatchNode(
+    hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies,
+    size_t numDependencies, const hipExtMemcpyBatchNodeParams* nodeParams) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphAddExtMemcpyBatchNode_fn(
+      pGraphNode, graph, pDependencies, numDependencies, nodeParams);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipGraphExtMemcpyBatchNodeGetParams(hipGraphNode_t node,
+                                               hipExtMemcpyBatchNodeParams* pNodeParams) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphExtMemcpyBatchNodeGetParams_fn(node, pNodeParams);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipGraphExtMemcpyBatchNodeSetParams(hipGraphNode_t node,
+                                               const hipExtMemcpyBatchNodeParams* pNodeParams) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphExtMemcpyBatchNodeSetParams_fn(node, pNodeParams);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipGraphExecExtMemcpyBatchNodeSetParams(
+    hipGraphExec_t hGraphExec, hipGraphNode_t node,
+    const hipExtMemcpyBatchNodeParams* pNodeParams) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphExecExtMemcpyBatchNodeSetParams_fn(hGraphExec, node,
+                                                                               pNodeParams);
+  CATCH;
+}
