@@ -769,6 +769,7 @@ protected:
         run.threadIds.resize(nThreads);
 
         ThreadStartGate startGate(nThreads);
+        ThreadStartGate bodyGate(nThreads);
         std::atomic<int> inFlight{0};
         std::atomic<int> maxInFlight{0};
         auto worker = [&](int threadIdx) {
@@ -780,6 +781,16 @@ protected:
             }
             const int active = inFlight.fetch_add(1, std::memory_order_relaxed) + 1;
             UpdateMaximum(maxInFlight, active);
+            // Do not let an eagerly scheduled worker complete its body before
+            // the other workers have actually entered it. This makes the
+            // concurrency assertion deterministic rather than scheduler-timing
+            // dependent.
+            if (!bodyGate.ArriveAndWait()) {
+                inFlight.fetch_sub(1, std::memory_order_relaxed);
+                run.results[threadIdx].ok = false;
+                run.results[threadIdx].msg = "worker body start was cancelled";
+                return;
+            }
             try {
                 run.results[threadIdx] = body(threadIdx);
             } catch (const std::exception& error) {
@@ -798,6 +809,7 @@ protected:
             worker(0);
         } catch (const std::exception& error) {
             startGate.Cancel();
+            bodyGate.Cancel();
             run.results[0].ok = false;
             run.results[0].msg = std::string("failed to launch worker: ") + error.what();
         }
