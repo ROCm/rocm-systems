@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   # For scheduled runs, cancel any in-progress nightly so only one runs at a time.

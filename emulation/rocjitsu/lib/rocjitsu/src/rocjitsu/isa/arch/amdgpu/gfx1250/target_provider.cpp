@@ -3,7 +3,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/target_provider.h"
 
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
 #include "rocjitsu/isa/target_provider.h"
 
 namespace rocjitsu::gfx1250 {

@@ -400,6 +400,7 @@ add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Developer and test workflow tools.
 add_subdirectory(tools)
+add_subdirectory(fuzz/decode)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)
