@@ -48,7 +48,7 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.common import ValuDualIssueDetector
-from utils.metrics.expression import CodeTransformer
+from utils.metrics.expression import transform_expression
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -581,14 +581,15 @@ class db_analysis(OmniAnalyze_Base):
         emit_variance_warnings: bool = False,
     ) -> Any:  # noqa ANN401
         if parse:
+            original_value = value
             value = re.sub(
                 r"\$([0-9A-Za-z_]+)",
                 lambda m: f'sys_info["{m.group(1)}"]',
                 value,
             )
             ast_node = ast.parse(value)
-            transformer = CodeTransformer()
-            transformer.visit(ast_node)
+            if not transform_expression(ast_node, original_value):
+                return None
             value = astunparse.unparse(ast_node)
             value = value.replace("raw_pmc_df", "pmc_df")
             value = value.replace("pmc_df['sys_info']", "sys_info")
@@ -605,7 +606,7 @@ class db_analysis(OmniAnalyze_Base):
                 warnings.simplefilter("always", RuntimeWarning)
                 eval_result = eval(
                     compile(value, "<string>", "eval"),
-                    {},  # no globals
+                    {"__builtins__": {}},
                     {
                         # only locals
                         "pmc_df": pmc_df,
