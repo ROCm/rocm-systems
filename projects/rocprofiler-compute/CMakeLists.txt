@@ -571,13 +571,21 @@ add_test(
         tests/test_rocprofv3_avail_interface.py ${WORKING_DIR_OPTION}
 )
 
-# Memory chart CLI renderers (gfx9 plotille + gfx11 Rich) — no GPU required
+# Memory chart tests — no GPU required
 add_test(
-    NAME test_mem_chart
+    NAME test_mem_chart_gfx11
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_mem_chart.xml ${COV_OPTION} tests/test_mem_chart.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_mem_chart_gfx11.xml ${COV_OPTION}
+        tests/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_mem_chart_gfx9
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_mem_chart_gfx9.xml ${COV_OPTION}
+        tests/test_mem_chart_gfx9.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -888,7 +896,8 @@ if(${ENABLE_COVERAGE})
         test_num_xcds_cli_output
         test_mi_gpu_spec
         test_utils
-        test_mem_chart
+        test_mem_chart_gfx11
+        test_mem_chart_gfx9
         test_roofline_calc
         test_roofline_analyze
         test_roofline_main
