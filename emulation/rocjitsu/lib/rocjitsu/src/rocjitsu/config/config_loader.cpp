@@ -59,13 +59,13 @@ uint32_t config_u32(const std::unordered_map<std::string, std::string> &cfg, con
 }
 
 uint32_t default_sgprs_per_wf(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
     return 128;
   return 112;
 }
 
 uint32_t default_vgprs_per_wf(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return 1024;
   return 256;
 }
@@ -715,7 +715,7 @@ rj_code_arch_t parse_arch(const std::string &arch_str) {
   if (arch_str == "rdna4")
     return ROCJITSU_CODE_ARCH_RDNA4;
   if (arch_str == "gfx1250")
-    return ROCJITSU_CODE_ARCH_GFX1250;
+    return ROCJITSU_CODE_ARCH_CDNA5;
   if (arch_str == "rv32i")
     return ROCJITSU_CODE_ARCH_RV32I;
   if (arch_str == "rv64i")
@@ -743,7 +743,7 @@ const char *arch_to_string(rj_code_arch_t arch) {
     return "rdna3_5";
   case ROCJITSU_CODE_ARCH_RDNA4:
     return "rdna4";
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return "gfx1250";
   case ROCJITSU_CODE_ARCH_RV32I:
     return "rv32i";
