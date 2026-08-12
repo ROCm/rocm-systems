@@ -7661,9 +7661,7 @@ rsmi_status_t rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_co
       if (gfxclk == UINT16_MAX) {
         break;
       }
-      if ((gfxclk != 0) && (gfxclk != UINT16_MAX)) {
-        xcd_counter++;
-      }
+      xcd_counter++;
     }
   }
 

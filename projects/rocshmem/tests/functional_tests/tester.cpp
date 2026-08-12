@@ -110,6 +110,7 @@ Tester::Tester(TesterArguments args) : args(args) {
     case AllToAllWaveTestType:
     case FcollectWaveTestType:
     case ReduceWaveTestType:
+    case TeamReduceScatterWaveTestType:
       num_timers = args.num_wgs * num_warps;
       break;
     default:
