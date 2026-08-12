@@ -135,7 +135,7 @@ struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 
     auto operator()() const
     {
-        const type _obj{};
+        type _obj{};
         return (*this)(_obj);
     }
 
