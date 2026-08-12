@@ -1,0 +1,136 @@
+# ---------------------------------------------------------------------------
+# AMD SMI package upgrade / downgrade test.
+#
+# The packaging rework changed how the module is delivered (direct
+# site-packages install instead of a postinst pip install), which changes the
+# postinst/prerm/postun semantics. This job builds the package twice with
+# different versions in the SAME distro container, then installs old -> upgrades
+# to new -> downgrades back, asserting the module, CLI, and the ld.so.conf.d
+# linker registration stay consistent at each step (a self-upgrade round trip;
+# a true cross-release test additionally needs a prior published artifact).
+#
+# The package must be built and tested in the same distro image: the RPM/DEB
+# bakes in the distro's site-packages path, so a package built on one distro
+# will not import on another. No GPU required.
+# ---------------------------------------------------------------------------
+
+name: AMDSMI Upgrade Downgrade
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/DEBIAN/**'
+      - 'projects/amdsmi/RPM/**'
+      - 'projects/amdsmi/py-interface/**'
+      - 'projects/amdsmi/CMakeLists.txt'
+      - 'projects/amdsmi/tests/run_amdsmi_upgrade_downgrade_test.py'
+      - '.github/workflows/amdsmi-upgrade-downgrade.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/DEBIAN/**'
+      - 'projects/amdsmi/RPM/**'
+      - 'projects/amdsmi/py-interface/**'
+      - 'projects/amdsmi/CMakeLists.txt'
+      - 'projects/amdsmi/tests/run_amdsmi_upgrade_downgrade_test.py'
+      - '.github/workflows/amdsmi-upgrade-downgrade.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade-downgrade:
+    name: ${{matrix.name}}
+    runs-on: ubuntu-22.04
+    container: ${{matrix.container}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debian (Ubuntu 22.04)
+            container: ubuntu:22.04
+            generator: DEB
+            manager: apt
+            ext: deb
+          - name: RPM (AlmaLinux 9)
+            container: almalinux:9
+            generator: RPM
+            manager: dnf
+            ext: rpm
+
+    env:
+      BUILD_DIR: /tmp/amdsmi-build
+
+    steps:
+      - name: Install Debian build prerequisites
+        if: matrix.generator == 'DEB'
+        run: |
+          set -e
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates gcc g++ cmake make file pkg-config \
+            libdrm-dev libnl-3-dev libnl-genl-3-dev libmnl-dev python3 sudo
+
+      - name: Install RPM build prerequisites
+        if: matrix.generator == 'RPM'
+        run: |
+          set -e
+          # libnl3-devel/libmnl-devel live in CRB + EPEL on AlmaLinux 9.
+          dnf install -y 'dnf-command(config-manager)'
+          dnf config-manager --set-enabled crb
+          dnf install -y epel-release
+          dnf install -y \
+            git gcc gcc-c++ cmake make rpm-build file \
+            libdrm-devel libnl3-devel libmnl-devel python3 sudo
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          # rocm-systems is a large monorepo; only the amdsmi project is needed.
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Configure and build once
+        working-directory: projects/amdsmi
+        run: |
+          set -e
+          cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DENABLE_ESMI_LIB=ON
+          cmake --build "$BUILD_DIR" -j"$(nproc)"
+
+      - name: Package two versions (old, new)
+        working-directory: projects/amdsmi
+        run: |
+          set -e
+          # Re-package the same build tree at two versions via
+          # ROCM_LIBPATCH_VERSION (the 4th version component); no rebuild.
+          # Select the MAIN package only (exclude the -tests package). Match by
+          # build order rather than a hardcoded version so a version bump does
+          # not silently break the selection: after the first cpack only v1
+          # exists, and after the second the newest by version sort is v2.
+          mkdir -p /tmp/pkgs
+          main_pkgs() {
+            find "$BUILD_DIR" -maxdepth 1 -name "amd-smi-lib[-_]*.${{matrix.ext}}" \
+              | grep -v -- '-tests' | sort -V
+          }
+          ROCM_LIBPATCH_VERSION=1 cmake "$BUILD_DIR" >/dev/null
+          ( cd "$BUILD_DIR" && cpack -G ${{matrix.generator}} )
+          cp "$(main_pkgs | head -1)" /tmp/pkgs/old.${{matrix.ext}}
+          ROCM_LIBPATCH_VERSION=2 cmake "$BUILD_DIR" >/dev/null
+          ( cd "$BUILD_DIR" && cpack -G ${{matrix.generator}} )
+          cp "$(main_pkgs | tail -1)" /tmp/pkgs/new.${{matrix.ext}}
+          ls -l /tmp/pkgs
+
+      - name: Install old, upgrade to new, downgrade to old
+        working-directory: projects/amdsmi
+        run: |
+          set -e
+          python3 tests/run_amdsmi_upgrade_downgrade_test.py \
+            --old-package /tmp/pkgs/old.${{matrix.ext}} \
+            --new-package /tmp/pkgs/new.${{matrix.ext}} \
+            --package-manager ${{matrix.manager}}

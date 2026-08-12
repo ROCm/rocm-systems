@@ -151,7 +151,7 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesAtThresholdFitsScratch)
 TEST_F(DdaIpcEligibilityTest, AllToAll_StagingBytesOneCountOverThresholdStillEligible)
 {
     // Eligibility is independent of the 4 MiB dispatch cap enforced in collectives.cc.
-    const size_t count = kAlltoAllFloat32CountAt4MbThreshold + 1;
+    const size_t count = kAlltoAllFloat32CountAt4MbThreshold + 4;
     const size_t stagingBytes = testAlltoAllDdaIpcStagingBytes(
         count, mockComm_.comm.nRanks, sizeof(float));
     EXPECT_GT(stagingBytes, kDdaAlltoAllGfx950ThresholdBytes);

@@ -65,6 +65,14 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_aql_queue.h"
 
+#ifdef __FreeBSD__
+#include <pthread_np.h>
+#define GET_THREAD_ID() pthread_getthreadid_np()
+#elif defined(__linux__)
+#include <sys/syscall.h>
+#define GET_THREAD_ID() syscall(SYS_gettid)
+#endif
+
 constexpr char SNAPSHOT_INFO_ALIGNMENT = 0x8;
 constexpr uint32_t LOAD_ALIGNMENT_SHIFT = 4;
 constexpr uint32_t NOTE_ALIGNMENT_SHIFT = 2;
@@ -107,7 +115,7 @@ std::string substitute_core_pattern(const std::string& pattern) {
        (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 30))
     pid_t tid = gettid();
 #else
-  pid_t tid = static_cast<pid_t>(syscall(SYS_gettid));
+  pid_t tid = static_cast<pid_t>(GET_THREAD_ID());
 #endif
   time_t now = time(nullptr);
   // Get hostname
@@ -337,10 +345,11 @@ static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter
 
       debug_print("Added CWSR area range: %#" PRIx64 " - %#" PRIx64 " (size: %zu)\n",
                   reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader),
-                  reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader) + queue_info.SaveAreaSizeInBytes,
-                  queue_info.SaveAreaSizeInBytes);
+                  reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader)
+                    + (queue_info.SaveAreaAllocSize * gpu_agent->properties().NumXcc),
+                  queue_info.SaveAreaAllocSize * gpu_agent->properties().NumXcc);
       filter.add_range(reinterpret_cast<uint64_t>(queue_info.SaveAreaHeader),
-                       queue_info.SaveAreaSizeInBytes);
+                       queue_info.SaveAreaAllocSize * gpu_agent->properties().NumXcc);
     }
   }
 
@@ -417,7 +426,7 @@ static bool GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& ent
     return false;
   }
   entry.ctx_save_restore_address = (uint64_t)queue_info.SaveAreaHeader;
-  entry.ctx_save_restore_area_size = (uint32_t)queue_info.SaveAreaSizeInBytes;
+  entry.ctx_save_restore_area_size = (uint32_t)queue_info.SaveAreaAllocSize;
 
   return true;
 }

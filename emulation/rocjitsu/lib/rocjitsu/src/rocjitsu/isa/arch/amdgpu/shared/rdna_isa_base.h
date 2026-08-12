@@ -55,6 +55,7 @@ struct RdnaIsaBase {
   static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 0; ///< No AccVGPR file on any RDNA ISA.
   static constexpr bool SRAM_ECC = false;             ///< RDNA does not alter D16 for ECC.
   static constexpr uint8_t WAITCNT_LGKMCNT_MASK = 0;  ///< 0 = no monolithic S_WAITCNT.
+  static constexpr bool MODE_HAS_GPR_IDX_EN = false;  ///< RDNA MODE[27] is DISABLE_PERF.
 
   using Context = amdgpu::Wavefront;
 };

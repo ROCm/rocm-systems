@@ -26,7 +26,7 @@ struct ncclIbvSymbols ibvSymbols;
 #ifdef ENABLE_FAULT_INJECTION
 // Fault shims installed on the context's ops table at open/close time.
 #include "net_ib_ops_fault.h"
-RCCL_PARAM_DECLARE(InjectFaults);
+RCCL_PARAM(IbFaultInjection, "IB_FAULT_INJECTION", 0);
 #endif
 
 #ifdef ENABLE_QP_TRACKING
@@ -159,7 +159,7 @@ const char* wrap_ibv_get_device_name(struct ibv_device* device) {
 ncclResult_t wrap_ibv_open_device(struct ibv_context** ret,
                                   struct ibv_device* device) { /*returns ncclResult_t (ncclSuccess on success)*/
 #ifdef ENABLE_FAULT_INJECTION
-  if (rcclParamInjectFaults() != 0) {
+  if (rcclParamIbFaultInjection() != 0) {
     // Expand IBV_PTR_CHECK inline to install fault shims before returning.
     CHECK_NOT_NULL(ibvSymbols, ibv_internal_open_device);
     *ret = ibvSymbols.ibv_internal_open_device(device);
@@ -186,7 +186,7 @@ ncclResult_t wrap_ibv_open_device(struct ibv_context** ret,
 ncclResult_t wrap_ibv_close_device(struct ibv_context* context) { /*returns ncclResult_t (ncclSuccess on success)*/
 #ifdef ENABLE_FAULT_INJECTION
   // Restore original ops before closing so the real close sees a clean context.
-  if (rcclParamInjectFaults() != 0 && context) NCCLCHECK(ncclIbOpsFaultRemove(context));
+  if (rcclParamIbFaultInjection() != 0 && context) NCCLCHECK(ncclIbOpsFaultRemove(context));
 #endif
   IBV_INT_CHECK(ibvSymbols, ibv_internal_close_device, ibv_internal_close_device(context), -1, "ibv_close_device");
 }

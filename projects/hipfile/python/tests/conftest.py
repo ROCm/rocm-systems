@@ -120,6 +120,23 @@ _FAKE_PROPS = {
 }
 
 
+class _FakeAsyncIOHandle:  # pylint: disable=too-few-public-methods
+    """Stand-in for the real ``AsyncIOHandle`` cdef class.
+
+    The real class owns C storage the driver fills in when the async op
+    completes; here we just mirror its constructor and attribute surface
+    (``bytes_done`` read-only, ``size`` / ``file_offset`` / ``buffer_offset``
+    read-write) so ``file.py``'s ``read_async`` / ``write_async`` construct and
+    inspect it without a compiled extension.
+    """
+
+    def __init__(self, size, file_offset, buffer_offset):
+        self.size = size
+        self.file_offset = file_offset
+        self.buffer_offset = buffer_offset
+        self.bytes_done = 0
+
+
 def _build_fake_hipfile():
     """Create a fake ``hipfile._hipfile`` module.
 
@@ -170,6 +187,14 @@ def _build_fake_hipfile():
         size,
         0,
     )
+
+    # Asynchronous I/O -- default: full transfer, no error.
+    mod.AsyncIOHandle = _FakeAsyncIOHandle
+    mod.hipFileReadAsync = lambda handle, buffer_base, io, stream_handle: (0, 0)
+    mod.hipFileWriteAsync = lambda handle, buffer_base, io, stream_handle: (0, 0)
+    mod.hipFileStreamRegister = lambda stream_handle, flags=0: (0, 0)
+    mod.hipFileStreamDeregister = lambda stream_handle: (0, 0)
+    mod.supports_async = lambda: True
 
     # Error strings.
     mod.hipFileGetOpErrorString = lambda status: f"fake-op-error-{status}"

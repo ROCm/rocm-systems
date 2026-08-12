@@ -1,9 +1,11 @@
 """Shared utilities for RCCL CI test scripts (JAX, PyTorch)."""
 
+import json
 import logging
 import os
 import smtplib
 import sys
+import urllib.request
 import xml.etree.ElementTree as ET
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -123,3 +125,62 @@ def send_email_report(
     log.warning(
         "Could not send email to %s (tried: %s)", recipient, ", ".join(SMTP_SERVERS)
     )
+
+
+def send_teams_webhook(
+    report: str, webhook_url: str, status: str, subject_prefix: str
+) -> None:
+    """Send the summary report to a Microsoft Teams channel via webhook."""
+    color = "Good" if status == "PASSED" else "Attention"
+    run_url = os.environ.get("GITHUB_SERVER_URL", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    actions_url = f"{run_url}/{repo}/actions/runs/{run_id}" if run_url else ""
+
+    facts = [{"title": "Status", "value": status}]
+    if actions_url:
+        facts.append({"title": "Run", "value": f"[View]({actions_url})"})
+
+    body = [
+        {
+            "type": "TextBlock",
+            "text": f"{subject_prefix}: {status}",
+            "weight": "Bolder",
+            "size": "Medium",
+            "color": color,
+        },
+        {"type": "FactSet", "facts": facts},
+        {
+            "type": "TextBlock",
+            "text": report,
+            "wrap": True,
+            "fontType": "Monospace",
+            "size": "Small",
+        },
+    ]
+
+    payload = {
+        "type": "message",
+        "attachments": [
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "content": {
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "type": "AdaptiveCard",
+                    "version": "1.4",
+                    "body": body,
+                },
+            }
+        ],
+    }
+
+    try:
+        req = urllib.request.Request(
+            webhook_url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            log.info("Teams webhook sent (HTTP %d)", resp.status)
+    except Exception as e:
+        log.warning("Failed to send Teams webhook: %s", e)

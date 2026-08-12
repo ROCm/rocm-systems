@@ -73,6 +73,7 @@ enum class CoherenceState : uint8_t {
 /// are per-process and may alias across processes.
 struct CacheTag {
   uint64_t tag = 0;
+  uint64_t coherence_epoch = 0; ///< Controller-defined lazy-invalidation generation.
   uint32_t vmid = 0;
   bool valid = false;
   bool dirty = false;
@@ -159,6 +160,7 @@ public:
       auto &t = tag_at(set, w);
       if (!t.valid) {
         t.tag = tag;
+        t.coherence_epoch = 0;
         t.vmid = vmid;
         t.valid = true;
         t.dirty = false;
@@ -179,6 +181,7 @@ public:
       std::memcpy(evicted_data, line_data(set, victim_way), LINE_SIZE);
 
     vt.tag = tag;
+    vt.coherence_epoch = 0;
     vt.vmid = vmid;
     vt.valid = true;
     vt.dirty = false;
@@ -196,6 +199,7 @@ public:
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid) {
+        t.coherence_epoch = 0;
         t.valid = false;
         t.dirty = false;
         t.coherence = CoherenceState::INVALID;
@@ -212,6 +216,7 @@ public:
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag) {
+        t.coherence_epoch = 0;
         t.valid = false;
         t.dirty = false;
         t.coherence = CoherenceState::INVALID;
@@ -222,6 +227,7 @@ public:
   /// @brief Invalidate all cache lines.
   void invalidate_all() {
     for (auto &t : tags_) {
+      t.coherence_epoch = 0;
       t.valid = false;
       t.dirty = false;
       t.coherence = CoherenceState::INVALID;

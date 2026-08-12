@@ -131,6 +131,14 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseAlltoAllGda(struct ncclComm* comm);
+// Returns true when the CE AllReduce path should be used instead of the standard ring/tree kernels.
+// Does NOT check ceARTmpBuf initialization; the caller is responsible.
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op);
+// Updates the CE AllReduce graph latch from this call's capture state.
+// Invoke once per collective (any type) at each CE AR decision point.
+void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
+// Pure query: is CE AllReduce currently allowed on this comm?
+bool rcclCeAllReduceAllowed(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);
@@ -158,5 +166,8 @@ bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan);
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
 int rcclGetMaxWarpsPerBlock(struct ncclComm* comm);
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes);
+int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMultiplier, int maxChannels,
+                                  int adjustedMaxNchannels, bool userUpdatedMaxChannels);
+int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc);
 #endif
 #endif
