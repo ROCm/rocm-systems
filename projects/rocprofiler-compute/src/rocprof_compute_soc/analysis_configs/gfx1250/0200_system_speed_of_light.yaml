@@ -110,8 +110,8 @@ Panel Config:
           peak: $max_sclk * $cu_per_gpu * 131072 / 1000
           pct_of_peak: true
         Active WGPs:
-          value: AVG(SQG_LEVEL_WGP_ACTIVE_sum / ((End_Timestamp - Start_Timestamp) / 1e9))
-          unit: WGPs
+          value: AVG((SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
+          unit: WGPs/cycle
           peak: $cu_per_gpu
           pct_of_peak: true
           coll_level: SQG_LEVEL_WGP_ACTIVE
@@ -210,7 +210,7 @@ Panel Config:
           peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
           pct_of_peak: true
         Instruction Cache Fetch Latency:
-          value: AVG((SUM(SQ_IFETCH_LEVEL_ACCUM) / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
+          value: AVG((SUM(SQ_IFETCH_LEVEL_ACCUM) / SQC_IFETCH_REQ_sum) if (SQC_IFETCH_REQ_sum != 0) else None)
           unit: Cycles
           peak: None
           pct_of_peak: false
@@ -267,7 +267,7 @@ Panel Config:
       Achieved Int4 WMMA throughput.
 
     Active WGPs: >-
-      Average number of WGPs that had at least one active wavefront.
+      Average number of WGPs that had at least one active wavefront in a cycle.
 
     IPC: >-
       Average number of instructions per active WGP cycle.

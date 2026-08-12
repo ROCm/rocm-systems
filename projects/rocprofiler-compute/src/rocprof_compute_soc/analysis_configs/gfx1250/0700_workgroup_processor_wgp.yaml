@@ -504,7 +504,7 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        LDS access latency:
+        LDS Access Latency:
           avg: AVG((SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum) if (SQ_INSTS_LDS_sum != 0) else None)
           min: MIN((SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum) if (SQ_INSTS_LDS_sum != 0) else None)
           max: MAX((SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum) if (SQ_INSTS_LDS_sum != 0) else None)
@@ -641,7 +641,28 @@ Panel Config:
       Total elapsed kernel clock cycles.
 
     Active WGPs: >-
-      Average number of WGPs with at least one active wavefront.
+      Average number of WGPs with at least one active wavefront in a cycle.
+
+    Grid Size: >-
+      Total number of work-items in the dispatch grid.
+
+    Workgroup Size: >-
+      Number of work-items per workgroup.
+
+    VGPRs: >-
+      Number of architectural VGPRs allocated per wave.
+
+    AGPRs: >-
+      Number of accumulation VGPRs allocated per wave.
+
+    SGPRs: >-
+      Number of SGPRs allocated per wave.
+
+    LDS Allocation: >-
+      Bytes of LDS allocated per workgroup.
+
+    Scratch Allocation: >-
+      Bytes of scratch (private) memory allocated per work-item.
 
     Dispatched Waves: >-
       Total wavefronts dispatched.
@@ -649,56 +670,8 @@ Panel Config:
     Dispatched Threads: >-
       Total work-items dispatched.
 
-    Saved Waves: >-
-      Total wavefronts saved to off-chip memory due to preemption.
-
-    Restored Waves: >-
-      Total wavefronts restored from off-chip memory after preemption.
-
-    Initial Prefetch Waves: >-
-      Total wavefronts dispatched as initial prefetch waves to warm caches.
-
-    Messages: >-
-      Total wave-to-driver message events issued.
-
     Wave Life: >-
       Average wavefront lifetime in cycles.
-
-    Time in Ready State: >-
-      Fraction of wavefront lifetime cycles in ready-to-issue state.
-
-    Time in Wait State: >-
-      Fraction of wavefront lifetime cycles stalled waiting for a resource.
-
-    Wait for Waitcnt: >-
-      Fraction of wavefront lifetime cycles stalled on a waitcnt instruction.
-
-    Wait for Load Waitcnt: >-
-      Fraction of wavefront lifetime cycles stalled on a load-type waitcnt.
-
-    Wait for Store Waitcnt: >-
-      Fraction of wavefront lifetime cycles stalled on a store-type waitcnt.
-
-    Wait for KM Counter: >-
-      Fraction of wavefront lifetime cycles stalled on a kernel-message counter.
-
-    Wait for DS Counter: >-
-      Fraction of wavefront lifetime cycles stalled on an LDS wait count.
-
-    Wait for Instruction Fetch: >-
-      Fraction of wavefront lifetime cycles stalled on instruction fetch.
-
-    Wait for Barrier: >-
-      Fraction of wavefront lifetime cycles stalled at a workgroup barrier.
-
-    Wait for Sleep: >-
-      Fraction of wavefront lifetime cycles in a sleep state.
-
-    Wait for Delay Depctr: >-
-      Fraction of wavefront lifetime cycles stalled on a delay-based dependency counter.
-
-    Wait for Depctr: >-
-      Fraction of wavefront lifetime cycles stalled on a dependency counter.
 
     Total Instructions: >-
       Total instructions issued.
@@ -730,17 +703,8 @@ Panel Config:
     Instructions - VMEM Flat: >-
       Number of flat-addressed VMEM instructions issued.
 
-    Instructions - VMEM Buffer: >-
-      Number of buffer VMEM instructions issued.
-
     Instructions - Global Scratch: >-
       Number of global/scratch VMEM instructions issued.
-
-    Instructions - VMEM Load: >-
-      Number of VMEM load instructions issued.
-
-    Instructions - VMEM Store: >-
-      Number of VMEM store instructions issued.
 
     Instructions - Flat Load: >-
       Number of flat-addressed load instructions issued.
@@ -871,27 +835,6 @@ Panel Config:
     WMMA Int Operations - Int4: >-
       Total Int4 WMMA instruction dispatches.
 
-    Instruction Issue Stall Rate: >-
-      Percentage of WGP-busy cycles no wave could issue an instruction.
-
-    SMEM Issue Stall Rate: >-
-      Percentage of WGP-busy cycles stalled on a pending SMEM result.
-
-    SALU Issue Stall Rate: >-
-      Percentage of WGP-busy cycles stalled on a pending SALU result.
-
-    VALU Issue Stall Rate: >-
-      Percentage of WGP-busy cycles the VALU pipeline cannot accept a new instruction.
-
-    VMEM Issue Stall Rate: >-
-      Percentage of WGP-busy cycles the VMEM pipeline cannot accept a new instruction.
-
-    VMEM Issue Stall Rate - Arbiter: >-
-      Percentage of WGP-busy cycles the VMEM arbiter is stalled.
-
-    LDS Issue Stall Rate: >-
-      Percentage of WGP-busy cycles the LDS pipeline cannot accept a new instruction.
-
     TDM Issue Stall Rate: >-
       Percentage of WGP-busy cycles the TDM pipeline cannot accept a new instruction.
 
@@ -907,26 +850,8 @@ Panel Config:
     Pipeline Utilization - XDL: >-
       Percentage of WGP-busy cycles the XDL (WMMA) pipeline is busy.
 
-    SMEM Latency: >-
-      Average SMEM instruction latency.
-
-    VMEM Load Latency: >-
-      Average VMEM load latency.
-
-    VMEM Store Latency: >-
-      Average VMEM store latency.
-
     LDS Access Latency: >-
-      Average LDS access latency.
-
-    LDS Load Latency: >-
-      Average LDS load latency.
-
-    LDS Store Latency: >-
-      Average LDS store latency.
-
-    Instruction Fetch Latency: >-
-      Average instruction fetch latency.
+      Average LDS access latency in cycles.
 
     WGP-GL0 Request Bus Util: >-
       Percentage of cycles the WGP-to-GL0 request bus is carrying a valid request.
@@ -958,53 +883,14 @@ Panel Config:
     TXD Data Bus Utilization: >-
       Percentage of cycles the TXD data return bus is carrying valid return data.
 
-    Icache Utilization: >-
-      Percentage of cycles the Instruction Cache is serving requests.
-
     Icache Hit Rate: >-
       Instruction Cache hit rate.
-
-    Icache Latency: >-
-      Average Instruction Cache access latency.
-
-    Icache Request Stall Rate: >-
-      Percentage of cycles the Instruction Cache is stalled on instruction fetch.
-
-    Icache-GL1 Request Latency: >-
-      Average latency for Instruction Cache misses serviced from GL1.
-
-    Dcache Utilization: >-
-      Percentage of cycles the Scalar Data Cache is serving requests.
 
     Dcache Hit Rate: >-
       Scalar Data Cache hit rate.
 
-    Dcache Latency: >-
-      Average Scalar Data Cache access latency.
-
-    Dcache Request Stall Rate: >-
-      Percentage of cycles the Scalar Data Cache is stalled.
-
     Dcache Request Bandwidth: >-
       Total Scalar Data Cache bandwidth.
-
-    Dcache Request - 1DWord: >-
-      Number of 1-DWORD (4-byte) scalar memory requests.
-
-    Dcache Request - 2DWord: >-
-      Number of 2-DWORD (8-byte) scalar memory requests.
-
-    Dcache Request - 4DWord: >-
-      Number of 4-DWORD (16-byte) scalar memory requests.
-
-    Dcache Request - 8DWord: >-
-      Number of 8-DWORD (32-byte) scalar memory requests.
-
-    Dcache Request - 16DWord: >-
-      Number of 16-DWORD (64-byte) scalar memory requests.
-
-    Dcache-GL1 Request Latency: >-
-      Average latency for Scalar Data Cache misses serviced from GL1.
 
     Interface Stall Rate: >-
       Percentage of cycles the SQC-GL1 interface is stalled.
