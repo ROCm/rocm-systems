@@ -52,7 +52,7 @@ constexpr std::array<TargetInfo, 5> kTargetInfos = {{
      ROCJITSU_CODE_TARGET_GFX1201},
     // gfx1250 A0 and B0 share the same ELF machine and structural ISA. Separate
     // revision options select the translation direction.
-    {"gfx1250", ROCJITSU_CODE_ARCH_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+    {"gfx1250", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250,
      ROCJITSU_CODE_TARGET_GFX1250},
 }};
 
