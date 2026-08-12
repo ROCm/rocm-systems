@@ -35,10 +35,15 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          filter: blob:none
           sparse-checkout: |
             projects/rocprofiler-systems
             .gitmodules
-          submodules: recursive
+
+      - name: Init rocprofiler-systems submodules
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git submodule update --init --recursive --depth 1 --jobs 4 -- projects/rocprofiler-systems
 
       - name: Configure ROCm environment
         run: |
@@ -64,4 +69,5 @@ jobs:
           python3 scripts/clang-tidy-check.py \
             --base "origin/${{ github.base_ref }}" \
             --build-path build/debug \
+            -j $(nproc) \
             --clang-tidy-binary clang-tidy-18
