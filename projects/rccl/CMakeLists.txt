@@ -176,7 +176,7 @@ if (BUILD_ADDRESS_SANITIZER)
     # rather than /path/to/libclang_rt.asan-x86_64.so then
     # we failed to locate it.
     if(IS_ABSOLUTE "${_clang_rt_path}" AND EXISTS "${_clang_rt_path}")
-      set(ASAN_RUNTIME_DIR "${_clang_rt_path}")
+      get_filename_component(ASAN_RUNTIME_DIR "${_clang_rt_path}" DIRECTORY)
       break()
     endif()
   endforeach()
