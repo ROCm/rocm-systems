@@ -124,7 +124,7 @@ Panel Config:
           value: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         LDS Utilization:
-          value: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          value: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / (SUM(GRBM_GUI_ACTIVE) * $cu_per_gpu)
           unit: Percent
         LDS Bank Conflict Rate:
           value: 100 * SUM(SQC_LDS_BANK_CONFLICT_sum) / SUM(SQC_LDS_IDX_ACTIVE_sum)
@@ -273,7 +273,10 @@ Panel Config:
       resolve to LDS. This counts instructions rather than data movement, so it does not
       distinguish reads from writes.
     LDS Utilization: >-
-      Percentage of shader busy cycles during which LDS was servicing indexed accesses.
+      Percentage of the LDS cycle budget across all CUs spent servicing indexed
+      (non-direct, non-interpolation) accesses, measured over GPU-active cycles.
+      Because two CUs share a workgroup processor's LDS, a saturated LDS reads
+      well below 100% on this architecture.
     LDS Bank Conflict Rate: >-
       Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when
       multiple work-items in a wavefront access different addresses in the same LDS bank.

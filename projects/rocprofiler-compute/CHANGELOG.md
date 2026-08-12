@@ -40,7 +40,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   modes on partition-capable accelerators, noting that analysis derives logical
   XCD, L2 channel, and HBM channel counts from them.
 
-* Added the `LDS Utilization` metric to the gfx115x Memory Chart.
+* Added the `LDS Utilization` metric to the gfx115x Memory Chart. It reports LDS
+  indexed-access cycles against the whole-GPU LDS cycle budget (GPU-active cycles times
+  the CU count). Note that two CUs share a workgroup processor's LDS, so a saturated LDS
+  reads well below 100%.
 
 ### Changed
 

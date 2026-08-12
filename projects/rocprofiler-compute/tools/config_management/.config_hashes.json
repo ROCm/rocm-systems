@@ -5,7 +5,7 @@
         "0000_top_stats.yaml": "9d2d844dd3e3cbd6743c5a7f4ada6dcc",
         "0100_system_info.yaml": "09a09ab73c94db93d40eba5068ae06ca",
         "0200_system_speed_of_light.yaml": "95d5183a1339f7fb9b4531160e83594d",
-        "0300_memory_chart.yaml": "11114f44448eaed03b841537c4ec67cd",
+        "0300_memory_chart.yaml": "10083d654c57222ff93874544a1d782c",
         "0400_roofline.yaml": "14243a4aa61185e7ac1bea933a4262cb",
         "0500_command_processor_cpc.yaml": "2b853d2df2c9c7afe11f41bf92ab1b5b",
         "0600_workgroup_manager_spi.yaml": "cee979ca8ead219d99a08b1c512d8c3d",

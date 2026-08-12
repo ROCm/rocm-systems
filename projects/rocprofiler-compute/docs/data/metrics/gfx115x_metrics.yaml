@@ -85,7 +85,7 @@ Memory chart - LDS (Local Data Share):
     rst: Number of LDS instructions issued by the shader, including FLAT instructions that resolve to LDS. This counts instructions rather than data movement, so it does not distinguish reads from writes.
     unit: Requests per Normalization Unit
   LDS Utilization:
-    rst: Percentage of shader busy cycles during which LDS was servicing indexed accesses.
+    rst: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
     unit: Percent
   LDS Bank Conflict Rate:
     rst: Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.
