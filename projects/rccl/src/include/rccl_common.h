@@ -139,8 +139,8 @@ NCCL_API(ncclResult_t, rcclGetAlgoInfo, struct ncclComm* comm, ncclFunc_t coll, 
 // the full backend RCCL would actually run (CE, DDA, symmetric, or kernel) for
 // the given operands, so rccl-tests can attribute numbers to the right label.
 // `algo` returns a native NCCL_ALGO_* or rcclAddonAlgos_t value; name it with
-// rcclGetAlgoName(). Currently implemented for AllReduce; other collectives fall
-// back to rcclGetAlgoInfo().
+// rcclGetAlgoName(). Currently implemented for AllReduce and AllGather; other
+// collectives fall back to rcclGetAlgoInfo().
 //
 // graphCapturing: pass non-zero if the collective will execute under HIP/CUDA
 // graph capture. This query is normally issued outside capture (before/after the
