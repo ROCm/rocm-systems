@@ -207,8 +207,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   // facts needed by dense relay selection. Re-decoding the whole code object
   // here (and a third time for component-local scalar assignments) is both
   // redundant and dominant on multi-thousand-kernel generated libraries.
-  if (instrumentation::is_admitted_arch(arch) &&
-      use_indirect_appended && local_entry_islands) {
+  if (instrumentation::is_admitted_arch(arch) && use_indirect_appended && local_entry_islands) {
     const auto merge_ranges = [](std::vector<std::pair<uint64_t, uint64_t>> &ranges) {
       std::ranges::sort(ranges);
       size_t merged_range_count = 0u;
@@ -263,6 +262,10 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         groups.back().second.candidates.push_back(candidate);
       }
     }
+    using DenseHostCandidateCacheKey =
+        std::tuple<bool, std::string, uint64_t, std::vector<uint64_t>,
+                   std::vector<std::pair<uint16_t, uint16_t>>>;
+    std::map<DenseHostCandidateCacheKey, std::vector<uint64_t>> dense_host_candidate_cache;
     for (const auto &[key, group] : groups) {
       const ConSanCandidateResourcePlan *group_resource =
           group.candidates.empty() ? nullptr
@@ -324,56 +327,71 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           const std::vector<MoiSgprRange> host_bootstrap_ranges =
               moi_relocatable_host_scalar_ranges(group_options,
                                                  MoiRelocatableHostScalarState::AccessRouter, arch);
-          MoiDenseOwnerLivenessProof host_owner_proof =
-              resource_state.prepare_dense_liveness_for_owners(
-                  group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
           const uint64_t host_words_count = group_entry_island_words + 1u;
           const uint64_t owner_begin =
               key.first ? kernel->entry_text_offset : function->entry_text_offset;
           const uint64_t owner_end =
               owner_begin + (key.first ? kernel->code_size : function->code_size);
-          std::vector<std::pair<uint64_t, uint64_t>> owner_sync_ranges;
-          const size_t owner_barrier_count =
-              key.first ? kernel->barrier_sites.size() : function->barrier_sites.size();
-          const size_t owner_fence_count =
-              key.first ? kernel->fence_sites.size() : function->fence_sites.size();
-          const size_t owner_atomic_count =
-              key.first ? kernel->atomic_sites.size() : function->atomic_sites.size();
-          owner_sync_ranges.reserve(owner_barrier_count + owner_fence_count + owner_atomic_count);
-          const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
-            if (size != 0u)
-              owner_sync_ranges.emplace_back(begin, begin + size);
-          };
-          const auto append_owner_sites = [&](const auto &owner) {
-            for (const ConSanBarrierSite &site : owner.barrier_sites)
-              append_occupied_range(site.text_offset, site.size);
-            for (const ConSanFenceSite &site : owner.fence_sites)
-              append_occupied_range(site.text_offset, site.size);
-            for (const ConSanAtomicSite &site : owner.atomic_sites)
-              append_occupied_range(site.text_offset, site.size);
-          };
-          if (key.first)
-            append_owner_sites(*kernel);
-          else
-            append_owner_sites(*function);
-          merge_ranges(owner_sync_ranges);
-          const auto overlaps_instrumented_site = [&](uint64_t begin, uint64_t end) {
-            return overlaps_ranges(global_access_ranges, begin, end) ||
-                   overlaps_ranges(owner_sync_ranges, begin, end);
-          };
-
-          auto best_host = find_moi_dense_relay_host(
-              resource_state, original_text,
-              {
-                  .owner_begin = owner_begin,
-                  .owner_end = owner_end,
-                  .host_word_count = static_cast<size_t>(host_words_count),
-                  .anchors = anchors,
-                  .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
-                  .owner_proof = host_owner_proof,
-                  .bootstrap_ranges = host_bootstrap_ranges,
-              },
-              overlaps_instrumented_site);
+          std::vector<std::pair<uint16_t, uint16_t>> bootstrap_key;
+          bootstrap_key.reserve(host_bootstrap_ranges.size());
+          for (const MoiSgprRange &range : host_bootstrap_ranges)
+            bootstrap_key.emplace_back(range.base, range.width);
+          DenseHostCandidateCacheKey cache_key{key.first, key.second, host_words_count,
+                                               group_resource->owner_descriptor_file_offsets,
+                                               std::move(bootstrap_key)};
+          auto cached_candidates = dense_host_candidate_cache.find(cache_key);
+          if (cached_candidates == dense_host_candidate_cache.end()) {
+            MoiDenseOwnerLivenessProof host_owner_proof =
+                resource_state.prepare_dense_liveness_for_owners(
+                    group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
+            std::vector<std::pair<uint64_t, uint64_t>> owner_sync_ranges;
+            const size_t owner_barrier_count =
+                key.first ? kernel->barrier_sites.size() : function->barrier_sites.size();
+            const size_t owner_fence_count =
+                key.first ? kernel->fence_sites.size() : function->fence_sites.size();
+            const size_t owner_atomic_count =
+                key.first ? kernel->atomic_sites.size() : function->atomic_sites.size();
+            owner_sync_ranges.reserve(owner_barrier_count + owner_fence_count + owner_atomic_count);
+            const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
+              if (size != 0u)
+                owner_sync_ranges.emplace_back(begin, begin + size);
+            };
+            const auto append_owner_sites = [&](const auto &owner) {
+              for (const ConSanBarrierSite &site : owner.barrier_sites)
+                append_occupied_range(site.text_offset, site.size);
+              for (const ConSanFenceSite &site : owner.fence_sites)
+                append_occupied_range(site.text_offset, site.size);
+              for (const ConSanAtomicSite &site : owner.atomic_sites)
+                append_occupied_range(site.text_offset, site.size);
+            };
+            if (key.first)
+              append_owner_sites(*kernel);
+            else
+              append_owner_sites(*function);
+            merge_ranges(owner_sync_ranges);
+            const auto overlaps_instrumented_site = [&](uint64_t begin, uint64_t end) {
+              return overlaps_ranges(global_access_ranges, begin, end) ||
+                     overlaps_ranges(owner_sync_ranges, begin, end);
+            };
+            std::vector<uint64_t> host_candidates = collect_moi_dense_relay_host_candidates(
+                resource_state,
+                {
+                    .owner_begin = owner_begin,
+                    .owner_end = owner_end,
+                    .host_word_count = static_cast<size_t>(host_words_count),
+                    .anchors = anchors,
+                    .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
+                    .owner_proof = host_owner_proof,
+                    .bootstrap_ranges = host_bootstrap_ranges,
+                },
+                overlaps_instrumented_site);
+            cached_candidates =
+                dense_host_candidate_cache.emplace(std::move(cache_key), std::move(host_candidates))
+                    .first;
+          }
+          auto best_host = select_moi_dense_relay_host(resource_state, original_text,
+                                                       static_cast<size_t>(host_words_count),
+                                                       anchors, cached_candidates->second);
           if (best_host) {
             island = best_host->host_offset + sizeof(uint32_t);
             dense_entry_hosts.emplace(dispatcher,

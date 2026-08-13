@@ -2140,19 +2140,17 @@ struct MoiDenseRelayHostSearch {
 };
 
 template <typename OverlapsReserved>
-[[nodiscard]] std::optional<MoiDenseRelayHost>
-find_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
-                          std::span<const uint8_t> text, const MoiDenseRelayHostSearch &search,
-                          OverlapsReserved &&overlaps_reserved) {
-  if (search.owner_begin >= search.owner_end || search.host_word_count == 0u ||
-      search.anchors.empty())
-    return std::nullopt;
+[[nodiscard]] std::vector<uint64_t>
+collect_moi_dense_relay_host_candidates(const MoiResourcePlanningState &resource_state,
+                                        const MoiDenseRelayHostSearch &search,
+                                        OverlapsReserved &&overlaps_reserved) {
+  if (search.owner_begin >= search.owner_end || search.host_word_count == 0u)
+    return {};
   if (search.host_word_count > std::numeric_limits<uint64_t>::max() / sizeof(uint32_t))
-    return std::nullopt;
+    return {};
   const uint64_t host_bytes = static_cast<uint64_t>(search.host_word_count) * sizeof(uint32_t);
 
-  std::optional<MoiDenseRelayHost> best_host;
-  uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
+  std::vector<uint64_t> candidates;
   auto block = std::lower_bound(resource_state.blocks.begin(), resource_state.blocks.end(),
                                 search.owner_begin,
                                 [](const std::unique_ptr<BasicBlock> &candidate, uint64_t entry) {
@@ -2199,41 +2197,77 @@ find_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
                                                relocated_references, search.bootstrap_ranges)) {
         continue;
       }
-
-      const uint64_t relay_offset = host_offset + sizeof(uint32_t);
-      uint64_t max_distance = 0u;
-      const bool reachable = std::ranges::all_of(search.anchors, [&](uint64_t anchor) {
-        if (!compute_sopp_branch_simm16(anchor, relay_offset))
-          return false;
-        max_distance = std::max(max_distance, anchor < relay_offset ? relay_offset - anchor
-                                                                    : anchor - relay_offset);
-        return true;
-      });
-      if (!reachable || max_distance >= best_max_distance)
-        continue;
-
-      std::vector<uint32_t> displaced_words;
-      std::vector<std::string> decode_errors;
-      while (displaced_words.size() < search.host_word_count) {
-        auto decoded = decode_relocatable_entry_instruction(
-            text, host_offset + displaced_words.size() * sizeof(uint32_t), resource_state.arch,
-            decode_errors, resource_state.decoder.get());
-        if (!decoded) {
-          displaced_words.clear();
-          break;
-        }
-        displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
-      }
-      if (displaced_words.size() != search.host_word_count)
-        continue;
-      best_max_distance = max_distance;
-      best_host = MoiDenseRelayHost{
-          .host_offset = host_offset,
-          .displaced_words = std::move(displaced_words),
-      };
+      candidates.push_back(host_offset);
     }
   }
-  return best_host;
+  return candidates;
+}
+
+[[nodiscard]] std::optional<MoiDenseRelayHost>
+select_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
+                            std::span<const uint8_t> text, size_t host_word_count,
+                            std::span<const uint64_t> anchors,
+                            std::span<const uint64_t> candidate_offsets) {
+  if (host_word_count == 0u || anchors.empty() || candidate_offsets.empty())
+    return std::nullopt;
+
+  const auto [minimum_anchor, maximum_anchor] = std::ranges::minmax(anchors);
+  const uint64_t midpoint = minimum_anchor + (maximum_anchor - minimum_anchor) / 2u;
+  const uint64_t midpoint_host = midpoint >= sizeof(uint32_t) ? midpoint - sizeof(uint32_t) : 0u;
+  auto right = std::ranges::lower_bound(candidate_offsets, midpoint_host);
+  auto left = right;
+  const auto begin = candidate_offsets.begin();
+  const auto end = candidate_offsets.end();
+  const auto score = [&](uint64_t host_offset) {
+    const uint64_t relay_offset = host_offset + sizeof(uint32_t);
+    return std::max(relay_offset - std::min(relay_offset, minimum_anchor),
+                    maximum_anchor - std::min(relay_offset, maximum_anchor));
+  };
+  const auto decode_host = [&](uint64_t host_offset) -> std::optional<MoiDenseRelayHost> {
+    const uint64_t relay_offset = host_offset + sizeof(uint32_t);
+    if (!std::ranges::all_of(anchors, [&](uint64_t anchor) {
+          return compute_sopp_branch_simm16(anchor, relay_offset).has_value();
+        })) {
+      return std::nullopt;
+    }
+    std::vector<uint32_t> displaced_words;
+    std::vector<std::string> decode_errors;
+    while (displaced_words.size() < host_word_count) {
+      auto decoded = decode_relocatable_entry_instruction(
+          text, host_offset + displaced_words.size() * sizeof(uint32_t), resource_state.arch,
+          decode_errors, resource_state.decoder.get());
+      if (!decoded)
+        return std::nullopt;
+      displaced_words.insert(displaced_words.end(), decoded->begin(), decoded->end());
+    }
+    if (displaced_words.size() != host_word_count)
+      return std::nullopt;
+    return MoiDenseRelayHost{
+        .host_offset = host_offset,
+        .displaced_words = std::move(displaced_words),
+    };
+  };
+
+  while (left != begin || right != end) {
+    const bool have_left = left != begin;
+    const uint64_t left_offset = have_left ? *std::prev(left) : 0u;
+    const bool choose_left = have_left && (right == end || score(left_offset) <= score(*right));
+    const uint64_t candidate = choose_left ? *(--left) : *right++;
+    if (auto host = decode_host(candidate))
+      return host;
+  }
+  return std::nullopt;
+}
+
+template <typename OverlapsReserved>
+[[nodiscard]] std::optional<MoiDenseRelayHost>
+find_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
+                          std::span<const uint8_t> text, const MoiDenseRelayHostSearch &search,
+                          OverlapsReserved &&overlaps_reserved) {
+  const std::vector<uint64_t> candidates = collect_moi_dense_relay_host_candidates(
+      resource_state, search, std::forward<OverlapsReserved>(overlaps_reserved));
+  return select_moi_dense_relay_host(resource_state, text, search.host_word_count, search.anchors,
+                                     candidates);
 }
 
 [[nodiscard]] RegisterSet
@@ -2759,6 +2793,103 @@ resource_plan_for_site(const ConSanResult &result, ConSanResourceSiteKind site_k
   });
   return it == result.resource_plans.end() ? nullptr : &*it;
 }
+
+struct MoiResourcePlanSiteKey {
+  ConSanResourceSiteKind kind = ConSanResourceSiteKind::Access;
+  uint64_t text_offset = 0;
+
+  bool operator==(const MoiResourcePlanSiteKey &) const = default;
+};
+
+struct MoiResourcePlanSiteKeyHash {
+  size_t operator()(const MoiResourcePlanSiteKey &key) const noexcept {
+    const size_t offset_hash = std::hash<uint64_t>{}(key.text_offset);
+    const size_t kind_hash = std::hash<uint8_t>{}(static_cast<uint8_t>(key.kind));
+    return offset_hash ^ (kind_hash + 0x9e3779b9u + (offset_hash << 6u) + (offset_hash >> 2u));
+  }
+};
+
+class MoiResourcePlanSiteIndex {
+public:
+  explicit MoiResourcePlanSiteIndex(const ConSanResult &result) : result_(result) {
+    indices_.reserve(result.resource_plans.size());
+    for (size_t index = 0; index < result.resource_plans.size(); ++index) {
+      const ConSanCandidateResourcePlan &plan = result.resource_plans[index];
+      indices_.try_emplace(MoiResourcePlanSiteKey{plan.site_kind, plan.text_offset}, index);
+    }
+  }
+
+  [[nodiscard]] const ConSanCandidateResourcePlan *find(ConSanResourceSiteKind kind,
+                                                        uint64_t text_offset) const {
+    const auto found = indices_.find(MoiResourcePlanSiteKey{kind, text_offset});
+    return found == indices_.end() ? nullptr : &result_.resource_plans[found->second];
+  }
+
+private:
+  const ConSanResult &result_;
+  std::unordered_map<MoiResourcePlanSiteKey, size_t, MoiResourcePlanSiteKeyHash> indices_;
+};
+
+class MoiPatchOwnerIndex {
+public:
+  explicit MoiPatchOwnerIndex(const ConSanResult &result) {
+    for (const ConSanPatchInfo &patch : result.patches) {
+      if (patch.workgroup_shadow_size != 0u) {
+        workgroup_shadow_owners_.insert(patch.owner_descriptor_file_offsets.begin(),
+                                        patch.owner_descriptor_file_offsets.end());
+      }
+      if (!is_persistent_access_patch(patch))
+        continue;
+      for (uint64_t owner : patch.owner_descriptor_file_offsets)
+        persistent_access_patches_by_owner_[owner].push_back(&patch);
+    }
+  }
+
+  [[nodiscard]] const ConSanPatchInfo *
+  persistent_access_patch_for(std::span<const uint64_t> owners) {
+    std::vector<uint64_t> key(owners.begin(), owners.end());
+    if (const auto cached = persistent_access_cache_.find(key);
+        cached != persistent_access_cache_.end()) {
+      return cached->second;
+    }
+
+    const ConSanPatchInfo *match = nullptr;
+    if (!owners.empty()) {
+      const auto candidates = persistent_access_patches_by_owner_.find(owners.front());
+      if (candidates != persistent_access_patches_by_owner_.end()) {
+        const auto found = std::ranges::find_if(candidates->second, [&](const auto *patch) {
+          return std::ranges::all_of(owners, [&](uint64_t owner) {
+            return std::ranges::find(patch->owner_descriptor_file_offsets, owner) !=
+                   patch->owner_descriptor_file_offsets.end();
+          });
+        });
+        if (found != candidates->second.end())
+          match = *found;
+      }
+    }
+    persistent_access_cache_.emplace(std::move(key), match);
+    return match;
+  }
+
+  [[nodiscard]] bool has_workgroup_shadow_for_any(std::span<const uint64_t> owners) const {
+    return std::ranges::any_of(
+        owners, [&](uint64_t owner) { return workgroup_shadow_owners_.contains(owner); });
+  }
+
+private:
+  [[nodiscard]] static bool is_persistent_access_patch(const ConSanPatchInfo &patch) {
+    return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+            patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
+            patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+            patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
+           patch.scratch_vgpr && patch.persistent_epoch_private_offset;
+  }
+
+  std::unordered_map<uint64_t, std::vector<const ConSanPatchInfo *>>
+      persistent_access_patches_by_owner_;
+  std::unordered_set<uint64_t> workgroup_shadow_owners_;
+  std::map<std::vector<uint64_t>, const ConSanPatchInfo *> persistent_access_cache_;
+};
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ConSanOptions &options,
