@@ -1047,12 +1047,9 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 DmaBlitManager::BufferState DmaBlitManager::AcquireHostBuffer(const_address host_mem, size_t size,
                                                               HostBufferPolicy policy) const {
   BufferState buffer_state = {0};
-  const bool do_host_pinning =
-      policy.mode == HostBufferPolicy::Mode::kPreferPinnedAbove && size > policy.threshold;
-  const size_t copy_chunk_size = do_host_pinning ? PinXferSize : StagingXferSize;
-  size_t xfer_size = std::min(size, copy_chunk_size);
 
-  if (do_host_pinning) {
+  if (policy.mode == HostBufferPolicy::Mode::kPreferPinnedAbove && size > policy.threshold) {
+    const size_t xfer_size = std::min(size, PinXferSize);
     size_t partial = 0;
     amd::Memory* pinned_mem = pinHostMemory(host_mem, xfer_size, partial);
     if (pinned_mem != nullptr) {
@@ -1069,7 +1066,7 @@ DmaBlitManager::BufferState DmaBlitManager::AcquireHostBuffer(const_address host
   }
 
   // If memory pinning fails, fall back to a staging buffer.
-  xfer_size = std::min(xfer_size, StagingXferSize);
+  const size_t xfer_size = std::min(size, StagingXferSize);
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Staging resource size %zu",
           xfer_size);
   buffer_state.copySize_ = xfer_size;
