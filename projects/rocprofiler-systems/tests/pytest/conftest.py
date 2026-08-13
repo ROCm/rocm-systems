@@ -612,8 +612,24 @@ def pytest_collection_modifyitems(config, items) -> None:
                 )
 
 
-def pytest_collection_finish(session):
+# Modules that fail to collect are recorded here so CTest generate mode can fail
+_collection_errors: list[pytest.CollectReport] = []
+
+
+def pytest_collectreport(report) -> None:
+    """Record collection failures for CTest generate mode's abort check."""
+    if report.failed:
+        _collection_errors.append(report)
+
+
+def pytest_collection_finish(session) -> None:
     if session.config.getoption("--ctest-mode", default="off") == "generate":
+        if _collection_errors:
+            failures = "\n".join(f"  - {r.nodeid}" for r in _collection_errors)
+            pytest.exit(
+                f"CTestTestfile.cmake generation failed due to:\n{failures}",
+                returncode=1,
+            )
         raw_path = session.config.getoption("--ctest-output-path", default=None)
         output_path = Path(raw_path) if raw_path else None
         _ctest_generate_tests(session.items, output_path)
@@ -1558,6 +1574,9 @@ def _build_rocprofsys_config_header() -> list[str]:
         else "Not found"
     )
 
+    # capabilities.max_threads reports 0 when rocprof-sys-avail could not be queried
+    max_threads_str = cap.max_threads if cap.max_threads else "Not found"
+
     W = 22  # label width for alignment
 
     def _row(label: str, value) -> str:
@@ -1601,6 +1620,7 @@ def _build_rocprofsys_config_header() -> list[str]:
         "-" * 70,
         "System Capabilities:",
         _row("Detected num procs:", cap.num_procs),
+        _row("Max threads:", max_threads_str),
         _row("UCX available:", cap.ucx_availability),
         _row("Perf event paranoid:", cap.perf_event_paranoid),
         _row("CAP_SYS_ADMIN:", cap.cap_sys_admin),
