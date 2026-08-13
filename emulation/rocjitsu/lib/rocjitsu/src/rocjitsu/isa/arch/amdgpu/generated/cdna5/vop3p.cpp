@@ -56,7 +56,7 @@ uint32_t cdna5_matrix_fmt_element_bits(uint32_t fmt) {
   }
 }
 
-int gfx1250_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {
+int cdna5_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {
   return static_cast<int>((dim * k * cdna5_matrix_fmt_element_bits(fmt)) / 32);
 }
 
@@ -88,14 +88,14 @@ int gfx1250_scaled_wmma_src0_size_bits(const MachineInst *inst) {
   const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);
   if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))
     return 512;
-  return gfx1250_matrix_fmt_operand_size_bits(high->opsel, 16, 128);
+  return cdna5_matrix_fmt_operand_size_bits(high->opsel, 16, 128);
 }
 
 int gfx1250_scaled_wmma_src1_size_bits(const MachineInst *inst) {
   const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);
   if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))
     return 256;
-  return gfx1250_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);
+  return cdna5_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);
 }
 
 } // namespace
@@ -1657,10 +1657,10 @@ VWmmaF3216x16x128F8f6f4Vop3p::VWmmaF3216x16x128F8f6f4Vop3p(const MachineInst *in
             selected_exec_fn(InstructionExecutionId::VWmmaF3216x16x128F8f6f4Vop3p),
             LiteralSupport::None),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(gfx1250_matrix_fmt_operand_size_bits(reinterpret_cast<const OpEncoding *>(inst)->opsel,
-                                                16, 128),
+      src0(cdna5_matrix_fmt_operand_size_bits(reinterpret_cast<const OpEncoding *>(inst)->opsel, 16,
+                                              128),
            OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(gfx1250_matrix_fmt_operand_size_bits(
+      src1(cdna5_matrix_fmt_operand_size_bits(
                ((reinterpret_cast<const OpEncoding *>(inst)->pad_14 << 2) |
                 reinterpret_cast<const OpEncoding *>(inst)->opsel_hi),
                16, 128),
