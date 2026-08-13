@@ -201,6 +201,7 @@ RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM(InitChannels, "INIT_CHANNELS", -1);
+RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // GDRCOPY support: Off by default
 NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
@@ -279,8 +280,8 @@ exit:;
 }
 
 static ncclResult_t ncclInit() {
-    // Register atexit handler to detect process shutdown. This must happen
-    // early so the handler runs BEFORE HIP runtime static destructors.
+  // Register atexit handler to detect process shutdown. This must happen
+  // early so the handler runs BEFORE HIP runtime static destructors.
   rcclRegisterShutdownHandler();
 
   char strValue[2048];
@@ -300,7 +301,7 @@ static ncclResult_t ncclInit() {
     unsigned int eax, ebx, ecx, edx;
     if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx)) ecx = 0; // cpuid not supported
     NCCLCHECK(ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue));
-      // Check BIOS string and hypervisor presence on ecx bit 31
+    // Check BIOS string and hypervisor presence on ecx bit 31
     if (strncmp("Hyper-V UEFI Release", strValue, 20) != 0 && (ecx & (1u << 31)) == 0) {
       char cmdline[2048] = {0};
       const char* cmdlinePtr = NULL;
@@ -1355,8 +1356,7 @@ static ncclResult_t ncclP2pSchedule(struct ncclComm* comm) {
 
 #ifdef ENABLE_WARP_SPEED
 static bool willEnableWarpSpeed(struct ncclComm* parent, struct ncclComm* comm, int nNodes) {
-  return rcclParamWarpSpeedForceEnable() > 0 ||
-         ((!parent || comm->isGrow) && rcclCanUseWarpSpeedAuto(comm, nNodes));
+  return rcclParamWarpSpeedForceEnable() > 0 || ((!parent || comm->isGrow) && rcclCanUseWarpSpeedAuto(comm, nNodes));
 }
 #endif
 
@@ -2371,7 +2371,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   TRACE(NCCL_INIT, "rank %d nranks %d - DONE", rank, nranks);
 
 exit:
-  if (ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity); // RCCL 2.29.7 behavior: leave calling thread pinned to GPU-local NUMA
+  if (ncclOsCpuCount(comm->cpuAffinity))
+    ncclOsSetAffinity(comm->cpuAffinity); // RCCL 2.29.7 behavior: leave calling thread pinned to GPU-local NUMA
   /* If split resource is shared, we are not able to unlink the proxy ops pool here since the child comm can
    * attach the proxy ops pool of parent at any time; otherwise, unlink it here to make sure the pool will be
    * properly cleaned up. */

@@ -266,6 +266,7 @@ enum OpSelSsrcLanesel {
   OPR_SSRC_LANESEL_NULL = 124,
   OPR_SSRC_LANESEL_M0 = 125,
   OPR_SSRC_LANESEL_POS_INT_MIN = 128,
+  OPR_SSRC_LANESEL_POS_INT_MAX = 191,
 };
 
 enum OpSelSsrcSpecialScc {
