@@ -1835,10 +1835,11 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     }
   }
   if (fastPath) {
-    // Phase 3: allgather
+    // Phase 3: allgather directly into the user's receive window.
     batchOpsParams.numOps = 0;
     myRecvSlot = (uint8_t*)recvbuff + (size_t)comm->rank * shardBytes;
-    recvSlotOffset = (size_t)comm->rank * shardBytes;
+    const size_t recvWindowOffset = (size_t)((uint8_t*)recvbuff - (uint8_t*)recvWin->userPtr);
+    recvSlotOffset = recvWindowOffset + (size_t)comm->rank * shardBytes;
 
     // The reduce kernel writes the reduced shard straight into recvbuff, so outShard and
     // myRecvSlot alias; copying would be a self-overlapping D2D transfer.
