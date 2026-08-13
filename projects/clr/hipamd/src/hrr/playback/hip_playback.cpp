@@ -2323,13 +2323,14 @@ hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* pl) 
 // Shared D2H validation logic for all 3D memcpy variants.
 // Copies byte_count bytes from src_live (device) into a host buffer, then
 // validates against the expected blob stored at d2h_hash_lo/hi.
-// `tag` names the API in the diagnostics; the driver-memcpy handlers share this
-// body and must not report themselves as "3D".
+// `tag` names the calling API in the diagnostics. It has no default: several
+// APIs share this body, and the messages here are the only thing that tells
+// them apart in a replay log.
 static hipError_t replay_memcpy3d_d2h(PlaybackContext& ctx,
                                        void* src_live, size_t byte_count,
                                        uint64_t d2h_hash_lo, uint64_t d2h_hash_hi,
                                        hipStream_t stream, bool is_async,
-                                       const char* tag = "3D") {
+                                       const char* tag) {
     std::vector<uint8_t> actual(byte_count ? byte_count : 1);
     hipError_t r;
     if (is_async) {
@@ -2395,7 +2396,7 @@ hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
         size_t byte_count = parms.extent.width * parms.extent.height * parms.extent.depth;
         return replay_memcpy3d_d2h(ctx, src_live, byte_count,
                                    a->d2h_hash_lo, a->d2h_hash_hi,
-                                   nullptr, false);
+                                   nullptr, false, "hipMemcpy3D");
     }
     // D2D: translate both pointers
     parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
@@ -2432,7 +2433,7 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
         size_t byte_count = parms.extent.width * parms.extent.height * parms.extent.depth;
         return replay_memcpy3d_d2h(ctx, src_live, byte_count,
                                    a->d2h_hash_lo, a->d2h_hash_hi,
-                                   stream, true);
+                                   stream, true, "hipMemcpy3DAsync");
     }
     // D2D: translate both pointers
     parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
