@@ -26,7 +26,7 @@
 #include <thread>
 #include <vector>
 
-using namespace roctx_recordfn::detail;
+using namespace torch_trace_collector::detail;
 
 namespace
 {
@@ -117,24 +117,26 @@ std::size_t count_in_marker_path(const std::string& wire, const std::string& nee
 
 TEST(LeafContext, ForwardTopLevelLeafIsAten)
 {
-    EXPECT_STREQ(roctx_recordfn::default_leaf_context(false, 42, true), roctx_recordfn::kAtenTopLevelLeaf);
+    EXPECT_STREQ(torch_trace_collector::default_leaf_context(false, 42, true),
+                 torch_trace_collector::kAtenTopLevelLeaf);
 }
 
 TEST(LeafContext, ForwardNestedLeafIsAtenNested)
 {
-    EXPECT_STREQ(roctx_recordfn::default_leaf_context(false, 42, false), roctx_recordfn::kAtenNestedLeaf);
+    EXPECT_STREQ(torch_trace_collector::default_leaf_context(false, 42, false),
+                 torch_trace_collector::kAtenNestedLeaf);
 }
 
 TEST(LeafContext, BackwardWithSeqLeafIsAutogradBwd)
 {
-    EXPECT_STREQ(roctx_recordfn::default_leaf_context(true, 7, true),
-                 roctx_recordfn::kAutogradBackwardLeaf);
+    EXPECT_STREQ(torch_trace_collector::default_leaf_context(true, 7, true),
+                 torch_trace_collector::kAutogradBackwardLeaf);
 }
 
 TEST(LeafContext, BackwardWithoutSeqLeafIsAutogradEngine)
 {
-    EXPECT_STREQ(roctx_recordfn::default_leaf_context(true, -1, true),
-                 roctx_recordfn::kAutogradEngineLeaf);
+    EXPECT_STREQ(torch_trace_collector::default_leaf_context(true, -1, true),
+                 torch_trace_collector::kAutogradEngineLeaf);
 }
 
 namespace

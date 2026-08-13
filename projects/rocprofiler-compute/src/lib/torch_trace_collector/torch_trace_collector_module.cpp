@@ -15,7 +15,7 @@
 
 #include <string>
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 pybind11::dict dump_stats()
@@ -36,11 +36,11 @@ pybind11::dict dump_stats()
     return stats_dict;
 }
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail
 
-PYBIND11_MODULE(roctx_recordfn, m)
+PYBIND11_MODULE(torch_trace_collector, m)
 {
-    using namespace roctx_recordfn::detail;
+    using namespace torch_trace_collector::detail;
 
     m.doc() = "ROCTX bridge for PyTorch's RecordFunction callback.";
 

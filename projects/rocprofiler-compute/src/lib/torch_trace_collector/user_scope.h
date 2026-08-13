@@ -24,7 +24,7 @@ extern "C"
 #include <rocprofiler-sdk-roctx/roctx.h>
 }
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 // Carries the main-thread USER_SCOPE chain to autograd workers.
@@ -155,4 +155,4 @@ inline void pop_user_scope()
     }
 }
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail

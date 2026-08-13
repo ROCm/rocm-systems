@@ -6,7 +6,7 @@
 #include <atomic>
 #include <cstdint>
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 // Runtime counters exposed through dump_stats().
@@ -31,4 +31,4 @@ inline void inc(std::atomic<std::uint64_t>& counter)
     counter.fetch_add(1, std::memory_order_relaxed);
 }
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail

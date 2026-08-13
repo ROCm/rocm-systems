@@ -29,7 +29,7 @@ extern "C"
 #include <rocprofiler-sdk-roctx/roctx.h>
 }
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 // Records what start_cb pushed so end_cb can unwind it.
@@ -112,9 +112,9 @@ inline std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& r
         StackEntry leaf;
         leaf.marker                  = name;
         const bool is_backward_scope = (scope == at::RecordScope::BACKWARD_FUNCTION);
-        leaf.context = roctx_recordfn::default_leaf_context(is_backward_scope,
-                                                            seq_nr,
-                                                            stack_was_empty_for_leaf);
+        leaf.context = torch_trace_collector::default_leaf_context(is_backward_scope,
+                                                                   seq_nr,
+                                                                   stack_was_empty_for_leaf);
         g_thread.stack.push_back(std::move(leaf));
         observer_ctx->pushed_leaf = true;
 
@@ -194,4 +194,4 @@ inline bool is_installed()
     return g_install.installed.load();
 }
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail

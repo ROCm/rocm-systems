@@ -5,7 +5,7 @@
 
 #include <string>
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 struct StackEntry
@@ -14,4 +14,4 @@ struct StackEntry
     std::string context;
 };
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail
