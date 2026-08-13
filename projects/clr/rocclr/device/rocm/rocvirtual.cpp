@@ -1522,7 +1522,18 @@ AqlSlotReservation VirtualGPU::ReserveAqlSlots(size_t packet_count) {
 
 // ================================================================================================
 void VirtualGPU::OptimizeStreamOrderingBarrier(
-    uint16_t& header, const AqlSlotReservation& reservation) const {
+    uint16_t& header, const AqlSlotReservation& reservation) {
+  // Coop dispatch (ordering rides the completion-signal chain): clear the bit only if this grid
+  // fits alongside the in-flight coop grids, else keep it so it waits for them to retire.
+  if (coop_concurrent_dispatch_) {
+    // The submit path already waited for room, so this normally admits. It can still decline for
+    // a grid larger than the admission ceiling, which has nothing to wait for and must serialize.
+    if (coopAdmitFits(coop_pending_fraction_)) {
+      header &= ~kBarrierBit;
+    }
+    return;
+  }
+
   if (!roc_device_.settings().aql_barrier_opt_) {
     return;
   }
@@ -1557,6 +1568,46 @@ void VirtualGPU::RecordAqlPacketHeader(const AqlSlotReservation& reservation,
 // ================================================================================================
 void VirtualGPU::CompleteAqlSubmission(const AqlSlotReservation& reservation) {
   last_aql_packet_slot_ = reservation.start_slot + reservation.packet_count - 1;
+}
+
+// ================================================================================================
+bool VirtualGPU::coopAdmitFits(double grid_fraction) {
+  // Prune retired grids (signal drained to <= 0), summing the fraction still resident.
+  double in_flight = 0.0;
+  for (auto it = coop_inflight_.begin(); it != coop_inflight_.end();) {
+    if (Hsa::signal_load_relaxed(it->first->signal_) <= 0) {
+      it->first->release();
+      it = coop_inflight_.erase(it);
+    } else {
+      in_flight += it->second;
+      ++it;
+    }
+  }
+  // Ceiling is below 1.0 by default in practice: the occupancy API reports a theoretical
+  // maximum that SPI crawler limits and harvested CUs make unreachable, so admitting to
+  // exactly 1.0 lets in grids that then only place partially.
+  const double ceiling = static_cast<double>(DEBUG_CLR_COOP_ADMIT_PCT) / 100.0;
+  return (in_flight + grid_fraction <= ceiling + 1e-6);
+}
+
+// ================================================================================================
+ProfilingSignal* VirtualGPU::coopOldestInflight() {
+  for (auto& e : coop_inflight_) {
+    if (Hsa::signal_load_relaxed(e.first->signal_) > 0) {
+      e.first->retain();
+      return e.first;
+    }
+  }
+  return nullptr;
+}
+
+// ================================================================================================
+void VirtualGPU::coopTrackInflight(double grid_fraction) {
+  ProfilingSignal* sig = Barriers().GetLastSignal();
+  if (sig != nullptr) {
+    sig->retain();  // block ring reuse so we can poll it for retirement
+    coop_inflight_.emplace_back(sig, grid_fraction);
+  }
 }
 
 // ================================================================================================
@@ -5330,7 +5381,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     }
 
     // Lock the queue, using the blit manager lock
-    std::scoped_lock k(*(queue->blitMgr().lockXfer()));
+    std::unique_lock<std::recursive_mutex> k(*(queue->blitMgr().lockXfer()));
 
     queue->profilingBegin(vcmd);
 
@@ -5342,18 +5393,62 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
       static_cast<KernelBlitManager&>(queue->blitMgr()).RunGwsInit(workgroups - 1);
     }
 
-    // Sync AQL packets
+    // Reuse the barrier-bit-opt gate (aql_barrier_opt_). Overlap only on SW grid.sync ASICs
+    // (!gwsInitSupported_), where the coop queue need not be held exclusive.
+    const bool coop_concurrent =
+        dev().settings().aql_barrier_opt_ && !dev().settings().gwsInitSupported_;
+
+    // grid_fraction = blocks/capacity (1.0 if unknown -> serialize); coopAdmitFits polls it at
+    // ring-reservation time under the coop blit lock (no atomics needed).
+    double grid_fraction = 1.0;
+    if (coop_concurrent) {
+      const uint32_t capacity = vcmd.coopMaxGridBlocks();
+      grid_fraction =
+          (capacity > 0) ? static_cast<double>(vcmd.numWorkgroups()) / capacity : 1.0;
+      queue->coop_pending_fraction_ = grid_fraction;
+      queue->coop_concurrent_dispatch_ = true;
+      // A grid that does not fit must not be stamped with barrier bit 1: that makes it wait for
+      // the WHOLE coop queue to drain, and because the queue is in-order it stalls every grid
+      // queued behind it too. Hold the submit instead until the grid actually fits. Only the
+      // calling thread waits, asleep on the oldest in-flight grid's completion signal with the
+      // transfer-queue lock released, so unrelated blits on that queue still make progress and no
+      // core is burned spinning. Resident coop grids always retire, so this always terminates.
+      while (!queue->coopAdmitFits(grid_fraction)) {
+        ProfilingSignal* oldest = queue->coopOldestInflight();
+        if (oldest == nullptr) {
+          break;  // nothing is in flight yet it still does not fit: nothing to wait for
+        }
+        k.unlock();
+        Hsa::signal_wait_scacquire(oldest->signal_, HSA_SIGNAL_CONDITION_LT, 1, uint64_t(-1),
+                                   HSA_WAIT_STATE_BLOCKED);
+        oldest->release();
+        k.lock();
+      }
+    }
+
+    // Standard barrier header; OptimizeStreamOrderingBarrier decides the bit.
     queue->setAqlHeader(dispatchPacketHeader_);
 
-    // Submit kernel to HW
+    // attach_signal makes the dispatch carry its own completion signal (the fence's return-dep role).
     if (!queue->submitKernelInternal(vcmd.sizes(), vcmd.kernel(), vcmd.parameters(),
                                      static_cast<void*>(as_cl(&vcmd.event())),
-                                     vcmd.sharedMemBytes(), &vcmd)) {
+                                     vcmd.sharedMemBytes(), &vcmd, nullptr,
+                                     /*attach_signal=*/coop_concurrent)) {
       LogError("AQL dispatch failed!");
       vcmd.setStatus(CL_INVALID_OPERATION);
     }
-    // Wait for the execution on the device queue. Keep the current queue in-order
-    queue->releaseGpuMemoryFence(kSkipCpuWait);
+    // Clear the marker so the fence/dependency packets below take the normal ordering path.
+    queue->coop_concurrent_dispatch_ = false;
+    // Skip the post-dispatch fence when concurrent: ordering rides the completion-signal chain and
+    // visibility the consumer's terminal fence; its only other effect was serializing the next grid.
+    if (!coop_concurrent) {
+      queue->releaseGpuMemoryFence(kSkipCpuWait);
+    }
+
+    // Record this grid as in-flight so later dispatches gate on the occupancy it holds.
+    if (coop_concurrent) {
+      queue->coopTrackInflight(grid_fraction);
+    }
 
     // Add a dependency into the current queue on the coop queue
     Barriers().AddExternalSignal(queue->Barriers().GetLastSignal());
