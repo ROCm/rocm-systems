@@ -300,6 +300,24 @@ typedef struct rocprofiler_callback_tracing_kernel_dispatch_data_t
 } rocprofiler_callback_tracing_kernel_dispatch_data_t;
 
 /**
+ * @brief ROCProfiler HIP Event Callback Tracer Record.
+ *
+ * Timestamps are only non-zero in the ::ROCPROFILER_CALLBACK_PHASE_NONE callback (barrier
+ * completion). For WAIT operations, @p source_queue_id identifies where the event was originally
+ * recorded; for RECORD operations it equals @p queue_id.
+ */
+typedef struct rocprofiler_callback_tracing_hip_event_data_t
+{
+    uint64_t                size;              ///< size of this struct
+    rocprofiler_timestamp_t start_timestamp;   ///< start time in nanoseconds
+    rocprofiler_timestamp_t end_timestamp;     ///< end time in nanoseconds
+    rocprofiler_agent_id_t  agent_id;          ///< agent where barrier executed
+    rocprofiler_queue_id_t  queue_id;          ///< queue where barrier was dispatched
+    uint64_t                hip_event_handle;  ///< hipEvent_t pointer value
+    rocprofiler_queue_id_t  source_queue_id;   ///< queue where event was recorded
+} rocprofiler_callback_tracing_hip_event_data_t;
+
+/**
  * @brief ROCProfiler Memory Copy Callback Tracer Record.
  *
  * The timestamps in this record will only be non-zero in the ::ROCPROFILER_CALLBACK_PHASE_EXIT

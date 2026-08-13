@@ -427,6 +427,31 @@ typedef struct rocprofiler_buffer_tracing_kernel_dispatch_record_t
 } rocprofiler_buffer_tracing_kernel_dispatch_record_t;
 
 /**
+ * @brief ROCProfiler Buffer HIP Event Tracer Record.
+ *
+ * For WAIT operations, @p source_queue_id identifies where the event was originally recorded; for
+ * RECORD operations it equals @p queue_id.
+ */
+typedef struct rocprofiler_buffer_tracing_hip_event_record_t
+{
+    uint64_t                           size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t  kind;  ///< ::ROCPROFILER_BUFFER_TRACING_HIP_EVENT
+    rocprofiler_hip_event_operation_t  operation;
+    rocprofiler_async_correlation_id_t correlation_id;    ///< correlation ids for record
+    rocprofiler_thread_id_t            thread_id;         ///< id for thread that enqueued barrier
+    rocprofiler_timestamp_t            start_timestamp;   ///< start time in nanoseconds
+    rocprofiler_timestamp_t            end_timestamp;     ///< end time in nanoseconds
+    rocprofiler_agent_id_t             agent_id;          ///< agent where barrier executed
+    rocprofiler_queue_id_t             queue_id;          ///< queue where barrier was dispatched
+    uint64_t                           hip_event_handle;  ///< hipEvent_t pointer value
+    rocprofiler_queue_id_t             source_queue_id;   ///< queue where event was recorded
+
+    /// @var operation
+    /// @brief HIP event buffer records are emitted after the barrier completes on the GPU.
+    /// Enqueue is already captured by HIP API buffer tracing.
+} rocprofiler_buffer_tracing_hip_event_record_t;
+
+/**
  * @brief Summary record emitted once per successful hipGraphLaunch invocation.
  *
  * graph_exec_id is the process-monotonic ID delivered with EXEC_CREATE
