@@ -280,7 +280,7 @@ Here are some options to handle this:
 
   * A number too high can cause packet losses and/or lead to a full buffer.
 
-* Set the ``HSA_CU_MASK`` to mask out all CUs but the target. For more details, see `setting CUs <https://rocm.docs.amd.com/en/latest/how-to/setting-cus.html>`_.
+* Set the ``HSA_CU_MASK`` to mask out all CUs but the target. For more details, see `setting CUs <https://rocm.docs.amd.com/en/latest/reference/environment-variables/setting-cus.html>`_.
 
   * If only the ``target_cu`` (or a few CUs) are not masked out, then all or most waves will be assigned to the ``target_cu``.
 
