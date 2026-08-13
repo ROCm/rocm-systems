@@ -513,12 +513,40 @@ void VfioDeviceHost::fence_service_loop() {
   // As uint64_t: bar2[0x100] = wptr_bytes.
   static constexpr size_t kSdma0DbIdx = 0x100; // 64-bit index into BAR2
 
+  // KIQ GFX ring doorbell: WDOORBELL64(doorbell_index=0x000, wptr).
+  // doorbell_index.kiq = AMDGPU_DOORBELL_LAYOUT1_KIQ_START = 0x000.
+  // WDOORBELL64 writes: cpu_addr[0x000] = wptr; as uint64_t: bar2[0x000].
+  // When the KIQ wptr advances, the CP would process MAP_QUEUES/MAP_PROCESS
+  // PM4 packets and write acknowledgments. We detect this and simulate fence
+  // signal so KFD fence waits don't block (already handled by livepatch stubs).
+  static constexpr size_t kKiqDbIdx = 0x000; // 64-bit index into BAR2
+  uint64_t kiq_wptr_prev = ~0ULL;
+
   uint64_t iteration = 0;
   while (!fence_stop_.load(std::memory_order_relaxed)) {
     ++iteration;
     // GFX SCRATCH_REG0 ring test (every iteration).
     if (bar5 && bar5[kScratchIdx] == kTestInit)
       bar5[kScratchIdx] = kTestDone;
+
+    // KIQ GFX doorbell (BAR2 64-bit index 0x000).
+    // Detects MAP_QUEUES/MAP_PROCESS commits from the KFD scheduler.
+    // The KIQ ring acknowledgment is handled by our livepatch stubs
+    // (amdgpu_fence_wait_polling returns immediately). We log KIQ activity
+    // for diagnostics.
+    if (bar2) {
+      uint64_t kiq_now = bar2[kKiqDbIdx];
+      if (kiq_now != kiq_wptr_prev && kiq_now != ~0ULL) {
+        std::fprintf(stderr,
+                     "[vfio-host] KIQ doorbell: wptr 0x%llx→0x%llx\n",
+                     (unsigned long long)kiq_wptr_prev,
+                     (unsigned long long)kiq_now);
+        kiq_wptr_prev = kiq_now;
+        // KIQ ring committed PM4 packets (MAP_QUEUES, MAP_PROCESS, etc.).
+        // The KFD fence waits are handled by our livepatch stubs.
+        // The BAR5 KIQ fence address is updated separately via fence_drv.
+      }
+    }
 
     // SDMA0 kernel-mode doorbell polling (BAR2 64-bit index 0x100).
     // Detects when the kernel SDMA0 GFX ring commits a new wptr.

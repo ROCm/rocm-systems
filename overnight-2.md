@@ -208,3 +208,82 @@ kfd_ioctl_wait_events (periodic COMPLETE), kfd_queue_acquire_buffers (always 0)
 HIP status:
 - hipGetDeviceCount=1, Properties, hipMalloc/Free: WORK
 - hipStreamCreate: hangs waiting for GPU interrupt event to signal WAIT_EVENTS
+
+## Final Analysis - hipStreamCreate Blocker
+
+### What Works
+- kfd_set_event() resolved via kprobe → events ARE being signaled
+- kfd_queue_acquire_buffers stub → CREATE_QUEUE no longer returns EINVAL
+- kfd_ioctl_wait_events stub with kfd_set_event → events signal in kernel
+
+### What Still Blocks
+hipStreamCreate: the main hip_stream process is in a user-space busy-wait loop
+(101% CPU, wchan=0). It's waiting for a child process (GPU operation process) to
+set some user-space variable. The child process does:
+1. KFD queue creation → succeeds (our stubs)
+2. ROCr sends MAP_PROCESS packet to KIQ ring
+3. CP (Command Processor) executes MAP_PROCESS and sends acknowledgment
+4. Child waits for this acknowledgment in user-space memory
+
+Step 3 never completes because there's no CP firmware executing the PM4 packets.
+
+### Root Cause
+MAP_PROCESS and SET_RESOURCES are PM4 packets sent to the KIQ ring. After the
+KIQ processes them, the MEC firmware writes an acknowledgment to a GPU VA in
+the child process's address space. Without MEC firmware execution, this never
+happens.
+
+### True Fix Required
+Option A: Implement KIQ PM4 packet execution in rocjitsu-vfu
+  - When KIQ wptr advances (doorbell at BAR5 KIQ register), parse PM4 packets
+  - For MAP_PROCESS/SET_RESOURCES, write the acknowledgment to the GPU VA
+  - Translate GPU VA → IOVA via GART table (or map via DMA region)
+  
+Option B: Livepatch kfd_ioctl_acquire_vm or kfd_process_device_init_vm
+  - Make the VM acquisition step not require GPU acknowledgment
+
+Option C: Patch map_queues_cpsch to not wait for queue mapping
+  - After pm_send_runlist (sends MAP_PROCESS to KIQ), signal completion directly
+
+### KIQ Ring Packet Format
+KIQ uses GFX ring type. KIQ commits wptr via WREG32 to BAR5 (not doorbell).
+kRegKiqWptr = some BAR5 offset. When amdgpu writes the KIQ wptr, we intercept
+via bar5_cb and can execute the PM4 packets.
+
+MAP_PROCESS PM4 packet format: see gfx_v9_4_3.c kgd_gfx_v9_program_trap_handler_settings
+or the HIQ/KIQ code in amdkfd.
+
+
+## Key Discovery - Futex Analysis
+
+### What Blocks hipStreamCreate
+ROCr main thread calls `FUTEX_WAIT_BITSET` (op=129) with `val=INT_MAX` and infinite timeout.
+The atomic int at that address must change from INT_MAX to proceed.
+
+This is changed by: ROCr's event handler after receiving a GPU completion event via:
+1. GPU firmware → IH ring interrupt → `kfd_signal_event_interrupt(pasid)` → event signaled
+2. ROCr's `WAIT_EVENTS` returns COMPLETE with event data
+3. ROCr event handler writes to futex
+
+### What Drives the Event
+The missing link is `kfd_signal_event_interrupt`. It's called from:
+- `kfd_int_process_v9.c` when `SOC15_IH_CLIENTID_SE0SH` + `SOC15_INTSRC_CP_END_OF_PIPE`
+
+These IH entries come from the IH ring when the GPU processes KIQ MAP_QUEUES packets.
+
+### PASID Discovery
+PASID is readable from `/sys/class/kfd/kfd/proc/*/pasid` while HIP is running.
+Also accessible from kfd_process struct via kprobe when `kfd_ioctl_wait_events` is called.
+
+### Next: IH Ring Injection
+When KIQ doorbell fires (BAR2 index 0x000):
+1. Read IH ring IOVA from BAR5 `kRegIhRbBase` (byte 0xF840): `ih_iova = reg_val << 8`
+2. Find IH ring HVA via DMA region map (DMA coherent → IOVA == gpu_addr)
+3. Write IV entry: word0=(0x0a | (181<<8)), word3=pasid, word4=0
+4. Advance IH WPTR register at BAR5 byte 0xF84C
+5. Trigger IH processing → kfd_signal_event_interrupt(pasid, 0, 0)
+6. Event scan → signal pending events → WAIT_EVENTS returns COMPLETE with data
+7. ROCr event handler writes to futex → hipStreamCreate continues
+
+The PASID needs to come from the livepatch (reading kfd_process.pasid) or from
+reading the IH ring PASID field that was written by the last MAP_PROCESS packet.

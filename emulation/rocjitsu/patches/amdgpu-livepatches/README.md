@@ -97,6 +97,26 @@ The HIP runtime returns an error rather than hanging indefinitely.
 | `hipMemcpy` (D2H) | ✗ SDMA job timeout |
 | `hipMemset` (GPU) | ✗ SDMA job timeout |
 
+## Current Blocker: hipStreamCreate
+
+`hipStreamCreate` requires:
+1. KFD queue creation (now works via `kfd_queue_acquire_buffers` stub)
+2. ROCr sends MAP_PROCESS / SET_RESOURCES PM4 packets via KIQ ring
+3. MEC firmware processes these packets and acknowledges
+4. ROCr user-space spins waiting for the acknowledgment in shared memory
+
+Step 3 blocks: without MEC firmware executing PM4 packets via the KIQ ring,
+the acknowledgment is never written. The ROCr main thread spins at 100% CPU
+waiting for the shared memory to change.
+
+**Next step**: implement KIQ ring PM4 packet emulation in rocjitsu-vfu.
+When KIQ wptr advances (BAR2 doorbell index 0x000), parse the PM4 packets
+(MAP_PROCESS, SET_RESOURCES) and write the expected acknowledgment values.
+
+KIQ doorbell: `AMDGPU_DOORBELL_LAYOUT1_KIQ_START = 0x000`
+BAR2 byte offset = 0x000 (same as uint64_t index 0x000)
+Already intercepted by fence_service_loop — just need to add handling.
+
 ## HIP API Status (latest)
 
 | API | Status | Notes |

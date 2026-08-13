@@ -3,16 +3,15 @@
 //
 // amdgpu_vfu_livepatch.c — kernel live patch for amdgpu in vfio-user emulation
 //
-// This livepatch stubs functions that require real GPU hardware execution in order
-// to make amdgpu load and the KFD/HIP stack initialize when backed by a rocjitsu
-// vfio-user device instead of real hardware.
+// Stubs functions that require real GPU hardware so amdgpu loads and the
+// KFD/HIP stack initializes when backed by rocjitsu vfio-user.
 //
 // Build:
 //   echo 'obj-m := amdgpu_vfu_livepatch.o' > Kbuild
 //   touch Makefile
 //   make -C /lib/modules/$(uname -r)/build M=$(pwd) modules
 //
-// Load order (before amdgpu):
+// Load order (livepatch BEFORE amdgpu):
 //   modprobe gpu_sched
 //   insmod amdgpu_vfu_livepatch.ko
 //   modprobe amdgpu discovery=2 fw_load_type=0 ip_block_mask=0x1F \
@@ -23,94 +22,137 @@
 #include <linux/livepatch.h>
 #include <linux/dma-fence.h>
 #include <linux/delay.h>
+#include <linux/kprobes.h>
 #include <linux/atomic.h>
 
 // ---- Ring test stubs ----
-// SDMA and GFX IB ring tests require the GPU to execute DMA/PM4 packets.
 
 static int patched_sdma_v4_4_2_ring_test_ring(void *ring) { return 0; }
 static int patched_sdma_v4_4_2_ring_test_ib(void *ring, long timeout) { return 0; }
 static int patched_gfx_v9_4_3_ring_test_ib(void *ring, long timeout) { return 0; }
 
 // ---- VM invalidation engine bypass ----
-// With 5 SDMA instances, the MMHUB engine bitmap is exhausted.
+// 5 SDMA instances exhaust the MMHUB engine bitmap.
 
 static int patched_amdgpu_gmc_allocate_vm_inv_eng(void *adev) { return 0; }
 
-// ---- KIQ fence wait stubs ----
-// Returns success immediately without waiting for GPU to write fence value.
+// ---- KIQ fence wait stub ----
 
 static long patched_amdgpu_fence_wait_polling(void *ring, unsigned int wait_seq,
                                                long timeout) { return 1; }
 
 // ---- DQM fence wait stub ----
-// amdkfd_fence_wait_timeout: polled after HWS SET_RESOURCES/MAP_PROCESS packets.
 
 static int patched_amdkfd_fence_wait_timeout(void *dqm,
                                               unsigned long long fence_value,
                                               unsigned int timeout_ms) { return 0; }
 
 // ---- DRM scheduler job stub ----
-// Returns a pre-signaled stub fence so the DRM scheduler immediately
-// considers the job complete without GPU execution.
 
 static void *patched_amdgpu_job_run(void *sched_job)
 {
     return dma_fence_get_stub();
 }
 
+// ---- Queue buffer acquisition stub ----
+// kfd_queue_buffer_svm_get always returns -EINVAL in this kernel
+// (CONFIG_HSA_AMD_SVM_AMDKCL not set). Stubbing lets CREATE_QUEUE
+// proceed to set up DQM queue structures.
+
+static int patched_kfd_queue_acquire_buffers(void *pdd, void *properties)
+{
+    return 0;
+}
+
+// ---- KFD event signaling via kfd_signal_event_interrupt ----
+// Resolved at runtime via kprobe after amdgpu loads.
+//
+// kfd_signal_event_interrupt(u32 pasid, u32 partial_id, u32 valid_id_bits):
+//   With partial_id=0, valid_id_bits=0: scans ALL signal_page slots for
+//   the process with the given PASID and signals any that are marked.
+//
+// kfd_lookup_process_by_pasid(u32 pasid, void*extra): returns kfd_process*
+//   or NULL if not found.
+
+static void (*fn_kfd_signal)(unsigned int pasid, unsigned int partial_id,
+                             unsigned int valid_id_bits);
+static void *(*fn_kfd_lookup)(unsigned int pasid, void *extra);
+static atomic_t kfd_fns_resolved = ATOMIC_INIT(0);
+
+static void resolve_kfd_fns(void)
+{
+    if (atomic_read(&kfd_fns_resolved))
+        return;
+
+    struct kprobe kp1 = { .symbol_name = "kfd_signal_event_interrupt" };
+    struct kprobe kp2 = { .symbol_name = "kfd_lookup_process_by_pasid" };
+
+    if (register_kprobe(&kp1) == 0) {
+        fn_kfd_signal = (typeof(fn_kfd_signal))kp1.addr;
+        unregister_kprobe(&kp1);
+        pr_info("[vfu_lp] kfd_signal_event_interrupt at %px\n", fn_kfd_signal);
+    }
+    if (register_kprobe(&kp2) == 0) {
+        fn_kfd_lookup = (typeof(fn_kfd_lookup))kp2.addr;
+        unregister_kprobe(&kp2);
+        pr_info("[vfu_lp] kfd_lookup_process_by_pasid at %px\n", fn_kfd_lookup);
+    }
+    if (fn_kfd_signal && fn_kfd_lookup)
+        atomic_set(&kfd_fns_resolved, 1);
+}
+
 // ---- KFD event wait stub ----
+//
+// Without real GPU interrupts, WAIT_EVENTS blocks forever waiting for
+// GPU completion events. We:
+//   1. Sleep 5ms to pace the ROCr polling loop
+//   2. Call kfd_signal_event_interrupt for this process's PASID to fire
+//      any KFD events that are already marked in the signal_page
+//   3. Return TIMEOUT so ROCr retries, now with events signaled
+//
+// The PASID is found by scanning 1..1023 and checking which matches
+// this kfd_process pointer via kfd_lookup_process_by_pasid.
+//
+// Current limitation: hipStreamCreate still blocks because the futex
+// it waits on is driven by the queue's ACTIVE flag, which is set by
+// MEC firmware after processing MAP_QUEUES — not by KFD events.
+// Next step: KIQ PM4 MAP_QUEUES packet execution in rocjitsu-vfu.
+//
 // kfd_ioctl_wait_events_args:
 //   +0:  uint64_t events_ptr
 //   +8:  uint32_t num_events
 //   +12: uint32_t wait_for_all
-//   +16: uint32_t timeout   (ms; 0=poll, ~0=infinite)
+//   +16: uint32_t timeout
 //   +20: uint32_t wait_result  (0=COMPLETE, 1=TIMEOUT, 2=FAIL)
-//
-// Background: ROCr has background worker threads that block in WAIT_EVENTS
-// waiting for GPU completion events (signaled by kfd_signal_event_interrupt
-// via IH ring). Without real GPU interrupts, these never arrive.
-//
-// Strategy: sleep 10ms then return COMPLETE every 5th call, TIMEOUT on others.
-// This gives worker threads a periodic "tick" to advance their state machine
-// without crashing on unhandled TIMEOUT.
-//
-// Limitation: spurious COMPLETE causes ROCs to access uninitialized queue
-// state (null deref) in some code paths. Full solution requires IH ring
-// emulation in rocjitsu-vfu to inject proper GPU completion events.
-
-static atomic_t wait_events_count = ATOMIC_INIT(0);
 
 static int patched_kfd_ioctl_wait_events(void *filp, void *p, void *data)
 {
     uint32_t timeout  = *(uint32_t *)((uint8_t *)data + 16);
     uint32_t *wait_result = (uint32_t *)((uint8_t *)data + 20);
+
     if (timeout == 0) {
-        *wait_result = 0; /* KFD_IOC_WAIT_RESULT_COMPLETE */
-    } else {
-        msleep(10);
-        uint32_t n = (uint32_t)atomic_fetch_add(1, &wait_events_count);
-        *wait_result = ((n % 5) == 0) ? 0 : 1; /* COMPLETE every 5th, else TIMEOUT */
+        *wait_result = 0; /* COMPLETE */
+        return 0;
     }
-    return 0;
-}
 
-// ---- Queue buffer acquisition stub ----
-// kfd_queue_acquire_buffers validates that queue ring, pointers, and CWSR
-// area are properly mapped in the GPU VM. In this kernel build,
-// kfd_queue_buffer_svm_get always returns -EINVAL (CONFIG_HSA_AMD_SVM_AMDKCL
-// not set), so the CWSR buffer can't be acquired via the SVM fallback path.
-//
-// By returning 0 unconditionally, CREATE_QUEUE proceeds to pqm_create_queue
-// which sets up the DQM queue state. The queue BO pointers (ring_bo, cwsr_bo)
-// remain NULL, so actual GPU queue execution will fail, but the kernel-side
-// queue structures are created correctly.
-//
-// Signature: int kfd_queue_acquire_buffers(struct kfd_process_device *pdd,
-//                                          struct queue_properties *properties)
+    if (!atomic_read(&kfd_fns_resolved))
+        resolve_kfd_fns();
 
-static int patched_kfd_queue_acquire_buffers(void *pdd, void *properties)
-{
+    msleep(5);
+
+    /* Signal events for this process by finding its PASID */
+    if (fn_kfd_lookup && fn_kfd_signal) {
+        unsigned int pasid;
+        for (pasid = 1; pasid < 1024; ++pasid) {
+            void *found = fn_kfd_lookup(pasid, NULL);
+            if (found == p) {
+                fn_kfd_signal(pasid, 0, 0);
+                break;
+            }
+        }
+    }
+
+    *wait_result = 1; /* TIMEOUT — ROCr retries, now with events signaled */
     return 0;
 }
 
@@ -131,10 +173,10 @@ static struct klp_func funcs[] = {
       .new_func  = patched_amdkfd_fence_wait_timeout, },
     { .old_name = "amdgpu_job_run",
       .new_func  = patched_amdgpu_job_run, },
-    { .old_name = "kfd_ioctl_wait_events",
-      .new_func  = patched_kfd_ioctl_wait_events, },
     { .old_name = "kfd_queue_acquire_buffers",
       .new_func  = patched_kfd_queue_acquire_buffers, },
+    { .old_name = "kfd_ioctl_wait_events",
+      .new_func  = patched_kfd_ioctl_wait_events, },
     { }
 };
 
@@ -151,6 +193,7 @@ static struct klp_patch patch = {
 
 static int __init amdgpu_vfu_livepatch_init(void)
 {
+    resolve_kfd_fns();
     return klp_enable_patch(&patch);
 }
 
