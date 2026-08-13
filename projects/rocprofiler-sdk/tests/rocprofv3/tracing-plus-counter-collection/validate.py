@@ -150,10 +150,12 @@ def test_perfetto_counter_samples(pftrace_reader, json_data):
 def test_out_of_range_device_qualifier_is_skipped(counter_input_data):
     """A NAME:device=N qualifier restricts NAME to the agent whose GPU index is N.
     The fixtures request SQ_CYCLES and SQ_BUSY_CYCLES with indices no system has, so
-    those counters must be dropped rather than collected or fatal."""
+    those counters must be dropped while the rest of the request is still collected."""
     unavailable = {"SQ_CYCLES", "SQ_BUSY_CYCLES"}
+    collected = set(counter_input_data["Counter_Name"])
 
-    assert not unavailable & set(counter_input_data["Counter_Name"])
+    assert collected
+    assert not unavailable & collected
 
 
 if __name__ == "__main__":

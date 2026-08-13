@@ -175,6 +175,31 @@ foreach(_mode IN ITEMS stats summary)
         LABELS "counter-collection")
 endforeach()
 
+set(_fixture rocprofv3-test-counter-collection-device-qualifier)
+rocprofiler_add_integration_execute_test(
+    ${_fixture}
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES GRBM_GUI_ACTIVE:device=0
+        --agent-index relative -d ${_output_dir}/device-qualifier -o out --output-format
+        csv json -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    PRELOAD "${PRELOAD_ENV}"
+    TIMEOUT 60
+    LABELS "counter-collection"
+    FIXTURES_SETUP ${_fixture})
+
+rocprofiler_add_integration_validate_test(
+    ${_fixture}
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_device_qualifier_restricts_counter
+    ARGS --device-input ${_output_dir}/device-qualifier/out_counter_collection.csv
+         --json-input ${_output_dir}/device-qualifier/out_results.json
+    FIXTURES_REQUIRED ${_fixture}
+    TIMEOUT 60
+    LABELS "counter-collection")
+
 if(TARGET openmp-target)
     set(_fixture rocprofv3-test-counter-collection-openmp)
     rocprofiler_add_integration_execute_test(

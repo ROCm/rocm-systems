@@ -166,6 +166,43 @@ def test_openmp_counter_collection(openmp_rows):
     assert _application_rows(openmp_rows)
 
 
+def test_device_qualifier_restricts_counter(device_rows, json_data):
+    assert device_rows
+
+    # the run pins --agent-index relative, so Agent_Id holds the logical node id
+    data = _tool_data(json_data)
+    gpu_index_by_agent = {
+        int(agent["logical_node_id"]): int(agent["gpu_index"])
+        for agent in data["agents"]
+        if int(agent["type"]) == 2
+    }
+    names_by_gpu_index = defaultdict(set)
+    for row in device_rows:
+        gpu_index = gpu_index_by_agent[int(row["Agent_Id"].split()[-1])]
+        names_by_gpu_index[gpu_index].add(row["Counter_Name"])
+
+    qualified_agent_is_visible = any(
+        int(agent["gpu_index"]) == 0
+        and agent["runtime_visibility"]["hsa"]
+        and agent["runtime_visibility"]["hip"]
+        for agent in data["agents"]
+        if int(agent["type"]) == 2
+    )
+    if not qualified_agent_is_visible:
+        pytest.skip(
+            "GPU index 0 is not visible to the runtime, so :device=0 collects nothing"
+        )
+
+    # GRBM_GUI_ACTIVE is requested with :device=0, SQ_WAVES without a qualifier
+    for gpu_index, names in names_by_gpu_index.items():
+        assert ("GRBM_GUI_ACTIVE" in names) == (gpu_index == 0)
+        assert "SQ_WAVES" in names
+
+    qualified = [row for row in device_rows if row["Counter_Name"] == "GRBM_GUI_ACTIVE"]
+    assert all(float(row["Counter_Value"]) >= 0.0 for row in qualified)
+    assert any(float(row["Counter_Value"]) > 0.0 for row in qualified)
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)
