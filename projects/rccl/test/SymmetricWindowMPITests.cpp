@@ -408,14 +408,21 @@ TEST_F(SymWin_AllReduce, BothWindows_Fp8Sum)
 
             ASSERT_MPI_EQ(ncclSuccess,
                 ncclAllReduce(sendBuf, recvBuf, count, dtype, ncclSum, comm, stream));
-            ASSERT_EQ(hipSuccess, hipStreamSynchronize(stream));
+            ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
-            ASSERT_EQ(hipSuccess, hipMemcpy(hostRecv.data(), recvBuf, bufSize, hipMemcpyDeviceToHost));
+            ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hostRecv.data(), recvBuf, bufSize, hipMemcpyDeviceToHost));
+            size_t localErrors = 0;
             for (size_t i = 0; i < count; i++) {
                 const float expected = ExpectedFp8AllReduceSum<Fp8T>(nRanks, i);
-                ASSERT_EQ(expected, static_cast<float>(hostRecv[i]))
-                    << "rank=" << rank << " dtype=" << dtypeName << " i=" << i;
+                if (expected != static_cast<float>(hostRecv[i])) {
+                    if (localErrors == 0) {
+                        TEST_INFO("rank=%d dtype=%s first mismatch at i=%zu: expected=%f got=%f",
+                            rank, dtypeName, i, expected, static_cast<float>(hostRecv[i]));
+                    }
+                    localErrors++;
+                }
             }
+            ASSERT_MPI_EQ(localErrors, size_t{0});
         }
     };
 
@@ -578,14 +585,21 @@ TEST_F(SymWin_ReduceScatter, BothWindows_Fp8Sum)
 
             ASSERT_MPI_EQ(ncclSuccess,
                 ncclReduceScatter(sendBuf, recvBuf, countPerRank, dtype, ncclSum, comm, stream));
-            ASSERT_EQ(hipSuccess, hipStreamSynchronize(stream));
+            ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
-            ASSERT_EQ(hipSuccess, hipMemcpy(hostRecv.data(), recvBuf, recvSize, hipMemcpyDeviceToHost));
+            ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hostRecv.data(), recvBuf, recvSize, hipMemcpyDeviceToHost));
+            size_t localErrors = 0;
             for (size_t i = 0; i < countPerRank; i++) {
                 const float expected = ExpectedFp8ReduceScatterSum<Fp8T>(rank, nRanks, countPerRank, i);
-                ASSERT_EQ(expected, static_cast<float>(hostRecv[i]))
-                    << "rank=" << rank << " dtype=" << dtypeName << " i=" << i;
+                if (expected != static_cast<float>(hostRecv[i])) {
+                    if (localErrors == 0) {
+                        TEST_INFO("rank=%d dtype=%s first mismatch at i=%zu: expected=%f got=%f",
+                            rank, dtypeName, i, expected, static_cast<float>(hostRecv[i]));
+                    }
+                    localErrors++;
+                }
             }
+            ASSERT_MPI_EQ(localErrors, size_t{0});
         }
     };
 
