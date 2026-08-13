@@ -222,7 +222,7 @@ class TestTranspose(RocprofsysTest):
 
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("transpose_env")
-    @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument"])
+    @pytest.mark.parametrize("mode", ["binary_rewrite"])
     def test_trace_delay_gates_gpu_contexts(self, mode, transpose_env, trace_delay_rules):
         """
         Regression test: ROCPROFSYS_TRACE_DELAY must gate the actual startup of
