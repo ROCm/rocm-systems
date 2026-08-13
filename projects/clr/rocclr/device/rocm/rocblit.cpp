@@ -15,6 +15,10 @@
 #include <map>
 
 namespace amd::roc {
+namespace {
+constexpr size_t kBatchPinningThreshold = 64 * Ki;
+}  // namespace
+
 DmaBlitManager::DmaBlitManager(VirtualGPU& gpu, Setup setup)
     : HostBlitManager(gpu, setup),
       MinSizeForPinnedXfer(dev().settings().pinnedMinXferSize_),
@@ -52,8 +56,8 @@ bool DmaBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
     const_address addrSrc = gpuMem(srcMemory).getDeviceMemory() + origin[0];
     address addrDst = reinterpret_cast<address>(dstHost);
     constexpr bool kHostToDev = false;
-    constexpr bool kEnablePin = true;
-    if (!hsaCopyStagedOrPinned(addrSrc, addrDst, copySize, kHostToDev, copyMetadata, kEnablePin)) {
+    if (!hsaCopyStagedOrPinned(addrSrc, addrDst, copySize, kHostToDev, copyMetadata,
+                               HostBufferPolicy::PreferPinnedAbove(MinSizeForPinnedXfer))) {
       LogError("DmaBlitManager:: readBuffer copy failure!");
       return false;
     }
@@ -86,7 +90,8 @@ bool DmaBlitManager::readBufferRect(device::Memory& srcMemory, void* dstHost,
 
         // Copy data from device to host - line by line
         address dst = reinterpret_cast<address>(dstHost) + dstOffset;
-        bool retval = hsaCopyStagedOrPinned(src + srcOffset, dst, size[0], false, copyMetadata);
+        bool retval = hsaCopyStagedOrPinned(src + srcOffset, dst, size[0], false, copyMetadata,
+                                            HostBufferPolicy::StagingOnly());
         if (!retval) {
           return retval;
         }
@@ -136,8 +141,8 @@ bool DmaBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory,
     address dstAddr = gpuMem(dstMemory).getDeviceMemory() + origin[0];
     const_address srcAddr = reinterpret_cast<const_address>(srcHost);
     constexpr bool kHostToDev = true;
-    constexpr bool enablePin = true;
-    if (!hsaCopyStagedOrPinned(srcAddr, dstAddr, copySize, kHostToDev, copyMetadata, enablePin)) {
+    if (!hsaCopyStagedOrPinned(srcAddr, dstAddr, copySize, kHostToDev, copyMetadata,
+                               HostBufferPolicy::PreferPinnedAbove(MinSizeForPinnedXfer))) {
       LogError("DmaBlitManager:: writeBuffer copy failure!");
       return false;
     }
@@ -170,8 +175,8 @@ bool DmaBlitManager::writeBufferRect(const void* srcHost, device::Memory& dstMem
         // Copy data from host to device - line by line
         const_address src = reinterpret_cast<const_address>(srcHost) + srcOffset;
         constexpr bool kHostToDev = true;
-        bool retval =
-            hsaCopyStagedOrPinned(src, dst + dstOffset, size[0], kHostToDev, copyMetadata);
+        bool retval = hsaCopyStagedOrPinned(src, dst + dstOffset, size[0], kHostToDev, copyMetadata,
+                                            HostBufferPolicy::StagingOnly());
         if (!retval) {
           return retval;
         }
@@ -1038,45 +1043,38 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 }
 
 // ================================================================================================
-// Get Staging or Pinned memory buffer
-void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePin, bool first_tx,
-                               DmaBlitManager::BufferState& buffState) const {
-  bool doHostPinning = enablePin && (size > MinSizeForPinnedXfer);
-  size_t copyChunkSize = doHostPinning ? PinXferSize : StagingXferSize;
-  size_t xferSize = std::min(size, copyChunkSize);
+// Acquire a staging or pinned host buffer.
+DmaBlitManager::BufferState DmaBlitManager::AcquireHostBuffer(const_address host_mem, size_t size,
+                                                              HostBufferPolicy policy) const {
+  BufferState buffer_state = {0};
+  const bool do_host_pinning =
+      policy.mode == HostBufferPolicy::Mode::kPreferPinnedAbove && size > policy.threshold;
+  const size_t copy_chunk_size = do_host_pinning ? PinXferSize : StagingXferSize;
+  size_t xfer_size = std::min(size, copy_chunk_size);
 
-  if (doHostPinning) {  // Pin host Memory
-    char* alignedHost = reinterpret_cast<char*>(const_cast<unsigned char*>(hostMem));
-    size_t partial1 = 0;
-    size_t partial2 = 0;
-    if (xferSize > PinXferSize && first_tx) {
-      // Align to 4K boundary
-      alignedHost = const_cast<char*>(
-          amd::alignDown(reinterpret_cast<const char*>(hostMem), PinnedMemoryAlignment));
-      // Find partial size of unaligned copy
-      partial2 = reinterpret_cast<const char*>(hostMem) - alignedHost;
-      size_t tmpSize = amd::alignUp(PinXferSize + partial2, PinnedMemoryAlignment);
-      xferSize = std::min(tmpSize - partial2, size);
-    }
-    amd::Memory* pinnedMem = pinHostMemory(alignedHost, xferSize, partial1);
-    if (pinnedMem != nullptr) {
-      Memory* pinnedMemory = dev().getRocMemory(pinnedMem);
-      address pinBuffer = pinnedMemory->getDeviceMemory();
+  if (do_host_pinning) {
+    size_t partial = 0;
+    amd::Memory* pinned_mem = pinHostMemory(host_mem, xfer_size, partial);
+    if (pinned_mem != nullptr) {
+      Memory* pinned_memory = dev().getRocMemory(pinned_mem);
+      address pin_buffer = pinned_memory->getDeviceMemory();
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Pinned resource size %d",
-              xferSize);
-      buffState.copySize_ = xferSize;
-      buffState.buffer_ = pinBuffer + partial1 + partial2;
-      buffState.pinnedMem_ = pinnedMem;
-      return;
+              xfer_size);
+      buffer_state.copySize_ = xfer_size;
+      buffer_state.buffer_ = pin_buffer + partial;
+      buffer_state.pinnedMem_ = pinned_mem;
+      return buffer_state;
     }
-    LogWarning("DmaBlitManager::getBuffer failed to pin a resource!");
+    LogWarning("DmaBlitManager::AcquireHostBuffer failed to pin a resource!");
   }
-  // If Memory Pinning fails, failback to staging buffer
-  xferSize = std::min(xferSize, StagingXferSize);
+
+  // If memory pinning fails, fall back to a staging buffer.
+  xfer_size = std::min(xfer_size, StagingXferSize);
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Staging resource size %d",
-          xferSize);
-  buffState.copySize_ = xferSize;
-  buffState.buffer_ = gpu().Staging().Acquire(std::min(xferSize, StagingXferSize));
+          xfer_size);
+  buffer_state.copySize_ = xfer_size;
+  buffer_state.buffer_ = gpu().Staging().Acquire(xfer_size);
+  return buffer_state;
 }
 
 // ================================================================================================
@@ -1089,11 +1087,10 @@ void DmaBlitManager::releaseBuffer(BufferState& buffer) const {
 // ================================================================================================
 bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDst, size_t size,
                                            bool hostToDev, amd::CopyMetadata& copyMetadata,
-                                           bool enablePin) const {
+                                           HostBufferPolicy policy) const {
   // Do not skip wait here for D2H. Resolving dependent signals for SDMA engine is slow
   gpu().releaseGpuMemoryFence(hostToDev || !dev().settings().blocking_blit_);
-  // If Pinning is enabled, Pin host Memory for copy size > MinSizeForPinnedTransfer
-  // For 16KB < size <= MinSizeForPinnedTransfer Use staging buffer without pinning
+  // The policy selects when pinning is attempted; smaller transfers use staging.
   bool status = true;
   size_t copyOffset = 0;
   size_t totalSize = size;
@@ -1103,13 +1100,11 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
   // src and dst agent for rocr
   hsa_agent_t srcAgent = hostToDev ? dev().getCpuAgent() : dev().getBackendDevice();
   hsa_agent_t dstAgent = hostToDev ? dev().getBackendDevice() : dev().getCpuAgent();
-  bool firstTx = true;
   while (totalSize > 0) {
     const_address hostmem = hostToDev ? hostSrc : hostDst;
     // Get Pinned Host Memory or Staging buffer based on copy size
-    BufferState outBuffer = {0};
-    getBuffer(static_cast<const_address>(hostmem + copyOffset), totalSize, enablePin, firstTx,
-              outBuffer);
+    BufferState outBuffer =
+        AcquireHostBuffer(static_cast<const_address>(hostmem + copyOffset), totalSize, policy);
     size_t copysize = outBuffer.copySize_;
     address stagingBuffer = outBuffer.buffer_;
     if (stagingBuffer == 0) {
@@ -1157,7 +1152,6 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
     // Update Offset and Transfer Size
     copyOffset += copysize;
     totalSize -= copysize;
-    firstTx = false;
   }
 
   // @note: HIP requires to unpin all memory after operation, due to an optimization with
@@ -2154,11 +2148,9 @@ bool KernelBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
       constexpr bool kAttachSignal = true;
 
       while (totalSize > 0) {
-        BufferState outBuffer = {0};
-        constexpr bool kEnablePin = true;
-        constexpr bool kFirstTx = false;
-        getBuffer(static_cast<const_address>(dstAddr + stagedCopyOffset), totalSize, kEnablePin,
-                  kFirstTx, outBuffer);
+        BufferState outBuffer =
+            AcquireHostBuffer(static_cast<const_address>(dstAddr + stagedCopyOffset), totalSize,
+                              HostBufferPolicy::PreferPinnedAbove(MinSizeForPinnedXfer));
         copySize = outBuffer.copySize_;
         address stagingBuffer = outBuffer.buffer_;
         address currentSrcAddr = srcAddr + stagedCopyOffset;
@@ -2288,13 +2280,10 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
       size_t stagedCopyOffset = 0;
 
       while (totalSize > 0) {
-        BufferState outBuffer = {0};
-        // Disable pinned writes
-        constexpr bool kEnablePin = false;
-        constexpr bool kFirstTx = false;
         // Do not enable pinning for uploads. Always use staging buffer
-        getBuffer(static_cast<const_address>(srcAddr + stagedCopyOffset), totalSize, kEnablePin,
-                  kFirstTx, outBuffer);
+        BufferState outBuffer =
+            AcquireHostBuffer(static_cast<const_address>(srcAddr + stagedCopyOffset), totalSize,
+                              HostBufferPolicy::StagingOnly());
         // Get an address from managed staging buffer
         address stagingBuffer = outBuffer.buffer_;
         copySize = outBuffer.copySize_;
@@ -2922,14 +2911,15 @@ bool KernelBlitManager::WriteBufferBatch(
     const_address src_addr = reinterpret_cast<const_address>(op.src_host);
     size_t copy_offset = 0;
     size_t remaining_size = op.size;
-    bool first_transfer = true;
     // Staging captures source bytes before return; pinned host DMA may read later.
-    const bool enable_pin =
-        op.metadata.srcAccessOrder_ != amd::CopyMetadata::kSrcAccessOrderDuringApiCall;
+    const HostBufferPolicy host_buffer_policy =
+        op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderDuringApiCall
+            ? HostBufferPolicy::StagingOnly()
+            : HostBufferPolicy::PreferPinnedAbove(kBatchPinningThreshold);
 
     while (remaining_size > 0) {
       const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
-      // Flush before getBuffer can rotate the staging pool past queued copies that still use it.
+      // Flush before AcquireHostBuffer can rotate the staging pool past queued copies that use it.
       if ((staging_batch_size + max_staging_size) > StagingXferSize) {
         const bool result = ShaderCopyBufferBatchRaw(staging_copy_ops);
         staging_copy_ops.clear();
@@ -2941,9 +2931,8 @@ bool KernelBlitManager::WriteBufferBatch(
         }
       }
 
-      BufferState buffer_state = {0};
-      getBuffer(static_cast<const_address>(src_addr + copy_offset), remaining_size, enable_pin,
-                first_transfer, buffer_state);
+      BufferState buffer_state = AcquireHostBuffer(
+          static_cast<const_address>(src_addr + copy_offset), remaining_size, host_buffer_policy);
       const size_t copy_size = buffer_state.copySize_;
       if (buffer_state.buffer_ == 0 || copy_size == 0) {
         LogWarning("KernelBlitManager::WriteBufferBatch: Buffer creation failed!");
@@ -2968,7 +2957,6 @@ bool KernelBlitManager::WriteBufferBatch(
 
       copy_offset += copy_size;
       remaining_size -= copy_size;
-      first_transfer = false;
     }
   }
 
@@ -3017,6 +3005,8 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
   std::vector<BatchRawCopyOp> staging_copy_ops;
   std::vector<StagingReadBack> staging_read_backs;
   size_t staging_batch_size = 0;
+  const HostBufferPolicy host_buffer_policy =
+      HostBufferPolicy::PreferPinnedAbove(kBatchPinningThreshold);
 
   for (const amd::BatchReadMemoryOp& op : read_ops) {
     Memory* src_memory = dev().getRocMemory(op.src_memory);
@@ -3030,7 +3020,6 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
     address dst_addr = reinterpret_cast<address>(op.dst_host);
     size_t copy_offset = 0;
     size_t remaining_size = op.size;
-    bool first_transfer = true;
 
     while (remaining_size > 0) {
       const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
@@ -3049,9 +3038,8 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
         staging_batch_size = 0;
       }
 
-      BufferState buffer_state = {0};
-      getBuffer(static_cast<const_address>(dst_addr + copy_offset), remaining_size, true,
-                first_transfer, buffer_state);
+      BufferState buffer_state = AcquireHostBuffer(
+          static_cast<const_address>(dst_addr + copy_offset), remaining_size, host_buffer_policy);
       const size_t copy_size = buffer_state.copySize_;
       if (buffer_state.buffer_ == 0 || copy_size == 0) {
         LogWarning("KernelBlitManager::ReadBufferBatch: Buffer creation failed!");
@@ -3076,7 +3064,6 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
 
       copy_offset += copy_size;
       remaining_size -= copy_size;
-      first_transfer = false;
     }
   }
 

@@ -211,6 +211,22 @@ class DmaBlitManager : public device::HostBlitManager {
     amd::Memory* pinnedMem_;  //!< Pinned Memory
     size_t copySize_;         //!< last copy size
   };
+
+  struct HostBufferPolicy {
+    enum class Mode {
+      kStagingOnly,
+      kPreferPinnedAbove,
+    };
+
+    static constexpr HostBufferPolicy StagingOnly() { return {Mode::kStagingOnly, 0}; }
+    static constexpr HostBufferPolicy PreferPinnedAbove(size_t threshold) {
+      return {Mode::kPreferPinnedAbove, threshold};
+    }
+
+    Mode mode;
+    size_t threshold;
+  };
+
   //! Synchronizes the blit operations if necessary
   inline void synchronize() const;
 
@@ -249,12 +265,10 @@ class DmaBlitManager : public device::HostBlitManager {
       const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
       std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
 
-  // Get Pinned Host Memory or Staging Buffer
-  void getBuffer(const_address hostMem,  //!< Host Mem Address
-                 size_t size,            //!< Transfer Size
-                 bool enablePin,         //!< True when Pinning is enabled
-                 bool first_tx,          //!< True for first copy
-                 BufferState& buffer     //!< State of Buffer
+  // Acquires pinned host memory or a staging buffer according to the policy
+  BufferState AcquireHostBuffer(const_address host_mem,  //!< Host memory address
+                                size_t size,             //!< Transfer size
+                                HostBufferPolicy policy  //!< Host buffer selection policy
   ) const;
 
   // Release Pinned host memory
@@ -266,7 +280,7 @@ class DmaBlitManager : public device::HostBlitManager {
                              size_t size,                      //!< Size in bytes
                              bool hostToDev,                   //!< True for H2D copy
                              amd::CopyMetadata& copyMetadata,  //!< copy MetaData
-                             bool enPinning = false            //!< True if pinning required
+                             HostBufferPolicy policy           //!< Host buffer selection policy
   ) const;
 
   const size_t PinXferSize;           //!< Copy size for Pinned Copy
