@@ -87,7 +87,7 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250.json";
+const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250_cdna5.json";
 
 constexpr uint32_t S_ENDPGM_GFX12 = 0xBFB00000u;
 constexpr uint32_t S_WAIT_KMCNT_0_GFX12 = 0xBFC70000u;
@@ -252,7 +252,7 @@ std::string make_single_se_gfx1250_config(uint32_t num_cus) {
              std::to_string(i) + R"(","latency":1,"weight":10})";
   }
 
-  return R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"gfx1250"},)"
+  return R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"cdna5"},)"
          R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
          R"({"name":"vram","type":"gpu_memory"},)"
          R"({"name":"xcd0","type":"xcd","children":[)"
@@ -651,8 +651,8 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
   auto *soc = loaded.soc();
   ASSERT_NE(soc, nullptr);
   EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA5);
-  EXPECT_EQ(config::parse_arch("gfx1250"), ROCJITSU_CODE_ARCH_CDNA5);
-  EXPECT_STREQ(config::arch_to_string(ROCJITSU_CODE_ARCH_CDNA5), "gfx1250");
+  EXPECT_EQ(config::parse_arch("cdna5"), ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_STREQ(config::arch_to_string(ROCJITSU_CODE_ARCH_CDNA5), "cdna5");
 
   EXPECT_TRUE(loaded.device.present);
   EXPECT_EQ(loaded.device.gfx_target_version, 120500u);

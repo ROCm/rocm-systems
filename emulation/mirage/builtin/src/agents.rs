@@ -2,7 +2,7 @@
 //!
 //! Each agent mirrors one of the rocjitsu `configs/*.json` files:
 //! `MI300X` follows `gfx942_cdna3.json`, `MI350X` follows
-//! `gfx950_cdna4.json`, and `MI450X` follows `gfx1250.json`.
+//! `gfx950_cdna4.json`, and `MI450X` follows `gfx1250_cdna5.json`.
 //! All three share the same `soc -> {vram, iod, xcd -> {l2, cp,
 //! se -> cu}}` component tree and six link patterns; they differ
 //! only in their device identity, the IOD fan-out, and the per-CU
@@ -127,7 +127,7 @@ pub fn mi350x() -> AgentDef {
 }
 
 /// `MI450X` builtin agent (registry key `MI450X`), mirroring the
-/// rocjitsu `gfx1250.json` config: `arch = gfx1250`, an
+/// rocjitsu `gfx1250_cdna5.json` config: `arch = cdna5`, an
 /// 8-XCD / 4-SE / 8-CU shader fabric and a 2-IOD memory tier.
 pub fn mi450x() -> AgentDef {
     AgentDef {

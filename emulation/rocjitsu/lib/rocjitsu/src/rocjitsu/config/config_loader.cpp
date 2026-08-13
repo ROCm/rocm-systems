@@ -714,7 +714,7 @@ rj_code_arch_t parse_arch(const std::string &arch_str) {
     return ROCJITSU_CODE_ARCH_RDNA3_5;
   if (arch_str == "rdna4")
     return ROCJITSU_CODE_ARCH_RDNA4;
-  if (arch_str == "gfx1250")
+  if (arch_str == "cdna5")
     return ROCJITSU_CODE_ARCH_CDNA5;
   if (arch_str == "rv32i")
     return ROCJITSU_CODE_ARCH_RV32I;
@@ -744,7 +744,7 @@ const char *arch_to_string(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA4:
     return "rdna4";
   case ROCJITSU_CODE_ARCH_CDNA5:
-    return "gfx1250";
+    return "cdna5";
   case ROCJITSU_CODE_ARCH_RV32I:
     return "rv32i";
   case ROCJITSU_CODE_ARCH_RV64I:
