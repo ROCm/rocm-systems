@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 #include <hip/hip_runtime.h>
 
@@ -92,22 +93,112 @@ template <> struct QueuePairTraits<QueuePairMux> {
 };
 
 class QueuePairMux : public QueuePairSHMEM<QueuePairMux> {
-public:
+private:
+  union QueuePairUnion {
 #if defined(GDA_IONIC)
-  __host__ QueuePairMux(QueuePairIONIC&& ionic);
+    QueuePairIONIC ionic;
+    __host__ QueuePairUnion(QueuePairIONIC&& ionic) : ionic{std::move(ionic)} { }
 #endif
 #if defined(GDA_BNXT)
-  __host__ QueuePairMux(QueuePairBNXT&& bnxt);
+    QueuePairBNXT  bnxt;
+    __host__ QueuePairUnion(QueuePairBNXT&& bnxt)   : bnxt{std::move(bnxt)} { }
 #endif
 #if defined(GDA_MLX5)
-  __host__ QueuePairMux(QueuePairMLX5&& mlx5);
+    QueuePairMLX5  mlx5;
+    __host__ QueuePairUnion(QueuePairMLX5&& mlx5)   : mlx5{std::move(mlx5)} { }
+#endif
+
+    /* Copy and move constructors and assignment operators are deleted,
+     * since they can't know which subobject to construct or assign */
+    __host__ QueuePairUnion(const QueuePairUnion& other)            = delete;
+    __host__ QueuePairUnion(QueuePairUnion&& other)                 = delete;
+    __host__ QueuePairUnion& operator=(const QueuePairUnion& other) = delete;
+    __host__ QueuePairUnion& operator=(QueuePairUnion&& other)      = delete;
+
+    /*
+     * @brief Empty destructor. Call QueuePairUnion::destruct to destroy active subobject.
+     *
+     * Since union members have non-trivial destructors,
+     * the implicitely-declared or explicitly-defaulted destructor is defined as deleted.
+     * To allow any definition of QueuePairMux::~QueuePairMux(),
+     * we must provide some definition of ~QueuePairUnion(), as otherwise it cannot be called
+     * as part of the destructor sequence of ~QueuePairMux().
+     *
+     * ~QueuePairUnion() is defined as empty;
+     * destruction of the active subobject is delegated to QueuePairUnion::destruct.
+     */
+    __host__ ~QueuePairUnion() { }
+
+    /*
+     * @brief Construct new QueuePairUnion, moving the active subobject from other.
+     *
+     * @param[in,out] other QueuePairUnion object to move-construct from.
+     * @param[in] provider Type of active subobject of other.
+     *
+     * @return QueuePairUnion with an active subobject moved from other.
+     */
+    static __host__ QueuePairUnion construct(QueuePairUnion&& other, GDAProvider provider);
+
+    /*
+     * @brief Assign *this, moving the active subobject from other.
+     * Both *this and other must have the same member active.
+     *
+     * @param[in,out] other QueuePairUnion object to move-assign from.
+     * @param[in] provider Type of active subobject of both *this and other.
+     *
+     * @return Reference to *this after assigning the active subobject moved from other.
+     */
+    __host__ QueuePairUnion& assign(QueuePairUnion&& other, GDAProvider provider);
+
+    /*
+     * @brief Call destructor of active subobject.
+     *
+     * @param[in] provider Type of active subobject.
+     */
+    __host__ void destruct(GDAProvider provider);
+  };
+
+  QueuePairUnion qp;
+
+  /**
+   * @brief Underlying GDA Provider.
+   * Only used by __host__ code, __device__ code should use constmem.gda_provider instead.
+   */
+  static inline GDAProvider provider{GDAProvider::UNSET};
+
+public:
+#if defined(GDA_IONIC)
+  __host__ QueuePairMux(QueuePairIONIC&& ionic)
+    : qp{std::move(ionic)} { provider = GDAProvider::IONIC; }
+#endif
+#if defined(GDA_BNXT)
+  __host__ QueuePairMux(QueuePairBNXT&& bnxt)
+    : qp{std::move(bnxt)}  { provider = GDAProvider::BNXT;  }
+#endif
+#if defined(GDA_MLX5)
+  __host__ QueuePairMux(QueuePairMLX5&& mlx5)
+    : qp{std::move(mlx5)}  { provider = GDAProvider::MLX5;  }
 #endif
 
   __host__ QueuePairMux(const QueuePairMux& other) = delete;
   __host__ QueuePairMux& operator=(const QueuePairMux& other) = delete;
-  __host__ QueuePairMux& operator=(QueuePairMux&& other);
-  __host__ QueuePairMux(QueuePairMux&& other);
-  __host__ ~QueuePairMux();
+
+  /* Note:
+   * qp{QueuePairUnion::construct(std::move(other.qp), get_provider())}
+   * only works in C++17 or later: the "guaranteed copy elision" prvalue semantics
+   * mean that the qp subobject does not need to have an accessible copy or move constructor */
+  __host__ QueuePairMux(QueuePairMux&& other)
+    : qp{QueuePairUnion::construct(std::move(other.qp), get_provider())} { }
+
+  __host__ QueuePairMux& operator=(QueuePairMux&& other) {
+    /* All QueuePairMux have the same underlying provider */
+    qp.assign(std::move(other.qp), get_provider());
+    return *this;
+  }
+
+  __host__ ~QueuePairMux() {
+    qp.destruct(get_provider());
+  }
 
 public:
   template <OpCode Op, typename... Options>
@@ -218,77 +309,6 @@ public:
   static __host__ __device__ __forceinline__ T to_provider_endianness(T val);
 
 private:
-  union QueuePairUnion {
-#if defined(GDA_IONIC)
-    QueuePairIONIC ionic;
-    __host__ QueuePairUnion(QueuePairIONIC&& ionic);
-#endif
-#if defined(GDA_BNXT)
-    QueuePairBNXT  bnxt;
-    __host__ QueuePairUnion(QueuePairBNXT&& bnxt);
-#endif
-#if defined(GDA_MLX5)
-    QueuePairMLX5  mlx5;
-    __host__ QueuePairUnion(QueuePairMLX5&& mlx5);
-#endif
-
-    /* Copy and move constructors and assignment operators are deleted,
-     * since they can't know which subobject to construct or assign */
-    __host__ QueuePairUnion(const QueuePairUnion& other)            = delete;
-    __host__ QueuePairUnion(QueuePairUnion&& other)                 = delete;
-    __host__ QueuePairUnion& operator=(const QueuePairUnion& other) = delete;
-    __host__ QueuePairUnion& operator=(QueuePairUnion&& other)      = delete;
-
-    /*
-     * @brief Empty destructor. Call QueuePairUnion::destruct to destroy active subobject.
-     *
-     * Since union members have non-trivial destructors,
-     * the implicitely-declared or explicitly-defaulted destructor is defined as deleted.
-     * To allow any definition of QueuePairMux::~QueuePairMux(),
-     * we must provide some definition of ~QueuePairUnion(), as otherwise it cannot be called
-     * as part of the destructor sequence of ~QueuePairMux().
-     *
-     * ~QueuePairUnion() is defined as empty;
-     * destruction of the active subobject is delegated to QueuePairUnion::destruct.
-     */
-    __host__ ~QueuePairUnion() { }
-
-
-    /*
-     * @brief Construct new QueuePairUnion, moving the active subobject from other.
-     *
-     * @param[in,out] other QueuePairUnion object to move-construct from.
-     * @param[in] provider Type of active subobject of other.
-     *
-     * @return QueuePairUnion with an active subobject moved from other.
-     */
-    static __host__ QueuePairUnion construct(QueuePairUnion&& other, GDAProvider provider);
-
-    /*
-     * @brief Assign *this, moving the active subobject from other.
-     * Both *this and other must have the same member active.
-     *
-     * @param[in,out] other QueuePairUnion object to move-assign from.
-     * @param[in] provider Type of active subobject of both *this and other.
-     *
-     * @return Reference to *this after assigning the active subobject moved from other.
-     */
-    __host__ QueuePairUnion& assign(QueuePairUnion&& other, GDAProvider provider);
-
-    /*
-     * @brief Call destructor of active subobject.
-     *
-     * @param[in] provider Type of active subobject.
-     */
-    __host__ void destruct(GDAProvider provider);
-  } qp;
-
-  /**
-   * @brief Underlying GDA Provider.
-   * Only used by __host__ code, __device__ code should use constmem.gda_provider instead.
-   */
-  static inline GDAProvider provider{GDAProvider::UNSET};
-
   static __host__   __forceinline__ GDAProvider get_provider() { return provider; }
   static __device__ __forceinline__ GDAProvider get_provider() { return constmem.gda_provider; }
 
@@ -298,6 +318,76 @@ private:
   template <OpCode Op, typename Provider>
   static __host__ __device__ constexpr typename Provider::OpCode provider_op();
 };
+
+__host__ inline QueuePairMux::QueuePairUnion QueuePairMux::QueuePairUnion::construct(
+    QueuePairUnion&& other, GDAProvider provider) {
+  switch (provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return {std::move(other.ionic)};
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return {std::move(other.bnxt)};
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return {std::move(other.mlx5)};
+#endif
+  default:
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
+  }
+}
+
+__host__ inline QueuePairMux::QueuePairUnion& QueuePairMux::QueuePairUnion::assign(
+    QueuePairUnion&& other, GDAProvider provider) {
+  switch (provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    ionic = std::move(other.ionic);
+    break;
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    bnxt = std::move(other.bnxt);
+    break;
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    mlx5 = std::move(other.mlx5);
+    break;
+#endif
+  default:
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
+  }
+  return *this;
+}
+
+__host__ inline void QueuePairMux::QueuePairUnion::destruct(GDAProvider provider) {
+  /* Call destructor of active subobject, based on provider */
+  switch (provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    ionic.~QueuePairIONIC();
+    break;
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    bnxt.~QueuePairBNXT();
+    break;
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    mlx5.~QueuePairMLX5();
+    break;
+#endif
+  default:
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
+  }
+}
 
 template <QueuePairMux::OpCode Op, typename Provider>
 __host__ __device__ constexpr typename Provider::OpCode QueuePairMux::provider_op() {
@@ -438,6 +528,66 @@ __device__ __forceinline__ void QueuePairMux::quiet_single() {
   default:
     assert(false /* invalid GDAProvider */);
     __builtin_unreachable();
+  }
+}
+
+__host__ inline int QueuePairMux::buffer_register(void *addr, size_t length) {
+  switch (get_provider()) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return qp.ionic.buffer_register(addr, length);
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return qp.bnxt.buffer_register(addr, length);
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return qp.mlx5.buffer_register(addr, length);
+#endif
+  default:
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
+  }
+}
+
+__host__ inline int QueuePairMux::buffer_unregister(void *addr) {
+  switch (get_provider()) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return qp.ionic.buffer_unregister(addr);
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return qp.bnxt.buffer_unregister(addr);
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return qp.mlx5.buffer_unregister(addr);
+#endif
+  default:
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
+  }
+}
+
+__host__ inline int QueuePairMux::buffer_unregister_all() {
+  switch (get_provider()) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return qp.ionic.buffer_unregister_all();
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return qp.bnxt.buffer_unregister_all();
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return qp.mlx5.buffer_unregister_all();
+#endif
+  default:
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
   }
 }
 

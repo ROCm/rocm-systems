@@ -37,14 +37,6 @@ target_sources(
     topology.cpp
 )
 
-if(GDA_MUX)
-target_sources(
-  ${PROJECT_NAME}
-  PRIVATE
-    queue_pair_mux.cpp
-)
-endif()
-
 add_subdirectory(ionic)
 add_subdirectory(bnxt)
 add_subdirectory(mlx5)

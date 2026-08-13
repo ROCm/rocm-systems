@@ -180,11 +180,6 @@ if(USE_GDA)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/context_gda_device_coll.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/backend_gda.cpp
   )
-  if(GDA_MUX)
-    list(APPEND BITCODE_SOURCES
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/queue_pair_mux.cpp
-    )
-  endif()
 endif()
 
 # Build bitcode for each GPU architecture
