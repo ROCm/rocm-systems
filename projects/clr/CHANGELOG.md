@@ -2,14 +2,19 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 10.1.0 for ROCm 10.1.0
+
+### Added
+* New HIP APIs
+    - Device Management: support for querying a device identifier.
+      * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for a device
+
 ## HIP 10.0.0 for ROCm 10.0.0
 
 ### Added
 * New HIP APIs
     - Stream Ordered Memory Allocator: support for API parity with corresponding CUDA API.
       * `hipMemGetDefaultMemPool` returns the default memory pool for the specified location and allocation type
-    - Device Management: support for querying a device identifier.
-      * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for a device
     - Cooperative Groups scan functions are now supported, providing feature parity with CUDA.
       * `cooperative_groups::exclusive_scan` performs an exclusive prefix scan across the threads in a cooperative group. For each thread, the result is computed from the values of all preceding threads using a binary operation (addition by default), excluding the current thread's own value.
       * `cooperative_groups::inclusive_scan` performs an inclusive prefix scan across the threads in a cooperative group. For each thread, the result includes the current thread's value in addition to the values of all preceding threads.
