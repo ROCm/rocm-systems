@@ -79,19 +79,47 @@ set(_so_name "torch_trace_collector-${_tag}")
 
 message(STATUS "torch_trace_collector: building against ${_ttc_python} (tag ${_tag})")
 
-# Pin Python3 to the probed interpreter for the module's headers.
-set(Python3_EXECUTABLE
-    "${_ttc_python}"
-    CACHE FILEPATH
-    "Interpreter used to build torch_trace_collector."
-    FORCE
-)
+# Pin Python3 to the probed interpreter for this directory only. FindPython3
+# records its result in private _Python3_* cache entries that outlive this
+# directory, so they are saved here and restored after the call below.
+set(_ttc_saved_python_vars "")
+get_cmake_property(_ttc_cache_vars CACHE_VARIABLES)
+foreach(_var IN LISTS _ttc_cache_vars)
+    if(_var MATCHES "^_Python3_")
+        get_property(_ttc_saved_${_var} CACHE ${_var} PROPERTY VALUE)
+        list(APPEND _ttc_saved_python_vars ${_var})
+    endif()
+endforeach()
+
+set(Python3_EXECUTABLE "${_ttc_python}")
 find_package(
     Python3
     ${_py_major}.${_py_minor}
     REQUIRED
     COMPONENTS Interpreter Development.Module
 )
+
+foreach(_var IN LISTS _ttc_saved_python_vars)
+    set(${_var} "${_ttc_saved_${_var}}" CACHE INTERNAL "")
+endforeach()
+get_cmake_property(_ttc_cache_vars CACHE_VARIABLES)
+foreach(_var IN LISTS _ttc_cache_vars)
+    if(_var MATCHES "^_Python3_")
+        list(FIND _ttc_saved_python_vars ${_var} _index)
+        if(_index EQUAL -1)
+            unset(${_var} CACHE)
+        endif()
+    endif()
+endforeach()
+
+get_property(_ttc_python_restored CACHE _Python3_EXECUTABLE PROPERTY VALUE)
+if(NOT "${_ttc_python_restored}" STREQUAL "${_ttc_saved__Python3_EXECUTABLE}")
+    message(
+        FATAL_ERROR
+        "torch_trace_collector: _Python3_EXECUTABLE was not restored (expected "
+        "'${_ttc_saved__Python3_EXECUTABLE}', got '${_ttc_python_restored}')."
+    )
+endif()
 
 find_library(
     ROCTX_LIB
