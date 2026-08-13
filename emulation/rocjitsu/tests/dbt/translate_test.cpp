@@ -1781,7 +1781,7 @@ TEST(BinaryTranslatorE2E, EmptyTextGfx1250StillRejectsA0ToB0) {
 
 TEST(BinaryTranslatorE2E, Gfx1250InvalidInstructionIsDiagnosedAndLeavesObjectUnchanged) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
-  const auto invalid = gfx1250::build_vop1(gfx1250::kVReadfirstlaneB32Vop1, {.src0 = 255});
+  const auto invalid = cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 255});
   const std::vector<uint32_t> words = {invalid[0], kGfx1250SEndpgm};
   auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
   AmdGpuCodeObject source(image.data(), image.size());
@@ -6229,7 +6229,7 @@ TEST(BinaryTranslatorE2E, Gfx1250InvalidPoolCandidateFallsBackToNormalDecodeDiag
   words.insert(words.end(), rocjitsu::kDirectBranchIslandPoolSlots,
                rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_GFX1250));
   words[rocjitsu::kGeneratedIslandPoolHeaderWords] =
-      gfx1250::build_vop1(gfx1250::kVReadfirstlaneB32Vop1, {.src0 = 255})[0];
+      cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 255})[0];
   words.push_back(kGfx1250SEndpgm);
 
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);

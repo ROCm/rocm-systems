@@ -4212,7 +4212,7 @@ TEST(Gfx1250DecodeTest, Vop3RejectsLiteral64Selector) {
 }
 
 TEST(Gfx1250DecodeTest, Vop1RejectsUnsupportedLiteral32WithoutExtensionWord) {
-  const auto words = gfx1250::build_vop1(gfx1250::kVReadfirstlaneB32Vop1, {.src0 = 255});
+  const auto words = cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 255});
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
@@ -4220,7 +4220,7 @@ TEST(Gfx1250DecodeTest, Vop1RejectsUnsupportedLiteral32WithoutExtensionWord) {
 }
 
 TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral32WithoutExtensionWord) {
-  const auto words = gfx1250::build_vop2(gfx1250::kVFmamkF64Vop2, {.src0 = 255});
+  const auto words = cdna5::build_vop2(cdna5::kVFmamkF64Vop2, {.src0 = 255});
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
@@ -4228,7 +4228,7 @@ TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral32WithoutExtensionWord) {
 }
 
 TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral64WithoutExtensionWords) {
-  const auto words = gfx1250::build_vop2(gfx1250::kVFmamkF32Vop2, {.src0 = 254});
+  const auto words = cdna5::build_vop2(cdna5::kVFmamkF32Vop2, {.src0 = 254});
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);

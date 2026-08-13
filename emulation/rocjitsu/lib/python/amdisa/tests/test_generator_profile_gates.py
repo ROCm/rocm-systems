@@ -2274,7 +2274,7 @@ def test_generated_sendmsg_return_selectors_are_not_literals(
     amdgpu_generated_root: Path,
     arch: str,
 ):
-    generated_root = amdgpu_generated_root / arch
+    generated_root = amdgpu_generated_root / _generated_dir_name(arch)
     encodings = (generated_root / 'encodings.cpp').read_text()
     sop1 = (generated_root / 'sop1.cpp').read_text()
 
