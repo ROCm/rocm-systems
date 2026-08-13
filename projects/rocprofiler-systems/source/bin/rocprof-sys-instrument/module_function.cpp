@@ -421,14 +421,20 @@ module_function::get_visibility() const
 // whereas an object path names a file the user may keep in any directory, so
 // only its filename is searched. E.g. "/home/me/dyninst-tests/app" is
 // not part of dyninst.
-bool
-module_function::is_object_module() const
+//
+// Returns whichever of the two the caller should search, so the result refers
+// to module_base and is valid for as long as it is.
+const string_t&
+module_function::get_module_identity(const string_t& module_base) const
 {
     auto* _object = (module) ? module->getObject() : nullptr;
-    if(_object == nullptr) return false;
 
-    return rocprofsys::path::filename(module_name) ==
-           rocprofsys::path::filename(_object->pathName());
+    // module_name is the object's own path when the code had no debug info
+    const bool _is_object_module =
+        _object != nullptr &&
+        module_base == rocprofsys::path::filename(_object->pathName());
+
+    return _is_object_module ? module_base : module_name;
 }
 
 bool
@@ -444,7 +450,7 @@ module_function::is_internal_constrained() const
 
     auto        _module_base = rocprofsys::path::filename(module_name);
     auto        _module_real = rocprofsys::path::realpath(module_name);
-    const auto& _module_id   = is_object_module() ? _module_base : module_name;
+    const auto& _module_id   = get_module_identity(_module_base);
 
     if(std::regex_search(_module_id,
                          std::regex{ "lib(rocprof-sys|rocprofsys|timemory|perfetto)" }))
@@ -507,7 +513,7 @@ module_function::is_module_constrained() const
         return false;
 
     auto        _module_base = rocprofsys::path::filename(module_name);
-    const auto& _module_id   = is_object_module() ? _module_base : module_name;
+    const auto& _module_id   = get_module_identity(_module_base);
 
     static std::regex ext_regex{ "\\.(s|S)$", regex_opts };
     static std::regex sys_regex{ "^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts };
