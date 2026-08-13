@@ -31,7 +31,7 @@ const char *cdna5_matrix_fmt_name(uint32_t fmt) {
   }
 }
 
-const char *gfx1250_matrix_scale_fmt_name(uint32_t fmt) {
+const char *cdna5_matrix_scale_fmt_name(uint32_t fmt) {
   switch (fmt) {
   case 0:
     return "MATRIX_SCALE_FMT_E8";
@@ -3285,11 +3285,11 @@ void VWmmaScaleF32Vop3px2::build_modifiers(std::string &out) const {
   const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
   if (matrix_a_scale_fmt != 0) {
     out += " matrix_a_scale_fmt:";
-    out += gfx1250_matrix_scale_fmt_name(matrix_a_scale_fmt);
+    out += cdna5_matrix_scale_fmt_name(matrix_a_scale_fmt);
   }
   if (matrix_b_scale_fmt != 0) {
     out += " matrix_b_scale_fmt:";
-    out += gfx1250_matrix_scale_fmt_name(matrix_b_scale_fmt);
+    out += cdna5_matrix_scale_fmt_name(matrix_b_scale_fmt);
   }
   if ((scale_inst_.opsel >> 2) & 0x1u)
     out += " matrix_a_reuse";
