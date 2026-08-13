@@ -7451,7 +7451,7 @@ class CodeGenerator:
                         d16_partial_reg_offset = d16_vgpr_count - 1
                     # These gfx1250-only WMMA source-format fields derive the
                     # src0/src1 operand sizes from the instruction shape.
-                    gfx1250_f8f6f4_shape = self._cdna5_f8f6f4_wmma_shape(inst)
+                    cdna5_f8f6f4_shape = self._cdna5_f8f6f4_wmma_shape(inst)
                     cdna4_f8f6f4_shape = self._cdna4_f8f6f4_mfma_shape(inst)
                     gfx1250_swmmac_has_modifiers = self._cdna5_swmmac_has_modifiers(
                         inst
@@ -7463,7 +7463,7 @@ class CodeGenerator:
                         )
                         if opnd_size_expr is None:
                             opnd_size_expr = self._cdna5_matrix_fmt_operand_size_expr(
-                                gfx1250_f8f6f4_shape, opnd.name
+                                cdna5_f8f6f4_shape, opnd.name
                             )
                         if opnd_size_expr is None:
                             opnd_size_expr = self._cdna4_matrix_fmt_operand_size_expr(
@@ -7790,7 +7790,7 @@ class CodeGenerator:
                                 'void implicit_uses(RegisterSet &uses) const override'
                             )
                         )
-                    if gfx1250_f8f6f4_shape is not None or gfx1250_swmmac_has_modifiers:
+                    if cdna5_f8f6f4_shape is not None or gfx1250_swmmac_has_modifiers:
                         public_members.append(
                             cgen.Statement(
                                 'void build_modifiers(std::string &out) const override'
@@ -8979,7 +8979,7 @@ class CodeGenerator:
 
                     inst_classes.append(s)
                     inst_impls = [class_ctor_impl]
-                    if gfx1250_f8f6f4_shape is not None:
+                    if cdna5_f8f6f4_shape is not None:
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
