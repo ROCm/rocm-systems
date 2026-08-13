@@ -3099,6 +3099,11 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeDmaBufSupported:
       return hipCUResultTohipError(
           cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, device));
+#if CUDA_VERSION >= CUDA_13000
+    case hipDeviceAttributeHostAllocDmaBufSupported:
+      return hipCUResultTohipError(
+          cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_HOST_ALLOC_DMA_BUF_SUPPORTED, device));
+#endif
     case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
           pi, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, device));

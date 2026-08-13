@@ -5,23 +5,10 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/smem.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/addr_calc.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include "rocjitsu/vm/amdgpu/mem_state.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <cstring>
-#include <limits>
-#include <memory>
 
 namespace rocjitsu {
 namespace cdna4 {
@@ -43,7 +30,7 @@ Operand make_smem_offset(const Smem::OpEncoding *enc) {
 
 SLoadDwordSmem::SLoadDwordSmem(const MachineInst *inst)
     : Smem("s_load_dword", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SLoadDwordSmem>()),
+           selected_exec_fn(InstructionExecutionId::SLoadDwordSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -56,24 +43,11 @@ SLoadDwordSmem::SLoadDwordSmem(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
-}
-
-void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 1;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
 }
 
 SLoadDwordx2Smem::SLoadDwordx2Smem(const MachineInst *inst)
     : Smem("s_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SLoadDwordx2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SLoadDwordx2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -86,24 +60,11 @@ SLoadDwordx2Smem::SLoadDwordx2Smem(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
-}
-
-void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 2;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
 }
 
 SLoadDwordx4Smem::SLoadDwordx4Smem(const MachineInst *inst)
     : Smem("s_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SLoadDwordx4Smem>()),
+           selected_exec_fn(InstructionExecutionId::SLoadDwordx4Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -116,24 +77,11 @@ SLoadDwordx4Smem::SLoadDwordx4Smem(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
-}
-
-void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 4;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
 }
 
 SLoadDwordx8Smem::SLoadDwordx8Smem(const MachineInst *inst)
     : Smem("s_load_dwordx8", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SLoadDwordx8Smem>()),
+           selected_exec_fn(InstructionExecutionId::SLoadDwordx8Smem)),
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -146,24 +94,11 @@ SLoadDwordx8Smem::SLoadDwordx8Smem(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
-}
-
-void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 8;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
 }
 
 SLoadDwordx16Smem::SLoadDwordx16Smem(const MachineInst *inst)
     : Smem("s_load_dwordx16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SLoadDwordx16Smem>()),
+           selected_exec_fn(InstructionExecutionId::SLoadDwordx16Smem)),
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -178,22 +113,9 @@ SLoadDwordx16Smem::SLoadDwordx16Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 16;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SScratchLoadDwordSmem::SScratchLoadDwordSmem(const MachineInst *inst)
     : Smem("s_scratch_load_dword", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SScratchLoadDwordSmem>()),
+           selected_exec_fn(InstructionExecutionId::SScratchLoadDwordSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -206,24 +128,11 @@ SScratchLoadDwordSmem::SScratchLoadDwordSmem(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
-}
-
-void SScratchLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 1;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
 }
 
 SScratchLoadDwordx2Smem::SScratchLoadDwordx2Smem(const MachineInst *inst)
     : Smem("s_scratch_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SScratchLoadDwordx2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SScratchLoadDwordx2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -238,22 +147,9 @@ SScratchLoadDwordx2Smem::SScratchLoadDwordx2Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SScratchLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 2;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SScratchLoadDwordx4Smem::SScratchLoadDwordx4Smem(const MachineInst *inst)
     : Smem("s_scratch_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SScratchLoadDwordx4Smem>()),
+           selected_exec_fn(InstructionExecutionId::SScratchLoadDwordx4Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -268,22 +164,9 @@ SScratchLoadDwordx4Smem::SScratchLoadDwordx4Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SScratchLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 4;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SBufferLoadDwordSmem::SBufferLoadDwordSmem(const MachineInst *inst)
     : Smem("s_buffer_load_dword", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferLoadDwordSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferLoadDwordSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -298,22 +181,9 @@ SBufferLoadDwordSmem::SBufferLoadDwordSmem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 1;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SBufferLoadDwordx2Smem::SBufferLoadDwordx2Smem(const MachineInst *inst)
     : Smem("s_buffer_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferLoadDwordx2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferLoadDwordx2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -328,22 +198,9 @@ SBufferLoadDwordx2Smem::SBufferLoadDwordx2Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 2;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SBufferLoadDwordx4Smem::SBufferLoadDwordx4Smem(const MachineInst *inst)
     : Smem("s_buffer_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferLoadDwordx4Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferLoadDwordx4Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -358,22 +215,9 @@ SBufferLoadDwordx4Smem::SBufferLoadDwordx4Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 4;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SBufferLoadDwordx8Smem::SBufferLoadDwordx8Smem(const MachineInst *inst)
     : Smem("s_buffer_load_dwordx8", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferLoadDwordx8Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferLoadDwordx8Smem)),
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -388,22 +232,9 @@ SBufferLoadDwordx8Smem::SBufferLoadDwordx8Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 8;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SBufferLoadDwordx16Smem::SBufferLoadDwordx16Smem(const MachineInst *inst)
     : Smem("s_buffer_load_dwordx16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferLoadDwordx16Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferLoadDwordx16Smem)),
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -418,22 +249,9 @@ SBufferLoadDwordx16Smem::SBufferLoadDwordx16Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
-  d->num_dwords = 16;
-  d->elem_size = 4;
-  d->sign_extend = false;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SStoreDwordSmem::SStoreDwordSmem(const MachineInst *inst)
     : Smem("s_store_dword", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SStoreDwordSmem>()),
+           selected_exec_fn(InstructionExecutionId::SStoreDwordSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -446,25 +264,11 @@ SStoreDwordSmem::SStoreDwordSmem(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
-}
-
-void SStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->num_dwords = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto &cu = wf.cu();
-  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
-  for (uint32_t i = 0; i < 1; ++i)
-    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
 }
 
 SStoreDwordx2Smem::SStoreDwordx2Smem(const MachineInst *inst)
     : Smem("s_store_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SStoreDwordx2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SStoreDwordx2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -477,25 +281,11 @@ SStoreDwordx2Smem::SStoreDwordx2Smem(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
-}
-
-void SStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->num_dwords = 2;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto &cu = wf.cu();
-  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
-  for (uint32_t i = 0; i < 2; ++i)
-    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
 }
 
 SStoreDwordx4Smem::SStoreDwordx4Smem(const MachineInst *inst)
     : Smem("s_store_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SStoreDwordx4Smem>()),
+           selected_exec_fn(InstructionExecutionId::SStoreDwordx4Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -508,25 +298,11 @@ SStoreDwordx4Smem::SStoreDwordx4Smem(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
-}
-
-void SStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->num_dwords = 4;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto &cu = wf.cu();
-  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
-  for (uint32_t i = 0; i < 4; ++i)
-    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
 }
 
 SScratchStoreDwordSmem::SScratchStoreDwordSmem(const MachineInst *inst)
     : Smem("s_scratch_store_dword", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SScratchStoreDwordSmem>()),
+           selected_exec_fn(InstructionExecutionId::SScratchStoreDwordSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -539,25 +315,11 @@ SScratchStoreDwordSmem::SScratchStoreDwordSmem(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
-}
-
-void SScratchStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->num_dwords = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto &cu = wf.cu();
-  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
-  for (uint32_t i = 0; i < 1; ++i)
-    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
 }
 
 SScratchStoreDwordx2Smem::SScratchStoreDwordx2Smem(const MachineInst *inst)
     : Smem("s_scratch_store_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SScratchStoreDwordx2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SScratchStoreDwordx2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -572,23 +334,9 @@ SScratchStoreDwordx2Smem::SScratchStoreDwordx2Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SScratchStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->num_dwords = 2;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto &cu = wf.cu();
-  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
-  for (uint32_t i = 0; i < 2; ++i)
-    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SScratchStoreDwordx4Smem::SScratchStoreDwordx4Smem(const MachineInst *inst)
     : Smem("s_scratch_store_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SScratchStoreDwordx4Smem>()),
+           selected_exec_fn(InstructionExecutionId::SScratchStoreDwordx4Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -603,23 +351,9 @@ SScratchStoreDwordx4Smem::SScratchStoreDwordx4Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SScratchStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->num_dwords = 4;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto &cu = wf.cu();
-  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
-  for (uint32_t i = 0; i < 4; ++i)
-    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SBufferStoreDwordSmem::SBufferStoreDwordSmem(const MachineInst *inst)
     : Smem("s_buffer_store_dword", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferStoreDwordSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferStoreDwordSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -634,23 +368,9 @@ SBufferStoreDwordSmem::SBufferStoreDwordSmem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->num_dwords = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto &cu = wf.cu();
-  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
-  for (uint32_t i = 0; i < 1; ++i)
-    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SBufferStoreDwordx2Smem::SBufferStoreDwordx2Smem(const MachineInst *inst)
     : Smem("s_buffer_store_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferStoreDwordx2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferStoreDwordx2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -665,23 +385,9 @@ SBufferStoreDwordx2Smem::SBufferStoreDwordx2Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->num_dwords = 2;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto &cu = wf.cu();
-  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
-  for (uint32_t i = 0; i < 2; ++i)
-    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SBufferStoreDwordx4Smem::SBufferStoreDwordx4Smem(const MachineInst *inst)
     : Smem("s_buffer_store_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferStoreDwordx4Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferStoreDwordx4Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
@@ -696,90 +402,55 @@ SBufferStoreDwordx4Smem::SBufferStoreDwordx4Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
-  d->num_dwords = 4;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto &cu = wf.cu();
-  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;
-  for (uint32_t i = 0; i < 4; ++i)
-    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);
-  d->addr = smem_calculate_address(inst_, wf);
-  set_data(std::move(d));
-}
-
 SDcacheInvSmem::SDcacheInvSmem(const MachineInst *inst)
     : Smem("s_dcache_inv", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SDcacheInvSmem>()) {
+           selected_exec_fn(InstructionExecutionId::SDcacheInvSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
-
-void SDcacheInvSmem::execute_impl(amdgpu::Wavefront &wf) { wf.cu().l1_scalar().invalidate_all(); }
 
 SDcacheWbSmem::SDcacheWbSmem(const MachineInst *inst)
     : Smem("s_dcache_wb", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SDcacheWbSmem>()) {
+           selected_exec_fn(InstructionExecutionId::SDcacheWbSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
-}
-
-void SDcacheWbSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.cu().l1_scalar().writeback_all(wf.process_id());
 }
 
 SDcacheInvVolSmem::SDcacheInvVolSmem(const MachineInst *inst)
     : Smem("s_dcache_inv_vol", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SDcacheInvVolSmem>()) {
+           selected_exec_fn(InstructionExecutionId::SDcacheInvVolSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
-}
-
-void SDcacheInvVolSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.cu().l1_scalar().invalidate_all();
 }
 
 SDcacheWbVolSmem::SDcacheWbVolSmem(const MachineInst *inst)
     : Smem("s_dcache_wb_vol", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SDcacheWbVolSmem>()) {
+           selected_exec_fn(InstructionExecutionId::SDcacheWbVolSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
-void SDcacheWbVolSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.cu().l1_scalar().writeback_all(wf.process_id());
-}
-
 SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
-    : Smem("s_memtime", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMemtimeSmem>()),
+    : Smem("s_memtime", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SMemtimeSmem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata) {
   dst_operands_[0] = &sdata;
   num_src_ = 0;
   num_dst_ = 1;
-}
-
-void SMemtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_memtime_smem(*this, wf);
 }
 
 SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
     : Smem("s_memrealtime", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMemrealtimeSmem>()),
+           selected_exec_fn(InstructionExecutionId::SMemrealtimeSmem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata) {
   dst_operands_[0] = &sdata;
   num_src_ = 0;
   num_dst_ = 1;
 }
 
-void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_memrealtime_smem(*this, wf);
-}
-
 SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
     : Smem("s_atc_probe", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtcProbeSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtcProbeSmem)),
       sdata(8, OperandType::OPR_SIMM8, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -790,11 +461,9 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
 SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
     : Smem("s_atc_probe_buffer", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtcProbeBufferSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtcProbeBufferSmem)),
       sdata(8, OperandType::OPR_SIMM8, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -805,27 +474,20 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
-
 SDcacheDiscardSmem::SDcacheDiscardSmem(const MachineInst *inst)
     : Smem("s_dcache_discard", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SDcacheDiscardSmem>()),
+           selected_exec_fn(InstructionExecutionId::SDcacheDiscardSmem)),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
   num_src_ = 2;
   num_dst_ = 0;
-}
-
-void SDcacheDiscardSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SDcacheDiscardX2Smem::SDcacheDiscardX2Smem(const MachineInst *inst)
     : Smem("s_dcache_discard_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SDcacheDiscardX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SDcacheDiscardX2Smem)),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sbase;
@@ -834,14 +496,9 @@ SDcacheDiscardX2Smem::SDcacheDiscardX2Smem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SDcacheDiscardX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
 SBufferAtomicSwapSmem::SBufferAtomicSwapSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicSwapSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicSwapSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -851,16 +508,11 @@ SBufferAtomicSwapSmem::SBufferAtomicSwapSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicCmpswapSmem::SBufferAtomicCmpswapSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicCmpswapSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicCmpswapSmem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -870,16 +522,11 @@ SBufferAtomicCmpswapSmem::SBufferAtomicCmpswapSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicAddSmem::SBufferAtomicAddSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicAddSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicAddSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -889,16 +536,11 @@ SBufferAtomicAddSmem::SBufferAtomicAddSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicSubSmem::SBufferAtomicSubSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicSubSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicSubSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -908,16 +550,11 @@ SBufferAtomicSubSmem::SBufferAtomicSubSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicSminSmem::SBufferAtomicSminSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicSminSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicSminSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -927,16 +564,11 @@ SBufferAtomicSminSmem::SBufferAtomicSminSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicUminSmem::SBufferAtomicUminSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicUminSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicUminSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -946,16 +578,11 @@ SBufferAtomicUminSmem::SBufferAtomicUminSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicSmaxSmem::SBufferAtomicSmaxSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicSmaxSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicSmaxSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -965,16 +592,11 @@ SBufferAtomicSmaxSmem::SBufferAtomicSmaxSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicUmaxSmem::SBufferAtomicUmaxSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicUmaxSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicUmaxSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -984,16 +606,11 @@ SBufferAtomicUmaxSmem::SBufferAtomicUmaxSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicAndSmem::SBufferAtomicAndSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicAndSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicAndSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1003,16 +620,11 @@ SBufferAtomicAndSmem::SBufferAtomicAndSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicOrSmem::SBufferAtomicOrSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicOrSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicOrSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1022,16 +634,11 @@ SBufferAtomicOrSmem::SBufferAtomicOrSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicXorSmem::SBufferAtomicXorSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicXorSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicXorSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1041,16 +648,11 @@ SBufferAtomicXorSmem::SBufferAtomicXorSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicIncSmem::SBufferAtomicIncSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicIncSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicIncSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1060,16 +662,11 @@ SBufferAtomicIncSmem::SBufferAtomicIncSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicDecSmem::SBufferAtomicDecSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicDecSmem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicDecSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1079,16 +676,11 @@ SBufferAtomicDecSmem::SBufferAtomicDecSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicSwapX2Smem::SBufferAtomicSwapX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_swap_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicSwapX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicSwapX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1098,16 +690,11 @@ SBufferAtomicSwapX2Smem::SBufferAtomicSwapX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicCmpswapX2Smem::SBufferAtomicCmpswapX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicCmpswapX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicCmpswapX2Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1117,16 +704,11 @@ SBufferAtomicCmpswapX2Smem::SBufferAtomicCmpswapX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicAddX2Smem::SBufferAtomicAddX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_add_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicAddX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicAddX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1136,16 +718,11 @@ SBufferAtomicAddX2Smem::SBufferAtomicAddX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicSubX2Smem::SBufferAtomicSubX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_sub_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicSubX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicSubX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1155,16 +732,11 @@ SBufferAtomicSubX2Smem::SBufferAtomicSubX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicSminX2Smem::SBufferAtomicSminX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_smin_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicSminX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicSminX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1174,16 +746,11 @@ SBufferAtomicSminX2Smem::SBufferAtomicSminX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicUminX2Smem::SBufferAtomicUminX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_umin_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicUminX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicUminX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1193,16 +760,11 @@ SBufferAtomicUminX2Smem::SBufferAtomicUminX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicSmaxX2Smem::SBufferAtomicSmaxX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_smax_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicSmaxX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicSmaxX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1212,16 +774,11 @@ SBufferAtomicSmaxX2Smem::SBufferAtomicSmaxX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicUmaxX2Smem::SBufferAtomicUmaxX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_umax_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicUmaxX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicUmaxX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1231,16 +788,11 @@ SBufferAtomicUmaxX2Smem::SBufferAtomicUmaxX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicAndX2Smem::SBufferAtomicAndX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_and_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicAndX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicAndX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1250,16 +802,11 @@ SBufferAtomicAndX2Smem::SBufferAtomicAndX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicOrX2Smem::SBufferAtomicOrX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_or_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicOrX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicOrX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1269,16 +816,11 @@ SBufferAtomicOrX2Smem::SBufferAtomicOrX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicXorX2Smem::SBufferAtomicXorX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_xor_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicXorX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicXorX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1288,16 +830,11 @@ SBufferAtomicXorX2Smem::SBufferAtomicXorX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicIncX2Smem::SBufferAtomicIncX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_inc_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicIncX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicIncX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1307,16 +844,11 @@ SBufferAtomicIncX2Smem::SBufferAtomicIncX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SBufferAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SBufferAtomicDecX2Smem::SBufferAtomicDecX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_dec_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBufferAtomicDecX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SBufferAtomicDecX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1328,14 +860,9 @@ SBufferAtomicDecX2Smem::SBufferAtomicDecX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
 SAtomicSwapSmem::SAtomicSwapSmem(const MachineInst *inst)
     : Smem("s_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicSwapSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicSwapSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1345,16 +872,11 @@ SAtomicSwapSmem::SAtomicSwapSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicCmpswapSmem::SAtomicCmpswapSmem(const MachineInst *inst)
     : Smem("s_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicCmpswapSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicCmpswapSmem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1364,16 +886,11 @@ SAtomicCmpswapSmem::SAtomicCmpswapSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicAddSmem::SAtomicAddSmem(const MachineInst *inst)
     : Smem("s_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicAddSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicAddSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1383,16 +900,11 @@ SAtomicAddSmem::SAtomicAddSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicSubSmem::SAtomicSubSmem(const MachineInst *inst)
     : Smem("s_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicSubSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicSubSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1402,16 +914,11 @@ SAtomicSubSmem::SAtomicSubSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicSminSmem::SAtomicSminSmem(const MachineInst *inst)
     : Smem("s_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicSminSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicSminSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1421,16 +928,11 @@ SAtomicSminSmem::SAtomicSminSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicUminSmem::SAtomicUminSmem(const MachineInst *inst)
     : Smem("s_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicUminSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicUminSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1440,16 +942,11 @@ SAtomicUminSmem::SAtomicUminSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicSmaxSmem::SAtomicSmaxSmem(const MachineInst *inst)
     : Smem("s_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicSmaxSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicSmaxSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1459,16 +956,11 @@ SAtomicSmaxSmem::SAtomicSmaxSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicUmaxSmem::SAtomicUmaxSmem(const MachineInst *inst)
     : Smem("s_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicUmaxSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicUmaxSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1478,16 +970,11 @@ SAtomicUmaxSmem::SAtomicUmaxSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicAndSmem::SAtomicAndSmem(const MachineInst *inst)
     : Smem("s_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicAndSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicAndSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1497,16 +984,11 @@ SAtomicAndSmem::SAtomicAndSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicOrSmem::SAtomicOrSmem(const MachineInst *inst)
     : Smem("s_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicOrSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicOrSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1516,16 +998,11 @@ SAtomicOrSmem::SAtomicOrSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicXorSmem::SAtomicXorSmem(const MachineInst *inst)
     : Smem("s_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicXorSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicXorSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1535,16 +1012,11 @@ SAtomicXorSmem::SAtomicXorSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicIncSmem::SAtomicIncSmem(const MachineInst *inst)
     : Smem("s_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicIncSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicIncSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1554,16 +1026,11 @@ SAtomicIncSmem::SAtomicIncSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicDecSmem::SAtomicDecSmem(const MachineInst *inst)
     : Smem("s_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicDecSmem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicDecSmem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1575,14 +1042,9 @@ SAtomicDecSmem::SAtomicDecSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
 SAtomicSwapX2Smem::SAtomicSwapX2Smem(const MachineInst *inst)
     : Smem("s_atomic_swap_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicSwapX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicSwapX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1594,14 +1056,9 @@ SAtomicSwapX2Smem::SAtomicSwapX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
 SAtomicCmpswapX2Smem::SAtomicCmpswapX2Smem(const MachineInst *inst)
     : Smem("s_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicCmpswapX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicCmpswapX2Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1613,14 +1070,9 @@ SAtomicCmpswapX2Smem::SAtomicCmpswapX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
 SAtomicAddX2Smem::SAtomicAddX2Smem(const MachineInst *inst)
     : Smem("s_atomic_add_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicAddX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicAddX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1630,16 +1082,11 @@ SAtomicAddX2Smem::SAtomicAddX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicSubX2Smem::SAtomicSubX2Smem(const MachineInst *inst)
     : Smem("s_atomic_sub_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicSubX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicSubX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1649,16 +1096,11 @@ SAtomicSubX2Smem::SAtomicSubX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicSminX2Smem::SAtomicSminX2Smem(const MachineInst *inst)
     : Smem("s_atomic_smin_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicSminX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicSminX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1668,16 +1110,11 @@ SAtomicSminX2Smem::SAtomicSminX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicUminX2Smem::SAtomicUminX2Smem(const MachineInst *inst)
     : Smem("s_atomic_umin_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicUminX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicUminX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1687,16 +1124,11 @@ SAtomicUminX2Smem::SAtomicUminX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicSmaxX2Smem::SAtomicSmaxX2Smem(const MachineInst *inst)
     : Smem("s_atomic_smax_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicSmaxX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicSmaxX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1706,16 +1138,11 @@ SAtomicSmaxX2Smem::SAtomicSmaxX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicUmaxX2Smem::SAtomicUmaxX2Smem(const MachineInst *inst)
     : Smem("s_atomic_umax_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicUmaxX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicUmaxX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1725,16 +1152,11 @@ SAtomicUmaxX2Smem::SAtomicUmaxX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicAndX2Smem::SAtomicAndX2Smem(const MachineInst *inst)
     : Smem("s_atomic_and_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicAndX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicAndX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1744,16 +1166,11 @@ SAtomicAndX2Smem::SAtomicAndX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicOrX2Smem::SAtomicOrX2Smem(const MachineInst *inst)
     : Smem("s_atomic_or_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicOrX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicOrX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1763,16 +1180,11 @@ SAtomicOrX2Smem::SAtomicOrX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicXorX2Smem::SAtomicXorX2Smem(const MachineInst *inst)
     : Smem("s_atomic_xor_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicXorX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicXorX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1782,16 +1194,11 @@ SAtomicXorX2Smem::SAtomicXorX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicIncX2Smem::SAtomicIncX2Smem(const MachineInst *inst)
     : Smem("s_atomic_inc_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicIncX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicIncX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1801,16 +1208,11 @@ SAtomicIncX2Smem::SAtomicIncX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 SAtomicDecX2Smem::SAtomicDecX2Smem(const MachineInst *inst)
     : Smem("s_atomic_dec_x2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAtomicDecX2Smem>()),
+           selected_exec_fn(InstructionExecutionId::SAtomicDecX2Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -1820,11 +1222,6 @@ SAtomicDecX2Smem::SAtomicDecX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
-}
-
-void SAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 } // namespace cdna4
