@@ -72,6 +72,15 @@ def get_amdgpu_version(
     return None
 
 
+# capchk builds its capability table behind #if defined(CAP_*), so a capability
+# newer than the kernel headers it was compiled against is reported as unknown
+# rather than absent.
+#
+# The list here is the set of capabilities capchk may legitimately not know
+# about; any other unknown name is a typo in the caller.
+_OPTIONAL_CAPABILITIES = frozenset({"CAP_PERFMON"})  # Introduced in kernel 5.8
+
+
 @dataclass
 class SystemCapabilities:
     """
@@ -316,7 +325,24 @@ class SystemCapabilities:
 
     # Results for the relevant caps are cached in functions below
     def _has_capability(self, name: str, capability_set: str = "effective") -> bool:
-        """Return True if this process holds *name* in *capability_set*."""
+        """Return True if this process holds *name* in *capability_set*.
+
+        Exit codes of rocprof-sys-capchk, which is where its answer lives:
+
+          - 0: the capability is held
+          - 1: the capability is absent
+          - 2: the capability name is unknown
+          - 3: the capability set name is unknown
+
+        2 and 3 mean the caller asked for something that does not exist, so they
+        raise rather than report the capability as absent and silently skip the
+        tests that need it. The exception is a capability newer than the kernel
+        headers capchk was built against, which is a real system difference
+        rather than a mistake; see ``_OPTIONAL_CAPABILITIES``.
+
+        Stdout is a human-readable sentence and must never be parsed
+        Changes here should be reflected in tests/rocprof-sys-capchk.cpp
+        """
         capchk = self.rocprofsys_tests_dir / "rocprof-sys-capchk"
         if not capchk.exists():
             return False
@@ -329,6 +355,14 @@ class SystemCapabilities:
             )
         except (subprocess.SubprocessError, OSError):
             return False
+
+        if result.returncode == 3:
+            raise ValueError(
+                f"rocprof-sys-capchk does not support capability set "
+                f"{capability_set!r}"
+            )
+        if result.returncode == 2 and name.upper() not in _OPTIONAL_CAPABILITIES:
+            raise ValueError(f"rocprof-sys-capchk does not support capability {name!r}")
         return result.returncode == 0
 
     @persistent_cached_property
