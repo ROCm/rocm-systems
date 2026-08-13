@@ -17,12 +17,12 @@ __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #endif
     // Step 0: Setup
-  size_t msgSize = work->count * sizeof(T) * ncclShmem.comm.nRanks;
   // Direct reduce scatter only supports the Simple protocol.
   // Compile this block only for Simple (LL and LL128 share
   // runRing but never run this path). For FP8 at unroll 32 the generated
   // reduceCopy is large enough to overflow the GPU stack and fault.
   if constexpr (Proto::Id == NCCL_PROTO_SIMPLE) {
+    size_t msgSize = work->count * sizeof(T) * ncclShmem.comm.nRanks;
     if (work->enableDirectReduceScatter && msgSize <= (size_t)work->directReduceScatterLimitBytes) {
       const int nRanks = ncclShmem.comm.nRanks;
       const ssize_t numElements = work->count;
