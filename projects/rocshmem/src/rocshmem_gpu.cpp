@@ -1335,8 +1335,7 @@ __device__ int rocshmem_wg_team_create_ctx(rocshmem_team_t team, long options,
   return result == true ? 0 : -1;
 }
 
-__device__ void rocshmem_wg_ctx_destroy(
-    [[maybe_unused]] rocshmem_ctx_t *ctx) {
+__device__ void rocshmem_wg_ctx_destroy([[maybe_unused]] rocshmem_ctx_t *ctx) {
   LOGD_API("device::wg_ctx_destroy (ctx=%zd)",
     ctx->ctx_opaque);
 
@@ -1346,15 +1345,13 @@ __device__ void rocshmem_wg_ctx_destroy(
 }
 
 __device__ void rocshmem_ctx_threadfence_system(rocshmem_ctx_t ctx) {
-  LOGD_API("device::ctx_threadfence_system (ctx=%zd)",
-    ctx.ctx_opaque);
+  LOGD_API("device::ctx_threadfence_system (ctx=%zd)", ctx.ctx_opaque);
 
   direct_ctx_threadfence_system(ctx);
 }
 
 __device__ __attribute__((used)) __forceinline__ void rocshmem_ctx_putmem(
-    rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems,
-    int pe) {
+    rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::ctx_putmem (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
@@ -1363,8 +1360,8 @@ __device__ __attribute__((used)) __forceinline__ void rocshmem_ctx_putmem(
 }
 
 template <typename T>
-__device__ __attribute__((used)) __forceinline__ void rocshmem_put(rocshmem_ctx_t ctx, T *dest, const T *source,
-                              size_t nelems, int pe) {
+__device__ __attribute__((used)) __forceinline__ void rocshmem_put(
+    rocshmem_ctx_t ctx, T *dest, const T *source, size_t nelems, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::put (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
@@ -1373,7 +1370,7 @@ __device__ __attribute__((used)) __forceinline__ void rocshmem_put(rocshmem_ctx_
 }
 
 template <typename T>
-__device__ __attribute__((used)) __forceinline__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe) {
+__device__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::p (ctx=%zd, dest=%p, value=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)value, pe, pe_in_world);
@@ -1382,7 +1379,7 @@ __device__ __attribute__((used)) __forceinline__ void rocshmem_p(rocshmem_ctx_t 
 }
 
 template <typename T>
-__device__ __attribute__((used)) __forceinline__ T rocshmem_g(rocshmem_ctx_t ctx, const T *source, int pe) {
+__device__ T rocshmem_g(rocshmem_ctx_t ctx, const T *source, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::g (ctx=%zd, source=%p, pe=%d w%d)",
     ctx.ctx_opaque, source, pe, pe_in_world);
@@ -1390,9 +1387,8 @@ __device__ __attribute__((used)) __forceinline__ T rocshmem_g(rocshmem_ctx_t ctx
   return direct_ctx_g<T>(ctx, source, pe_in_world);
 }
 
-__device__ __attribute__((used)) __forceinline__ void rocshmem_ctx_getmem(rocshmem_ctx_t ctx, void *dest,
-                                     const void *source, size_t nelems,
-                                     int pe) {
+__device__ void rocshmem_ctx_getmem(rocshmem_ctx_t ctx, void *dest,
+    const void *source, size_t nelems, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::ctx_getmem (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
@@ -1401,8 +1397,8 @@ __device__ __attribute__((used)) __forceinline__ void rocshmem_ctx_getmem(rocshm
 }
 
 template <typename T>
-__device__ __attribute__((used)) __forceinline__ void rocshmem_get(rocshmem_ctx_t ctx, T *dest, const T *source,
-                              size_t nelems, int pe) {
+__device__ void rocshmem_get(rocshmem_ctx_t ctx, T *dest, const T *source,
+    size_t nelems, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::get (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
@@ -1421,8 +1417,8 @@ __device__ __attribute__((used)) __forceinline__ void rocshmem_ctx_putmem_nbi(
 }
 
 template <typename T>
-__device__ void rocshmem_put_nbi(rocshmem_ctx_t ctx, T *dest, const T *source,
-                                  size_t nelems, int pe) {
+__device__ __attribute__((used)) __forceinline__ void rocshmem_put_nbi(
+    rocshmem_ctx_t ctx, T *dest, const T *source, size_t nelems, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::put_nbi (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
@@ -1905,18 +1901,18 @@ __device__ void rocshmem_ctx_sync(rocshmem_ctx_t ctx,
 
 __device__ void rocshmem_ctx_sync_wave(rocshmem_ctx_t ctx,
                                        rocshmem_team_t team) {
-LOGD_API("device::ctx_sync_wave (ctx=%zd, team=%zd)",
-    ctx.ctx_opaque, team);
+  LOGD_API("device::ctx_sync_wave (ctx=%zd, team=%zd)",
+      ctx.ctx_opaque, team);
 
-direct_ctx_sync_wg(ctx, team);
+  direct_ctx_sync_wg(ctx, team);
 }
 
 __device__ void rocshmem_ctx_sync_wg(rocshmem_ctx_t ctx,
                                      rocshmem_team_t team) {
-LOGD_API("device::ctx_sync_wg (ctx=%zd, team=%zd)",
-    ctx.ctx_opaque, team);
+  LOGD_API("device::ctx_sync_wg (ctx=%zd, team=%zd)",
+      ctx.ctx_opaque, team);
 
-direct_ctx_sync_wg(ctx, team);
+  direct_ctx_sync_wg(ctx, team);
 }
 
 __device__ int rocshmem_ctx_n_pes(rocshmem_ctx_t ctx) {
@@ -2254,14 +2250,14 @@ __device__ void rocshmem_get_nbi_wave(rocshmem_ctx_t ctx, T *dest,
 }
 
 #define ROCSHMEM_CTX_PUTMEM_SIGNAL_DEF(SUFFIX)                                             \
-  __device__ __attribute__((used)) __forceinline__                                        \
+  __device__ __attribute__((used)) __forceinline__                                         \
   void rocshmem_ctx_putmem_signal##SUFFIX(rocshmem_ctx_t ctx,                              \
                                                       void *dest, const void *source,      \
                                                       size_t nelems,                       \
                                                       uint64_t *sig_addr, uint64_t signal, \
                                                       int sig_op,                          \
                                                       int pe) {                            \
-    LOGD_API("device::ctx_putmem_signal##SUFFIX (ctx=%zd, dest=%p, "             \
+    LOGD_API("device::ctx_putmem_signal##SUFFIX (ctx=%zd, dest=%p, "                       \
       "source=%p, nelems=%d, sig_addr=%p, signal=%ld, sig_op=%d, pe=%d w%d)\n",            \
       ctx.ctx_opaque, dest, source, nelems,                                                \
       sig_addr, signal, sig_op, pe, translate_pe(ctx, pe));                                \
@@ -2276,7 +2272,7 @@ __device__ void rocshmem_get_nbi_wave(rocshmem_ctx_t ctx, T *dest,
                                                    size_t nelems,                          \
                                                    uint64_t *sig_addr, uint64_t signal,    \
                                                    int sig_op, int pe) {                   \
-    LOGD_API("device::ctx_put_signal##SUFFIX (ctx=%zd, dest=%p, "                \
+    LOGD_API("device::ctx_put_signal##SUFFIX (ctx=%zd, dest=%p, "                          \
       "source=%p, nelems=%d, sig_addr=%p, signal=%ld, sig_op=%d, pe=%d w%d)\n",            \
       ctx.ctx_opaque, dest, source, nelems,                                                \
       sig_addr, signal, sig_op, pe, translate_pe(ctx, pe));                                \
@@ -2305,9 +2301,8 @@ ROCSHMEM_SIGNAL_FETCH_DEF(_wave)
  ****************************** Teams Interface *******************************
  *****************************************************************************/
 
-__device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
-                                           int src_pe,
-                                           rocshmem_team_t dst_team) {
+__device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team, int src_pe,
+                                          rocshmem_team_t dst_team) {
   return team_translate_pe(src_team, src_pe, dst_team);
 }
 
@@ -2552,55 +2547,55 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
  * Define APIs to call the template functions
  **/
 
-#define REDUCTION_DEF_GEN(T, TNAME, Op_API, Op)                               \
-  __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_wg(                 \
-      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
-      int nreduce) {                                                           \
-    return rocshmem_reduce_wg<T, Op>(ctx, team, dest, source, nreduce);       \
-  }                                                                            \
-  __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_wave(               \
-      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
-      int nreduce) {                                                           \
-    return rocshmem_reduce_wave<T, Op>(ctx, team, dest, source, nreduce);     \
+#define REDUCTION_DEF_GEN(T, TNAME, Op_API, Op)                                   \
+  __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_wg(                     \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,         \
+      int nreduce) {                                                              \
+    return rocshmem_reduce_wg<T, Op>(ctx, team, dest, source, nreduce);           \
+  }                                                                               \
+  __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_wave(                   \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,         \
+      int nreduce) {                                                              \
+    return rocshmem_reduce_wave<T, Op>(ctx, team, dest, source, nreduce);         \
+  }    
+    
+#define REDUCE_SCATTER_DEF_GEN(T, TNAME, Op_API, Op)                              \
+  __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_scatter_wg(             \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,         \
+      int nreduce) {                                                              \
+    return rocshmem_reduce_scatter_wg<T, Op>(ctx, team, dest, source, nreduce);   \
   }
 
-#define REDUCE_SCATTER_DEF_GEN(T, TNAME, Op_API, Op)                          \
-  __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_scatter_wg(         \
-      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
-      int nreduce) {                                                          \
-    return rocshmem_reduce_scatter_wg<T, Op>(ctx, team, dest, source, nreduce); \
-  }
-
-#define REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, Op_API, Op)                       \
-  __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_scatter_wave(          \
-      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,        \
+#define REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, Op_API, Op)                         \
+  __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_scatter_wave(           \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,         \
       int nreduce) {                                                              \
     return rocshmem_reduce_scatter_wave<T, Op>(ctx, team, dest, source, nreduce); \
   }
 
 #define ARITH_REDUCTION_DEF_GEN(T, TNAME)                        \
-  REDUCTION_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)                \
-  REDUCTION_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)                \
-  REDUCTION_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)                \
-  REDUCTION_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)              \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)          \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)          \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)          \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)        \
-  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)     \
-  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)     \
-  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)     \
+  REDUCTION_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)                 \
+  REDUCTION_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)                 \
+  REDUCTION_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)                 \
+  REDUCTION_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)               \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)            \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)            \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)            \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)          \
+  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)       \
+  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)       \
+  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)       \
   REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
 
 #define BITWISE_REDUCTION_DEF_GEN(T, TNAME)                      \
-  REDUCTION_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)                  \
-  REDUCTION_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)                \
-  REDUCTION_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)                \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)            \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)          \
-  REDUCE_SCATTER_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)          \
-  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)       \
-  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)     \
+  REDUCTION_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)                   \
+  REDUCTION_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)                 \
+  REDUCTION_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)                 \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)              \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)            \
+  REDUCE_SCATTER_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)            \
+  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)         \
+  REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)       \
   REDUCE_SCATTER_WAVE_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
 
 #define INT_REDUCTION_DEF_GEN(T, TNAME) \
@@ -2930,30 +2925,30 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
 
 #define RMA_SIGNAL_SUFFIX_DEC(SUFFIX)                                                    \
   template <typename T>                                                                  \
-  __device__ void rocshmem_ctx_put_signal##SUFFIX(rocshmem_ctx_t ctx,                 \
+  __device__ void rocshmem_ctx_put_signal##SUFFIX(rocshmem_ctx_t ctx,                    \
                                                     T *dest, const T *source,            \
                                                     size_t nelems,                       \
                                                     uint64_t *sig_addr, uint64_t signal, \
                                                     int sig_op, int pe);                 \
                                                                                          \
   template <typename T>                                                                  \
-  __device__ void rocshmem_put_signal##SUFFIX(T *dest, const T *source, size_t nelems, \
+  __device__ void rocshmem_put_signal##SUFFIX(T *dest, const T *source, size_t nelems,   \
                                                 uint64_t *sig_addr, uint64_t signal,     \
                                                 int sig_op, int pe);                     \
 
 #define RMA_SIGNAL_SUFFIX_DEF(T, TNAME, SUFFIX)                                                   \
-  __device__ void rocshmem_ctx_##TNAME##_put_signal##SUFFIX(rocshmem_ctx_t ctx,                 \
+  __device__ void rocshmem_ctx_##TNAME##_put_signal##SUFFIX(rocshmem_ctx_t ctx,                   \
                                                              T *dest, const T *source,            \
                                                              size_t nelems,                       \
                                                              uint64_t *sig_addr, uint64_t signal, \
                                                              int sig_op, int pe) {                \
-    rocshmem_ctx_put_signal##SUFFIX<T>(ctx, dest, source, nelems, sig_addr, signal, sig_op, pe); \
+    rocshmem_ctx_put_signal##SUFFIX<T>(ctx, dest, source, nelems, sig_addr, signal, sig_op, pe);  \
   }                                                                                               \
                                                                                                   \
-  __device__ void rocshmem_##TNAME##_put_signal##SUFFIX(T *dest, const T *source, size_t nelems, \
+  __device__ void rocshmem_##TNAME##_put_signal##SUFFIX(T *dest, const T *source, size_t nelems,  \
                                                          uint64_t *sig_addr, uint64_t signal,     \
                                                          int sig_op, int pe) {                    \
-    rocshmem_put_signal##SUFFIX(dest, source, nelems, sig_addr, signal, sig_op, pe);             \
+    rocshmem_put_signal##SUFFIX(dest, source, nelems, sig_addr, signal, sig_op, pe);              \
   }
 
 #define RMA_SIGNAL_GEN(SUFFIX)                                 \
