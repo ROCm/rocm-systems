@@ -19,8 +19,7 @@ from utils import mem_chart_gfx11
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
 
 MEM_CHART_PANEL_YAML = (
-    Path(common.ROOT)
-    / "src"
+    Path(common.SRC)
     / "rocprof_compute_soc"
     / "analysis_configs"
     / "gfx115x"
