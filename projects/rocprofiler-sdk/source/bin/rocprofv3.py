@@ -26,7 +26,6 @@ import os
 import sys
 import re
 import argparse
-import ctypes
 import textwrap
 import subprocess
 
@@ -124,65 +123,6 @@ def warn_deprecated_output_formats(output_formats):
             "then run `rocpd convert -i <database>.db --output-format csv` when CSV "
             "output is needed."
         )
-def _format_application_output_keys(path, app_args):
-    raw_args = list(app_args) if app_args else [os.path.basename(sys.argv[0])]
-    if len(raw_args) > 1 and raw_args[1] == "--":
-        del raw_args[1]
-    tag = os.path.basename(str(raw_args[0]))
-    command = []
-    for argument in raw_args:
-        value = str(argument).strip().replace("/", "_")
-        while value.startswith("."):
-            value = value[1:]
-        while value.startswith("_"):
-            value = value[1:]
-        command.append(value)
-
-    values = {
-        "argv": "_".join(command),
-        "args": "_".join(command[1:]),
-        "tag": tag,
-        "argt": tag
-        + (command[1] if len(command) > 1 else "")
-        + (f"_{'_'.join(command[2:])}" if len(command) > 2 else ""),
-    }
-    values.update({f"arg{index}": value for index, value in enumerate(command)})
-    for key, value in values.items():
-        path = path.replace(f"%{key}%", value).replace(f"{{{key}}}", value)
-    path = re.sub(r"(?:%arg\d+%|\{arg\d+\})[-/_]*", "", path)
-    return path, tag
-
-
-def _format_output_path(path, app_args, library, environment=None):
-    path, tag = _format_application_output_keys(path, app_args)
-    output = ctypes.c_char_p()
-    library.format_output_path.argtypes = [
-        ctypes.c_char_p,
-        ctypes.c_char_p,
-        ctypes.POINTER(ctypes.c_char_p),
-    ]
-    library.format_output_path.restype = ctypes.c_int
-
-    missing = object()
-    previous = {}
-    if environment:
-        for key, value in environment.items():
-            previous[key] = os.environ.get(key, missing)
-            os.environ[key] = str(value)
-    try:
-        status = library.format_output_path(
-            os.fsencode(path), os.fsencode(tag), ctypes.byref(output)
-        )
-    finally:
-        for key, value in previous.items():
-            if value is missing:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-    if status != 1 or output.value is None:
-        raise OSError("canonical output path formatter failed")
-    return os.fsdecode(output.value)
 
 
 def format_help(formatter, w=120, h=40):
@@ -1767,7 +1707,6 @@ def run(app_args, args, **kwargs):
     _output_path = (
         args.output_directory if args.output_directory is not None else os.getcwd()
     )
-    _list_avail_output_file = None
 
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)
@@ -1782,28 +1721,6 @@ def run(app_args, args, **kwargs):
         args.output_file is not None or args.output_directory is not None
     ):
         update_env("ROCPROF_OUTPUT_LIST_AVAIL_FILE", True)
-        try:
-            output_formatter = ctypes.CDLL(ROCPROF_LIST_AVAIL_TOOL_LIBRARY)
-            output_path = _format_output_path(
-                app_env.get("ROCPROF_OUTPUT_PATH", "%cwd%"),
-                app_args,
-                output_formatter,
-                app_env,
-            )
-            output_stem = _format_output_path(
-                app_env.get("ROCPROF_OUTPUT_FILE_NAME", "%hostname%/%pid%"),
-                app_args,
-                output_formatter,
-                app_env,
-            )
-            _list_avail_output_file = _format_output_path(
-                os.path.join(output_path, f"{output_stem}_list_avail.txt"),
-                app_args,
-                output_formatter,
-                app_env,
-            )
-        except (AttributeError, OSError) as error:
-            fatal_error(f"Could not resolve list-avail output path: {error}")
 
     if not args.output_format:
         args.output_format = ["rocpd"]
@@ -2025,7 +1942,7 @@ def run(app_args, args, **kwargs):
         update_env(
             "ROCPROF_LIST_AVAIL_TOOL_LIBRARY",
             ROCPROF_LIST_AVAIL_TOOL_LIBRARY,
-            overwrite=False,
+            overwrite_if_true=True,
         )
 
     if args.pid:
@@ -2143,15 +2060,18 @@ def run(app_args, args, **kwargs):
     if args.list_avail:
         update_env("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", "on")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3-avail")
-        pmc_command = [sys.executable, path, "info", "--pmc"]
-        capability_commands = [
-            [sys.executable, path, "info", "--pc-sampling"],
-            [sys.executable, path, "info", "--spm-config"],
+        avail_command = [
+            sys.executable,
+            path,
+            "info",
+            "--pmc",
+            "--pc-sampling",
+            "--spm-config",
         ]
 
-        def run_avail_command(command, output=None):
+        if app_args:
             try:
-                return subprocess.check_call(command, env=app_env, stdout=output)
+                exit_code = subprocess.check_call(avail_command, env=app_env)
             except subprocess.CalledProcessError as error:
                 fatal_error(
                     f"rocprofv3-avail exited with status {error.returncode}",
@@ -2159,30 +2079,13 @@ def run(app_args, args, **kwargs):
                 )
             except OSError as error:
                 fatal_error(f"Could not execute rocprofv3-avail: {error}")
-
-        has_application = bool(app_args)
-        if has_application:
-            avail_commands = [pmc_command] + capability_commands
         else:
-            avail_commands = capability_commands
-            app_args = pmc_command
+            app_args = avail_command
             for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):
                 update_env(
                     f"{itr}_LOG_LEVEL",
                     "error",
                 )
-
-        if _list_avail_output_file:
-            try:
-                os.makedirs(os.path.dirname(_list_avail_output_file), exist_ok=True)
-                with open(_list_avail_output_file, "w") as output:
-                    for command in avail_commands:
-                        exit_code = run_avail_command(command, output)
-            except OSError as error:
-                fatal_error(f"Could not write list-avail output: {error}")
-        else:
-            for command in avail_commands:
-                exit_code = run_avail_command(command)
 
     elif args.pid:
         update_env("ROCPROF_ATTACH_PID", args.pid)
@@ -2471,17 +2374,6 @@ def run(app_args, args, **kwargs):
 
     if args.log_level in ("info", "trace", "env", "config"):
         log_config(app_env)
-
-    if args.list_avail and not has_application and not args.echo:
-        if _list_avail_output_file:
-            try:
-                with open(_list_avail_output_file, "a") as output:
-                    exit_code = run_avail_command(app_args, output)
-            except OSError as error:
-                fatal_error(f"Could not write list-avail output: {error}")
-        else:
-            exit_code = run_avail_command(app_args)
-        return exit_code
 
     if use_execv:
         if args.echo:

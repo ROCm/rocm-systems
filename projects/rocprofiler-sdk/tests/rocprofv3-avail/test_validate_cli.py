@@ -22,7 +22,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import ctypes
 import json
 import os
 import re
@@ -106,7 +105,9 @@ Device = namedtuple(
 )
 
 # A single hardware block exposes more countable events than it has physical
-# counters, so this many counters from one block cannot share a pass.
+# counters, so this many counters from one block cannot share a pass. The largest
+# block holds 24 counters on gfx10, 25 on gfx11 and at least 107 on gfx90a and
+# later, but only 15 on gfx9 and earlier, where the check is skipped instead.
 INCOMPATIBLE_SET_SIZE = 24
 
 
@@ -155,10 +156,11 @@ class Inventory:
 
 
 class Commands:
-    def __init__(self, avail, rocprofv3, environment):
+    def __init__(self, avail, rocprofv3, environment, root):
         self.avail = avail
         self.rocprofv3 = rocprofv3
         self.environment = environment
+        self.root = root
 
     def _run(self, executable, *arguments, check=True, cwd=None, environment=None):
         command = [sys.executable, str(executable)]
@@ -239,7 +241,7 @@ def commands(request):
     rocprofv3 = Path(request.config.getoption("--rocprofv3"))
     assert avail.is_file(), f"rocprofv3-avail not found: {avail}"
     assert rocprofv3.is_file(), f"rocprofv3 not found: {rocprofv3}"
-    return Commands(avail, rocprofv3, environment)
+    return Commands(avail, rocprofv3, environment, root)
 
 
 def _value(item):
@@ -638,85 +640,47 @@ def test_help_and_bad_subcommand(commands):
     assert "Traceback" not in bad_result.stderr
 
 
-def test_output_formatter_error_contract(commands):
-    library = ctypes.CDLL(commands.environment["ROCPROF_LIST_AVAIL_TOOL_LIBRARY"])
-    library.format_output_path.argtypes = [
-        ctypes.c_char_p,
-        ctypes.c_char_p,
-        ctypes.POINTER(ctypes.c_char_p),
-    ]
-    library.format_output_path.restype = ctypes.c_int
-
-    output = ctypes.c_char_p(os.fsencode("sentinel"))
-    assert library.format_output_path(None, None, ctypes.byref(output)) == 0
-    assert output.value is None
-    assert library.format_output_path(os.fsencode("path"), None, None) == 0
-
-
 @pytest.mark.parametrize("flag", ("--list-avail", "-L"))
 def test_rocprofv3_list_avail_stdout(commands, inventory, flag):
     result = commands.run_rocprofv3(flag)
     _assert_availability(result.stdout, inventory)
 
 
+def test_rocprofv3_list_avail_with_application(commands, inventory, tmp_path):
+    marker = "application-executed"
+    result = commands.run_rocprofv3(
+        "--list-avail", "--", "/bin/echo", marker, cwd=tmp_path
+    )
+    assert marker in result.stdout
+    _assert_availability(result.stdout, inventory)
+
+
 def test_rocprofv3_list_avail_false_runs_application(commands, tmp_path):
-    result = commands.run_rocprofv3("-L", "false", "--", "/bin/true", cwd=tmp_path)
+    marker = "application-executed"
+    result = commands.run_rocprofv3(
+        "-L", "false", "--", "/bin/echo", marker, cwd=tmp_path
+    )
+    assert marker in result.stdout
     assert _info_counters(result.stdout) == {}
-    assert not list(tmp_path.rglob("*_list_avail.txt"))
 
 
-@pytest.mark.parametrize("routing", ("directory-only", "file-only", "placeholder-app"))
+@pytest.mark.parametrize("routing", ("directory-only", "file-only"))
 def test_rocprofv3_list_avail_output_routing(commands, inventory, tmp_path, routing):
     cwd = tmp_path / routing
     cwd.mkdir()
-    environment = {}
     if routing == "directory-only":
         output_directory = cwd / "output"
         arguments = ("-d", output_directory, "--list-avail")
-    elif routing == "file-only":
-        arguments = ("-o", "availability", "--list-avail")
     else:
-        output_directory = (
-            cwd / "%hostname%" / "%env{AIROCVAL_ROUTE}%" / "%rank%-%size%-%nid%"
-        )
-        environment.update(
-            {
-                "AIROCVAL_RANK": "3",
-                "AIROCVAL_ROUTE": "route-token",
-                "AIROCVAL_SIZE": "8",
-            }
-        )
-        arguments = (
-            "-d",
-            output_directory,
-            "-o",
-            "%argt%_%pid%",
-            "--mpi-world-rank-variable",
-            "AIROCVAL_RANK",
-            "--mpi-world-size-variable",
-            "AIROCVAL_SIZE",
-            "--list-avail",
-            "--",
-            "/bin/true",
-            "--",
-            "payload",
-        )
+        arguments = ("-o", "availability", "--list-avail")
 
-    result = commands.run_rocprofv3(*arguments, cwd=cwd, environment=environment)
+    result = commands.run_rocprofv3(*arguments, cwd=cwd)
     if routing == "directory-only":
         output_file = (
             output_directory / socket.gethostname() / f"{result.pid}_list_avail.txt"
         )
-    elif routing == "file-only":
-        output_file = cwd / "availability_list_avail.txt"
     else:
-        output_file = (
-            cwd
-            / socket.gethostname()
-            / "route-token"
-            / "3-8-3"
-            / f"truepayload_{result.pid}_list_avail.txt"
-        )
+        output_file = cwd / "availability_list_avail.txt"
 
     assert sorted(cwd.rglob("*_list_avail.txt")) == [output_file]
     _assert_routed_output(result, output_file, inventory)
@@ -736,10 +700,13 @@ def test_rocprofv3_list_avail_with_tracing(commands, inventory, request, tmp_pat
         "metrics",
         "--",
         application,
+        "1",
+        "20",
         cwd=tmp_path,
     )
 
     availability = output_directory / "metrics_list_avail.txt"
+    assert availability.is_file()
     _assert_availability(
         availability.read_text(encoding="utf-8", errors="replace"), inventory
     )
@@ -749,12 +716,12 @@ def test_rocprofv3_list_avail_with_tracing(commands, inventory, request, tmp_pat
     connection = sqlite3.connect(f"file:{trace}?mode=ro", uri=True)
     try:
         counts = [
-            connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            for table in ("rocpd_kernel_dispatch", "rocpd_region")
+            connection.execute(f"SELECT COUNT(*) FROM {view}").fetchone()[0]
+            for view in ("kernels", "regions")
         ]
     finally:
         connection.close()
-    assert all(count > 0 for count in counts), f"empty trace tables: {counts}"
+    assert all(count > 0 for count in counts), f"empty trace views: {counts}"
 
 
 def test_rocprofv3_list_avail_input_file(commands, inventory, tmp_path):
@@ -808,32 +775,31 @@ def test_rocprofv3_list_avail_multipass_routing(commands, inventory, tmp_path):
         )
 
 
-def test_rocprofv3_nested_failure_is_clean(commands, tmp_path):
-    missing_library = tmp_path / "missing-list-avail.so"
-    result = commands.run_rocprofv3(
-        "--list-avail",
-        check=False,
-        environment={"ROCPROF_LIST_AVAIL_TOOL_LIBRARY": str(missing_library)},
-    )
-    combined = result.stdout + result.stderr
-    assert result.returncode == 1
-    assert "rocprofv3-avail exited with status 1" in result.stderr
-    assert "Traceback" not in combined
-
-
-def test_rocprofv3_incompatible_list_avail_library_is_clean(commands):
-    list_avail_library = Path(commands.environment["ROCPROF_LIST_AVAIL_TOOL_LIBRARY"])
-    incompatible_library = list_avail_library.parent.parent / "librocprofiler-sdk.so"
+def test_rocprofv3_incompatible_list_avail_library_is_clean(commands, tmp_path):
+    root = commands.root
+    incompatible_library = root / "lib" / "librocprofiler-sdk.so"
     assert incompatible_library.is_file()
 
-    environment = {"ROCPROF_LIST_AVAIL_TOOL_LIBRARY": str(incompatible_library)}
-
-    nested_result = commands.run_rocprofv3(
-        "--list-avail",
-        check=False,
-        environment=environment,
+    # mirror the ROCm tree so --rocm-root resolves a library without the
+    # symbols the avail tool needs
+    rocm_root = tmp_path / "rocm"
+    library_directory = Path("lib") / "rocprofiler-sdk"
+    (rocm_root / library_directory).mkdir(parents=True)
+    for directory in (Path("."), Path("lib"), library_directory):
+        for entry in (root / directory).iterdir():
+            link = rocm_root / directory / entry.name
+            if not link.exists() and not entry.name.startswith(
+                "librocprofv3-list-avail.so"
+            ):
+                link.symlink_to(entry)
+    (rocm_root / library_directory / "librocprofv3-list-avail.so").symlink_to(
+        incompatible_library
     )
-    nested_output = nested_result.stdout + nested_result.stderr
-    assert nested_result.returncode == 1
-    assert "rocprofv3-avail exited with status 1" in nested_result.stderr
-    assert "Traceback" not in nested_output
+
+    result = commands.run_rocprofv3(
+        "--rocm-root", rocm_root, "--list-avail", check=False, cwd=tmp_path
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "Unable to load rocprofv3-avail library" in result.stderr
+    assert "Traceback" not in combined
