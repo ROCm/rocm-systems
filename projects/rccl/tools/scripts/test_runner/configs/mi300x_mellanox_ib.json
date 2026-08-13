@@ -3499,9 +3499,17 @@
       "tests": [
         {
           "name": "GIN_DeviceMPI_AllTests",
-          "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall); excludes Phase-1 VA signal tests (gin_device_signal_phase1) and tests with dedicated entries below",
-          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.VASignal_*:-GinMPIDeviceTests.SignalAdd_PutValue:-GinMPIDeviceTests.SignalInc_MixingRule:-GinMPIDeviceTests.Signal_WaitRead_Low32Bits:-GinMPIDeviceTests.SignalShadow_GetPtr:-GinMPIDeviceTests.MultiContext_NonPowerOf2:-GinMPIDeviceTests.RailConnection_Create",
+          "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall); excludes Phase-1 VA signal tests (gin_device_signal_phase1), the Tier-1 multi-context siblings (GIN_Tier1_MultiContext), and tests with dedicated entries below",
+          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.VASignal_*:-GinMPIDeviceTests.SignalAdd_PutValue:-GinMPIDeviceTests.SignalInc_MixingRule:-GinMPIDeviceTests.Signal_WaitRead_Low32Bits:-GinMPIDeviceTests.SignalShadow_GetPtr:-GinMPIDeviceTests.MultiContext_NonPowerOf2:-GinMPIDeviceTests.RailConnection_Create:-GinMPIDeviceTests.*_MultiContext",
           "timeout": 600
+        },
+        {
+          "name": "GIN_DeviceMPI_MultiContext",
+          "description": "GIN device tests driven across multiple GIN contexts (NCCL_GIN_NCONTEXTS=4): put/putValue-inline/counter+signal/VA-signal, one block per context",
+          "test_filter": "GinMPIDeviceTests.*_MultiContext",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "4"
+          }
         },
         {
           "name": "GIN_MultiContext_NonPowerOf2",
@@ -4504,6 +4512,12 @@
       "name": "SparseSendRecv",
       "description": "Test sparse send/recv functionality over multiple plans",
       "config": "sparse_send_recv",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI - MultiContext",
+      "description": "GIN device tests driven across multiple GIN contexts (NCCL_GIN_NCONTEXTS=4): put/putValue-inline/counter+signal/VA-signal, one block per context",
+      "config": "gin_device_mpi_multi_context",
       "enabled": true
     }
   ]
