@@ -128,8 +128,7 @@ jobs:
             sanitizer_runtime: SHARED
             c_compiler: gcc
             cxx_compiler: g++
-            arch_flags: -march=x86-64-v4
-            require_native_simd_width_16: 1
+            enable_avx512_if_available: 1
 
     steps:
       - name: Install base dependencies
@@ -154,17 +153,28 @@ jobs:
             .github
             shared/machine-readable-isa/isa
 
-      - name: Verify AVX-512 runner support
-        if: matrix.require_native_simd_width_16 == 1
+      - name: Detect optional AVX-512 support
+        id: detect_avx512
+        if: matrix.enable_avx512_if_available == 1
         shell: bash
         run: |
           required_features=(avx512f avx512bw avx512cd avx512dq avx512vl)
+          missing_features=()
           for feature in "${required_features[@]}"; do
             if ! grep -qw "${feature}" /proc/cpuinfo; then
-              echo "::error::The ${feature} CPU feature is required by the ${{ matrix.name }} job."
-              exit 1
+              missing_features+=("${feature}")
             fi
           done
+
+          if (( ${#missing_features[@]} == 0 )); then
+            echo "arch_flags=-march=x86-64-v4" >> "${GITHUB_OUTPUT}"
+            echo "require_native_simd_width_16=1" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Enabling 16-lane AVX-512 coverage for the ${{ matrix.name }} job."
+          else
+            echo "arch_flags=" >> "${GITHUB_OUTPUT}"
+            echo "require_native_simd_width_16=0" >> "${GITHUB_OUTPUT}"
+            echo "::notice::AVX-512 unavailable (${missing_features[*]}); retaining the baseline ${{ matrix.name }} configuration."
+          fi
 
       - name: Checkout corpus
         if: matrix.enable_tsan == 0
@@ -254,8 +264,8 @@ jobs:
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_CXX_COMPILER="${{ matrix.cxx_compiler }}")
           fi
 
-          CFLAGS="${{ matrix.arch_flags }}"
-          CXXFLAGS="${{ matrix.arch_flags }}"
+          CFLAGS="${{ steps.detect_avx512.outputs.arch_flags }}"
+          CXXFLAGS="${{ steps.detect_avx512.outputs.arch_flags }}"
           if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
             CXXFLAGS+=" -Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
           fi
@@ -269,7 +279,7 @@ jobs:
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
-            -DRJ_TEST_REQUIRE_NATIVE_SIMD_WIDTH_16=${{ matrix.require_native_simd_width_16 || 0 }} \
+            -DRJ_TEST_REQUIRE_NATIVE_SIMD_WIDTH_16=${{ steps.detect_avx512.outputs.require_native_simd_width_16 || 0 }} \
             -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
           # Set a conservative number of workers to avoid OOM and excessive system load.
