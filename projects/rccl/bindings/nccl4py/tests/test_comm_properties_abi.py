@@ -102,6 +102,34 @@ class _NcclCommPropertiesRef(ctypes.Structure):
     ]
 
 
+class _NcclCommPropertiesBuggyRef(ctypes.Structure):
+    """Reference layout of the regression this test guards against.
+
+    Identical to :class:`_NcclCommPropertiesRef` except ``ginType`` and
+    ``railedGinType`` are mistakenly declared as ``uint8_t`` instead of the
+    real ``ncclGinType_t`` (4-byte enum), reproducing the pre-fix
+    ``cynccl.pxd`` bug class described in the module docstring. Used only to
+    compute the buggy struct's size explicitly, so the negative test below
+    stays a faithful regression guard even if fields are added/reordered.
+    """
+
+    _fields_ = [
+        ("size", ctypes.c_size_t),
+        ("magic", ctypes.c_uint),
+        ("version", ctypes.c_uint),
+        ("rank", ctypes.c_int),
+        ("nRanks", ctypes.c_int),
+        ("cudaDev", ctypes.c_int),
+        ("nvmlDev", ctypes.c_int),
+        ("deviceApiSupport", ctypes.c_uint8),
+        ("multimemSupport", ctypes.c_uint8),
+        ("ginType", ctypes.c_uint8),  # bug: should be ncclGinType_t (int)
+        ("nLsaTeams", ctypes.c_int),
+        ("hostRmaSupport", ctypes.c_uint8),
+        ("railedGinType", ctypes.c_uint8),  # bug: should be ncclGinType_t
+    ]
+
+
 # Field-name mapping: reference (C) name -> nccl4py Python property name.
 _FIELD_MAP = [
     ("size", "size_"),
@@ -186,9 +214,10 @@ def test_comm_properties_from_buffer_round_trip(gin_type, railed_gin_type):
 
 
 def test_comm_properties_from_buffer_rejects_undersized_buffer():
-    """A buffer sized for the buggy uint8_t-packed struct (48 bytes) must
-    be rejected rather than silently misinterpreted.
+    """A buffer sized for the buggy uint8_t-packed struct must be rejected
+    rather than silently misinterpreted.
     """
-    undersized = bytes(ctypes.sizeof(_NcclCommPropertiesRef) - 8)
+    undersized = bytes(ctypes.sizeof(_NcclCommPropertiesBuggyRef))
+    assert len(undersized) < ctypes.sizeof(_NcclCommPropertiesRef)
     with pytest.raises(ValueError, match="buffer length must be"):
         CommProperties.from_buffer(undersized)
