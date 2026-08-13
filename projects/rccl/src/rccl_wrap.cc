@@ -445,9 +445,9 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
   RCCL_STATIC_EXPOSE_CHECK();
   if (algo == nullptr || protocol == nullptr || maxChannels == nullptr) return ncclInvalidArgument;
 
-  // AllReduce is the only collective wired to the unified decision so far. It
-  // returns the actual backend (CE / DDA / symmetric / kernel) for these operands
-  // so rccl-tests can label numbers with the implementation that ran. graphCapturing
+  // AllReduce and AllGather are wired to the unified decision. They return the
+  // actual backend (CE / DDA / symmetric / kernel) for these operands so
+  // rccl-tests can label numbers with the implementation that ran. graphCapturing
   // lets the caller declare graph mode, which the (out-of-capture) query cannot
   // detect on its own -- see the header comment.
   if (coll == ncclFuncAllReduce) {
