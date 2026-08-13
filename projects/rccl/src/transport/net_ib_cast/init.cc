@@ -8,6 +8,7 @@
 #include "common_cast.h"
 #include "p2p_resiliency_recovery_cast.h"
 #include "net_telemetry.h"
+#include "qp_sharing.h"
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
@@ -633,6 +634,12 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       // flag IbCastAinicCtsInlineData is used specifically to identify UseInline for Ainic
       IbCastAinicCtsInlineData = IbCastUseInline;
 
+      // CTS offload and QP sharing are mutually exclusive. disable CTS offload when QP sharing is enabled
+      if (IbCastOffloadEnabled && (rcclParamIbCastCommNGroups() > 0)) {
+        INFO(NCCL_INIT | NCCL_NET, "NET/IB : QP sharing enabled - disabling CTS Offload (not yet supported with QP sharing)");
+        IbCastOffloadEnabled = false;
+      }
+
       INFO(NCCL_INIT | NCCL_NET,
            "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Inline Data: %s; CTS Offload: %s; "
            "IB Use Inline: %s; GDR Flush: %s",
@@ -646,6 +653,10 @@ exit:
       (ncclParamIbCastResiliencyPortFailover() || ncclParamIbCastResiliencyPortRecovery())) {
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling QP scheduler "
                                "(load balancer integration with resiliency is pending)");
+    castGlobalQpSchedParms.enable = false;
+  }
+  if (ret == ncclSuccess && castGlobalQpSchedParms.enable && rcclParamIbCastCommNGroups() > 0) {
+    INFO(NCCL_INIT | NCCL_NET, "NET/IB : QP sharing enabled - disabling QP scheduler");
     castGlobalQpSchedParms.enable = false;
   }
   if (ret == ncclSuccess && IbCastOffloadEnabled &&
