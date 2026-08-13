@@ -29,67 +29,67 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          avg: 100 * AVG(GL2A_BUSY_sum / GL2A_CYCLE_sum)
+          avg: 100 * SUM(GL2A_BUSY_sum) / SUM(GL2A_CYCLE_sum)
           min: 100 * MIN(GL2A_BUSY_sum / GL2A_CYCLE_sum)
           max: 100 * MAX(GL2A_BUSY_sum / GL2A_CYCLE_sum)
           unit: Percent
         GL2A-GL2C0 Request:
-          avg: AVG(GL2A_REQ_GL2C0_sum / $denom)
+          avg: SUM(GL2A_REQ_GL2C0_sum) / SUM($denom)
           min: MIN(GL2A_REQ_GL2C0_sum / $denom)
           max: MAX(GL2A_REQ_GL2C0_sum / $denom)
           unit: (Count + $normUnit)
         GL2A-GL2C1 Request:
-          avg: AVG(GL2A_REQ_GL2C1_sum / $denom)
+          avg: SUM(GL2A_REQ_GL2C1_sum) / SUM($denom)
           min: MIN(GL2A_REQ_GL2C1_sum / $denom)
           max: MAX(GL2A_REQ_GL2C1_sum / $denom)
           unit: (Count + $normUnit)
         GL2A-GL2C2 Request:
-          avg: AVG(GL2A_REQ_GL2C2_sum / $denom)
+          avg: SUM(GL2A_REQ_GL2C2_sum) / SUM($denom)
           min: MIN(GL2A_REQ_GL2C2_sum / $denom)
           max: MAX(GL2A_REQ_GL2C2_sum / $denom)
           unit: (Count + $normUnit)
         GL2A-GL2C3 Request:
-          avg: AVG(GL2A_REQ_GL2C3_sum / $denom)
+          avg: SUM(GL2A_REQ_GL2C3_sum) / SUM($denom)
           min: MIN(GL2A_REQ_GL2C3_sum / $denom)
           max: MAX(GL2A_REQ_GL2C3_sum / $denom)
           unit: (Count + $normUnit)
         GL2A-GL2C0 Request Stall Rate:
-          avg: 100 * AVG(GL2A_REQ_STALL_GL2C0_sum / GL2A_BUSY_sum)
+          avg: 100 * SUM(GL2A_REQ_STALL_GL2C0_sum) / SUM(GL2A_BUSY_sum)
           min: 100 * MIN(GL2A_REQ_STALL_GL2C0_sum / GL2A_BUSY_sum)
           max: 100 * MAX(GL2A_REQ_STALL_GL2C0_sum / GL2A_BUSY_sum)
           unit: Percent
         GL2A-GL2C1 Request Stall Rate:
-          avg: 100 * AVG(GL2A_REQ_STALL_GL2C1_sum / GL2A_BUSY_sum)
+          avg: 100 * SUM(GL2A_REQ_STALL_GL2C1_sum) / SUM(GL2A_BUSY_sum)
           min: 100 * MIN(GL2A_REQ_STALL_GL2C1_sum / GL2A_BUSY_sum)
           max: 100 * MAX(GL2A_REQ_STALL_GL2C1_sum / GL2A_BUSY_sum)
           unit: Percent
         GL2A-GL2C2 Request Stall Rate:
-          avg: 100 * AVG(GL2A_REQ_STALL_GL2C2_sum / GL2A_BUSY_sum)
+          avg: 100 * SUM(GL2A_REQ_STALL_GL2C2_sum) / SUM(GL2A_BUSY_sum)
           min: 100 * MIN(GL2A_REQ_STALL_GL2C2_sum / GL2A_BUSY_sum)
           max: 100 * MAX(GL2A_REQ_STALL_GL2C2_sum / GL2A_BUSY_sum)
           unit: Percent
         GL2A-GL2C3 Request Stall Rate:
-          avg: 100 * AVG(GL2A_REQ_STALL_GL2C3_sum / GL2A_BUSY_sum)
+          avg: 100 * SUM(GL2A_REQ_STALL_GL2C3_sum) / SUM(GL2A_BUSY_sum)
           min: 100 * MIN(GL2A_REQ_STALL_GL2C3_sum / GL2A_BUSY_sum)
           max: 100 * MAX(GL2A_REQ_STALL_GL2C3_sum / GL2A_BUSY_sum)
           unit: Percent
         GL2C0-GL2A Return Stall Rate:
-          avg: 100 * AVG(GL2A_RTN_STALL_GL2C0_sum / GL2A_BUSY_sum)
+          avg: 100 * SUM(GL2A_RTN_STALL_GL2C0_sum) / SUM(GL2A_BUSY_sum)
           min: 100 * MIN(GL2A_RTN_STALL_GL2C0_sum / GL2A_BUSY_sum)
           max: 100 * MAX(GL2A_RTN_STALL_GL2C0_sum / GL2A_BUSY_sum)
           unit: Percent
         GL2C1-GL2A Return Stall Rate:
-          avg: 100 * AVG(GL2A_RTN_STALL_GL2C1_sum / GL2A_BUSY_sum)
+          avg: 100 * SUM(GL2A_RTN_STALL_GL2C1_sum) / SUM(GL2A_BUSY_sum)
           min: 100 * MIN(GL2A_RTN_STALL_GL2C1_sum / GL2A_BUSY_sum)
           max: 100 * MAX(GL2A_RTN_STALL_GL2C1_sum / GL2A_BUSY_sum)
           unit: Percent
         GL2C2-GL2A Return Stall Rate:
-          avg: 100 * AVG(GL2A_RTN_STALL_GL2C2_sum / GL2A_BUSY_sum)
+          avg: 100 * SUM(GL2A_RTN_STALL_GL2C2_sum) / SUM(GL2A_BUSY_sum)
           min: 100 * MIN(GL2A_RTN_STALL_GL2C2_sum / GL2A_BUSY_sum)
           max: 100 * MAX(GL2A_RTN_STALL_GL2C2_sum / GL2A_BUSY_sum)
           unit: Percent
         GL2C3-GL2A Return Stall Rate:
-          avg: 100 * AVG(GL2A_RTN_STALL_GL2C3_sum / GL2A_BUSY_sum)
+          avg: 100 * SUM(GL2A_RTN_STALL_GL2C3_sum) / SUM(GL2A_BUSY_sum)
           min: 100 * MIN(GL2A_RTN_STALL_GL2C3_sum / GL2A_BUSY_sum)
           max: 100 * MAX(GL2A_RTN_STALL_GL2C3_sum / GL2A_BUSY_sum)
           unit: Percent
@@ -105,7 +105,7 @@ Panel Config:
         unit: Unit
       metric:
         GL2C Utilization:
-          avg: 100 * AVG(GL2C_BUSY_sum / GL2C_CYCLE_sum)
+          avg: 100 * SUM(GL2C_BUSY_sum) / SUM(GL2C_CYCLE_sum)
           min: 100 * MIN(GL2C_BUSY_sum / GL2C_CYCLE_sum)
           max: 100 * MAX(GL2C_BUSY_sum / GL2C_CYCLE_sum)
           unit: Percent
@@ -121,37 +121,37 @@ Panel Config:
         unit: Unit
       metric:
         GL2 Cache Hit Rate:
-          avg: 100 * AVG(GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
+          avg: 100 * SUM(GL2C_HIT_sum) / SUM((GL2C_HIT_sum + GL2C_MISS_sum))
           min: 100 * MIN(GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
           max: 100 * MAX(GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
           unit: Percent
         GL2 Pipeline Stall:
-          avg: 100 * AVG(GL2C_TAG_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_TAG_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_TAG_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_TAG_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2 Latency FIFO Full Stall:
-          avg: 100 * AVG(GL2C_LATENCY_FIFO_FULL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_LATENCY_FIFO_FULL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_LATENCY_FIFO_FULL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_LATENCY_FIFO_FULL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2 Source FIFO Full Stall:
-          avg: 100 * AVG(GL2C_SRC_FIFO_FULL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_SRC_FIFO_FULL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_SRC_FIFO_FULL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_SRC_FIFO_FULL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2 Tag Stall - Set Full:
-          avg: 100 * AVG(GL2C_TAG_MISS_NOTHING_REPLACEABLE_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_TAG_MISS_NOTHING_REPLACEABLE_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_TAG_MISS_NOTHING_REPLACEABLE_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_TAG_MISS_NOTHING_REPLACEABLE_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2 Tag Stall - Writeback FIFO Full:
-          avg: 100 * AVG(GL2C_TAG_WRITEBACK_FIFO_FULL_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_TAG_WRITEBACK_FIFO_FULL_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_TAG_WRITEBACK_FIFO_FULL_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_TAG_WRITEBACK_FIFO_FULL_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2 Tag Stall - Cached EA FIFO Full:
-          avg: 100 * AVG(GL2C_TAG_CACHED_EA_FIFO_FULL_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_TAG_CACHED_EA_FIFO_FULL_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_TAG_CACHED_EA_FIFO_FULL_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_TAG_CACHED_EA_FIFO_FULL_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
@@ -167,47 +167,47 @@ Panel Config:
         unit: Unit
       metric:
         GL2-EA Request Stall on VC3:
-          avg: 100 * AVG(GL2C_EA_REQ_VC3_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_EA_REQ_VC3_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_EA_REQ_VC3_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_EA_REQ_VC3_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2-EA Request Stall on VC4:
-          avg: 100 * AVG(GL2C_EA_REQ_VC4_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_EA_REQ_VC4_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_EA_REQ_VC4_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_EA_REQ_VC4_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2-EA Request Stall on VC6:
-          avg: 100 * AVG(GL2C_EA_REQ_VC6_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_EA_REQ_VC6_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_EA_REQ_VC6_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_EA_REQ_VC6_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2-EA Request Stall on VC7:
-          avg: 100 * AVG(GL2C_EA_REQ_VC7_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_EA_REQ_VC7_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_EA_REQ_VC7_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_EA_REQ_VC7_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2-EA Data Stall on VC2:
-          avg: 100 * AVG(GL2C_EA_DATA_VC2_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_EA_DATA_VC2_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_EA_DATA_VC2_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_EA_DATA_VC2_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2-EA Data Stall on VC3:
-          avg: 100 * AVG(GL2C_EA_DATA_VC3_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_EA_DATA_VC3_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_EA_DATA_VC3_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_EA_DATA_VC3_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2-EA Data Stall on VC4:
-          avg: 100 * AVG(GL2C_EA_DATA_VC4_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_EA_DATA_VC4_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_EA_DATA_VC4_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_EA_DATA_VC4_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2-EA Data Stall on VC6:
-          avg: 100 * AVG(GL2C_EA_DATA_VC6_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_EA_DATA_VC6_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_EA_DATA_VC6_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_EA_DATA_VC6_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
         GL2-EA Data Stall on VC7:
-          avg: 100 * AVG(GL2C_EA_DATA_VC7_STALL_sum / GL2C_BUSY_sum)
+          avg: 100 * SUM(GL2C_EA_DATA_VC7_STALL_sum) / SUM(GL2C_BUSY_sum)
           min: 100 * MIN(GL2C_EA_DATA_VC7_STALL_sum / GL2C_BUSY_sum)
           max: 100 * MAX(GL2C_EA_DATA_VC7_STALL_sum / GL2C_BUSY_sum)
           unit: Percent
@@ -223,17 +223,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2-EA Read Latency:
-          avg: AVG(GL2C_EA_RDREQ_LEVEL_sum / GL2C_EA_RDREQ_sum)
+          avg: SUM(GL2C_EA_RDREQ_LEVEL_sum) / SUM(GL2C_EA_RDREQ_sum)
           min: MIN(GL2C_EA_RDREQ_LEVEL_sum / GL2C_EA_RDREQ_sum)
           max: MAX(GL2C_EA_RDREQ_LEVEL_sum / GL2C_EA_RDREQ_sum)
           unit: Cycles
         GL2-EA Write Latency:
-          avg: AVG(GL2C_EA_WRREQ_LEVEL_sum / GL2C_EA_WRREQ_sum)
+          avg: SUM(GL2C_EA_WRREQ_LEVEL_sum) / SUM(GL2C_EA_WRREQ_sum)
           min: MIN(GL2C_EA_WRREQ_LEVEL_sum / GL2C_EA_WRREQ_sum)
           max: MAX(GL2C_EA_WRREQ_LEVEL_sum / GL2C_EA_WRREQ_sum)
           unit: Cycles
         GL2-EA Atomic Latency:
-          avg: AVG(GL2C_EA_ATOMIC_LEVEL_sum / GL2C_EA_ATOMIC_sum)
+          avg: SUM(GL2C_EA_ATOMIC_LEVEL_sum) / SUM(GL2C_EA_ATOMIC_sum)
           min: MIN(GL2C_EA_ATOMIC_LEVEL_sum / GL2C_EA_ATOMIC_sum)
           max: MAX(GL2C_EA_ATOMIC_LEVEL_sum / GL2C_EA_ATOMIC_sum)
           unit: Cycles
@@ -249,17 +249,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2-EA HBM Bandwidth - Read:
-          avg: AVG(GL2C_EA_RDREQ_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_RDREQ_DRAM_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_RDREQ_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_RDREQ_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA HBM Bandwidth - Write:
-          avg: AVG(GL2C_EA_WRREQ_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_WRREQ_DRAM_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_WRREQ_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_WRREQ_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA HBM Bandwidth - Atomic:
-          avg: AVG(GL2C_EA_ATOMIC_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_ATOMIC_DRAM_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_ATOMIC_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_ATOMIC_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -275,17 +275,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2-EA Host CPU Bandwidth - Read:
-          avg: AVG(GL2C_EA_RDREQ_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_RDREQ_CPU_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_RDREQ_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_RDREQ_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Host CPU Bandwidth - Write:
-          avg: AVG(GL2C_EA_WRREQ_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_WRREQ_CPU_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_WRREQ_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_WRREQ_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Host CPU Bandwidth - Atomic:
-          avg: AVG(GL2C_EA_ATOMIC_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_ATOMIC_CPU_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_ATOMIC_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_ATOMIC_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -301,17 +301,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2-EA PCIE Bandwidth - Read:
-          avg: AVG(GL2C_EA_RDREQ_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_RDREQ_PCIE_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_RDREQ_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_RDREQ_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA PCIE Bandwidth - Write:
-          avg: AVG(GL2C_EA_WRREQ_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_WRREQ_PCIE_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_WRREQ_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_WRREQ_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA PCIE Bandwidth - Atomic:
-          avg: AVG(GL2C_EA_ATOMIC_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_ATOMIC_PCIE_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_ATOMIC_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_ATOMIC_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -327,17 +327,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2-EA Remote Node Bandwidth - Read:
-          avg: AVG(GL2C_EA_RDREQ_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_RDREQ_RM_NODE_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_RDREQ_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_RDREQ_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Remote Node Bandwidth - Write:
-          avg: AVG(GL2C_EA_WRREQ_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_WRREQ_RM_NODE_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_WRREQ_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_WRREQ_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Remote Node Bandwidth - Atomic:
-          avg: AVG(GL2C_EA_ATOMIC_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_ATOMIC_RM_NODE_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_ATOMIC_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_ATOMIC_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -353,17 +353,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2-EA Remote Memory Bandwidth - Read:
-          avg: AVG(GL2C_EA_RDREQ_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_RDREQ_RM_MEM_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_RDREQ_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_RDREQ_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Remote Memory Bandwidth - Write:
-          avg: AVG(GL2C_EA_WRREQ_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_WRREQ_RM_MEM_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_WRREQ_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_WRREQ_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Remote Memory Bandwidth - Atomic:
-          avg: AVG(GL2C_EA_ATOMIC_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL2C_EA_ATOMIC_RM_MEM_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL2C_EA_ATOMIC_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_ATOMIC_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s

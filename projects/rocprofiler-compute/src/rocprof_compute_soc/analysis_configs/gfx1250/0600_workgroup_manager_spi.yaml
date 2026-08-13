@@ -15,7 +15,7 @@ Panel Config:
         unit: Unit
       metric:
         SPI Utilization:
-          avg: 100 * AVG(SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $SE_NUM))
+          avg: 100 * SUM(SPI_BUSY_sum) / SUM((GRBM_GUI_ACTIVE_sum * $SE_NUM))
           min: 100 * MIN(SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $SE_NUM))
           max: 100 * MAX(SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $SE_NUM))
           unit: Percent
@@ -54,37 +54,37 @@ Panel Config:
           max: MAX(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
           unit: Count
         Wave Dispatch Rate:
-          avg: AVG(SPI_ALL_WAVE_sum / SPI_BUSY_sum)
+          avg: SUM(SPI_ALL_WAVE_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_ALL_WAVE_sum / SPI_BUSY_sum)
           max: MAX(SPI_ALL_WAVE_sum / SPI_BUSY_sum)
           unit: Waves per Cycle
         Thread Dispatch Rate:
-          avg: AVG(SPI_ALL_WAVE_ITEMS_sum / SPI_BUSY_sum)
+          avg: SUM(SPI_ALL_WAVE_ITEMS_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_ALL_WAVE_ITEMS_sum / SPI_BUSY_sum)
           max: MAX(SPI_ALL_WAVE_ITEMS_sum / SPI_BUSY_sum)
           unit: Threads per Cycle
         Per-SE Wave Occupancy:
-          avg: AVG(SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_BUSY_sum)
+          avg: SUM(SPI_ALL_WAVE_IN_FLIGHT_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_BUSY_sum)
           max: MAX(SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_BUSY_sum)
           unit: Waves
         Per-SE Wave Life:
-          avg: AVG(SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_ALL_WAVE_sum)
+          avg: SUM(SPI_ALL_WAVE_IN_FLIGHT_sum) / SUM(SPI_ALL_WAVE_sum)
           min: MIN(SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_ALL_WAVE_sum)
           max: MAX(SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_ALL_WAVE_sum)
           unit: Cycles
         Context Save Rate:
-          avg: 100 * AVG(SPI_ALL_WAVE_SAVED_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_ALL_WAVE_SAVED_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_ALL_WAVE_SAVED_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_ALL_WAVE_SAVED_sum / SPI_BUSY_sum)
           unit: Percent
         Context Restore Rate:
-          avg: 100 * AVG(SPI_ALL_WAVE_RESTORED_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_ALL_WAVE_RESTORED_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_ALL_WAVE_RESTORED_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_ALL_WAVE_RESTORED_sum / SPI_BUSY_sum)
           unit: Percent
         Wave Dispatch FIFO Full Rate:
-          avg: 100 * AVG(SPI_RA_WR_CTL_FULL_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_RA_WR_CTL_FULL_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_WR_CTL_FULL_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_RA_WR_CTL_FULL_sum / SPI_BUSY_sum)
           unit: Percent
@@ -100,47 +100,47 @@ Panel Config:
         unit: Unit
       metric:
         Resource No-Allocation Rate:
-          avg: 100 * AVG(SPI_RA_REQ_NO_ALLOC_CSN_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_RA_REQ_NO_ALLOC_CSN_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_REQ_NO_ALLOC_CSN_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_RA_REQ_NO_ALLOC_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Resource Allocation Rate:
-          avg: 100 * AVG(SPI_RA_REQ_ALLOC_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_RA_REQ_ALLOC_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_REQ_ALLOC_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_RA_REQ_ALLOC_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - LDS Full:
-          avg: 100 * AVG(SPI_RA_LDS_CU_FULL_CSN_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_RA_LDS_CU_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_LDS_CU_FULL_CSN_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_RA_LDS_CU_FULL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - Waveslots Full:
-          avg: 100 * AVG(SPI_RA_WAVE_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_RA_WAVE_SIMD_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_WAVE_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_RA_WAVE_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - VGPR Full:
-          avg: 100 * AVG(SPI_RA_VGPR_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_RA_VGPR_SIMD_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_VGPR_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_RA_VGPR_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - Barrier Full:
-          avg: 100 * AVG(SPI_RA_BAR_CU_FULL_CSN_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_RA_BAR_CU_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_BAR_CU_FULL_CSN_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_RA_BAR_CU_FULL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - Bulky Full:
-          avg: 100 * AVG(SPI_RA_BULKY_FULL_CSN_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_RA_BULKY_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_BULKY_FULL_CSN_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_RA_BULKY_FULL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - Named Barriers Full:
-          avg: 100 * AVG(SPI_RA_NAMED_BAR_FULL_CSN_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_RA_NAMED_BAR_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_NAMED_BAR_FULL_CSN_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_RA_NAMED_BAR_FULL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - Temp Space Full:
-          avg: 100 * AVG(SPI_RA_TMP_STALL_CSN_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_RA_TMP_STALL_CSN_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_TMP_STALL_CSN_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_RA_TMP_STALL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
@@ -156,27 +156,27 @@ Panel Config:
         unit: Unit
       metric:
         Per-Queue Outstanding Dispatch Requests (P0_Q0_sum):
-          avg: AVG(SPI_CSQ_P0_Q0_OCCUPANCY_sum / SPI_BUSY_sum)
+          avg: SUM(SPI_CSQ_P0_Q0_OCCUPANCY_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_CSQ_P0_Q0_OCCUPANCY_sum / SPI_BUSY_sum)
           max: MAX(SPI_CSQ_P0_Q0_OCCUPANCY_sum / SPI_BUSY_sum)
           unit: Count
         Per-Queue Outstanding Dispatch Requests (P0_Q1_sum):
-          avg: AVG(SPI_CSQ_P0_Q1_OCCUPANCY_sum / SPI_BUSY_sum)
+          avg: SUM(SPI_CSQ_P0_Q1_OCCUPANCY_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_CSQ_P0_Q1_OCCUPANCY_sum / SPI_BUSY_sum)
           max: MAX(SPI_CSQ_P0_Q1_OCCUPANCY_sum / SPI_BUSY_sum)
           unit: Count
         Per-Queue Outstanding Dispatch Requests (P1_Q0_sum):
-          avg: AVG(SPI_CSQ_P1_Q0_OCCUPANCY_sum / SPI_BUSY_sum)
+          avg: SUM(SPI_CSQ_P1_Q0_OCCUPANCY_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_CSQ_P1_Q0_OCCUPANCY_sum / SPI_BUSY_sum)
           max: MAX(SPI_CSQ_P1_Q0_OCCUPANCY_sum / SPI_BUSY_sum)
           unit: Count
         Per-Queue Outstanding Dispatch Requests (P1_Q1_sum):
-          avg: AVG(SPI_CSQ_P1_Q1_OCCUPANCY_sum / SPI_BUSY_sum)
+          avg: SUM(SPI_CSQ_P1_Q1_OCCUPANCY_sum) / SUM(SPI_BUSY_sum)
           min: MIN(SPI_CSQ_P1_Q1_OCCUPANCY_sum / SPI_BUSY_sum)
           max: MAX(SPI_CSQ_P1_Q1_OCCUPANCY_sum / SPI_BUSY_sum)
           unit: Count
         CPC Pre-Alloc Request Stall Rate:
-          avg: 100 * AVG(SPI_RA_PRE_ALLOC_STALL_sum / SPI_BUSY_sum)
+          avg: 100 * SUM(SPI_RA_PRE_ALLOC_STALL_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_PRE_ALLOC_STALL_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_RA_PRE_ALLOC_STALL_sum / SPI_BUSY_sum)
           unit: Percent

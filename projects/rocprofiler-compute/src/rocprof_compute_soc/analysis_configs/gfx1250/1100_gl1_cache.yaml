@@ -20,27 +20,27 @@ Panel Config:
         unit: Unit
       metric:
         GL1A Utilization:
-          avg: 100 * AVG(GL1A_BUSY_sum / GL1A_CYCLE_sum)
+          avg: 100 * SUM(GL1A_BUSY_sum) / SUM(GL1A_CYCLE_sum)
           min: 100 * MIN(GL1A_BUSY_sum / GL1A_CYCLE_sum)
           max: 100 * MAX(GL1A_BUSY_sum / GL1A_CYCLE_sum)
           unit: Percent
         GL1A Request Bus Utilization:
-          avg: 100 * AVG(GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
+          avg: 100 * SUM(GL1A_REQ_PATH_BUSY_sum) / SUM(GL1A_CYCLE_sum)
           min: 100 * MIN(GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
           max: 100 * MAX(GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
           unit: Percent
         GL1A Return Bus Utilization:
-          avg: 100 * AVG(GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
+          avg: 100 * SUM(GL1A_RET_PATH_BUSY_sum) / SUM(GL1A_CYCLE_sum)
           min: 100 * MIN(GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
           max: 100 * MAX(GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
           unit: Percent
         GL1A Requests:
-          avg: AVG(GL1A_ARB_REQUESTS_sum / $denom)
+          avg: SUM(GL1A_ARB_REQUESTS_sum) / SUM($denom)
           min: MIN(GL1A_ARB_REQUESTS_sum / $denom)
           max: MAX(GL1A_ARB_REQUESTS_sum / $denom)
           unit: (Count + $normUnit)
         GL1A Request Latency:
-          avg: AVG(GL1A_REQ_INFLIGHT_LEVEL_sum / GL1A_ARB_REQUESTS_sum)
+          avg: SUM(GL1A_REQ_INFLIGHT_LEVEL_sum) / SUM(GL1A_ARB_REQUESTS_sum)
           min: MIN(GL1A_REQ_INFLIGHT_LEVEL_sum / GL1A_ARB_REQUESTS_sum)
           max: MAX(GL1A_REQ_INFLIGHT_LEVEL_sum / GL1A_ARB_REQUESTS_sum)
           unit: Cycles
@@ -56,17 +56,17 @@ Panel Config:
         unit: Unit
       metric:
         GL1C Utilization:
-          avg: 100 * AVG(GL1C_BUSY_sum / GL1C_CYCLE_sum)
+          avg: 100 * SUM(GL1C_BUSY_sum) / SUM(GL1C_CYCLE_sum)
           min: 100 * MIN(GL1C_BUSY_sum / GL1C_CYCLE_sum)
           max: 100 * MAX(GL1C_BUSY_sum / GL1C_CYCLE_sum)
           unit: Percent
         GL1C Return Arbitration Latency:
-          avg: AVG(GL1C_ARB_RET_LEVEL_sum / GL1C_REQ_sum)
+          avg: SUM(GL1C_ARB_RET_LEVEL_sum) / SUM(GL1C_REQ_sum)
           min: MIN(GL1C_ARB_RET_LEVEL_sum / GL1C_REQ_sum)
           max: MAX(GL1C_ARB_RET_LEVEL_sum / GL1C_REQ_sum)
           unit: Cycles
         GL1C Buffer Full Stall:
-          avg: 100 * AVG(GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
+          avg: 100 * SUM(GL1C_STALL_BUFFER_FULL_sum) / SUM(GL1C_BUSY_sum)
           min: 100 * MIN(GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
           max: 100 * MAX(GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
           unit: Percent
@@ -82,27 +82,27 @@ Panel Config:
         unit: Unit
       metric:
         GL1C Requests:
-          avg: AVG(GL1C_REQ_sum / $denom)
+          avg: SUM(GL1C_REQ_sum) / SUM($denom)
           min: MIN(GL1C_REQ_sum / $denom)
           max: MAX(GL1C_REQ_sum / $denom)
           unit: (Count + $normUnit)
         GL1C Requests - Read:
-          avg: AVG(GL1C_REQ_READ_sum / $denom)
+          avg: SUM(GL1C_REQ_READ_sum) / SUM($denom)
           min: MIN(GL1C_REQ_READ_sum / $denom)
           max: MAX(GL1C_REQ_READ_sum / $denom)
           unit: (Count + $normUnit)
         GL1C Requests - Write:
-          avg: AVG(GL1C_REQ_WRITE_sum / $denom)
+          avg: SUM(GL1C_REQ_WRITE_sum) / SUM($denom)
           min: MIN(GL1C_REQ_WRITE_sum / $denom)
           max: MAX(GL1C_REQ_WRITE_sum / $denom)
           unit: (Count + $normUnit)
         GL1C Requests - Atomic with Return:
-          avg: AVG(GL1C_REQ_ATOMIC_WITH_RET_sum / $denom)
+          avg: SUM(GL1C_REQ_ATOMIC_WITH_RET_sum) / SUM($denom)
           min: MIN(GL1C_REQ_ATOMIC_WITH_RET_sum / $denom)
           max: MAX(GL1C_REQ_ATOMIC_WITH_RET_sum / $denom)
           unit: (Count + $normUnit)
         GL1C Requests - Atomic without Return:
-          avg: AVG(GL1C_REQ_ATOMIC_WITHOUT_RET_sum / $denom)
+          avg: SUM(GL1C_REQ_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
           min: MIN(GL1C_REQ_ATOMIC_WITHOUT_RET_sum / $denom)
           max: MAX(GL1C_REQ_ATOMIC_WITHOUT_RET_sum / $denom)
           unit: (Count + $normUnit)
@@ -117,12 +117,12 @@ Panel Config:
         unit: Unit
       metric:
         GL1C Request Bandwidth - Read:
-          avg: AVG((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum * 128 + GL1C_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          avg: SUM((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum * 128 + GL1C_REQ_READ_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum * 128 + GL1C_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum * 128 + GL1C_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL1C Request Bandwidth - Write:
-          avg: AVG((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum * 128 + GL1C_REQ_WRITE_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          avg: SUM((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum * 128 + GL1C_REQ_WRITE_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum * 128 + GL1C_REQ_WRITE_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum * 128 + GL1C_REQ_WRITE_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -137,47 +137,47 @@ Panel Config:
         unit: Unit
       metric:
         GL1C Multicast Tracker Depletion Stall:
-          avg: 100 * AVG(GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
+          avg: 100 * SUM(GL1C_MULTICAST_TRACKER_DEPLETS_sum) / SUM(GL1C_BUSY_sum)
           min: 100 * MIN(GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
           max: 100 * MAX(GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast Request - 128B:
-          avg: AVG(GL1C_REQ_MULTICAST_128B_sum / $denom)
+          avg: SUM(GL1C_REQ_MULTICAST_128B_sum) / SUM($denom)
           min: MIN(GL1C_REQ_MULTICAST_128B_sum / $denom)
           max: MAX(GL1C_REQ_MULTICAST_128B_sum / $denom)
           unit: (Count + $normUnit)
         GL1C Multicast Request - 256B:
-          avg: AVG(GL1C_REQ_MULTICAST_256B_sum / $denom)
+          avg: SUM(GL1C_REQ_MULTICAST_256B_sum) / SUM($denom)
           min: MIN(GL1C_REQ_MULTICAST_256B_sum / $denom)
           max: MAX(GL1C_REQ_MULTICAST_256B_sum / $denom)
           unit: (Count + $normUnit)
         GL1C Request Bandwidth - Multicast:
-          avg: AVG((GL1C_REQ_MULTICAST_128B_sum * 128 + GL1C_REQ_MULTICAST_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          avg: SUM((GL1C_REQ_MULTICAST_128B_sum * 128 + GL1C_REQ_MULTICAST_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN((GL1C_REQ_MULTICAST_128B_sum * 128 + GL1C_REQ_MULTICAST_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((GL1C_REQ_MULTICAST_128B_sum * 128 + GL1C_REQ_MULTICAST_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL1C Multicast Tracker 0 Timeout Rate:
-          avg: 100 * AVG(GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
+          avg: 100 * SUM(GL1C_REQ_MULTICAST_TIMEOUT0_sum) / SUM(GL1C_BUSY_sum)
           min: 100 * MIN(GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
           max: 100 * MAX(GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast Tracker 1 Timeout Rate:
-          avg: 100 * AVG(GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
+          avg: 100 * SUM(GL1C_REQ_MULTICAST_TIMEOUT1_sum) / SUM(GL1C_BUSY_sum)
           min: 100 * MIN(GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
           max: 100 * MAX(GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast Tracker 2 Timeout Rate:
-          avg: 100 * AVG(GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
+          avg: 100 * SUM(GL1C_REQ_MULTICAST_TIMEOUT2_sum) / SUM(GL1C_BUSY_sum)
           min: 100 * MIN(GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
           max: 100 * MAX(GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast Tracker 3 Timeout Rate:
-          avg: 100 * AVG(GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
+          avg: 100 * SUM(GL1C_REQ_MULTICAST_TIMEOUT3_sum) / SUM(GL1C_BUSY_sum)
           min: 100 * MIN(GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
           max: 100 * MAX(GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast-to-Unicast Downgrade Rate:
-          avg: 100 * AVG(GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
+          avg: 100 * SUM(GL1C_REQ_MULTICAST_DOWNGRADE_sum) / SUM(GL1C_BUSY_sum)
           min: 100 * MIN(GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
           max: 100 * MAX(GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
           unit: Percent
@@ -193,77 +193,77 @@ Panel Config:
         unit: Unit
       metric:
         GL1C-GLARB Read Requests:
-          avg: AVG(GL1C_GL2_REQ_READ_sum / $denom)
+          avg: SUM(GL1C_GL2_REQ_READ_sum) / SUM($denom)
           min: MIN(GL1C_GL2_REQ_READ_sum / $denom)
           max: MAX(GL1C_GL2_REQ_READ_sum / $denom)
           unit: (Count + $normUnit)
         GL1C-GLARB Read Requests - 32B:
-          avg: AVG(GL1C_GL2_REQ_READ_32B_sum / $denom)
+          avg: SUM(GL1C_GL2_REQ_READ_32B_sum) / SUM($denom)
           min: MIN(GL1C_GL2_REQ_READ_32B_sum / $denom)
           max: MAX(GL1C_GL2_REQ_READ_32B_sum / $denom)
           unit: (Count + $normUnit)
         GL1C-GLARB Read Requests - 64B:
-          avg: AVG(GL1C_GL2_REQ_READ_64B_sum / $denom)
+          avg: SUM(GL1C_GL2_REQ_READ_64B_sum) / SUM($denom)
           min: MIN(GL1C_GL2_REQ_READ_64B_sum / $denom)
           max: MAX(GL1C_GL2_REQ_READ_64B_sum / $denom)
           unit: (Count + $normUnit)
         GL1C-GLARB Read Requests - 128B:
-          avg: AVG(GL1C_GL2_REQ_READ_128B_sum / $denom)
+          avg: SUM(GL1C_GL2_REQ_READ_128B_sum) / SUM($denom)
           min: MIN(GL1C_GL2_REQ_READ_128B_sum / $denom)
           max: MAX(GL1C_GL2_REQ_READ_128B_sum / $denom)
           unit: (Count + $normUnit)
         GL1C-GLARB Read Requests - 256B:
-          avg: AVG(GL1C_GL2_REQ_READ_256B_sum / $denom)
+          avg: SUM(GL1C_GL2_REQ_READ_256B_sum) / SUM($denom)
           min: MIN(GL1C_GL2_REQ_READ_256B_sum / $denom)
           max: MAX(GL1C_GL2_REQ_READ_256B_sum / $denom)
           unit: (Count + $normUnit)
         GL1C-GLARB Write Requests:
-          avg: AVG(GL1C_GL2_REQ_WRITE_sum / $denom)
+          avg: SUM(GL1C_GL2_REQ_WRITE_sum) / SUM($denom)
           min: MIN(GL1C_GL2_REQ_WRITE_sum / $denom)
           max: MAX(GL1C_GL2_REQ_WRITE_sum / $denom)
           unit: (Count + $normUnit)
         GL1C-GLARB Write Requests - 32B:
-          avg: AVG(GL1C_GL2_REQ_WRITE_32B_sum / $denom)
+          avg: SUM(GL1C_GL2_REQ_WRITE_32B_sum) / SUM($denom)
           min: MIN(GL1C_GL2_REQ_WRITE_32B_sum / $denom)
           max: MAX(GL1C_GL2_REQ_WRITE_32B_sum / $denom)
           unit: (Count + $normUnit)
         GL1C-GLARB Write Requests - 64B:
-          avg: AVG(GL1C_GL2_REQ_WRITE_64B_sum / $denom)
+          avg: SUM(GL1C_GL2_REQ_WRITE_64B_sum) / SUM($denom)
           min: MIN(GL1C_GL2_REQ_WRITE_64B_sum / $denom)
           max: MAX(GL1C_GL2_REQ_WRITE_64B_sum / $denom)
           unit: (Count + $normUnit)
         GL1C-GLARB Write Requests - 128B:
-          avg: AVG(GL1C_GL2_REQ_WRITE_128B_sum / $denom)
+          avg: SUM(GL1C_GL2_REQ_WRITE_128B_sum) / SUM($denom)
           min: MIN(GL1C_GL2_REQ_WRITE_128B_sum / $denom)
           max: MAX(GL1C_GL2_REQ_WRITE_128B_sum / $denom)
           unit: (Count + $normUnit)
         GL1C-GLARB Write Requests - 256B:
-          avg: AVG(GL1C_GL2_REQ_WRITE_256B_sum / $denom)
+          avg: SUM(GL1C_GL2_REQ_WRITE_256B_sum) / SUM($denom)
           min: MIN(GL1C_GL2_REQ_WRITE_256B_sum / $denom)
           max: MAX(GL1C_GL2_REQ_WRITE_256B_sum / $denom)
           unit: (Count + $normUnit)
         GL1C-GLARB Read Latency:
-          avg: AVG(GL1C_GL2_REQ_READ_LEVEL_sum / GL1C_GL2_REQ_READ_sum)
+          avg: SUM(GL1C_GL2_REQ_READ_LEVEL_sum) / SUM(GL1C_GL2_REQ_READ_sum)
           min: MIN(GL1C_GL2_REQ_READ_LEVEL_sum / GL1C_GL2_REQ_READ_sum)
           max: MAX(GL1C_GL2_REQ_READ_LEVEL_sum / GL1C_GL2_REQ_READ_sum)
           unit: Cycles
         GL1C-GLARB Write Latency:
-          avg: AVG(GL1C_GL2_REQ_WRITE_LEVEL_sum / GL1C_GL2_REQ_WRITE_sum)
+          avg: SUM(GL1C_GL2_REQ_WRITE_LEVEL_sum) / SUM(GL1C_GL2_REQ_WRITE_sum)
           min: MIN(GL1C_GL2_REQ_WRITE_LEVEL_sum / GL1C_GL2_REQ_WRITE_sum)
           max: MAX(GL1C_GL2_REQ_WRITE_LEVEL_sum / GL1C_GL2_REQ_WRITE_sum)
           unit: Cycles
         GL1C-GLARB Read Bandwidth:
-          avg: AVG((GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          avg: SUM((GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN((GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL1C-GLARB Write Bandwidth:
-          avg: AVG(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
+          avg: SUM(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
           min: MIN(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL1C-GLARB Write ACKs:
-          avg: AVG(GL1C_GL2_RET_ACK_sum / $denom)
+          avg: SUM(GL1C_GL2_RET_ACK_sum) / SUM($denom)
           min: MIN(GL1C_GL2_RET_ACK_sum / $denom)
           max: MAX(GL1C_GL2_RET_ACK_sum / $denom)
           unit: (Count + $normUnit)
