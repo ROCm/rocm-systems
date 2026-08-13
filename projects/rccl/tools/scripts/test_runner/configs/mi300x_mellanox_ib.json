@@ -929,6 +929,29 @@
       ]
     },
 
+    "rma_external_plugin_put_signal": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_PLUGIN": "STATIC_PLUGIN",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "RCCL_RMA_USE_DMABUF": "1",
+        "RCCL_RMA_RELOAD_COUNTER_FILE": "/tmp/rccl_rma_reload_put_signal_counter.txt"
+      },
+      "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path",
+      "tests": [
+        {"name": "Rma_ExternalPluginIssuesPutSignalToStub", "description": "rank 0 ncclPutSignal + ncclSignal (no wait) must invoke the external stub plugin's iput/iputSignal primitives", "test_filter": "RmaExternalPluginPutSignalTest.IssuesPutSignalToStub"}
+      ]
+    },
+
     "unit_tests_standard": {
       "is_gtest": true,
       "binary": "rccl-UnitTests",
@@ -4552,6 +4575,12 @@
       "name": "SparseSendRecv",
       "description": "Test sparse send/recv functionality over multiple plans",
       "config": "sparse_send_recv",
+      "enabled": true
+    },
+    {
+      "name": "RMA External Plugin - Put Signal",
+      "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path",
+      "config": "rma_external_plugin_put_signal",
       "enabled": true
     }
   ]

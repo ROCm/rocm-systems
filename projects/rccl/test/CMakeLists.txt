@@ -225,6 +225,7 @@ if(BUILD_TESTS)
     StandaloneTests.cpp
     DdaIpcTests.cpp
     NetPluginReloadTests.cpp
+    RmaExternalPluginLoadTests.cpp
     plugin/net_reload_plugin.cpp
     ProfilerPluginCloseTests.cpp
     CpuAffinityTests.cpp
@@ -663,6 +664,8 @@ if(BUILD_TESTS)
       NChannelsPerNetPeerMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
+      RmaExternalPluginPutSignalMPITests.cpp
+      plugin/net_reload_plugin.cpp
       mem_manager/SuspendResumeMPITests.cpp
       RevokeMPITests.cpp
       ce/CeMPITests.cpp
@@ -678,6 +681,14 @@ if(BUILD_TESTS)
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
+
+    # plugin/net_reload_plugin.cpp is compiled into rccl-UnitTestsMPI so
+    # RmaExternalPluginPutSignalMPITests can load its ncclRmaPlugin_v13 in-process
+    # via STATIC_PLUGIN (dlopen(NULL))
+    target_link_options(rccl-UnitTestsMPI PRIVATE
+      "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
+      "LINKER:--export-dynamic-symbol=ncclRmaPlugin_v13")
+
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
 
     # Hand the in-tree Inspector plugin to InspectorPromP2pMPITests so it can
