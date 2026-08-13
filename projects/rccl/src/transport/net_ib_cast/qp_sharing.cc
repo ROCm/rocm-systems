@@ -137,6 +137,19 @@ struct ncclIbNetCommBase* IbCastRouteCommFromWrId(uint64_t wr_id) {
     : &((struct ncclIbRecvComm*)g_IbCastCommTable[commId].comm)->base;
 }
 
+struct ncclIbNetCommBase* IbCastRouteCommFromImmData(struct ncclIbNetCommBase* base, uint32_t immDataHost) {
+  if (rcclParamIbCastCommNGroups() > 0) {
+    uint16_t immCommId = (immDataHost >> WR_IMM_BYID_COMM_ID_SHIFT) & WR_IMM_BYID_COMM_ID_MASK;
+    //uint8_t reqSlot = immDataHost & WR_IMM_BYID_REQ_ID_MASK;
+    if (immCommId != 0 && immCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[immCommId].used) {
+      return g_IbCastCommTable[immCommId].isSend
+        ? &((struct ncclIbSendComm*)g_IbCastCommTable[immCommId].comm)->base
+        : &((struct ncclIbRecvComm*)g_IbCastCommTable[immCommId].comm)->base;
+    }
+  }
+  return NULL;
+}
+
 // Self-locking variant for callers that do NOT already hold the mutex
 // (e.g. the connect/accept non-sharing fallback paths).
 void IbCastFreeCommId(uint16_t commId) {

@@ -442,7 +442,7 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     qpInitAttr.sq_sig_all &= (~(1 << 19));
   }
 
-  if (createQpAttrs->isQpSharingEnabled) {
+  if (createQpAttrs->isQpSharingEnabled && (createQpAttrs->qpSharingGroupIdx >= 0)) {
     // For Ionic with QP sharing, use groupIdx for UDMA mask selection
     uint8_t mask = (createQpAttrs->qpSharingGroupIdx % 2 == 0) ? IONIC_UDMA_MASK_LOW : IONIC_UDMA_MASK_HIGH;
     wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, mask);
@@ -1070,6 +1070,7 @@ ib_recv_dev_list:
       comm->base.isSharedQpPrimary = true;
     }
   }
+  meta.sharedGroupIdx = comm->base.sharedGroupIdx;
 
 qp_sharing_skip_sender:
   // Create QPs on the sender side

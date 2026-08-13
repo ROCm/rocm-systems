@@ -87,6 +87,7 @@ ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {
     }
     recvComm->prepostReceiveWorkRequests = true;
   }
+#if 0
   if (rcclParamIbCastCommNGroups() > 0) {
     // WQE posted by one comm can be consumed by another comm, so the per-comm counters drift
     // and the RQ starves. Prepost mode reposts one WQE per completion with no per-comm counter,
@@ -96,6 +97,7 @@ ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {
     }
     recvComm->prepostReceiveWorkRequests = true;
   }
+#endif
 
   INFO(NCCL_NET, "NET/IB: %s: Receive work requests will be %s", __func__,
        recvComm->prepostReceiveWorkRequests ? "pre-posted" : "posted on-demand");

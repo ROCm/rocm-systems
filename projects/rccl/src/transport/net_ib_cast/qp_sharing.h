@@ -110,4 +110,10 @@ static inline uint64_t IbCastStripCommId(uint64_t wr_id) {
 // if sharing is disabled or the commId is invalid.
 struct ncclIbNetCommBase* IbCastRouteCommFromWrId(uint64_t wr_id);
 
+// Look up the target comm from the commId encoded in immData.
+// Returns target base based on commId in immData if sharing is enabled or
+// returns NULL if sharing is disabled or commId is invalid.
+struct ncclIbNetCommBase* IbCastRouteCommFromImmData(
+    struct ncclIbNetCommBase* base, uint32_t immDataHost);
+
 #endif // NET_IB_CAST_QP_SHARING_H_
