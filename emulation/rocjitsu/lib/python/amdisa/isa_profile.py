@@ -231,7 +231,17 @@ class IsaProfile(ABC):
 
     @property
     def generated_arch_name(self) -> str | None:
-        """Override for the generated C++ architecture namespace/directory."""
+        """Override for the logical architecture name used by code generation."""
+        return None
+
+    @property
+    def generated_dir_name(self) -> str | None:
+        """Override for the generated and handwritten filesystem directory."""
+        return None
+
+    @property
+    def cpp_namespace(self) -> str | None:
+        """Override for the generated C++ architecture namespace."""
         return None
 
     @property
@@ -1701,14 +1711,22 @@ class Rdna4Profile(_AmdgpuProfileBase):
 class Gfx1250Profile(Rdna4Profile):
     """ISA profile for gfx1250.
 
-    The gfx1250 encoding model is RDNA4/GFX12-like. Keep it as a named target
-    profile so generated C++ lands under ``amdgpu/gfx1250`` while reusing the
-    RDNA4 parser/codegen rules.
+    The gfx1250 encoding model is RDNA4/GFX12-like. Keep ``gfx1250`` as the
+    logical target used by parser/codegen rules while generated and handwritten
+    C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
 
     @property
     def generated_arch_name(self) -> str | None:
         return 'gfx1250'
+
+    @property
+    def generated_dir_name(self) -> str | None:
+        return 'cdna5'
+
+    @property
+    def cpp_namespace(self) -> str | None:
+        return 'cdna5'
 
     @property
     def semantic_class_overrides(self) -> dict[str, str]:
