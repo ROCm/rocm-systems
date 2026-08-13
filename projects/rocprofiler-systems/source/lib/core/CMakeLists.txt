@@ -7,7 +7,6 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/argparse.cpp
     ${CMAKE_CURRENT_LIST_DIR}/categories.cpp
     ${CMAKE_CURRENT_LIST_DIR}/config.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/constraint.cpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu.cpp
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.cpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.cpp
@@ -34,6 +33,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/common_types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/concepts.hpp
     ${CMAKE_CURRENT_LIST_DIR}/config.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/constraint_deps.hpp
     ${CMAKE_CURRENT_LIST_DIR}/constraint.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/demangler.hpp

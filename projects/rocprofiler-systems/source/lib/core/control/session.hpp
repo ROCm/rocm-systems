@@ -5,9 +5,11 @@
 
 #include <array>
 #include <atomic>
+#include <bitset>
 #include <cassert>
 #include <cstddef>
 #include <functional>
+#include <initializer_list>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -29,8 +31,46 @@ enum class action
 enum class scope : std::size_t
 {
     global = 0,
-    sampling_only,
+    sampling,
     count_,  // sentinel: number of scopes
+};
+
+inline constexpr std::size_t SCOPE_COUNT = static_cast<std::size_t>(scope::count_);
+
+class scope_set
+{
+public:
+    scope_set() noexcept { m_bits.set(static_cast<std::size_t>(scope::global)); }
+
+    scope_set(std::initializer_list<scope> scopes) noexcept
+    {
+        for(auto _s : scopes)
+            m_bits.set(static_cast<std::size_t>(_s));
+    }
+
+    [[nodiscard]] bool contains(scope event_scope) const noexcept
+    {
+        return m_bits.test(static_cast<std::size_t>(event_scope));
+    }
+
+    template <typename Predicate>
+    [[nodiscard]] bool all_of(Predicate&& pred) const
+    {
+        for(std::size_t i = 0; i < SCOPE_COUNT; ++i)
+            if(m_bits.test(i) && !pred(static_cast<scope>(i))) return false;
+        return true;
+    }
+
+    template <typename Predicate>
+    [[nodiscard]] bool any_of(Predicate&& pred) const
+    {
+        for(std::size_t i = 0; i < SCOPE_COUNT; ++i)
+            if(m_bits.test(i) && pred(static_cast<scope>(i))) return true;
+        return false;
+    }
+
+private:
+    std::bitset<SCOPE_COUNT> m_bits{};
 };
 
 struct subscriber
@@ -38,7 +78,7 @@ struct subscriber
     std::function<void()> on_pause;
     std::function<void()> on_resume;
     std::string           name;
-    std::vector<scope>    scopes = { scope::global };
+    scope_set             scopes = {};
 };
 
 class session
@@ -74,8 +114,8 @@ public:
 
     [[nodiscard]] bool is_active(scope event_scope = scope::global) const noexcept
     {
-        assert(static_cast<std::size_t>(event_scope) < scope_count);
-        return m_active[static_cast<std::size_t>(event_scope)].load(
+        assert(static_cast<std::size_t>(event_scope) < SCOPE_COUNT);
+        return m_scope_tracing[static_cast<std::size_t>(event_scope)].load(
             std::memory_order_relaxed);
     }
 
@@ -86,13 +126,11 @@ public:
         std::string_view name, scope event_scope = scope::global) const noexcept;
 
 private:
-    static constexpr std::size_t scope_count = static_cast<std::size_t>(scope::count_);
-
     using scoped_actions = std::unordered_map<std::string, action>;
 
-    std::array<scoped_actions, scope_count>    m_actions;
+    std::array<scoped_actions, SCOPE_COUNT>    m_actions;
     std::vector<subscriber>                    m_subscribers;
-    std::array<std::atomic<bool>, scope_count> m_active{};
+    std::array<std::atomic<bool>, SCOPE_COUNT> m_scope_tracing{};
 
     mutable std::mutex m_actions_mutex;
     std::mutex         m_subscribers_mutex;
