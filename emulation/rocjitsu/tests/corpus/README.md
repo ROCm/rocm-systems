@@ -2,16 +2,23 @@
 
 `gfx1250_b0_a0_semantic_tests.json` selects semantic programs whose instruction
 forms have implemented runtime translations. The companion
-`gfx1250_b0_a0_semantic_rewrites.json` pins the exact positive offline rewrite
-count for every selected executable.
+`gfx1250_b0_a0_semantic_rewrites.json` pins the exact non-negative offline
+rewrite count for every selected executable. A zero count qualifies a
+deliberate copy-path fix through runtime comparison.
 
-Four source-coverage programs are intentionally outside this qualification
-until their translations are implemented:
+These source-coverage programs are intentionally outside this qualification
+until their translations or semantic fixtures are ready:
 
-- `barrier_signal_isfirst_test`
+- `barrier_id_minus1_scc_test`
+- `barrier_id_minus2_scc_test`
+- `flat_scratch_scalar_hi_test`
+- `flat_scratch_scalar_lo_test`
+- `flat_scratch_vector_hi_test`
+- `flat_scratch_vector_lo_test`
 - `fp8_e5m3_pack_test`
-- `wmma_split_f16_test`
-- `wmma_split_fp4_test`
+- `monitor_sleep_bounded_test`
+- `monitor_sleep_unbounded_test`
+- `permute_pk16_test`
 
 The offline translator currently rejects those forms as unsupported. They are
 not silently accepted or treated as passing translations.
@@ -48,3 +55,8 @@ declared exclusions. It streams each output through a temporary file and
 retains only its size and SHA-256. Its `finalize` command requires every pinned
 corpus input to have either a successful pair or a matching declared
 exclusion, which prevents partial runs from becoming a develop baseline.
+
+## Near-timeout reporting
+
+With `--warn-perf`, `run-corpus-tests.sh` warns about passing tests whose
+runtime approaches the pytest timeout.
