@@ -113,10 +113,10 @@ resolve_dxg_thunk(void* handle, const DxgLoaderOps& ops)
 
     auto thunk     = DxgThunk{};
     thunk.get_node = reinterpret_cast<PFN_DxgGetNodeTopology>(resolve("DxgGetNodeTopology"));
-    thunk.acquire_snapshot =
-        reinterpret_cast<PFN_DxgAcquireTopologySnapshot>(resolve("DxgAcquireTopologySnapshot"));
-    thunk.release_snapshot =
-        reinterpret_cast<PFN_DxgReleaseTopologySnapshot>(resolve("DxgReleaseTopologySnapshot"));
+    thunk.acquire_snapshot = reinterpret_cast<PFN_hsaKmtAcquireSystemProperties>(
+        resolve("hsaKmtAcquireSystemProperties"));
+    thunk.release_snapshot = reinterpret_cast<PFN_hsaKmtReleaseSystemProperties>(
+        resolve("hsaKmtReleaseSystemProperties"));
     thunk.open_kfd  = reinterpret_cast<PFN_hsaKmtOpenKFD>(resolve("hsaKmtOpenKFD"));
     thunk.close_kfd = reinterpret_cast<PFN_hsaKmtCloseKFD>(resolve("hsaKmtCloseKFD"));
     return thunk;
@@ -159,11 +159,16 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
         ~OpenGuard() { dxg.close_kfd(); }
     } _open_guard{dxg};
 
-    uint32_t num_nodes = 0;
-    if(auto st = dxg.acquire_snapshot(&num_nodes); st != kHsaKmtStatusSuccess)
+    // Refcounted, like the open above: the HSA runtime's reference on this
+    // snapshot outlives the release below, which drops only ours. That refcount
+    // arrived with DxgGetNodeTopology, and complete() above required it, so a
+    // librocdxg old enough to drop the snapshot on the first release cannot
+    // reach this line.
+    auto sys_props = HsaSystemProperties{};
+    if(auto st = dxg.acquire_snapshot(&sys_props); st != kHsaKmtStatusSuccess)
     {
-        ROCP_WARNING << fmt::format("wsl topology: DxgAcquireTopologySnapshot failed (status={})",
-                                    st);
+        ROCP_WARNING << fmt::format(
+            "wsl topology: hsaKmtAcquireSystemProperties failed (status={})", st);
         return out;
     }
 
@@ -172,6 +177,8 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
         const DxgThunk& dxg;
         ~SnapshotGuard() { dxg.release_snapshot(); }
     } _snapshot_guard{dxg};
+
+    const auto num_nodes = sys_props.NumNodes;
 
     for(uint32_t node_id = 0; node_id < num_nodes; ++node_id)
     {

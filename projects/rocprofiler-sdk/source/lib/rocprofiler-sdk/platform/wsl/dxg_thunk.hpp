@@ -31,6 +31,8 @@
 
 #include "lib/rocprofiler-sdk/platform/wsl/dxg_topology.hpp"
 
+#include <hsakmt/hsakmttypes.h>
+
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -42,11 +44,17 @@ namespace platform
 {
 namespace wsl
 {
-using PFN_DxgGetNodeTopology         = int32_t (*)(uint32_t, uint32_t, DxgNodeTopology*);
-using PFN_DxgAcquireTopologySnapshot = int32_t (*)(uint32_t*);
-using PFN_DxgReleaseTopologySnapshot = int32_t (*)();
-using PFN_hsaKmtOpenKFD              = int32_t (*)();
-using PFN_hsaKmtCloseKFD             = int32_t (*)();
+// hsaKmtAcquireSystemProperties() is called through the real
+// HsaSystemProperties, not a mirror of it. Unlike HsaDxgNodeTopology - new
+// enough that the hsakmt package this builds against need not carry its header
+// yet - HsaSystemProperties is four uint32 fields that have not moved since
+// the KMT topology API was introduced, and hsakmttypes.h is already a
+// dependency of rocprofiler-sdk's own public agent.h.
+using PFN_DxgGetNodeTopology            = int32_t (*)(uint32_t, uint32_t, DxgNodeTopology*);
+using PFN_hsaKmtAcquireSystemProperties = int32_t (*)(HsaSystemProperties*);
+using PFN_hsaKmtReleaseSystemProperties = int32_t (*)();
+using PFN_hsaKmtOpenKFD                 = int32_t (*)();
+using PFN_hsaKmtCloseKFD                = int32_t (*)();
 
 // The unversioned soname, matching ThunkLoader::whoami() in the HSA runtime.
 // Never a versioned name (librocdxg.so.1 / .so.7): hard-coding a soversion
@@ -55,16 +63,24 @@ using PFN_hsaKmtCloseKFD             = int32_t (*)();
 // DxgGetNodeTopology reply carries its own size and ABI version.
 inline constexpr const char* kLibRocdxgSoname = "librocdxg.so";
 
-// Every entry point the topology read needs. The librocdxg that ships today
-// exports hsaKmtOpenKFD and hsaKmtCloseKFD but none of the Dxg* topology
-// calls, so all five are required before anything is called.
+// Every entry point the topology read needs. The four hsaKmt* names are
+// long-standing librocdxg exports, so DxgGetNodeTopology is the only one of the
+// five that a thunk predating this ABI does not have.
+//
+// Requiring all five before any of them is called is also what makes reusing
+// the snapshot pair safe. Exporting those two is not the same as refcounting
+// them: librocdxg gained the refcount that lets a second consumer hold a
+// reference while ROCr is running in the same change that added
+// DxgGetNodeTopology. An older thunk would drop the snapshot outright on the
+// first release - but it has no DxgGetNodeTopology either, so it is refused
+// here before anything is acquired.
 struct DxgThunk
 {
-    PFN_DxgGetNodeTopology         get_node         = nullptr;
-    PFN_DxgAcquireTopologySnapshot acquire_snapshot = nullptr;
-    PFN_DxgReleaseTopologySnapshot release_snapshot = nullptr;
-    PFN_hsaKmtOpenKFD              open_kfd         = nullptr;
-    PFN_hsaKmtCloseKFD             close_kfd        = nullptr;
+    PFN_DxgGetNodeTopology            get_node         = nullptr;
+    PFN_hsaKmtAcquireSystemProperties acquire_snapshot = nullptr;
+    PFN_hsaKmtReleaseSystemProperties release_snapshot = nullptr;
+    PFN_hsaKmtOpenKFD                 open_kfd         = nullptr;
+    PFN_hsaKmtCloseKFD                close_kfd        = nullptr;
 
     bool complete() const
     {

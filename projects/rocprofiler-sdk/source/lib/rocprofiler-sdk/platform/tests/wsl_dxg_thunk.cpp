@@ -123,10 +123,13 @@ struct FakeThunk
         return kHsaKmtStatusSuccess;
     }
 
-    static int32_t AcquireSnapshot(uint32_t* num_nodes)
+    static int32_t AcquireSnapshot(HsaSystemProperties* props)
     {
         g_state->calls.emplace_back("acquire_snapshot");
-        if(num_nodes != nullptr) *num_nodes = g_state->num_nodes;
+        // The node count is read back out of this, so a caller that passed
+        // nothing would walk zero nodes and look like an empty machine.
+        EXPECT_NE(props, nullptr) << "acquire must be handed somewhere to write";
+        if(props != nullptr) props->NumNodes = g_state->num_nodes;
         return g_state->acquire_status;
     }
 
@@ -184,8 +187,8 @@ struct FakeLoader
     int                      close_count      = 0;
     bool                     noload_finds_it  = true;
     bool                     plain_open_works = true;
-    // The librocdxg that ships today: hsaKmt* resolve, no Dxg* entry point
-    // does. Set false to model it.
+    // The librocdxg that ships today: every hsaKmt* entry point resolves,
+    // DxgGetNodeTopology does not. Set false to model it.
     bool        exports_topology = true;
     std::string missing_symbol   = {};
     void*       handle           = reinterpret_cast<void*>(0xd06);
@@ -206,9 +209,9 @@ struct FakeLoader
             if(!exports_topology && std::strncmp(name, "Dxg", 3) == 0) return nullptr;
             if(std::strcmp(name, "DxgGetNodeTopology") == 0)
                 return reinterpret_cast<void*>(&FakeThunk::GetNode);
-            if(std::strcmp(name, "DxgAcquireTopologySnapshot") == 0)
+            if(std::strcmp(name, "hsaKmtAcquireSystemProperties") == 0)
                 return reinterpret_cast<void*>(&FakeThunk::AcquireSnapshot);
-            if(std::strcmp(name, "DxgReleaseTopologySnapshot") == 0)
+            if(std::strcmp(name, "hsaKmtReleaseSystemProperties") == 0)
                 return reinterpret_cast<void*>(&FakeThunk::ReleaseSnapshot);
             if(std::strcmp(name, "hsaKmtOpenKFD") == 0)
                 return reinterpret_cast<void*>(&FakeThunk::OpenKfd);
@@ -231,8 +234,8 @@ struct FakeLoader
 // performs, whose side effect is to reconfigure the thunk for its caller -
 // must not be looked up here, let alone called.
 const std::vector<std::string> kResolvedSymbols = {"DxgGetNodeTopology",
-                                                   "DxgAcquireTopologySnapshot",
-                                                   "DxgReleaseTopologySnapshot",
+                                                   "hsaKmtAcquireSystemProperties",
+                                                   "hsaKmtReleaseSystemProperties",
                                                    "hsaKmtOpenKFD",
                                                    "hsaKmtCloseKFD"};
 }  // namespace
@@ -435,9 +438,9 @@ TEST(wsl_dxg_thunk, an_empty_snapshot_is_released_and_closed)
 
 // --- an incomplete function table ------------------------------------------
 
-// A thunk predating the topology ABI exports hsaKmtOpenKFD but not the Dxg*
-// entry points. Missing any one of the five must stop the read before it calls
-// anything at all - not crash on a null pointer, and not abort.
+// A thunk predating the topology ABI exports the hsaKmt* entry points but not
+// DxgGetNodeTopology. Missing any one of the five must stop the read before it
+// calls anything at all - not crash on a null pointer, and not abort.
 TEST(wsl_dxg_thunk, a_thunk_missing_any_entry_point_is_never_called)
 {
     for(int missing = 0; missing < 5; ++missing)
@@ -534,10 +537,10 @@ TEST(wsl_dxg_thunk, an_old_thunk_missing_a_symbol_is_closed_without_being_called
 }
 
 // The librocdxg that ships today: it opens, it exports the entry points the
-// HSA runtime needs, and it has none of the three topology calls. This is the
-// configuration the WSL path actually meets in the field, so the refusal has
-// to be a clean one - the handle given back, nothing invoked, no GPU agents
-// and no abort.
+// HSA runtime needs - snapshot ownership among them - and it has no
+// DxgGetNodeTopology. This is the configuration the WSL path actually meets in
+// the field, so the refusal has to be a clean one - the handle given back,
+// nothing invoked, no GPU agents and no abort.
 TEST(wsl_dxg_thunk, the_shipped_thunk_without_topology_exports_is_refused_cleanly)
 {
     auto fake               = FakeThunk{};

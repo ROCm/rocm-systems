@@ -44,14 +44,26 @@ namespace wsl
 // instead of being refined once the HSA runtime happens to come up.
 //
 // The declarations below mirror the ABI published by
-// rocr-runtime/libhsakmt/include/hsakmt/hsakmt_dxg.h. They are duplicated
-// rather than included because rocprofiler-sdk builds standalone against an
-// installed ROCm and cannot require an hsakmt header revision that may be
-// older than the thunk it dlopens at runtime. Duplication is safe here only
-// because this ABI is small, append-only, and every reply describes itself
+// rocr-runtime/libhsakmt/include/hsakmt/hsakmt_dxg.h. They are spelled out
+// here rather than included because that header is new: rocprofiler-sdk builds
+// standalone against an installed ROCm, and the hsakmt package satisfying the
+// build is not necessarily new enough to carry it. That is a build-time
+// concern only - this is not a claim to be independent of hsakmt, since
+// <rocprofiler-sdk/agent.h> above includes hsakmttypes.h, and the topology
+// snapshot is taken with the thunk's own hsaKmtAcquireSystemProperties().
+//
+// What the dedicated record buys is a layout that cannot shift underneath a
+// dynamically resolved thunk. The same fields are all present in
+// HsaNodeProperties and the DXG thunk fills that structure in full, but it is
+// an internal runtime structure with no stable layout: it has grown - 364
+// bytes to 396 - and it has also been rearranged at a constant size, with
+// same-sized fields swapping places and sizeof() never moving. rocprofiler-sdk
+// resolves librocdxg at run time and can therefore meet one from a different
+// ROCm package than it was built against, where neither change is detectable -
+// a size check would not even see the reordering. HsaDxgNodeTopology is
+// append-only and every reply describes itself
 // (DxgNodeTopology::StructSize / AbiVersion), so a thunk that disagrees with
-// these declarations is caught on the very call that would have used it. The
-// full HsaNodeProperties layout is deliberately NOT duplicated.
+// these declarations is caught on the very call that would have used it.
 
 // HSAKMT_STATUS values this file cares about.
 inline constexpr int32_t kHsaKmtStatusSuccess             = 0;

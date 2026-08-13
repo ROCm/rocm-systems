@@ -74,12 +74,24 @@ rather than published with placeholder values.
 Version requirement
 -------------------
 
-The topology ABI (``DxgAcquireTopologySnapshot``, ``DxgGetNodeTopology``,
-``DxgReleaseTopologySnapshot``) is a hard requirement, not a preference. There
-is no fallback to the older ``hsaKmtGetNodeProperties`` path: that call
-exchanges a full ``HsaNodeProperties``, whose layout is not version-stable, so
-calling it across a package boundary either overruns the caller's buffer or
-misreads its fields.
+``DxgGetNodeTopology`` is a hard requirement, not a preference. There is no
+fallback to the older ``hsaKmtGetNodeProperties`` path. It reports the same
+data, but it exchanges a full ``HsaNodeProperties``: an internal runtime
+structure that has grown (364 bytes to 396) and has also been rearranged at an
+unchanged size, carrying no size parameter for a caller to check either against.
+``librocdxg`` is resolved at run time and can come from a different ROCm package
+than this build, where a mismatch would silently overrun the caller's buffer or
+misread its fields — and a size comparison would not even see the reordering.
+
+Taking the topology snapshot needs no new entry point. ROCprofiler-SDK uses
+``hsaKmtAcquireSystemProperties`` and ``hsaKmtReleaseSystemProperties``, which
+``librocdxg`` has exported all along. What is new is that it reference-counts
+them, so the snapshot this read runs against is the same one the HSA runtime
+holds and neither consumer can drop it out from under the other. That refcount
+arrived together with ``DxgGetNodeTopology``, and every entry point is required
+before any of them is called, so a ``librocdxg`` predating it — one that would
+drop the snapshot on the first release — is refused before anything is
+acquired.
 
 Compatibility is settled one call at a time. Each ``DxgGetNodeTopology`` reply
 states the ABI version it was written to and how many bytes were written, and
