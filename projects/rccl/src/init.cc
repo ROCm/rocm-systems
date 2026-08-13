@@ -1615,7 +1615,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
-  comm->topo->skipPresetTopoMatching = !uniformRanksPerHost(comm, nranks);
+  comm->topo->skipPresetTopoMatching = !uniformRanksPerHost(comm, nranks) ||
+                                       (comm->topo->nodes[GPU].count > 0 &&
+                                        IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250"));
 
   timers[TIMER_INIT_GRAPHS] = clockNano();
   // Get rings and trees

@@ -14,6 +14,7 @@
 #include "comm.h"
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "common/StandaloneUtils.hpp"
 #include "debug.h"
 #include "graph/topo.h"
 #include "net.h"
@@ -2384,6 +2385,48 @@ TEST(RcclAllReduceDdaDecision, SymEligible_YieldsToSymmetricKernel)
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
                                                 /*symEligible=*/true, /*ceAllReduceAllowed=*/true));
+}
+
+// ---------------------------------------------------------------------------
+// Tests for skipPresetTopoMatching: gfx1250 skips Rome model matching.
+// Runs on real GPU, initializes a communicator, and checks internal state.
+// ---------------------------------------------------------------------------
+
+TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
+{
+    RUN_ISOLATED_TEST("Gfx1250_SkipsRomeModelMatching", []()
+    {
+        int numDevices;
+        HIPCALL(hipGetDeviceCount(&numDevices));
+        if (numDevices < 1) {
+            GTEST_SKIP() << "No devices available.";
+        }
+
+        // Check if this is gfx1250
+        hipDeviceProp_t prop;
+        HIPCALL(hipGetDeviceProperties(&prop, 0));
+        bool isGfx1250 = (strncmp(prop.gcnArchName, "gfx1250", 7) == 0);
+
+        ncclComm_t commHandle;
+        ncclUniqueId id;
+        NCCLCHECK(ncclGetUniqueId(&id));
+        HIPCALL(hipSetDevice(0));
+        NCCLCHECK(ncclCommInitRank(&commHandle, 1, id, 0));
+
+        // Cast to internal struct to access topo
+        ncclComm* comm = commHandle;
+
+        if (isGfx1250) {
+            // gfx1250 should skip preset topo matching
+            EXPECT_TRUE(comm->topo->skipPresetTopoMatching);
+            // Rome model index should be NONE (no preset matched)
+            EXPECT_EQ(comm->topo->romeTopoModelIdx, RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE);
+        }
+        // For other archs, we don't assert - skipPresetTopoMatching depends on
+        // uniformRanksPerHost which varies by system config.
+
+        NCCLCHECK(ncclCommDestroy(commHandle));
+    });
 }
 
 } // namespace RcclUnitTesting
