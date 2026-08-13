@@ -982,6 +982,31 @@ unblock_samples()
     trait::runtime_enabled<sampler_t>::set(true);
 }
 
+enum class timer_state
+{
+    stopped,
+    running
+};
+
+// Blocking samples only makes the handler discard them; the OS timer keeps
+// firing and its signal keeps interrupting the target's sleeps. Stop the
+// timers themselves so a paused sampler is unobservable to the application.
+void
+set_sampler_timers(timer_state state)
+{
+    for(std::int64_t i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
+    {
+        auto& _sampler = get_sampler(i);
+        auto& _running = get_sampler_running(i);
+        if(!_sampler || !_running || !*_running) continue;
+
+        if(state == timer_state::running)
+            _sampler->start();
+        else
+            _sampler->stop();
+    }
+}
+
 void
 block_signals(std::set<int> _signals)
 {
@@ -1860,6 +1885,7 @@ pause()
     LOG_DEBUG("Pausing sampling...");
     pending_pause_ts.store(tim::get_clock_real_now<std::uint64_t, std::nano>());
     block_samples();
+    set_sampler_timers(timer_state::stopped);
 }
 
 void
@@ -1881,6 +1907,7 @@ resume()
         pause_intervals.push_back(pause_interval_t{ _pause_ts, _resume_ts });
     }
 
+    set_sampler_timers(timer_state::running);
     unblock_samples();
 }
 
