@@ -29,24 +29,22 @@ typedef enum rj_code_arch_e {
   ROCJITSU_CODE_ARCH_CDNA3 = 2,
   /// @brief Compute Data Network Architecture 4 (CDNA4).
   ROCJITSU_CODE_ARCH_CDNA4 = 3,
+  /// @brief Compute Data Network Architecture 5 (CDNA5).
+  ROCJITSU_CODE_ARCH_CDNA5 = 4,
   /// @brief Radeon DNA Architecture 1 (RDNA1, GFX10.1).
-  ROCJITSU_CODE_ARCH_RDNA1 = 4,
+  ROCJITSU_CODE_ARCH_RDNA1 = 5,
   /// @brief Radeon DNA Architecture 2 (RDNA2, GFX10.3).
-  ROCJITSU_CODE_ARCH_RDNA2 = 5,
+  ROCJITSU_CODE_ARCH_RDNA2 = 6,
   /// @brief Radeon DNA Architecture 3 (RDNA3, GFX11).
-  ROCJITSU_CODE_ARCH_RDNA3 = 6,
+  ROCJITSU_CODE_ARCH_RDNA3 = 7,
   /// @brief Radeon DNA Architecture 3.5 (RDNA3.5, GFX11.5).
-  ROCJITSU_CODE_ARCH_RDNA3_5 = 7,
+  ROCJITSU_CODE_ARCH_RDNA3_5 = 8,
   /// @brief Radeon DNA Architecture 4 (RDNA4, GFX12).
-  ROCJITSU_CODE_ARCH_RDNA4 = 8,
+  ROCJITSU_CODE_ARCH_RDNA4 = 9,
   /// @brief RISC-V 32-bit integer base ISA.
-  ROCJITSU_CODE_ARCH_RV32I = 9,
+  ROCJITSU_CODE_ARCH_RV32I = 10,
   /// @brief RISC-V 64-bit integer base ISA.
-  ROCJITSU_CODE_ARCH_RV64I = 10,
-  /// @brief gfx1250 ISA architecture.
-  ROCJITSU_CODE_ARCH_GFX1250 = 11,
-  /// @brief Temporary CDNA5 alias for the gfx1250 ISA architecture.
-  ROCJITSU_CODE_ARCH_CDNA5 = ROCJITSU_CODE_ARCH_GFX1250,
+  ROCJITSU_CODE_ARCH_RV64I = 11,
   // \NPI new ISA family: add its public architecture identifier here and wire
   // its closed-world semantics through the ISA traits, properties, and users.
   /// @brief Number of named, built-in architectures.
