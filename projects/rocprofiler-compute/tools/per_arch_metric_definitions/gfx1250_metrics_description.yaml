@@ -541,8 +541,8 @@ Roofline Performance Rates:
     rst: Achieved Int8 WMMA throughput.
     unit: GIOP/s
   HBM Bandwidth:
-    plain: Total HBM bandwidth.
-    rst: Total HBM bandwidth.
+    plain: Total HBM bandwidth. The peak empirically measured bandwidth reflects peak single-direction (read-only) bandwidth, so write-heavy or mixed kernels fall below it.
+    rst: Total HBM bandwidth. The peak empirically measured bandwidth reflects peak single-direction (read-only) bandwidth, so write-heavy or mixed kernels fall below it.
     unit: GB/s
   GL2 Cache Bandwidth:
     plain: GL2 Cache bandwidth.
