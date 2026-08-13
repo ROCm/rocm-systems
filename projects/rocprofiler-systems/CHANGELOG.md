@@ -34,6 +34,11 @@ replaces Perfetto as the primary trace output.
   `ROCPROFSYS_CONFIG_FILE` is preserved, and the one given on the command line is
   appended to it.
 
+- Pausing sampling now stops the underlying per-thread timers instead of only
+  discarding the samples they produce. Previously a paused sampler kept delivering
+  timer signals, so the profiled application's sleeps were still interrupted
+  throughout a window in which no data was being collected.
+
 ### Fixed
 
 - `ROCPROFSYS_TRACE_DELAY`/`ROCPROFSYS_TRACE_DURATION` now actually gate GPU context
