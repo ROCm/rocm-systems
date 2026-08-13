@@ -3816,7 +3816,7 @@ class CodeGenerator:
                 '  }\n'
                 '}\n'
                 '\n'
-                'const char *gfx1250_matrix_scale_fmt_name(uint32_t fmt) {\n'
+                'const char *cdna5_matrix_scale_fmt_name(uint32_t fmt) {\n'
                 '  switch (fmt) {\n'
                 '  case 0:\n'
                 '    return "MATRIX_SCALE_FMT_E8";\n'
@@ -4026,11 +4026,11 @@ class CodeGenerator:
               const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
               if (matrix_a_scale_fmt != 0) {
                 out += " matrix_a_scale_fmt:";
-                out += gfx1250_matrix_scale_fmt_name(matrix_a_scale_fmt);
+                out += cdna5_matrix_scale_fmt_name(matrix_a_scale_fmt);
               }
               if (matrix_b_scale_fmt != 0) {
                 out += " matrix_b_scale_fmt:";
-                out += gfx1250_matrix_scale_fmt_name(matrix_b_scale_fmt);
+                out += cdna5_matrix_scale_fmt_name(matrix_b_scale_fmt);
               }
               if ((scale_inst_.opsel >> 2) & 0x1u)
                 out += " matrix_a_reuse";
