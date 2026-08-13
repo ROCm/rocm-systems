@@ -3777,8 +3777,8 @@ class CodeGenerator:
             } // namespace''')
 
     @staticmethod
-    def _emit_gfx1250_matrix_fmt_helpers() -> _ImplOutputs:
-        """Emit C++ helpers for gfx1250 VOP3P packed and matrix quirks."""
+    def _emit_cdna5_matrix_fmt_helpers() -> _ImplOutputs:
+        """Emit C++ helpers for CDNA5 VOP3P packed and matrix quirks."""
         execution = textwrap.dedent('''\
             namespace {
             struct PkF32Words {
@@ -9384,7 +9384,7 @@ class CodeGenerator:
                     self.isa_spec.arch_name.lower() == 'cdna5'
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
-                    matrix_outputs = self._emit_gfx1250_matrix_fmt_helpers()
+                    matrix_outputs = self._emit_cdna5_matrix_fmt_helpers()
                     class_func_impls.model[0:0] = [
                         cgen.Line(impl) for impl in matrix_outputs.model
                     ]
