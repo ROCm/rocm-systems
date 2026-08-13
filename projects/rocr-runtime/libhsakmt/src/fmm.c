@@ -268,8 +268,10 @@ typedef struct {
  * span it never owned.
  */
 struct svm_api_range {
-	void *start;			/* page-aligned base address */
-	uint64_t size;			/* page-aligned size */
+	void *start;			/* page-aligned base, rounded out */
+	uint64_t size;			/* page-aligned size, rounded out */
+	void *revoke_start;		/* pages this registration owns outright */
+	uint64_t revoke_size;		/* 0 if it fills no whole page */
 	uint32_t refcount;		/* registrations of this same user pointer */
 	rbtree_node_t node;		/* svm_api_range_tree, key user VA (size field 0) */
 };
@@ -1171,9 +1173,16 @@ static svm_api_range_t *svm_api_range_find(struct hsa_kfd_fmm_context *fmm_ctx,
  * subtraction in svm_api_range_put.
  */
 static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx, void *user_addr,
-			      void *aligned_addr, uint64_t aligned_size)
+			      void *aligned_addr, uint64_t aligned_size,
+			      uint64_t user_size)
 {
 	svm_api_range_t *r;
+	/* Register rounds out to map whole pages, revoke rounds in. The bytes
+	 * past either end belong to whatever else shares those pages.
+	 */
+	HSAuint64 in_start = PAGE_ALIGN_UP((HSAuint64)user_addr);
+	HSAuint64 in_end = ((HSAuint64)user_addr + user_size) & ~(HSAuint64)(PAGE_SIZE - 1);
+	HSAuint64 in_size = in_end > in_start ? in_end - in_start : 0;
 
 	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 	r = svm_api_range_find(fmm_ctx, user_addr);
@@ -1181,6 +1190,10 @@ static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx, void *user_ad
 		++r->refcount;
 		if (aligned_size > r->size)
 			r->size = aligned_size;
+		if (in_size > r->revoke_size) {
+			r->revoke_start = (void *)in_start;
+			r->revoke_size = in_size;
+		}
 		if (r->size > fmm_ctx->svm_api_max_extent)
 			fmm_ctx->svm_api_max_extent = r->size;
 		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
@@ -1199,6 +1212,8 @@ static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx, void *user_ad
 	}
 	r->start = aligned_addr;
 	r->size = aligned_size;
+	r->revoke_start = (void *)in_start;
+	r->revoke_size = in_size;
 	r->refcount = 1;
 	r->node.key = rbtree_key((unsigned long)user_addr, 0);
 	hsakmt_rbtree_insert(&fmm_ctx->svm_api_range_tree, &r->node);
@@ -1266,10 +1281,16 @@ static int svm_api_range_put(struct hsa_kfd_fmm_context *fmm_ctx, void *addr,
 		return 0;
 	}
 
-	base = (HSAuint64)r->start;
-	end = base + r->size;
+	base = (HSAuint64)r->revoke_start;
+	end = base + r->revoke_size;
 	hsakmt_rbtree_delete(&fmm_ctx->svm_api_range_tree, &r->node);
 	free(r);
+
+	/* Fills no whole page, so nothing here is ours alone. */
+	if (end <= base) {
+		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+		return 0;
+	}
 
 	/* Emit the gaps in [base, end) not covered by any surviving registration.
 	 *
@@ -1340,10 +1361,12 @@ static HSAKMT_STATUS fmm_unregister_mem_svm_api(HsaKFDContext *ctx,
 	if (!fmm_ctx->first_gpu_mem)
 		return HSAKMT_STATUS_ERROR;
 
-	/* One NO_ACCESS attribute per GPU plus two CLR_FLAGS attributes.
-	 * NO_ACCESS on a GPU that never had access is harmless.
+	/* NO_ACCESS only. The coherency flags are page granular and COHERENT is
+	 * the kernel default, so clearing them drops whatever else shares those
+	 * pages below default; on gfx942/950 that also turns a live mapping
+	 * cached. NO_ACCESS is what the unmap and eviction skip key off.
 	 */
-	nattr = num_gpus + 2;
+	nattr = num_gpus;
 	s_attr = nattr * sizeof(struct kfd_ioctl_svm_attribute);
 	args = alloca(sizeof(*args) + s_attr);
 	args->start_addr = (HSAuint64)aligned_addr;
@@ -1354,10 +1377,6 @@ static HSAKMT_STATUS fmm_unregister_mem_svm_api(HsaKFDContext *ctx,
 		args->attrs[i].type = HSA_SVM_ATTR_NO_ACCESS;
 		args->attrs[i].value = fmm_ctx->all_gpu_id_array[i];
 	}
-	args->attrs[num_gpus].type = HSA_SVM_ATTR_CLR_FLAGS;
-	args->attrs[num_gpus].value = HSA_SVM_FLAG_COHERENT;
-	args->attrs[num_gpus + 1].type = HSA_SVM_ATTR_CLR_FLAGS;
-	args->attrs[num_gpus + 1].value = HSA_SVM_FLAG_EXT_COHERENT;
 
 	pr_debug("Deregistering from SVM %p size: %" PRIu64 "\n", aligned_addr,
 		 aligned_size);
@@ -1430,7 +1449,7 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	/* Track only once the kernel has the attributes, so a failed register
 	 * leaves nothing behind and there is no reserved extent to roll back.
 	 */
-	svm_api_range_get(fmm_ctx, address, (void *)aligned_addr, aligned_size);
+	svm_api_range_get(fmm_ctx, address, (void *)aligned_addr, aligned_size, size);
 
 	ret = HSAKMT_STATUS_SUCCESS;
 
