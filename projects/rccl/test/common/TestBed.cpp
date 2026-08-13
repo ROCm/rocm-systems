@@ -55,6 +55,11 @@ namespace RcclUnitTesting
     // Collect the number of GPUs
     this->numDevicesAvailable = ev.maxGpus;
     if (ev.verbose) TEST_INFO("Detected %d GPUs", this->numDevicesAvailable);
+
+    // Communicator process pool: ON by default; set UT_COMM_POOL=0 to disable.
+    char const* poolEnv = getenv("UT_COMM_POOL");
+    this->poolMode = !(poolEnv && poolEnv[0] == '0');
+    this->configUsedPool = false;
   }
 
   void TestBed::InitComms(std::vector<std::vector<int>> const& deviceIdsPerProcess,
@@ -86,37 +91,117 @@ namespace RcclUnitTesting
       }
     }
 
-    // Check that no children currently exist
-    if (childList.size() > 0)
+    // ---- Communicator process pool (UT_COMM_POOL): reuse persistent workers ----
+    // The 99MB -O0 debug librccl loads its GPU device-code object on a process's first
+    // GPU use (~15-30s); it then stays resident, so a second ncclCommInitRank in the same
+    // process is ~0.15s. Reusing workers across configs pays that load once per worker
+    // instead of once per config. Worker d is pinned to device d; a config child maps to
+    // the pool worker owning its representative device (MP: child j -> device-j worker;
+    // SP: the single child -> device-0 worker, which accumulates the other contexts).
+    this->configUsedPool = false;
+    if (this->poolMode)
     {
-      TEST_ERROR("DestroyComms must be called prior to subsequent call to InitComms");
-      return;
+      // Lazily fork the persistent pool once (one worker per device).
+      if (this->poolChildren.empty())
+      {
+        int const poolSize = this->numDevicesAvailable;
+        this->poolChildren.assign(poolSize, nullptr);
+        for (int d = 0; d < poolSize; ++d)
+        {
+          this->poolChildren[d] = new TestBedChild(d, ev.verbose, ev.printValues, ev.useMultithreading);
+          if (this->poolChildren[d]->InitPipes() != TEST_SUCCESS)
+          {
+            TEST_ERROR("Unable to create pipes to pool child process");
+            return;
+          }
+          pid_t pid = fork();
+          if (pid == 0)
+          {
+            this->poolChildren[d]->StartExecutionLoop();
+            return;
+          }
+          this->poolChildren[d]->pid = pid;
+          close(this->poolChildren[d]->childWriteFd);
+          close(this->poolChildren[d]->childReadFd);
+        }
+
+        // Concurrently pre-warm every worker: send WARMUP to all of them first, THEN
+        // collect acks, so each worker's ~13s device-code-object load overlaps across
+        // processes instead of being paid lazily and serially as configs first touch each
+        // worker (that serial chain was ~94s of the ~157s total init).
+        int const warmCmd = TestBedChild::CHILD_WARMUP;
+        for (int d = 0; d < poolSize; ++d)
+        {
+          ASSERT_EQ(write(this->poolChildren[d]->parentWriteFd, &warmCmd, sizeof(warmCmd)), sizeof(warmCmd));
+        }
+        for (int d = 0; d < poolSize; ++d)
+        {
+          ErrCode st = TEST_SUCCESS;
+          ssize_t const r = read(this->poolChildren[d]->parentReadFd, &st, sizeof(st));
+          if (r != (ssize_t)sizeof(st) || st != TEST_SUCCESS)
+          {
+            TEST_ERROR("Pool worker %d failed to warm up", d);
+            return;
+          }
+        }
+      }
+
+      // Map this config's children onto distinct pool workers by representative device.
+      bool mappable = true;
+      std::vector<TestBedChild*> mapped(this->numActiveChildren, nullptr);
+      std::set<int> usedWorkers;
+      for (int c = 0; c < this->numActiveChildren && mappable; ++c)
+      {
+        int const worker = deviceIdsPerProcess[c].empty() ? -1 : deviceIdsPerProcess[c][0];
+        if (worker < 0 || worker >= (int)this->poolChildren.size() || usedWorkers.count(worker))
+        {
+          mappable = false;  // out-of-range or collision (e.g. multi-rank-per-GPU) -> fork-fresh
+          break;
+        }
+        usedWorkers.insert(worker);
+        mapped[c] = this->poolChildren[worker];
+      }
+
+      if (mappable)
+      {
+        // Reuse: childList borrows the selected pool workers (pool retains ownership).
+        childList = mapped;
+        this->configUsedPool = true;
+      }
     }
 
-    // Create child-processes
-    childList.resize(this->numActiveChildren);
-    for (int childId = 0; childId < this->numActiveChildren; ++childId)
+    if (!this->configUsedPool)
     {
-      childList[childId] = new TestBedChild(childId, ev.verbose, ev.printValues, ev.useMultithreading);
-      if (childList[childId]->InitPipes() != TEST_SUCCESS)
+      // ---- Classic fork-fresh path (pool disabled, or an unmappable config) ----
+      if (childList.size() > 0)
       {
-        TEST_ERROR("Unable to create pipes to child process");
+        TEST_ERROR("DestroyComms must be called prior to subsequent call to InitComms");
         return;
       }
+      childList.resize(this->numActiveChildren);
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      {
+        childList[childId] = new TestBedChild(childId, ev.verbose, ev.printValues, ev.useMultithreading);
+        if (childList[childId]->InitPipes() != TEST_SUCCESS)
+        {
+          TEST_ERROR("Unable to create pipes to child process");
+          return;
+        }
 
-      pid_t pid = fork();
-      if (pid == 0)
-      {
-        // Child process enters execution loop
-        childList[childId]->StartExecutionLoop();
-        return;
-      }
-      else
-      {
-        // Parent records child process ID and closes unused ends of pipe
-        childList[childId]->pid = pid;
-        close(childList[childId]->childWriteFd);
-        close(childList[childId]->childReadFd);
+        pid_t pid = fork();
+        if (pid == 0)
+        {
+          // Child process enters execution loop
+          childList[childId]->StartExecutionLoop();
+          return;
+        }
+        else
+        {
+          // Parent records child process ID and closes unused ends of pipe
+          childList[childId]->pid = pid;
+          close(childList[childId]->childWriteFd);
+          close(childList[childId]->childReadFd);
+        }
       }
     }
 
@@ -168,8 +253,12 @@ namespace RcclUnitTesting
       // Send the total number of group calls for this child process
       PIPE_WRITE(childId, numGroupCalls);
 
-      // Send the number of collectives to be run per group call
-      PIPE_WRITE(childId, numCollectivesInGroup);
+      // Send the number of collectives to be run per group call.
+      // Serialize the vector BY VALUE (size + elements), not the 24-byte control block:
+      // the old PIPE_WRITE(vector) shipped heap pointers that were only valid in the child
+      // via fork-time COW, which breaks for reused pool workers (stale COW snapshot).
+      { int _n = (int)numCollectivesInGroup.size(); PIPE_WRITE(childId, _n);
+        for (int _i = 0; _i < _n; ++_i) { int _v = numCollectivesInGroup[_i]; PIPE_WRITE(childId, _v); } }
 
       // Send the RCCL communication with blocking or non-blocking option
       PIPE_WRITE(childId, useBlocking);
@@ -177,8 +266,9 @@ namespace RcclUnitTesting
       // Send whether to use MultiRank interfaces or not.
       PIPE_WRITE(childId, useMulti);
 
-      // Send how many streams to use per group call
-      PIPE_WRITE(childId, numStreamsPerGroup);
+      // Send how many streams to use per group call (by value: size + elements, see above).
+      { int _n = (int)numStreamsPerGroup.size(); PIPE_WRITE(childId, _n);
+        for (int _i = 0; _i < _n; ++_i) { int _v = numStreamsPerGroup[_i]; PIPE_WRITE(childId, _v); } }
 
       // Send the GPUs this child uses
       int const numGpus = deviceIdsPerProcess[childId].size();
@@ -510,8 +600,20 @@ namespace RcclUnitTesting
       }
     }();
 
-    // Close any open child processes (always, even if the teardown above failed)
-    Finalize();
+    if (this->configUsedPool)
+    {
+      // Pool mode: comms/streams were freed on the workers, but keep the workers alive for
+      // the next config (their device-code kernels stay resident). Drop the borrowed refs;
+      // the pool keeps ownership. Finalize() (between sweeps / at teardown) reaps the pool.
+      this->childList.clear();
+      this->numActiveChildren = 0;
+      this->numActiveRanks = 0;
+    }
+    else
+    {
+      // Classic / fork-fresh: reap the per-config children this call owns.
+      TeardownOwnedChildList();
+    }
 
     InteractiveWait("Finishing DestroyComms");
   }
@@ -542,7 +644,18 @@ namespace RcclUnitTesting
 
   void TestBed::Finalize()
   {
-    if (this->numActiveChildren == 0)
+    // Reap per-config fork-fresh children (if any), then the persistent pool. Finalize()
+    // is the pool-reset boundary: tests that change env between sweeps call it, so the
+    // next sweep re-forks a pool that inherits the new env.
+    TeardownOwnedChildList();
+    TeardownPool();
+  }
+
+  void TestBed::TeardownOwnedChildList()
+  {
+    // Only reaps children that childList OWNS (classic / fork-fresh path). In pool mode
+    // childList holds borrowed pool refs (cleared by DestroyComms), so this is a no-op.
+    if (this->configUsedPool || this->numActiveChildren == 0)
       return;
 
     InteractiveWait("Starting Finalize");
@@ -577,6 +690,41 @@ namespace RcclUnitTesting
     this->numActiveRanks = 0;
 
     InteractiveWait("Finishing Finalize");
+  }
+
+  void TestBed::TeardownPool()
+  {
+    if (this->poolChildren.empty())
+      return;
+
+    // Best-effort stop (avoid the ASSERT-based PIPE_WRITE during teardown), then reap.
+    int const cmd = TestBedChild::CHILD_STOP;
+    for (TestBedChild* c : this->poolChildren)
+    {
+      if (!c)
+      {
+        continue;
+      }
+      ssize_t const w = write(c->parentWriteFd, &cmd, sizeof(cmd));
+      (void)w;
+      close(c->parentWriteFd);
+      close(c->parentReadFd);
+    }
+    for (TestBedChild* c : this->poolChildren)
+    {
+      if (!c)
+      {
+        continue;
+      }
+      int returnVal = 0;
+      waitpid(c->pid, &returnVal, 0);
+      delete c;
+    }
+    this->poolChildren.clear();
+    this->childList.clear();      // borrowed refs only; do not delete
+    this->configUsedPool = false;
+    this->numActiveChildren = 0;
+    this->numActiveRanks = 0;
   }
 
   TestBed::~TestBed()

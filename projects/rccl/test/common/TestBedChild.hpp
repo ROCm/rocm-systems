@@ -33,7 +33,8 @@ namespace RcclUnitTesting
       CHILD_DESTROY_COMMS    = 9,  // DestroyComms()
       CHILD_DESTROY_GRAPHS   = 10, // DestroyGraphs()
       CHILD_STOP             = 11, // Stop()
-      NUM_CHILD_COMMANDS     = 12
+      CHILD_WARMUP           = 12, // Warmup() - load the device code object (pool pre-warm)
+      NUM_CHILD_COMMANDS     = 13
     };
 
     char const ChildCommandNames[NUM_CHILD_COMMANDS][20] =
@@ -49,7 +50,8 @@ namespace RcclUnitTesting
       "DEALLOCATE_MEM",
       "DESTROY_COMMS",
       "DESTROY_GRAPHS",
-      "STOP"
+      "STOP",
+      "WARMUP"
     };
 
     // These variables remain constant for life of TestBedChild
@@ -95,6 +97,11 @@ namespace RcclUnitTesting
 
     // Initialize RCCL communicators
     ErrCode InitComms();
+
+    // Pool pre-warm: create+destroy a throwaway 1-rank comm on this worker's device
+    // (device == childId) to force the RCCL device code object to load. Lets all pool
+    // workers pay this ~13s load concurrently at startup instead of lazily/serially.
+    ErrCode Warmup();
 
     // Set CollectiveArgs
     ErrCode SetCollectiveArgs();

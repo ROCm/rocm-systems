@@ -128,6 +128,7 @@ namespace RcclUnitTesting
       case CHILD_DEALLOCATE_MEM  : status = DeallocateMem();        break;
       case CHILD_DESTROY_COMMS   : status = DestroyComms();         break;
       case CHILD_DESTROY_GRAPHS  : status = DestroyGraphs();        break;
+      case CHILD_WARMUP          : status = Warmup();               break;
       case CHILD_STOP            : goto stop;
       default: exit(0);
       }
@@ -172,6 +173,26 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
+  ErrCode TestBedChild::Warmup()
+  {
+    // Force the RCCL device code object to load for this worker's device by creating and
+    // immediately destroying a throwaway single-rank communicator. Worker d owns device d
+    // (childId == device). All pool workers run this concurrently at pool startup, so the
+    // ~13s per-process code-object load overlaps instead of being paid lazily and serially
+    // as each MP config first touches its worker.
+    int const dev = this->childId;
+    if (this->verbose) TEST_INFO("Child %d begins Warmup() on device %d", this->childId, dev);
+    CHECK_HIP(hipSetDevice(dev));
+    ncclComm_t comm = nullptr;
+    CHILD_NCCL_CALL(ncclCommInitAll(&comm, 1, &dev), "warmup ncclCommInitAll");
+    if (comm != nullptr)
+    {
+      CHILD_NCCL_CALL(ncclCommDestroy(comm), "warmup ncclCommDestroy");
+    }
+    if (this->verbose) TEST_INFO("Child %d finishes Warmup()", this->childId);
+    return TEST_SUCCESS;
+  }
+
   ErrCode TestBedChild::InitComms()
   {
     if (this->verbose) TEST_INFO("Child %d begins InitComms()", this->childId);
@@ -182,11 +203,16 @@ namespace RcclUnitTesting
     PIPE_READ(this->totalRanks);
     PIPE_READ(this->rankOffset);
     PIPE_READ(this->numGroupCalls);
-    PIPE_READ(this->numCollectivesInGroup);
+    // Read vectors BY VALUE (size + elements) to match TestBed::InitComms; the old
+    // PIPE_READ(vector) copied a 24-byte control block that only dereferenced correctly
+    // in a freshly-forked child (fork-COW). Reused pool workers need real values.
+    { int _n = 0; PIPE_READ(_n); this->numCollectivesInGroup.resize(_n);
+      for (int _i = 0; _i < _n; ++_i) PIPE_READ(this->numCollectivesInGroup[_i]); }
     PIPE_READ(this->useBlocking);
     bool useMultiRankPerGpu;
     PIPE_READ(useMultiRankPerGpu);
-    PIPE_READ(this->numStreamsPerGroup);
+    { int _n = 0; PIPE_READ(_n); this->numStreamsPerGroup.resize(_n);
+      for (int _i = 0; _i < _n; ++_i) PIPE_READ(this->numStreamsPerGroup[_i]); }
 
     // Read the GPUs this child uses and prepare storage for collective args / datasets
     int numGpus;

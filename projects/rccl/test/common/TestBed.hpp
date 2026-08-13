@@ -32,6 +32,16 @@ namespace RcclUnitTesting
     bool                       useBlocking;           // RCCL communication with blocking or non-blocking option
     EnvVars                    ev;                    // Environment variables
 
+    // Communicator process pool (UT_COMM_POOL, default on). Reuse child processes
+    // across InitComms/DestroyComms so the (very expensive in -O0 debug) GPU device-code
+    // load is paid once per worker instead of once per config. poolChildren[d] is the
+    // persistent worker pinned to device d. Finalize() is the pool-reset boundary (real
+    // teardown), so env changes that tests make between sweeps (each bracketed by an
+    // explicit Finalize) are always picked up by a freshly-forked pool.
+    bool                       poolMode;              // reuse workers across configs (UT_COMM_POOL != 0)
+    std::vector<TestBedChild*> poolChildren;          // persistent pool, index == pinned device id
+    bool                       configUsedPool;        // last InitComms served from the pool (skip Finalize in DestroyComms)
+
     // Constructor - Creates one child process per detected GPU device that waits for further commands
     TestBed();
 
@@ -117,6 +127,12 @@ namespace RcclUnitTesting
     // Explicit TestBed destructor that releases all child processes
     // No further calls to TestBed should be performed after this call
     void Finalize();
+
+    // Teardown helpers. TeardownOwnedChildList reaps the per-config fork-fresh children
+    // that childList owns (classic / pool-fallback path). TeardownPool reaps the
+    // persistent pool workers. Finalize() is the pool-reset boundary and runs both.
+    void TeardownOwnedChildList();
+    void TeardownPool();
 
     // Destructor - Calls Finalize() to release all child processes
     ~TestBed();
