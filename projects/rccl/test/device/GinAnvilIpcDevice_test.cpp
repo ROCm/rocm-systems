@@ -212,10 +212,12 @@ TEST_F(GinAnvilIpcDeviceTest, DetailHelpers_ChannelAndDirty) {
   d_fused.zero();
   d_dirtyRead.zero();
 
-  kernelDetailHelpers<<<1, 1>>>(d_ctx.ptr, 128, d_eff.ptr, d_fused.ptr, d_dirtyRead.ptr);
+  // blockId=2, single-warp block (<<<1,1>>> => nWarpsPerBlock clamped to 1, warpId 0)
+  // => slot = 2*1 + 0 = 2, effChannel = (baseCh + stride*slot) % numCh.
+  kernelDetailHelpers<<<1, 1>>>(d_ctx.ptr, 2, d_eff.ptr, d_fused.ptr, d_dirtyRead.ptr);
   syncAndCheck();
 
-  EXPECT_EQ(d_eff.download(), 2);  // (0 + 1*(128/64)) % 4 == 2
+  EXPECT_EQ(d_eff.download(), 2);  // (0 + 1*2) % 4 == 2
   hipDeviceProp_t prop{};
   ASSERT_EQ(hipSuccess, hipGetDeviceProperties(&prop, 0));
   const bool oss7 = (std::strstr(prop.gcnArchName, "gfx950") != nullptr);
@@ -279,7 +281,7 @@ TEST_F(GinAnvilIpcDeviceTest, AnvilCtxValid_AndSignalPtr) {
 
 __global__ void kernelFencePaths(bool sdmaPath, bool hasCounter) {
   if (threadIdx.x != 0) return;
-  fenceBeforeSignal(sdmaPath, nullptr, hasCounter);
+  fenceBeforeSignal(nullptr, sdmaPath, nullptr, hasCounter);
 }
 
 TEST_F(GinAnvilIpcDeviceTest, FenceBeforeSignal_CompilesAllPaths) {
