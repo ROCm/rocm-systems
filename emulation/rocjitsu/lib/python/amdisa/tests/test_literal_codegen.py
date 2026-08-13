@@ -14,7 +14,7 @@ from amdisa.codegen.execute.simd_codegen import (
 )
 from amdisa.cross_isa import SharedInstInfo, SharedInstructionPlan
 from amdisa.gpuisa import InstEncoding, Instruction, Operand
-from amdisa.isa_profile import Gfx1250Profile, Rdna4Profile
+from amdisa.isa_profile import Cdna5Profile, Rdna4Profile
 from amdisa.parser import Parser, _uniquify_fieldless_names
 from amdisa.semantics import InstructionSemantics
 
@@ -689,7 +689,7 @@ def test_scalar_addpc_generated_execute_uses_unsigned_pc_addition():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
-        profile=Gfx1250Profile(),
+        profile=Cdna5Profile(),
         inst_encodings=[],
         encoding_map={},
     )
@@ -722,7 +722,7 @@ def test_literal_fma_can_share_with_matching_operand_layouts_only():
     rdna_codegen.config = SimpleNamespace(unshared_execute_keys=frozenset())
 
     gfx_codegen = object.__new__(CodeGenerator)
-    gfx_codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Gfx1250Profile())
+    gfx_codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
     gfx_codegen.shared_plan = plan
     gfx_codegen.config = SimpleNamespace(unshared_execute_keys=frozenset())
 

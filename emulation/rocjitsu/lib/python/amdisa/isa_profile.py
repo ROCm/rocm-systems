@@ -1708,7 +1708,7 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return []
 
 
-class Gfx1250Profile(Rdna4Profile):
+class Cdna5Profile(Rdna4Profile):
     """ISA profile for gfx1250.
 
     The gfx1250 encoding model is RDNA4/GFX12-like. Use ``cdna5`` as the

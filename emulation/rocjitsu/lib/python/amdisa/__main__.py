@@ -15,7 +15,7 @@ from amdisa import (
     CdnaProfile,
     CodegenConfig,
     CodeGenerator,
-    Gfx1250Profile,
+    Cdna5Profile,
     Parser,
     Rdna1Profile,
     Rdna2Profile,
@@ -51,7 +51,7 @@ _PROFILES = {
     'rdna3': Rdna3Profile,
     'rdna3.5': Rdna3_5Profile,
     'rdna4': Rdna4Profile,
-    'cdna5': Gfx1250Profile,
+    'cdna5': Cdna5Profile,
 }
 
 
