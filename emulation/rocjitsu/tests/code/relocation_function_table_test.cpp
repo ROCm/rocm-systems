@@ -6,7 +6,7 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/relocation_function_table.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 
 #include <gtest/gtest.h>
@@ -179,18 +179,18 @@ std::vector<uint32_t> make_table_dispatch_text() {
     words.push_back(static_cast<uint32_t>(encoding >> 32));
   };
 
-  auto getpc = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804700u);
+  auto getpc = std::bit_cast<cdna5::Sop1MachineInst>(0xbe804700u);
   getpc.sdst = 0;
   append32(std::bit_cast<uint32_t>(getpc));
 
-  auto add = std::bit_cast<gfx1250::Sop2MachineInst>(0xa9800000u);
+  auto add = std::bit_cast<cdna5::Sop2MachineInst>(0xa9800000u);
   add.sdst = 0;
   add.ssrc0 = 0;
   add.ssrc1 = 254;
   append32(std::bit_cast<uint32_t>(add));
   append64(0x3000u - 0x1004u);
 
-  auto got_load = std::bit_cast<gfx1250::SmemMachineInst>(uint64_t{0xf4002000u});
+  auto got_load = std::bit_cast<cdna5::SmemMachineInst>(uint64_t{0xf4002000u});
   got_load.sbase = 0;
   got_load.sdata = 2;
   append64(std::bit_cast<uint64_t>(got_load));
@@ -202,13 +202,13 @@ std::vector<uint32_t> make_table_dispatch_text() {
   table_load.soffset = 6;
   append64(std::bit_cast<uint64_t>(table_load));
 
-  auto swap = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804900u);
+  auto swap = std::bit_cast<cdna5::Sop1MachineInst>(0xbe804900u);
   swap.sdst = 30;
   swap.ssrc0 = 4;
   append32(std::bit_cast<uint32_t>(swap));
   append32(0xbfb00000u); // s_endpgm continuation
 
-  auto setpc = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804800u);
+  auto setpc = std::bit_cast<cdna5::Sop1MachineInst>(0xbe804800u);
   setpc.ssrc0 = 30;
   append32(std::bit_cast<uint32_t>(setpc));
   return words;
@@ -226,31 +226,31 @@ std::vector<uint32_t> make_direct_table_dispatch_text_with_addend(uint64_t add_l
     words.push_back(static_cast<uint32_t>(encoding >> 32));
   };
 
-  auto getpc = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804700u);
+  auto getpc = std::bit_cast<cdna5::Sop1MachineInst>(0xbe804700u);
   getpc.sdst = 54;
   append32(std::bit_cast<uint32_t>(getpc));
 
-  auto add = std::bit_cast<gfx1250::Sop2MachineInst>(0xa9800000u);
+  auto add = std::bit_cast<cdna5::Sop2MachineInst>(0xa9800000u);
   add.sdst = 54;
   add.ssrc0 = 54;
   add.ssrc1 = 254;
   append32(std::bit_cast<uint32_t>(add));
   append64(add_literal);
 
-  auto table_load = std::bit_cast<gfx1250::SmemMachineInst>(uint64_t{0xf4002000u});
+  auto table_load = std::bit_cast<cdna5::SmemMachineInst>(uint64_t{0xf4002000u});
   table_load.sbase = 27; // encoded in SGPR-pair units: s[54:55].
   table_load.sdata = 0;
   table_load.scale_offset = 1;
   table_load.soffset = 2;
   append64(std::bit_cast<uint64_t>(table_load));
 
-  auto swap = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804900u);
+  auto swap = std::bit_cast<cdna5::Sop1MachineInst>(0xbe804900u);
   swap.sdst = 30;
   swap.ssrc0 = 0;
   append32(std::bit_cast<uint32_t>(swap));
   append32(0xbfb00000u); // s_endpgm continuation
 
-  auto setpc = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804800u);
+  auto setpc = std::bit_cast<cdna5::Sop1MachineInst>(0xbe804800u);
   setpc.ssrc0 = 30;
   append32(std::bit_cast<uint32_t>(setpc));
   return words;
@@ -273,11 +273,11 @@ std::vector<uint32_t> make_double_add_table_dispatch_text() {
     words.push_back(static_cast<uint32_t>(encoding >> 32));
   };
 
-  auto getpc = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804700u);
+  auto getpc = std::bit_cast<cdna5::Sop1MachineInst>(0xbe804700u);
   getpc.sdst = 54;
   append32(std::bit_cast<uint32_t>(getpc)); // 0x00: s_get_pc_i64 s[54:55].
 
-  auto add = std::bit_cast<gfx1250::Sop2MachineInst>(0xa9800000u);
+  auto add = std::bit_cast<cdna5::Sop2MachineInst>(0xa9800000u);
   add.sdst = 54;
   add.ssrc0 = 54;
   add.ssrc1 = 254;
@@ -287,20 +287,20 @@ std::vector<uint32_t> make_double_add_table_dispatch_text() {
   append32(std::bit_cast<uint32_t>(add)); // 0x10: s_add_nc_u64 (second add).
   append64(0x2000u - 0x1804u);            // 0x14: literal; 0x1804 + 0x7FC = 0x2000 (table base).
 
-  auto table_load = std::bit_cast<gfx1250::SmemMachineInst>(uint64_t{0xf4002000u});
+  auto table_load = std::bit_cast<cdna5::SmemMachineInst>(uint64_t{0xf4002000u});
   table_load.sbase = 27; // s[54:55].
   table_load.sdata = 0;
   table_load.scale_offset = 1;
   table_load.soffset = 2;
   append64(std::bit_cast<uint64_t>(table_load)); // 0x18: s_load_b64.
 
-  auto swap = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804900u);
+  auto swap = std::bit_cast<cdna5::Sop1MachineInst>(0xbe804900u);
   swap.sdst = 30;
   swap.ssrc0 = 0;
   append32(std::bit_cast<uint32_t>(swap)); // 0x20: s_swap_pc_i64.
   append32(0xbfb00000u);                   // 0x24: s_endpgm continuation.
 
-  auto setpc = std::bit_cast<gfx1250::Sop1MachineInst>(0xbe804800u);
+  auto setpc = std::bit_cast<cdna5::Sop1MachineInst>(0xbe804800u);
   setpc.ssrc0 = 30;
   append32(std::bit_cast<uint32_t>(setpc)); // 0x28: s_set_pc_i64.
   return words;
