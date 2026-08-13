@@ -7,7 +7,7 @@
 #ifndef ROCJITSU_ISA_OPERAND_H_
 #define ROCJITSU_ISA_OPERAND_H_
 
-#include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cassert>
@@ -24,6 +24,8 @@ namespace rocjitsu {
 template <typename Isa> class AmdgpuIsaOperand;
 
 namespace amdgpu {
+class ComputeUnitCore;
+class InstructionComputeUnitView;
 class RegisterAccess;
 class Wavefront;
 
@@ -100,6 +102,18 @@ public:
 
   /// @brief Full 64-bit literal value when this operand came from a literal64 encoding.
   [[nodiscard]] virtual std::optional<uint64_t> literal64_value() const { return std::nullopt; }
+
+  /// @brief Compile-time constant value of this operand, resolved without any
+  /// register/wavefront state, or nullopt for registers and other non-constant
+  /// operands.
+  ///
+  /// @details Unlike `literal64_value()` (which only reports the literal64
+  /// encoding), this also resolves inline constants — small integers and the
+  /// inline float constants whose value is implied by the encoding. The base
+  /// default covers only the literal case; ISA subclasses override it to add
+  /// inline-constant resolution. Useful for static analysis (e.g. detecting
+  /// `s_mov exec, -1`) where no wavefront is available.
+  [[nodiscard]] virtual std::optional<uint64_t> const_value() const { return literal64_value(); }
 
   /// @brief Operand width in bits.
   int size_bits() const { return size_bits_; }
@@ -489,8 +503,9 @@ public:
 /// (e.g. RISC-V) inherit directly from `IsaOperand` and use the base
 /// `Operand` defaults.
 ///
-/// The declaration remains in the core ISA layer because conventional targets
-/// and split model/execution targets share it. Execution-only definitions live
+/// This remains as the generator fallback for AMDGPU profiles that opt out of
+/// split execution sources. Built-in AMDGPU targets use `IsaOperand` plus a
+/// per-target execution table instead. Execution-only fallback definitions live
 /// in `isa_operand_simd_inl.h`.
 ///
 /// @tparam Isa AMDGPU arch ISA traits providing the SIMD helpers above.

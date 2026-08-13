@@ -4,7 +4,7 @@
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 
 #include "rocjitsu/code/basic_block.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
@@ -175,7 +175,7 @@ void apply_immediate_mode_vgpr_msb_side_effect(VgprMsbState &state, uint16_t hwr
 
 void transfer_instruction(VgprMsbState &state, const Instruction &inst,
                           std::span<const uint8_t> text) {
-  if (inst.opcode() == gfx1250::kSSetVgprMsbSopp && inst.mnemonic() == "s_set_vgpr_msb") {
+  if (inst.opcode() == cdna5::kSSetVgprMsbSopp && inst.mnemonic() == "s_set_vgpr_msb") {
     const Operand *immediate = inst.src_operand(0);
     if (immediate == nullptr) {
       state.banks.fill(std::nullopt);
@@ -203,11 +203,9 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
     return;
   }
 
-  // Read the 32-bit immediate from the text image at src_loc()+4 rather than
-  // raw_encoding()[1]: raw_encoding() points at the 4-byte SOPK inst_ subobject,
-  // so [1] indexes past it and only happens to land on the adjacent literal_
-  // member — a layout-dependent out-of-bounds read. The literal follows the
-  // encoding word in the instruction stream, so the text image is authoritative.
+  // Read the 32-bit immediate from the text image at src_loc()+4. The literal
+  // follows the encoding word in the instruction stream, and the text image is
+  // the authoritative input for this analysis.
   const std::optional<uint32_t> literal = text_word_at(text, inst.src_loc() + sizeof(uint32_t));
   if (!literal || inst.size() < 2 * static_cast<int>(sizeof(uint32_t))) {
     apply_mode_write(state, hwreg, std::nullopt);

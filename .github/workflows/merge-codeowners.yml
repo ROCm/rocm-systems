@@ -3,6 +3,9 @@ name: Merge CODEOWNERS Files
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   merge-codeowners:
     runs-on: ubuntu-latest
