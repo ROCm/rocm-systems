@@ -599,7 +599,7 @@ function(_add_single_rocshmem_test)
 
     # Build test name following driver.sh convention
     # When NUM_WF is set the actual thread count is determined at runtime, so
-    # encode the wavefront count instead (e.g. _z1wf, _z2wf).
+    # encode the wavefront count instead in file name (e.g. _wf1, _wf2).
     if(DEFINED TEST_NUM_WF)
         set(FULL_TEST_NAME "${TEST_NAME}_n${TEST_RANKS}_w${TEST_WORKGROUPS}_wf${TEST_NUM_WF}")
     else()
