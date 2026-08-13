@@ -4113,7 +4113,7 @@ class CodeGenerator:
         return _ImplOutputs(model=[model], execution=[execution])
 
     @staticmethod
-    def _emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers() -> str:
+    def _emit_cdna5_scaled_wmma_vop3px2_decoder_helpers() -> str:
         return textwrap.dedent('''\
             namespace {
 
@@ -12106,7 +12106,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         decode_body = []
         if self._supports_cdna5_scaled_wmma_vop3px2():
             class_impl.append(
-                cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers())
+                cgen.Line(self._emit_cdna5_scaled_wmma_vop3px2_decoder_helpers())
             )
         if self._supports_cdna_mfma_f8f6f4_vop3px2():
             class_impl.append(

@@ -3360,7 +3360,7 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
         'Vop3p::ExtensionDecodePolicy::Skip),'
     ) in model_impl
 
-    helpers = codegen._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers()
+    helpers = codegen._emit_cdna5_scaled_wmma_vop3px2_decoder_helpers()
     assert 'isVop3pOp' in helpers
     assert 'isWmmaScaleF32Vop3px2' not in helpers
 
