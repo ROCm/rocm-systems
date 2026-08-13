@@ -3351,7 +3351,7 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     assert codegen._supports_cdna5_scaled_wmma_vop3px2()
     assert 'VWmmaScaleF32Vop3px2' in (codegen._emit_cdna5_scaled_wmma_vop3px2_class())
     model_impl = ' '.join(
-        codegen._emit_gfx1250_scaled_wmma_vop3px2_impls().model[0].split()
+        codegen._emit_cdna5_scaled_wmma_vop3px2_impls().model[0].split()
     )
     assert (
         'reinterpret_cast<const OpEncoding *>(inst + 2), '

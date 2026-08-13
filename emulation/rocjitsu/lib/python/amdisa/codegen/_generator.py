@@ -3965,7 +3965,7 @@ class CodeGenerator:
             };
             ''')
 
-    def _emit_gfx1250_scaled_wmma_vop3px2_impls(self) -> _ImplOutputs:
+    def _emit_cdna5_scaled_wmma_vop3px2_impls(self) -> _ImplOutputs:
         exec_fn = self._split_execute_expr('VWmmaScaleF32Vop3px2')
         model = textwrap.dedent('''\
             VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
@@ -9358,7 +9358,7 @@ class CodeGenerator:
                     inst_classes.append(
                         cgen.Line(self._emit_cdna5_scaled_wmma_vop3px2_class())
                     )
-                    scaled_outputs = self._emit_gfx1250_scaled_wmma_vop3px2_impls()
+                    scaled_outputs = self._emit_cdna5_scaled_wmma_vop3px2_impls()
                     class_func_impls.model.extend(
                         cgen.Line(impl) for impl in scaled_outputs.model
                     )
