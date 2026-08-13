@@ -84,7 +84,7 @@ int cdna5_scaled_wmma_dst_size_bits(const MachineInst *inst) {
   return cdna5_scaled_wmma_is_f4_32x16x128(inst) ? 512 : 256;
 }
 
-int gfx1250_scaled_wmma_src0_size_bits(const MachineInst *inst) {
+int cdna5_scaled_wmma_src0_size_bits(const MachineInst *inst) {
   const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);
   if (cdna5_scaled_wmma_is_f4_32x16x128(inst))
     return 512;
@@ -3169,7 +3169,7 @@ VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
             Vop3p::ExtensionDecodePolicy::Skip),
       vdst(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
            reinterpret_cast<const OpEncoding *>(inst + 2)->vdst),
-      src0(gfx1250_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
+      src0(cdna5_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
            reinterpret_cast<const OpEncoding *>(inst + 2)->src0),
       src1(gfx1250_scaled_wmma_src1_size_bits(inst), OperandType::OPR_SRC_VGPR,
            reinterpret_cast<const OpEncoding *>(inst + 2)->src1),
