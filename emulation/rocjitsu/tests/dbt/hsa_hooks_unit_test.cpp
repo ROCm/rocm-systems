@@ -1067,6 +1067,25 @@ hsa_status_t HSA_API fake_executable_get_symbol_by_name(hsa_executable_t, const 
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t HSA_API fake_executable_get_symbol(hsa_executable_t, const char *,
+                                                const char *symbol_name, hsa_agent_t, int32_t,
+                                                hsa_executable_symbol_t *symbol) {
+  if (symbol_name == nullptr || symbol == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (symbol_name != g_fake_symbol_name)
+    return HSA_STATUS_ERROR_INVALID_SYMBOL_NAME;
+  *symbol = kFakeKernelSymbol;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_executable_iterate_symbols(
+    hsa_executable_t executable,
+    hsa_status_t (*callback)(hsa_executable_t, hsa_executable_symbol_t, void *), void *data) {
+  if (callback == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  return callback(executable, kFakeKernelSymbol, data);
+}
+
 hsa_status_t HSA_API fake_executable_iterate_agent_symbols(
     hsa_executable_t executable, hsa_agent_t agent,
     hsa_status_t (*callback)(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, void *),
@@ -1323,6 +1342,7 @@ struct FakeApiTable {
     core.hsa_system_get_major_extension_table_fn = fake_system_get_major_extension_table;
     core.hsa_executable_load_agent_code_object_fn = fake_executable_load_agent_code_object;
     core.hsa_executable_destroy_fn = fake_executable_destroy;
+    core.hsa_executable_get_symbol_fn = fake_executable_get_symbol;
     core.hsa_executable_get_symbol_by_name_fn = fake_executable_get_symbol_by_name;
     core.hsa_executable_symbol_get_info_fn = fake_executable_symbol_get_info;
     core.hsa_agent_iterate_regions_fn = fake_agent_iterate_regions;
@@ -1330,6 +1350,7 @@ struct FakeApiTable {
     core.hsa_memory_allocate_fn = fake_core_memory_allocate;
     core.hsa_memory_free_fn = fake_core_memory_free;
     core.hsa_memory_assign_agent_fn = fake_memory_assign_agent;
+    core.hsa_executable_iterate_symbols_fn = fake_executable_iterate_symbols;
     core.hsa_executable_iterate_agent_symbols_fn = fake_executable_iterate_agent_symbols;
     amd.hsa_amd_agent_iterate_memory_pools_fn = fake_amd_agent_iterate_memory_pools;
     amd.hsa_amd_memory_pool_get_info_fn = fake_amd_memory_pool_get_info;
@@ -6377,11 +6398,22 @@ struct IteratedSymbolForTest {
   hsa_executable_symbol_t symbol{};
 };
 
+struct IteratedLegacySymbolForTest {
+  hsa_executable_symbol_t symbol{};
+};
+
 hsa_status_t HSA_API capture_iterated_symbol_for_test(hsa_executable_t, hsa_agent_t agent,
                                                       hsa_executable_symbol_t symbol, void *data) {
   auto *captured = static_cast<IteratedSymbolForTest *>(data);
   captured->agent = agent;
   captured->symbol = symbol;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API capture_iterated_legacy_symbol_for_test(hsa_executable_t,
+                                                             hsa_executable_symbol_t symbol,
+                                                             void *data) {
+  static_cast<IteratedLegacySymbolForTest *>(data)->symbol = symbol;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -7242,6 +7274,129 @@ TEST(HsaHooksUnitTest, ConSanDynamicStackDispatchAddsMaximumFrameAboveRuntimePri
   ASSERT_EQ(g_last_intercept_written_packets.size(), 1u);
   EXPECT_EQ(g_last_intercept_written_packets.front().private_segment_size, 1056u);
   EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+}
+
+void configure_consan_symbol_binding_case() {
+  reset_code_object_observations();
+  reset_queue_fakes();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  g_transform_override_result.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  g_transform_override_result.modified = true;
+  g_transform_override_result.final_validation_passed = true;
+  g_transform_override_result.elf_bytes = {0x7f, 'E', 'L', 'F', 's', 'y', 'm'};
+  g_transform_override_result.kernels.emplace_back();
+  auto &kernel = g_transform_override_result.kernels.back();
+  kernel.name = "oversized_kernel";
+  kernel.descriptor_file_offset = 64u;
+
+  rocjitsu::ConSanPatchInfo patch;
+  patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
+  patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
+  patch.required_private_segment_size = 64u;
+  patch.required_group_segment_size = 128u;
+  patch.owner_descriptor_file_offsets = {kernel.descriptor_file_offset};
+  g_transform_override_result.patches.push_back(std::move(patch));
+}
+
+void load_consan_symbol_binding_case(FakeApiTable &api) {
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kFakeExecutable, kGuestAgent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+}
+
+void expect_consan_symbol_segment_requirements(FakeApiTable &api, hsa_executable_symbol_t symbol) {
+  uint32_t private_bytes = 0;
+  ASSERT_EQ(api.core.hsa_executable_symbol_get_info_fn(
+                symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &private_bytes),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(private_bytes, 64u);
+  uint32_t group_bytes = 0;
+  ASSERT_EQ(api.core.hsa_executable_symbol_get_info_fn(
+                symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &group_bytes),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(group_bytes, 128u);
+}
+
+TEST(HsaHooksUnitTest, ConSanLegacyGetSymbolBindsDispatchSegmentRequirements) {
+  configure_consan_symbol_binding_case();
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  ASSERT_NE(api.core.hsa_executable_get_symbol_fn, fake_executable_get_symbol);
+  load_consan_symbol_binding_case(api);
+
+  g_fake_symbol_kernel_object = 0x12345678u;
+  g_fake_symbol_private_segment_size = 16u;
+  g_fake_symbol_group_segment_size = 32u;
+  hsa_executable_symbol_t symbol{};
+  ASSERT_EQ(api.core.hsa_executable_get_symbol_fn(
+                kFakeExecutable, nullptr, g_fake_symbol_name.c_str(), kGuestAgent, 0, &symbol),
+            HSA_STATUS_SUCCESS);
+  expect_consan_symbol_segment_requirements(api, symbol);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, ConSanLegacyIterateSymbolsBindsDispatchSegmentRequirements) {
+  configure_consan_symbol_binding_case();
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  ASSERT_NE(api.core.hsa_executable_iterate_symbols_fn, fake_executable_iterate_symbols);
+  load_consan_symbol_binding_case(api);
+
+  g_fake_symbol_kernel_object = 0x12345678u;
+  g_fake_symbol_private_segment_size = 16u;
+  g_fake_symbol_group_segment_size = 32u;
+  IteratedLegacySymbolForTest iterated{};
+  ASSERT_EQ(api.core.hsa_executable_iterate_symbols_fn(
+                kFakeExecutable, capture_iterated_legacy_symbol_for_test, &iterated),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(iterated.symbol.handle, kFakeKernelSymbol.handle);
+  expect_consan_symbol_segment_requirements(api, iterated.symbol);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, ConSanExecutableDestroyDropsReusedSymbolDispatchMetadata) {
+  configure_consan_symbol_binding_case();
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  load_consan_symbol_binding_case(api);
+
+  g_fake_symbol_kernel_object = 0x12345678u;
+  g_fake_symbol_private_segment_size = 16u;
+  g_fake_symbol_group_segment_size = 32u;
+  hsa_executable_symbol_t symbol{};
+  ASSERT_EQ(api.core.hsa_executable_get_symbol_by_name_fn(
+                kFakeExecutable, g_fake_symbol_name.c_str(), &kGuestAgent, &symbol),
+            HSA_STATUS_SUCCESS);
+  expect_consan_symbol_segment_requirements(api, symbol);
+
+  ASSERT_EQ(api.core.hsa_executable_destroy_fn(kFakeExecutable), HSA_STATUS_SUCCESS);
+
+  hsa_executable_symbol_t reused_symbol{};
+  ASSERT_EQ(api.core.hsa_executable_get_symbol_by_name_fn(
+                kFakeExecutable, g_fake_symbol_name.c_str(), &kGuestAgent, &reused_symbol),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(reused_symbol.handle, symbol.handle);
+  uint32_t private_bytes = 0;
+  ASSERT_EQ(
+      api.core.hsa_executable_symbol_get_info_fn(
+          reused_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &private_bytes),
+      HSA_STATUS_SUCCESS);
+  EXPECT_EQ(private_bytes, 16u);
+  uint32_t group_bytes = 0;
+  ASSERT_EQ(api.core.hsa_executable_symbol_get_info_fn(
+                reused_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &group_bytes),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(group_bytes, 32u);
 }
 
 void configure_consan_zero_record_case() {

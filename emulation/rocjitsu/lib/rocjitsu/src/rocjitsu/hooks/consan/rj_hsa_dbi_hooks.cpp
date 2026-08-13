@@ -1895,12 +1895,21 @@ public:
         HSA_STATUS_SUCCESS) {
       return;
     }
+    const Bound observed{
+        .executable = executable.handle,
+        .symbol = symbol.handle,
+        .kernel_object = kernel_object,
+        .required_private_bytes = pending->required_private_bytes,
+        .dynamic_private_addend = pending->dynamic_private_addend,
+        .required_group_bytes = pending->required_group_bytes,
+        .records_moi_site = pending->records_moi_site,
+    };
     const auto bound = std::ranges::find_if(
         bound_, [&](const Bound &candidate) { return candidate.symbol == symbol.handle; });
     if (bound == bound_.end()) {
-      bound_.push_back({symbol.handle, kernel_object, pending->required_private_bytes,
-                        pending->dynamic_private_addend, pending->required_group_bytes,
-                        pending->records_moi_site});
+      bound_.push_back(observed);
+    } else if (bound->executable != executable.handle) {
+      *bound = observed;
     } else {
       bound->kernel_object = kernel_object;
       bound->required_private_bytes =
@@ -1922,6 +1931,15 @@ public:
           static_cast<unsigned long long>(kernel_object), pending->required_private_bytes,
           pending->dynamic_private_addend, pending->required_group_bytes);
     }
+  }
+
+  void erase_executable(hsa_executable_t executable) {
+    std::lock_guard lock(mutex_);
+    std::erase_if(pending_, [&](const Pending &candidate) {
+      return candidate.executable == executable.handle;
+    });
+    std::erase_if(
+        bound_, [&](const Bound &candidate) { return candidate.executable == executable.handle; });
   }
 
   [[nodiscard]] std::optional<uint32_t> required_for_symbol(hsa_executable_symbol_t symbol) const {
@@ -1987,6 +2005,7 @@ private:
     bool records_moi_site = false;
   };
   struct Bound {
+    uint64_t executable = 0;
     uint64_t symbol = 0;
     uint64_t kernel_object = 0;
     uint32_t required_private_bytes = 0;
@@ -2024,10 +2043,17 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
     const char *options, hsa_loaded_code_object_t *loaded_code_object);
 hsa_status_t HSA_API rj_dbi_executable_destroy(hsa_executable_t executable);
+hsa_status_t HSA_API rj_dbi_executable_get_symbol(hsa_executable_t executable,
+                                                  const char *module_name, const char *symbol_name,
+                                                  hsa_agent_t agent, int32_t call_convention,
+                                                  hsa_executable_symbol_t *symbol);
 hsa_status_t HSA_API rj_dbi_executable_get_symbol_by_name(hsa_executable_t executable,
                                                           const char *symbol_name,
                                                           const hsa_agent_t *agent,
                                                           hsa_executable_symbol_t *symbol);
+hsa_status_t HSA_API rj_dbi_executable_iterate_symbols(
+    hsa_executable_t executable,
+    hsa_status_t (*callback)(hsa_executable_t, hsa_executable_symbol_t, void *), void *data);
 hsa_status_t HSA_API rj_dbi_executable_iterate_agent_symbols(
     hsa_executable_t executable, hsa_agent_t agent,
     hsa_status_t (*callback)(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, void *),
@@ -2074,7 +2100,9 @@ public:
     original_get_major_extension_table_ = core_->hsa_system_get_major_extension_table_fn;
     original_load_agent_code_object_ = core_->hsa_executable_load_agent_code_object_fn;
     original_executable_destroy_ = core_->hsa_executable_destroy_fn;
+    original_get_symbol_ = core_->hsa_executable_get_symbol_fn;
     original_get_symbol_by_name_ = core_->hsa_executable_get_symbol_by_name_fn;
+    original_iterate_symbols_ = core_->hsa_executable_iterate_symbols_fn;
     original_iterate_agent_symbols_ = core_->hsa_executable_iterate_agent_symbols_fn;
     original_symbol_get_info_ = core_->hsa_executable_symbol_get_info_fn;
     original_queue_create_ = core_->hsa_queue_create_fn;
@@ -2113,7 +2141,11 @@ public:
     core_->hsa_executable_load_agent_code_object_fn = rj_dbi_executable_load_agent_code_object;
     core_->hsa_executable_destroy_fn = rj_dbi_executable_destroy;
     if (intercept_dispatch_segments_) {
+      if (original_get_symbol_ != nullptr)
+        core_->hsa_executable_get_symbol_fn = rj_dbi_executable_get_symbol;
       core_->hsa_executable_get_symbol_by_name_fn = rj_dbi_executable_get_symbol_by_name;
+      if (original_iterate_symbols_ != nullptr)
+        core_->hsa_executable_iterate_symbols_fn = rj_dbi_executable_iterate_symbols;
       core_->hsa_executable_iterate_agent_symbols_fn = rj_dbi_executable_iterate_agent_symbols;
       core_->hsa_executable_symbol_get_info_fn = rj_dbi_executable_symbol_get_info;
     }
@@ -2256,8 +2288,12 @@ public:
         core_->hsa_executable_load_agent_code_object_fn = original_load_agent_code_object_;
       if (core_->hsa_executable_destroy_fn == rj_dbi_executable_destroy)
         core_->hsa_executable_destroy_fn = original_executable_destroy_;
+      if (core_->hsa_executable_get_symbol_fn == rj_dbi_executable_get_symbol)
+        core_->hsa_executable_get_symbol_fn = original_get_symbol_;
       if (core_->hsa_executable_get_symbol_by_name_fn == rj_dbi_executable_get_symbol_by_name)
         core_->hsa_executable_get_symbol_by_name_fn = original_get_symbol_by_name_;
+      if (core_->hsa_executable_iterate_symbols_fn == rj_dbi_executable_iterate_symbols)
+        core_->hsa_executable_iterate_symbols_fn = original_iterate_symbols_;
       if (core_->hsa_executable_iterate_agent_symbols_fn == rj_dbi_executable_iterate_agent_symbols)
         core_->hsa_executable_iterate_agent_symbols_fn = original_iterate_agent_symbols_;
       if (core_->hsa_executable_symbol_get_info_fn == rj_dbi_executable_symbol_get_info)
@@ -2728,9 +2764,19 @@ public:
     return original_executable_destroy_;
   }
 
+  [[nodiscard]] decltype(hsa_executable_get_symbol) *get_symbol() const {
+    std::lock_guard lock(mutex_);
+    return original_get_symbol_;
+  }
+
   [[nodiscard]] decltype(hsa_executable_get_symbol_by_name) *get_symbol_by_name() const {
     std::lock_guard lock(mutex_);
     return original_get_symbol_by_name_;
+  }
+
+  [[nodiscard]] decltype(hsa_executable_iterate_symbols) *iterate_symbols() const {
+    std::lock_guard lock(mutex_);
+    return original_iterate_symbols_;
   }
 
   [[nodiscard]] decltype(hsa_executable_iterate_agent_symbols) *iterate_agent_symbols() const {
@@ -2813,7 +2859,9 @@ private:
     original_loader_create_from_file_with_offset_size_ = nullptr;
     original_load_agent_code_object_ = nullptr;
     original_executable_destroy_ = nullptr;
+    original_get_symbol_ = nullptr;
     original_get_symbol_by_name_ = nullptr;
+    original_iterate_symbols_ = nullptr;
     original_iterate_agent_symbols_ = nullptr;
     original_symbol_get_info_ = nullptr;
     original_queue_create_ = nullptr;
@@ -2845,7 +2893,9 @@ private:
   LoaderCreateFromFileWithOffsetSize original_loader_create_from_file_with_offset_size_ = nullptr;
   decltype(hsa_executable_load_agent_code_object) *original_load_agent_code_object_ = nullptr;
   decltype(hsa_executable_destroy) *original_executable_destroy_ = nullptr;
+  decltype(hsa_executable_get_symbol) *original_get_symbol_ = nullptr;
   decltype(hsa_executable_get_symbol_by_name) *original_get_symbol_by_name_ = nullptr;
+  decltype(hsa_executable_iterate_symbols) *original_iterate_symbols_ = nullptr;
   decltype(hsa_executable_iterate_agent_symbols) *original_iterate_agent_symbols_ = nullptr;
   decltype(hsa_executable_symbol_get_info) *original_symbol_get_info_ = nullptr;
   decltype(hsa_queue_create) *original_queue_create_ = nullptr;
@@ -3038,6 +3088,7 @@ hsa_status_t HSA_API rj_dbi_executable_destroy(hsa_executable_t executable) {
     AutoScReportBufferRegistry::instance().retire(layer().core_table(), executable);
     retire_auto_moi_report_buffers(layer().core_table(), executable);
     ReplacementCodeObjectStorageRegistry::instance().remove(executable);
+    KernelPrivateDispatchRegistry::instance().erase_executable(executable);
   }
   return status;
 }
@@ -3221,6 +3272,33 @@ struct DbiIterateAgentSymbolsData {
   void *data = nullptr;
 };
 
+struct DbiIterateSymbolsData {
+  hsa_status_t (*callback)(hsa_executable_t, hsa_executable_symbol_t, void *) = nullptr;
+  void *data = nullptr;
+};
+
+hsa_status_t HSA_API rj_dbi_iterate_symbols_callback(hsa_executable_t executable,
+                                                     hsa_executable_symbol_t symbol, void *data) {
+  auto *wrapped = static_cast<DbiIterateSymbolsData *>(data);
+  if (const auto name = query_dbi_executable_symbol_name(symbol)) {
+    KernelPrivateDispatchRegistry::instance().bind_symbol(executable, *name, symbol,
+                                                          layer().symbol_get_info());
+  }
+  return wrapped->callback(executable, symbol, wrapped->data);
+}
+
+hsa_status_t HSA_API rj_dbi_executable_iterate_symbols(
+    hsa_executable_t executable,
+    hsa_status_t (*callback)(hsa_executable_t, hsa_executable_symbol_t, void *), void *data) {
+  auto *original = layer().iterate_symbols();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR;
+  if (callback == nullptr)
+    return original(executable, callback, data);
+  DbiIterateSymbolsData wrapped{callback, data};
+  return original(executable, rj_dbi_iterate_symbols_callback, &wrapped);
+}
+
 hsa_status_t HSA_API rj_dbi_iterate_agent_symbols_callback(hsa_executable_t executable,
                                                            hsa_agent_t agent,
                                                            hsa_executable_symbol_t symbol,
@@ -3254,6 +3332,22 @@ hsa_status_t HSA_API rj_dbi_executable_get_symbol_by_name(hsa_executable_t execu
   if (original == nullptr)
     return HSA_STATUS_ERROR;
   const hsa_status_t status = original(executable, symbol_name, agent, symbol);
+  if (status == HSA_STATUS_SUCCESS && symbol_name != nullptr && symbol != nullptr) {
+    KernelPrivateDispatchRegistry::instance().bind_symbol(executable, symbol_name, *symbol,
+                                                          layer().symbol_get_info());
+  }
+  return status;
+}
+
+hsa_status_t HSA_API rj_dbi_executable_get_symbol(hsa_executable_t executable,
+                                                  const char *module_name, const char *symbol_name,
+                                                  hsa_agent_t agent, int32_t call_convention,
+                                                  hsa_executable_symbol_t *symbol) {
+  auto *original = layer().get_symbol();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR;
+  const hsa_status_t status =
+      original(executable, module_name, symbol_name, agent, call_convention, symbol);
   if (status == HSA_STATUS_SUCCESS && symbol_name != nullptr && symbol != nullptr) {
     KernelPrivateDispatchRegistry::instance().bind_symbol(executable, symbol_name, *symbol,
                                                           layer().symbol_get_info());
