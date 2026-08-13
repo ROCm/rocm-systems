@@ -1341,6 +1341,74 @@ ncclResult_t IbCastCheckVProps(ncclNetVDeviceProps_t* vProps1, ncclNetVDevicePro
   return ncclSuccess;
 }
 
+// Creates and modifies the per-comm GDR flush QP to RTS state.
+static ncclResult_t IbCastReceiverFlushQpCreateToRts(ncclIbRecvComm* rComm, struct ncclIbConnectionMetadata* remMeta,
+                                                     int channelId) {
+  if (!rComm->flushEnabled) return ncclSuccess;
+  for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
+    ncclIbRecvCommDev* rCommDev = &rComm->devs[i];
+    ncclIbDev* ibDev = &IbCastDevs[rCommDev->base.ibDevN];
+
+    struct ncclIbQpCreateAttr qpCreateAttrs;
+    memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
+    qpCreateAttrs.type = IBV_QPT_RC;
+    qpCreateAttrs.cq = rCommDev->base.cq;
+    qpCreateAttrs.pd = rCommDev->base.pd;
+    qpCreateAttrs.maxRecvWorkRequest = 0;
+    qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+    qpCreateAttrs.qpContext = &rComm->base.stats;
+    qpCreateAttrs.ctsQpSlot = NCCL_CTS_QP_SLOT_INVALID;
+    qpCreateAttrs.isCtsEnabled = rComm->useCtsOffload;
+    qpCreateAttrs.isDataQp = true;
+    qpCreateAttrs.channelId = channelId;
+    qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
+    qpCreateAttrs.useIonic = IbCastAinicRoce;
+    // QP sharing is disabled for flush QP
+    qpCreateAttrs.isQpSharingEnabled = false;
+    qpCreateAttrs.qpSharingGroupIdx = -1;
+    qpCreateAttrs.cqDepthMultiplier = 1;
+
+    NCCLCHECK(IbCastQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
+    rCommDev->gpuFlush.qp.channelId = channelId;
+    rCommDev->gpuFlush.qp.isDataQp = qpCreateAttrs.isDataQp;
+
+    INFO(NCCL_NET,
+         "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
+         __func__, ibDev->portNum, rCommDev->base.ibDevN, IbCastDevs[rCommDev->base.ibDevN].devName, IbCastNDevs,
+         IbCastNMergedDevs, rCommDev->gpuFlush.qp.qp->qp_num, (uint16_t)ncclParamIbCastPkey(), rCommDev->base.pd);
+
+    ncclIbQp* flushQp = &rCommDev->gpuFlush.qp;
+
+    // Transition the QP to INIT state
+    struct ncclIbQpInitAttr* initAttr = &flushQp->initAttr;
+    initAttr->state = IBV_QPS_INIT;
+    initAttr->pkeyIndex = ncclParamIbCastPkey();
+    initAttr->portNum = ibDev->portNum;
+    initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
+    NCCLCHECK(IbCastQpInit(flushQp));
+
+    struct ncclIbQpRtrAttr* rtrAttr = &flushQp->rtrAttr;
+    rtrAttr->mtu = ibDev->portAttr.active_mtu;
+    rtrAttr->linkLayer = ibDev->portAttr.link_layer;
+    // TODO: Flush QP is a "loopback QP" (connected to itself), so it should
+    // not use any information from the remote side during configuration.
+    rtrAttr->tc = ibDev->portAttr.link_layer == IBV_LINK_LAYER_ETHERNET ? remMeta->tc : -1;
+    rtrAttr->sl = remMeta->sl;
+    rtrAttr->remoteQpNum = rCommDev->gpuFlush.qp.qp->qp_num;
+    rtrAttr->remoteLid = ibDev->portAttr.lid;
+    rtrAttr->remoteGid = rCommDev->base.gidInfo.localGid;
+    rtrAttr->localIbPort = ibDev->portNum;
+    rtrAttr->localGid = rCommDev->base.gidInfo.localGid;
+    rtrAttr->localGidIndex = rCommDev->base.gidInfo.localGidIndex;
+    NCCLCHECK(IbCastQpRtr(flushQp));
+    struct ncclIbQpRtsAttr* rtsAttr = &flushQp->rtsAttr;
+    rtsAttr->timeout = ncclParamIbCastTimeout();
+    rtsAttr->retryCnt = ncclParamIbCastRetryCnt();
+    NCCLCHECK(IbCastQpRts(flushQp));
+  }
+  return ncclSuccess;
+}
+
 // The function creates and modifies QPs to RTS state on the receiver side
 // using remote information from the sender side (remMeta). It also populates
 // the remote metadata structure, provided to the function (remMeta), with the
@@ -1487,69 +1555,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     }
   }
 
-  if (rComm->flushEnabled) {
-    for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
-      ncclIbRecvCommDev* rCommDev = &rComm->devs[i];
-      ncclIbDev* ibDev = &IbCastDevs[rCommDev->base.ibDevN];
-
-      struct ncclIbQpCreateAttr qpCreateAttrs;
-      memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
-      qpCreateAttrs.type = IBV_QPT_RC;
-      qpCreateAttrs.cq = rCommDev->base.cq;
-      qpCreateAttrs.pd = rCommDev->base.pd;
-      qpCreateAttrs.maxRecvWorkRequest = 0;
-      qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
-      qpCreateAttrs.qpContext = &rComm->base.stats;
-      qpCreateAttrs.ctsQpSlot = NCCL_CTS_QP_SLOT_INVALID;
-      qpCreateAttrs.isCtsEnabled = rComm->useCtsOffload;
-      qpCreateAttrs.isDataQp = true;
-      qpCreateAttrs.channelId = channelId;
-      qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
-      qpCreateAttrs.useIonic = IbCastAinicRoce;
-      // QP sharing is disabled for flush QP
-      qpCreateAttrs.isQpSharingEnabled = false;
-      qpCreateAttrs.qpSharingGroupIdx = -1;
-      qpCreateAttrs.cqDepthMultiplier = 1;
-
-      NCCLCHECK(IbCastQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
-      rCommDev->gpuFlush.qp.channelId = channelId;
-      rCommDev->gpuFlush.qp.isDataQp = qpCreateAttrs.isDataQp;
-
-      INFO(NCCL_NET,
-           "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
-           __func__, ibDev->portNum, rCommDev->base.ibDevN, IbCastDevs[rCommDev->base.ibDevN].devName, IbCastNDevs,
-           IbCastNMergedDevs, rCommDev->gpuFlush.qp.qp->qp_num, (uint16_t)ncclParamIbCastPkey(), rCommDev->base.pd);
-
-      ncclIbQp* flushQp = &rCommDev->gpuFlush.qp;
-
-      // Transition the QP to INIT state
-      struct ncclIbQpInitAttr* initAttr = &flushQp->initAttr;
-      initAttr->state = IBV_QPS_INIT;
-      initAttr->pkeyIndex = ncclParamIbCastPkey();
-      initAttr->portNum = ibDev->portNum;
-      initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
-      NCCLCHECK(IbCastQpInit(flushQp));
-
-      struct ncclIbQpRtrAttr* rtrAttr = &flushQp->rtrAttr;
-      rtrAttr->mtu = ibDev->portAttr.active_mtu;
-      rtrAttr->linkLayer = ibDev->portAttr.link_layer;
-      // TODO: Flush QP is a "loopback QP" (connected to itself), so it should
-      // not use any information from the remote side during configuration.
-      rtrAttr->tc = ibDev->portAttr.link_layer == IBV_LINK_LAYER_ETHERNET ? remMeta->tc : -1;
-      rtrAttr->sl = remMeta->sl;
-      rtrAttr->remoteQpNum = rCommDev->gpuFlush.qp.qp->qp_num;
-      rtrAttr->remoteLid = ibDev->portAttr.lid;
-      rtrAttr->remoteGid = rCommDev->base.gidInfo.localGid;
-      rtrAttr->localIbPort = ibDev->portNum;
-      rtrAttr->localGid = rCommDev->base.gidInfo.localGid;
-      rtrAttr->localGidIndex = rCommDev->base.gidInfo.localGidIndex;
-      NCCLCHECK(IbCastQpRtr(flushQp));
-      struct ncclIbQpRtsAttr* rtsAttr = &flushQp->rtsAttr;
-      rtsAttr->timeout = ncclParamIbCastTimeout();
-      rtsAttr->retryCnt = ncclParamIbCastRetryCnt();
-      NCCLCHECK(IbCastQpRts(flushQp));
-    }
-  }
+  NCCLCHECK(IbCastReceiverFlushQpCreateToRts(rComm, remMeta, channelId));
 
   if (rComm->base.resiliency) {
     NCCLCHECK(IbCastResiliencyReceiverQpsCreateToRts(rComm->base.resiliency, remMeta, &meta->resiliencyInfo));
@@ -1866,6 +1872,12 @@ ib_recv:
         rComm->devs[i].base.cq = recvExistingSlot->primaryCq;
       }
       recvExistingSlot->cqRefcount++;
+
+      // SECONDARY receivers skip IbCastReceiverQpsCreateToRts below (it also
+      // creates the data QPs, which SECONDARY adopts from the shared pool
+      // instead), but the flush QP is per-comm and never shared, so it must
+      // still be created here.
+      NCCLCHECKGOTO(IbCastReceiverFlushQpCreateToRts(rComm, &remMeta, channelId), ret, fail);
 
       goto qp_sharing_done_recv;
     } else {
