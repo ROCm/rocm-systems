@@ -19,6 +19,9 @@
 #include "dda_alltoall.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
+#include "ce_coll.h"
+#include "alltoallv_meta.h"
+#include "strongstream.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -34,6 +37,8 @@ const char* ncclFuncToString(ncclFunc_t fn) {
     return "AllReduce";
   case ncclFuncAlltoAll:
     return "AlltoAll";
+  case ncclFuncAlltoAllv:
+    return "AlltoAllv";
   case ncclFuncBroadcast:
     return "Broadcast";
   case ncclFuncGather:
@@ -532,14 +537,20 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
   std::vector<size_t> sendcounts1(nRanks);
   std::vector<size_t> recvcounts1(nRanks);
 
-  std::vector<size_t> sizes(4 * nRanks); // 4 for sdispl, rdispl, scount, rcount
-#ifdef ENABLE_ROCSHMEM
+  std::vector<size_t> sizes(4 * nRanks); // [sendSizes, sendDispls, recvSizes, recvDispls] (bytes).
+  std::vector<size_t> gatheredSizes(4 * nRanks * nRanks);
+
   for (int i = 0; i < nRanks; i++) {
     sdispls1[i] = sdispls[i] * ncclTypeSize(datatype);
     rdispls1[i] = rdispls[i] * ncclTypeSize(datatype);
     sendcounts1[i] = sendcounts[i] * ncclTypeSize(datatype);
     recvcounts1[i] = recvcounts[i] * ncclTypeSize(datatype);
+    sizes[i] = sendcounts1[i];
+    sizes[nRanks + i] = sdispls1[i];
+    sizes[2 * nRanks + i] = recvcounts1[i];
+    sizes[3 * nRanks + i] = rdispls1[i];
   }
+#ifdef ENABLE_ROCSHMEM
 
   size_t count = sdispls1[nRanks - 1] + sendcounts1[nRanks - 1];
 
@@ -547,13 +558,6 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
     INFO(
       NCCL_INIT,
       "GDA alltoallv is supported for up to 128MB message size; Use ROCSHMEM_HEAP_SIZE=3GB for GDA support till 512MB");
-
-    for (int i = 0; i < nRanks; i++) {
-      sizes[i] = sendcounts1[i];
-      sizes[nRanks + i] = sdispls1[i];
-      sizes[2 * nRanks + i] = recvcounts1[i];
-      sizes[3 * nRanks + i] = rdispls1[i];
-    }
     count = count / ncclTypeSize(datatype);
 
     // use CU for copy-in/copy-out for small <= 128KB sizes
@@ -589,18 +593,55 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
     return ret;
   }
 #endif
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  NCCLCHECK(ncclDevrFindWindow(comm, sendbuff, &sendWin));
+  NCCLCHECK(ncclDevrFindWindow(comm, recvbuff, &recvWin));
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+  bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+  struct ncclCudaGraph ceGraph;
+  NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+  bool ceCapturing = ncclCudaGraphValid(ceGraph);
 
-  Recorder::instance().skip(true);
-  NCCLCHECK(ncclGroupStart());
-  for (int r = 0; r < nRanks; r++) {
-    NCCLCHECK(ncclSend(((char*)sendbuff) + sdispls[r] * ncclTypeSize(datatype), sendcounts[r], datatype, r, comm,
-                       stream));
-    NCCLCHECK(ncclRecv(((char*)recvbuff) + rdispls[r] * ncclTypeSize(datatype), recvcounts[r], datatype, r, comm,
-                       stream));
+  // CE AlltoAllv is single-node only (ncclCeAlltoAllvEligible requires nNodes==1).
+  // Multi-node jobs (e.g. 18x4) use the send/recv fallback below for cross-node traffic.
+  if (ncclCeAlltoAllvEligible(comm, datatype, winRegType, hasSysmemSegment, ceCapturing)) {
+    const size_t nLocal = 4 * (size_t)nRanks;
+    const size_t nGather = nLocal * (size_t)nRanks;
+
+    CUDACHECK(cudaMemcpyAsync(comm->localSizes, sizes.data(), nLocal * sizeof(size_t), cudaMemcpyHostToDevice, stream));
+    NCCLCHECK(ncclGroupStart());
+    for (int r = 0; r < nRanks; r++) {
+      void* recvPtr = (void*)((char*)comm->gatheredSizes + (size_t)r * nLocal * sizeof(size_t));
+      NCCLCHECK(ncclSend(comm->localSizes, nLocal, ncclUint64, r, comm, stream));
+      NCCLCHECK(ncclRecv(recvPtr, nLocal, ncclUint64, r, comm, stream));
+    }
+    NCCLCHECK(ncclGroupEnd());
+    CUDACHECK(cudaMemcpyAsync(gatheredSizes.data(), comm->gatheredSizes, nGather * sizeof(size_t),
+                              cudaMemcpyDeviceToHost, stream));
+    CUDACHECK(cudaStreamSynchronize(stream));
+
+    struct ncclInfo info = {
+      ncclFuncAlltoAllv,   "AlltoAllv",         sendbuff, recvbuff, 0, datatype, ncclSum, 0, comm, stream,
+      ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS, nullptr
+    };
+    info.sizes = gatheredSizes.data();
+
+    return ncclEnqueueCheck(&info);
+  } else {
+    Recorder::instance().skip(true);
+    NCCLCHECK(ncclGroupStart());
+    for (int r = 0; r < nRanks; r++) {
+      NCCLCHECK(ncclSend(((char*)sendbuff) + sdispls[r] * ncclTypeSize(datatype), sendcounts[r], datatype, r, comm,
+                         stream));
+      NCCLCHECK(ncclRecv(((char*)recvbuff) + rdispls[r] * ncclTypeSize(datatype), recvcounts[r], datatype, r, comm,
+                         stream));
+    }
+    NCCLCHECK(ncclGroupEnd());
+    Recorder::instance().skip(false);
+    return ncclSuccess;
   }
-  NCCLCHECK(ncclGroupEnd());
-  Recorder::instance().skip(false);
-  return ncclSuccess;
 }
 
 NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -1098,6 +1139,7 @@ ncclResult_t ncclPutSignal_impl(const void* localbuff, size_t count, ncclDataTyp
                           1,
                           1,
                           nullptr, /* chunkSteps, sliceSteps, acc */
+                          nullptr,
                           false, /* useDirect */
                           peerWinOffset,
                           peerWin,
@@ -1127,6 +1169,7 @@ ncclResult_t ncclSignal_impl(int peer, int sigIdx, int ctx, unsigned int flags, 
                           1,
                           1,
                           nullptr, /* chunkSteps, sliceSteps, acc */
+                          nullptr,
                           false, /* useDirect */
                           0,
                           NULL,
@@ -1156,6 +1199,7 @@ ncclResult_t ncclWaitSignal_impl(int nDesc, ncclWaitSignalDesc_t* signalDescs, n
                           1,
                           1,
                           nullptr, /* chunkSteps, sliceSteps, acc */
+                          nullptr,
                           false, /* useDirect */
                           0,
                           NULL,
