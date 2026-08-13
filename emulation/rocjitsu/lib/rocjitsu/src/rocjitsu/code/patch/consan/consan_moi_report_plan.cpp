@@ -245,7 +245,7 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
   access_record_count = *hash_records;
   if (access_record_count != 0u) {
     if (access_record_count > uint64_t{1} << 31u) {
-      plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
+      plan.reason = ConSanMoiAutoReportPlanReason::AbiGeometryCapacityOverflow;
       return false;
     }
     access_record_count = std::bit_ceil(access_record_count);
@@ -463,19 +463,6 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
     }
     return candidate;
   };
-  const auto has_adaptable_record_replay_geometry = [&] {
-    const auto valid_power_of_two = [](uint64_t value, uint64_t maximum) {
-      return value != 0u && value <= maximum && (value & (value - 1u)) == 0u;
-    };
-    return inventory.record_replay_bank_count_adaptive &&
-           valid_power_of_two(inventory.record_replay_access_dispatch_bank_count,
-                              kConSanMoiRecordReplayMaximumDispatchBankCount) &&
-           valid_power_of_two(inventory.record_replay_access_owner_bank_count,
-                              kConSanMoiRecordReplayMaximumOwnerBankCount) &&
-           valid_power_of_two(inventory.record_replay_address_group_headroom,
-                              kConSanMoiRecordReplayMaximumAddressGroupsPerWave);
-  };
-
   for (;;) {
     uint64_t headroom = kConSanMoiRecordReplayDynamicEventHeadroom;
     for (;;) {
@@ -487,8 +474,9 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
           plan.outcome == ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity &&
           plan.reason == ConSanMoiAutoReportPlanReason::PerBufferCeiling;
       const bool adaptive_abi_capacity_limited =
-          plan.reason == ConSanMoiAutoReportPlanReason::AbiCapacityOverflow &&
-          has_adaptable_record_replay_geometry();
+          plan.outcome == ConSanMoiAutoReportPlanOutcome::Overflow &&
+          plan.reason == ConSanMoiAutoReportPlanReason::AbiGeometryCapacityOverflow &&
+          inventory.record_replay_bank_count_adaptive;
       if (!capacity_limited && !adaptive_abi_capacity_limited) {
         return candidate;
       }

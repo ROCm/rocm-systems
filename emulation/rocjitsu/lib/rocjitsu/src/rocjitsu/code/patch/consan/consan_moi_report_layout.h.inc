@@ -263,6 +263,7 @@ enum class ConSanMoiAutoReportPlanReason : uint8_t {
   None,
   PerBufferCeiling,
   AbiCapacityOverflow,
+  AbiGeometryCapacityOverflow,
   ByteSizeOverflow,
 };
 
@@ -313,6 +314,8 @@ consan_moi_auto_report_plan_reason_name(ConSanMoiAutoReportPlanReason reason) {
     return "per_buffer_ceiling";
   case ConSanMoiAutoReportPlanReason::AbiCapacityOverflow:
     return "abi_capacity_overflow";
+  case ConSanMoiAutoReportPlanReason::AbiGeometryCapacityOverflow:
+    return "abi_geometry_capacity_overflow";
   case ConSanMoiAutoReportPlanReason::ByteSizeOverflow:
     return "byte_size_overflow";
   }

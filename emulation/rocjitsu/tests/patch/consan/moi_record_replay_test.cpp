@@ -4351,7 +4351,7 @@ TEST(ConSanMoi, AutoReportInventoryAdaptsBeforeLargeAccessGeometryExceedsAbiCapa
                               expanded.record_replay_address_group_headroom;
   const ConSanMoiAutoReportPlan expanded_plan = plan_consan_moi_auto_report(expanded);
   ASSERT_EQ(expanded_plan.outcome, ConSanMoiAutoReportPlanOutcome::Overflow);
-  ASSERT_EQ(expanded_plan.reason, ConSanMoiAutoReportPlanReason::AbiCapacityOverflow);
+  ASSERT_EQ(expanded_plan.reason, ConSanMoiAutoReportPlanReason::AbiGeometryCapacityOverflow);
 
   const ConSanMoiAutoReportInventory fitted =
       fit_consan_moi_record_replay_auto_report_inventory(inventory);
@@ -4366,6 +4366,27 @@ TEST(ConSanMoi, AutoReportInventoryAdaptsBeforeLargeAccessGeometryExceedsAbiCapa
   EXPECT_LT(fitted.record_replay_access_owner_bank_count,
             inventory.record_replay_access_owner_bank_count);
   EXPECT_LE(plan.required_bytes, kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
+}
+
+TEST(ConSanMoi, AutoReportInventoryDoesNotReduceGeometryForFixedAbiCapacityOverflow) {
+  ConSanMoiAutoReportInventory inventory;
+  inventory.engine = ConSanMoiEngine::RecordReplay;
+  inventory.access_range_count = uint64_t{UINT32_MAX} + 1u;
+  inventory.record_replay_bank_count_adaptive = true;
+
+  const ConSanMoiAutoReportPlan initial_plan = plan_consan_moi_auto_report(inventory);
+  ASSERT_EQ(initial_plan.outcome, ConSanMoiAutoReportPlanOutcome::Overflow);
+  ASSERT_EQ(initial_plan.reason, ConSanMoiAutoReportPlanReason::AbiCapacityOverflow);
+
+  const ConSanMoiAutoReportInventory fitted =
+      fit_consan_moi_record_replay_auto_report_inventory(inventory);
+  EXPECT_EQ(fitted.access_range_count, inventory.access_range_count);
+  EXPECT_EQ(fitted.record_replay_access_dispatch_bank_count,
+            inventory.record_replay_access_dispatch_bank_count);
+  EXPECT_EQ(fitted.record_replay_access_owner_bank_count,
+            inventory.record_replay_access_owner_bank_count);
+  EXPECT_EQ(fitted.record_replay_address_group_headroom,
+            inventory.record_replay_address_group_headroom);
 }
 
 TEST(ConSanMoi, FirstLightProbeAddsNativeLdsImmediateOffset) {
