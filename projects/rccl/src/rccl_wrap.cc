@@ -50,9 +50,10 @@ RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
-RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 1);
+RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
+RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -367,6 +368,59 @@ extern ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task
 extern int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count,
                                     ncclDataType_t datatype, int protocol, int nMaxChannels);
 
+ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
+                                      int* algo, int* protocol, int* maxChannels) {
+  const bool isAllGather = (coll == ncclFuncAllGather);
+  ncclComm* interComm = comm->hierarchicalInterComm;
+  ncclComm* intraComm = comm->hierarchicalIntraComm;
+  int nNodes = interComm->nRanks;
+
+  *algo =
+    isAllGather ? rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER : rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER;
+
+  // Inter-node phase. Direct AllGather is only tuned up to 16 nodes.
+  size_t interMsgSize = count * ncclTypeSize(dataType) * nNodes;
+  bool interDirect = isAllGather ? (nNodes <= 16 && rcclUseAllGatherDirect(interComm, interMsgSize)) :
+                                   rcclUseReduceScatterDirect(interComm, interMsgSize);
+  if (interDirect) {
+    *protocol = NCCL_PROTO_SIMPLE;
+    *maxChannels = interComm->p2pnChannels;
+  } else {
+    struct ncclTaskColl task = {};
+    task.func = coll;
+    task.count = count;
+    task.datatype = dataType;
+    NCCLCHECK(getAlgoInfo(interComm, &task, 0, 0, 1));
+    *protocol = task.protocol;
+    *maxChannels = task.nMaxChannels;
+  }
+
+  // Intra-node phase. The hierarchical ReduceScatter never runs Direct intra-node,
+  // so only AllGather gets the fast path here.
+  int intraProto, intraChan;
+  size_t intraCount = count * nNodes;
+  size_t intraMsgSize = intraCount * ncclTypeSize(dataType) * intraComm->nRanks;
+  if (isAllGather && rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
+    intraProto = NCCL_PROTO_SIMPLE;
+    intraChan = intraComm->p2pnChannels;
+  } else {
+    struct ncclTaskColl task = {};
+    task.func = coll;
+    task.count = intraCount;
+    task.datatype = dataType;
+    NCCLCHECK(getAlgoInfo(intraComm, &task, 0, 0, 1));
+    intraProto = task.protocol;
+    intraChan = task.nMaxChannels;
+  }
+
+  // For hierarchical algorithm, only the inter-comm protocol/channels are
+  // reported in rccl-tests -A output.
+  // The intra-comm values are logged below for debugging purposes
+  INFO(NCCL_COLL, "Hierarchical %s inter: proto=%d channels=%d, intra: proto=%d channels=%d", isAllGather ? "AG" : "RS",
+       *protocol, *maxChannels, intraProto, intraChan);
+  return ncclSuccess;
+}
+
 ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
                              int collNetSupport, int nvlsSupport, int numPipeOps, int* algo, int* protocol,
                              int* maxChannels) {
@@ -374,48 +428,9 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   int nRanks;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   size_t msgSize = count * ncclTypeSize(dataType) * nRanks;
-  if (coll == ncclFuncAllGather && rcclUseHierarchicalAllGather(comm, msgSize)) {
-    *algo = rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER;
-    ncclComm* interComm = comm->hierarchicalInterComm;
-    ncclComm* intraComm = comm->hierarchicalIntraComm;
-    int nNodes = interComm->nRanks;
-
-    size_t interMsgSize = count * ncclTypeSize(dataType) * nNodes;
-    if (nNodes <= 16 && rcclUseAllGatherDirect(interComm, interMsgSize)) {
-      *protocol = NCCL_PROTO_SIMPLE;
-      *maxChannels = interComm->p2pnChannels;
-    } else {
-      struct ncclTaskColl task;
-      task.func = ncclFuncAllGather;
-      task.count = count;
-      task.datatype = dataType;
-      NCCLCHECK(getAlgoInfo(interComm, &task, 0, 0, 1));
-      *protocol = task.protocol;
-      *maxChannels = task.nMaxChannels;
-    }
-
-    int intraProto, intraChan;
-    size_t intraCount = count * nNodes;
-    size_t intraMsgSize = intraCount * ncclTypeSize(dataType) * intraComm->nRanks;
-    if (rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
-      intraProto = NCCL_PROTO_SIMPLE;
-      intraChan = intraComm->p2pnChannels;
-    } else {
-      struct ncclTaskColl task;
-      task.func = ncclFuncAllGather;
-      task.count = intraCount;
-      task.datatype = dataType;
-      NCCLCHECK(getAlgoInfo(intraComm, &task, 0, 0, 1));
-      intraProto = task.protocol;
-      intraChan = task.nMaxChannels;
-    }
-
-    // For hierarchical algorithm, only the inter-comm protocol/channels are
-    // reported in rccl-tests -A output.
-    // The intra-comm values are logged below for debugging purposes
-    INFO(NCCL_COLL, "Hierarchical AG inter: proto=%d channels=%d, intra: proto=%d channels=%d", *protocol, *maxChannels,
-         intraProto, intraChan);
-    return ncclSuccess;
+  if ((coll == ncclFuncAllGather && rcclUseHierarchicalAllGather(comm, msgSize)) ||
+      (coll == ncclFuncReduceScatter && rcclUseHierarchicalReduceScatter(comm, msgSize))) {
+    return rcclHierarchicalAlgoInfo(comm, coll, count, dataType, algo, protocol, maxChannels);
   }
   if (coll == ncclFuncAllGather && rcclUseAllGatherDirect(comm, msgSize)) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER;
@@ -423,7 +438,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
-  struct ncclTaskColl task;
+  struct ncclTaskColl task = {};
   task.func = coll;
   task.count = count;
   task.datatype = dataType;
@@ -548,6 +563,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER:
       *algoName = "Hier";
       break;
+    case rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER:
+      *algoName = "Hier";
+      break;
 #ifdef ENABLE_WARP_SPEED
     case rcclAddonAlgos_t::RCCL_WARP_SPEED:
       *algoName = "RING*"; // WarpSpeed (*) uses RING algorithm
@@ -602,6 +620,30 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm) {
   return false;
 }
 
+size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter) {
+  size_t agThreshold = 0;
+  if (allGather) {
+    if (nNodes >= 32) {
+      agThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE; // 128MB
+    } else if (nNodes >= 16) {
+      agThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 64MB
+    } else if (nNodes >= 8) {
+      agThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 4; // 32MB
+    }
+  }
+
+  size_t rsThreshold = 0;
+  if (reduceScatter) {
+    if (nNodes >= 16) {
+      rsThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE; // 128MB
+    } else if (nNodes >= 8) {
+      rsThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 64MB
+    }
+  }
+
+  return std::max(agThreshold, rsThreshold);
+}
+
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 1);
 
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
@@ -609,15 +651,7 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   if (rcclParamHierarchicalAllGather() != 1) return false;
   if (!comm->hierarchicalCommsInitialized) return false;
 
-  size_t threshold = 0;
-  if (comm->nNodes >= 32) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE; // 128MB
-  } else if (comm->nNodes >= 16) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2; // 64MB
-  } else if (comm->nNodes >= 8) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 4; // 32MB
-  }
-
+  size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/true, /*reduceScatter=*/false);
   return threshold > 0 && msgSize <= threshold;
 }
 
@@ -679,6 +713,7 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
 
 bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
   static int enabled = rcclParamCeAllReduce();
+  static int force = rcclParamForceCeAllReduce();
   if (!enabled) {
     // Log once per process, not on every eligibility check (called per AllReduce).
     static bool warnedDisabled = false;
@@ -690,22 +725,52 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
   }
 
   // Requires single-node symmetric memory support with CTA_POLICY_ZERO (CE mode).
-  if (!comm->symmetricSupport) return false;
-  if (comm->nNodes != 1) return false;
+  if (!comm->symmetricSupport) {
+    WARN("Skipping CE AllReduce: symmetric support is not enabled");
+    return false;
+  }
+  if (comm->nNodes != 1) {
+    WARN("Skipping CE AllReduce: nNodes is not 1");
+    return false;
+  }
 
   // count must divide evenly so every rank owns an equal shard.
-  if (count == 0 || count % (size_t)comm->nRanks != 0) return false;
+  if (count == 0 || count % (size_t)comm->nRanks != 0) {
+    WARN("Skipping CE AllReduce: count (%zu) is not divisible by nRanks (%d)", count, comm->nRanks);
+    return false;
+  }
 
   // Total message must fit within the pre-allocated staging buffer.
   size_t msgBytes = count * ncclTypeSize(datatype);
-  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES || msgBytes < NCCL_CE_AR_MIN_MSG_BYTES) return false;
+  if (force) {
+    if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
+      WARN("Skipping CE AllReduce despite RCCL_FORCE_CE_ALLREDUCE=1: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)",
+           msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
+      return false;
+    }
+  }
+  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
+    WARN("Skipping CE AllReduce: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)", msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
+    return false;
+  }
+
+  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO && !force) {
+    WARN("Skipping CE AllReduce: CTA policy is not ZERO");
+    return false;
+  }
 
   // Only standard reduction ops with a simple kernel implementation.
   // ncclAvg (maps to SumPostDiv) and user-defined PreMulSum fall back to ring.
-  if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) return false;
+  if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) {
+    WARN("Skipping CE AllReduce: unsupported reduction operation");
+    return false;
+  }
 
   // Float8 types require specialised handling not yet implemented for CE AR.
-  if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) return false;
+  if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
+    WARN("Skipping CE AllReduce: unsupported datatype: Float8");
+    return false;
+  }
 
   return true;
 }
@@ -778,20 +843,38 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   decision->ceCapturing = ceCapturing;
   decision->ceArGraphAllowed = ceArGraphAllowed;
 
+  // Symmetric-window lookup, hoisted so CE 2-shot / DDA / CE-registered all share
+  // it. sendWin/recvWin drive winRegType and the sysmem-segment guard below.
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  const bool hasSysmemSegment =
+    ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+
+  // develop's single "will CE AllReduce service this call" gate (collectives.cc
+  // ncclAllReduce_impl). force = RCCL_FORCE_CE_ALLREDUCE; symReg probes whether the
+  // buffers are CE-registrable symmetric windows (uses ncclDevSum, matching develop).
+  const bool force = rcclParamForceCeAllReduce() != 0;
+  const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType);
+  const bool ceAllReduceAllowed =
+    ncclGroupDepth == 0 && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op) && (force || symReg);
+
   // (3) Eager CE 2-shot (staging buffer). Requires !symEligible and an
   // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
-  if (!symEligible && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op) &&
-      comm->ceColl.ceARTmpBuf != NULL) {
+  if (!symEligible && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
     decision->algo = RCCL_CE_2SHOT;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
   }
 
-  // (4) DDA fast paths. Same gate as before: enabled by threshold, and either
-  // gfx1250 (fabric, full range) or a small enough message on other DDA arches.
+  // (4) DDA fast paths. develop's shared gate: !symEligible, and either gfx1250
+  // (fabric, full range) or CE is not going to service this call (!ceAllReduceAllowed),
+  // subject to rcclDdaEnabled thresholds -- all folded into the helper.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  if (!symEligible && rcclDdaEnabled(comm, msgBytes, 8388608) &&
-      (ddaFabricArch1250 || msgBytes < (size_t)NCCL_CE_AR_MIN_MSG_BYTES)) {
+  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (rcclParamDdaLL() && msgBytes <= (size_t)rcclParamDdaLLThreshold() &&
@@ -828,31 +911,16 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // NOTE: CE registered wins over the symmetric kernel when both are eligible,
   // matching taskAppend (its CE branch is not gated on symEligible; symmetric
   // extraction only sees tasks that fall through to collTaskAppend).
-  struct ncclDevrWindow* sendWin = nullptr;
-  struct ncclDevrWindow* recvWin = nullptr;
-  ncclDevrFindWindow(comm, sendbuff, &sendWin);
-  ncclDevrFindWindow(comm, recvbuff, &recvWin);
-  const bool hasSysmemSegment =
-    ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
-  ncclSymRegType_t winRegType;
-  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
-
+  //
+  // develop's taskAppend appends CE for AllReduce iff !hasSysmemSegment && ceAvailable
+  // && ((CTAPolicy & ZERO) || force): ceAvailable starts from ncclCeAvailable(op) then
+  // is cleared unless graph-allowed, op-supported, count-divisible and RCCL_CE_ALLREDUCE.
   bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType);
-  bool ceAllReduceFits = true;
-  if (!ceArGraphAllowed || !rcclUseCeAllReduce(comm, count, datatype, op)) {
+  const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
+  if (!ceArGraphAllowed || !ceAllReduceOpSupported || (count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
     ceAvailable = false;
-  } else if (msgBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || msgBytes < (size_t)NCCL_CE_AR_MIN_MSG_BYTES) {
-    ceAllReduceFits = false;
   }
-
-  if (ceAllReduceFits && ceAvailable && !hasSysmemSegment) {
-    decision->algo = RCCL_CE_REGISTERED;
-    decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
-    return ncclSuccess;
-  }
-  // CTAPolicy ZERO (zero-compute-CTA offload) mirrors taskAppend; its guard is a
-  // subset of the plain CE gate above, so it is subsumed today (no behavior change).
-  if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAllReduceFits && ceAvailable && !hasSysmemSegment) {
+  if (ceAvailable && !hasSysmemSegment && ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
@@ -1120,6 +1188,17 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   return false;
 }
 
+RCCL_PARAM(HierarchicalReduceScatter, "HIERARCHICAL_REDUCE_SCATTER", 0);
+
+bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize) {
+  if (comm->nNodes < 8 || rcclParamHierarchicalReduceScatter() != 1 || !comm->hierarchicalCommsInitialized) {
+    return false;
+  }
+
+  size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/false, /*reduceScatter=*/true);
+  return threshold > 0 && msgSize <= threshold;
+}
+
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable) {
   if (comm->pxnDisable != RCCL_VALUE_UNSET) {
     rcclPxnDisable = comm->pxnDisable;
@@ -1237,7 +1316,7 @@ bool rcclIsAboveWarpSpeedThreshold(struct ncclComm* comm, struct ncclTaskColl* i
 
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) {
   return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && (nNodes == 1) &&
-         (rcclParamWarpSpeedAutoMode() != 0) && comm-> cuCount > 128; // Only use in SPX mode, 256 CU on gfx950
+         (rcclParamWarpSpeedAutoMode() != 0) && comm->cuCount > 128; // Only use in SPX mode, 256 CU on gfx950
 }
 
 ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskColl* info) {
@@ -1301,7 +1380,7 @@ int rcclGetMaxWarpsPerBlock(struct ncclComm* comm) {
 }
 
 // Compute the bandwidth channel count (nc) when WarpSpeed is enabled, scaling the
-// base channel count by the per-block warp multiplier. 
+// base channel count by the per-block warp multiplier.
 int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMultiplier, int maxChannels,
                                   int adjustedMaxNchannels, bool userUpdatedMaxChannels) {
   const bool singleNode = comm->nNodes == 1;
@@ -1326,7 +1405,7 @@ int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMult
 }
 
 // Adjust the per-collective channel count (nc) for WarpSpeed during algo/channel
-// tuning. No-op when WarpSpeed is disabled. 
+// tuning. No-op when WarpSpeed is disabled.
 int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc) {
   if (comm->topo->warpSpeedEnabled) {
     nc /= comm->warpSpeedChannelMultiplier;

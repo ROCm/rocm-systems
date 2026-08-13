@@ -10,10 +10,10 @@
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <array>
@@ -133,13 +133,13 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
   const std::string_view mnemonic = inst.mnemonic();
   const bool affected = mnemonic == "v_cvt_pk_fp8_f32" || mnemonic == "v_cvt_sr_fp8_f32" ||
                         mnemonic.starts_with("v_cvt_f32_fp8");
-  const bool is_vop3 = inst.encoding_id() >= gfx1250::encoding::kVop3 &&
-                       inst.encoding_id() <= gfx1250::encoding::kVop3OpHi6;
-  if (!affected || !is_vop3 || inst.size() < static_cast<int>(sizeof(gfx1250::Vop3MachineInst)) ||
+  const bool is_vop3 = inst.encoding_id() >= cdna5::encoding::kVop3 &&
+                       inst.encoding_id() <= cdna5::encoding::kVop3OpHi6;
+  if (!affected || !is_vop3 || inst.size() < static_cast<int>(sizeof(cdna5::Vop3MachineInst)) ||
       inst.raw_encoding() == nullptr)
     return false;
 
-  gfx1250::Vop3MachineInst encoding{};
+  cdna5::Vop3MachineInst encoding{};
   std::memcpy(&encoding, inst.raw_encoding(), sizeof(encoding));
   return encoding.clamp != 0;
 }
@@ -226,7 +226,7 @@ void gfx1250_b0_to_a0_append_wmma_completion_wait_if_needed(
   // destinations without draining unrelated ALU dependency counters.
   // The no-wait default is 0xff9f; clearing only VA_VDST[15:12] gives 0x0f9f.
   constexpr uint16_t kWaitVaVdstZero = 0x0f9f;
-  words.push_back(gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero})[0]);
+  words.push_back(cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero})[0]);
 }
 
 bool gfx1250_b0_to_a0_is_deferred_family(std::string_view mnemonic) {
