@@ -35,9 +35,10 @@ find_package(rocprofiler-sdk REQUIRED)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pmc_groups.json
                ${CMAKE_CURRENT_BINARY_DIR}/pmc_groups.json COPYONLY)
 
-# The counter-collection option conflicts below are rejected while parsing arguments, so
-# the application never launches. It exits zero to keep WILL_FAIL attributable to
-# rocprofv3 rejecting the options rather than to the application itself failing.
+# The counter-collection option conflicts in this file are rejected while parsing
+# arguments, so the application never launches. It exits zero to keep WILL_FAIL
+# attributable to rocprofv3 rejecting the options rather than to the application itself
+# failing. The tolerated case below reuses it as a workload that issues no dispatches.
 set(_NOOP_APPLICATION ${CMAKE_COMMAND} -E true)
 
 # Conflict: --pmc on the command line + pmc_groups from an input file
@@ -95,3 +96,16 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;counter-collection"
     WILL_FAIL
     FAIL_REGULAR_EXPRESSION "Each --pmc must specify at least one counter")
+
+# Tolerated: a device qualifier naming a GPU index that does not exist
+# PASS_REGULAR_EXPRESSION disables the exit-code check, so nothing may require it
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-counter-collection-out-of-range-device-qualifier
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES
+            SQ_CYCLES:device=16384 -- ${_NOOP_APPLICATION}
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests;counter-collection"
+    ENVIRONMENT "ROCPROF_LOG_LEVEL=warning"
+    PASS_REGULAR_EXPRESSION "Device ID not found for PMC counter 'SQ_CYCLES:device=16384'"
+    )

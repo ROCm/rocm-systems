@@ -40,6 +40,7 @@ def pytest_addoption(parser):
     parser.addoption("--context-pftrace", action="store")
     parser.addoption("--post-input", action="store")
     parser.addoption("--openmp-input", action="store")
+    parser.addoption("--device-input", action="store")
 
 
 def _read_csv(request, option):
@@ -104,3 +105,8 @@ def post_rows(request):
 @pytest.fixture
 def openmp_rows(request):
     return _read_csv(request, "--openmp-input")
+
+
+@pytest.fixture
+def device_rows(request):
+    return _read_csv(request, "--device-input")
