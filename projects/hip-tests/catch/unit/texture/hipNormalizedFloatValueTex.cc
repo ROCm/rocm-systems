@@ -93,7 +93,7 @@ static void textureTest(texture<T, hipTextureType1D, hipReadModeNormalizedFloat>
   tex->filterMode = fMode;
   HIP_CHECK(hipBindTextureToArray(tex, dData, &desc))
 
-  float* dOutputData = NULL;
+  float* dOutputData = nullptr;
   HIP_CHECK(hipMalloc(&dOutputData, sizeof(float) * SIZE))
   REQUIRE(dOutputData != nullptr);
 

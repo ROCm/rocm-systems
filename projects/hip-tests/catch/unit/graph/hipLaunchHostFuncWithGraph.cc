@@ -165,7 +165,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Positive_Thread) {
   HIP_CHECK(hipGraphDestroy(graph))
 }
 namespace {
-__global__ void kernelA(double* arrayA, size_t size) {
+static __global__ void kernelA(double* arrayA, size_t size) {
   const size_t x = threadIdx.x + blockDim.x * blockIdx.x;
   if (x < size) {
     arrayA[x] *= 2.0;
@@ -246,7 +246,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
 
 
 namespace {
-__global__ void spin_then_set(int* flag, long long spin_ticks) {
+static __global__ void spin_then_set(int* flag, long long spin_ticks) {
 #if HT_NVIDIA
   long long start = clock64();
   while ((clock64() - start) < spin_ticks) { /* spin */ }
@@ -258,7 +258,7 @@ __global__ void spin_then_set(int* flag, long long spin_ticks) {
 #endif
   *flag = 1;
 }
-__global__ void noop() {}
+static __global__ void noop() {}
 
 constexpr int kSdmaCopyElements = 1 << 20;
 constexpr size_t kSdmaCopyBytes = kSdmaCopyElements * sizeof(int);

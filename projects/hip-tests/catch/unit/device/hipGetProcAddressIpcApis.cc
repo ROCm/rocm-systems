@@ -64,7 +64,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Memory) {
     REQUIRE(write(fd[1], &handle, sizeof(handle)) >= 0);
     REQUIRE(close(fd[1]) == 0);
 
-    REQUIRE(wait(NULL) >= 0);
+    REQUIRE(wait(nullptr) >= 0);
 
     HIP_CHECK(hipFree(devMemSrc))
     free(srcHostMem);
@@ -154,7 +154,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Event) {
     REQUIRE(write(fd[1], &handle, sizeof(hipIpcEventHandle_t)) >= 0);
     REQUIRE(close(fd[1]) == 0);
 
-    REQUIRE(wait(NULL) >= 0);
+    REQUIRE(wait(nullptr) >= 0);
 
     HIP_CHECK(hipEventDestroy(start))
   } else {  // child process

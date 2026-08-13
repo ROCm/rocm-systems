@@ -66,7 +66,7 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_AlignmentTest) {
   // check for address alignment fron 2 to 1024
   for (int iter = 0; iter < 12; iter++) {
     alignmnt = alignmnt * 2;
-    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, alignmnt, 0, 0))
+    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, alignmnt, nullptr, 0))
     REQUIRE((reinterpret_cast<unsigned long long>(ptrA) % alignmnt) == 0);
     std::fill(B_h.begin(), B_h.end(), initializer);
     HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
@@ -118,19 +118,19 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Negative) {
   void* ptrA;
 
   SECTION("Nullptr to ptr") {
-    REQUIRE(hipMemAddressReserve(nullptr, size_mem, 0, 0, 0) == hipErrorInvalidValue);
+    REQUIRE(hipMemAddressReserve(nullptr, size_mem, 0, nullptr, 0) == hipErrorInvalidValue);
   }
 
   SECTION("pass size as 0") {
-    REQUIRE(hipMemAddressReserve(&ptrA, 0, 0, 0, 0) == hipErrorInvalidValue);
+    REQUIRE(hipMemAddressReserve(&ptrA, 0, 0, nullptr, 0) == hipErrorInvalidValue);
   }
 
   SECTION("pass non power of two for alignment") {
-    REQUIRE(hipMemAddressReserve(&ptrA, size_mem, 3, 0, 0) == hipErrorInvalidValue);
+    REQUIRE(hipMemAddressReserve(&ptrA, size_mem, 3, nullptr, 0) == hipErrorInvalidValue);
   }
 
   SECTION("pass size as non multiple of host page size") {
-    REQUIRE(hipMemAddressReserve(&ptrA, (size_mem - 1), 0, 0, 0) == hipErrorInvalidValue);
+    REQUIRE(hipMemAddressReserve(&ptrA, (size_mem - 1), 0, nullptr, 0) == hipErrorInvalidValue);
   }
 
   CTX_DESTROY();

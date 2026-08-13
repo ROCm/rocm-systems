@@ -31,9 +31,9 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <windows.h>
+#include <Windows.h>
 #include <tchar.h>
-#include <tlhelp32.h>
+#include <TlHelp32.h>
 #else
 #include <unistd.h>
 #include <sys/types.h>
@@ -54,7 +54,7 @@ typedef pid_t Process;
 inline std::string getSelfExePath() {
 #if HT_WIN
   char path[MAX_PATH];
-  DWORD len = GetModuleFileName(NULL, path, MAX_PATH);
+  DWORD len = GetModuleFileName(nullptr, path, MAX_PATH);
   return std::string(path, len);
 #else
   char path[4096];
@@ -121,7 +121,7 @@ class SpawnProc {
 
     std::string res;
     for (size_t i = 0; i < len; i++) {
-      res += 'a' + dist(rng);
+      res += static_cast<char>('a' + dist(rng));
     }
     return res;
   }
@@ -160,7 +160,7 @@ class SpawnProc {
       sa.nLength = sizeof(sa);
       sa.bInheritHandle = TRUE;
       hFile = CreateFile(tmpFileName_.c_str(), GENERIC_WRITE, 0, &sa,
-                         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
       if (hFile != INVALID_HANDLE_VALUE) {
         si.dwFlags |= STARTF_USESTDHANDLES;
         si.hStdOutput = hFile;
@@ -172,7 +172,7 @@ class SpawnProc {
     }
 
     std::vector<char> envBlock;
-    LPVOID lpEnvironment = NULL;
+    LPVOID lpEnvironment = nullptr;
     if (!envVars_.empty()) {
       auto icaseFind = [&](const std::string& key) {
         std::string lowerKey = key;
@@ -209,11 +209,11 @@ class SpawnProc {
     }
 
     memset(&process_, 0, sizeof(process_));
-    BOOL ok = CreateProcess(exeName_.c_str(), cmdLineInput.data(), NULL, NULL,
-                            inheritHandles, 0, lpEnvironment, NULL, &si, &process_);
+    BOOL ok = CreateProcess(exeName_.c_str(), cmdLineInput.data(), nullptr, nullptr,
+                            inheritHandles, 0, lpEnvironment, nullptr, &si, &process_);
 
     if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
-    if (!ok) return GetLastError();
+    if (!ok) return static_cast<int>(GetLastError());
     spawned_ = true;
     return 0;
 #else

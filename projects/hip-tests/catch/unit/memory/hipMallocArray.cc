@@ -425,7 +425,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocArray_MaxTexture_Default, uint, int4, ushor
                    char4, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
-  size_t width, height;
+  size_t width = 0, height = 0;
   hipArray_t array{};
   hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
   const unsigned int flag = hipArrayDefault;

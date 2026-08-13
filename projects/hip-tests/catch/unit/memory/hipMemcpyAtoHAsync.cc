@@ -48,8 +48,8 @@ HIP_TEST_CASE(Unit_hipMemcpyAtoHAsync_Basic) {
   HIP_CHECK(hipMallocArray(&A_a, &desc, col, row, hipArrayDefault))
   HIP_CHECK(hipMemcpy2DToArray(A_a, 0, 0, A_h, col * sizeof(int), col * sizeof(int), row,
                                hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpyAtoHAsync(B_h, A_a, 0, sizeof(int) * col * row, 0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipMemcpyAtoHAsync(B_h, A_a, 0, sizeof(int) * col * row, nullptr))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   for (int i = 0; i < (row * col); i++) {
     REQUIRE(A_h[i] == B_h[i]);
   }

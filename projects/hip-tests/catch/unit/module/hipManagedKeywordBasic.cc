@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_hipModuleGetGlobal_Functional) {
     HIP_CHECK(hipModuleLoad(&Module, fileName))
     hipFunction_t Function;
     HIP_CHECK(hipModuleGetFunction(&Function, Module, "GPU_func"))
-    HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, 1, 1, 1, 0, 0, NULL, NULL))
+    HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr))
     HIP_CHECK(hipDeviceSynchronize())
     HIP_CHECK(hipModuleGetGlobal(reinterpret_cast<hipDeviceptr_t*>(&x), &xSize, Module, "x"))
     HIP_CHECK(hipMemcpyDtoH(&data, hipDeviceptr_t(x), xSize))

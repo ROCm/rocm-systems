@@ -43,7 +43,7 @@ __global__ void testinline()
 }
 )"};
 
-std::vector<char> compile_prog(const char* src) {
+static std::vector<char> compile_prog(const char* src) {
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, src, nullptr, 0, nullptr, nullptr));
   
@@ -79,7 +79,7 @@ std::vector<char> compile_prog(const char* src) {
   return code;
 }
 
-void* link_prog(hipLinkState_t* state,const std::vector<char>& global_obj, const std::vector<char>& device_obj) {
+static void* link_prog(hipLinkState_t* state,const std::vector<char>& global_obj, const std::vector<char>& device_obj) {
   HIP_CHECK(hipLinkCreate(0, nullptr, nullptr, state))
 
   if (global_obj.size() > 0) {
@@ -114,7 +114,7 @@ HIP_TEST_CASE(Unit_hiprtc_spirv_compilation) {
   HIP_CHECK(hipModuleLoadData(&module, bin))
   HIP_CHECK(hipModuleGetFunction(&function, module, "testinline"))
 
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 64, 1, 1, 0, 0, nullptr, 0))
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 64, 1, 1, 0, nullptr, nullptr, nullptr))
   HIP_CHECK(hipDeviceSynchronize())
 
   HIP_CHECK(hipModuleUnload(module))

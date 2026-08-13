@@ -91,9 +91,9 @@ static void test_cg_thread_block_type(ThreadBlockTypeTests test_type, int block_
   int *size_dev, *size_host;
   int *thd_rank_dev, *thd_rank_host;
   int *sync_dev, *sync_host;
-  dim3 *group_index_dev, *group_index_host;
-  dim3 *thd_index_dev, *thd_index_host;
-  dim3 *group_dim_dev, *group_dim_host;
+  dim3 *group_index_dev = nullptr, *group_index_host = nullptr;
+  dim3 *thd_index_dev = nullptr, *thd_index_host = nullptr;
+  dim3 *group_dim_dev = nullptr, *group_dim_host = nullptr;
 
   // Allocate device memory
   HIP_CHECK(hipMalloc(&size_dev, num_bytes))

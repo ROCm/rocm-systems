@@ -76,7 +76,7 @@ if(NOT WIN32)
   target_link_libraries(HrrTest stdc++ stdc++fs)
 endif()
 
-target_include_directories(HrrTest PRIVATE
+target_include_directories(HrrTest SYSTEM PRIVATE
     ${HRR_CLR_DIR}
     ${HRR_CLR_DIR}/playback
 )

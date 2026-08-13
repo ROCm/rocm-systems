@@ -12,7 +12,7 @@ Functional ::
  root nodes (i.e., nodes without dependencies).
  2) Pass nodes as nullptr and verify api returns actual number of root nodes added to graph.
  3) If NumRootNodes passed is greater than the actual number of root nodes, the remaining entries in
- nodes list will be set to NULL, and the number of nodes actually obtained will be returned in
+ nodes list will be set to nullptr, and the number of nodes actually obtained will be returned in
 NumRootNodes. 4) Create a graph with stream capture done on multiple dependent streams. Verify root
 nodes of created graph are matching the operations pushed which doesn't have dependencies. 5)
 Functional Test to validate number of root nodes when dependencies in the graph are dynamically
@@ -62,11 +62,11 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Functional) {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
   HIP_CHECK(hipGraphCreate(&graph, 0))
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, NULL, 0, A_d, A_h, Nbytes,
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   dependencies.push_back(memcpyNode);
   rootnodelist.push_back(memcpyNode);
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, NULL, 0, B_d, B_h, Nbytes,
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, B_d, B_h, Nbytes,
                                     hipMemcpyHostToDevice));
   dependencies.push_back(memcpyNode);
   rootnodelist.push_back(memcpyNode);
@@ -123,7 +123,7 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Functional) {
   }
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
   HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
@@ -214,7 +214,7 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_CapturedStream) {
   REQUIRE(nodeType == hipGraphNodeTypeMemset);
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
   HIP_CHECK(hipStreamSynchronize(streamForGraph))
 

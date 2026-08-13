@@ -101,7 +101,7 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device
     REQUIRE(write(fd[1], &handle, sizeof(handle)) >= 0);
     REQUIRE(close(fd[1]) == 0);
 
-    REQUIRE(wait(NULL) >= 0);
+    REQUIRE(wait(nullptr) >= 0);
 
     HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr)))
   }

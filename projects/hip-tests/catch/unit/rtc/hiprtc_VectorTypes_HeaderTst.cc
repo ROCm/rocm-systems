@@ -18,6 +18,8 @@
 #include <hip_test_common.hh>
 #include <hip/hiprtc.h>
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Woverlength-strings"
 static constexpr auto vectorTypes_string{
     R"(
 extern "C"
@@ -1333,6 +1335,7 @@ __global__ void vectorTypes(int *res) {
   d4 = d41 / double4(3.1, 1.3, 2.0, 2.4);  res[1239] = isEqualDouble4(d4, double4(1.0, 1.0, 1.2, 2.0));
 }
 )"};
+#pragma clang diagnostic pop
 
 /**
  * Test Description
@@ -1352,8 +1355,8 @@ HIP_TEST_CASE(Unit_Rtc_VectorTypes_header) {
   int* result_h;
   int* result_d;
   int n = 1240;
-  int Nbytes = n * sizeof(int);
-  result_h = new int[n];
+  size_t Nbytes = static_cast<size_t>(n) * sizeof(int);
+  result_h = new int[static_cast<size_t>(n)];
   for (int i = 0; i < n; i++) {
     result_h[i] = 0;
   }
@@ -1372,7 +1375,7 @@ HIP_TEST_CASE(Unit_Rtc_VectorTypes_header) {
   const char* compiler_option = complete_CO.c_str();
   hiprtcProgram prog;
 
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, vectorTypes_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, vectorTypes_string, kername, 0, nullptr, nullptr));
   hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, &compiler_option)};
   if (!(compileResult == HIPRTC_SUCCESS)) {
     WARN("hiprtcCompileProgram() api failed!!");
@@ -1396,7 +1399,7 @@ HIP_TEST_CASE(Unit_Rtc_VectorTypes_header) {
   hipFunction_t function;
   HIP_CHECK(hipModuleLoadData(&module, codec.data()))
   HIP_CHECK(hipModuleGetFunction(&function, module, kername))
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter))
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, kernel_parameter))
   HIP_CHECK(hipDeviceSynchronize())
   HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost))
   for (int i = 0; i < n; i++) {

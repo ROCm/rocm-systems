@@ -76,7 +76,7 @@ bool testCodeObjFile(const char* codeObjFile) {
 
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, stream, NULL,
+  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, stream, nullptr,
                                   reinterpret_cast<void**>(&config)));
 
   HIP_CHECK(hipStreamSynchronize(stream))

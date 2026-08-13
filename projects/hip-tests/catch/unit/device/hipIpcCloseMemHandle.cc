@@ -78,7 +78,7 @@ HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
     REQUIRE(write(fd[1], &handle, sizeof(handle)) >= 0);
     REQUIRE(close(fd[1]) == 0);
 
-    REQUIRE(wait(NULL) >= 0);
+    REQUIRE(wait(nullptr) >= 0);
 
     hipPointerAttribute_t attributes;
     HIP_CHECK(hipPointerGetAttributes(&attributes, ptr))

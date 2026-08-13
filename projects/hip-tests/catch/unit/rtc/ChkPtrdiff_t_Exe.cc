@@ -19,14 +19,14 @@
     }                                                                                              \
   }
 #define HIPRTC_CHECK(error)                                                                        \
-  {                                                                                                \
+  do {                                                                                             \
     auto localError = error;                                                                       \
     if (localError != HIPRTC_SUCCESS) {                                                            \
       printf("error: '%s'(%d) from %s at %s:%d\n", hiprtcGetErrorString(localError), localError,   \
              #error, __FUNCTION__, __LINE__);                                                      \
       exit(0);                                                                                     \
     }                                                                                              \
-  }
+  } while (0)
 static constexpr auto ptrdiff_Kernel_String{
     R"(
 extern "C"
@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
     platformVar = 1;
 #endif
   }
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ptrdiff_Kernel_String, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ptrdiff_Kernel_String, kername, 0, nullptr, nullptr));
   hiprtcResult compileResult{hiprtcCompileProgram(prog, 2, compiler_options)};
 
   if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
   hipFunction_t function;
   HIP_CHECK(hipModuleLoadData(&module, codec.data()))
   HIP_CHECK(hipModuleGetFunction(&function, module, kername))
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter))
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, kernel_parameter))
   HIP_CHECK(hipDeviceSynchronize())
   HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost))
   if (*result_h != 1) {

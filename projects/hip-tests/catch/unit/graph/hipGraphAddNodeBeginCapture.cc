@@ -84,7 +84,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_with_hipGraphAddHostNode) {
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal))
   HIP_CHECK(hipGraphCreate(&graph, 0))
 
-  hipHostNodeParams p = {0, 0};
+  hipHostNodeParams p = {nullptr, nullptr};
   p.fn = CpuCallback;
   p.userData = nullptr;
   HIP_CHECK(hipGraphAddHostNode(&cpuGraphNode, graph, nullptr, 0, &p))
@@ -93,7 +93,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_with_hipGraphAddHostNode) {
 
   HIP_CHECK(hipStreamEndCapture(stream, &graph))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, stream))
   HIP_CHECK(hipStreamSynchronize(stream))
 
@@ -129,7 +129,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_with_hipGraphAddHostNode) {
  */
 
 HIP_TEST_CASE(Unit_hipStreamEndCapture_later_and_add_a_node_inbetween) {
-  hipGraphExec_t graphExec;
+  hipGraphExec_t graphExec = nullptr;
   hipGraphNode_t memcpyD2H_C;
   hipStream_t stream;
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
@@ -281,7 +281,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_later_and_add_a_node_inbetween) {
                                       Nbytes, hipMemcpyDeviceToHost));
 
     hipGraphNode_t hostNode;
-    hipHostNodeParams hostParams = {0, 0};
+    hipHostNodeParams hostParams = {nullptr, nullptr};
     hostParams.fn = callbackFunc;
     hostParams.userData = C_h;
     HIP_CHECK(hipGraphAddHostNode(&hostNode, capGraph, nullptr, 0, &hostParams))
@@ -476,7 +476,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_later_and_add_a_node_inbetween) {
 
 HIP_TEST_CASE(Unit_hipStreamEndCapture_first_and_add_a_node_later) {
   hipGraph_t graph;
-  hipGraphExec_t graphExec;
+  hipGraphExec_t graphExec = nullptr;
   hipGraphNode_t memcpyD2H_C;
   hipStream_t stream;
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
@@ -622,7 +622,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_first_and_add_a_node_later) {
                                       hipMemcpyDeviceToHost));
 
     hipGraphNode_t hostNode;
-    hipHostNodeParams hostParams = {0, 0};
+    hipHostNodeParams hostParams = {nullptr, nullptr};
     hostParams.fn = callbackFunc;
     hostParams.userData = C_h;
     HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
@@ -800,7 +800,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_first_and_add_other_graph_node_later) {
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_AC, graph, nullptr, 0, A_h, C_d, Nbytes,
                                     hipMemcpyDeviceToHost));
   hipGraphNode_t hostNode;
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackFunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))

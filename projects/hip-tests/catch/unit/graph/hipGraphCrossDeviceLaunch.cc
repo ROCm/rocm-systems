@@ -87,7 +87,7 @@ HIP_TEST_CASE(Unit_hipGraphCrossDeviceLaunch_CrossStreamDependencyOrdering) {
   context.value = &h_value;
   context.expected = expected_value;
   hipGraphNode_t host_node = nullptr;
-  hipHostNodeParams host_params = {0, 0};
+  hipHostNodeParams host_params = {nullptr, nullptr};
   host_params.fn = recordHostValue;
   host_params.userData = &context;
 

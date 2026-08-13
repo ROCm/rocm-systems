@@ -21,14 +21,14 @@
 
 static constexpr int kBlockSize = 256;
 
-__global__ void fillKernel(float* buf, float value, int64_t n) {
+static __global__ void fillKernel(float* buf, float value, int64_t n) {
   int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   if (idx < n) {
     buf[idx] = value;
   }
 }
 
-__global__ void verifyKernel(const float* buf, float expected, int64_t n, int* error) {
+static __global__ void verifyKernel(const float* buf, float expected, int64_t n, int* error) {
   int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   if (idx < n && buf[idx] != expected) {
     atomicAdd(error, 1);
@@ -38,7 +38,7 @@ __global__ void verifyKernel(const float* buf, float expected, int64_t n, int* e
 // Busy-spin kernel: each thread loops `iters` times, reading/writing buf to
 // prevent the compiler from optimizing the loop away. Use a large iteration
 // count to keep the GPU busy long enough for concurrent host-thread launches.
-__global__ void busyKernel(float* buf, float value, int64_t n, int64_t iters) {
+static __global__ void busyKernel(float* buf, float value, int64_t n, int64_t iters) {
   int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   if (idx < n) {
     float v = value;
@@ -130,7 +130,7 @@ static GraphMemStats queryGraphMem(int device) {
   return s;
 }
 
-void printDeviceMem(const char* label) {
+static void printDeviceMem(const char* label) {
     size_t freeMem = 0, totalMem = 0;
     HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem))
     size_t usedMem = totalMem - freeMem;

@@ -55,7 +55,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_NegTsts) {
   config.blockDimY = 1;
   config.blockDimZ = 1;
   config.sharedMemBytes = 0;
-  config.hStream = 0;  // default stream
+  config.hStream = nullptr;  // default stream
 
   // Set up a cooperative launch attribute
   hipDrvLaunchAttribute attr;
@@ -77,15 +77,15 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_NegTsts) {
   HIP_CHECK(hipModuleGetFunction(&function, module, kernel_name))
 
   SECTION("Kernel config as nullptr") {
-    HIP_CHECK_ERROR(hipDrvLaunchKernelEx(nullptr, function, kernelParams, NULL),
+    HIP_CHECK_ERROR(hipDrvLaunchKernelEx(nullptr, function, kernelParams, nullptr),
                     hipErrorInvalidValue);
   }
   SECTION("Kernel function as nullptr") {
-    HIP_CHECK_ERROR(hipDrvLaunchKernelEx(&config, nullptr, kernelParams, NULL),
+    HIP_CHECK_ERROR(hipDrvLaunchKernelEx(&config, nullptr, kernelParams, nullptr),
                     hipErrorInvalidResourceHandle);
   }
   SECTION("Kernel parameter as nullptr") {
-    HIP_CHECK_ERROR(hipDrvLaunchKernelEx(&config, function, nullptr, NULL), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipDrvLaunchKernelEx(&config, function, nullptr, nullptr), hipErrorInvalidValue);
   }
   HIP_LAUNCH_CONFIG invalidConfig = {};
   invalidConfig.gridDimX = 0;
@@ -95,7 +95,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_NegTsts) {
   invalidConfig.blockDimY = 1;
   invalidConfig.blockDimZ = 1;
   invalidConfig.sharedMemBytes = 0;
-  invalidConfig.hStream = 0;  // default stream
+  invalidConfig.hStream = nullptr;  // default stream
 
   // Set up a cooperative launch attribute
   hipDrvLaunchAttribute invalidAttr;
@@ -112,7 +112,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_NegTsts) {
   err = hipErrorInvalidValue;
 #endif
   SECTION("Invalid Kernel config") {
-    HIP_CHECK_ERROR(hipDrvLaunchKernelEx(&invalidConfig, function, kernelParams, NULL), err);
+    HIP_CHECK_ERROR(hipDrvLaunchKernelEx(&invalidConfig, function, kernelParams, nullptr), err);
   }
 
   HIP_CHECK(hipModuleUnload(module))
@@ -136,7 +136,7 @@ bool runTestDrvLaunch(const char* testName, std::string kernelFunc, int totalThr
   config.blockDimY = 1;
   config.blockDimZ = 1;
   config.sharedMemBytes = 0;
-  config.hStream = 0;  // default stream
+  config.hStream = nullptr;  // default stream
 
   // Set up a cooperative launch attribute
   hipDrvLaunchAttribute attr;
@@ -158,7 +158,7 @@ bool runTestDrvLaunch(const char* testName, std::string kernelFunc, int totalThr
   HIP_CHECK(hipModuleGetFunction(&function, module, kernelFunc.c_str()))
 
   // Launch the kernel using the driver API function.
-  hipError_t err = hipDrvLaunchKernelEx(&config, function, kernelParams, NULL);
+  hipError_t err = hipDrvLaunchKernelEx(&config, function, kernelParams, nullptr);
   if (err != hipSuccess) {
     printf("%s test failed to launch kernel: error code %d\n", testName, err);
     HIP_CHECK(hipFree(d_output))
@@ -242,7 +242,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_Different_Kernels) {
   config.blockDimY = 1;
   config.blockDimZ = 1;
   config.sharedMemBytes = 0;
-  config.hStream = 0;
+  config.hStream = nullptr;
   hipDrvLaunchAttribute attr;
   attr.id = hipDrvLaunchAttributeCooperative;
   // Zero out the padding bytes
@@ -321,7 +321,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs) {
   config.blockDimY = 1;
   config.blockDimZ = 1;
   config.sharedMemBytes = 0;
-  config.hStream = 0;
+  config.hStream = nullptr;
   hipDrvLaunchAttribute attr;
   attr.id = hipDrvLaunchAttributeCooperative;
   // Zero out the padding bytes
@@ -399,7 +399,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_MaxBlockDims) {
   config.blockDimY = 1;
   config.blockDimZ = 1;
   config.sharedMemBytes = 0;
-  config.hStream = 0;
+  config.hStream = nullptr;
   hipDrvLaunchAttribute attr;
   attr.id = hipDrvLaunchAttributeCooperative;
   // Zero out the padding bytes

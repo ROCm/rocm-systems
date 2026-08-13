@@ -23,7 +23,7 @@ Functional:
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
-#if CUDA_VERSION >= CUDA_12000
+#if defined(CUDA_VERSION) && defined(CUDA_12000) && CUDA_VERSION >= CUDA_12000
 
 constexpr size_t N = 1000000;
 /**
@@ -73,7 +73,7 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithParams_Negative) {
   }
 }
 
-void GraphInstantiateWithParams_DependencyGraph() {
+static void GraphInstantiateWithParams_DependencyGraph() {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -153,8 +153,8 @@ void GraphInstantiateWithParams_DependencyGraph() {
   HIP_CHECK(hipGraphInstantiateWithParams(&graphExec, graph, &params))
   REQUIRE(params.result_out == hipGraphInstantiateSuccess);
 
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   // Verify graph execution result
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
@@ -163,7 +163,7 @@ void GraphInstantiateWithParams_DependencyGraph() {
   HIP_CHECK(hipGraphDestroy(graph))
 }
 
-void GraphInstantiateWithParams_StreamCapture() {
+static void GraphInstantiateWithParams_StreamCapture() {
   float *A_d, *C_d;
   float *A_h, *C_h;
   size_t Nbytes = N * sizeof(float);
@@ -178,7 +178,7 @@ void GraphInstantiateWithParams_StreamCapture() {
 
   // Fill with Phi + i
   for (size_t i = 0; i < N; i++) {
-    A_h[i] = 1.618f + i;
+    A_h[i] = 1.618f + static_cast<float>(i);
   }
   HIP_CHECK(hipMalloc(&A_d, Nbytes))
   HIP_CHECK(hipMalloc(&C_d, Nbytes))

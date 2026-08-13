@@ -199,7 +199,7 @@ static bool checkMempoolMultStreamConcurrentExec(int N, bool useDefStrm = true) 
   hipStream_t testStreams[3];
   HIP_CHECK(hipStreamCreate(&testStreams[0]))
   if (useDefStrm) {
-    testStreams[1] = 0;  // null stream
+    testStreams[1] = nullptr;  // null stream
     testStreams[2] = hipStreamPerThread;
   } else {
     HIP_CHECK(hipStreamCreate(&testStreams[1]))
@@ -393,8 +393,8 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReleaseThreshold) {
  */
 HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_NullStream) {
   checkMempoolSupported(0) constexpr int N = 1 << 20;
-  REQUIRE(true == checkMaximumAndDefaultThreshold(0, N, testdefault));
-  REQUIRE(true == checkMaximumAndDefaultThreshold(0, N, testMaximum));
+  REQUIRE(true == checkMaximumAndDefaultThreshold(nullptr, N, testdefault));
+  REQUIRE(true == checkMaximumAndDefaultThreshold(nullptr, N, testMaximum));
 }
 
 /**

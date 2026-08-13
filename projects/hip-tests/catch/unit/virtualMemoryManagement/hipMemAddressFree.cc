@@ -47,7 +47,7 @@ HIP_TEST_CASE(Unit_hipMemAddressFree_negative) {
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
 
   SECTION("nullptr to devptr") {
     REQUIRE(hipMemAddressFree(nullptr, size_mem) == hipErrorInvalidValue);

@@ -105,9 +105,9 @@ static void test_group_partition(unsigned tileSz) {
   int blockSize = 1;
   int threadsPerBlock = WAVE_SIZE;
 
-  int* hPtr = NULL;
-  int* dPtr = NULL;
-  int* cpuPrefixSum = NULL;
+  int* hPtr = nullptr;
+  int* dPtr = nullptr;
+  int* cpuPrefixSum = nullptr;
 
   std::vector<unsigned int> cg_sizes = {1, 2, 3};
   for (auto i : cg_sizes) {
@@ -154,9 +154,9 @@ static void test_shfl_up() {
     int group_size = totalThreads / i;
     int group_size_in_bytes = group_size * sizeof(int);
 
-    int* hPtr = NULL;
-    int* dPtr = NULL;
-    int* dResults = NULL;
+    int* hPtr = nullptr;
+    int* dPtr = nullptr;
+    int* dResults = nullptr;
     int lane_delta = (rand() % group_size);
 
     std::cout << "Testing coalesced_groups shfl_up with lane_delta " << lane_delta

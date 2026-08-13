@@ -155,7 +155,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_VMM) {
 
   // Validating hipMemAddressReserve API
   void* ptr = nullptr;
-  HIP_CHECK(dyn_hipMemAddressReserve_ptr(&ptr, granularity, 0, 0, 0))
+  HIP_CHECK(dyn_hipMemAddressReserve_ptr(&ptr, granularity, 0, nullptr, 0))
   REQUIRE(ptr != nullptr);
 
   // Validating hipMemMap API

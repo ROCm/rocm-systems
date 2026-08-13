@@ -34,15 +34,18 @@ template <> inline __half sum(__half* a) {
   __half factor;
   getFactor(factor);
   for (int i = 0; i < n; i++) {
-    a[i] = i + __half2float(factor);
+    a[i] = static_cast<float>(i) + __half2float(factor);
     cpuSum = __half2float(cpuSum) + __half2float(a[i]);
   }
   return cpuSum;
 }
 
 template <> inline bool compare(__half gpuSum, __half cpuSum) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfloat-equal"
   if (__half2float(gpuSum) != __half2float(cpuSum)) {
     return true;
   }
+#pragma clang diagnostic pop
   return false;
 }

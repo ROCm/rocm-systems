@@ -31,9 +31,10 @@ inline std::string to_string(const LinearAllocs allocation_type) {
       return "hipMalloc";
     case LinearAllocs::hipMallocManaged:
       return "hipMallocManaged";
-    default:
-      return "unknown alloc type";
+    case LinearAllocs::noAlloc:
+      return "noAlloc";
   }
+  return "unknown alloc type";
 }
 
 template <typename T> class LinearAllocGuard {
@@ -93,7 +94,7 @@ template <typename T> class LinearAllocGuard {
 
   ~LinearAllocGuard() { dealloc(); }
 
-  T* ptr() const { return ptr_; };
+  T* ptr() const { return ptr_; }
   T* host_ptr() const { return host_ptr_; }
   size_t size_bytes() const { return size_; }
 
@@ -138,7 +139,7 @@ template <typename T> class LinearAllocGuardMultiDim {
   ~LinearAllocGuardMultiDim() { static_cast<void>(hipFree(pitched_ptr_.ptr)); }
 
  public:
-  T* ptr() const { return reinterpret_cast<T*>(pitched_ptr_.ptr); };
+  T* ptr() const { return reinterpret_cast<T*>(pitched_ptr_.ptr); }
 
   size_t pitch() const { return pitched_ptr_.pitch; }
 
@@ -360,7 +361,7 @@ class EventsGuard {
     }
   }
 
-  hipEvent_t& operator[](int index) { return events_[index]; }
+  hipEvent_t& operator[](size_t index) { return events_[index]; }
 
   operator hipEvent_t() const { return events_.at(0); }
 
@@ -383,7 +384,7 @@ class StreamsGuard {
     for (auto& s : streams_) static_cast<void>(hipStreamDestroy(s));
   }
 
-  hipStream_t& operator[](int index) { return streams_[index]; }
+  hipStream_t& operator[](size_t index) { return streams_[index]; }
 
   operator hipStream_t() const { return streams_.at(0); }
 
@@ -414,6 +415,7 @@ class MemPoolGuard {
         pool_props.win32SecurityAttributes = nullptr;
 
         HIP_CHECK(hipMemPoolCreate(&mempool_, &pool_props))
+        break;
     }
   }
 

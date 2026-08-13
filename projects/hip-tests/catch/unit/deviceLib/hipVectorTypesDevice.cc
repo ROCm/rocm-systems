@@ -205,12 +205,12 @@ template <typename V> __global__ void CheckSharedVectorType(bool* ptr) {
 
 template <typename V> bool run_CheckSharedVectorType() {
   bool* ptr = nullptr;
-  if (hipMalloc(&ptr, sizeof(bool)) != HIP_SUCCESS) return false;
+  if (hipMalloc(&ptr, sizeof(bool)) != hipSuccess) return false;
   unique_ptr<bool, decltype(hipFree)*> correct{ptr, hipFree};
-  hipLaunchKernelGGL((CheckSharedVectorType<V>), dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, correct.get());
+  hipLaunchKernelGGL((CheckSharedVectorType<V>), dim3(1, 1, 1), dim3(1, 1, 1), 0, nullptr, correct.get());
   HIP_CHECK(hipGetLastError())
   bool passed = true;
-  if (hipMemcpyDtoH(&passed, correct.get(), sizeof(bool)) != HIP_SUCCESS) {
+  if (hipMemcpyDtoH(&passed, correct.get(), sizeof(bool)) != hipSuccess) {
     return false;
   }
   return passed;

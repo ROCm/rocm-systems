@@ -19,7 +19,7 @@
  * size_t *numDependencies_out __dparm(0)))` - Get stream's capture state
  */
 
-void checkStreamCaptureInfo_v2(hipStreamCaptureMode mode, hipStream_t stream) {
+static void checkStreamCaptureInfo_v2(hipStreamCaptureMode mode, hipStream_t stream) {
   constexpr size_t N = 1000000;
   size_t Nbytes = N * sizeof(float);
 
@@ -30,7 +30,7 @@ void checkStreamCaptureInfo_v2(hipStreamCaptureMode mode, hipStream_t stream) {
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
   hipGraphNodeType type(hipGraphNodeTypeEmpty);
   unsigned long long capSequenceID = 0;  // NOLINT
-  size_t numDependencies;
+  size_t numDependencies = 0;
 
   LinearAllocGuard<float> A_h(LinearAllocs::malloc, Nbytes);
   LinearAllocGuard<float> B_h(LinearAllocs::malloc, Nbytes);

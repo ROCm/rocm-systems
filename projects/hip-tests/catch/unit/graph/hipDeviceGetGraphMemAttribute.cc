@@ -118,7 +118,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory) {
   HIP_CHECK(hipGraphExecDestroy(graph_exec2))
 
   HIP_CHECK(hipDeviceGraphMemTrim(0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   checkGraphMemAttribute(0, 2 * element_count * sizeof(int));
   ResetGraphMemAttribute();

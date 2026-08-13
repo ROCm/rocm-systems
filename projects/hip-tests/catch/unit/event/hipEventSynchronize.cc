@@ -114,12 +114,12 @@ HIP_TEST_CASE(Unit_hipEventSynchronize_NoEventRecord_Positive) {
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
-  HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, 0,
+  HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, nullptr,
                                static_cast<const float*>(A_d), static_cast<const float*>(B_d), C_d,
                                N);
 
   // Record the end_event
-  HIP_CHECK(hipEventRecord(end_event, NULL))
+  HIP_CHECK(hipEventRecord(end_event, nullptr))
 
   // When hipEventSynchronized is called on event that has not been recorded,
   // the function returns immediately

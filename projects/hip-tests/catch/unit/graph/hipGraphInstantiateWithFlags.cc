@@ -14,6 +14,8 @@ GPU device  and instantite the graph launch in peer GPU device Mapping is missin
 platform hence skipping the testcases
 */
 
+#include <limits>
+
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
@@ -32,9 +34,9 @@ static constexpr size_t NBYTES = SIZE * sizeof(int);
  * In fillKernel, all elements of the array filled with given value
  */
 static __global__ void fillKernel(int* arr, int size, int value) {
-  int offset = blockDim.x * blockIdx.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-  for (int i = offset; i < size; i += stride) {
+  unsigned int offset = blockDim.x * blockIdx.x + threadIdx.x;
+  unsigned int stride = blockDim.x * gridDim.x;
+  for (unsigned int i = offset; i < static_cast<unsigned int>(size); i += stride) {
     arr[i] = value;
   }
 }
@@ -43,9 +45,9 @@ static __global__ void fillKernel(int* arr, int size, int value) {
  * In doubleKernel, all elements of the array doubled with its value
  */
 static __global__ void doubleKernel(int* arr, int size) {
-  int offset = blockDim.x * blockIdx.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-  for (int i = offset; i < size; i += stride) {
+  unsigned int offset = blockDim.x * blockIdx.x + threadIdx.x;
+  unsigned int stride = blockDim.x * gridDim.x;
+  for (unsigned int i = offset; i < static_cast<unsigned int>(size); i += stride) {
     arr[i] += arr[i];
   }
 }
@@ -78,7 +80,7 @@ This function verifies the following scenarios
 1. Creates dependency graph, Instantiates the graph with flags and verifies it
 2. Creates graph on one GPU-1 device and instantiates the graph on peer GPU device
 */
-void GraphInstantiateWithFlags_DependencyGraph(bool ctxt_change = false) {
+static void GraphInstantiateWithFlags_DependencyGraph(bool ctxt_change = false) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -158,8 +160,8 @@ void GraphInstantiateWithFlags_DependencyGraph(bool ctxt_change = false) {
   }
   // Instantiate and launch the cloned graph
   HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0))
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   // Verify graph execution result
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
@@ -173,7 +175,7 @@ This function verifies the following scenarios
 1. Creates stream capture graph, Instantiates the graph with flags and verifies it
 2. Creates graph on one GPU-1 device and instantiates the graph on peer GPU device
 */
-void GraphInstantiateWithFlags_StreamCapture(bool deviceContextChg = false) {
+static void GraphInstantiateWithFlags_StreamCapture(bool deviceContextChg = false) {
   float *A_d, *C_d;
   float *A_h, *C_h;
   size_t Nbytes = N * sizeof(float);
@@ -188,7 +190,7 @@ void GraphInstantiateWithFlags_StreamCapture(bool deviceContextChg = false) {
 
   // Fill with Phi + i
   for (size_t i = 0; i < N; i++) {
-    A_h[i] = 1.618f + i;
+    A_h[i] = 1.618f + static_cast<float>(i);
   }
   HIP_CHECK(hipMalloc(&A_d, Nbytes))
   HIP_CHECK(hipMalloc(&C_d, Nbytes))
@@ -431,7 +433,7 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop) {
     REQUIRE(devMem != nullptr);
 
 #if HT_AMD
-    size_t sizeToCheck = -1;
+    size_t sizeToCheck = std::numeric_limits<size_t>::max();
     HIP_CHECK(hipMemPtrGetInfo(devMem, &sizeToCheck))
     REQUIRE(sizeToCheck == NBytes);
 #endif

@@ -214,7 +214,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemFreeNode_Functional) {
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, NULL, 0, &allocParam))
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam))
   REQUIRE(allocParam.dptr != nullptr);
   HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph, &allocNodeA, 1,
                                    reinterpret_cast<void*>(allocParam.dptr)));

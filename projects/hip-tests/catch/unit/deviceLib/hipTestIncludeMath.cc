@@ -9,6 +9,8 @@
 
 // Test __HIP_DEVICE_COMPILE__ is defined after math_functions.h
 // is included.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-noreturn"
 __device__ __host__ inline void throw_std_bad_alloc() {
 #ifndef __HIP_DEVICE_COMPILE__
   throw std::bad_alloc();
@@ -17,6 +19,7 @@ __device__ __host__ inline void throw_std_bad_alloc() {
   new int[kHuge];
 #endif
 }
+#pragma clang diagnostic pop
 
 __global__ void FloatMathPreciseKernel() {
   int iX;
@@ -116,6 +119,6 @@ __global__ void FloatMathPreciseKernel() {
 HIP_TEST_CASE(Unit_TestIncludeMathPreciseFloat) {
   hipError_t err;
   err = hipLaunchKernel(reinterpret_cast<void*>(FloatMathPreciseKernel), dim3(1, 1, 1),
-                        dim3(1, 1, 1), 0, 0, 0);
+                        dim3(1, 1, 1), nullptr, 0, nullptr);
   REQUIRE(err == hipSuccess);
 }

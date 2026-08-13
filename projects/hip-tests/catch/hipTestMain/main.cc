@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: MIT
  */
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-macros"
 #define CATCH_CONFIG_RUNNER
+#pragma clang diagnostic pop
 #include <cmd_options.hh>
 #include <hip_test_common.hh>
 

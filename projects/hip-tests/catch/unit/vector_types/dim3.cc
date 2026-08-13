@@ -40,7 +40,7 @@ HIP_TEST_CASE(Unit_dim3_Empty_Positive_Device) {
   dim3* vector_d;
   HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)))
   HIP_CHECK(hipMemcpy(vector_d, &vector_h, sizeof(dim3), hipMemcpyHostToDevice))
-  Dim3VectorKernel<<<1, 1, 0, 0>>>(vector_d);
+  Dim3VectorKernel<<<1, 1, 0, nullptr>>>(vector_d);
   HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(dim3), hipMemcpyDeviceToHost))
   HIP_CHECK(hipFree(vector_d))
 
@@ -70,7 +70,7 @@ HIP_TEST_CASE(Unit_dim3_X_Positive_Device) {
   uint32_t value_x =
       GENERATE(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max() / 2,
                std::numeric_limits<uint32_t>::max());
-  Dim3VectorKernel<<<1, 1, 0, 0>>>(vector_d, value_x);
+  Dim3VectorKernel<<<1, 1, 0, nullptr>>>(vector_d, value_x);
   HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(dim3), hipMemcpyDeviceToHost))
   HIP_CHECK(hipFree(vector_d))
 
@@ -103,7 +103,7 @@ HIP_TEST_CASE(Unit_dim3_XY_Positive_Device) {
   uint32_t value_y =
       GENERATE(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max() / 2,
                std::numeric_limits<uint32_t>::max());
-  Dim3VectorKernel<<<1, 1, 0, 0>>>(vector_d, value_x, value_y);
+  Dim3VectorKernel<<<1, 1, 0, nullptr>>>(vector_d, value_x, value_y);
   HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(dim3), hipMemcpyDeviceToHost))
   HIP_CHECK(hipFree(vector_d))
 
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Unit_dim3_XYZ_Positive_Device) {
   uint32_t value_z =
       GENERATE(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max() / 2,
                std::numeric_limits<uint32_t>::max());
-  Dim3VectorKernel<<<1, 1, 0, 0>>>(vector_d, value_x, value_y, value_z);
+  Dim3VectorKernel<<<1, 1, 0, nullptr>>>(vector_d, value_x, value_y, value_z);
   HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(dim3), hipMemcpyDeviceToHost))
   HIP_CHECK(hipFree(vector_d))
 

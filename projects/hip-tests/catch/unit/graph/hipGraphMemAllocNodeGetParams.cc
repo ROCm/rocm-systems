@@ -81,7 +81,7 @@ static void hipGraphMemAllocNodeGetParams_Functional(unsigned deviceId = 0) {
   params_in.poolProps.location.id = deviceId;
   params_in.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, NULL, 0, &params_in))
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &params_in))
   int* A_d = reinterpret_cast<int*>(params_in.dptr);
   REQUIRE(A_d != nullptr);
 
@@ -181,7 +181,7 @@ HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2) {
   params_in.poolProps.location.id = 0;
   params_in.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, NULL, 0, &params_in))
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &params_in))
   REQUIRE(params_in.dptr != nullptr);
   A_d = reinterpret_cast<int*>(params_in.dptr);
   HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeB, graph, &allocNodeA, 1, &params_in))
@@ -376,7 +376,7 @@ HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative) {
   params_in.poolProps.location.id = 0;
   params_in.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, NULL, 0, &params_in))
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &params_in))
   int* A_d = reinterpret_cast<int*>(params_in.dptr);
   REQUIRE(A_d != nullptr);
 

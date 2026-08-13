@@ -82,11 +82,11 @@ HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_BasicFunctional) {
   peerCopyParams.dstArray = array_2;
   peerCopyParams.dstDevice = dst_device;
   peerCopyParams.dstPos = make_hipPos(0, 0, 0);
-  peerCopyParams.dstPtr = make_hipPitchedPtr(0, 0, 0, 0);
+  peerCopyParams.dstPtr = make_hipPitchedPtr(nullptr, 0, 0, 0);
   peerCopyParams.srcArray = array_1;
   peerCopyParams.srcDevice = src_device;
   peerCopyParams.srcPos = make_hipPos(0, 0, 0);
-  peerCopyParams.srcPtr = make_hipPitchedPtr(0, 0, 0, 0);
+  peerCopyParams.srcPtr = make_hipPitchedPtr(nullptr, 0, 0, 0);
   peerCopyParams.extent = extent;
 
   HIP_CHECK(hipMemcpy3DPeerAsync(&peerCopyParams, stream))
@@ -155,10 +155,10 @@ HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_NegativeTsts) {
   hipMemcpy3DPeerParms peerCopyParams{};
   peerCopyParams.dstArray = array_2;
   peerCopyParams.dstPos = make_hipPos(0, 0, 0);
-  peerCopyParams.dstPtr = make_hipPitchedPtr(0, 0, 0, 0);
+  peerCopyParams.dstPtr = make_hipPitchedPtr(nullptr, 0, 0, 0);
   peerCopyParams.srcArray = array_1;
   peerCopyParams.srcPos = make_hipPos(0, 0, 0);
-  peerCopyParams.srcPtr = make_hipPitchedPtr(0, 0, 0, 0);
+  peerCopyParams.srcPtr = make_hipPitchedPtr(nullptr, 0, 0, 0);
   peerCopyParams.extent = extent;
 
   SECTION("Max Destination device id") {

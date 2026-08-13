@@ -48,7 +48,7 @@ HIP_TEST_CASE(Unit_hipStreamCaptureRtc) {
 
   std::vector<const char*> options = {sarg.c_str()};
 
-  auto compileResult = hiprtcCompileProgram(prog, options.size(), options.data());
+  auto compileResult = hiprtcCompileProgram(prog, static_cast<int>(options.size()), options.data());
   if (compileResult != HIPRTC_SUCCESS) {
     size_t logSize = 0;
     hiprtcGetProgramLogSize(prog, &logSize);
@@ -102,9 +102,9 @@ HIP_TEST_CASE(Unit_hipStreamCaptureRtc) {
   // stream before graph execution
   float tmp = 2.0;
   HIPCHECK(hipMemcpy(&tmp, data_d, sizeof(float), hipMemcpyDeviceToHost))
-  REQUIRE(tmp == 0.0);
+  REQUIRE(tmp == 0.0f);
 
-  HIPCHECK(hipGraphInstantiate(&graph_exec, graph, NULL, NULL, 0))
+  HIPCHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0))
   HIPCHECK(hipGraphDestroy(graph))
 
   HIPCHECK(hipGraphLaunch(graph_exec, stream))
@@ -118,7 +118,7 @@ HIP_TEST_CASE(Unit_hipStreamCaptureRtc) {
   HIPCHECK(hipFree(data_d))
   HIP_CHECK(hipModuleUnload(module))
 
-  REQUIRE(tmp == 1.0);
+  REQUIRE(tmp == 1.0f);
 #if HT_NVIDIA
   HIPCHECK(hipCtxDestroy(ctx))
 #endif

@@ -178,13 +178,13 @@ HIP_TEST_CASE(Unit_hipMemPoolCreate_DeviceTest) {
       int* A_d;
       HIP_CHECK(hipSetDevice(dev))
       HIP_CHECK(
-          hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), N * sizeof(int), mem_pool, 0));
-      HIP_CHECK(hipStreamSynchronize(0))
+          hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), N * sizeof(int), mem_pool, nullptr));
+      HIP_CHECK(hipStreamSynchronize(nullptr))
       HIP_CHECK(hipSetDevice(0))
       // Launch kernel to access A_d and free it on dev 0 context
-      setKer<<<N / numThreadsPerBlk, numThreadsPerBlk, 0, 0>>>(A_d);
-      HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), 0))
-      HIP_CHECK(hipStreamSynchronize(0))
+      setKer<<<N / numThreadsPerBlk, numThreadsPerBlk, 0, nullptr>>>(A_d);
+      HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), nullptr))
+      HIP_CHECK(hipStreamSynchronize(nullptr))
     }
     HIP_CHECK(hipMemPoolDestroy(mem_pool))
   }

@@ -243,7 +243,7 @@ template <typename F> static void test_cg_multi_grid_group_type(F kernel_func, i
   int *size_dev[MaxGPUs], *size_host[MaxGPUs];
   int *thd_rank_dev[MaxGPUs], *thd_rank_host[MaxGPUs];
   int *is_valid_dev[MaxGPUs], *is_valid_host[MaxGPUs];
-  int *sync_dev[MaxGPUs], *sync_result;
+  int *sync_dev[MaxGPUs], *sync_result = nullptr;
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipSetDevice(i))
 
@@ -379,7 +379,7 @@ HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Basic) {
     max_threads_per_blk = min(max_threads_per_blk, device_properties.maxThreadsPerBlock);
   }
 
-  void* kernel_func;
+  void* kernel_func = nullptr;
   bool specific_api_test = false;
 
   SECTION("Default multi grid group API test") {

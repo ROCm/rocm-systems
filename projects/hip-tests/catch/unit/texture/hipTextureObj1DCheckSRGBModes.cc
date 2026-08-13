@@ -78,8 +78,8 @@ static void runTest(const int width, const float offsetX = 0) {
   texDesc.sRGB = sRGB ? 1 : 0;
 
   // Create texture object
-  hipTextureObject_t textureObject = 0;
-  auto ret = hipCreateTextureObject(&textureObject, &resDesc, &texDesc, NULL);
+  hipTextureObject_t textureObject = nullptr;
+  auto ret = hipCreateTextureObject(&textureObject, &resDesc, &texDesc, nullptr);
 #if HT_AMD
   if (ret == hipErrorInvalidValue && resType == hipResourceTypeLinear) {
     free(hData);

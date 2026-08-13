@@ -191,8 +191,20 @@ if(HIP_PLATFORM MATCHES "amd")
                   COMMENT "Compiling copyKernel.code")
   add_custom_target(copyKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code)
 
+  # clang-cl (the Windows HIP compiler driver) does not support -S (assembly output).
+  # On Windows, use clang++ (GCC-style driver) from the same LLVM installation instead,
+  # and omit the MSVC-style flags in HIP_DEVICE_BUILD_FLAGS_NO_ARCH (/Ox, /D...) which
+  # clang++ does not accept.
+  if(WIN32)
+    get_filename_component(_hip_compiler_dir "${CMAKE_HIP_COMPILER}" DIRECTORY)
+    set(_hip_s_compiler "${_hip_compiler_dir}/clang++")
+    set(_hip_s_extra_flags "")
+  else()
+    set(_hip_s_compiler "${CMAKE_HIP_COMPILER}")
+    set(_hip_s_extra_flags "${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}")
+  endif()
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
-                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=5 -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  COMMAND ${_hip_s_compiler} ${_hip_s_extra_flags} -mcode-object-version=5 -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include

@@ -24,7 +24,7 @@
 #include <string>
 
 #if (defined(_WIN32) || defined(_WIN64)) && defined(_MSC_VER)
-#include <windows.h>
+#include <Windows.h>
 #endif
 
 // SVM Atomic wrappers.

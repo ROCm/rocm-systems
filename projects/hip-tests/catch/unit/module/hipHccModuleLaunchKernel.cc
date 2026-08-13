@@ -61,7 +61,7 @@ HIP_TEST_CASE(Unit_hipHccModuleLaunchKernel_basic) {
   hipFunction_t kernelFunc;
   HIP_CHECK(hipModuleGetFunction(&kernelFunc, module, kernel_name))
 
-  HIP_CHECK(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, 1, 1, 0, 0, kernelArgs,
+  HIP_CHECK(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, 1, 1, 0, nullptr, kernelArgs,
                                      nullptr, nullptr, nullptr));
   HIP_CHECK(hipMemcpyDtoH(B_h, (hipDeviceptr_t)B_d, widthInBytes))
   for (int i = 0; i < width; i++) {
@@ -97,32 +97,32 @@ HIP_TEST_CASE(Unit_hipHccModuleLaunchKernel_NegTst) {
   hipFunction_t kernelFunc;
   HIP_CHECK(hipModuleGetFunction(&kernelFunc, module, kernel_name))
   SECTION("nullptr to f(first argument)") {
-    HIP_CHECK_ERROR(hipHccModuleLaunchKernel(nullptr, width, 1, 1, width, 1, 1, 0, 0, kernelArgs,
+    HIP_CHECK_ERROR(hipHccModuleLaunchKernel(nullptr, width, 1, 1, width, 1, 1, 0, nullptr, kernelArgs,
                                              nullptr, nullptr, nullptr),
                     hipErrorInvalidHandle);
   }
   SECTION("-1 to localWorkSizeX(fifth argument)") {
-    HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, -1, 1, 1, 0, 0, kernelArgs,
+    HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, -1, 1, 1, 0, nullptr, kernelArgs,
                                              nullptr, nullptr, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION("-1 to localWorkSizeY(sixth argument)") {
-    HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, -1, 1, 0, 0,
+    HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, -1, 1, 0, nullptr,
                                              kernelArgs, nullptr, nullptr, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION("-1 to localWorkSizeZ(seventh argument)") {
-    HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, 1, -1, 0, 0,
+    HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, 1, -1, 0, nullptr,
                                              kernelArgs, nullptr, nullptr, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION("-1 to sharedMemBytes(eighth argument)") {
-    HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, 1, 1, -1, 0,
+    HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, 1, 1, -1, nullptr,
                                              kernelArgs, nullptr, nullptr, nullptr),
                     hipErrorInvalidValue);
   }
   SECTION("nullptr to kernelParams(10th argument)") {
-    HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, 1, 1, 0, 0, nullptr,
+    HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, 1, 1, 0, nullptr, nullptr,
                                              nullptr, nullptr, nullptr),
                     hipErrorInvalidValue);
   }

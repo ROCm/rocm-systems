@@ -156,24 +156,24 @@ HIP_TEST_CASE(Unit_Rtc_HipComplex_header) {
     n = 25;
     kernel_name = "hip_complex_basic_kernel";
     HIPRTC_CHECK(
-        hiprtcCreateProgram(&prog, hip_complex_basic_string, kernel_name.c_str(), 0, NULL, NULL));
+        hiprtcCreateProgram(&prog, hip_complex_basic_string, kernel_name.c_str(), 0, nullptr, nullptr));
   }
   SECTION("Corner cases for Float type") {
     n = 6;
     kernel_name = "hip_complex_corner_float_kernel";
     HIPRTC_CHECK(hiprtcCreateProgram(&prog, hip_complex_corner_float_string, kernel_name.c_str(), 0,
-                                     NULL, NULL));
+                                     nullptr, nullptr));
   }
   SECTION("Corner cases for Double type") {
     n = 6;
     kernel_name = "hip_complex_corner_double_kernel";
     HIPRTC_CHECK(hiprtcCreateProgram(&prog, hip_complex_corner_double_string, kernel_name.c_str(),
-                                     0, NULL, NULL));
+                                     0, nullptr, nullptr));
   }
   unsigned int* result_h;
   unsigned int* result_d;
-  unsigned int Nbytes = n * sizeof(unsigned int);
-  result_h = new unsigned int[n];
+  size_t Nbytes = static_cast<size_t>(n) * sizeof(unsigned int);
+  result_h = new unsigned int[static_cast<size_t>(n)];
   for (int i = 0; i < n; i++) {
     result_h[i] = 0;
   }
@@ -202,7 +202,7 @@ HIP_TEST_CASE(Unit_Rtc_HipComplex_header) {
   hipFunction_t function;
   HIP_CHECK(hipModuleLoadData(&module, codec.data()))
   HIP_CHECK(hipModuleGetFunction(&function, module, kername))
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter))
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, kernel_parameter))
   HIP_CHECK(hipDeviceSynchronize())
   HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost))
   for (int i = 0; i < n; i++) {

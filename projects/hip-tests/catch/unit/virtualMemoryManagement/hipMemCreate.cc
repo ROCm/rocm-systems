@@ -123,7 +123,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   // Set access
   hipMemAccessDesc accessDesc = {};
@@ -192,7 +192,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemRelease(handle))
   // Set access
@@ -261,7 +261,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_ChkWithKerLaunch) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemRelease(handle))
   // Set access
@@ -337,7 +337,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_MapNonContiguousChunks) {
   }
   // Allocate virtual address range for all the memory chunks
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, (numOfBuffers * size_mem), 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, (numOfBuffers * size_mem), 0, nullptr, 0))
   for (int idx = 0; idx < numOfBuffers; idx++) {
     unsigned long long uiptr = reinterpret_cast<unsigned long long>(ptrA);
     uiptr = uiptr + idx * size_mem;
@@ -421,7 +421,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_ChkWithMemset) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   // Set access
   hipMemAccessDesc accessDesc = {};

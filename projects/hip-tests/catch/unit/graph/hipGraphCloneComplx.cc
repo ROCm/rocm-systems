@@ -1526,7 +1526,7 @@ HIP_TEST_CASE(Unit_hipGraphClone_address_change_in_loop) {
     HIP_CHECK(hipGraphAddDependencies(graph, &kVecAdd, &memcpyD2H_C, 1))
 
     // Instantiate and launch the graph
-    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
     HIP_CHECK(hipGraphLaunch(graphExec, stream))
     HIP_CHECK(hipStreamSynchronize(stream))
 
@@ -1553,7 +1553,7 @@ HIP_TEST_CASE(Unit_hipGraphClone_address_change_in_loop) {
     HIP_CHECK(hipGraphKernelNodeSetParams(kVecAddC, &kNodeParams1))
 
     // Instantiate and launch the graph
-    HIP_CHECK(hipGraphInstantiate(&graphExecC, graph_C, NULL, NULL, 0))
+    HIP_CHECK(hipGraphInstantiate(&graphExecC, graph_C, nullptr, nullptr, 0))
     HIP_CHECK(hipGraphLaunch(graphExecC, stream))
     HIP_CHECK(hipStreamSynchronize(stream))
 
@@ -1611,9 +1611,9 @@ static void hipGraphClone_address_change_in_thread(hipGraph_t* graph, hipGraphNo
   HIP_CHECK_THREAD(hipGraphKernelNodeSetParams(kVecAddC, &kNodeParams1));
 
   // Instantiate and launch the graph
-  HIP_CHECK_THREAD(hipGraphInstantiate(&graphExecC, graph_C, NULL, NULL, 0));
-  HIP_CHECK_THREAD(hipGraphLaunch(graphExecC, stream));
-  HIP_CHECK_THREAD(hipStreamSynchronize(stream));
+  HIP_CHECK_THREAD(hipGraphInstantiate(&graphExecC, graph_C, NULL, NULL, 0))
+  HIP_CHECK_THREAD(hipGraphLaunch(graphExecC, stream))
+  HIP_CHECK_THREAD(hipStreamSynchronize(stream))
 
   // Verify graph execution result
   HipTest::checkVectorSUB<int>(D_h, E_h, F_h, N);
@@ -1671,7 +1671,7 @@ HIP_TEST_CASE(Unit_hipGraphClone_address_change_in_thread) {
   HIP_CHECK(hipGraphAddDependencies(graph, &kVecAdd, &memcpyD2H_C, 1))
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, stream))
   HIP_CHECK(hipStreamSynchronize(stream))
 
@@ -1921,7 +1921,7 @@ HIP_TEST_CASE(Unit_hipGraphChild_hipUserObject_hipGraphUserObject) {
   HIP_CHECK(hipGraphAddDependencies(graph, &kVecSub, &memcpyD2H_X, 1))
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, stream))
   HIP_CHECK(hipStreamSynchronize(stream))
 

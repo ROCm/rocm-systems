@@ -100,7 +100,7 @@ HIP_TEST_CASE(Unit_hipGraphGetNodes_Positive_Functional) {
   }
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
   HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
@@ -140,8 +140,8 @@ HIP_TEST_CASE(Unit_hipGraphGetNodes_Positive_CapturedStream) {
 
   // Initialize input buffer
   for (size_t i = 0; i < N; ++i) {
-    A_h[i] = 3.146f + i;  // Pi
-    B_h[i] = 3.146f + i;  // Pi
+    A_h[i] = 3.146f + static_cast<float>(i);  // Pi
+    B_h[i] = 3.146f + static_cast<float>(i);  // Pi
   }
 
   // Create streams and events
@@ -158,7 +158,7 @@ HIP_TEST_CASE(Unit_hipGraphGetNodes_Positive_CapturedStream) {
   INFO("Num of nodes returned by GetNodes : " << numNodes);
   REQUIRE(numNodes == numMemcpy + numKernel + numMemset);
 
-  int numBytes = sizeof(hipGraphNode_t) * numNodes;
+  size_t numBytes = sizeof(hipGraphNode_t) * numNodes;
   hipGraphNode_t* nodes = reinterpret_cast<hipGraphNode_t*>(malloc(numBytes));
   REQUIRE(nodes != nullptr);
 
@@ -179,6 +179,18 @@ HIP_TEST_CASE(Unit_hipGraphGetNodes_Positive_CapturedStream) {
         cntMemset++;
         break;
 
+      case hipGraphNodeTypeHost:
+      case hipGraphNodeTypeGraph:
+      case hipGraphNodeTypeEmpty:
+      case hipGraphNodeTypeWaitEvent:
+      case hipGraphNodeTypeEventRecord:
+      case hipGraphNodeTypeExtSemaphoreSignal:
+      case hipGraphNodeTypeExtSemaphoreWait:
+      case hipGraphNodeTypeMemAlloc:
+      case hipGraphNodeTypeMemFree:
+      case hipGraphNodeTypeMemcpyFromSymbol:
+      case hipGraphNodeTypeMemcpyToSymbol:
+      case hipGraphNodeTypeCount:
       default:
         INFO("Unexpected nodetype returned : " << nodeType);
         REQUIRE(false);
@@ -190,11 +202,13 @@ HIP_TEST_CASE(Unit_hipGraphGetNodes_Positive_CapturedStream) {
   REQUIRE(cntMemset == numMemset);
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
   HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
   // Validate the computation
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfloat-equal"
   for (size_t i = 0; i < N; i++) {
     if (C_h[i] != A_h[i] + B_h[i]) {
       INFO("C not matching at " << i << " C_h[i] " << C_h[i] << " A_h[i] + B_h[i] "
@@ -202,6 +216,7 @@ HIP_TEST_CASE(Unit_hipGraphGetNodes_Positive_CapturedStream) {
       REQUIRE(false);
     }
   }
+#pragma clang diagnostic pop
 
   HIP_CHECK(hipStreamDestroy(streamForGraph))
   HIP_CHECK(hipGraphExecDestroy(graphExec))
@@ -242,7 +257,7 @@ HIP_TEST_CASE(Unit_hipGraphGetNodes_Negative_Parameters) {
   HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes))
   INFO("Num of nodes returned by GetNodes : " << numNodes);
 
-  int numBytes = sizeof(hipGraphNode_t) * numNodes;
+  size_t numBytes = sizeof(hipGraphNode_t) * numNodes;
   hipGraphNode_t* nodes = reinterpret_cast<hipGraphNode_t*>(malloc(numBytes));
   REQUIRE(nodes != nullptr);
 

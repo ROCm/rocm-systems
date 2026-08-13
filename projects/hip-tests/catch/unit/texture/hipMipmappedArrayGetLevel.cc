@@ -40,7 +40,7 @@ HIP_TEST_CASE(Unit_hipMipmappedArrayGetLevel_Negative_Parameters) {
 
   unsigned int levels = 1 + std::log2(desc.Depth);
 
-  HIP_CHECK(hipFree(0))
+  HIP_CHECK(hipFree(nullptr))
   HIP_CHECK(hipMipmappedArrayCreate(&array, &desc, levels))
 
   hipArray_t levelArray;

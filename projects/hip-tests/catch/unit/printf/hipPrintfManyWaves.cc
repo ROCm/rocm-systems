@@ -35,7 +35,7 @@ static void test_mixed0(int* retval, uint num_blocks, uint threads_per_block) {
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_mixed0, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
     switch (ii % 3) {
@@ -83,7 +83,7 @@ static void test_mixed1(int* retval, uint num_blocks, uint threads_per_block) {
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_mixed1, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
     switch (ii % 3) {
@@ -123,7 +123,7 @@ static void test_mixed2(int* retval, uint num_blocks, uint threads_per_block) {
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_mixed2, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
     REQUIRE(retval[ii] == strlen(msg_short) + strlen(msg_long1) + strlen(msg_long2) + 1);
@@ -159,7 +159,7 @@ static void test_mixed3(int* retval, uint num_blocks, uint threads_per_block) {
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_mixed3, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
     if (ii % 3 == 0) {
@@ -190,7 +190,7 @@ static void test_numbers(uint num_blocks, uint threads_per_block) {
   CaptureStream captured(stdout);
   uint num_threads = num_blocks * threads_per_block;
   hipLaunchKernelGGL(kernel_numbers, dim3(num_blocks), dim3(threads_per_block), 0, 0);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   auto CapturedData = captured.getCapturedData();
   std::vector<uint> points;
   while (true) {

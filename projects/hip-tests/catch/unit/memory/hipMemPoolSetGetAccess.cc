@@ -433,7 +433,7 @@ HIP_TEST_CASE(Unit_hipMemPoolSetAccess_NegTst) {
   descList.location.type = hipMemLocationTypeDevice;
   descList.location.id = 0;
   // Scenario1
-  SECTION("memPool NULL check") {
+  SECTION("memPool nullptr check") {
     REQUIRE(hipMemPoolSetAccess(nullptr, &descList, count) == hipErrorInvalidValue);
   }
   // Scenario2

@@ -68,7 +68,7 @@ HIP_TEST_CASE(Unit_Printf_PrintfAltFormsTsts) {
       std::string("0x00000042") + std::string(6, ' ') + "\n";
   CaptureStream captured(stdout);
   hipLaunchKernelGGL(test_kernel, dim3(1), dim3(1), 0, 0);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   auto CapturedData = captured.getCapturedData();
   std::string device_output = captured.gulp(CapturedData);
   REQUIRE(device_output == reference);

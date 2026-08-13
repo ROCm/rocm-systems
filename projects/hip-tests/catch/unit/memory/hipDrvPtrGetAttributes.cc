@@ -64,7 +64,7 @@ HIP_TEST_CASE(Unit_hipDrvPtrGetAttributes_Negative) {
 
 #if HT_AMD
   SECTION("Passing nullptr to device Pointer") {
-    hipDeviceptr_t ptr = 0;
+    hipDeviceptr_t ptr = nullptr;
     REQUIRE(hipDrvPointerGetAttributes(2, attributes, data, ptr) == hipErrorInvalidValue);
   }
 #endif

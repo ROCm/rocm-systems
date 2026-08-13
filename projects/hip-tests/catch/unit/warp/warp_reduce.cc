@@ -29,7 +29,7 @@ __global__ void multipleMasksKernel(T* output, const T* input, const unsigned lo
                                     int numMasks) {
   bool isInAnyOfTheMasks = false;
   int numMask = 0;
-  unsigned long long mask;
+  unsigned long long mask = 0;
 
   while (numMask < numMasks && !isInAnyOfTheMasks) {
     mask = masks[numMask];

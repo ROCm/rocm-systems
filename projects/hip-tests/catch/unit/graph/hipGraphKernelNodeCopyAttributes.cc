@@ -170,7 +170,7 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeCopyAttributes_Functional) {
   }
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, stream))
   HIP_CHECK(hipStreamSynchronize(stream))
 

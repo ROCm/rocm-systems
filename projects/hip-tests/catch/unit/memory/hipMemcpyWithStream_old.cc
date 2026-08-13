@@ -127,7 +127,7 @@ void TestDtoDonSameDevice(void) {
   HIP_CHECK(hipMalloc(&B_d[1], Nbytes))
   HIP_CHECK(hipMalloc(&C_d[1], Nbytes))
   C_h[1] = reinterpret_cast<int*>(malloc(Nbytes));
-  HIP_ASSERT(C_h[1] != NULL);
+  HIP_ASSERT(C_h[1] != nullptr);
 
   HIP_CHECK(hipMemcpyWithStream(A_d[0], A_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]))
   HIP_CHECK(hipMemcpyWithStream(B_d[0], B_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]))
@@ -278,7 +278,7 @@ void TestkindDtoD(void) {
     HIP_CHECK(hipMalloc(&B_d[i], Nbytes))
     HIP_CHECK(hipMalloc(&C_d[i], Nbytes))
     C_h[i] = reinterpret_cast<int*>(malloc(Nbytes));
-    HIP_ASSERT(C_h[i] != NULL);
+    HIP_ASSERT(C_h[i] != nullptr);
   }
 
   HIP_CHECK(hipSetDevice(0))
@@ -378,7 +378,7 @@ void TestkindDefaultForDtoD(void) {
     HIP_CHECK(hipMalloc(&B_d[i], Nbytes))
     HIP_CHECK(hipMalloc(&C_d[i], Nbytes))
     C_h[i] = reinterpret_cast<int*>(malloc(Nbytes));
-    HIP_ASSERT(C_h[i] != NULL);
+    HIP_ASSERT(C_h[i] != nullptr);
   }
 
   hipStream_t stream[MaxGPUDevices];
@@ -441,9 +441,9 @@ void TestkindHtoH(void) {
 
   // Allocate memory to A_h and B_h
   A_h = static_cast<int*>(malloc(Nbytes));
-  HIP_ASSERT(A_h != NULL);
+  HIP_ASSERT(A_h != nullptr);
   B_h = static_cast<int*>(malloc(Nbytes));
-  HIP_ASSERT(B_h != NULL);
+  HIP_ASSERT(B_h != nullptr);
 
   for (size_t i = 0; i < N; ++i) {
     if (A_h) {

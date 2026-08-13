@@ -174,7 +174,7 @@ template <typename T> T MakeVectorTypeDevice(decltype(T().x) value) {
   T* vector_d;
   HIP_CHECK(hipMalloc(&vector_d, sizeof(T)))
   HIP_CHECK(hipMemcpy(vector_d, &vector_h, sizeof(T), hipMemcpyHostToDevice))
-  VectorTypeKernel<<<1, 1, 0, 0>>>(vector_d, value);
+  VectorTypeKernel<<<1, 1, 0, nullptr>>>(vector_d, value);
   HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(T), hipMemcpyDeviceToHost))
   HIP_CHECK(hipFree(vector_d))
   return vector_h;

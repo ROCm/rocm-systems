@@ -70,9 +70,9 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetEnabled_Functional_Basic) {
   memsetParams.height = 1;
   HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
 
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, NULL, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, nullptr, 0))
 
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
@@ -88,7 +88,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetEnabled_Functional_Basic) {
   // Adding child node to clonedGraph
   HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode, graph, nullptr, 0, childGraph))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   SECTION("Create graphExec with Kernel node and verify its enabled status") {
     HIP_CHECK(hipGraphNodeGetEnabled(graphExec, kNodeAdd, &isEnabled))
@@ -182,8 +182,8 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetEnabled_Negative_Functional) {
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &kNodeAdd, 1))
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_B, &kNodeAdd, 1))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
-  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec2, graph, nullptr, nullptr, 0))
 
   HIP_CHECK(hipGraphClone(&clonedGraph, graph))
   HIP_CHECK(hipGraphInstantiate(&clonedGraphExec, clonedGraph, nullptr, nullptr, 0))

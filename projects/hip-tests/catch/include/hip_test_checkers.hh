@@ -163,9 +163,9 @@ template <typename T> void setDefaultData(size_t numElements, T* A_h, T* B_h, T*
       if (B_h) B_h[i] = 'b';
       if (C_h) C_h[i] = 'c';
     } else {
-      if (A_h) A_h[i] = 3.146f + i;
-      if (B_h) B_h[i] = 1.618f + i;
-      if (C_h) C_h[i] = 1.4f + i;
+      if (A_h) A_h[i] = 3.146f + static_cast<float>(i);
+      if (B_h) B_h[i] = 1.618f + static_cast<float>(i);
+      if (C_h) C_h[i] = 1.4f + static_cast<float>(i);
     }
   }
 }
@@ -176,27 +176,27 @@ bool initArraysForHost(T** A_h, T** B_h, T** C_h, size_t N, bool usePinnedHost =
 
   if (usePinnedHost) {
     if (A_h) {
-      HIP_CHECK(hipHostMalloc((void**)A_h, Nbytes))
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(A_h), Nbytes))
     }
     if (B_h) {
-      HIP_CHECK(hipHostMalloc((void**)B_h, Nbytes))
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(B_h), Nbytes))
     }
     if (C_h) {
-      HIP_CHECK(hipHostMalloc((void**)C_h, Nbytes))
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(C_h), Nbytes))
     }
   } else {
     if (A_h) {
-      *A_h = (T*)malloc(Nbytes);
+      *A_h = reinterpret_cast<T*>(malloc(Nbytes));
       REQUIRE(*A_h != nullptr);
     }
 
     if (B_h) {
-      *B_h = (T*)malloc(Nbytes);
+      *B_h = reinterpret_cast<T*>(malloc(Nbytes));
       REQUIRE(*B_h != nullptr);
     }
 
     if (C_h) {
-      *C_h = (T*)malloc(Nbytes);
+      *C_h = reinterpret_cast<T*>(malloc(Nbytes));
       REQUIRE(*C_h != nullptr);
     }
   }
@@ -238,9 +238,9 @@ template <typename T> void setDefaultDataT(size_t numElements, T* A_h, T* B_h, T
       if (B_h) B_h[i] = 'b';
       if (C_h) C_h[i] = 'c';
     } else {
-      if (A_h) A_h[i] = 3.146f + i;
-      if (B_h) B_h[i] = 1.618f + i;
-      if (C_h) C_h[i] = 1.4f + i;
+      if (A_h) A_h[i] = 3.146f + static_cast<float>(i);
+      if (B_h) B_h[i] = 1.618f + static_cast<float>(i);
+      if (C_h) C_h[i] = 1.4f + static_cast<float>(i);
     }
   }
 }
@@ -253,27 +253,27 @@ void initArraysForHostT(T** A_h, T** B_h, T** C_h, size_t N, bool usePinnedHost 
 
   if (usePinnedHost) {
     if (A_h) {
-      HIP_CHECK_THREAD(hipHostMalloc((void**)A_h, Nbytes))
+      HIP_CHECK_THREAD(hipHostMalloc(reinterpret_cast<void**>(A_h), Nbytes))
     }
     if (B_h) {
-      HIP_CHECK_THREAD(hipHostMalloc((void**)B_h, Nbytes))
+      HIP_CHECK_THREAD(hipHostMalloc(reinterpret_cast<void**>(B_h), Nbytes))
     }
     if (C_h) {
-      HIP_CHECK_THREAD(hipHostMalloc((void**)C_h, Nbytes))
+      HIP_CHECK_THREAD(hipHostMalloc(reinterpret_cast<void**>(C_h), Nbytes))
     }
   } else {
     if (A_h) {
-      *A_h = (T*)malloc(Nbytes);
+      *A_h = reinterpret_cast<T*>(malloc(Nbytes));
       REQUIRE_THREAD(*A_h != nullptr);
     }
 
     if (B_h) {
-      *B_h = (T*)malloc(Nbytes);
+      *B_h = reinterpret_cast<T*>(malloc(Nbytes));
       REQUIRE_THREAD(*B_h != nullptr);
     }
 
     if (C_h) {
-      *C_h = (T*)malloc(Nbytes);
+      *C_h = reinterpret_cast<T*>(malloc(Nbytes));
       REQUIRE_THREAD(*C_h != nullptr);
     }
   }

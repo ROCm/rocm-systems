@@ -185,8 +185,8 @@ HIP_TEST_CASE(Unit_hipGraphLaunch_Functional_MultipleLaunch) {
   SECTION("Graph launch on Null stream") {
     for (int iter = 0; iter < TEST_LOOP_SIZE; iter++) {
       fillRandInpData(A_h, C_h, SIZE);
-      HIP_CHECK(hipGraphLaunch(graphExec, 0))
-      HIP_CHECK(hipStreamSynchronize(0))
+      HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
+      HIP_CHECK(hipStreamSynchronize(nullptr))
       validateOutData(A_h, C_h, SIZE);
     }
   }

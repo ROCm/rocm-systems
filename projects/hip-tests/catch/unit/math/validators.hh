@@ -20,8 +20,8 @@
 // Catch::MatcherBase.
 template <typename T> class MatcherBase : public Catch::Matchers::MatcherBase<T> {
  public:
-  virtual std::string describe() const = 0;
-  virtual ~MatcherBase() = default;
+  std::string describe() const override = 0;
+  ~MatcherBase() override = default;
 };
 
 template <typename T, typename Matcher> class ValidatorBase : public MatcherBase<T> {

@@ -47,7 +47,7 @@ template <int N>
 __global__ void nontype_kernel() {}
 )";
 
-bool Test(int CaseNum, const char* GpuProgram) {
+static bool Test(int CaseNum, const char* GpuProgram) {
   bool IfTestPassed = true;
   // Create an instance of hiprtcProgram
   hiprtcProgram prog;
@@ -56,8 +56,8 @@ bool Test(int CaseNum, const char* GpuProgram) {
                                    GpuProgram,  // buffer
                                    "prog.cu",   // name
                                    0,           // numHeaders
-                                   NULL,        // headers
-                                   NULL));      // includeNames
+                                   nullptr,     // headers
+                                   nullptr));   // includeNames
 
   // add all name expressions for kernels
   std::vector<std::string> kernel_name_vec, kernelNameExpectdOutput;
@@ -115,9 +115,9 @@ bool Test(int CaseNum, const char* GpuProgram) {
   for (size_t i = 0; i < kernel_name_vec.size(); ++i)
     HIPRTC_CHECK(hiprtcAddNameExpression(prog, kernel_name_vec[i].c_str()));
 
-  hiprtcResult compileResult = hiprtcCompileProgram(prog,   // prog
-                                                    0,      // numOptions
-                                                    NULL);  // options
+  hiprtcResult compileResult = hiprtcCompileProgram(prog,      // prog
+                                                    0,         // numOptions
+                                                    nullptr);  // options
   // Obtain compilation log from the program.
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));

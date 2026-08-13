@@ -17,16 +17,16 @@ constexpr size_t kArraySize = 5;
 }
 
 #define HIP_GRAPH_MEMCPY_FROM_SYMBOL_NODE_DEFINE_GLOBALS(type)                                     \
-  __device__ type type##_device_var = 1;                                                           \
-  __constant__ __device__ type type##_const_device_var = 1;                                        \
-  __device__ type type##_device_arr[kArraySize] = {1, 2, 3, 4, 5};                                 \
-  __constant__ __device__ type type##_const_device_arr[kArraySize] = {1, 2, 3, 4, 5};
+  static __device__ type type##_device_var = 1;                                                    \
+  static __constant__ __device__ type type##_const_device_var = 1;                                 \
+  static __device__ type type##_device_arr[kArraySize] = {1, 2, 3, 4, 5};                          \
+  static __constant__ __device__ type type##_const_device_arr[kArraySize] = {1, 2, 3, 4, 5};
 
 #define HIP_GRAPH_MEMCPY_FROM_SYMBOL_NODE_DEFINE_ALTERNATE_GLOBALS(type)                           \
-  __device__ type type##_alt_device_var = 0;                                                       \
-  __constant__ __device__ type type##_alt_const_device_var = 0;                                    \
-  __device__ type type##_alt_device_arr[kArraySize] = {0, 0, 0, 0, 0};                             \
-  __constant__ __device__ type type##_alt_const_device_arr[kArraySize] = {0, 0, 0, 0, 0};
+  static __device__ type type##_alt_device_var = 0;                                                \
+  static __constant__ __device__ type type##_alt_const_device_var = 0;                             \
+  static __device__ type type##_alt_device_arr[kArraySize] = {0, 0, 0, 0, 0};                      \
+  static __constant__ __device__ type type##_alt_const_device_arr[kArraySize] = {0, 0, 0, 0, 0};
 
 template <typename T, typename F>
 void MemcpyFromSymbolShell(F f, const void* symbol, size_t offset, const std::vector<T> expected) {

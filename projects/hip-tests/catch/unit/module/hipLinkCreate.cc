@@ -43,7 +43,7 @@ static inline void JitLink(hipModule_t *Module, hipFunction_t *Kernel, hipLinkSt
    std::vector<hipJitOption> jit_options = {hipJitOptionIRtoISAOptExt,
                                                hipJitOptionIRtoISAOptCountExt};
    size_t isaoptssize = 4;
-   const void* lopts[] = {(void*)isaopts, (void*)(isaoptssize)};
+   void* lopts[] = {(void*)isaopts, (void*)(isaoptssize)};
 
 
    HIP_CHECK(hipLinkCreate(jit_options.size(), jit_options.data(), (void **)lopts, LinkState))
@@ -105,7 +105,7 @@ HIP_TEST_CASE(Unit_hip_linker_spirv_input) {
 
     bool from_file = false;
     hipJitInputType input_type= hipJitInputSpirv;
-    const char *filename;
+    const char *filename = nullptr;
     SECTION("Link Add Data with Bundled Spirv") {
         from_file = false;
         input_type = hipJitInputSpirv;
@@ -189,7 +189,7 @@ HIP_TEST_CASE(Unit_hipLinkCreate_AddLinker_CUDA_only_options) {
   // Random options so that it is not null
   const char* isaopts[] = {"-mllvm", "-inline-threshold=1", "-mllvm", "-inlinehint-threshold=1"};
   size_t isaoptssize = 4;
-  const void* lopts[] = {(void*)isaopts, (void*)(isaoptssize)};
+  void* lopts[] = {(void*)isaopts, (void*)(isaoptssize)};
 
   std::vector<hipJitOption> options = {hipJitOptionMaxRegisters,
                                        hipJitOptionThreadsPerBlock,

@@ -209,7 +209,7 @@ HIP_TEST_CASE(Unit_hipStreamGetDevice_NullStream) {
   for (int i = 0; i < device_count; i++) {
     HIP_CHECK(hipSetDevice(i))
     hipDevice_t device_from_stream;
-    HIP_CHECK(hipStreamGetDevice(0, &device_from_stream))
+    HIP_CHECK(hipStreamGetDevice(nullptr, &device_from_stream))
     REQUIRE(device_from_stream == i);
   }
 }

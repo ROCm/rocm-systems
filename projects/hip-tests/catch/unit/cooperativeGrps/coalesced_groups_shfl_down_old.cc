@@ -132,8 +132,8 @@ static void test_group_partition(unsigned int tileSz) {
       expectedResult[i] = expectedSum;
     }
 
-    int* dResult = NULL;
-    int* hResult = NULL;
+    int* dResult = nullptr;
+    int* hResult = nullptr;
 
     HIPCHECK(hipHostMalloc(&hResult, numTiles  * sizeof(int), hipHostMallocDefault))
     memset(hResult, 0, numTiles * sizeof(int));
@@ -175,9 +175,9 @@ static void test_shfl_down() {
     int group_size = totalThreads / i;
     int group_size_in_bytes = group_size * sizeof(int);
 
-    int* hPtr = NULL;
-    int* dPtr = NULL;
-    int* dResults = NULL;
+    int* hPtr = nullptr;
+    int* dPtr = nullptr;
+    int* dResults = nullptr;
     int lane_delta = rand() % group_size;
     std::cout << "Testing coalesced_groups shfl_down with lane_delta " << lane_delta
               << "and group size " << WAVE_SIZE << '\n'

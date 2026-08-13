@@ -142,7 +142,7 @@ HIP_TEST_CASE(Unit_KerArgOptimization_Saxpy) {
     HIP_CHECK(hipModuleLoad(&Module, fileName17))
     HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name))
   }
-  HIP_CHECK(hipExtModuleLaunchKernel(Function, arraylen, 1, 1, blocksize, 1, 1, 0, 0, NULL,
+  HIP_CHECK(hipExtModuleLaunchKernel(Function, arraylen, 1, 1, blocksize, 1, 1, 0, 0, nullptr,
                                      reinterpret_cast<void**>(&config), 0));
   HIP_CHECK(hipDeviceSynchronize())
   // Verify results

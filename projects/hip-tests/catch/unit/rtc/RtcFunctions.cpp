@@ -48,7 +48,7 @@ bool check_architecture(const char** Combination_CO, int Combination_CO_size, in
   std::string complete_CO = retrieved_CO + actual_architecture;
   const char* compiler_option = complete_CO.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, max_thread_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, max_thread_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -122,7 +122,7 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
   HIP_CHECK(hipMemcpy(A_d, A_h.data(), Nbytes, hipMemcpyHostToDevice))
   HIP_CHECK(hipMemcpy(B_d, B_h.data(), Nbytes, hipMemcpyHostToDevice))
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, rdc_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, rdc_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -304,7 +304,7 @@ bool check_denormals_enabled(const char** Combination_CO, int Combination_CO_siz
     HIP_CHECK(hipMemcpy(power_d, power_h.data(), Nbytes, hipMemcpyHostToDevice))
     HIP_CHECK(hipMemcpy(result_d, result_h.data(), Nbytes, hipMemcpyHostToDevice))
     hiprtcProgram program;
-    HIPRTC_CHECK(hiprtcCreateProgram(&program, denormals_string, "denormals", 0, NULL, NULL));
+    HIPRTC_CHECK(hiprtcCreateProgram(&program, denormals_string, "denormals", 0, nullptr, nullptr));
     if (Combination_CO_size != -1) {
       hiprtcResult compileResult{
           hiprtcCompileProgram(program, Combination_CO_size, Combination_CO)};
@@ -436,7 +436,7 @@ bool check_denormals_disabled(const char** Combination_CO, int Combination_CO_si
     HIP_CHECK(hipMemcpy(power_d, power_h.data(), Nbytes, hipMemcpyHostToDevice))
     HIP_CHECK(hipMemcpy(result_d, result_h.data(), Nbytes, hipMemcpyHostToDevice))
     hiprtcProgram program;
-    HIPRTC_CHECK(hiprtcCreateProgram(&program, denormals_string, "denormals", 0, NULL, NULL));
+    HIPRTC_CHECK(hiprtcCreateProgram(&program, denormals_string, "denormals", 0, nullptr, nullptr));
     if (Combination_CO_size != -1) {
       hiprtcResult compileResult{
           hiprtcCompileProgram(program, Combination_CO_size, Combination_CO)};
@@ -841,7 +841,7 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
   CO_IRadded[3] = "-mllvm";
   CO_IRadded[4] = ir_dump_option.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     int Combination_CO_IRadded_size = Combination_CO_size + 5;
     int b = 0;
@@ -975,7 +975,7 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
   CO_IRadded[5] = "-mllvm";
   CO_IRadded[6] = "-disable-vector-combine";
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     int Combination_CO_IRadded_size = Combination_CO_size + 7;
     int b = 0;
@@ -1099,7 +1099,7 @@ bool check_macro(const char** Combination_CO, int Combination_CO_size, int max_t
   }
   const char* compiler_option = retrieved_CO.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, macro_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, macro_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -1203,7 +1203,7 @@ bool check_undef_macro(const char** Combination_CO, int Combination_CO_size, int
     appended_compiler_options[i] = variable[i].c_str();
   }
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, undef_macro_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, undef_macro_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -1446,7 +1446,7 @@ bool check_warning(const char** Combination_CO, int Combination_CO_size, int max
   const char* kername = kernel_name.c_str();
   const char* compiler_option = retrieved_CO.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, warning_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, warning_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -1528,7 +1528,7 @@ bool check_Rpass_inline(const char** Combination_CO, int Combination_CO_size, in
   const char* kername = kernel_name.c_str();
   const char* compiler_option = retrieved_CO.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, max_thread_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, max_thread_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -1622,7 +1622,7 @@ bool check_conversionerror_enabled(const char** Combination_CO, int Combination_
   std::string variable = CO_vec[0];
   const char* compiler_option = variable.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
   } else {
@@ -1688,7 +1688,7 @@ bool check_conversionerror_disabled(const char** Combination_CO, int Combination
   std::string variable = CO_vec[1];
   const char* compiler_option = variable.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
   } else {
@@ -1745,7 +1745,7 @@ bool check_conversionwarning_enabled(const char** Combination_CO, int Combinatio
   std::string variable = CO_vec[2];
   const char* compiler_option = variable.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
   } else {
@@ -1810,7 +1810,7 @@ bool check_conversionwarning_disabled(const char** Combination_CO, int Combinati
   std::string variable = CO_vec[3];
   const char* compiler_option = variable.c_str();
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, error_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
   } else {
@@ -1911,7 +1911,7 @@ bool check_max_thread(const char** Combination_CO, int Combination_CO_size, int 
       continue;
     }
     hiprtcProgram prog;
-    HIPRTC_CHECK(hiprtcCreateProgram(&prog, max_thread_string, kername, 0, NULL, NULL));
+    HIPRTC_CHECK(hiprtcCreateProgram(&prog, max_thread_string, kername, 0, nullptr, nullptr));
     if (Combination_CO_size != -1) {
       std::string max_thread_string = variable[senario];
       Combination_CO[max_thread_pos] = max_thread_string.c_str();
@@ -2036,7 +2036,7 @@ bool check_unsafe_atomic_enabled(const char** Combination_CO, int Combination_CO
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
   for (int senario = 0; senario < 2; senario++) {
     hiprtcProgram prog;
-    HIPRTC_CHECK(hiprtcCreateProgram(&prog, unsafe_atomic_string, kername, 0, NULL, NULL));
+    HIPRTC_CHECK(hiprtcCreateProgram(&prog, unsafe_atomic_string, kername, 0, nullptr, nullptr));
     if (Combination_CO_size != -1) {
       hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
       if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -2145,7 +2145,7 @@ bool check_unsafe_atomic_disabled(const char** Combination_CO, int Combination_C
   HIP_CHECK(hipMalloc(&A_d, Nbytes))
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, unsafe_atomic_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, unsafe_atomic_string, kername, 0, nullptr, nullptr));
   if (Combination_CO_size != -1) {
     hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -3030,7 +3030,7 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
   HIP_CHECK(hipMemcpy(B_d, B_h.data(), Nbytes, hipMemcpyHostToDevice))
   HIP_CHECK(hipMemcpy(C_d, C_h.data(), Nbytes, hipMemcpyHostToDevice))
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ffp_contract_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ffp_contract_string, kername, 0, nullptr, nullptr));
   CaptureIR ir_capture;
   auto dump_dir = ir_capture.CreateDumpDir();
   std::string ir_dump_option = "-ir-dump-directory=" + dump_dir.string();

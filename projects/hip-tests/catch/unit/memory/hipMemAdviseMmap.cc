@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_MmapMem) {
       REQUIRE(false);
     }
     void* MmpdFile = nullptr;
-    MmpdFile = mmap(NULL, sb.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    MmpdFile = mmap(nullptr, sb.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (MmpdFile == nullptr) {
       INFO("mmap() call failed!\n. Cant proceed with the test.");
       REQUIRE(false);

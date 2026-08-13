@@ -74,7 +74,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
    AccessedBy flag is consistent with cuda's counter part*/
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
   CHECK_MANAGED_MEMORY_SUPPORT
-  int Ngpus = 0, *Hmm = NULL, MEM_SZ = 4096, RND_NUM = 999;
+  int Ngpus = 0, *Hmm = nullptr, MEM_SZ = 4096, RND_NUM = 999;
   HIP_CHECK(hipGetDeviceCount(&Ngpus))
   std::vector<int> OutData;
   for (int i = 0; i < Ngpus; ++i) {
@@ -125,7 +125,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_4) {
   CHECK_MANAGED_MEMORY_SUPPORT
-  int *Hmm = NULL, PageSz = 4096, Ngpus, RND_NUM = 999;
+  int *Hmm = nullptr, PageSz = 4096, Ngpus, RND_NUM = 999;
   HIP_CHECK(hipGetDeviceCount(&Ngpus))
   int* OutData = new int[Ngpus];
   for (int i = 0; i < Ngpus; ++i) {

@@ -46,8 +46,8 @@ HIP_TEST_CASE(Unit_hipTexRefGetFormat_Positive) {
 
   HIP_CHECK(hipTexRefSetFormat(tex_ref, format_set, num_channels))
 
-  // If format or number of channels is NULL, it will be ignored as per CUDA docs.
-  SECTION("If format or numChannels is NULL, it will be ignored") {
+  // If format or number of channels is nullptr, it will be ignored as per CUDA docs.
+  SECTION("If format or numChannels is nullptr, it will be ignored") {
 #if HT_AMD
     HIP_CHECK_ERROR(hipTexRefGetFormat(nullptr, &num_channels, tex_ref), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipTexRefGetFormat(&format_get, nullptr, tex_ref), hipErrorInvalidValue);

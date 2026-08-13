@@ -15,7 +15,7 @@ HIP_TEST_CASE(Unit_hipMipmappedArrayGetMemoryRequirements_Negative_Parameters) {
   hipMipmappedArray_t array;
   unsigned int levels = 1 + std::log2(6);
 
-  HIP_CHECK(hipFree(0))
+  HIP_CHECK(hipFree(nullptr))
 #if HT_AMD
   HIP_ARRAY3D_DESCRIPTOR desc = {};
   using vec_info = vector_info<float>;

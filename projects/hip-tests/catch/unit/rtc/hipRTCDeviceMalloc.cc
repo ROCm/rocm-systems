@@ -101,8 +101,8 @@ HIP_TEST_CASE(Unit_hiprtc_devicemalloc) {
   HIP_CHECK(hipMemcpy(dY, hY.get(), bufferSize, hipMemcpyHostToDevice))
 
   float **pA, **pB;
-  HIP_CHECK(hipMalloc((float***)&pA, sizeof(float*)))
-  HIP_CHECK(hipMalloc((float***)&pB, sizeof(float*)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&pA), sizeof(float*)))
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&pB), sizeof(float*)))
 
   struct {
     float* b_;
@@ -131,8 +131,8 @@ HIP_TEST_CASE(Unit_hiprtc_devicemalloc) {
   HIP_CHECK(hipModuleUnload(module))
 
   for (size_t i = 0; i < n; ++i) {
-    INFO("For " << i << " Value: " << fabs(hX[i] + hY[i] - hOut[i])
-                << " with: " << (fabs(hOut[i] * 1.0f) * 1e-6));
-    REQUIRE(fabs(hX[i] + hY[i] - hOut[i]) <= fabs(hOut[i]) * 1e-6);
+    INFO("For " << i << " Value: " << fabsf(hX[i] + hY[i] - hOut[i])
+                << " with: " << (fabsf(hOut[i]) * 1e-6f));
+    REQUIRE(fabsf(hX[i] + hY[i] - hOut[i]) <= fabsf(hOut[i]) * 1e-6f);
   }
 }

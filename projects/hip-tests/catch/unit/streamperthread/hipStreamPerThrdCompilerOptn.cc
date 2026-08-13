@@ -265,7 +265,7 @@ void DefaultPT2_StreamSync() {
   HIP_CHECK(hipStreamSynchronize(DefltStrmPT::Strm))
   // Calling hipStreamSync on null stream
   Wait_Kernel3<<<1, 1>>>(DefltStrmPT::clockrate, 1);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   HIP_CHECK(hipStreamDestroy(DefltStrmPT::Strm))
 }
 
@@ -318,7 +318,7 @@ void DefaultPT2_EvtQuery() {
     REQUIRE(false);
   }
   // Testing for Null or default stream
-  HIP_CHECK(hipEventRecord(evt1, 0))
+  HIP_CHECK(hipEventRecord(evt1, nullptr))
   int Got_hipSuccess = 0;  // 0 for no, 1 for yes
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
   *notified = 1;  // notify to exit
@@ -360,8 +360,8 @@ void Default_LaunchKernel(int NullStrm) {
   // launch Kernel
   if (NullStrm) {
     HIP_CHECK(hipLaunchKernel((const void*)DefltStrmPT_Square, dim3(Blocks, 1, 1),
-                              dim3(ThrdsPerBlk, 1, 1), Args, 0, 0));
-    HIP_CHECK(hipStreamSynchronize(0))
+                              dim3(ThrdsPerBlk, 1, 1), Args, 0, nullptr));
+    HIP_CHECK(hipStreamSynchronize(nullptr))
   } else {
     HIP_CHECK(hipLaunchKernel((const void*)DefltStrmPT_Square, dim3(Blocks, 1, 1),
                               dim3(ThrdsPerBlk, 1, 1), Args, 0, DefltStrmPT::Strm));
@@ -416,8 +416,8 @@ void DefaultPT2_LaunchCooperativeKernel(int NullStrm) {
   params[3] = reinterpret_cast<void*>(&dC);
   if (NullStrm) {
     HIPCHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(DefltStrmPT_Test_gws), dimGrid,
-                                        dimBlock, params, dimBlock.x * sizeof(int64_t), 0));
-    HIP_CHECK(hipStreamSynchronize(0))
+                                        dimBlock, params, dimBlock.x * sizeof(int64_t), nullptr));
+    HIP_CHECK(hipStreamSynchronize(nullptr))
   } else {
     HIPCHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(DefltStrmPT_Test_gws), dimGrid,
                                         dimBlock, params, dimBlock.x * sizeof(int64_t),
@@ -486,7 +486,7 @@ void DefaultPT2_StrmGetPriority() {
     }
   }
   INFO("Checking priority on null stream!!\n");
-  HIP_CHECK(hipStreamGetPriority(0, &ObsrvdPriority))
+  HIP_CHECK(hipStreamGetPriority(nullptr, &ObsrvdPriority))
   if (ObsrvdPriority != 0) {
     INFO("Expected priority: 0, Observed Priority: %d\n" << ObsrvdPriority);
     INFO("Test Failed!\n\n");
@@ -646,8 +646,8 @@ void DefaultPT2_hipMemcpy3D() {
 
   HIP_CHECK(
       hipMalloc3DArray(&arr, &channelDesc, make_hipExtent(width, height, depth), hipArrayDefault));
-  hipMemcpy3DParms myparms{0,         {0, 0, 0},    {0, 0, 0, 0}, 0,
-                           {0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0},    hipMemcpyDefault};
+  hipMemcpy3DParms myparms{};
+  myparms.kind = hipMemcpyDefault;
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
   myparms.srcPtr = make_hipPitchedPtr(Hptr, width * sizeof(float), width, height);

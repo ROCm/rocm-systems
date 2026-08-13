@@ -54,7 +54,7 @@ __global__ void AtomicFAddKernelKernel(float* data, size_t n) {
 
 template <typename T>
 void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internalRegister) {
-  constexpr auto memsetval = 13.0f;
+  constexpr auto memsetval = 13;
   A = A + offset;
   numElements -= offset;
 

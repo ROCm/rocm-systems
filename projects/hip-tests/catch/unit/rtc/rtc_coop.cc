@@ -68,7 +68,7 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
   using distribution = typename DistributionType<T>::type;
 
   static constexpr std::array<int, 7> tileSizes = {1, 2, 4, 8, 16, 32, 64};
-  unsigned int wavefrontSize = getWarpSize();
+  unsigned int wavefrontSize = static_cast<unsigned int>(getWarpSize());
   const char* loweredName;
   hipFunction_t kernel;
   hipModule_t module;
@@ -81,12 +81,12 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
   // for float16, we generate any random unsigned short, but cap the exponent later on
   // to keep it in the range (-8.0..8.0) (just to avoid overflows)
   // On the rest of the types, just use a bigger reduced range of numbers to avoid overflows too
-  T a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() : -1023;
-  T b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() : 1023;
+  T a = static_cast<T>(std::is_same<T, half>::value ? static_cast<int>(std::numeric_limits<unsigned short>::lowest()) : (std::is_signed<T>::value ? -1023 : 0));
+  T b = static_cast<T>(std::is_same<T, half>::value ? static_cast<int>(std::numeric_limits<unsigned short>::max()) : 1023);
   distribution dist(a, b);
 
   HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice))
-  genRandomBuffers(d_input, input, dist, gen, wavefrontSize);
+  genRandomBuffers(d_input, input, dist, gen, static_cast<int>(wavefrontSize));
   std::vector<const void*> args = { d_output.ptr(), d_input.ptr(), d_aggType.ptr() };
   std::size_t sizeBytes = args.size() * sizeof(void*);
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, args.data(), HIP_LAUNCH_PARAM_BUFFER_SIZE, &sizeBytes,
@@ -111,7 +111,7 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
   HIPRTC_CHECK(hiprtcGetLoweredName(prog, expression.c_str(), &loweredName));
   HIP_CHECK(hipModuleGetFunction(&kernel, module, loweredName))
   HIP_CHECK(hipModuleLaunchKernel(kernel, grdDim.x, grdDim.y, grdDim.z, blkDim.x, blkDim.y,
-                                  blkDim.z, 0, 0, nullptr, config));
+                                  blkDim.z, 0, nullptr, nullptr, config));
   HIP_CHECK(hipModuleUnload(module))
   HIP_CHECK(hipDeviceSynchronize())
   HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost))
@@ -119,7 +119,7 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
   INFO("Type: " << typeToString<T>());
   for (auto tileSize : tileSizes) {
     for (unsigned int laneId = 0; laneId < wavefrontSize; laneId++) {
-      if (tileSize <= wavefrontSize) {
+      if (static_cast<unsigned int>(tileSize) <= wavefrontSize) {
         std::string inputStr;
 
         if constexpr (!std::is_same<T, half>::value) {
@@ -129,15 +129,15 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
     }
 
     for (unsigned int laneId = 0; laneId < wavefrontSize; laneId++) {
-      unsigned long long mask = ~0ull >> (64 - tileSize);
+      unsigned long long mask = ~0ull >> (64 - static_cast<unsigned int>(tileSize));
 
-      mask <<= ((laneId % wavefrontSize) / tileSize) * tileSize;
+      mask <<= ((laneId % wavefrontSize) / static_cast<unsigned int>(tileSize)) * static_cast<unsigned int>(tileSize);
 
       if ((1ull << laneId) & mask) {
-        if (tileSize <= wavefrontSize) {
+        if (static_cast<unsigned int>(tileSize) <= wavefrontSize) {
           T expectedByLane[64];
           Op<T> op;
-          T result = output.host_ptr()[numTile * wavefrontSize + laneId];
+          T result = output.host_ptr()[static_cast<unsigned int>(numTile) * wavefrontSize + laneId];
 
           calculateExpected(expectedByLane, input.host_ptr(), op, mask, aggType);
 
@@ -148,7 +148,7 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
                                         expectedByLane[laneId],
                                         mask,
                                         input.host_ptr(),
-                                        laneId);
+                                        static_cast<int>(laneId));
           }
         }
       }

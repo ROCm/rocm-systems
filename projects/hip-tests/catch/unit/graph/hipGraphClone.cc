@@ -48,7 +48,7 @@ This function creates the graph with dependencies
 then performs device context change and clones the cloned graph
 Executes the cloned graph and validates the result
 */
-void hipGraphClone_DeviceContextChange() {
+static void hipGraphClone_DeviceContextChange() {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph, clonedgraph;
@@ -91,7 +91,7 @@ This function does the following
    the existing graph and execute the cloned graph
    to ensure that cloned graph is not modified
 */
-void hipGraphClone_Func(bool ModifyOrigGraph = false) {
+static void hipGraphClone_Func(bool ModifyOrigGraph = false) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -266,9 +266,9 @@ HIP_TEST_CASE(Unit_hipGraphClone_MultiThreaded) {
     hipGraphExec_t graphExec;
     HIP_CHECK_THREAD(hipGraphClone(&clonedgraph, graph));
     // Instantiate and launch the cloned graph
-    HIP_CHECK_THREAD(hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0));
-    HIP_CHECK_THREAD(hipGraphLaunch(graphExec, 0));
-    HIP_CHECK_THREAD(hipStreamSynchronize(0));
+    HIP_CHECK_THREAD(hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0))
+    HIP_CHECK_THREAD(hipGraphLaunch(graphExec, 0))
+    HIP_CHECK_THREAD(hipStreamSynchronize(0))
 
     for (size_t i = 0; i < N; i++) {
       REQUIRE_THREAD(A_h[i] == B_h[i]);

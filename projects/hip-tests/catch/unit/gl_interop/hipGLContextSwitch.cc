@@ -32,7 +32,7 @@
 #include "gl_interop_common.hh"
 
 #ifdef _WIN32
-#include <windows.h>
+#include <Windows.h>
 #else
 #include <GL/glx.h>
 #endif

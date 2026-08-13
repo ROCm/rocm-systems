@@ -42,8 +42,8 @@ namespace {
 constexpr int kThreads = 4;
 constexpr int kNodesPerThread = 256;
 
-void BuildAndDumpGraph(std::atomic<int>* start_gate, std::string dot_path,
-                       std::vector<int>* ids_out) {
+static void BuildAndDumpGraph(std::atomic<int>* start_gate, std::string dot_path,
+                              std::vector<int>* ids_out) {
   HIP_CHECK_THREAD(hipSetDevice(0))
 
   hipGraph_t graph{};
@@ -243,7 +243,7 @@ HIP_TEST_CASE(Unit_hipGraph_ConcurrentConstruct_LaunchDropSmoke) {
 
       hipGraphExec_t exec{};
       HIP_CHECK_THREAD(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0))
-      HIP_CHECK_THREAD(hipGraphLaunch(exec, 0))
+      HIP_CHECK_THREAD(hipGraphLaunch(exec, nullptr))
       HIP_CHECK_THREAD(hipDeviceSynchronize())
 
       std::vector<uint32_t> host(kSmokeChainLen);

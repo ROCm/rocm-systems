@@ -93,7 +93,7 @@ __global__ void hrr_repro_writeFlag(int* out, const int* flag, int n) {
 
 // slotmap-style kernel: required_out is always written (deterministic), while
 // optional_out is written ONLY when the uncaptured flag differs from the
-// sentinel.  optional_out is genuinely NULL at capture, so the recorded arg is
+// sentinel.  optional_out is genuinely nullptr at capture, so the recorded arg is
 // 0x0; on replay the branch is taken and the null write faults at 0x20000.
 __global__ void hrr_repro_slotmap(float* required_out, const unsigned* flag,
                                   float* optional_out, int n) {
@@ -227,7 +227,7 @@ TEST_CASE("Unit_HRR_UncapturedHostWrite_Direct", "[.][hrr-direct]") {
 // so the recorded-null optional_out write at 0x20000 is never reached.
 //
 // At capture flag == sentinel, so the optional branch is skipped and the run is
-// clean; the optional_out argument is genuinely NULL (recorded as 0x0).
+// clean; the optional_out argument is genuinely nullptr (recorded as 0x0).
 // ===========================================================================
 TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipSetDevice(0))
@@ -254,7 +254,7 @@ TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
 
   float* required_out = nullptr;
   HIP_CHECK(hipMalloc(&required_out, kSZ))
-  float* optional_out = nullptr;  // genuinely NULL at capture (recorded as 0x0)
+  float* optional_out = nullptr;  // genuinely nullptr at capture (recorded as 0x0)
 
   hipLaunchKernelGGL(hrr_repro_slotmap, dim3(kGrid), dim3(kBlock), 0, nullptr,
                      required_out, flag_dev, optional_out, kN);

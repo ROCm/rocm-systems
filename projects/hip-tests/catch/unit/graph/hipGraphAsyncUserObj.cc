@@ -38,7 +38,7 @@ template <typename T> __global__ void KernelFn(T* Ad, int clockrate, int WaitMs)
     *Ad = 0;
   }
 }
-void threadFunc_dltMemory() {
+static void threadFunc_dltMemory() {
   std::unique_lock lk(m);
   cv.wait(lk, [] { return setVar; });
   REQUIRE_THREAD(globalPtr != nullptr);
@@ -47,13 +47,13 @@ void threadFunc_dltMemory() {
 }
 static int kernelDelayMs() { return isQuickLevel() ? 500 : 5000; }
 
-void destroyPinnedObj(void* ptr) {
+static void destroyPinnedObj(void* ptr) {
   globalPtr = ptr;
   setVar = true;
   cv.notify_one();
 }
 template <typename T>
-void hipUserObjectCreate_int_float_Objects(T* hostArr, T* devArr, void destroyObj(void*)) {
+static void hipUserObjectCreate_int_float_Objects(T* hostArr, T* devArr, void destroyObj(void*)) {
   int clockrate = 0;
   HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0))
   hipGraph_t graph = nullptr;
@@ -78,7 +78,7 @@ void hipUserObjectCreate_int_float_Objects(T* hostArr, T* devArr, void destroyOb
     HIP_CHECK(hipGraphExecDestroy(graph_instance))
     HIP_CHECK(hipStreamSynchronize(stream))
     if ((std::is_same<float, T>::value) == true) {
-      REQUIRE(*hostArr == 9999.0);
+      REQUIRE(*hostArr == 9999.0f);
     } else if ((std::is_same<int, T>::value) == true) {
       REQUIRE(*hostArr == 9999);
     } else {
@@ -134,7 +134,7 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_Int_float_Objects) {
     HIP_CHECK_THREAD_FINALIZE();
   }
 }
-void destroyHostRegObj(void* ptr) {
+static void destroyHostRegObj(void* ptr) {
   int* ptr2 = reinterpret_cast<int*>(ptr);
   delete ptr2;
 }
@@ -332,7 +332,7 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_ClonedGraph) {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(devArr));
 }
-__global__ void ManualGraphKernelFn(int* Ad, int clockrate, int WaitMs) {
+static __global__ void ManualGraphKernelFn(int* Ad, int clockrate, int WaitMs) {
   uint64_t num_cycles = (uint64_t)clockrate;
   num_cycles = num_cycles * WaitMs;
   uint64_t start = clock64(), cycles = 0;

@@ -229,7 +229,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_CaptureIndepGraph) {
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, 0, 0, &kernelNodeParams))
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, nullptr, 0, &kernelNodeParams))
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyNode1, &kernelNode, 1))
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyNode2, &kernelNode, 1))
   HIP_CHECK(hipGraphAddDependencies(graph, &kernelNode, &memcpyNode3, 1))
@@ -309,7 +309,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_CaptureDepGraph) {
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, 0, 0, &kernelNodeParams))
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, nullptr, 0, &kernelNodeParams))
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyNode1, &kernelNode, 1))
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyNode2, &kernelNode, 1))
   HIP_CHECK(hipGraphAddDependencies(graph, &kernelNode, &memcpyNode3, 1))
@@ -702,7 +702,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_CaptureChildpGraph) {
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kernelNodeParams.extra = nullptr;
   // Create the child graph node kernelNode1->memcpyNode3
-  HIP_CHECK(hipGraphAddKernelNode(&kernelNode1, graphChild, 0, 0, &kernelNodeParams))
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode1, graphChild, nullptr, 0, &kernelNodeParams))
   HIP_CHECK(hipGraphAddDependencies(graphChild, &kernelNode1, &memcpyNode3, 1))
   // Add the graphChild to graph with dependencies
   std::vector<hipGraphNode_t> dependncy;
@@ -796,7 +796,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_ModifyChildpGraph) {
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kernelNodeParams.extra = nullptr;
   // Create the child graph node kernelNode1->memcpyNode3
-  HIP_CHECK(hipGraphAddKernelNode(&kernelNode1, graphChild, 0, 0, &kernelNodeParams))
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode1, graphChild, nullptr, 0, &kernelNodeParams))
   HIP_CHECK(hipGraphAddDependencies(graphChild, &kernelNode1, &memcpyNode3, 1))
   // Add the graphChild to graph with dependencies
   std::vector<hipGraphNode_t> dependncy;
@@ -1186,7 +1186,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_CapturePartialInThreads) {
 #ifdef __linux__
 // Currently disabled due to defect raised.
 static std::atomic<int> retValG(1);
-void threadCaptureExec(int* A_d, int* B_d, int* C_d, int* A_h, int* B_h, int* C_h,
+static void threadCaptureExec(int* A_d, int* B_d, int* C_d, int* A_h, int* B_h, int* C_h,
                        hipStream_t* stream1, hipStream_t* stream2, hipGraph_t* graph,
                        bool verifyStreamSync) {
   bool ret = false;

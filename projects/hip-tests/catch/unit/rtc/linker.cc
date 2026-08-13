@@ -62,10 +62,10 @@ HIP_TEST_CASE(Unit_RTC_LinkDestroy_Default) {
   }
 }
 
-std::vector<char> createBitcodeFromSource(const char* src, const char* name, int num_options,
-                                          const char** options) {
+static std::vector<char> createBitcodeFromSource(const char* source_code, const char* name, int num_options,
+                                                  const char** options) {
   hiprtcProgram program;
-  HIPRTC_CHECK(hiprtcCreateProgram(&program, src, name, 0, nullptr, nullptr));
+  HIPRTC_CHECK(hiprtcCreateProgram(&program, source_code, name, 0, nullptr, nullptr));
 
   HIPRTC_CHECK(hiprtcCompileProgram(program, num_options, options));
 
@@ -88,9 +88,10 @@ HIP_TEST_CASE(Unit_RTC_LinkerAPI) {
   std::vector<hiprtcJIT_option> jit_options = {HIPRTC_JIT_IR_TO_ISA_OPT_EXT,
                                                HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT};
   size_t isaoptssize = 4;
-  const void* lopts[] = {(void*)isaopts, (void*)(isaoptssize)};
+  const void* lopts[] = {reinterpret_cast<void*>(const_cast<char**>(isaopts)),
+                         reinterpret_cast<void*>(isaoptssize)};
   hiprtcLinkState linkstate;
-  HIPRTC_CHECK(hiprtcLinkCreate(jit_options.size(), jit_options.data(), (void**)lopts, &linkstate));
+  HIPRTC_CHECK(hiprtcLinkCreate(static_cast<unsigned int>(jit_options.size()), jit_options.data(), const_cast<void**>(lopts), &linkstate));
   HIPRTC_CHECK(hiprtcLinkAddData(linkstate, HIPRTC_JIT_INPUT_LLVM_BITCODE, code.data(), code.size(),
                                  "LinkISA", 0, nullptr, nullptr));
 
@@ -147,7 +148,7 @@ HIP_TEST_CASE(Unit_RTC_LinkerAPI) {
   HIP_CHECK(hipModuleUnload(module))
 
   for (size_t i = 0; i < n; ++i) {
-    REQUIRE(fabs(a * hX[i] + hY[i] - hOut[i]) <= fabs(hOut[i]) * 1e-6);
+    REQUIRE(fabsf(a * hX[i] + hY[i] - hOut[i]) <= fabsf(hOut[i]) * 1e-6f);
   }
 }
 
@@ -191,7 +192,7 @@ HIP_TEST_CASE(Unit_RTC_LinkAddFile_Default) {
   static constexpr const char* file_name = "bitcode_file";
   std::ofstream file(file_name, std::ios::binary);
   REQUIRE(file.is_open());
-  file.write(code.data(), code.size());
+  file.write(code.data(), static_cast<std::streamsize>(code.size()));
   file.close();
 
   // Create link with options
@@ -199,9 +200,10 @@ HIP_TEST_CASE(Unit_RTC_LinkAddFile_Default) {
   std::vector<hiprtcJIT_option> jit_options = {HIPRTC_JIT_IR_TO_ISA_OPT_EXT,
                                                HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT};
   size_t isaoptssize = 4;
-  const void* lopts[] = {(void*)isaopts, (void*)(isaoptssize)};
+  const void* lopts[] = {reinterpret_cast<void*>(const_cast<char**>(isaopts)),
+                         reinterpret_cast<void*>(isaoptssize)};
   hiprtcLinkState linkstate;
-  HIPRTC_CHECK(hiprtcLinkCreate(jit_options.size(), jit_options.data(), (void**)lopts, &linkstate));
+  HIPRTC_CHECK(hiprtcLinkCreate(static_cast<unsigned int>(jit_options.size()), jit_options.data(), const_cast<void**>(lopts), &linkstate));
   REQUIRE(hiprtcLinkAddFile(linkstate, HIPRTC_JIT_INPUT_LLVM_BITCODE, file_name, 0, nullptr,
                             nullptr) == HIPRTC_SUCCESS);
 

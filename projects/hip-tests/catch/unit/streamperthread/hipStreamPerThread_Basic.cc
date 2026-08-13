@@ -40,7 +40,7 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_Basic) {
 
   HIP_CHECK(hipMemcpyAsync(hostMem, devMem, size, hipMemcpyDeviceToHost, hipStreamPerThread))
 
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   // validate result
   for (int i = MEM_SIZE - 1; i >= 0; --i) {

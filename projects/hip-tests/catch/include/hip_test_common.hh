@@ -274,17 +274,19 @@ inline std::string& threadInfoMessageBuffer() {
   }
 
 #define HIPASSERT(condition)                                                                       \
-  if (!(condition)) {                                                                              \
-    printf("assertion %s at %s:%d \n", #condition, __FILE__, __LINE__);                            \
-    abort();                                                                                       \
-  }
+  do {                                                                                             \
+    if (!(condition)) {                                                                            \
+      printf("assertion %s at %s:%d \n", #condition, __FILE__, __LINE__);                         \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (0)
 
 // Causes the test to stop and be skipped at runtime.
 #define HIP_SKIP_TEST(reason)                                                                      \
-  {                                                                                                \
+  do {                                                                                             \
     std::cout << "HIP_SKIP_THIS_TEST" << std::endl;                                                \
     SKIP(reason);                                                                                  \
-  }
+  } while (0)
 
 #if HT_NVIDIA
 #define CTX_CREATE()                                                                               \
@@ -329,10 +331,10 @@ static inline int getWarpSize() {
   return 32;
 #elif HT_AMD
   int device = -1;
-  int warpSize = -1;
+  int warpSz = -1;
   HIP_CHECK(hipGetDevice(&device))
-  HIP_CHECK(hipDeviceGetAttribute(&warpSize, hipDeviceAttributeWarpSize, device))
-  return warpSize;
+  HIP_CHECK(hipDeviceGetAttribute(&warpSz, hipDeviceAttributeWarpSize, device))
+  return warpSz;
 #else
   std::cout<<"Have to be either Nvidia or AMD platform, asserting"<<std::endl;
   assert(false);
@@ -418,7 +420,7 @@ static inline long long get_time() {
 }
 
 static inline double elapsed_time(long long startTimeUs, long long stopTimeUs) {
-  return ((double)(stopTimeUs - startTimeUs)) / ((double)(1000));
+  return static_cast<double>(stopTimeUs - startTimeUs) / static_cast<double>(1000);
 }
 
 static inline unsigned setNumBlocks(unsigned blocksPerCU, unsigned threadsPerBlock, size_t N) {
@@ -427,9 +429,9 @@ static inline unsigned setNumBlocks(unsigned blocksPerCU, unsigned threadsPerBlo
   hipDeviceProp_t props{};
   HIP_CHECK(hipGetDeviceProperties(&props, device))
 
-  unsigned blocks = props.multiProcessorCount * blocksPerCU;
+  unsigned blocks = static_cast<unsigned>(props.multiProcessorCount) * blocksPerCU;
   if (blocks * threadsPerBlock < N) {
-    blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
+    blocks = (static_cast<unsigned>(N) + threadsPerBlock - 1) / threadsPerBlock;
   }
 
   return blocks;
@@ -448,9 +450,9 @@ static inline void setNumBlocksThread(unsigned blocksPerCU, unsigned threadsPerB
   hipDeviceProp_t props{};
   HIP_CHECK_THREAD(hipGetDeviceProperties(&props, device))
 
-  blocks = props.multiProcessorCount * blocksPerCU;
+  blocks = static_cast<unsigned int>(props.multiProcessorCount) * blocksPerCU;
   if (blocks * threadsPerBlock > N) {
-    blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
+    blocks = static_cast<unsigned>((N + threadsPerBlock - 1) / threadsPerBlock);
   }
 }
 
@@ -490,9 +492,9 @@ inline bool isPcieAtomicSupported() {
 inline bool isP2PSupported(int& d1, int& d2) {
   int num_devices = HipTest::getDeviceCount();
   int supported  = 1;
-  for (auto i = 0u; i < num_devices; ++i) {
+  for (int i = 0; i < num_devices; ++i) {
     int canAccess = 0;
-    for (auto j = 0u; j < num_devices; ++j) {
+    for (int j = 0; j < num_devices; ++j) {
       if (i != j) {
         HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j))
         if (!canAccess) {
@@ -686,35 +688,35 @@ void launchKernel(K kernel, Dim numBlocks, Dim numThreads, std::uint32_t memPerB
 //---
 struct Pinned {
   static const bool isPinned = true;
-  static const char* str() { return "Pinned"; };
+  static const char* str() { return "Pinned"; }
 
   static void* Alloc(size_t sizeBytes) {
     void* p;
-    HIPCHECK(hipHostMalloc((void**)&p, sizeBytes))
+    HIPCHECK(hipHostMalloc(static_cast<void**>(&p), sizeBytes))
     return p;
-  };
+  }
 };
 
 
 //---
 struct Unpinned {
   static const bool isPinned = false;
-  static const char* str() { return "Unpinned"; };
+  static const char* str() { return "Unpinned"; }
 
   static void* Alloc(size_t sizeBytes) {
     void* p = malloc(sizeBytes);
     HIPASSERT(p);
     return p;
-  };
+  }
 };
 
 
 struct Memcpy {
-  static const char* str() { return "Memcpy"; };
+  static const char* str() { return "Memcpy"; }
 };
 
 struct MemcpyAsync {
-  static const char* str() { return "MemcpyAsync"; };
+  static const char* str() { return "MemcpyAsync"; }
 };
 
 
@@ -765,13 +767,13 @@ class BlockingContext {
   void block_stream() {
     blocked = true;
     auto blocking_callback = [](hipStream_t, hipError_t, void* data) {
-      auto blocked = reinterpret_cast<std::atomic_bool*>(data);
-      while (blocked->load()) {
+      auto* blocked_flag = reinterpret_cast<std::atomic_bool*>(data);
+      while (blocked_flag->load()) {
         // Yield this thread till we are waiting
         std::this_thread::yield();
       }
     };
-    HIP_CHECK(hipStreamAddCallback(stream, blocking_callback, (void*)&blocked, 0))
+    HIP_CHECK(hipStreamAddCallback(stream, blocking_callback, reinterpret_cast<void*>(&blocked), 0))
   }
 
   void unblock_stream() {
@@ -873,7 +875,7 @@ class BlockingContext {
 // hipErrorStreamCaptureUnsupported. These macros shouldn't be used with hipStreamSync and
 // hipDeviceSync during capture.
 #define BEGIN_CAPTURE_SYNC(capture_err, rlx_mode_allowed)                                          \
-  hipStream_t stream;                                                                              \
+  hipStream_t stream = nullptr;                                                                    \
   GENERATE_CAPTURE();                                                                              \
   if (capture) {                                                                                   \
     HIP_CHECK(hipStreamCreate(&stream));                                                           \

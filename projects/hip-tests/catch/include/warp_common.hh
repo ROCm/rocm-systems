@@ -28,18 +28,18 @@
 const unsigned long long Every5thBit = 0x1084210842108421;
 const unsigned long long Every9thBit = 0x8040201008040201;
 const unsigned long long Every5thBut9th = Every5thBit & ~Every9thBit;
-const unsigned long long AllThreads = ~0;
+const unsigned long long AllThreads = ~0ULL;
 // number of warps to reduce. Both when testing warp intrinsics and cooperative groups
 // must be a multiple of warpSize
 static constexpr int kNumReduces = 78 * 32;
 
 inline __device__ bool deactivate_thread(const uint64_t* const active_masks) {
   const auto warp =
-      cooperative_groups::tiled_partition(cooperative_groups::this_thread_block(), warpSize);
+      cooperative_groups::tiled_partition(cooperative_groups::this_thread_block(), static_cast<unsigned int>(warpSize));
   const auto block = cooperative_groups::this_thread_block();
-  const auto warps_per_block = (block.size() + warpSize - 1) / warpSize;
+  const auto warps_per_block = (block.size() + static_cast<unsigned int>(warpSize) - 1u) / static_cast<unsigned int>(warpSize);
   const auto block_rank = (blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x;
-  const auto idx = block_rank * warps_per_block + block.thread_rank() / warpSize;
+  const auto idx = block_rank * warps_per_block + block.thread_rank() / static_cast<unsigned int>(warpSize);
   return !(active_masks[idx] & (static_cast<uint64_t>(1) << warp.thread_rank()));
 }
 
@@ -88,6 +88,8 @@ inline uint64_t get_active_mask(unsigned int warp_id, unsigned int warp_size) {
       break;
     case 4:  // all threads
       active_mask = 0xFFFFFFFFFFFFFFFF;
+      break;
+    default:
       break;
   }
   return active_mask;
@@ -153,7 +155,10 @@ inline bool compareEqual(T X, T Y) { return X == Y; }
 
 template <>
 inline bool compareEqual(__half X, __half Y) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wfloat-equal"
   return __half2float(X) == __half2float(Y);
+#pragma clang diagnostic pop
 }
 
 template <>
@@ -162,9 +167,9 @@ inline bool compareEqual(__half2 X, __half2 Y) {
 }
 
 inline bool compareMaskEqual(unsigned long long *Actual, unsigned long long *Expected,
-                       int i, int warpSize) {
-  if (warpSize == 32)
-    return (unsigned)Actual[i] == (unsigned)Expected[i];
+                       int i, int warpSizeArg) {
+  if (warpSizeArg == 32)
+    return static_cast<unsigned>(Actual[i]) == static_cast<unsigned>(Expected[i]);
   return Actual[i] == Expected[i];
 }
 
@@ -327,8 +332,8 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
   // masks must be != 0, hence passing 1 as the 'a' distribution parameter
   int wavefrontSize = getWarpSize();
   std::uniform_int_distribution<unsigned long long> dist(1, wavefrontSize == 64? ~0ull : (1ull << 32) - 1);
-  std::uniform_int_distribution<unsigned long long> distNoHoles(1, getWarpSize() - 2);
-  int numBytes = numItems * sizeof(T);
+  std::uniform_int_distribution<unsigned long long> distNoHoles(1, static_cast<unsigned long long>(getWarpSize() - 2));
+  size_t numBytes = static_cast<size_t>(numItems) * sizeof(T);
   LinearAllocGuard<T> tmp(LinearAllocs::malloc, numBytes);
   LinearAllocGuard<T> d_tmp(LinearAllocs::hipMalloc, numBytes);
 
@@ -363,7 +368,7 @@ __half genRandomHalf(std::uniform_int_distribution<unsigned short>& dist,
   __half_raw tmp;
   unsigned short mantissa = dist(gen) & 0x7ff;
 
-  tmp.x = (exponent << 10) | mantissa;
+  tmp.x = static_cast<unsigned short>((exponent << 10) | mantissa);
   return tmp;
 }
 
@@ -375,7 +380,7 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
                       Gen& gen,
                       int numItems)
 {
-  int numBytes = numItems * sizeof(T);
+  size_t numBytes = static_cast<size_t>(numItems) * sizeof(T);
   LinearAllocGuard<T> tmp(LinearAllocs::malloc, numBytes);
   LinearAllocGuard<T> d_tmp(LinearAllocs::hipMalloc, numBytes);
 
@@ -423,10 +428,9 @@ inline bool isInclusive(AggregationType aggType)
     return true;
   case AggregationType::ExclusiveScanDefault:
     return false;
-  default:
-    assert(false && "Unknown aggregation type");
-    return "unknown";
   }
+  assert(false && "Unknown aggregation type");
+  return false;
 }
 
 inline const char* aggregationTypeToStr(AggregationType aggType)
@@ -442,10 +446,9 @@ inline const char* aggregationTypeToStr(AggregationType aggType)
     return "inclusive scan plus";
   case AggregationType::ExclusiveScanDefault:
     return "exclusive scan plus";
-  default:
-    assert(false && "Unknown aggregation type");
-    return "unknown";
   }
+  assert(false && "Unknown aggregation type");
+  return "unknown";
 }
 
 constexpr uint64_t nextPowerOf2(uint64_t v) {
@@ -530,7 +533,7 @@ T calculateExpected(T* output,
        }
     }
 
-    for (int modulo = 2; modulo <= nextPowerOf2(lastLane + 1); modulo *= 2) {
+    for (int modulo = 2; modulo <= static_cast<int>(nextPowerOf2(static_cast<uint64_t>(lastLane + 1))); modulo *= 2) {
       for (int i = 0; i < lastLane + 1; i += 1) {
         int j = i - modulo / 2;
 
@@ -606,7 +609,7 @@ T calculateExpected(T* output,
 template <class T>
 void printMismatch(const T& result, const T& expected, const T* input, unsigned long long mask, int laneId)
 {
-  std::ios init(NULL);
+  std::ios init(nullptr);
 
   init.copyfmt(std::cout);
   std::cout << "\nMismatch at lane: " << laneId << "\n";
@@ -648,8 +651,8 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
   if constexpr (std::is_same<T, __half>::value) {
     float resultFloat = __half2float(result);
     float expectedFloat = __half2float(expected);
-    float absDifference = fabs(resultFloat - expectedFloat);
-    float relativeEpsilon = 0.1 * fmax(resultFloat, expectedFloat);
+    float absDifference = fabsf(resultFloat - expectedFloat);
+    float relativeEpsilon = 0.1f * fmaxf(resultFloat, expectedFloat);
     float eps = 0.01f;
 
     if constexpr (std::is_same<T, __half>::value) {
@@ -661,8 +664,8 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
     REQUIRE(!__hisnan(result));
 
     if (relativeEpsilon > eps) {
-      if (absDifference > 0.0001) {
-        if (absDifference >= eps * fabs(fmax(resultFloat, expectedFloat))) {
+      if (absDifference > 0.0001f) {
+        if (absDifference >= eps * fabsf(fmaxf(resultFloat, expectedFloat))) {
           printMismatch(result, expected, input, mask, laneId);
           std::cout << "Relative epsilon: " << relativeEpsilon << "\n";
           std::cout << "Difference: " << absDifference << "\n";
@@ -674,13 +677,13 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
     }
   } else {
     // for float or double, also lossy in terms of precision
-    T absDifference = fabs(result - expected);
-    T relativeEpsilon = 0.1 * fmax(result, expected);
-    T eps = 0.01;
+    T absDifference = static_cast<T>(fabs(static_cast<double>(result - expected)));
+    T relativeEpsilon = static_cast<T>(0.1) * static_cast<T>(fmax(static_cast<double>(result), static_cast<double>(expected)));
+    T eps = static_cast<T>(0.01);
 
     if (relativeEpsilon > eps) {
-      if (absDifference > 0.0001) {
-        if (absDifference >= eps * fabs(fmax(result, expected))) {
+      if (absDifference > static_cast<T>(0.0001)) {
+        if (absDifference >= eps * static_cast<T>(fabs(fmax(static_cast<double>(result), static_cast<double>(expected))))) {
           printMismatch(result, expected, input, mask, laneId);
           std::cout << "Relative epsilon: " << relativeEpsilon << "\n";
           std::cout << "Difference: " << absDifference << "\n";
@@ -700,15 +703,15 @@ void runTestReduce(int iteration, Reduce reduce)
 {
   using namespace Catch::Matchers;
   using distribution = typename DistributionType<T>::type;
-  unsigned int wavefrontSize = getWarpSize();
+  unsigned int wavefrontSize = static_cast<unsigned int>(getWarpSize());
   // one result per reduce per thread to be checked
   LinearAllocGuard<T> d_output(LinearAllocs::hipMalloc, kNumReduces * wavefrontSize * sizeof(T));
   LinearAllocGuard<T> output(LinearAllocs::malloc, kNumReduces * wavefrontSize * sizeof(T));
-  std::mt19937_64 gen(iteration);
+  std::mt19937_64 gen(static_cast<std::mt19937_64::result_type>(iteration));
   // for float16, we generate any random unsigned short, but cap the exponent later on
   // On the rest of the types, just use a bigger reduced range of numbers to avoid overflows too
   typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
-                                      (std::is_signed<T>::value? -1023 : 0);
+                                      static_cast<typename distribution::result_type>(std::is_signed<T>::value? -1023 : 0);
   typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
                                       1023;
   distribution dist(a, b);
@@ -718,7 +721,7 @@ void runTestReduce(int iteration, Reduce reduce)
   std::string opName = opToString<T, Op<T>>();
   int numReduce = 0;
 
-  genRandomBuffers(d_input, input, dist, gen, kNumReduces * wavefrontSize);
+  genRandomBuffers(d_input, input, dist, gen, kNumReduces * static_cast<int>(wavefrontSize));
   genRandomMasks(d_masks, masks, gen, kNumReduces);
   reduce(d_output.ptr(), d_input.ptr(), d_masks.ptr(), kNumReduces, op);
   HIP_CHECK(hipDeviceSynchronize())
@@ -726,7 +729,7 @@ void runTestReduce(int iteration, Reduce reduce)
 
   while (numReduce < kNumReduces) {
     T expectedByLane[64];
-    T* waveInput = &input.ptr()[numReduce * wavefrontSize];
+    T* waveInput = &input.ptr()[numReduce * static_cast<int>(wavefrontSize)];
     T expected = calculateExpected<T>(expectedByLane,
                                       waveInput,
                                       op,
@@ -734,8 +737,8 @@ void runTestReduce(int iteration, Reduce reduce)
                                       AggregationType::Reduce);
     int lane = 0;
 
-    while (lane < wavefrontSize) {
-      auto result = output.ptr()[numReduce * wavefrontSize + lane];
+    while (lane < static_cast<int>(wavefrontSize)) {
+      auto result = output.ptr()[numReduce * static_cast<int>(wavefrontSize) + lane];
       unsigned long long mask = masks.ptr()[numReduce];
 
       if ((1ull << lane) & mask) {

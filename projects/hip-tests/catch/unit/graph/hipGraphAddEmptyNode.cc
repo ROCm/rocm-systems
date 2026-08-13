@@ -93,7 +93,7 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_NegTest) {
 
 // Function to fill input data
 static void fillRandInpData(int* A1_h, int* A2_h, int* A3_h, size_t N) {
-  unsigned int seed = time(nullptr);
+  unsigned int seed = static_cast<unsigned int>(time(nullptr));
   for (size_t i = 0; i < N; i++) {
     A1_h[i] = (HipTest::RAND_R(&seed) & 0xFF);
     A2_h[i] = (HipTest::RAND_R(&seed) & 0xFF);

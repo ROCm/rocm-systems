@@ -69,7 +69,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Negative_Params) {
   }
 
   SECTION("Passing nullptr to dev_ptr") {
-    HIP_CHECK_ERROR(hipDrvGraphAddMemFreeNode(&alloc_node, graph, &alloc_node, 1, 0),
+    HIP_CHECK_ERROR(hipDrvGraphAddMemFreeNode(&alloc_node, graph, &alloc_node, 1, nullptr),
                     hipErrorInvalidValue);
   }
 
@@ -112,7 +112,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Positive) {
   HIP_CHECK(
       hipDrvGraphAddMemFreeNode(&memFreeNode, graph, &node, 1, (hipDeviceptr_t)alloc_param.dptr));
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
   HIP_CHECK(hipStreamSynchronize(streamForGraph))
   HIP_CHECK(hipGraphExecDestroy(graphExec))
   HIP_CHECK(hipGraphDestroy(graph))

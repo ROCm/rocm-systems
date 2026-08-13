@@ -500,10 +500,10 @@ HIP_TEST_CASE(Unit_hipMemPoolSetAttribute_ResetMemHighAttr) {
 
   // Allocate from mempool
   int* A_d;
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mem_pool, 0))
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mem_pool, nullptr))
   // Deallocate
-  HIP_CHECK(hipFreeAsync(A_d, 0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipFreeAsync(A_d, nullptr))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   // Reset High Attributes
   resetHighValue(mem_pool);
   // Validate usage statistics
@@ -829,9 +829,9 @@ HIP_TEST_CASE(Unit_hipMemPoolGetAttribute_UsageStatistics) {
   // Allocate from mempool
   int* A_d[iterations];
   for (int i = 0; i < iterations; i++) {
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d[i]), byte_size, mem_pool, 0))
+    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d[i]), byte_size, mem_pool, nullptr))
   }
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   // Take Usage Statistics
   getUsageStatistics(mem_pool, &stats);
   // Validate usage statistics
@@ -843,9 +843,9 @@ HIP_TEST_CASE(Unit_hipMemPoolGetAttribute_UsageStatistics) {
 
   // Deallocate half of the allocations
   for (int i = 0; i < iterations / 2; i++) {
-    HIP_CHECK(hipFreeAsync(A_d[i], 0))
+    HIP_CHECK(hipFreeAsync(A_d[i], nullptr))
   }
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   // Take Usage Statistics
   getUsageStatistics(mem_pool, &stats);
   // Validate usage statistics
@@ -855,9 +855,9 @@ HIP_TEST_CASE(Unit_hipMemPoolGetAttribute_UsageStatistics) {
 
   // Deallocate remaining allocations
   for (int i = (iterations / 2); i < iterations; i++) {
-    HIP_CHECK(hipFreeAsync(A_d[i], 0))
+    HIP_CHECK(hipFreeAsync(A_d[i], nullptr))
   }
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   // Take Usage Statistics
   getUsageStatistics(mem_pool, &stats);
   // Validate usage statistics

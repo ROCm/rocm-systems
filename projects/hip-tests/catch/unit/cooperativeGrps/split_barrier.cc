@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_coop_grids_split_barrier) {
     dim3 block(threads);
 
     HIP_CHECK(hipLaunchCooperativeKernel((void *)grid_split_barrier, grid,
-                                         block, args, 0, 0));
+                                         block, args, 0, nullptr));
     HIP_CHECK(hipDeviceSynchronize())
 
     int out = 0;

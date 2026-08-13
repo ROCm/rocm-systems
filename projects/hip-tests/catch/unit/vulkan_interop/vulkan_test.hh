@@ -68,7 +68,7 @@ WindowsSecurityAttributes()
     explicitAccess.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
     explicitAccess.Trustee.ptstrName = (LPTSTR) * ppSID;
 
-    SetEntriesInAcl(1, &explicitAccess, NULL, ppACL);
+    SetEntriesInAcl(1, &explicitAccess, nullptr, ppACL);
 
     SetSecurityDescriptorDacl(m_winPSecurityDescriptor, TRUE, *ppACL, FALSE);
 
@@ -334,16 +334,16 @@ VulkanTest::MappedBuffer<T> VulkanTest::CreateMappedStorage(uint32_t count,
 #ifdef _WIN64
     vulkanExportMemoryWin32HandleInfoKHR.sType =
         VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
-    vulkanExportMemoryWin32HandleInfoKHR.pNext = NULL;
+    vulkanExportMemoryWin32HandleInfoKHR.pNext = nullptr;
     vulkanExportMemoryWin32HandleInfoKHR.pAttributes = &winSecurityAttributes;
     vulkanExportMemoryWin32HandleInfoKHR.dwAccess =
         DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE;
-    vulkanExportMemoryWin32HandleInfoKHR.name = (LPCWSTR)NULL;
+    vulkanExportMemoryWin32HandleInfoKHR.name = (LPCWSTR)nullptr;
 
     vulkan_export_memory_allocate_info.pNext =
         _mem_handle_type & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR
         ? &vulkanExportMemoryWin32HandleInfoKHR
-        : NULL;
+        : nullptr;
 #endif
 
     allocate_info.pNext = &vulkan_export_memory_allocate_info;

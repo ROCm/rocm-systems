@@ -133,7 +133,7 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetParams_Functional) {
                                     C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
   HIP_CHECK(hipStreamSynchronize(streamForGraph))
 

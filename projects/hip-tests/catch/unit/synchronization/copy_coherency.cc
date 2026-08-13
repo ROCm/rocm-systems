@@ -48,7 +48,7 @@ void MemcpyFunction::launch(int* dst, const int* src, size_t numElements,
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
-  HIP_CHECK(hipModuleLaunchKernel(_function, blocks, 1, 1, threadsPerBlock, 1, 1, 0, s, NULL,
+  HIP_CHECK(hipModuleLaunchKernel(_function, blocks, 1, 1, threadsPerBlock, 1, 1, 0, s, nullptr,
                                   reinterpret_cast<void**>(&config)));
 }
 
@@ -143,12 +143,12 @@ void runCmd(CmdType cmd, int* dst, const int* src, hipStream_t s, size_t numElem
 
 void resetInputs(int* Ad, int* Bd, int* Ch, size_t numElements, int expected) {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
-  hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock), 0, hipStream_t(0), Ad,
+  hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock), 0, nullptr, Ad,
                      expected, numElements);
   // poison with bad value to ensure is overwritten correctly
-  hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock), 0, hipStream_t(0), Bd,
+  hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock), 0, nullptr, Bd,
                      0xDEADBEEF, numElements);
-  hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock), 0, hipStream_t(0), Bd,
+  hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock), 0, nullptr, Bd,
                      0xF000BA55, numElements);
   memset(Ch, 13, numElements * sizeof(int));
   HIP_CHECK(hipDeviceSynchronize())

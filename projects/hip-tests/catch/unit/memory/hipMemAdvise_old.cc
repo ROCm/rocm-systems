@@ -100,7 +100,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
   }
   HIP_CHECK(hipMallocManaged(&Hmm, MEM_SIZE, hipMemAttachGlobal))
   for (int i = 0; i < NumDevs; ++i) {
-    HIP_CHECK(hipMemPrefetchAsync(Hmm, MEM_SIZE, i, 0))
+    HIP_CHECK(hipMemPrefetchAsync(Hmm, MEM_SIZE, i, nullptr))
     for (int j = 0; j < NumDevs; ++j) {
       if (i == j) continue;
       HIP_CHECK(hipSetDevice(j))
@@ -138,7 +138,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
    we should still see the said flag is set for device 0*/
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
   CHECK_MANAGED_MEMORY_SUPPORT
-  int *Hmm = NULL, data = 999, Ngpus = 0;
+  int *Hmm = nullptr, data = 999, Ngpus = 0;
   HIP_CHECK(hipGetDeviceCount(&Ngpus))
   if (Ngpus < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
@@ -169,7 +169,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
 
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
   CHECK_MANAGED_MEMORY_SUPPORT
-  int *Hmm = NULL, data = 999, Ngpus = 0;
+  int *Hmm = nullptr, data = 999, Ngpus = 0;
   HIP_CHECK(hipGetDeviceCount(&Ngpus))
   if (Ngpus < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
@@ -201,7 +201,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
 
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
   CHECK_MANAGED_MEMORY_SUPPORT
-  int *Hmm = NULL, NumElms = isQuickLevel() ? 4096 : (1024 * 1024), InitVal = 123;
+  int *Hmm = nullptr, NumElms = isQuickLevel() ? 4096 : (1024 * 1024), InitVal = 123;
   const int blocks = (NumElms + 1023) / 1024;
   hipStream_t strm;
   HIP_CHECK(hipStreamCreate(&strm))
@@ -318,8 +318,8 @@ HIP_TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
   if (Ngpus < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
-  int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123;
-  int *Hmm1 = NULL, DataMismatch = 0;
+  int *Hmm = nullptr, NumElms = (1024 * 1024), InitVal = 123;
+  int *Hmm1 = nullptr, DataMismatch = 0;
   hipStream_t strm;
   HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int))))
   // Initializing memory

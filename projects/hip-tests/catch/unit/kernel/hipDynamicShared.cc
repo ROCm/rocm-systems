@@ -15,7 +15,7 @@ unsigned threadsPerBlock = 256;
 
 template <unsigned batch, typename T>
 __device__ void sum(T* sdata, unsigned groupElements, unsigned tid) {
-  T tmp;
+  T tmp{};
   if (groupElements < batch) return;
   // sdata[tid] += sdata[tid - batch/2] does not work when block size is
   // greater than wave size because one wave may complete before another

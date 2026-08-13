@@ -54,7 +54,7 @@ HIP_TEST_CASE(Unit_hipGraphHostNodeGetParams_Negative) {
   HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t hostNode;
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
@@ -113,12 +113,12 @@ HIP_TEST_CASE(Unit_hipGraphHostNodeGetParams_ClonedGraphWithHostNode) {
   HIP_CHECK(hipGraphClone(&clonedgraph, graph))
 
   hipGraphNode_t hostNode;
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, clonedgraph, nullptr, 0, &hostParams))
 
-  hipHostNodeParams sethostParams = {0, 0};
+  hipHostNodeParams sethostParams = {nullptr, nullptr};
   sethostParams.fn = callbackfunc_setparams;
   sethostParams.userData = C_h;
   HIP_CHECK(hipGraphHostNodeSetParams(hostNode, &sethostParams))
@@ -153,7 +153,7 @@ with hipGraphHostNodeSetParams and gets the host node
 params using hipGraphHostNodeGetParams API and validates
 it
 */
-void hipGraphHostNodeGetParams_func(bool setparams) {
+static void hipGraphHostNodeGetParams_func(bool setparams) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -174,7 +174,7 @@ void hipGraphHostNodeGetParams_func(bool setparams) {
                                     hipMemcpyDeviceToHost));
 
   hipGraphNode_t hostNode;
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
@@ -184,7 +184,7 @@ void hipGraphHostNodeGetParams_func(bool setparams) {
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyD2H_AC, &hostNode, 1))
 
   if (setparams) {
-    hipHostNodeParams sethostParams = {0, 0};
+    hipHostNodeParams sethostParams = {nullptr, nullptr};
     sethostParams.fn = callbackfunc_setparams;
     sethostParams.userData = C_h;
     HIP_CHECK(hipGraphHostNodeSetParams(hostNode, &sethostParams))

@@ -72,7 +72,7 @@ template <typename T> static void runTestR(const int width) {
   resDesc.res.array.array = hipArray;
 
   // Create surface object
-  hipSurfaceObject_t surfaceObject = 0;
+  hipSurfaceObject_t surfaceObject = nullptr;
   HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   T* hOutputData = nullptr;
@@ -120,7 +120,7 @@ template <typename T> static void runTestW(const int width) {
   resDesc.res.array.array = hipArray;
 
   // Create surface object
-  hipSurfaceObject_t surfaceObject = 0;
+  hipSurfaceObject_t surfaceObject = nullptr;
   HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   for (int j = 0; j < width; j++) {
@@ -174,7 +174,7 @@ template <typename T> static void runTestRW(const int width) {
   resDesc.res.array.array = hipArray;
 
   // Create surface object
-  hipSurfaceObject_t surfaceObject = 0;
+  hipSurfaceObject_t surfaceObject = nullptr;
   HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   HIP_CHECK(hipMallocArray(&hipOutArray, &channelDesc, width, 0, hipArraySurfaceLoadStore))
@@ -184,7 +184,7 @@ template <typename T> static void runTestRW(const int width) {
   resOutDesc.resType = hipResourceTypeArray;
   resOutDesc.res.array.array = hipOutArray;
 
-  hipSurfaceObject_t outSurfaceObject = 0;
+  hipSurfaceObject_t outSurfaceObject = nullptr;
   HIP_CHECK(hipCreateSurfaceObject(&outSurfaceObject, &resOutDesc))
 
   dim3 dimBlock(16, 1, 1);

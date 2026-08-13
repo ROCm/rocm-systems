@@ -108,7 +108,7 @@ __global__ void kernel_cg_coalesced_group_partition(unsigned int tileSz, int* re
   if (id % cg_sizes == 0) {
     coalesced_group threadBlockCGTy = coalesced_threads();
 
-    int* workspace = NULL;
+    int* workspace = nullptr;
 
     if (isGlobalMem) {
       workspace = globalMem;
@@ -198,7 +198,7 @@ void printResultsSimpleCoalescedGroups(int* ptr, int size) {
 void compareResultsSimpleCoalescedGroups(int* cpu, int* gpu, int size) {
   for (unsigned int i = 0; i < size / sizeof(int); i++) {
     if (cpu[i] != gpu[i]) {
-      REQUIRE(" results do not match.");
+      FAIL(" results do not match.");
     }
   }
 }
@@ -229,7 +229,7 @@ void verifyResultsSimpleCoalescedGroups(int* hPtr, int* dPtr, int size) {
       }
     }
     if (j == size) {
-      REQUIRE(" Result verification failed!");
+      FAIL(" Result verification failed!");
     }
   }
 }
@@ -266,15 +266,15 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
       expectedSum[numTiles - 1] = (lastTileSize - 1) * lastTileSize / 2;
     }
 
-    int* dResult = NULL;
+    int* dResult = nullptr;
     HIP_CHECK(hipMalloc(&dResult, sizeof(int) * numTiles))
 
-    int* globalMem = NULL;
+    int* globalMem = nullptr;
     if (useGlobalMem) {
       HIP_CHECK(hipMalloc((void**)&globalMem, threadsPerBlock * sizeof(int)))
     }
 
-    int* hResult = NULL;
+    int* hResult = nullptr;
     HIP_CHECK(hipHostMalloc(&hResult, numTiles * sizeof(int), hipHostMallocDefault))
     memset(hResult, 0, numTiles * sizeof(int));
 
@@ -324,10 +324,10 @@ static void test_shfl_any_to_any() {
     int group_size = (totalThreads + i - 1) / i;
     int group_size_in_bytes = group_size * sizeof(int);
 
-    int* hPtr = NULL;
-    int* dPtr = NULL;
-    int* dsrcArr = NULL;
-    int* dResults = NULL;
+    int* hPtr = nullptr;
+    int* dPtr = nullptr;
+    int* dsrcArr = nullptr;
+    int* dResults = nullptr;
     int* srcArr = (int*)malloc(group_size_in_bytes);
     int* srcArrCpu = (int*)malloc(group_size_in_bytes);
 
@@ -402,9 +402,9 @@ static void test_shfl_broadcast() {
     int group_size = (totalThreads + i - 1) / i;
     int group_size_in_bytes = group_size * sizeof(int);
 
-    int* hPtr = NULL;
-    int* dPtr = NULL;
-    int* dResults = NULL;
+    int* hPtr = nullptr;
+    int* dPtr = nullptr;
+    int* dResults = nullptr;
     int srcLane = rand() % 1000;
     int srcLaneCpu = 0;
     std::cout << "Testing coalesced_groups shfl with srcLane " << srcLane << '\n'

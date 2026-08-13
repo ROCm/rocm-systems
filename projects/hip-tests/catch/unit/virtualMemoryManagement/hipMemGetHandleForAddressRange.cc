@@ -161,7 +161,7 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_Negative) {
 
     size_t size_mem = ((granularity + sizeBytes - 1) / granularity) * granularity;
     hipDeviceptr_t ptrA;
-    HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&ptrA), size_mem, granularity, 0, 0))
+    HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&ptrA), size_mem, granularity, nullptr, 0))
 
     REQUIRE(reinterpret_cast<void*>(ptrA) != nullptr);
 
@@ -233,7 +233,7 @@ hipDeviceptr_t createVirtualMemoryAndFillData(int size, int* reservedAddrSize, i
 
   size_t size_mem = ((granularity + (size * sizeof(int)) - 1) / granularity) * granularity;
   hipDeviceptr_t ptrA;
-  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&ptrA), size_mem, granularity, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&ptrA), size_mem, granularity, nullptr, 0))
   REQUIRE(reinterpret_cast<void*>(ptrA) != nullptr);
 
   hipMemGenericAllocationHandle_t handle = GetPhysicalMemory(device, size_mem);
@@ -272,7 +272,7 @@ void createVirtualMemoryAndFillData_thread(hipDeviceptr_t* ptr, int size, int* r
   size_t size_mem = ((granularity + (size * sizeof(int)) - 1) / granularity) * granularity;
   hipDeviceptr_t ptrA;
   HIP_CHECK_THREAD(
-      hipMemAddressReserve(reinterpret_cast<void**>(&ptrA), size_mem, granularity, 0, 0));
+      hipMemAddressReserve(reinterpret_cast<void**>(&ptrA), size_mem, granularity, nullptr, 0));
   REQUIRE_THREAD(reinterpret_cast<void*>(ptrA) != nullptr);
 
   hipMemGenericAllocationHandle_t handle;
@@ -316,7 +316,7 @@ bool validateHandle(int handle, int size, int device = 0) {
   size_t sizeMem = ((granularity + sizeBytes - 1) / granularity) * granularity;
 
   void* dstDevMem = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&dstDevMem, sizeMem, granularity, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&dstDevMem, sizeMem, granularity, nullptr, 0))
   REQUIRE(dstDevMem != nullptr);
   HIP_CHECK(hipMemMap(dstDevMem, sizeMem, 0, imported_handle, 0))
 

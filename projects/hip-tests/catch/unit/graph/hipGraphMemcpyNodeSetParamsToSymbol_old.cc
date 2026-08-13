@@ -32,13 +32,13 @@ code.
 __device__ int globalIn[SIZE], globalOut[SIZE];
 __device__ __constant__ int globalConst[SIZE];
 
-__global__ void CpyToSymbolKernel(int* B_d) {
+static __global__ void CpyToSymbolKernel(int* B_d) {
   for (int i = 0; i < SIZE; i++) {
     B_d[i] = globalIn[i];
   }
 }
 
-__global__ void CpyToConstSymbolKernel(int* B_d) {
+static __global__ void CpyToConstSymbolKernel(int* B_d) {
   for (int i = 0; i < SIZE; i++) {
     B_d[i] = globalConst[i];
   }

@@ -620,7 +620,7 @@ HIP_TEST_CASE(Unit_hipMallocAsync_DefaultStreams_Concurrent) {
   // create multiple streams
   hipStream_t stream[3];
   HIP_CHECK(hipStreamCreate(&stream[0]))
-  stream[1] = 0;  // Null stream
+  stream[1] = nullptr;  // Null stream
   stream[2] = hipStreamPerThread;
   // Queue operations on the 3 streams
   for (int idx = 0; idx < 3; idx++) {

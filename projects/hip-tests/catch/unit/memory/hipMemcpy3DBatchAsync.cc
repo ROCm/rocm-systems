@@ -353,7 +353,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps, char,
  */
 HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_NegativeTests) {
   const int numOps = 2;
-  hipStream_t stream = NULL;
+  hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream))
   size_t failIdx;
   unsigned long long flags = 0;

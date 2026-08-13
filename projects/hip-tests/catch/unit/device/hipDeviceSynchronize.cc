@@ -77,9 +77,9 @@ HIP_TEST_CASE(Unit_hipDeviceSynchronize_Positive_Nullstream) {
   A_h[0] = 1;
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), _SIZE))
 
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, _SIZE, hipMemcpyHostToDevice, NULL))
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(Iter), dim3(1), dim3(1), 0, NULL, A_d, 1 << 30);
-  HIP_CHECK(hipMemcpyAsync(A_h, A_d, _SIZE, hipMemcpyDeviceToHost, NULL))
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, _SIZE, hipMemcpyHostToDevice, nullptr))
+  hipLaunchKernelGGL(HIP_KERNEL_NAME(Iter), dim3(1), dim3(1), 0, nullptr, A_d, 1 << 30);
+  HIP_CHECK(hipMemcpyAsync(A_h, A_d, _SIZE, hipMemcpyDeviceToHost, nullptr))
 
   HIP_CHECK(hipDeviceSynchronize())
   REQUIRE(1 << 30 == A_h[0] - 1);

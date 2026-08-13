@@ -34,13 +34,13 @@ code. 10) Check with other graph node but pass same graphExec, api expected to r
 __device__ int globalIn[SIZE], globalOut[SIZE];
 __device__ __constant__ int globalConst[SIZE];
 
-__global__ void MemcpyToSymbolExecKernel(int* B_d) {
+static __global__ void MemcpyToSymbolExecKernel(int* B_d) {
   for (int i = 0; i < SIZE; i++) {
     B_d[i] = globalIn[i];
   }
 }
 
-__global__ void MemcpyToConstSymbolExecKernel(int* B_d) {
+static __global__ void MemcpyToConstSymbolExecKernel(int* B_d) {
   for (int i = 0; i < SIZE; i++) {
     B_d[i] = globalConst[i];
   }
@@ -215,7 +215,7 @@ static void hipGraphExecMemcpyNodeSetParamsToSymbol_GlobalMem(bool useConstVar) 
                                                       hipMemcpyDeviceToDevice));
   }
 
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
 
   // Validating the result
   for (int i = 0; i < SIZE; i++) {

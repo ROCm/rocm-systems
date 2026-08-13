@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#ifndef _COMPILER_HIPCLASSKERNEL_H_
-#define _COMPILER_HIPCLASSKERNEL_H_
+#ifndef COMPILER_HIPCLASSKERNEL_H
+#define COMPILER_HIPCLASSKERNEL_H
 
 #include <hip_test_common.hh>
 
@@ -115,6 +115,7 @@ class testSizeC {
 
 class testSizeDV {
  public:
+  virtual ~testSizeDV() = default;
   virtual void __host__ __device__ func1();
 
  private:
@@ -123,6 +124,7 @@ class testSizeDV {
 
 class testSizeDerivedDV : testSizeDV {
  public:
+  ~testSizeDerivedDV() override = default;
   virtual void __host__ __device__ funcD1();
 
  private:

@@ -17,12 +17,14 @@ static inline unsigned int GenerateLinearAllocationFlagCombinations(
     const LinearAllocs allocation_type) {
   switch (allocation_type) {
     case LinearAllocs::hipHostMalloc:
-      return GENERATE(hipHostMallocDefault, hipHostMallocPortable, hipHostMallocMapped,
-                      hipHostMallocWriteCombined);
+      return static_cast<unsigned int>(
+          GENERATE(hipHostMallocDefault, hipHostMallocPortable, hipHostMallocMapped,
+                   hipHostMallocWriteCombined));
     case LinearAllocs::mallocAndRegister:
     case LinearAllocs::hipMallocManaged:
     case LinearAllocs::malloc:
     case LinearAllocs::hipMalloc:
+    case LinearAllocs::noAlloc:
       return 0u;
     default:
       assert("Invalid LinearAllocs enumerator");

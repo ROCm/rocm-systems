@@ -66,7 +66,7 @@ HIP_TEST_CASE(Unit_hipGraphExecGetFlags_Negative) {
  *    - HIP_VERSION >= 6.4
  */
 HIP_TEST_CASE(Unit_hipGraphExecGetFlags_Positive) {
-  hipGraphExec_t graphExec;
+  hipGraphExec_t graphExec = nullptr;
   unsigned long long flags;  // NOLINT
   hipGraph_t graph;
   constexpr size_t Nbytes = 10 * sizeof(int);
@@ -115,7 +115,7 @@ HIP_TEST_CASE(Unit_hipGraphExecGetFlags_Positive) {
   SECTION("flag is hipGraphInstantiateFlagDeviceLaunch") {
     HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph,
                   hipGraphInstantiateFlagDeviceLaunch));
-    HIP_CHECK(hipGraphLaunch(graphExec, 0))
+    HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
     REQUIRE(flags == hipGraphInstantiateFlagDeviceLaunch);
   }
   SECTION("flag is hipGraphInstantiateFlagUseNodePriority") {

@@ -18,7 +18,7 @@
 #include <vector>
 #include <cmath>
 
-const char* kernelname = "test_hip_bfloat16";
+static const char* kernelname = "test_hip_bfloat16";
 
 static constexpr auto code{
     R"(
@@ -54,7 +54,7 @@ HIP_TEST_CASE(Unit_hiprtc_test_hip_bfloat16) {
 #endif
   vector<const char*> opts;
   opts.push_back(sarg.c_str());
-  hiprtcResult compileResult{hiprtcCompileProgram(prog, opts.size(), opts.data())};
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, static_cast<int>(opts.size()), opts.data())};
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
   if (logSize) {

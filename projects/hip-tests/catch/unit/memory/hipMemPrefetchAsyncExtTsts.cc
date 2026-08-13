@@ -185,9 +185,9 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
   hipStream_t strm;
   HIP_CHECK(hipStreamCreate(&strm))
   SECTION("Passing null for dev ptr") {
-    err = hipMemPrefetchAsync(NULL, MemSz, 0, strm);
+    err = hipMemPrefetchAsync(nullptr, MemSz, 0, strm);
     if (err == hipSuccess) {
-      WARN("hipMemPrefetchAsync() gives hipSuccess when NULL is passed!!");
+      WARN("hipMemPrefetchAsync() gives hipSuccess when nullptr is passed!!");
       IfTestPassed = false;
     }
   }
@@ -233,7 +233,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
   SECTION("Checking behavior with stream object") {
     // Passing Null stream
     // expectation: No issue should be observed
-    err = hipMemPrefetchAsync(Hmm, MemSz, 0, 0);
+    err = hipMemPrefetchAsync(Hmm, MemSz, 0, nullptr);
     if (err != hipSuccess) {
       WARN(
           "hipMemPrefetchAsync() returns error when Null stream is"

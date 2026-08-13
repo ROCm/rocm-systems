@@ -74,7 +74,7 @@ void funcTestsForAllPriorityLevelsWrtNullStrm(unsigned int flags, bool deviceSyn
   // 0 idx is for default stream
   hipStream_t* stream = reinterpret_cast<hipStream_t*>(malloc(arr_size * sizeof(hipStream_t)));
   REQUIRE(stream != nullptr);
-  stream[0] = 0;
+  stream[0] = nullptr;
   int count = 1;
   // Create a stream for each of the priority levels
   for (priority = priority_high; priority < priority_low; priority++) {
@@ -257,7 +257,7 @@ template <typename T> bool verifyStreamPriorityKernelResults() {
 
 // get the range of priorities available
 #define OP(x)                                                                                      \
-  int priority_##x;                                                                                \
+  int priority_##x = 0;                                                                            \
   bool enable_priority_##x = false;
   OP(low)
   OP(normal)
@@ -284,7 +284,7 @@ template <typename T> bool verifyStreamPriorityKernelResults() {
   }
 // create streams with highest and lowest available priorities
 #define OP(x)                                                                                      \
-  hipStream_t stream_##x;                                                                          \
+  hipStream_t stream_##x = nullptr;                                                                \
   if (enable_priority_##x) {                                                                       \
     HIP_CHECK(hipStreamCreateWithPriority(&stream_##x, hipStreamDefault, priority_##x));           \
   }
@@ -393,7 +393,7 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
   size_t size = NUMITERS * MEMCPYSIZE1();
 // get the range of priorities available
 #define OP(x)                                                                                      \
-  int priority_##x;                                                                                \
+  int priority_##x = 0;                                                                            \
   bool enable_priority_##x = false;
   OP(low)
   OP(normal)

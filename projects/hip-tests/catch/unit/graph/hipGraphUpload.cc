@@ -108,7 +108,7 @@ static void hipGraphUploadFunctional_with_stream(hipStream_t stream) {
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_B, &kNodeAdd, 1))
   HIP_CHECK(hipGraphAddDependencies(graph, &kNodeAdd, &memcpy_C, 1))
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   HIP_CHECK(hipGraphUpload(graphExec, stream))
   HIP_CHECK(hipGraphLaunch(graphExec, stream))
@@ -131,8 +131,8 @@ HIP_TEST_CASE(Unit_hipGraphUpload_Functional) {
     HIP_CHECK(hipStreamDestroy(stream))
   }
   SECTION("Pass stream as default stream") {
-    hipGraphUploadFunctional_with_hipStreamBeginCapture(0);
-    hipGraphUploadFunctional_with_stream(0);
+    hipGraphUploadFunctional_with_hipStreamBeginCapture(nullptr);
+    hipGraphUploadFunctional_with_stream(nullptr);
   }
   SECTION("Pass stream as hipStreamPerThread") {
     hipGraphUploadFunctional_with_hipStreamBeginCapture(hipStreamPerThread);
@@ -180,8 +180,8 @@ HIP_TEST_CASE(Unit_hipGraphUpload_Functional_multidevice_test) {
     SECTION("Pass stream as default stream for each device") {
       for (int i = 0; i < numDevices; i++) {
         HIP_CHECK(hipSetDevice(i))
-        hipGraphUploadFunctional_with_hipStreamBeginCapture(0);
-        hipGraphUploadFunctional_with_stream(0);
+        hipGraphUploadFunctional_with_hipStreamBeginCapture(nullptr);
+        hipGraphUploadFunctional_with_stream(nullptr);
       }
     }
     SECTION("Pass stream as hipStreamPerThread for each device") {

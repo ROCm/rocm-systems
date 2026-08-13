@@ -85,7 +85,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipTexObjPitch_texture2D, char, unsigned char, short
   texDescr.readMode = hipReadModeElementType;
 
   hipTextureObject_t texObj;
-  HIP_CHECK(hipCreateTextureObject(&texObj, &texRes, &texDescr, NULL))
+  HIP_CHECK(hipCreateTextureObject(&texObj, &texRes, &texDescr, nullptr))
 
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&devPtrB), SIZE_W * sizeof(TestType) * SIZE_H))
 

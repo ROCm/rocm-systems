@@ -28,7 +28,7 @@ static void test_uniform0(int* retval, uint num_blocks, uint threads_per_block) 
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_uniform0, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
     REQUIRE(retval[ii] == strlen("Hello World\n"));
@@ -53,7 +53,7 @@ static void test_uniform1(int* retval, uint num_blocks, uint threads_per_block) 
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_uniform1, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
     REQUIRE(retval[ii] == strlen("Six times Eight is 42") + 1);
@@ -78,7 +78,7 @@ static void test_divergent0(int* retval, uint num_blocks, uint threads_per_block
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_divergent0, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != 10; ++ii) {
     REQUIRE(retval[ii] == 13);
@@ -113,7 +113,7 @@ static void test_divergent1(int* retval, uint num_blocks, uint threads_per_block
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_divergent1, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
     if (ii % 2) {
@@ -146,7 +146,7 @@ static void test_series(int* retval, uint num_blocks, uint threads_per_block) {
     retval[i] = 0x23232323;
   }
   hipLaunchKernelGGL(kernel_series, dim3(num_blocks), dim3(threads_per_block), 0, 0, retval);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   auto CapturedData = captured.getCapturedData();
   for (uint ii = 0; ii != num_threads; ++ii) {
     REQUIRE(retval[ii] == strlen(msg_long1) + strlen(msg_short) + strlen(msg_long2) + 3);

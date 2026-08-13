@@ -56,7 +56,7 @@ class GLImageObject {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8UI_EXT, kWidth, kHeight, 0, GL_RGBA_INTEGER_EXT,
-                 GL_UNSIGNED_BYTE, NULL);
+                 GL_UNSIGNED_BYTE, nullptr);
     REQUIRE(glGetError() == GL_NO_ERROR);
   }
 
@@ -169,7 +169,7 @@ class EGLContextScopeGuard : public IContextScopeGuard {
     REQUIRE(eglBindAPI(EGL_OPENGL_API));
 
     // 5. Create a context and make it current
-    egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT, NULL);
+    egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT, nullptr);
 
     REQUIRE(eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_));
   }
@@ -227,7 +227,7 @@ class GLContextScopeGuard {
   GLContextScopeGuard() {
 
     char* val = std::getenv(kEnvarName);
-    std::string val_str = val == NULL ? "" : val;
+    std::string val_str = val == nullptr ? "" : val;
 
     if (val_str.empty() || val_str == "GLUT") {
       gl_context_ = std::make_unique<GLUTContextScopeGuard>();

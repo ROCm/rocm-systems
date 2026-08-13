@@ -21,10 +21,10 @@
 #define NSTEP 1000
 #define NKERNEL 25
 #endif  // KERNEL_ARG_PREFETCH
-#define CONSTANT 5.34
+#define CONSTANT 5.34f
 
 static __global__ void simpleKernel(float* out_d, float* in_d) {
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < N) out_d[idx] = CONSTANT * in_d[idx];
 }
 
@@ -41,7 +41,7 @@ static void hipTestWithGraph() {
   in_h = new float[N];
   out_h = new float[N];
   for (int i = 0; i < N; i++) {
-    in_h[i] = i;
+    in_h[i] = static_cast<float>(i);
   }
 
   float *in_d, *out_d;
@@ -107,7 +107,7 @@ static void hipTestWithoutGraph() {
   in_h = new float[N];
   out_h = new float[N];
   for (int i = 0; i < N; i++) {
-    in_h[i] = i;
+    in_h[i] = static_cast<float>(i);
   }
 
   float *in_d, *out_d;

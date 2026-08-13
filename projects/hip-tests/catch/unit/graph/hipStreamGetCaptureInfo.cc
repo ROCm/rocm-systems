@@ -17,7 +17,7 @@
  * *pCaptureStatus, unsigned long long *pId)` - get capture status of a stream
  */
 
-void checkStreamCaptureInfo(hipStreamCaptureMode mode, hipStream_t stream) {
+static void checkStreamCaptureInfo(hipStreamCaptureMode mode, hipStream_t stream) {
   constexpr size_t N = 1000000;
   size_t Nbytes = N * sizeof(float);
 

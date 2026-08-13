@@ -19,23 +19,23 @@ Testcase Scenarios :
 #define GRAPH_LAUNCH_ITERS_QUICK 10
 
 static __global__ void reduce(float* d_in, double* d_out) {
-  int myId = threadIdx.x + blockDim.x * blockIdx.x;
-  int tid = threadIdx.x;
-  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+  unsigned int myId = threadIdx.x + blockDim.x * blockIdx.x;
+  unsigned int tid = threadIdx.x;
+  for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
     if (tid < s) {
       d_in[myId] += d_in[myId + s];
     }
     __syncthreads();
   }
   if (tid == 0) {
-    d_out[blockIdx.x] = d_in[myId];
+    d_out[blockIdx.x] = static_cast<double>(d_in[myId]);
   }
 }
 
 static __global__ void reduceFinal(double* d_in, double* d_out) {
-  int myId = threadIdx.x + blockDim.x * blockIdx.x;
-  int tid = threadIdx.x;
-  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+  unsigned int myId = threadIdx.x + blockDim.x * blockIdx.x;
+  unsigned int tid = threadIdx.x;
+  for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
     if (tid < s) {
       d_in[myId] += d_in[myId + s];
     }
@@ -47,7 +47,7 @@ static __global__ void reduceFinal(double* d_in, double* d_out) {
 }
 
 static void init_input(float* a, size_t size) {
-  unsigned int seed = time(nullptr);
+  unsigned int seed = static_cast<unsigned int>(time(nullptr));
   for (size_t i = 0; i < size; i++) {
     a[i] = (HipTest::RAND_R(&seed) & 0xFF) / static_cast<float>(RAND_MAX);
   }
@@ -76,7 +76,7 @@ static void hipWithoutGraphs(float* inputVec_h, float* inputVec_d, double* outpu
     HIP_CHECK(hipMemsetAsync(result_d, 0, sizeof(double), stream3))
     HIP_CHECK(hipEventRecord(memsetEvent2, stream3))
     HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent1, 0))
-    hipLaunchKernelGGL(reduce, dim3(inputSize / THREADS_PER_BLOCK, 1, 1),
+    hipLaunchKernelGGL(reduce, dim3(static_cast<uint32_t>(inputSize / THREADS_PER_BLOCK), 1, 1),
                        dim3(THREADS_PER_BLOCK, 1, 1), 0, stream1, inputVec_d, outputVec_d);
     HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent2, 0))
     hipLaunchKernelGGL(reduceFinal, dim3(1, 1, 1), dim3(THREADS_PER_BLOCK, 1, 1), 0, stream1,
@@ -98,7 +98,7 @@ static void hipWithoutGraphs(float* inputVec_h, float* inputVec_d, double* outpu
   HIP_CHECK(hipStreamDestroy(stream3))
   double result_h_cpu = 0.0;
   for (size_t i = 0; i < inputSize; i++) {
-    result_h_cpu += inputVec_h[i];
+    result_h_cpu += static_cast<double>(inputVec_h[i]);
   }
 
   REQUIRE(result_h_cpu == result_h);
@@ -133,7 +133,7 @@ static void hipGraphsUsingStreamCapture(float* inputVec_h, float* inputVec_d, do
   HIP_CHECK(hipMemsetAsync(result_d, 0, sizeof(double), stream3))
   HIP_CHECK(hipEventRecord(memsetEvent2, stream3))
   HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent1, 0))
-  hipLaunchKernelGGL(reduce, dim3(inputSize / THREADS_PER_BLOCK, 1, 1),
+  hipLaunchKernelGGL(reduce, dim3(static_cast<uint32_t>(inputSize / THREADS_PER_BLOCK), 1, 1),
                      dim3(THREADS_PER_BLOCK, 1, 1), 0, stream1, inputVec_d, outputVec_d);
   HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent2, 0))
   hipLaunchKernelGGL(reduceFinal, dim3(1, 1, 1), dim3(THREADS_PER_BLOCK, 1, 1), 0, stream1,
@@ -177,7 +177,7 @@ static void hipGraphsUsingStreamCapture(float* inputVec_h, float* inputVec_d, do
   HIP_CHECK(hipEventDestroy(memsetEvent2))
   double result_h_cpu = 0.0;
   for (size_t i = 0; i < inputSize; i++) {
-    result_h_cpu += inputVec_h[i];
+    result_h_cpu += static_cast<double>(inputVec_h[i]);
   }
 
   REQUIRE(result_h_cpu == result_h);
@@ -212,7 +212,7 @@ static void hipGraphsManual(float* inputVec_h, float* inputVec_d, double* output
   void* kernelArgs[4] = {reinterpret_cast<void*>(&inputVec_d),
                          reinterpret_cast<void*>(&outputVec_d), &inputSize, &numOfBlocks};
   kernelNodeParams.func = reinterpret_cast<void*>(reduce);
-  kernelNodeParams.gridDim = dim3(inputSize / THREADS_PER_BLOCK, 1, 1);
+  kernelNodeParams.gridDim = dim3(static_cast<uint32_t>(inputSize / THREADS_PER_BLOCK), 1, 1);
   kernelNodeParams.blockDim = dim3(THREADS_PER_BLOCK, 1, 1);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
@@ -278,7 +278,7 @@ static void hipGraphsManual(float* inputVec_h, float* inputVec_d, double* output
   HIP_CHECK(hipStreamDestroy(streamForGraph))
   double result_h_cpu = 0.0;
   for (size_t i = 0; i < inputSize; i++) {
-    result_h_cpu += inputVec_h[i];
+    result_h_cpu += static_cast<double>(inputVec_h[i]);
   }
 
   REQUIRE(result_h_cpu == result_h);

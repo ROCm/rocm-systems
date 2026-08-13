@@ -62,10 +62,10 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative) {
   hipGraphNode_t memcpyNode;
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphCreate(&graph, 0))
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, NULL, 0, &myparms))
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, nullptr, 0, &myparms))
 
   // Instantiate the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   SECTION("Pass hGraphExec as nullptr") {
     ret = hipGraphExecMemcpyNodeSetParams(nullptr, memcpyNode, &myparms);
     REQUIRE(hipErrorInvalidValue == ret);
@@ -124,7 +124,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative) {
     hipGraph_t graph1;
     hipGraphNode_t memcpyNode1;
     HIP_CHECK(hipGraphCreate(&graph1, 0))
-    HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode1, graph1, NULL, 0, &myparms))
+    HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode1, graph1, nullptr, 0, &myparms))
     ret = hipGraphExecMemcpyNodeSetParams(graphExec, memcpyNode1, &myparms);
     REQUIRE(hipErrorInvalidValue == ret);
     HIP_CHECK(hipGraphDestroy(graph1))

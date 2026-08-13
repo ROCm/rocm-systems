@@ -17,9 +17,9 @@
  */
 
 #include <hip_test_common.hh>
-#include "hrr_reader.h"
-#include "hrr_api_args.h"
-#include "hip_playback.h"
+#include <hrr_reader.h>
+#include <hrr_api_args.h>
+#include <hip_playback.h>
 
 #include <cstdio>
 #include <cstring>

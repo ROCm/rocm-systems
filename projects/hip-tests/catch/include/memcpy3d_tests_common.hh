@@ -23,15 +23,19 @@ static inline hipMemcpyKind ReverseMemcpyDirection(const hipMemcpyKind direction
       return hipMemcpyDeviceToHost;
     case hipMemcpyDeviceToHost:
       return hipMemcpyHostToDevice;
+    case hipMemcpyHostToHost:
+    case hipMemcpyDeviceToDevice:
+    case hipMemcpyDeviceToDeviceNoCU:
+    case hipMemcpyDefault:
     default:
       return direction;
   }
-};
+}
 
 static inline hipMemcpy3DParms GetMemcpy3DParms(PtrVariant dst_ptr, hipPos dst_pos,
                                                 PtrVariant src_ptr, hipPos src_pos,
                                                 hipExtent extent, hipMemcpyKind kind) {
-  hipMemcpy3DParms parms = {0};
+  hipMemcpy3DParms parms = {};
   if (std::holds_alternative<hipArray_t>(dst_ptr)) {
     parms.dstArray = std::get<hipArray_t>(dst_ptr);
   } else {
@@ -88,7 +92,7 @@ hipError_t Memcpy3DWrapper(PtrVariant dst_ptr, hipPos dst_pos, PtrVariant src_pt
       HIP_CHECK(hipGraphAddMemcpyNode(&node, g, nullptr, 0, &parms))
     }
 
-    hipMemcpy3DParms retrieved_params = {0};
+    hipMemcpy3DParms retrieved_params = {};
     HIP_CHECK(hipGraphMemcpyNodeGetParams(node, &retrieved_params))
     REQUIRE(parms == retrieved_params);
 
@@ -620,7 +624,7 @@ using DrvPtrVariant = std::variant<hipPitchedPtr, hipArray_t>;
 static inline HIP_MEMCPY3D GetDrvMemcpy3DParms(DrvPtrVariant dst_ptr, hipPos dst_pos,
                                                DrvPtrVariant src_ptr, hipPos src_pos,
                                                hipExtent extent, hipMemcpyKind kind) {
-  HIP_MEMCPY3D parms = {0};
+  HIP_MEMCPY3D parms = {};
 
   if (std::holds_alternative<hipArray_t>(dst_ptr)) {
     parms.dstMemoryType = hipMemoryTypeArray;
@@ -635,6 +639,7 @@ static inline HIP_MEMCPY3D GetDrvMemcpy3DParms(DrvPtrVariant dst_ptr, hipPos dst
         parms.dstHost = ptr.ptr;
         break;
       case hipMemcpyDeviceToDevice:
+      case hipMemcpyDeviceToDeviceNoCU:
       case hipMemcpyHostToDevice:
         parms.dstMemoryType = hipMemoryTypeDevice;
         parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(ptr.ptr);
@@ -657,6 +662,7 @@ static inline HIP_MEMCPY3D GetDrvMemcpy3DParms(DrvPtrVariant dst_ptr, hipPos dst
     switch (kind) {
       case hipMemcpyDeviceToHost:
       case hipMemcpyDeviceToDevice:
+      case hipMemcpyDeviceToDeviceNoCU:
         parms.srcMemoryType = hipMemoryTypeDevice;
         parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(ptr.ptr);
         break;
@@ -738,7 +744,7 @@ hipError_t DrvMemcpy3DGraphWrapper(DrvPtrVariant dst_ptr, hipPos dst_pos, DrvPtr
     HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, g, nullptr, 0, &parms, context))
   }
 
-  HIP_MEMCPY3D retrieved_params = {0};
+  HIP_MEMCPY3D retrieved_params = {};
   HIP_CHECK(hipDrvGraphMemcpyNodeGetParams(node, &retrieved_params))
   REQUIRE(parms == retrieved_params);
 

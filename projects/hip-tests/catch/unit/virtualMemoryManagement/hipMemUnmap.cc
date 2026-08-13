@@ -56,7 +56,7 @@ HIP_TEST_CASE(Unit_hipMemUnmap_negative) {
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
 
   SECTION("nullptr to ptrA") { REQUIRE(hipMemUnmap(nullptr, size_mem) == hipErrorInvalidValue); }
@@ -79,7 +79,7 @@ HIP_TEST_CASE(Unit_hipMemUnmap_negative) {
 
   SECTION("unmap of reserved-but-never-mapped VA") {
     void* unmappedVa = nullptr;
-    HIP_CHECK(hipMemAddressReserve(&unmappedVa, size_mem, 0, 0, 0))
+    HIP_CHECK(hipMemAddressReserve(&unmappedVa, size_mem, 0, nullptr, 0))
     // No hipMemMap has been issued against unmappedVa, so no entry
     // exists. Validation must reject with hipErrorInvalidValue
     REQUIRE(hipMemUnmap(unmappedVa, size_mem) == hipErrorInvalidValue);
@@ -145,7 +145,7 @@ HIP_TEST_CASE(Unit_hipMemUnmap_Capture) {
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemUnmap_CrossLinksTornDown) {
-  HIP_CHECK(hipFree(0))
+  HIP_CHECK(hipFree(nullptr))
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   int deviceId = 0;
@@ -164,11 +164,11 @@ HIP_TEST_CASE(Unit_hipMemUnmap_CrossLinksTornDown) {
   hipMemGenericAllocationHandle_t handle;
   void* ptr = nullptr;
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
-  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0))
 
   // Sanity: cross-link is wired pre-unmap.
-  hipMemGenericAllocationHandle_t retrieved = 0;  // 0 instead of nullptr: handle is an integer type on CUDA
+  hipMemGenericAllocationHandle_t retrieved = {};
   HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptr))
   REQUIRE(retrieved == handle);
   HIP_CHECK(hipMemRelease(retrieved))
@@ -199,7 +199,7 @@ HIP_TEST_CASE(Unit_hipMemUnmap_CrossLinksTornDown) {
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemUnmap_RemapCrossLinks) {
-  HIP_CHECK(hipFree(0))
+  HIP_CHECK(hipFree(nullptr))
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   int deviceId = 0;
@@ -220,10 +220,10 @@ HIP_TEST_CASE(Unit_hipMemUnmap_RemapCrossLinks) {
   HIP_CHECK(hipMemCreate(&handle2, size_mem, &prop, 0))
 
   void* ptr = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, nullptr, 0))
 
   HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle1, 0))
-  hipMemGenericAllocationHandle_t retrieved = 0;  // 0 instead of nullptr: handle is an integer type on CUDA
+  hipMemGenericAllocationHandle_t retrieved = {};
   HIP_CHECK(hipMemRetainAllocationHandle(&retrieved, ptr))
   REQUIRE(retrieved == handle1);
   HIP_CHECK(hipMemRelease(retrieved))
@@ -277,7 +277,7 @@ static __global__ void unmap_slow_marker_kernel(int* buf, int iters, int marker)
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_BasicRoundTrip) {
-  HIP_CHECK(hipFree(0))
+  HIP_CHECK(hipFree(nullptr))
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   int deviceId = 0;
@@ -302,7 +302,7 @@ HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_BasicRoundTrip) {
   hipMemGenericAllocationHandle_t handle;
   void* ptr = nullptr;
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
-  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, nullptr, 0))
 
   hipMemAccessDesc accessDesc{};
   accessDesc.location.type = hipMemLocationTypeDevice;
@@ -313,9 +313,9 @@ HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_BasicRoundTrip) {
   HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemSetAccess(ptr, size_mem, &accessDesc, 1))
   HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptr), A_h.data(), buffer_size))
-  unmap_square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(
+  unmap_square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, nullptr>>>(
       reinterpret_cast<int*>(ptr));
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   std::fill(B_h.begin(), B_h.end(), 0);
   HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptr), buffer_size))
   REQUIRE(std::equal(B_h.begin(), B_h.end(), C_h.data()));
@@ -326,9 +326,9 @@ HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_BasicRoundTrip) {
   HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemSetAccess(ptr, size_mem, &accessDesc, 1))
   HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptr), A_h.data(), buffer_size))
-  unmap_square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(
+  unmap_square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, nullptr>>>(
       reinterpret_cast<int*>(ptr));
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   std::fill(B_h.begin(), B_h.end(), 0);
   HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptr), buffer_size))
   REQUIRE(std::equal(B_h.begin(), B_h.end(), C_h.data()));
@@ -351,7 +351,7 @@ HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_BasicRoundTrip) {
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_InFlightKernelDrained) {
-  HIP_CHECK(hipFree(0))
+  HIP_CHECK(hipFree(nullptr))
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   int deviceId = 0;
@@ -370,7 +370,7 @@ HIP_TEST_CASE(Unit_hipMemUnmap_DirectPath_InFlightKernelDrained) {
   hipMemGenericAllocationHandle_t handle;
   void* ptr = nullptr;
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
-  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptr, size_mem, 0, handle, 0))
 
   hipMemAccessDesc accessDesc{};

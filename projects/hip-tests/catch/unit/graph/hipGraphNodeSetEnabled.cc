@@ -90,9 +90,9 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_Basic) {
   memsetParams.height = 1;
   HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams))
 
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, NULL, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, nullptr, 0))
 
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))

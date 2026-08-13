@@ -74,7 +74,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   std::thread host_thread(HostKernelDouble, Hmm, hPtr, N);
-  KernelDouble<<<dim3(blocks), dim3(threadsPerBlock), 0, 0>>>(Hmm, dPtr, N);
+  KernelDouble<<<dim3(blocks), dim3(threadsPerBlock), 0, nullptr>>>(Hmm, dPtr, N);
   host_thread.join();
   HIP_CHECK(hipMemcpy(resPtr, dPtr, N * sizeof(float), hipMemcpyDeviceToHost))
 
@@ -152,7 +152,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   unsigned int NUM_ELMS = (1024 * 1024);
-  float *Ad[MAX_GPU], *Hmm = NULL, *Ah = new float[NUM_ELMS];
+  float *Ad[MAX_GPU], *Hmm = nullptr, *Ah = new float[NUM_ELMS];
   hipStream_t stream[MAX_GPU];
   for (int Oloop = 0; Oloop < NumDevices; ++Oloop) {
     HIP_CHECK(hipSetDevice(Oloop))
@@ -217,7 +217,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Negative) {
   HIP_CHECK(hipMemGetInfo(&free, &total))
 
   SECTION("Nullptr to devPtr") {
-    HIP_CHECK_ERROR(hipMallocManaged(NULL, 1024, hipMemAttachGlobal), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMallocManaged(nullptr, 1024, hipMemAttachGlobal), hipErrorInvalidValue);
   }
 
   // cuda api doc says : If size is 0, cudaMallocManaged returns
@@ -235,7 +235,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Negative) {
   }
 
   SECTION("devptr is nullptr with flag hipMemAttachHost") {
-    HIP_CHECK_ERROR(hipMallocManaged(NULL, 1024, hipMemAttachHost), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMallocManaged(nullptr, 1024, hipMemAttachHost), hipErrorInvalidValue);
   }
 
   // cuda api doc says : If size is 0, cudaMallocManaged returns
@@ -253,7 +253,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Negative) {
   }
 
   SECTION("nullptr to devptr, size 0 and flag 0") {
-    HIP_CHECK_ERROR(hipMallocManaged(NULL, 0, 0), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMallocManaged(nullptr, 0, 0), hipErrorInvalidValue);
   }
 
   SECTION("Invalid flag parameter") {

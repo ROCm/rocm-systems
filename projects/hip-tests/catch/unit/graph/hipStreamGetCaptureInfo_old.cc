@@ -363,11 +363,11 @@ HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo) {
 
   // Verify the Error returned with null stream.
   SECTION("hipStreamGetCaptureInfo with null stream") {
-    ret = hipStreamGetCaptureInfo(0, &captureStatus, &capSequenceID);
+    ret = hipStreamGetCaptureInfo(nullptr, &captureStatus, &capSequenceID);
     REQUIRE(ret == hipErrorStreamCaptureImplicit);
   }
   SECTION("hipStreamGetCaptureInfo_v2 with null stream") {
-    ret = hipStreamGetCaptureInfo_v2(0, &captureStatus, &capSequenceID, nullptr, nullptr, nullptr);
+    ret = hipStreamGetCaptureInfo_v2(nullptr, &captureStatus, &capSequenceID, nullptr, nullptr, nullptr);
     REQUIRE(ret == hipErrorStreamCaptureImplicit);
   }
 
@@ -390,12 +390,12 @@ HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo) {
 
   // Capture Status
   SECTION("hipStreamGetCaptureInfo with null stream after End capture") {
-    ret = hipStreamGetCaptureInfo(0, &captureStatus2, &capSequenceID1);
+    ret = hipStreamGetCaptureInfo(nullptr, &captureStatus2, &capSequenceID1);
     REQUIRE(ret == hipSuccess);
   }
   SECTION("hipStreamGetCaptureInfo_v2 with null stream after End capture") {
     ret =
-        hipStreamGetCaptureInfo_v2(0, &captureStatus2, &capSequenceID1, nullptr, nullptr, nullptr);
+        hipStreamGetCaptureInfo_v2(nullptr, &captureStatus2, &capSequenceID1, nullptr, nullptr, nullptr);
     REQUIRE(ret == hipSuccess);
   }
   // Launch graph

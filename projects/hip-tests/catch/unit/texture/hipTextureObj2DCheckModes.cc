@@ -64,8 +64,8 @@ static void runTest(const int width, const int height, const float offsetX, cons
   texDesc.normalizedCoords = normalizedCoords;
 
   // Create texture object
-  hipTextureObject_t textureObject = 0;
-  HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, NULL))
+  hipTextureObject_t textureObject = nullptr;
+  HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, nullptr))
 
   float* dData = nullptr;
   HIP_CHECK(hipMalloc((void**)&dData, size))

@@ -185,7 +185,7 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_ChkNullStrmStatus) {
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone},
       captureStatus1{hipStreamCaptureStatusNone}, captureStatus2{hipStreamCaptureStatusNone};
   // Verify the Error returned if null stream is passed.
-  ret = hipStreamIsCapturing(0, &captureStatus);
+  ret = hipStreamIsCapturing(nullptr, &captureStatus);
   REQUIRE(ret == hipErrorStreamCaptureImplicit);
   // Check the capture status of the stream
   HIP_CHECK(hipStreamIsCapturing(stream, &captureStatus1))
@@ -200,7 +200,7 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_ChkNullStrmStatus) {
   HIP_CHECK(hipStreamEndCapture(stream, &graph))
   REQUIRE(graph != nullptr);
 
-  ret = hipStreamIsCapturing(0, &captureStatus2);
+  ret = hipStreamIsCapturing(nullptr, &captureStatus2);
   REQUIRE(ret == hipSuccess);
 
   // Launch graph

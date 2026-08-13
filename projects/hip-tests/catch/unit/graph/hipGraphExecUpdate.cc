@@ -402,7 +402,7 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_1) {
 
   REQUIRE(hipErrorGraphExecUpdateFailure == ret);
   REQUIRE(hipGraphExecUpdateErrorTopologyChanged == updateResult_out);
-  REQUIRE(NULL == hErrorNode_out);
+  REQUIRE(nullptr == hErrorNode_out);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
   HIP_CHECK(hipGraphExecDestroy(graphExec1))
@@ -455,7 +455,7 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_2) {
     REQUIRE(hipErrorGraphExecUpdateFailure == ret);
     REQUIRE(hipGraphExecUpdateErrorTopologyChanged == updateResult_out);
 #if HT_NVIDIA
-    REQUIRE(NULL == hErrorNode_out);
+    REQUIRE(nullptr == hErrorNode_out);
 #endif
   }
   SECTION("Update the GraphExec with similar graph where a node get deleted") {
@@ -478,7 +478,7 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_2) {
     ret = hipGraphExecUpdate(graphExec3, graph3, &hErrorNode_out, &updateResult_out);
     REQUIRE(hipErrorGraphExecUpdateFailure == ret);
     REQUIRE(hipGraphExecUpdateErrorTopologyChanged == updateResult_out);
-    REQUIRE(NULL == hErrorNode_out);
+    REQUIRE(nullptr == hErrorNode_out);
 
     HIP_CHECK(hipGraphExecDestroy(graphExec3))
     HIP_CHECK(hipGraphDestroy(graph3))
@@ -541,7 +541,7 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_Negative_Dependent_NodesDiffer) {
 
   REQUIRE(hipErrorGraphExecUpdateFailure == ret);
   REQUIRE(hipGraphExecUpdateErrorTopologyChanged == updateResult_out);
-  REQUIRE(NULL != hErrorNode_out);
+  REQUIRE(nullptr != hErrorNode_out);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
   HIP_CHECK(hipGraphExecDestroy(graphExec))

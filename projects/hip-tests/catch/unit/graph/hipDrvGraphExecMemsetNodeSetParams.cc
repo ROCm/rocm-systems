@@ -95,7 +95,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive) {
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   for (int i = 0; i < N; i++) {
     REQUIRE(hostMemDst[i] == value);
@@ -117,7 +117,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive) {
   }
 
   HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   for (int i = 0; i < N; i++) {
     REQUIRE(hostMemDst[i] == (value + 1));
@@ -184,7 +184,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_Negative) {
   }
   SECTION("Invalid destination address in Node params") {
     hipMemsetParams memsetParams{};
-    memsetParams.dst = 0;
+    memsetParams.dst = nullptr;
     memsetParams.pitch = pitch;
     memsetParams.elementSize = sizeof(char);
     memsetParams.width = width;

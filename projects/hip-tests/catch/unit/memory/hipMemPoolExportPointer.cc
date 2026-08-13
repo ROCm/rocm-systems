@@ -48,8 +48,8 @@ HIP_TEST_CASE(Unit_hipMemPoolExportPointer_Negative) {
   pool_props.handleTypes = handleType;
   HIP_CHECK(hipMemPoolCreate(&mempoolPfd, &pool_props))
   int* A_d;
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mempoolPfd, 0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mempoolPfd, nullptr))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   HIP_CHECK(hipMemPoolExportToShareableHandle(&sharedHandle, mempoolPfd,
                                               handleType, 0));
   SECTION("Passing nullptr as export data") {

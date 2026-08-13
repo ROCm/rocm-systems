@@ -50,7 +50,7 @@ HIP_TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_SingleStream) {
   int* Bh = new int[N];
   REQUIRE(Bh != nullptr);
   // Check whether to execute on default stream or user stream
-  hipStream_t strm = 0;
+  hipStream_t strm = nullptr;
   if (isDefaultStrm == 1) {
     HIP_CHECK(hipStreamCreate(&strm))
   }
@@ -110,7 +110,7 @@ HIP_TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_WithCU_NoCU_Comb_SingleStrm) {
   int* Bh = new int[N];
   REQUIRE(Bh != nullptr);
   // Check whether to execute on default stream or user stream
-  hipStream_t strm = 0;
+  hipStream_t strm = nullptr;
   HIP_CHECK(hipStreamCreate(&strm))
   // fill Ah with random data
   fillDataTransfer2Dev(Ah, N);
@@ -174,7 +174,7 @@ HIP_TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_NoCU_MulStrm) {
   REQUIRE(Ch != nullptr);
   // fill Ah with random data
   fillDataTransfer2Dev(Ah, N);
-  HIP_CHECK(hipMemcpyAsync(Ad, Ah, N * sizeof(int), hipMemcpyHostToDevice, 0))
+  HIP_CHECK(hipMemcpyAsync(Ad, Ah, N * sizeof(int), hipMemcpyHostToDevice, nullptr))
   hipStream_t strm1, strm2;
   HIP_CHECK(hipStreamCreate(&strm1))
   HIP_CHECK(hipStreamCreate(&strm2))

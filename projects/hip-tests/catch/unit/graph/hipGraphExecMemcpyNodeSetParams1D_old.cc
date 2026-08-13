@@ -118,7 +118,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Negative) {
                                     hipMemcpyDeviceToDevice));
   // Instantiate the graph
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
 
   SECTION("Pass hGraphExec as nullptr") {
     HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(nullptr, memcpyD2D, A_d.ptr(), B_d.ptr(),

@@ -120,7 +120,7 @@ HIP_TEST_CASE(Unit_OccupancyAPIs_StreamCapture) {
       &numBlocks, reinterpret_cast<const void*>(HipTest::vectorADD<int>), blockSize, 0, 0));
   REQUIRE(numBlocks > 0);
 
-  gridSize = 0, blockSize = 0;
+  gridSize = 0; blockSize = 0;
   HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, function, 0, 0))
   REQUIRE(gridSize > 0);
   REQUIRE(blockSize > 0);

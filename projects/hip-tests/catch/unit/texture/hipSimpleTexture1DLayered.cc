@@ -131,7 +131,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Layered1DTexture_Check_HostBufferToFromLayered1DArra
   texDescr.addressMode[1] = hipAddressModeClamp;
   texDescr.addressMode[2] = hipAddressModeClamp;
   texDescr.readMode = hipReadModeElementType;
-  HIP_CHECK(hipCreateTextureObject(&tex, &texRes, &texDescr, NULL))
+  HIP_CHECK(hipCreateTextureObject(&tex, &texRes, &texDescr, nullptr))
 
   // Allocate device memory for result
   TestType* dData = nullptr;
@@ -283,7 +283,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Layered1DTexture_Check_DeviceBufferToFromLayered1DAr
   texDescr.addressMode[1] = hipAddressModeClamp;
   texDescr.addressMode[2] = hipAddressModeClamp;
   texDescr.readMode = hipReadModeElementType;
-  HIP_CHECK(hipCreateTextureObject(&tex, &texRes, &texDescr, NULL))
+  HIP_CHECK(hipCreateTextureObject(&tex, &texRes, &texDescr, nullptr))
   HIP_CHECK(hipMemset(dData, 0, size))
 
   dim3 dimBlock(8);

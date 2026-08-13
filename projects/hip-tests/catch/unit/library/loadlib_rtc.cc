@@ -12,7 +12,7 @@
 
 static std::vector<char> compile_using_hiprtc(const std::string& code, std::string gpu_arch) {
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, code.c_str(), "code.cu", 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, code.c_str(), "code.cu", 0, nullptr, nullptr));
   #ifdef __HIP_PLATFORM_AMD__
     std::string offload_arch = "--offload-arch=" + gpu_arch;
   #else

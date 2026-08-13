@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetParams_Negative_Parameters) {
 
   HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &node_params))
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
   A_h = reinterpret_cast<char*>(malloc(Nbytes));
   HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost))
   hipGraphNodeParams node_params2 = {};
@@ -110,8 +110,8 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetParams_Positive) {
 
   HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &node_params))
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   A_h = reinterpret_cast<char*>(malloc(Nbytes));
   HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost))
   for (int i = 0; i < N; i++) {
@@ -130,8 +130,8 @@ HIP_TEST_CASE(Unit_hipGraphNodeSetParams_Positive) {
 
   HIP_CHECK(hipGraphNodeSetParams(node, &node_params2))
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost))
   for (int i = 0; i < N; i++) {
     REQUIRE(A_h[i] == 110);

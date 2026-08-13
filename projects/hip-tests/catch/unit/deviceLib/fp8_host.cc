@@ -7,6 +7,7 @@
 #include <hip_test_common.hh>
 #include <hip/hip_fp8.h>
 
+#include <cstring>
 #include <type_traits>
 #include <vector>
 #include <bitset>
@@ -159,8 +160,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_ocp_correctness, float, double) {
       ;
       float cvt2 = tmp;
 
-      INFO("Original: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&orig)));
-      INFO("Cvt back: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&cvt1)));
+      { unsigned int _orig_bits{}; std::memcpy(&_orig_bits, &orig, sizeof(float));
+        unsigned int _cvt1_bits{}; std::memcpy(&_cvt1_bits, &cvt1, sizeof(float));
+        INFO("Original: " << std::bitset<32>(_orig_bits));
+        INFO("Cvt back: " << std::bitset<32>(_cvt1_bits)); }
       REQUIRE(cvt1 == Catch::Approx(orig));
       REQUIRE(cvt2 == cvt1);
     }
@@ -429,8 +432,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_ocp_correctness, float, double) {
       ;
       float cvt2 = tmp;
 
-      INFO("Original: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&orig)));
-      INFO("Cvt back: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&cvt1)));
+      { unsigned int _orig_bits{}; std::memcpy(&_orig_bits, &orig, sizeof(float));
+        unsigned int _cvt1_bits{}; std::memcpy(&_cvt1_bits, &cvt1, sizeof(float));
+        INFO("Original: " << std::bitset<32>(_orig_bits));
+        INFO("Cvt back: " << std::bitset<32>(_cvt1_bits)); }
       REQUIRE(cvt1 == Catch::Approx(orig));
       REQUIRE(cvt1 == cvt2);
     }
@@ -769,8 +774,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_fnuz_correctness, float, double) {
       ;
       float cvt2 = tmp;
 
-      INFO("Original: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&orig)));
-      INFO("Cvt back: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&cvt1)));
+      { unsigned int _orig_bits{}; std::memcpy(&_orig_bits, &orig, sizeof(float));
+        unsigned int _cvt1_bits{}; std::memcpy(&_cvt1_bits, &cvt1, sizeof(float));
+        INFO("Original: " << std::bitset<32>(_orig_bits));
+        INFO("Cvt back: " << std::bitset<32>(_cvt1_bits)); }
       REQUIRE(cvt1 == Catch::Approx(orig));
       REQUIRE(cvt2 == cvt1);
     }
@@ -1047,8 +1054,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_fp8_fnuz_correctness, float, double) {
       ;
       float cvt2 = tmp;
 
-      INFO("Original: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&orig)));
-      INFO("Cvt back: " << std::bitset<32>(*reinterpret_cast<const unsigned int*>(&cvt1)));
+      { unsigned int _orig_bits{}; std::memcpy(&_orig_bits, &orig, sizeof(float));
+        unsigned int _cvt1_bits{}; std::memcpy(&_cvt1_bits, &cvt1, sizeof(float));
+        INFO("Original: " << std::bitset<32>(_orig_bits));
+        INFO("Cvt back: " << std::bitset<32>(_cvt1_bits)); }
       REQUIRE(cvt1 == Catch::Approx(orig));
       REQUIRE(cvt1 == cvt2);
     }
