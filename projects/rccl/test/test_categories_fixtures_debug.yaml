@@ -24,6 +24,7 @@ test_categories:
       - "DdaAlltoAllThreshold.*"
       - "DdaIpcEligibilityTest.*"
       - "DdaFabricEligibilityTest.*"
+      - "CeAlltoAllvEligibilityTest.*"
       - "NetSocketTests.*"
       - "SocketPollTimeout.*"
       - "Ipcsocket.*"
