@@ -33,32 +33,10 @@ influx_client::influx_client(
 : host_(std::move(host))
 , port_(port)
 , database_(std::move(database))
-{}
-
-std::string
-influx_client::make_write_url() const
 {
-    std::ostringstream ss;
-
-    ss << "http://" << host_
-       << ":" << port_
-       << "/write?db=" << database_
-       << "&precision=ns";
-
-    return ss.str();
-}
-
-std::string
-influx_client::make_query_url() const
-{
-    std::ostringstream ss;
-
-    ss << "http://" << host_
-       << ":" << port_
-       << "/query?db=" << database_
-       << "&precision=ns";
-
-    return ss.str();
+    // test that host is reachable
+    if (!ping())
+        throw std::runtime_error("Failed to connect to the database");
 }
 
 bool
@@ -128,6 +106,59 @@ influx_client::write_batch(const std::vector<entry_t>& entries)
 }
 
 bool
+influx_client::lookup_oldest_k(
+    uint32_t gpu_id,
+    uint64_t k,
+    std::vector<timesync_point>& k_points)
+{
+    k_points.clear();
+
+    std::ostringstream q;
+    q << "SELECT system_timestamp "
+      << "FROM gpu_timesync "
+      << "WHERE gpu_id='"
+      << gpu_id
+      << "' "
+      << "ORDER BY time ASC "
+      << "LIMIT "
+      << k;
+
+    auto response = query(q.str());
+    if(response.empty())
+        return false;
+
+    auto json = nlohmann::json::parse(response);
+
+    auto& results = json["results"];
+    if(results.empty())
+        return false;
+
+    if(results[0].contains("error"))
+        return false;
+
+    if(!results[0].contains("series"))
+        return true; // no points found
+
+    auto& series = results[0]["series"];
+    if(series.empty())
+        return true;
+
+    auto& values = series[0]["values"];
+
+    k_points.reserve(values.size());
+    for(const auto& value : values)
+    {
+        k_points.push_back(timesync_point{
+            .gpu_timestamp = value[0].get<uint64_t>(),
+            .system_timestamp = value[1].get<uint64_t>(),
+        });
+    }
+
+    // points already in ASC order
+    return true;
+}
+
+bool
 influx_client::lookup_newest_k(
     uint32_t gpu_id,
     uint64_t k,
@@ -182,6 +213,44 @@ influx_client::lookup_newest_k(
 }
 
 std::string
+influx_client::make_write_url() const
+{
+    std::ostringstream ss;
+
+    ss << "http://" << host_
+       << ":" << port_
+       << "/write?db=" << database_
+       << "&precision=ns";
+
+    return ss.str();
+}
+
+std::string
+influx_client::make_query_url() const
+{
+    std::ostringstream ss;
+
+    ss << "http://" << host_
+       << ":" << port_
+       << "/query?db=" << database_
+       << "&precision=ns";
+
+    return ss.str();
+}
+
+std::string
+influx_client::make_ping_url() const
+{
+    std::ostringstream ss;
+
+    ss << "http://" << host_
+       << ":" << port_
+       << "/ping";
+
+    return ss.str();
+}
+
+std::string
 influx_client::query(std::string_view influxql)
 {
     CURL* curl = curl_easy_init();
@@ -228,6 +297,31 @@ influx_client::query(std::string_view influxql)
     curl_easy_cleanup(curl);
 
     return (rc == CURLE_OK) ? response : std::string{};
+}
+
+bool
+influx_client::ping() const
+{
+    CURL* curl = curl_easy_init();
+    if(!curl)
+        return false;
+
+    curl_easy_setopt(
+        curl,
+        CURLOPT_URL,
+        make_ping_url().c_str());
+
+    CURLcode rc = curl_easy_perform(curl);
+
+    long http_code = 0;
+    curl_easy_getinfo(
+        curl,
+        CURLINFO_RESPONSE_CODE,
+        &http_code);
+
+    curl_easy_cleanup(curl);
+
+    return (rc == CURLE_OK && http_code == 204);
 }
 
 bool

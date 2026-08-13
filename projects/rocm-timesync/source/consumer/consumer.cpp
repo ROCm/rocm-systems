@@ -38,8 +38,6 @@ static std::string precision_to_name(ts_precision_t precision)
 
 } // namespace
 
-// TODO support mem client by itself
-
 static std::thread streamer;
 static ts_config_t cfg = {};
 static ipc::channel_t* channel = nullptr;
@@ -48,32 +46,58 @@ static timesync_db* db_client = nullptr;
 
 static int _db_init()
 {
+    // get in-process mem configuration
+    auto mem_size = cfg.cache.max_entries_per_gpu;
+
     if (std::holds_alternative<ts_db_influx_t>(cfg.db)) {
-#ifdef ROCM_TIMESYNC_BUILD_INFLUXDB
-        const auto& influx = std::get<ts_db_influx_t>(cfg.db);
-        /*
-        db_client = new influx_client(
-            influx.host,
-            influx.port,
-            influx.database
-        );
-        */
-
-        db_client = new cached_timesync_db(
-            std::make_unique<memory_client>(512),
-            std::make_unique<influx_client>(
-                influx.host,
-                influx.port,
-                influx.database
-            )
-        );
-        return 0;
-#else
+#ifndef ROCM_TIMESYNC_BUILD_INFLUXDB
         std::cerr << "InfluxDB client not compiled" << std::endl;
-#endif
-    };
+        return -EINVAL;
+#else
+        const auto& influx = std::get<ts_db_influx_t>(cfg.db);
 
-    return -EINVAL;
+        if (mem_size < 0) {
+            std::cerr << "Infinitely sized cache in front of a database obviates the database; disabling database" << std::endl;
+        }
+        else {
+            if (mem_size > 0) {
+                // caching mem client in front of influx backend
+                db_client = new cached_timesync_db(
+                    std::make_unique<memory_client>(mem_size),
+                    std::make_unique<influx_client>(
+                        influx.host,
+                        influx.port,
+                        influx.database
+                    )
+                );
+            } else {
+                // standalone influx client
+                db_client = new influx_client(
+                    influx.host,
+                    influx.port,
+                    influx.database
+                );
+            }
+
+            return 0;
+        }
+#endif
+    }
+
+    // standalone mem client
+    if (mem_size == 0) {
+        std::cerr << "No timestamp storage available" << std::endl;
+        return -EINVAL;
+    }
+
+    if (mem_size != -1) {
+        std::cerr << "It is not recommended to configure a standalone memory client with a limit (" << mem_size
+            << ") on number of timestamp entries" << std::endl;
+    }
+
+    db_client = new memory_client(mem_size);
+
+    return 0;
 }
 
 int timesync_client_init(const ts_client_config_t& ccfg)
@@ -125,7 +149,8 @@ int timesync_client_init(const ts_client_config_t& ccfg)
                 continue;
             }
 
-            db_client->write_batch(entries);
+            if (!db_client->write_batch(entries))
+                std::cerr << "WARNING FAILED TO WRITE POINTS TO STORAGE" << std::endl;
         }
     });
 
@@ -154,15 +179,12 @@ int timesync_client_translate(uint32_t agent_kfd_gpu_id, uint64_t agent_timestam
 {
     system_timestamp = 0;
 
-    //return db_client->lookup_or_extrapolate(agent_kfd_gpu_id, agent_timestamp, system_timestamp);
     auto start = std::chrono::steady_clock::now();
     auto ret = db_client->lookup_or_extrapolate(agent_kfd_gpu_id, agent_timestamp, system_timestamp);
     auto end = std::chrono::steady_clock::now();
 
-    assert(ret);
-
-    std::cout << ret << " took " << std::chrono::duration<double, std::micro>(end - start).count() << " us\n" << std::endl;
-    return ret;
+    //std::cout << "took " << std::chrono::duration<double, std::micro>(end - start).count() << " us\n" << std::endl;
+    return timesync_db::IsError(ret) ? -1 : 0;
 }
 
 } // namespace rocm_timesync

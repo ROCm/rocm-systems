@@ -6,7 +6,7 @@ namespace rocm_timesync
 {
 
 memory_client::memory_client(
-    uint32_t max_entries_per_gpu)
+    int64_t max_entries_per_gpu)
 : max_entries_per_gpu_(max_entries_per_gpu)
 {}
 
@@ -19,7 +19,7 @@ memory_client::write(const entry_t& entry)
 
     points.push_back(entry.point);
 
-    if(max_entries_per_gpu_ > 0 && points.size() > max_entries_per_gpu_)
+    if(max_entries_per_gpu_ >= 0 && points.size() > max_entries_per_gpu_)
         points.pop_front();
 
     return true;
@@ -45,10 +45,28 @@ memory_client::write_batch(const std::vector<entry_t>& entries)
             points_to_add.end()
         );
 
-        if (max_entries_per_gpu_ > 0 && points.size() > max_entries_per_gpu_)
+        if (max_entries_per_gpu_ >= 0 && points.size() > max_entries_per_gpu_)
             points.erase(points.begin(), points.begin() + (points.size() - max_entries_per_gpu_));
     }
 
+    return true;
+}
+
+bool
+memory_client::lookup_oldest_k(
+    uint32_t gpu_id,
+    uint64_t k,
+    std::vector<timesync_point>& k_points)
+{
+    auto gpu = get_gpu(gpu_id);
+    if (gpu == nullptr)
+        return false;
+
+    std::lock_guard<std::mutex> lock(gpu->mtx);
+    const auto& points = gpu->points;
+
+    auto to_copy = std::min(k, points.size());
+    k_points.assign(points.begin(), points.begin() + to_copy);
     return true;
 }
 

@@ -16,10 +16,11 @@ namespace rocm_timesync
 class memory_client : public timesync_db
 {
 public:
-    memory_client(uint32_t max_entries_per_gpu);
+    memory_client(int64_t max_entries_per_gpu);
     bool write(const entry_t& entry) override;
     bool write_batch(const std::vector<entry_t>& entries) override;
-    bool lookup_newest_k(uint32_t gpu_id, uint64_t k, std::vector<timesync_point>& points);
+    bool lookup_oldest_k(uint32_t gpu_id, uint64_t k, std::vector<timesync_point>& points) override;
+    bool lookup_newest_k(uint32_t gpu_id, uint64_t k, std::vector<timesync_point>& points) override;
 
 private:
     bool lookup_before(
@@ -37,7 +38,7 @@ private:
         std::mutex mtx;
     };
 
-    uint64_t max_entries_per_gpu_;
+    int64_t max_entries_per_gpu_;
     mutable std::shared_mutex data_mtx_;
     std::unordered_map<uint32_t, std::shared_ptr<mem_points>> data_;
 

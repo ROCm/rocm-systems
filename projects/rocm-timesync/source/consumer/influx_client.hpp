@@ -19,12 +19,15 @@ public:
 
     bool write(const entry_t& entry) override;
     bool write_batch(const std::vector<entry_t>& entries) override;
+    bool lookup_oldest_k(uint32_t gpu_id, uint64_t k, std::vector<timesync_point>& k_points) override;
     bool lookup_newest_k(uint32_t gpu_id, uint64_t k, std::vector<timesync_point>& k_points) override;
 
 private:
     std::string make_write_url() const;
     std::string make_query_url() const;
+    std::string make_ping_url() const;
     std::string query(std::string_view influxql);
+    bool ping() const;
 
     bool lookup_before(
         uint32_t gpu_id,
