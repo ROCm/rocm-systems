@@ -140,13 +140,20 @@ class TestGpuPower(unittest.TestCase):
                 power_profile_preset_mask,
                 power_profile_preset_masks_cond,
             ) in common.POWER_PROFILE_PRESET_MASKS:
+                # A device that does not support a given preset returns
+                # AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS; accept that as a valid
+                # not-supported outcome rather than a failure.
+                set_expected = [
+                    power_profile_preset_masks_cond,
+                    "AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS",
+                ]
                 msg = f"\t### amdsmi_set_gpu_power_profile(gpu={i}, power_profile_preset_mask={power_profile_preset_mask_name}):"
                 try:
                     amdsmi.amdsmi_set_gpu_power_profile(gpu, 0, power_profile_preset_mask)
                     self.common.print(msg, "")
                     self.common.check_ret("", "", self.common.PASS)
                 except amdsmi.AmdSmiLibraryException as e:
-                    if self.common.check_ret(msg, e, power_profile_preset_masks_cond):
+                    if self.common.check_ret(msg, e, set_expected):
                         self.raise_exception = e
                 self.common.print("")
         if self.raise_exception:

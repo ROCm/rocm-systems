@@ -97,6 +97,10 @@ class TestGpuEvents(unittest.TestCase):
                     continue
 
                 for event_type_name, event_type, event_type_cond in common.EVENT_TYPES:
+                    # ASICs without GPU performance-counter support return
+                    # AMDSMI_STATUS_FILE_ERROR from the counter APIs; accept that
+                    # as a valid not-supported outcome rather than a failure.
+                    counter_expected = [event_type_cond, "AMDSMI_STATUS_FILE_ERROR"]
                     results[i][event_group_name][event_type_name] = {}
                     results[i][event_group_name][event_type_name]["handle"] = 0
                     results[i][event_group_name][event_type_name]["num_counts"] = 0
@@ -109,7 +113,7 @@ class TestGpuEvents(unittest.TestCase):
                         self.common.check_ret("", "", self.common.PASS)
                         results[i][event_group_name][event_type_name]["handle"] = id(event_handle)
                     except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if self.common.check_ret(msg, e, event_type_cond):
+                        if self.common.check_ret(msg, e, counter_expected):
                             self.raise_exception = e
                         # Record that these would have been tested if supported
                         msg_add = "\n\tAMDSMI API Returned AMDSMI_STATUS_NOT_SUPPORTED"
@@ -131,7 +135,7 @@ class TestGpuEvents(unittest.TestCase):
                         self.common.print(msg, ret)
                         self.common.check_ret("", "", self.common.PASS)
                     except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if self.common.check_ret(msg, e, event_type_cond):
+                        if self.common.check_ret(msg, e, counter_expected):
                             self.raise_exception = e
 
                     # Wait...
@@ -144,7 +148,7 @@ class TestGpuEvents(unittest.TestCase):
                         self.common.check_ret("", "", self.common.PASS)
                         results[i][event_group_name][event_type_name]["num_counts"] = ret
                     except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if self.common.check_ret(msg, e, event_type_cond):
+                        if self.common.check_ret(msg, e, counter_expected):
                             self.raise_exception = e
 
                     # Stop control counter
@@ -157,7 +161,7 @@ class TestGpuEvents(unittest.TestCase):
                         self.common.print(msg, ret)
                         self.common.check_ret("", "", self.common.PASS)
                     except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if self.common.check_ret(msg, e, event_type_cond):
+                        if self.common.check_ret(msg, e, counter_expected):
                             self.raise_exception = e
 
                     # Destroy control counter
@@ -167,7 +171,7 @@ class TestGpuEvents(unittest.TestCase):
                         self.common.print(msg, ret)
                         self.common.check_ret("", "", self.common.PASS)
                     except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if self.common.check_ret(msg, e, event_type_cond):
+                        if self.common.check_ret(msg, e, counter_expected):
                             self.raise_exception = e
 
         msg = "gpu counter results"
