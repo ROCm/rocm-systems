@@ -78,7 +78,7 @@ from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
 )
-from utils.utils_common import get_uuid, get_version
+from utils.utils_common import get_uuid, get_version, normalize_filter_to_str_list
 from utils.utils_counter_defs import (
     extract_counters_and_variables,
     get_build_in_vars,
@@ -111,7 +111,9 @@ def filter_dispatch_frame(
     )
     if filter_gpu_ids:
         dispatch_frame = dispatch_frame.loc[
-            dispatch_frame["GPU_ID"].astype(str).isin([filter_gpu_ids])
+            dispatch_frame["GPU_ID"]
+            .astype(str)
+            .isin(normalize_filter_to_str_list(filter_gpu_ids))
         ]
     if filter_kernel_ids:
         dispatch_frame = dispatch_frame.loc[
@@ -121,7 +123,7 @@ def filter_dispatch_frame(
         ]
     if filter_dispatch_ids:
         if ">" in filter_dispatch_ids[0]:
-            dispatch_bound = re.match(r"\> (\d+)", filter_dispatch_ids[0])
+            dispatch_bound = re.match(r"\>\s*(\d+)", filter_dispatch_ids[0])
             dispatch_frame = dispatch_frame[
                 dispatch_frame["Dispatch_ID"] > int(dispatch_bound.group(1))
             ]

@@ -109,6 +109,7 @@ def make_source_frame_collector(workload, workload_path="/fake/workload"):
 
 def make_pc_sampling_database_analyzer(
     tool_data_per_workload,
+    filter_gpu_ids=(),
     filter_kernel_ids=(),
     filter_dispatch_ids=(),
 ):
@@ -120,6 +121,7 @@ def make_pc_sampling_database_analyzer(
     analyzer._runs = {
         workload_path: schema.Workload(
             sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
+            filter_gpu_ids=list(filter_gpu_ids),
             filter_kernel_ids=list(filter_kernel_ids),
             filter_dispatch_ids=list(filter_dispatch_ids),
         )
@@ -2712,12 +2714,19 @@ def test_run_analysis_writes_one_isa_file_per_kernel_code_object_and_process(
     )
 
 
-def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(tmp_path):
-    """One kernel's file holds its own offsets, counts and source."""
+@pytest.mark.parametrize("filter_gpu_ids", [(), ["0"]])
+def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
+    tmp_path, filter_gpu_ids
+):
+    """One kernel's file holds its own offsets, counts and source.
+
+    Filtering on the workload's own GPU keeps every row it already had.
+    """
     workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
     analyzer, result_path = make_csv_run_analyzer(
         tmp_path,
         {str(workload_path): [make_pc_sampling_tool_data()]},
+        filter_gpu_ids=filter_gpu_ids,
     )
     run_source_export_analysis(analyzer)
 
@@ -2866,13 +2875,16 @@ def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
     ]
 
 
-def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(tmp_path):
+@pytest.mark.parametrize("filter_dispatch_ids", [["1"], [">0"], ["> 0"]])
+def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
+    tmp_path, filter_dispatch_ids
+):
     """-d drops a dispatch, and the kernel that keeps none of its own."""
     workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
     analyzer, result_path = make_csv_run_analyzer(
         tmp_path,
         {str(workload_path): [make_pc_sampling_tool_data()]},
-        filter_dispatch_ids=["1"],
+        filter_dispatch_ids=filter_dispatch_ids,
     )
 
     run_source_export_analysis(analyzer)
