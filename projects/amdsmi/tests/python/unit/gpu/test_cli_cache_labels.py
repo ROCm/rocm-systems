@@ -252,16 +252,23 @@ class TestCliCacheLabels(unittest.TestCase):
     def test_human_readable_labels_and_totals(self):
         cache_info = self._run_cache("human")
 
-        # Acronyms derived from level + DATA/INST flags.
-        self.assertEqual(cache_info["cache_0"].get("cache_acronym"), "L1D")
-        self.assertEqual(cache_info["cache_1"].get("cache_acronym"), "L1I")
-        self.assertEqual(cache_info["cache_5"].get("cache_acronym"), "L2")
-        self.assertEqual(cache_info["cache_6"].get("cache_acronym"), "L3")
+        # Acronyms derived from level + DATA/INST flags, one assertion per fixture entry.
+        expected_acronyms = ["L1D", "L1I", "L1I", "L1D", "L1D", "L2", "L3"]
+        for index, acronym in enumerate(expected_acronyms):
+            self.assertEqual(cache_info[f"cache_{index}"].get("cache_acronym"), acronym)
 
         # Total size = per-instance cache_size * num_cache_instance, same unit.
-        self.assertEqual(cache_info["cache_0"].get("total_cache_size"), "8192 KB")
-        self.assertEqual(cache_info["cache_5"].get("total_cache_size"), "4096 KB")
-        self.assertEqual(cache_info["cache_6"].get("total_cache_size"), "229376 KB")
+        expected_totals = [
+            "8192 KB",
+            "7168 KB",
+            "2048 KB",
+            "1792 KB",
+            "512 KB",
+            "4096 KB",
+            "229376 KB",
+        ]
+        for index, total in enumerate(expected_totals):
+            self.assertEqual(cache_info[f"cache_{index}"].get("total_cache_size"), total)
 
         # Existing per-instance size formatting is unchanged.
         self.assertEqual(cache_info["cache_0"]["cache_size"], "32 KB")
@@ -270,14 +277,13 @@ class TestCliCacheLabels(unittest.TestCase):
         cache_info = self._run_cache("json")
 
         acronyms = [entry.get("cache_acronym") for entry in cache_info]
-        self.assertEqual(acronyms[0], "L1D")
-        self.assertEqual(acronyms[1], "L1I")
-        self.assertEqual(acronyms[5], "L2")
-        self.assertEqual(acronyms[6], "L3")
+        self.assertEqual(acronyms, ["L1D", "L1I", "L1I", "L1D", "L1D", "L2", "L3"])
 
-        self.assertEqual(cache_info[0].get("total_cache_size"), {"value": 8192, "unit": "KB"})
-        self.assertEqual(cache_info[5].get("total_cache_size"), {"value": 4096, "unit": "KB"})
-        self.assertEqual(cache_info[6].get("total_cache_size"), {"value": 229376, "unit": "KB"})
+        expected_totals = [8192, 7168, 2048, 1792, 512, 4096, 229376]
+        for index, value in enumerate(expected_totals):
+            self.assertEqual(
+                cache_info[index].get("total_cache_size"), {"value": value, "unit": "KB"}
+            )
 
         # Existing per-instance size wrapping is unchanged.
         self.assertEqual(cache_info[0]["cache_size"], {"value": 32, "unit": "KB"})
