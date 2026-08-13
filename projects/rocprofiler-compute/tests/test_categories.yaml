@@ -32,6 +32,8 @@ test_categories:
       - test_num_xcds_cli_output
       - test_mi_gpu_spec
       - test_utils_profile_csv
+      - test_csv_compression
+      - test_analysis_base
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_import_guard
@@ -96,6 +98,8 @@ test_categories:
       - test_code_object_analysis
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_csv_compression
+      - test_analysis_base
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_profiler_base
@@ -166,6 +170,8 @@ test_categories:
       - test_code_object_analysis
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_csv_compression
+      - test_analysis_base
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_profiler_base
@@ -236,6 +242,8 @@ test_categories:
       - test_code_object_analysis
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_csv_compression
+      - test_analysis_base
       - test_inject_roctx_package
       - test_torch_cpp_loader
       - test_profiler_base
