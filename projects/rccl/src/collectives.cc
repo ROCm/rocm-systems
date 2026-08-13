@@ -176,19 +176,8 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
   return ncclEnqueueCheck(&info);
 }
 
-// Common DDA protocol-tier knobs, shared by every fabric collective (no
-// per-collective variants). For a given collective's size:
-//   size <= DdaLLThreshold     -> LL    one-shot (16B lines)
-//   size <= DdaLL128Threshold  -> LL128 one-shot (128B lines)
-//   otherwise                  -> Simple (flat one-shot / tree two-shot)
-// Constraint: DdaLLThreshold <= DdaLL128Threshold <= DdaThreshold. Setting an
-// enable flag (or its threshold) to 0 disables that tier and falls through to
-// the next, so each protocol can be A/B'd in isolation at runtime.
-// Defaults tuned on 4x gfx1250 AllReduce (bf16): LL wins <=32KiB (grid hardcoded
-// to 24 blocks in the LL launcher for low latency), LL128 wins up to ~32MiB, and
-// Simple wins beyond (both use DDA_FABRIC_MAXBLOCKS=256). See the LL/LL128/Simple
-// x MAXBLOCKS sweep.
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
+
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
 // threshold for gfx942 (MI300).  gfx950Default optionally caps MI350; when 0,

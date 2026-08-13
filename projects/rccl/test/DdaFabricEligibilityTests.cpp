@@ -30,56 +30,75 @@ protected:
 
 TEST(DdaFabricScratchSizingTest, ExplicitOverrideTakesPrecedence)
 {
-    const auto forced = nccl_dda_detail::ddaFabricScratchSizing(8, 4096, 0, 0, 0, 0);
-    EXPECT_EQ(forced.bytes, 4096u);
+    const size_t forced = nccl_dda_detail::ddaFabricScratchSizing(8, 4096, 0, 0, 0, 0);
+    EXPECT_EQ(forced, 4096u);
 
-    const auto disabled =
-        nccl_dda_detail::ddaFabricScratchSizing(8, 0, 1, 128 * 1024 * 1024, 1, 32 * 1024 * 1024);
-    EXPECT_EQ(disabled.bytes, 0u);
+    const size_t disabled =
+        nccl_dda_detail::ddaFabricScratchSizing(8, 0, 1, 128 * 1024 * 1024, 1, 1);
+    EXPECT_EQ(disabled, 0u);
 }
 
 TEST(DdaFabricScratchSizingTest, DisabledDdaHasNoDerivedAllocation)
 {
-    const auto sizing =
-        nccl_dda_detail::ddaFabricScratchSizing(8, -1, 0, 128 * 1024 * 1024, 1, 32 * 1024 * 1024);
-    EXPECT_EQ(sizing.bytes, 0u);
-    EXPECT_EQ(sizing.effectiveLL128Threshold, 0u);
+    const size_t sizing =
+        nccl_dda_detail::ddaFabricScratchSizing(8, -1, 0, 128 * 1024 * 1024, 1, 1);
+    EXPECT_EQ(sizing, 0u);
 }
 
 TEST(DdaFabricScratchSizingTest, ZeroOverallThresholdHasNoDerivedAllocation)
 {
-    const auto sizing = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, 0, 1, 32 * 1024 * 1024);
-    EXPECT_EQ(sizing.bytes, 0u);
-    EXPECT_EQ(sizing.effectiveLL128Threshold, 0u);
+    const size_t sizing = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, 0, 1, 1);
+    EXPECT_EQ(sizing, 0u);
 }
 
 TEST(DdaFabricScratchSizingTest, DisabledLL128UsesSimpleCapacity)
 {
     constexpr int64_t simpleThreshold = 128 * 1024 * 1024;
-    const auto sizing = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, simpleThreshold, 0, 32 * 1024 * 1024);
-    EXPECT_EQ(sizing.bytes, (size_t)simpleThreshold + (size_t)simpleThreshold / 8);
-    EXPECT_EQ(sizing.effectiveLL128Threshold, 0u);
+    // With LL and LL128 both disabled, scratch = simpleCap (the threshold).
+    const size_t sizing = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, simpleThreshold, 0, 0);
+    EXPECT_EQ(sizing, (size_t)simpleThreshold);
 }
 
-TEST(DdaFabricScratchSizingTest, LL128ThresholdIsCappedByOverallThreshold)
+TEST(DdaFabricScratchSizingTest, LL128FloorDominatesWhenLargerThanSimpleCap)
 {
-    constexpr int64_t overallThreshold = 64 * 1024 * 1024;
-    const auto oversized =
-        nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, overallThreshold, 1, 128 * 1024 * 1024);
-    const auto atCap =
-        nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, overallThreshold, 1, overallThreshold);
-    EXPECT_EQ(oversized.effectiveLL128Threshold, (size_t)overallThreshold);
-    EXPECT_EQ(oversized.bytes, atCap.bytes);
+    // LL128 floor = 2 * 8 * 4370 * 128 = 8,949,760 bytes (~8.5 MiB)
+    // If simpleCap is smaller than the LL128 floor, scratch = LL128 floor.
+    constexpr int64_t smallSimpleCap = 4 * 1024 * 1024;  // 4 MiB
+    const size_t sizing = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, smallSimpleCap, 0, 1);
+    constexpr size_t ll128Floor = 2 * 8 * nccl_dda_detail::kDdaLL128SlotStrideLines * 128;
+    EXPECT_EQ(sizing, ll128Floor);
 }
 
-TEST(DdaFabricScratchSizingTest, LL128ThresholdIsCappedByPathLimit)
+TEST(DdaFabricScratchSizingTest, LargeSimpleCapDominatesWhenEnabled)
 {
-    constexpr int64_t twoGiB = 2LL * 1024 * 1024 * 1024;
-    const auto oversized = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, twoGiB, 1, twoGiB);
-    const auto atCap = nccl_dda_detail::ddaFabricScratchSizing(
-        8, -1, 1, twoGiB, 1, nccl_dda_detail::kDdaLL128ArMaxBytes);
-    EXPECT_EQ(oversized.effectiveLL128Threshold, nccl_dda_detail::kDdaLL128ArMaxBytes);
-    EXPECT_EQ(oversized.bytes, atCap.bytes);
+    // If simpleCap > LL/LL128 floors, scratch = simpleCap.
+    constexpr int64_t largeSimpleCap = 512 * 1024 * 1024;  // 512 MiB
+    const size_t sizing = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, largeSimpleCap, 1, 1);
+    EXPECT_EQ(sizing, (size_t)largeSimpleCap);
+}
+
+TEST(DdaFabricScratchSizingTest, LLFloorDominatesAtHighRankCount)
+{
+    // At 72 ranks with small threshold, LL floor should dominate.
+    // LL floor = 2 * 72 * 16384 * 16 = 37,748,736 (~36 MiB)
+    constexpr int nRanks = 72;
+    constexpr int64_t smallSimpleCap = 8 * 1024 * 1024;  // 8 MiB
+    const size_t sizing = nccl_dda_detail::ddaFabricScratchSizing(nRanks, -1, 1, smallSimpleCap, 1, 0);
+    constexpr size_t llFloor = 2 * nRanks * nccl_dda_detail::kDdaLLSlotStridePkts * 16;
+    EXPECT_EQ(sizing, llFloor);
+    EXPECT_GT(sizing, (size_t)smallSimpleCap);
+}
+
+TEST(DdaFabricScratchSizingTest, LL128FloorDominatesAtHighRankCount)
+{
+    // At 72 ranks with small threshold, LL128 floor should dominate.
+    // LL128 floor = 2 * 72 * 4370 * 128 = 80,609,280 (~77 MiB)
+    constexpr int nRanks = 72;
+    constexpr int64_t smallSimpleCap = 8 * 1024 * 1024;  // 8 MiB
+    const size_t sizing = nccl_dda_detail::ddaFabricScratchSizing(nRanks, -1, 1, smallSimpleCap, 0, 1);
+    constexpr size_t ll128Floor = 2 * nRanks * nccl_dda_detail::kDdaLL128SlotStrideLines * 128;
+    EXPECT_EQ(sizing, ll128Floor);
+    EXPECT_GT(sizing, (size_t)smallSimpleCap);
 }
 
 // ---------------------------------------------------------------------------

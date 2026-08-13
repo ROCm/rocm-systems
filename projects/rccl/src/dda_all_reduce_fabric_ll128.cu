@@ -33,7 +33,6 @@ namespace {
 using meta::comms::kDdaLL128DataElems;
 using meta::comms::kDdaLL128Lanes;
 using meta::comms::LLLine128;
-using nccl_dda_detail::kDdaLL128ArMaxBytes;
 
 // Per-call slot stride in 128B lines for a message of `numLines` lines. The
 // stride matches the message exactly (compact layout) so small all-reduces keep
@@ -146,7 +145,9 @@ bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   if (bytes % 8 != 0) {
     return false;
   }
-  if (bytes > kDdaLL128ArMaxBytes) {
+  // Use the runtime LL128 threshold (RCCL_DDA_LL128_THRESHOLD) as the cap.
+  const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
+  if (ll128Thresh <= 0 || bytes > (size_t)ll128Thresh) {
     return false;
   }
   // Scratch is sized from the actual message (compact per-call slot stride), so

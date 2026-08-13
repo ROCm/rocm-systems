@@ -61,15 +61,14 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   const int64_t llEnabled = rcclParamDdaLL();
   const int64_t llThresh = rcclParamDdaLLThreshold();
   const int64_t ll128Enabled = rcclParamDdaLL128();
-  const int64_t ll128ThreshCfg = rcclParamDdaLL128Threshold();
+  const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
   const int64_t simpleThresh = rcclParamDdaThreshold();
   const int64_t fabricScratchOverride = rcclParamDdaFabricBufferSizeForScratch();
-  const auto scratchSizing = ddaFabricScratchSizing(nRanks, fabricScratchOverride, rcclParamDdaEnable(),
-                                                    simpleThresh, ll128Enabled, ll128ThreshCfg);
 
   // Right-sized from the DDA thresholds and nRanks (env-overridable) instead of
   // a fixed 10 GiB. RCCL_DDA_FABRIC_BUFFER_SIZE=0 disables the fabric DDA path.
-  size_t bytes = scratchSizing.bytes;
+  size_t bytes = ddaFabricScratchSizing(nRanks, fabricScratchOverride, rcclParamDdaEnable(),
+                                        simpleThresh, llEnabled, ll128Enabled);
   if (bytes == 0) {
     return ncclSuccess;
   }
@@ -165,11 +164,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     NCCL_INIT,
     "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm, gfx1250 fabric path; derived from RCCL DDA params; "
     "RCCL_DDA_FABRIC_BUFFER_SIZE=%lld), LL enabled=%lld threshold=%lld, "
-    "LL128 enabled=%lld threshold=%lld (effective=%lld, 1GiB cap), "
-    "Simple threshold=%lld, FabricGpuBarrier nBlocks=%d, peer table on device",
+    "LL128 enabled=%lld threshold=%lld, Simple threshold=%lld, FabricGpuBarrier nBlocks=%d, peer table on device",
     nRanks, bytes, (long long)fabricScratchOverride, (long long)llEnabled, (long long)llThresh,
-    (long long)ll128Enabled, (long long)ll128ThreshCfg, (long long)scratchSizing.effectiveLL128Threshold,
-    (long long)simpleThresh, nBlocksMax);
+    (long long)ll128Enabled, (long long)ll128Thresh, (long long)simpleThresh, nBlocksMax);
   return ncclSuccess;
 
 fail:
