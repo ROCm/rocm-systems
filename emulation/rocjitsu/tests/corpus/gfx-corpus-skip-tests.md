@@ -21,11 +21,13 @@ Classification buckets:
 > Before classifying a case as a **long-running test**, measure it in a serial
 > run so xdist scheduling and worker contention do not inflate its runtime.
 
-## Pinned revisions
+## Observation revisions
 
-| component | commit |
+The classifications below were collected using these revisions.
+
+| component | revision |
 | --- | --- |
-| ROCjitsu | `81ffb57e24c682d15e10d2b90d82bcf4c45a9f67` |
+| ROCjitsu | `547818c822dc267cc8d2971798127ad421a2916c` |
 | `rocjitsu-test-corpus` | `a1c3a1df8c87e46557ad505d111faa15d21a6efb` |
 
 ## gfx942
@@ -383,22 +385,37 @@ Classification buckets:
 
 ## gfx1250
 
-### functional failure: 14
+### functional failure: 29
 
+- `cts.gfx1250.fpsan.fpsan_amdgcn_bf16_trans_test`
 - `cts.gfx1250.fpsan.fpsan_amdgcn_ldexp_test`
 - `cts.gfx1250.fpsan.fpsan_amdgcn_math_extra_test`
 - `cts.gfx1250.fpsan.fpsan_amdgcn_math_test`
 - `cts.gfx1250.fpsan.fpsan_atomic_test`
+- `cts.gfx1250.fpsan.fpsan_classify_test`
+- `cts.gfx1250.fpsan.fpsan_cvt_f16_fp8_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_cvt_fp8_e5m3_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_cvt_fp8_pack_test`
+- `cts.gfx1250.fpsan.fpsan_cvt_fp8_pk_test`
+- `cts.gfx1250.fpsan.fpsan_cvt_fp8_sr_test`
+- `cts.gfx1250.fpsan.fpsan_cvt_fp8_test`
+- `cts.gfx1250.fpsan.fpsan_cvt_scale_unpack_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_cvt_scalef32_pk_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_cvt_sr_pack_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_cvt_sr_pk_f16_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_cvt_test`
 - `cts.gfx1250.fpsan.fpsan_hip_device_test`
 - `cts.gfx1250.fpsan.fpsan_swmmac_16x16x128_fp8_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_swmmac_16x16x64_16_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_wave_test`
 - `cts.gfx1250.fpsan.fpsan_wmma_16x16x128_f8f6f4_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_wmma_16x16x128_fp8_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_wmma_16x16x32_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_wmma_16x16x4_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_wmma_16x16x64_fp8_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_wmma_32x16x128_f4_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_wmma_scale_f8f6f4_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_xlane_test`
 
 ### flaky: 1
 
