@@ -170,15 +170,30 @@ int main(int argc, char *argv[]) {
   char* ompi_local_rank = getenv("OMPI_COMM_WORLD_LOCAL_RANK");
   bool using_slr = false;
 
+  int num_devices = 0;
+  CHECK_HIP(hipGetDeviceCount(&num_devices));
+
   if (slr_np != nullptr) {
     // Using SLR runtime
     using_slr = true;
     int rank, nranks;
     init_slr(&rank, &nranks);
+    if (rank >= num_devices) {
+      std::cerr << "Error: rank " << rank << " exceeds the number of available GPUs ("
+                << num_devices << "). Aborting.\n";
+      abort();
+    }
     CHECK_HIP(hipSetDevice(rank));
   } else if (ompi_local_rank != nullptr) {
     // Using MPI runtime
-    CHECK_HIP(hipSetDevice(atoi(ompi_local_rank)));
+    int device_id = atoi(ompi_local_rank);
+    if (device_id >= num_devices) {
+      std::cerr << "Error: OMPI_COMM_WORLD_LOCAL_RANK=" << device_id
+                << " exceeds the number of available GPUs (" << num_devices
+                << "). Aborting.\n";
+      abort();
+    }
+    CHECK_HIP(hipSetDevice(device_id));
   } else {
     printf("Could not determine runtime: set ROCSHMEM_SLR_NP for SLR or use Open MPI `mpiexec`\n");
     abort();
