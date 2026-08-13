@@ -3630,7 +3630,7 @@ class CodeGenerator:
             } // namespace
             ''')
 
-    def _gfx1250_f8f6f4_wmma_shape(
+    def _cdna5_f8f6f4_wmma_shape(
         self, inst: Instruction
     ) -> tuple[int, int, int] | None:
         if self.isa_spec.arch_name != 'cdna5' or not inst.name.startswith('V_WMMA_'):
@@ -7451,7 +7451,7 @@ class CodeGenerator:
                         d16_partial_reg_offset = d16_vgpr_count - 1
                     # These gfx1250-only WMMA source-format fields derive the
                     # src0/src1 operand sizes from the instruction shape.
-                    gfx1250_f8f6f4_shape = self._gfx1250_f8f6f4_wmma_shape(inst)
+                    gfx1250_f8f6f4_shape = self._cdna5_f8f6f4_wmma_shape(inst)
                     cdna4_f8f6f4_shape = self._cdna4_f8f6f4_mfma_shape(inst)
                     gfx1250_swmmac_has_modifiers = self._gfx1250_swmmac_has_modifiers(
                         inst
