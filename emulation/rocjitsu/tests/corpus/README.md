@@ -55,3 +55,8 @@ declared exclusions. It streams each output through a temporary file and
 retains only its size and SHA-256. Its `finalize` command requires every pinned
 corpus input to have either a successful pair or a matching declared
 exclusion, which prevents partial runs from becoming a develop baseline.
+
+## Near-timeout reporting
+
+With `--warn-perf`, `run-corpus-tests.sh` warns about passing tests whose
+runtime approaches the pytest timeout.

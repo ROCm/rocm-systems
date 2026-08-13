@@ -276,6 +276,14 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDeviceAttributeGPUDirectRDMAWithHipV
   INFO("hipDeviceAttributeDmaBufSupported: " << hipDmaBufSupported);
   REQUIRE(hipRDMAWithHipVMMSupported == (hipVmmSupported && hipDmaBufSupported));
 }
+
+HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDeviceAttributeHostAllocDmaBufSupported) {
+  int hostAllocDmaBufSupported = -1;
+  HIP_CHECK(hipDeviceGetAttribute(&hostAllocDmaBufSupported,
+                                  hipDeviceAttributeHostAllocDmaBufSupported, 0));
+  INFO("hipDeviceAttributeHostAllocDmaBufSupported: " << hostAllocDmaBufSupported);
+  REQUIRE((hostAllocDmaBufSupported == 0 || hostAllocDmaBufSupported == 1));
+}
 /**
  * End doxygen group DeviceTest.
  * @}
