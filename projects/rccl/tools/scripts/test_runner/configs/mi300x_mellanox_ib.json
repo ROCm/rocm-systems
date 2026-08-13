@@ -768,6 +768,11 @@
           "name": "DdaFabricEligibilityTest",
           "description": "Dda Fabric eligibility tests",
           "test_filter": "DdaFabricEligibilityTest.*"
+	},
+	{
+          "name": "CeAlltoAllvEligibilityTest",
+          "description": "CE AlltoAllv eligibility, metadata layout, and ncclCeImplemented/ncclCeAvailable gating tests",
+          "test_filter": "CeAlltoAllvEligibilityTest.*"
         },
         {
           "name": "TimeoutTests",
@@ -2314,8 +2319,13 @@
         },
         {
           "name": "CE_Internal_Neg",
-          "description": "ncclCeImplemented returns false for non-CE collectives; true on supported driver",
+          "description": "ncclCeImplemented returns false for non-CE collectives; true on supported driver (includes AlltoAllv)",
           "test_filter": "CeInternalNeg.*"
+        },
+        {
+          "name": "CE_Internal_AlltoAllv",
+          "description": "CE AlltoAllv rejects missing size metadata before launching transfers",
+          "test_filter": "CeInternalMPITest.AlltoAllvMissingSizesReturnsInvalidUsage"
         }
       ]
     },
