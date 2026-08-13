@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
-project(profiler-hub VERSION 0.1.0)
+project(profiler-hub VERSION 0.2.0)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 17)
