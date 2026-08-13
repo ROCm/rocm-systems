@@ -23,7 +23,7 @@
 
 namespace {
 
-using meta::comms::kDdaLLRsMaxBytes;
+using meta::comms::kDdaLLMaxBytes;
 using meta::comms::kDdaLLRsSlotStridePkts;
 using meta::comms::LLPacket16;
 
@@ -118,7 +118,7 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   if (bytes % 8 != 0) {
     return false;
   }
-  if (bytes > kDdaLLRsMaxBytes) {
+  if (bytes > kDdaLLMaxBytes) {
     return false;
   }
   if (ddaLLRsScratchSize(comm->nRanks) > comm->ddaScratchBytes) {

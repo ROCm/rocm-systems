@@ -23,8 +23,8 @@
 
 namespace {
 
-using meta::comms::kDdaLLA2AMaxPerChunkBytes;
 using meta::comms::kDdaLLA2ASlotStridePkts;
+using meta::comms::kDdaLLMaxBytes;
 using meta::comms::LLPacket16;
 using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
 
@@ -120,7 +120,7 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   if (perChunkBytes % 16 != 0) {
     return false;
   }
-  if (perChunkBytes > kDdaLLA2AMaxPerChunkBytes) {
+  if (perChunkBytes > kDdaLLMaxBytes) {
     return false;
   }
   if (ddaLLA2AScratchSize(comm->nRanks) > comm->ddaScratchBytes) {

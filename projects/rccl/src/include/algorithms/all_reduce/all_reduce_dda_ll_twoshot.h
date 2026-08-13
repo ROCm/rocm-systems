@@ -39,7 +39,6 @@ namespace meta::comms {
 // Both tiers share one scratch and epoch, so bank 1 has to start at the same
 // offset for both: a slot here holds only a shard, and the bank spans two of them
 // (publish + write-back). dda_all_reduce_fabric_ll.cu static_asserts the halving.
-constexpr size_t kDdaLLArTwoShotMaxBytes = kDdaLLArMaxBytes;
 constexpr size_t kDdaLLArTwoShotSlotStridePkts = kDdaLLArSlotStridePkts / 2;
 
 // Fixed-width peer staging for phase 1: a runtime-sized array, or a runtime index

@@ -24,15 +24,8 @@
 
 namespace meta::comms {
 
-// Per-rank scratch slot capacity and hard per-rank cap (enforced in the
-// eligibility check); fixes the slot stride at compile time so the double-buffered
-// layout is identical on every rank and call. The effective size gate is the total
-// gathered size (DDA_ALLGATHER_LL_THRESHOLD, see collectives.cc), so the actual
-// per-rank payload is <= total / nRanks and usually well under this cap.
-// Footprint = 2 banks * nRanks * (kDdaLLAgMaxPerRankBytes * 2) for the 8B->16B
-// expansion; 36 MiB at 128 KiB / 72 ranks, within the 64 MiB DDA scratch.
-constexpr size_t kDdaLLAgMaxPerRankBytes = 131072;                     // 128 KiB
-constexpr size_t kDdaLLAgSlotStridePkts = kDdaLLAgMaxPerRankBytes / 8; // 16384
+// LL is for small-message, so the full payload is well under the staging cap.
+constexpr size_t kDdaLLAgSlotStridePkts = kDdaLLMaxBytes / 8;
 
 // LL all-gather kernel. 2D grid: grid.x == nRanks selects the peer (column b
 // owns peer b); grid.y == blocksPerPeer splits that peer's packets into gridDim.y

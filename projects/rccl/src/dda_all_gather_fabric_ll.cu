@@ -22,8 +22,8 @@
 
 namespace {
 
-using meta::comms::kDdaLLAgMaxPerRankBytes;
 using meta::comms::kDdaLLAgSlotStridePkts;
+using meta::comms::kDdaLLMaxBytes;
 using meta::comms::LLPacket16;
 using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
 
@@ -131,7 +131,7 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
   if (perRankBytes % 16 != 0) {
     return false;
   }
-  if (perRankBytes > kDdaLLAgMaxPerRankBytes) {
+  if (perRankBytes > kDdaLLMaxBytes) {
     return false;
   }
   if (ddaLLAgScratchSize(comm->nRanks) > comm->ddaScratchBytes) {

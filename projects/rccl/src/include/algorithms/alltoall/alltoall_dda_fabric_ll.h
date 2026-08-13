@@ -30,12 +30,8 @@
 
 namespace meta::comms {
 
-// Per-peer chunk capacity and hard cap (enforced in the eligibility check);
-// fixes the slot stride at compile time so the double-buffered layout is
-// identical on every rank and call. The effective size gate is the runtime LL
-// threshold (see collectives.cc). Footprint = 2 banks * nRanks * slot * 16B.
-constexpr size_t kDdaLLA2AMaxPerChunkBytes = 131072;                    // 128 KiB
-constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLA2AMaxPerChunkBytes / 8; // 16384
+// LL is for small-message, so the full payload is well under the staging cap.
+constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLMaxBytes / 8;
 
 // LL all-to-all kernel. 2D grid: grid.x == nRanks selects the peer (column b
 // owns peer b); grid.y == blocksPerPeer splits that peer's packets into gridDim.y

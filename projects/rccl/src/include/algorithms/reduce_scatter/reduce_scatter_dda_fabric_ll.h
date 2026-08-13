@@ -31,13 +31,8 @@
 
 namespace meta::comms {
 
-// Per-shard staging slot capacity and hard per-shard cap (enforced in the
-// eligibility check). Fixes the slot stride at compile time so the
-// double-buffered layout is identical on every rank and call.
-// Footprint = 2 banks * nRanks * (kDdaLLRsMaxBytes * 2) for the 8B->16B
-// expansion; 4 MiB at 128 KiB / 8 ranks, within the 64 MiB DDA scratch.
-constexpr size_t kDdaLLRsMaxBytes = 131072;                 // 128 KiB
-constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 16384
+// LL is for small-message, so the full payload is well under the staging cap.
+constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLMaxBytes / 8;
 
 // LL reduce-scatter kernel. 1D grid over packets (8B payload each) of the
 // per-rank shard (recvcount elements).

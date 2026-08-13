@@ -51,10 +51,9 @@ RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(0));
 
 namespace {
 
-using meta::comms::kDdaLLArMaxBytes;
 using meta::comms::kDdaLLArSlotStridePkts;
-using meta::comms::kDdaLLArTwoShotMaxBytes;
 using meta::comms::kDdaLLArTwoShotSlotStridePkts;
+using meta::comms::kDdaLLMaxBytes;
 using meta::comms::LLPacket16;
 
 // LL scratch footprint: 2 banks * nRanks slots * slotStride packets * 16B.
@@ -225,7 +224,7 @@ static bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* r
   if (bytes % 16 != 0) {
     return false;
   }
-  if (bytes > kDdaLLArMaxBytes) {
+  if (bytes > kDdaLLMaxBytes) {
     return false;
   }
   if (ddaLLArScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
@@ -272,7 +271,7 @@ static bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* r
     return false;
   }
 
-  if (bytesPerRank > kDdaLLArTwoShotMaxBytes) {
+  if (bytesPerRank > kDdaLLMaxBytes) {
     return false;
   }
 
