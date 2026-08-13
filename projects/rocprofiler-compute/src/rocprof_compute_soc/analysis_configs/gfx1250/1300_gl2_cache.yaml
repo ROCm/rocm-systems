@@ -20,7 +20,7 @@ Panel Config:
 
   - metric_table:
       id: 1301
-      title: "GL2A Processing"
+      title: GL2A Processing
       header:
         metric: Metric
         avg: Avg
@@ -96,7 +96,7 @@ Panel Config:
 
   - metric_table:
       id: 1310
-      title: "GL2C Utilization"
+      title: GL2C Utilization
       header:
         metric: Metric
         avg: Avg
@@ -112,7 +112,7 @@ Panel Config:
 
   - metric_table:
       id: 1311
-      title: "GL2C Cache Lookup"
+      title: GL2C Cache Lookup
       header:
         metric: Metric
         avg: Avg
@@ -158,7 +158,7 @@ Panel Config:
 
   - metric_table:
       id: 1302
-      title: "GL2C-EA Stalls"
+      title: GL2C-EA Stalls
       header:
         metric: Metric
         avg: Avg
@@ -214,7 +214,7 @@ Panel Config:
 
   - metric_table:
       id: 1303
-      title: "GL2C-EA Interface - Latencies"
+      title: GL2C-EA Interface - Latencies
       header:
         metric: Metric
         avg: Avg
@@ -240,7 +240,7 @@ Panel Config:
 
   - metric_table:
       id: 1304
-      title: "GL2C-EA Interface - HBM Bandwidth"
+      title: GL2C-EA Interface - HBM Bandwidth
       header:
         metric: Metric
         avg: Avg
@@ -266,7 +266,7 @@ Panel Config:
 
   - metric_table:
       id: 1305
-      title: "GL2C-EA Interface - Host CPU Bandwidth"
+      title: GL2C-EA Interface - Host CPU Bandwidth
       header:
         metric: Metric
         avg: Avg
@@ -292,7 +292,7 @@ Panel Config:
 
   - metric_table:
       id: 1306
-      title: "GL2C-EA Interface - PCIe Bandwidth"
+      title: GL2C-EA Interface - PCIe Bandwidth
       header:
         metric: Metric
         avg: Avg
@@ -318,7 +318,7 @@ Panel Config:
 
   - metric_table:
       id: 1307
-      title: "GL2C-EA Interface - Remote Node Bandwidth"
+      title: GL2C-EA Interface - Remote Node Bandwidth
       header:
         metric: Metric
         avg: Avg
@@ -344,7 +344,7 @@ Panel Config:
 
   - metric_table:
       id: 1308
-      title: "GL2C-EA Interface - Remote Memory Bandwidth (Same Node)"
+      title: GL2C-EA Interface - Remote Memory Bandwidth (Same Node)
       header:
         metric: Metric
         avg: Avg

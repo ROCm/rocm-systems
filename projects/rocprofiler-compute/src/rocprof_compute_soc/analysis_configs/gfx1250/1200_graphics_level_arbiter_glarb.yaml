@@ -21,7 +21,7 @@ Panel Config:
 
   - metric_table:
       id: 1201
-      title: "GLARBA Processing"
+      title: GLARBA Processing
       header:
         metric: Metric
         avg: Avg
@@ -57,7 +57,7 @@ Panel Config:
 
   - metric_table:
       id: 1202
-      title: "GLARBC Utilization"
+      title: GLARBC Utilization
       header:
         metric: Metric
         avg: Avg
@@ -83,7 +83,7 @@ Panel Config:
 
   - metric_table:
       id: 1203
-      title: "GLARBC Request"
+      title: GLARBC Request
       header:
         metric: Metric
         avg: Avg
@@ -118,7 +118,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 1204
-      title: "GLARBC Request Bandwidth"
+      title: GLARBC Request Bandwidth
       header:
         metric: Metric
         avg: Avg
@@ -143,7 +143,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 1205
-      title: "GLARBC-GL2 Interface"
+      title: GLARBC-GL2 Interface
       header:
         metric: Metric
         avg: Avg

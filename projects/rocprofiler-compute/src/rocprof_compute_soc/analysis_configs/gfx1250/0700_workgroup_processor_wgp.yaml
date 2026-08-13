@@ -6,7 +6,7 @@ Panel Config:
   data source:
   - metric_table:
       id: 701
-      title: "Utilization"
+      title: Utilization
       header:
         metric: Metric
         avg: Avg
@@ -78,7 +78,7 @@ Panel Config:
 
   - metric_table:
       id: 703
-      title: "Wave Dispatch"
+      title: Wave Dispatch
       header:
         metric: Metric
         avg: Avg
@@ -98,7 +98,7 @@ Panel Config:
           unit: Threads
   - metric_table:
       id: 704
-      title: "Wave Life"
+      title: Wave Life
       header:
         metric: Metric
         avg: Avg
@@ -113,7 +113,7 @@ Panel Config:
           unit: Cycles
   - metric_table:
       id: 705
-      title: "Wave Instruction Mix"
+      title: Wave Instruction Mix
       header:
         metric: Metric
         avg: Avg
@@ -168,7 +168,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 706
-      title: "VMEM Instruction Mix"
+      title: VMEM Instruction Mix
       header:
         metric: Metric
         avg: Avg
@@ -258,7 +258,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 707
-      title: "LDS Instruction Mix"
+      title: LDS Instruction Mix
       header:
         metric: Metric
         avg: Avg
@@ -298,7 +298,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 708
-      title: "VALU Instruction Mix"
+      title: VALU Instruction Mix
       header:
         metric: Metric
         avg: Avg
@@ -343,7 +343,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 709
-      title: "VALU FLOPs and IOPs Counting"
+      title: VALU FLOPs and IOPs Counting
       header:
         metric: Metric
         avg: Avg
@@ -389,7 +389,7 @@ Panel Config:
 
   - metric_table:
       id: 710
-      title: "WMMA Instruction FLOPs and IOPs Counting"
+      title: WMMA Instruction FLOPs and IOPs Counting
       header:
         metric: Metric
         avg: Avg
@@ -449,7 +449,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 711
-      title: "Instruction Issue Stalls"
+      title: Instruction Issue Stalls
       header:
         metric: Metric
         avg: Avg
@@ -465,7 +465,7 @@ Panel Config:
 
   - metric_table:
       id: 712
-      title: "Compute Pipeline Utilization"
+      title: Compute Pipeline Utilization
       header:
         metric: Metric
         avg: Avg
@@ -496,7 +496,7 @@ Panel Config:
 
   - metric_table:
       id: 713
-      title: "WGP Latencies"
+      title: WGP Latencies
       header:
         metric: Metric
         avg: Avg
@@ -511,7 +511,7 @@ Panel Config:
           unit: Cycles
   - metric_table:
       id: 714
-      title: "WGP-TXA Interface"
+      title: WGP-TXA Interface
       header:
         metric: Metric
         avg: Avg
@@ -568,7 +568,7 @@ Panel Config:
 
   - metric_table:
       id: 715
-      title: "WGP-TXD Interface"
+      title: WGP-TXD Interface
       header:
         metric: Metric
         avg: Avg
@@ -584,7 +584,7 @@ Panel Config:
 
   - metric_table:
       id: 716
-      title: "Instruction Cache"
+      title: Instruction Cache
       header:
         metric: Metric
         avg: Avg
@@ -599,7 +599,7 @@ Panel Config:
           unit: Percent
   - metric_table:
       id: 717
-      title: "Scalar Data Cache"
+      title: Scalar Data Cache
       header:
         metric: Metric
         avg: Avg
@@ -619,7 +619,7 @@ Panel Config:
           unit: (Bytes + $normUnit)
   - metric_table:
       id: 718
-      title: "SQC-GL1 Interface"
+      title: SQC-GL1 Interface
       header:
         metric: Metric
         avg: Avg

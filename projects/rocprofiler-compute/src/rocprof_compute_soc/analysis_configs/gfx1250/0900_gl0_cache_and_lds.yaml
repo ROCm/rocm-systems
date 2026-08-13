@@ -22,7 +22,7 @@ Panel Config:
 
   - metric_table:
       id: 901
-      title: "WGP Cache Utilization (LDS + GL0)"
+      title: WGP Cache Utilization (LDS + GL0)
       header:
         metric: Metric
         avg: Avg
@@ -39,7 +39,7 @@ Panel Config:
 
   - metric_table:
       id: 902
-      title: "Cache Requests"
+      title: Cache Requests
       header:
         metric: Metric
         avg: Avg
@@ -89,7 +89,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 903
-      title: "Cache Lookup"
+      title: Cache Lookup
       header:
         metric: Metric
         avg: Avg
@@ -176,7 +176,7 @@ Panel Config:
 
   - metric_table:
       id: 904
-      title: "LDS Accesses"
+      title: LDS Accesses
       header:
         metric: Metric
         avg: Avg
@@ -249,7 +249,7 @@ Panel Config:
 
   - metric_table:
       id: 905
-      title: "Set-Slot Dynamics"
+      title: Set-Slot Dynamics
       header:
         metric: Metric
         avg: Avg
@@ -392,7 +392,7 @@ Panel Config:
 
   - metric_table:
       id: 909
-      title: "GL0-UTCL0 Interface"
+      title: GL0-UTCL0 Interface
       header:
         metric: Metric
         avg: Avg
@@ -413,7 +413,7 @@ Panel Config:
 
   - metric_table:
       id: 910
-      title: "UTCL0-UTCL1 Interface"
+      title: UTCL0-UTCL1 Interface
       header:
         metric: Metric
         avg: Avg
@@ -469,7 +469,7 @@ Panel Config:
 
   - metric_table:
       id: 911
-      title: "UTCL0 Lookup"
+      title: UTCL0 Lookup
       header:
         metric: Metric
         avg: Avg

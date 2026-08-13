@@ -21,7 +21,7 @@ Panel Config:
 
   - metric_table:
       id: 801
-      title: "TXA Utilization"
+      title: TXA Utilization
       header:
         metric: Metric
         avg: Avg
@@ -43,7 +43,7 @@ Panel Config:
 
   - metric_table:
       id: 802
-      title: "Shader-TXA Requests - LDS"
+      title: Shader-TXA Requests - LDS
       header:
         metric: Metric
         avg: Avg
@@ -73,7 +73,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 803
-      title: "Shader-TXA Requests - VMEM"
+      title: Shader-TXA Requests - VMEM
       header:
         metric: Metric
         avg: Avg
@@ -123,7 +123,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 804
-      title: "Shader-TXA Requests - Async Load and Store"
+      title: Shader-TXA Requests - Async Load and Store
       header:
         metric: Metric
         avg: Avg
@@ -168,7 +168,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 805
-      title: "Shader-TXA Requests - TDM"
+      title: Shader-TXA Requests - TDM
       header:
         metric: Metric
         avg: Avg
@@ -203,7 +203,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 806
-      title: "Shader-TXA Requests - Block Load and Store"
+      title: Shader-TXA Requests - Block Load and Store
       header:
         metric: Metric
         avg: Avg
@@ -223,7 +223,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 807
-      title: "Shader-TXA Interface"
+      title: Shader-TXA Interface
       header:
         metric: Metric
         avg: Avg
@@ -246,7 +246,7 @@ Panel Config:
 
   - metric_table:
       id: 808
-      title: "TXA-VMW Interface"
+      title: TXA-VMW Interface
       header:
         metric: Metric
         avg: Avg
@@ -292,7 +292,7 @@ Panel Config:
 
   - metric_table:
       id: 809
-      title: "LDS and GL0 Data Bandwidth"
+      title: LDS and GL0 Data Bandwidth
       header:
         metric: Metric
         avg: Avg

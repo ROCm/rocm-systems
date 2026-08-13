@@ -21,7 +21,7 @@ Panel Config:
 
   - metric_table:
       id: 1501
-      title: "CHA Utilization"
+      title: CHA Utilization
       header:
         metric: Metric
         avg: Avg
@@ -37,7 +37,7 @@ Panel Config:
 
   - metric_table:
       id: 1502
-      title: "CHA Arbitration"
+      title: CHA Arbitration
       header:
         metric: Metric
         avg: Avg
@@ -73,7 +73,7 @@ Panel Config:
 
   - metric_table:
       id: 1503
-      title: "CHC Utilization"
+      title: CHC Utilization
       header:
         metric: Metric
         avg: Avg
@@ -94,7 +94,7 @@ Panel Config:
 
   - metric_table:
       id: 1504
-      title: "CHC Requests"
+      title: CHC Requests
       header:
         metric: Metric
         avg: Avg
@@ -169,7 +169,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 1505
-      title: "CHC Bandwidth and Latency"
+      title: CHC Bandwidth and Latency
       header:
         metric: Metric
         avg: Avg

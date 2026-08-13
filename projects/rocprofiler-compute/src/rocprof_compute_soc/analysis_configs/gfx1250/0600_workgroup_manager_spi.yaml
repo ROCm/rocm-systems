@@ -6,7 +6,7 @@ Panel Config:
   data source:
   - metric_table:
       id: 601
-      title: "Utilization"
+      title: Utilization
       header:
         metric: Metric
         avg: Avg
@@ -22,7 +22,7 @@ Panel Config:
 
   - metric_table:
       id: 602
-      title: "Wave Dispatch"
+      title: Wave Dispatch
       header:
         metric: Metric
         avg: Avg
@@ -91,7 +91,7 @@ Panel Config:
 
   - metric_table:
       id: 603
-      title: "Resource Allocation"
+      title: Resource Allocation
       header:
         metric: Metric
         avg: Avg
@@ -147,7 +147,7 @@ Panel Config:
 
   - metric_table:
       id: 604
-      title: "CPC-SPI Interface"
+      title: CPC-SPI Interface
       header:
         metric: Metric
         avg: Avg

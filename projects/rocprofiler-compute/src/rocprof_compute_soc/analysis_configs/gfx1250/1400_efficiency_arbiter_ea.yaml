@@ -21,7 +21,7 @@ Panel Config:
 
   - metric_table:
       id: 1401
-      title: "EA Utilization"
+      title: EA Utilization
       header:
         metric: Metric
         avg: Avg
@@ -37,7 +37,7 @@ Panel Config:
 
   - metric_table:
       id: 1402
-      title: "EA Traffic Bandwidth"
+      title: EA Traffic Bandwidth
       header:
         metric: Metric
         avg: Avg
@@ -88,7 +88,7 @@ Panel Config:
 
   - metric_table:
       id: 1403
-      title: "EA-SDP Interface - Outstanding Requests"
+      title: EA-SDP Interface - Outstanding Requests
       header:
         metric: Metric
         avg: Avg
@@ -154,7 +154,7 @@ Panel Config:
 
   - metric_table:
       id: 1404
-      title: "EA-SDP Interface - Stalls"
+      title: EA-SDP Interface - Stalls
       header:
         metric: Metric
         avg: Avg

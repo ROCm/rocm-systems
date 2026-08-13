@@ -11,7 +11,7 @@ Panel Config:
 
   - metric_table:
       id: 1101
-      title: "GL1A Processing"
+      title: GL1A Processing
       header:
         metric: Metric
         avg: Avg
@@ -47,7 +47,7 @@ Panel Config:
 
   - metric_table:
       id: 1102
-      title: "GL1C Utilization"
+      title: GL1C Utilization
       header:
         metric: Metric
         avg: Avg
@@ -73,7 +73,7 @@ Panel Config:
 
   - metric_table:
       id: 1103
-      title: "GL1C Request"
+      title: GL1C Request
       header:
         metric: Metric
         avg: Avg
@@ -108,7 +108,7 @@ Panel Config:
           unit: (Count + $normUnit)
   - metric_table:
       id: 1104
-      title: "GL1C Request Bandwidth"
+      title: GL1C Request Bandwidth
       header:
         metric: Metric
         avg: Avg
@@ -128,7 +128,7 @@ Panel Config:
           unit: GB/s
   - metric_table:
       id: 1105
-      title: "GL1C Multicast"
+      title: GL1C Multicast
       header:
         metric: Metric
         avg: Avg
@@ -184,7 +184,7 @@ Panel Config:
 
   - metric_table:
       id: 1106
-      title: "GL1C-GLARB Interface"
+      title: GL1C-GLARB Interface
       header:
         metric: Metric
         avg: Avg

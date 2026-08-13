@@ -17,7 +17,7 @@ Panel Config:
 
   - metric_table:
       id: 201
-      title: "System Speed-of-Light"
+      title: System Speed-of-Light
       header:
         metric: Metric
         value: Avg

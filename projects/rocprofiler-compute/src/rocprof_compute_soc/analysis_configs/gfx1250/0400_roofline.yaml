@@ -17,7 +17,7 @@ Panel Config:
 
   - metric_table:
       id: 401
-      title: "Roofline Performance Rates"
+      title: Roofline Performance Rates
       cli_style: Roofline
       tui_style: Roofline
       header:
@@ -117,7 +117,7 @@ Panel Config:
 
   - metric_table:
       id: 402
-      title: "Roofline Plot Points"
+      title: Roofline Plot Points
       cli_style: Roofline
       tui_style: Roofline
       header:
