@@ -3667,14 +3667,21 @@ TEST_P(IsaTest, VendorSpecificBarrierValueOrdersQueueEntries) {
 }
 
 TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
-  constexpr std::array packet_types{
-      HSA_PACKET_TYPE_BARRIER_AND,
-      HSA_PACKET_TYPE_BARRIER_OR,
-      HSA_PACKET_TYPE_VENDOR_SPECIFIC,
+  struct BarrierCase {
+    uint16_t packet_type;
+    bool header_barrier_bit;
+  };
+  constexpr std::array barrier_cases{
+      BarrierCase{HSA_PACKET_TYPE_BARRIER_AND, true},
+      BarrierCase{HSA_PACKET_TYPE_BARRIER_AND, false},
+      BarrierCase{HSA_PACKET_TYPE_BARRIER_OR, true},
+      BarrierCase{HSA_PACKET_TYPE_BARRIER_OR, false},
+      BarrierCase{HSA_PACKET_TYPE_VENDOR_SPECIFIC, true},
   };
 
-  for (const auto packet_type : packet_types) {
+  for (const auto [packet_type, header_barrier_bit] : barrier_cases) {
     SCOPED_TRACE(packet_type);
+    SCOPED_TRACE(header_barrier_bit);
     VmFixture f(arch(), 1, 8);
 
     const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
@@ -3697,7 +3704,7 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
     dispatch.kernel_object = ko;
 
     hsa_kernel_dispatch_packet_t barrier{};
-    barrier.header = packet_type | (1 << HSA_PACKET_HEADER_BARRIER);
+    barrier.header = packet_type | (header_barrier_bit ? (1 << HSA_PACKET_HEADER_BARRIER) : 0);
     if (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
       barrier.setup = amdgpu::kAmdAqlFormatPm4Ib;
     barrier.completion_signal.handle = kBarrierCompletionSignal;
