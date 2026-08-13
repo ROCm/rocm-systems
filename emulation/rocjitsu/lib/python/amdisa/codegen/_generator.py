@@ -2496,7 +2496,7 @@ class CodeGenerator:
                 inst_enc
             )
             supports_fixed_size_embedding = (
-                self._supports_gfx1250_scaled_wmma_vop3px2()
+                self._supports_cdna5_scaled_wmma_vop3px2()
                 and inst_enc.fmt_enc_name == 'Vop3p'
             )
             dpp_struct, dpp8_struct = self._vop_dpp_struct_names(inst_enc.enc_name)
@@ -3554,7 +3554,7 @@ class CodeGenerator:
 
         return None
 
-    def _supports_gfx1250_scaled_wmma_vop3px2(self) -> bool:
+    def _supports_cdna5_scaled_wmma_vop3px2(self) -> bool:
         return (
             self.isa_spec.arch_name.lower() == 'cdna5'
             and self.isa_spec.profile.generate_scaled_wmma_vop3px2
@@ -9164,7 +9164,7 @@ class CodeGenerator:
                 if _has_size_overrides:
                     h_includes.append(('array', True))
                 if (
-                    self._supports_gfx1250_scaled_wmma_vop3px2()
+                    self._supports_cdna5_scaled_wmma_vop3px2()
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
                     if not _has_size_overrides:
@@ -11882,7 +11882,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             ),
         ]
         decode_body = []
-        if self._supports_gfx1250_scaled_wmma_vop3px2():
+        if self._supports_cdna5_scaled_wmma_vop3px2():
             class_impl.append(
                 cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers())
             )
@@ -11975,7 +11975,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 [cgen.Statement('return std::make_unique<Vopd>(opcode)')]
             )
 
-        if self._supports_gfx1250_scaled_wmma_vop3px2():
+        if self._supports_cdna5_scaled_wmma_vop3px2():
             for _dte in self.isa_spec.primary_decode_table:
                 if (
                     _dte is not None
