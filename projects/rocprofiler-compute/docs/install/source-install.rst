@@ -38,7 +38,7 @@ ROCm Compute Profiler depends on a number of Python packages documented in the t
          - Python packages required to run ROCm Compute Profiler's CI suite using PyTest.
 
    When building with ``ENABLE_TESTS=ON``, ``TORCH_TRACE_PYTHON`` selects the Python
-   interpreter for the ``roctx_recordfn`` test build.
+   interpreter for the ``torch_trace_collector`` test build.
 
 The recommended procedure for ROCm Compute Profiler usage is to install into a shared file
 system so that multiple users can access the final installation. The

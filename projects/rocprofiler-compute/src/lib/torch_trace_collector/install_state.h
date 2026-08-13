@@ -8,7 +8,7 @@
 #include <atomic>
 #include <mutex>
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 // Global RecordFunction callback registration state.
@@ -21,4 +21,4 @@ struct InstallState
 
 inline InstallState g_install;
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail

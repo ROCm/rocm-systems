@@ -3,7 +3,7 @@
 
 """ROCTX instrumentation backend for PyTorch.
 
-ATen ops use the C++ RecordFunction tier (roctx_recordfn.so) when
+ATen ops use the C++ RecordFunction tier (torch_trace_collector.so) when
 TorchBackend.install() initializes it, with a Python TorchDispatchMode
 fallback. Structural wraps (nn.Module, Optimizer, distributed,
 CUDA graph, torch.compile) run on both tiers. Triton kernel launches
@@ -32,18 +32,18 @@ _BACKEND_NAME = "torch"
 
 class _RecordFnHook:
     def active(self) -> bool:
-        return _STATE.using_c_tier and _STATE.roctx_recordfn is not None
+        return _STATE.using_c_tier and _STATE.torch_trace_collector is not None
 
     def push(self, marker: str, context: str, backend: str) -> bool:
         try:
-            _STATE.roctx_recordfn.push_user_scope(marker, context, backend)
+            _STATE.torch_trace_collector.push_user_scope(marker, context, backend)
             return True
         except Exception:
             return False
 
     def pop(self) -> None:
         try:
-            _STATE.roctx_recordfn.pop_user_scope()
+            _STATE.torch_trace_collector.pop_user_scope()
         except Exception:
             pass
 
@@ -51,7 +51,7 @@ class _RecordFnHook:
 class _TorchState:
     """Mutable backend state populated by TorchBackend.install().
 
-    Holds the resolved torch module handles, the roctx_recordfn loader and
+    Holds the resolved torch module handles, the torch_trace_collector loader and
     native C++ RecordFunction tier, and the active Python-tier dispatch mode.
     """
 
@@ -68,9 +68,9 @@ class _TorchState:
         self.torch_root: str = ""
 
         self.loader_module: Any = None
-        self.load_roctx_recordfn: Optional[Callable[..., Any]] = None
+        self.load_torch_trace_collector: Optional[Callable[..., Any]] = None
         self.load_diagnostics: list[tuple[str, str]] = []
-        self.roctx_recordfn: Any = None
+        self.torch_trace_collector: Any = None
         self.using_c_tier: bool = False
         self.c_tier_initialized: bool = False
         self.native_hook: Optional[_RecordFnHook] = None
@@ -258,19 +258,19 @@ def _walk_subclasses(cls: type, fn: Callable[[type], None]) -> None:
 
 
 def _initialize_c_tier() -> bool:
-    """Load and install roctx_recordfn.so once per process."""
+    """Load and install torch_trace_collector.so once per process."""
     if _STATE.c_tier_initialized:
         return _STATE.using_c_tier
 
     _STATE.c_tier_initialized = True
 
-    if _STATE.load_roctx_recordfn is None:
-        _STATE.roctx_recordfn = None
+    if _STATE.load_torch_trace_collector is None:
+        _STATE.torch_trace_collector = None
         _STATE.using_c_tier = False
         return False
 
     try:
-        result = _STATE.load_roctx_recordfn()
+        result = _STATE.load_torch_trace_collector()
     except Exception as exc:
         console_warning(
             "ml api trace",
@@ -279,14 +279,14 @@ def _initialize_c_tier() -> bool:
         result = None
 
     if result is not None:
-        _STATE.roctx_recordfn = result.module
+        _STATE.torch_trace_collector = result.module
         _STATE.load_diagnostics = result.diagnostics
     else:
-        _STATE.roctx_recordfn = None
+        _STATE.torch_trace_collector = None
 
-    if _STATE.roctx_recordfn is not None:
+    if _STATE.torch_trace_collector is not None:
         try:
-            _STATE.roctx_recordfn.install()
+            _STATE.torch_trace_collector.install()
             console_log(
                 "ml api trace",
                 (
@@ -302,7 +302,7 @@ def _initialize_c_tier() -> bool:
                 "ml api trace",
                 f".so install() raised; falling back to Python tier: {exc}",
             )
-            _STATE.roctx_recordfn = None
+            _STATE.torch_trace_collector = None
 
     _STATE.using_c_tier = False
     return False
@@ -1147,10 +1147,10 @@ def using_c_tier() -> bool:
 
 def dump_recordfn_stats() -> Optional[dict[str, object]]:
     """Return the .so counters, or None on the Python tier."""
-    if _STATE.roctx_recordfn is None:
+    if _STATE.torch_trace_collector is None:
         return None
     try:
-        return _STATE.roctx_recordfn.dump_stats()
+        return _STATE.torch_trace_collector.dump_stats()
     except Exception:
         return None
 
@@ -1235,7 +1235,7 @@ def _resolve_torch() -> bool:
         from .torch_cpp_loader import load as _loader_fn
 
         _STATE.loader_module = _loader_mod
-        _STATE.load_roctx_recordfn = _loader_fn
+        _STATE.load_torch_trace_collector = _loader_fn
     except Exception as exc:
         console_warning(
             "ml api trace",

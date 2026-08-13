@@ -1,13 +1,13 @@
 ## Copyright (c) Advanced Micro Devices, Inc.
 ## SPDX-License-Identifier:  MIT
 
-set(target test-roctx-recordfn)
+set(target test-torch-trace-collector)
 
-add_executable(${target} test_roctx_recordfn.cpp)
+add_executable(${target} test_torch_trace_collector.cpp)
 
 # Includes, torch libraries, and the DebugInfoKind flag are inherited from
-# roctx-recordfn. Only the runtime search paths below are test-specific.
-target_link_libraries(${target} PRIVATE roctx-recordfn gtest_main)
+# torch-trace-collector. Only the runtime search paths below are test-specific.
+target_link_libraries(${target} PRIVATE torch-trace-collector gtest_main)
 
 # torch's shared libraries cross-reference one another at load time.
 target_link_options(${target} PRIVATE LINKER:--allow-shlib-undefined)
@@ -20,7 +20,7 @@ set_target_properties(
 
 # On some ROCm layouts openblas is outside the torch wheel; add it to the
 # runtime library path when present.
-set(_rcfn_openblas_dir "")
+set(_ttc_openblas_dir "")
 foreach(
     _dir
     IN
@@ -32,24 +32,30 @@ foreach(
         "$ENV{ROCM_PATH}/lib64"
         "/opt/rocm/lib64"
 )
-    file(GLOB _rcfn_openblas_hits "${_dir}/librocm-openblas.so*")
-    if(_rcfn_openblas_hits)
-        set(_rcfn_openblas_dir "${_dir}")
+    file(GLOB _ttc_openblas_hits "${_dir}/librocm-openblas.so*")
+    if(_ttc_openblas_hits)
+        set(_ttc_openblas_dir "${_dir}")
         break()
     endif()
 endforeach()
 
-set(_rcfn_test_ld_paths "${_torch_lib_search_dirs}")
-if(_rcfn_openblas_dir)
-    list(APPEND _rcfn_test_ld_paths "${_rcfn_openblas_dir}")
+set(_ttc_test_ld_paths "${_torch_lib_search_dirs}")
+if(_ttc_openblas_dir)
+    list(APPEND _ttc_test_ld_paths "${_ttc_openblas_dir}")
 endif()
-list(JOIN _rcfn_test_ld_paths ":" _rcfn_test_ld_path)
+list(JOIN _ttc_test_ld_paths ":" _ttc_test_ld_path)
 
-# The root CMakeLists.txt registers this test alongside the other native
-# gtests; publish the search path torch needs to resolve its own dependencies.
-set_target_properties(
+if(TEST_FROM_INSTALL)
+    set(_ttc_test_cmd tests/${target})
+else()
+    set(_ttc_test_cmd $<TARGET_FILE:${target}>)
+endif()
+add_test(NAME ${target} COMMAND ${_ttc_test_cmd})
+set_tests_properties(
     ${target}
-    PROPERTIES ROCPROF_TEST_LD_LIBRARY_PATH "${_rcfn_test_ld_path}"
+    PROPERTIES
+        LABELS "profile"
+        ENVIRONMENT "LD_LIBRARY_PATH=${_ttc_test_ld_path}:$ENV{LD_LIBRARY_PATH}"
 )
 
 if(INSTALL_TESTS)

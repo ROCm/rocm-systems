@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 // Identifies one autograd node. PyTorch draws sequence numbers from a
@@ -48,18 +48,18 @@ inline std::size_t hash_snapshot_key(const SnapshotKey& key) noexcept
     return static_cast<std::size_t>(value);
 }
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail
 
 template<>
-struct std::hash<roctx_recordfn::detail::SnapshotKey>
+struct std::hash<torch_trace_collector::detail::SnapshotKey>
 {
-    std::size_t operator()(const roctx_recordfn::detail::SnapshotKey& key) const noexcept
+    std::size_t operator()(const torch_trace_collector::detail::SnapshotKey& key) const noexcept
     {
-        return roctx_recordfn::detail::hash_snapshot_key(key);
+        return torch_trace_collector::detail::hash_snapshot_key(key);
     }
 };
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 // Sharded store mapping an autograd node to a forward-stack snapshot, with
@@ -182,4 +182,4 @@ private:
 
 inline SnapshotStore g_snapshots;
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail

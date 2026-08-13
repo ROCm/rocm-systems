@@ -1,13 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Resolve and load the ``roctx_recordfn`` pybind11 extension.
+"""Resolve and load the ``torch_trace_collector`` pybind11 extension.
 
 The loader first looks for a prebuilt ``.so`` under the install
 prefix, then falls back to a cached cmake build under
 ``~/.cache/rocprofiler-compute/``. Cache entries are keyed by the
 Python and torch versions in use and a fingerprint of the C++
-inputs. Set ``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` to force a fresh
+inputs. Set ``ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1`` to force a fresh
 build.
 """
 
@@ -24,8 +24,8 @@ from typing import Optional
 
 _THIS_DIR = Path(__file__).resolve().parent
 # parents[2] resolves to <repo>/src in dev and <install>/libexec/<project>
-# in installed layouts; both host the roctx_recordfn sources at lib/.
-_SO_SOURCE_DIR = _THIS_DIR.parents[2] / "lib" / "roctx_recordfn"
+# in installed layouts; both host the torch_trace_collector sources at lib/.
+_SO_SOURCE_DIR = _THIS_DIR.parents[2] / "lib" / "torch_trace_collector"
 _SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
 
 _INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
@@ -50,7 +50,7 @@ def _fingerprint_input_paths() -> tuple[Path, ...]:
 
 _FINGERPRINT_INPUTS = _fingerprint_input_paths()
 
-_REBUILD_ENV_VAR = "ROCPROFCOMPUTE_REBUILD_ROCTX"
+_REBUILD_ENV_VAR = "ROCPROFCOMPUTE_REBUILD_TORCH_TRACE"
 
 _Diagnostics = list[tuple[str, str]]
 
@@ -146,7 +146,7 @@ def _install_tree_prebuilt_candidates(tag: str) -> list[Path]:
     # both layouts: <repo>/src/utils/inject_roctx/_backends in dev, and
     # <prefix>/libexec/<project>/utils/inject_roctx/_backends when installed.
     install_root = _THIS_DIR.parents[4]
-    so_name = f"roctx_recordfn-{tag}.so"
+    so_name = f"torch_trace_collector-{tag}.so"
     pattern = f"lib*/{_INSTALL_TREE_PROJECT_NAME}/{so_name}"
     return sorted(install_root.glob(pattern))
 
@@ -159,7 +159,7 @@ def _try_prebuilt(
         if not so_path.exists():
             continue
         try:
-            mod = _import_module_from_path("roctx_recordfn", so_path)
+            mod = _import_module_from_path("torch_trace_collector", so_path)
             _safe_log("log", f"loaded pre-built .so: {so_path}", diagnostics)
             return mod
         except Exception as e:
@@ -173,7 +173,7 @@ def _try_prebuilt(
 
 def _jit_cache_dir(diagnostics: Optional[_Diagnostics] = None) -> Optional[Path]:
     base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
-    d = Path(base) / "rocprofiler-compute" / "roctx_recordfn"
+    d = Path(base) / "rocprofiler-compute" / "torch_trace_collector"
     try:
         d.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -187,7 +187,7 @@ def _jit_cache_dir(diagnostics: Optional[_Diagnostics] = None) -> Optional[Path]
 
 
 _PREBUILT_HINT = (
-    "ship a prebuilt roctx_recordfn-<tag>.so under "
+    "ship a prebuilt torch_trace_collector-<tag>.so under "
     "<install-prefix>/lib*/" + _INSTALL_TREE_PROJECT_NAME + "/"
 )
 
@@ -254,7 +254,7 @@ def _jit_failure_marker(
     cache_dir = _jit_cache_dir(diagnostics)
     if cache_dir is None:
         return None
-    return cache_dir / f"roctx_recordfn-{tag}.build-failed"
+    return cache_dir / f"torch_trace_collector-{tag}.build-failed"
 
 
 def _record_jit_failure(
@@ -343,15 +343,15 @@ def _try_jit(
     force_rebuild: bool = False,
     diagnostics: Optional[_Diagnostics] = None,
 ) -> Optional[types.ModuleType]:
-    """Return the cached or freshly cmake-built ``roctx_recordfn`` module."""
+    """Return the cached or freshly cmake-built ``torch_trace_collector`` module."""
     cache_dir = _jit_cache_dir(diagnostics)
     if cache_dir is None:
         return None
-    cached_so = cache_dir / f"roctx_recordfn-{tag}.so"
+    cached_so = cache_dir / f"torch_trace_collector-{tag}.so"
 
     if not force_rebuild and cached_so.exists():
         try:
-            mod = _import_module_from_path("roctx_recordfn", cached_so)
+            mod = _import_module_from_path("torch_trace_collector", cached_so)
             _safe_log("log", f"loaded JIT-cached .so: {cached_so}", diagnostics)
             return mod
         except Exception as e:
@@ -442,7 +442,7 @@ def _try_jit(
         _record_jit_failure(tag, err, stderr=build.stderr, diagnostics=diagnostics)
         return None
 
-    produced = build_dir / f"roctx_recordfn-{tag}.so"
+    produced = build_dir / f"torch_trace_collector-{tag}.so"
     if not produced.is_file():
         err = RuntimeError(
             f"cmake build succeeded but expected .so missing at {produced}"
@@ -454,7 +454,7 @@ def _try_jit(
     _install_cached_so(produced, cached_so, diagnostics)
 
     try:
-        mod = _import_module_from_path("roctx_recordfn", cached_so)
+        mod = _import_module_from_path("torch_trace_collector", cached_so)
     except Exception as e:
         _log_cmake_failure("load", e, "", diagnostics)
         _record_jit_failure(tag, e, diagnostics=diagnostics)
@@ -463,12 +463,12 @@ def _try_jit(
     _clear_jit_failure(tag)
     shutil.rmtree(build_dir, ignore_errors=True)
 
-    _safe_log("log", f"cmake-built roctx_recordfn.so for {tag}", diagnostics)
+    _safe_log("log", f"cmake-built torch_trace_collector.so for {tag}", diagnostics)
     return mod
 
 
 def load(force_python_fallback: bool = False) -> LoadResult:
-    """Resolve the ``roctx_recordfn`` module and return a ``LoadResult``."""
+    """Resolve the ``torch_trace_collector`` module and return a ``LoadResult``."""
     diagnostics: _Diagnostics = []
 
     if force_python_fallback:
@@ -506,7 +506,7 @@ def load(force_python_fallback: bool = False) -> LoadResult:
 
     _safe_log(
         "log",
-        "no roctx_recordfn .so available; using Python-only injector",
+        "no torch_trace_collector .so available; using Python-only injector",
         diagnostics,
     )
     return LoadResult(None, None, diagnostics)
