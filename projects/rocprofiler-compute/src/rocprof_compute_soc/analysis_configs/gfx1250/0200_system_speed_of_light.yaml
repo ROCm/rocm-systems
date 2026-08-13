@@ -111,13 +111,13 @@ Panel Config:
           pct_of_peak: true
         Active WGPs:
           value: AVG(SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum)
-          unit: WGPs/cycle
+          unit: WGPs per Cycle
           peak: $cu_per_gpu
           pct_of_peak: true
           coll_level: SQG_LEVEL_WGP_ACTIVE
         IPC:
           value: AVG((SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SQ_BUSY_CYCLES_sum)
-          unit: Instr/cycle
+          unit: Instructions per Cycle
           peak: 5
           pct_of_peak: true
         Wavefront Occupancy:
@@ -137,14 +137,14 @@ Panel Config:
           pct_of_peak: true
         LDS Bank Conflicts/Access:
           value: AVG(TX_VMW_LDS_BANK_CONFLICT_sum / (TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum))
-          unit: Conflicts/access
+          unit: Conflicts per Access
           peak: 64
           pct_of_peak: true
         # === Cache Hierarchy: GL0 (L0) -> GL1 (L1) -> GL2 (L2) ===
         # GL0: Vector L0 Cache (per CU)
         GL0 Hit Rate:
           value: ROUND(AVG((TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / TX_VMW_REQ_sum) * 100, 0)
-          unit: Pct
+          unit: Percent
           peak: 100
           pct_of_peak: false
         GL0 Cache BW:
@@ -155,13 +155,13 @@ Panel Config:
         # GL1: Level-1 Graphics Buffer (Arbiter + 12 channels/SE)
         GL1A Busy Rate:
           value: ROUND(AVG(GL1A_BUSY_sum / GL1A_CYCLE_sum) * 100, 0)
-          unit: Pct
+          unit: Percent
           peak: 100
           pct_of_peak: false
         # GL2: Level-2 Graphics Cache (Last-level cache on AID)
         GL2 Cache Hit Rate:
           value: AVG(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
-          unit: pct
+          unit: Percent
           peak: 100
           pct_of_peak: false
         GL2 Cache BW:
@@ -191,7 +191,7 @@ Panel Config:
           pct_of_peak: false
         Scalar Data Cache Hit Rate:
           value: AVG(100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
-          unit: pct
+          unit: Percent
           peak: 100
           pct_of_peak: false
         Scalar Data Cache BW:
@@ -201,7 +201,7 @@ Panel Config:
           pct_of_peak: true
         Instruction Cache Hit Rate:
           value: AVG(100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
-          unit: pct
+          unit: Percent
           peak: 100
           pct_of_peak: false
         Instruction Cache BW:

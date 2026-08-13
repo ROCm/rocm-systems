@@ -57,12 +57,12 @@ Panel Config:
           avg: AVG(SPI_ALL_WAVE_sum / SPI_BUSY_sum)
           min: MIN(SPI_ALL_WAVE_sum / SPI_BUSY_sum)
           max: MAX(SPI_ALL_WAVE_sum / SPI_BUSY_sum)
-          unit: Waves/cycle
+          unit: Waves per Cycle
         Thread Dispatch Rate:
           avg: AVG(SPI_ALL_WAVE_ITEMS_sum / SPI_BUSY_sum)
           min: MIN(SPI_ALL_WAVE_ITEMS_sum / SPI_BUSY_sum)
           max: MAX(SPI_ALL_WAVE_ITEMS_sum / SPI_BUSY_sum)
-          unit: Threads/cycle
+          unit: Threads per Cycle
         Per-SE Wave Occupancy:
           avg: AVG(SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_BUSY_sum)
           min: MIN(SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_BUSY_sum)
