@@ -1729,7 +1729,8 @@ def run(app_args, args, **kwargs):
     effective_output_formats.extend(
         re.split(r"[\s,;:]+", app_env.get("ROCPROF_OUTPUT_FORMAT", ""))
     )
-    warn_deprecated_output_formats(effective_output_formats)
+    if args.hipfile_trace or args.rocshmem_trace:
+        warn_deprecated_output_formats(effective_output_formats)
 
     if args.kokkos_trace:
         update_env("KOKKOS_TOOLS_LIBS", ROCPROF_KOKKOSP_LIBRARY, append=True)
