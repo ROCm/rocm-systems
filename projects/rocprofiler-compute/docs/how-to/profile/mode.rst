@@ -902,7 +902,6 @@ Requirements
 
 * Valid PyTorch installation in the profiling environment.
 * PyTorch application must be run as a Python script or a Python command.
-* Workload’s Python version must match roctx’s Python version.
 
 Usage
 -----
@@ -952,6 +951,25 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 .. code-block:: shell-session
 
    $ ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
+
+Native collector
+----------------
+
+Torch trace is collected by ``torch_trace_collector``, a C++ extension built for one
+combination of Python and PyTorch versions. The copy installed with ROCm Compute
+Profiler is used when it matches the interpreter that runs the workload. Otherwise the
+extension is built on first use, beside the installed sources when that directory is
+writable and under ``~/.cache/rocprofiler-compute/torch_trace_collector`` when it is
+not. ``XDG_CACHE_HOME`` overrides ``~/.cache``. That build requires CMake, a C++
+compiler, and the ROCprofiler-SDK, AMD Comgr and libdw development files. When it
+cannot run, profiling continues with a slower Python implementation.
+
+Set ``ROCPROFCOMPUTE_REBUILD_TORCH_TRACE`` to ``1`` in the workload environment to
+discard the build directory and build the extension again.
+
+.. code-block:: shell-session
+
+   $ ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1 rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
 
 Output
 ------

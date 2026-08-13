@@ -37,9 +37,6 @@ ROCm Compute Profiler depends on a number of Python packages documented in the t
        * - ``requirements-test.txt``
          - Python packages required to run ROCm Compute Profiler's CI suite using PyTest.
 
-   When building with ``ENABLE_TESTS=ON``, ``TORCH_TRACE_PYTHON`` selects the Python
-   interpreter for the ``torch_trace_collector`` test build.
-
 The recommended procedure for ROCm Compute Profiler usage is to install into a shared file
 system so that multiple users can access the final installation. The
 following steps illustrate how to install the necessary Python dependencies
@@ -76,6 +73,17 @@ follows.
 
     * - ``TEST_FROM_INSTALL``
       - Should be ON to enable testing from the installation location without dependency on the source directory.
+
+    * - ``BUILD_TORCH_TRACE_COLLECTOR``
+      - Controls the build of the ``torch_trace_collector`` extension, which
+        :ref:`Torch trace <torch-operator-mapping>` uses. One of ``AUTO`` (default),
+        which builds the extension when PyTorch is importable and skips it otherwise,
+        ``ON``, which stops the configure when PyTorch is unavailable, or ``OFF``, which
+        never builds it.
+
+    * - ``TORCH_TRACE_PYTHON``
+      - Specifies the Python interpreter that the ``torch_trace_collector`` extension is
+        built against. Defaults to the ``python3`` interpreter that CMake locates.
 
     * - ``ENABLE_SANITIZER``
       - Builds with sanitizer instrumentation for development.
