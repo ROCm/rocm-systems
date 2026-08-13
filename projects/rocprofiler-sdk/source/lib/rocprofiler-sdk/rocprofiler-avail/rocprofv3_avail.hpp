@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -91,10 +91,5 @@ is_counter_set(const uint64_t* counter_handles,
 
 void
 agent_info(uint64_t agent_handle, const char** agent_info_str) ROCPROFILER_EXPORT;
-
-int
-format_output_path(const char*  input,
-                   const char*  tag,
-                   const char** output) noexcept ROCPROFILER_EXPORT;
 
 ROCPROFILER_EXTERN_C_FINI
