@@ -15,7 +15,7 @@ Pre-built configs are in `configs/`:
 | `gfx950_cdna4_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
 | `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
 | `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon/KFD mode) |
-| `gfx1250.json` | Single gfx1250 GPU (standalone simulation, no KMD) |
+| `gfx1250_cdna5.json` | Single CDNA5 GPU (standalone simulation, no KMD) |
 
 ## JSON structure
 

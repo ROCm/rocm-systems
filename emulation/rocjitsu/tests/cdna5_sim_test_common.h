@@ -74,7 +74,7 @@ RJ_DIAGNOSTIC_POP
 #include <vector>
 namespace rocjitsu::test::cdna5 {
 
-inline const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250.json";
+inline const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250_cdna5.json";
 
 inline constexpr uint32_t S_ENDPGM_GFX12 = 0xBFB00000u;
 inline constexpr uint32_t S_WAIT_KMCNT_0_GFX12 = 0xBFC70000u;

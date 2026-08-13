@@ -76,8 +76,8 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
   auto *soc = loaded.soc();
   ASSERT_NE(soc, nullptr);
   EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA5);
-  EXPECT_EQ(config::parse_arch("gfx1250"), ROCJITSU_CODE_ARCH_CDNA5);
-  EXPECT_STREQ(config::arch_to_string(ROCJITSU_CODE_ARCH_CDNA5), "gfx1250");
+  EXPECT_EQ(config::parse_arch("cdna5"), ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_STREQ(config::arch_to_string(ROCJITSU_CODE_ARCH_CDNA5), "cdna5");
 
   EXPECT_TRUE(loaded.device.present);
   EXPECT_EQ(loaded.device.gfx_target_version, 120500u);
