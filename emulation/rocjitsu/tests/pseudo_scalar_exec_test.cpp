@@ -5,8 +5,8 @@
 /// @brief Cross-architecture pseudo-scalar transcendental execution tests.
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
@@ -55,7 +55,7 @@ std::optional<BaseEncodingWords> rdna4_encoding(std::string_view mnemonic) {
 }
 
 std::optional<BaseEncodingWords> gfx1250_encoding(std::string_view mnemonic) {
-  return find_test_encoding(gfx1250::test_data::ENCODINGS, mnemonic);
+  return find_test_encoding(cdna5::test_data::ENCODINGS, mnemonic);
 }
 
 struct PseudoScalarProfile {
@@ -69,8 +69,8 @@ struct PseudoScalarProfile {
 constexpr std::array<PseudoScalarProfile, 2> kProfiles{{
     {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, rdna4::kSSetregB32Sopk,
      rdna4::kSSetregImm32B32Sopk},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", gfx1250_encoding, gfx1250::kSSetregB32Sopk,
-     gfx1250::kSSetregImm32B32Sopk},
+    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", gfx1250_encoding, cdna5::kSSetregB32Sopk,
+     cdna5::kSSetregImm32B32Sopk},
 }};
 
 struct PseudoScalarCase {

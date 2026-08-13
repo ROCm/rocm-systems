@@ -55,9 +55,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand_types.h"
@@ -137,7 +137,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::build_sopp(op, {.simm16 = simm16})[0];
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::build_sopp(op, {.simm16 = simm16})[0];
+    return cdna5::build_sopp(op, {.simm16 = simm16})[0];
   default:
     throw util::UnimplementedInst("SOPP builder for target architecture");
   }
@@ -175,7 +175,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna4::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::build_sop1(
+    return cdna5::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
   default:
     throw util::UnimplementedInst("SOP1 builder for target architecture");
@@ -224,9 +224,9 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
-                                    .ssrc1 = static_cast<uint8_t>(ssrc1),
-                                    .sdst = static_cast<uint8_t>(sdst)})[0];
+    return cdna5::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                  .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                  .sdst = static_cast<uint8_t>(sdst)})[0];
   default:
     throw util::UnimplementedInst("SOP2 builder for target architecture");
   }
@@ -272,7 +272,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna4::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::build_sopc(
+    return cdna5::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
   default:
     return pack_sopc(op, ssrc0, ssrc1);
@@ -309,7 +309,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     ROCJITSU_BUILD_SOPK(rdna4);
   case ROCJITSU_CODE_ARCH_GFX1250:
-    ROCJITSU_BUILD_SOPK(gfx1250);
+    ROCJITSU_BUILD_SOPK(cdna5);
   default:
     throw util::UnimplementedInst("SOPK builder for target architecture");
   }
@@ -347,7 +347,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::OPR_SDST_M0;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::OPR_SDST_M0;
+    return cdna5::OPR_SDST_M0;
   default:
     throw util::UnimplementedInst("M0 operand code for target architecture");
   }
@@ -379,7 +379,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::OPR_SDST_VCC_LO;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::OPR_SDST_VCC_LO;
+    return cdna5::OPR_SDST_VCC_LO;
   default:
     throw util::UnimplementedInst("VCC_LO operand code for target architecture");
   }
@@ -411,7 +411,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::OPR_SDST_EXEC_LO;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::OPR_SDST_EXEC_LO;
+    return cdna5::OPR_SDST_EXEC_LO;
   default:
     throw util::UnimplementedInst("EXEC_LO operand code for target architecture");
   }
@@ -443,7 +443,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::OPR_SRC_NEG_INT_MIN;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::OPR_SRC_NEG_INT_MIN;
+    return cdna5::OPR_SRC_NEG_INT_MIN;
   default:
     throw util::UnimplementedInst("inline -1 source code for target architecture");
   }
@@ -506,7 +506,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:                                                                   \
     return rdna4::opcode;                                                                          \
   case ROCJITSU_CODE_ARCH_GFX1250:                                                                 \
-    return gfx1250::opcode
+    return cdna5::opcode
 
 /// @brief Get the s_branch opcode for a target ISA.
 [[nodiscard]] inline constexpr uint32_t sopp_op_branch(rj_code_arch_t arch) {
@@ -566,7 +566,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kSGetPcB64Sop1;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::kSGetPcI64Sop1;
+    return cdna5::kSGetPcI64Sop1;
   default:
     throw util::UnimplementedInst("s_getpc for target architecture");
   }
@@ -594,7 +594,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kSSetPcB64Sop1;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::kSSetPcI64Sop1;
+    return cdna5::kSSetPcI64Sop1;
   default:
     throw util::UnimplementedInst("s_setpc for target architecture");
   }
@@ -622,7 +622,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kSSwapPcB64Sop1;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::kSSwapPcI64Sop1;
+    return cdna5::kSSwapPcI64Sop1;
   default:
     throw util::UnimplementedInst("s_swappc for target architecture");
   }
@@ -650,7 +650,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kSCallB64Sopk;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::kSCallI64Sopk;
+    return cdna5::kSCallI64Sopk;
   default:
     throw util::UnimplementedInst("s_call_b64 for target architecture");
   }
@@ -684,7 +684,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kSDelayAluSopp;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::kSDelayAluSopp;
+    return cdna5::kSDelayAluSopp;
   default:
     throw util::UnimplementedInst("s_delay_alu for target architecture");
   }
@@ -819,7 +819,7 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_xcnt(rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_GFX1250)
     return std::nullopt;
-  return build_sopp_encoding(arch, gfx1250::kSWaitXcntSopp, 0);
+  return build_sopp_encoding(arch, cdna5::kSWaitXcntSopp, 0);
 }
 
 /// @brief Encode s_mov_b32 for the given target ISA.
