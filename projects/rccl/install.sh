@@ -535,6 +535,14 @@ if [[ "${kernel_compile_timing}" == true ]]; then
     fi
 fi
 
+alias_log="hipify/gensrc/unroll_table_aliases.log"
+echo ""
+if [[ -s "${alias_log}" ]]; then
+    echo "Generic-kernel unroll clamps (specialized functions aliased to lower unroll): ${PWD}/${alias_log}"
+else
+    echo "Generic-kernel unroll clamps: none (every funcId has a native variant for each built unroll factor)"
+fi
+
 # Initiate package build (`make package` or `ninja package`), if enabled
 if [[ "${build_package}" == true ]]; then
     if [[ "${build_system}" == "ninja"* ]]; then

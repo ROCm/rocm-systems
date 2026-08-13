@@ -583,6 +583,66 @@ primary_funcs = sorted(
 primary_to_index = {fn: i for i, fn in enumerate(primary_funcs)}
 primary_to_index = {fn: primary_to_index.get(Fn(*fn), -1) for fn in func_rows}
 
+# funcId indexes the first local_unroll slice (see host_table / enumerate_func_rows).
+func_id_unroll = local_unroll[0]
+
+def fn_identity_key(fn):
+  return (fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.reg)
+
+primary_by_identity_unroll = {
+  (fn_identity_key(fn), fn.unroll): fn for fn in primary_funcs
+}
+
+func_id_axis = [fn for fn in primary_funcs if fn.unroll == func_id_unroll]
+
+def dispatch_fn_for_unroll_table(unroll, base_fn):
+  """Row for funcId=base_fn when the generic kernel uses unroll `unroll`.
+
+  Prefer the native variant at that unroll when it was generated; otherwise use
+  the func-id-axis entry (kernels clamped to func_id_unroll by unroll overrides).
+  """
+  return primary_by_identity_unroll.get((fn_identity_key(base_fn), unroll), base_fn)
+
+def table_rows_for_unroll(unroll):
+  if unroll not in local_unroll:
+    return []
+  return [dispatch_fn_for_unroll_table(unroll, base) for base in func_id_axis]
+
+def unroll_table_aliases(unroll):
+  """(funcId, base_fn) pairs aliased to func_id_unroll in a higher-unroll table."""
+  if unroll not in local_unroll or unroll == func_id_unroll:
+    return []
+  aliases = []
+  for index, base_fn in enumerate(func_id_axis):
+    native = primary_by_identity_unroll.get((fn_identity_key(base_fn), unroll))
+    if native is None:
+      aliases.append((index, base_fn))
+  return aliases
+
+alias_log_lines = []
+for unroll in local_unroll:
+  aliases = unroll_table_aliases(unroll)
+  if not aliases:
+    continue
+  alias_log_lines.append(
+    "ncclDevKernel_Generic_%s: %d specialized function(s) aliased to unroll %s "
+    "(no native unroll-%s variant generated)"
+    % (unroll, len(aliases), func_id_unroll, unroll)
+  )
+  for index, base_fn in aliases:
+    sym = "ncclDevFunc_" + fn_sym(base_fn)
+    alias_log_lines.append(
+      "  funcId %4d  %s  -> %s"
+      % (index, paste(" ", base_fn.coll, base_fn.algo, base_fn.proto, base_fn.redop,
+                      base_fn.ty, base_fn.acc, base_fn.pipeline), sym)
+    )
+
+alias_log_path = os.path.join(gensrc, "unroll_table_aliases.log")
+with open(alias_log_path, "w") as alias_log:
+  alias_log.write("\n".join(alias_log_lines))
+  if alias_log_lines:
+    alias_log.write("\n")
+
 ################################################################################
 
 # Generate <gensrc>/device_table.h
@@ -601,24 +661,20 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       out("__device__ void %s();\n" % sym)
   out("\n")
 
-  index = {val: None for val in all_unrolls}
-
   # Function-pointer table. Only the builds that dispatch through it at RUNTIME
   # emit it: the device-linker build and the legacy indirect-function-call build.
   out("#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)\n")
   out("typedef void(*ncclDevFuncPtr_t)();\n\n")
   for unroll in all_unrolls:
-    index[unroll] = 0
+    rows = table_rows_for_unroll(unroll)
     out("static __device__ ncclDevFuncPtr_t const ncclDevFuncTable_%s[] = {\n" % unroll)
-    for fn in primary_funcs:
-      if fn.unroll != unroll: continue
+    for index, fn in enumerate(rows):
       sym = "ncclDevFunc_" + fn_sym(fn)
       guard = get_arch_guard(fn)
       if guard:
-        out("#if %s\n/*%4d*/ %s,\n#else\n/*%4d*/ nullptr,\n#endif\n" % (guard, index[unroll], sym, index[unroll]))
+        out("#if %s\n/*%4d*/ %s,\n#else\n/*%4d*/ nullptr,\n#endif\n" % (guard, index, sym, index))
       else:
-        out("/*%4d*/ %s,\n" % (index[unroll], sym))
-      index[unroll] += 1
+        out("/*%4d*/ %s,\n" % (index, sym))
     out("nullptr};\n")
     out("\n")
   out("#endif // USE_INDIRECT_FUNCTION_CALL || RCCL_DEVICE_LINKER\n\n")
@@ -639,7 +695,7 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
           f"      : Caller{unroll}<m, l>::call{unroll}(funcIndex);\n"
           "  }\n"
           "};\n\n")
-      unroll_fns = [fn for fn in primary_funcs if fn.unroll == unroll]
+      unroll_fns = table_rows_for_unroll(unroll)
       for i, fn in enumerate(unroll_fns):
         # Must match the symbol emitted for the forward declarations / table /
         # DEFINE_ncclDevFunc above: fn_sym() omits the reg suffix when reg=="0",

@@ -259,6 +259,65 @@ class UnrollOverrideMapTest(unittest.TestCase):
         self.assertFalse(any(n.endswith("_32.cpp") for n in f32))
         self.assertTrue(any(n.endswith("_8.cpp") for n in f32))
 
+    def _extract_gfx1250_table(self, header, unroll):
+        rows = {}
+        m = re.search(
+            rf"ncclDevFuncTable_{unroll}\[\] = \{{(.*?)\nnullptr\}};",
+            header,
+            re.S,
+        )
+        self.assertIsNotNone(m, f"table_{unroll} missing")
+        body = m.group(1)
+        i = 0
+        lines = body.splitlines()
+        while i < len(lines):
+            line = lines[i].strip()
+            if line.startswith("#if defined(__gfx1250__)"):
+                idx_line = lines[i + 1].strip()
+                mm = re.match(r"/\*(\s*\d+)\*/\s*(.+?),", idx_line)
+                if mm:
+                    rows[int(mm.group(1))] = mm.group(2).strip()
+                i += 4
+                continue
+            mm = re.match(r"/\*(\s*\d+)\*/\s*(.+?),", line)
+            if mm:
+                rows[int(mm.group(1))] = mm.group(2).strip()
+            i += 1
+        return rows
+
+    def test_clamped_kernels_alias_in_higher_unroll_tables(self):
+        """Unroll-overridden kernels must occupy the same funcId in every table,
+        aliased to their func-id-axis (unroll-8) symbol when no native variant."""
+        with tempfile.TemporaryDirectory(prefix="rccl_clamp_table_") as tmpdir:
+            header, _ = _generate(
+                tmpdir,
+                local_gpu_only="ON",
+                only_funcs=(
+                    "AllReduce TREE SIMPLE MinMax u8|AllReduce TREE SIMPLE MinMax i8|"
+                    "AllReduce RING SIMPLE Sum f32"
+                ),
+                gfx_name="gfx1250",
+            )
+        t8 = self._extract_gfx1250_table(header, "8")
+        t16 = self._extract_gfx1250_table(header, "16")
+        t32 = self._extract_gfx1250_table(header, "32")
+        self.assertEqual(len(t8), len(t16))
+        self.assertEqual(len(t8), len(t32))
+
+        # Built-in override: MinMax u8 acc=1 is clamped to unroll 8 only.
+        clamp_idx = next(
+            i for i, sym in t8.items() if sym.endswith("_MinMax_u8_1_0_8")
+        )
+        self.assertEqual(t8[clamp_idx], t16[clamp_idx])
+        self.assertEqual(t8[clamp_idx], t32[clamp_idx])
+
+        # Non-clamped: Sum f32 acc=1 keeps distinct native unroll variants.
+        native_idx = next(
+            i for i, sym in t8.items() if sym.endswith("_Sum_f32_1_0_8")
+        )
+        self.assertTrue(t16[native_idx].endswith("_Sum_f32_1_0_16"))
+        self.assertTrue(t32[native_idx].endswith("_Sum_f32_1_0_32"))
+
 
 if __name__ == "__main__":
     unittest.main()
