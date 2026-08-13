@@ -111,10 +111,6 @@ function display_help()
     echo "                                          AlltoAllPivot, SendRecv, AlltoAllGda, AlltoAllvGda"
     echo "                               Advanced: Specify algo, protocol, redop, and type per collective."
     echo "                                 ONLY_FUNCS=\"AllReduce RING SIMPLE Sum f32|SendRecv\""
-    echo "    RCCL_DEVICE_UNROLL_MAP     Per-kernel codegen unroll overrides (local-GPU builds)."
-    echo "                               Format: 'Coll Algo Proto RedOp Ty [Acc Pipeline] [FromUnroll] -> ToUnroll'"
-    echo "                               Omit FromUnroll to replace the arch default (32 on gfx1250 SIMPLE)."
-    echo "                               Example: RCCL_DEVICE_UNROLL_MAP=\"AllReduce RING SIMPLE MinMax u8 -> 8\""
     echo "    ROCSHMEM_INSTALL_DIR       Path to a pre-built rocSHMEM installation (skips building from source)"
 }
 

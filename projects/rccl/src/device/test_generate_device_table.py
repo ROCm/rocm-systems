@@ -178,6 +178,7 @@ class Gfx1250Fp8UnrollGenerationTest(unittest.TestCase):
     def setUpClass(cls):
         if not os.path.exists(GENERATE_PY):
             raise unittest.SkipTest("generate.py not found next to test")
+        cls._gensrc_root = tempfile.mkdtemp(prefix="rccl_fp8_unroll_root_")
 
     def _specialized_unrolls(self, only_funcs):
         with tempfile.TemporaryDirectory(prefix="rccl_fp8_unroll_") as tmpdir:
@@ -204,8 +205,58 @@ class Gfx1250Fp8UnrollGenerationTest(unittest.TestCase):
         unrolls = sorted({re.search(r"_(\d+)\.cpp$", n).group(1) for n in f32_names})
         self.assertEqual(["16", "32", "8"], unrolls)
 
+    def test_host_table_complete_when_unroll_buckets_are_uneven(self):
+        # FP8 kernels only exist at unroll 8, so the unroll-8/16/32 slices of
+        # func_rows are different sizes. host_table.cpp generation must select
+        # rows by identity (fn.unroll == func_id_unroll), not by a positional
+        # slice of func_rows: with a positional slice, identities past the
+        # shortest bucket's length are silently missing from
+        # ncclDevFuncNameToId entirely (not merely mapped to -1), which causes
+        # "ncclDevFuncId: ... not found" at runtime for those identities.
+        rocm = os.path.join(self._gensrc_root, "rocm")
+        bin_dir = os.path.join(rocm, "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        rocminfo = os.path.join(bin_dir, "rocminfo")
+        with open(rocminfo, "w") as f:
+            f.write(
+                textwrap.dedent(
+                    """\
+                    #!/bin/sh
+                    echo "Name:                    gfx1250"
+                    echo "Compute Unit:            304"
+                    """
+                )
+            )
+        os.chmod(rocminfo, 0o755)
+        env = os.environ.copy()
+        env["ROCM_PATH"] = rocm
+        gensrc = os.path.join(self._gensrc_root, "gensrc")
+        script = textwrap.dedent(
+            f"""
+            import importlib.util, os, sys
+            spec = importlib.util.spec_from_file_location("gen", {GENERATE_PY!r})
+            mod = importlib.util.module_from_spec(spec)
+            sys.argv = ["generate.py", {gensrc!r}, "OFF", "OFF", "ON", "OFF", "AllGather|AllReduce|AlltoAllPivot|Broadcast|Reduce|ReduceScatter|SendRecv"]
+            spec.loader.exec_module(mod)
+            expected = {{fn for fn in mod.func_rows if fn.unroll == mod.func_id_unroll}}
+            print(len(expected))
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script], check=True, capture_output=True, text=True, env=env
+        )
+        expected_count = int(result.stdout.strip().splitlines()[-1])
+        with open(os.path.join(gensrc, "host_table.cpp")) as f:
+            host_table = f.read()
+        actual_count = len(re.findall(r"^\s*\{\d+,\s*-?\d+\},", host_table, re.M))
+        self.assertEqual(
+            expected_count, actual_count,
+            "ncclDevFuncNameToId is missing entries: expected one row per "
+            "identity at func_id_unroll, got a different count",
+        )
 
-class UnrollOverrideMapTest(unittest.TestCase):
+
+class UnrollClampTest(unittest.TestCase):
     MINMAX_U8 = "AllReduce TREE SIMPLE MinMax u8"
     MINMAX_U8_ONLY = MINMAX_U8 + "|AllReduce TREE SIMPLE MinMax i8"
 
@@ -214,50 +265,22 @@ class UnrollOverrideMapTest(unittest.TestCase):
         if not os.path.exists(GENERATE_PY):
             raise unittest.SkipTest("generate.py not found next to test")
 
-    def _specialized(self, only_funcs, env=None):
-        with tempfile.TemporaryDirectory(prefix="rccl_unroll_map_") as tmpdir:
-            run_env = os.environ.copy()
-            if env:
-                run_env.update(env)
-            rocm = os.path.join(tmpdir, "rocm")
-            bin_dir = os.path.join(rocm, "bin")
-            os.makedirs(bin_dir, exist_ok=True)
-            rocminfo = os.path.join(bin_dir, "rocminfo")
-            with open(rocminfo, "w") as f:
-                f.write(
-                    textwrap.dedent(
-                        """\
-                        #!/bin/sh
-                        echo "Name:                    gfx1250"
-                        echo "Compute Unit:            304"
-                        """
-                    )
-                )
-            os.chmod(rocminfo, 0o755)
-            run_env["ROCM_PATH"] = rocm
-            gensrc = os.path.join(tmpdir, "gensrc")
-            subprocess.run(
-                [sys.executable, GENERATE_PY, gensrc, "OFF", "OFF", "ON", "OFF", only_funcs],
-                check=True,
-                capture_output=True,
-                text=True,
-                env=run_env,
+    def _specialized(self, only_funcs):
+        with tempfile.TemporaryDirectory(prefix="rccl_unroll_clamp_") as tmpdir:
+            _, gensrc = _generate(
+                tmpdir,
+                local_gpu_only="ON",
+                only_funcs=only_funcs,
+                gfx_name="gfx1250",
             )
             return sorted(os.listdir(os.path.join(gensrc, "specialized")))
 
-    def test_builtin_default_override_replaces_unroll_32_with_8(self):
+    def test_builtin_clamp_skips_unroll_16_and_32(self):
         names = self._specialized(self.MINMAX_U8_ONLY)
         u8 = [n for n in names if "minmax_u8_1_0_" in n]
         self.assertTrue(any(n.endswith("_8.cpp") for n in u8))
+        self.assertFalse(any(n.endswith("_16.cpp") for n in u8))
         self.assertFalse(any(n.endswith("_32.cpp") for n in u8))
-
-    def test_env_specific_from_to_override(self):
-        env = {"RCCL_DEVICE_UNROLL_MAP": "AllReduce RING SIMPLE Sum f32 1 0 32 -> 4"}
-        names = self._specialized("AllReduce RING SIMPLE Sum f32", env=env)
-        f32 = [n for n in names if "sum_f32_1_0_" in n]
-        self.assertTrue(any(n.endswith("_4.cpp") for n in f32))
-        self.assertFalse(any(n.endswith("_32.cpp") for n in f32))
-        self.assertTrue(any(n.endswith("_8.cpp") for n in f32))
 
     def _extract_gfx1250_table(self, header, unroll):
         rows = {}

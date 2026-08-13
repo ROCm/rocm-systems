@@ -37,25 +37,6 @@ def reg_values_of(coll, proto):
     return ["1", "2"]
   return ["0"]
 
-# Maps functions to the chosen representative for the equivalence class it
-# belongs to. For instance (sum, signed int) maps to (sum, unsigned int).
-def equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
-  if coll in ("AllReduce", "Reduce", "ReduceScatter"):
-    # map signed integer sum/prod to unsigned
-    if redop in ("Sum","Prod","PreMulSum","SumPostDiv") and ty[0]=="i":
-      ty = "u"+ty[1:]
-    # map signed integer min/max to unsigned for non-NVLS
-    elif redop=="MinMax" and ty[0]=="i" and ("NVLS" not in algo):
-      ty = "u"+ty[1:]
-    # map pipelined to non-pipelined for LL/LL128 to avoid extra device codegen
-    if (pipeline != "0" and proto != "SIMPLE"):
-      pipeline = "0"
-
-  return (coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
-
-def kernel_identity(coll, algo, proto, redop, ty, acc, pipeline):
-  return (coll, algo, proto, redop, ty, acc, pipeline)
-
 ################################################################################
 # The first command line argument is the path to the directory to generate and
 # populate.
@@ -290,14 +271,11 @@ local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()
 # rocSHMEM/GDA-based collectives: only generated when ENABLE_ROCSHMEM build is requested
 gda_colls = {"AlltoAllGda", "AlltoAllvGda"}
 
-# Per-kernel device codegen unroll overrides for the local GPU build.
-# Each identity below expands to two rules: default-unroll/32->8 and 16->8.
-# from_unroll=None means "replace the architecture/runtime default unroll (32 on
-# gfx1250 SIMPLE). Also set RCCL_DEVICE_UNROLL_MAP at build time; see install.sh.
-#
-# Identities capped at unroll 8: kernels whose gfx1250 compile time exceeded 45s
-# (see --kernel-compile-timing in install.sh).
-_BUILTIN_UNROLL_OVERRIDE_IDENTITIES = [
+# gfx1250 SIMPLE kernel identities whose compile time exceeded 45s at unroll
+# 16/32 (see --kernel-compile-timing in install.sh). Only unroll 8 is generated
+# for these; ncclDevFuncTable_16/32 alias them back to the unroll-8 symbol
+# (see table_rows_for_unroll() below).
+_UNROLL_8_ONLY_IDENTITIES = {
   ("AllReduce", "TREE", "SIMPLE", "MinMax", "f16", "1", "0"),
   ("AllReduce", "TREE", "SIMPLE", "MinMax", "f16", "0", "0"),
   ("AllReduce", "RING", "SIMPLE", "MinMax", "f16", "1", "0"),
@@ -315,126 +293,28 @@ _BUILTIN_UNROLL_OVERRIDE_IDENTITIES = [
   ("AllReduce", "TREE", "SIMPLE", "SumPostDiv", "u8", "0", "0"),
   ("AllReduce", "TREE", "SIMPLE", "PreMulSum", "bf16", "1", "1"),
   ("AllReduce", "RING", "SIMPLE", "SumPostDiv", "u8", "1", "0"),
-]
-
-_BUILTIN_UNROLL_OVERRIDE_RULES = [
-  rule
-  for coll, algo, proto, redop, ty, acc, pipeline in _BUILTIN_UNROLL_OVERRIDE_IDENTITIES
-  for rule in (
-    (coll, algo, proto, redop, ty, acc, pipeline, None, "8"),
-    (coll, algo, proto, redop, ty, acc, pipeline, "16", "8"),
-  )
-]
-
-_unroll_override_table = None
-
-def arch_default_unroll(proto, ty):
-  """Runtime default unroll for this arch/protocol/type (see commSetUnrollFactor)."""
-  if local_gfx_name == "gfx1250":
-    if proto == "LL" or ty in ("f8e4m3", "f8e5m2"):
-      return "8"
-    return "32"
-  if local_gfx_name == "gfx950":
-    return "1"
-  if local_gfx_name == "gfx908" or local_gfx_name == "gfx942":
-    return "2"
-  if len(local_unroll) == 1:
-    return local_unroll[0]
-  return None
-
-def _parse_unroll_map_env(env_value):
-  """Parse RCCL_DEVICE_UNROLL_MAP entries.
-
-  Formats (multiple entries separated by '|'):
-    Coll Algo Proto RedOp Ty Acc Pipeline -> ToUnroll
-    Coll Algo Proto RedOp Ty Acc Pipeline FromUnroll -> ToUnroll
-  Acc and Pipeline may be omitted (default acc=1, pipeline=0).
-  Arrow may be '->' or '='.
-  """
-  rules = []
-  for entry in env_value.split("|"):
-    entry = entry.strip()
-    if not entry:
-      continue
-    if "->" in entry:
-      left, to_unroll = entry.split("->", 1)
-    elif "=" in entry:
-      left, to_unroll = entry.split("=", 1)
-    else:
-      raise ValueError(
-        "RCCL_DEVICE_UNROLL_MAP entry must contain '->' or '=': %r" % entry)
-    to_unroll = to_unroll.strip()
-    parts = left.split()
-    if len(parts) == 5:
-      coll, algo, proto, redop, ty = parts
-      acc, pipeline = "1", "0"
-      from_unroll = None
-    elif len(parts) == 6:
-      coll, algo, proto, redop, ty, from_unroll = parts
-      acc, pipeline = "1", "0"
-    elif len(parts) == 7:
-      coll, algo, proto, redop, ty, acc, pipeline = parts
-      from_unroll = None
-    elif len(parts) == 8:
-      coll, algo, proto, redop, ty, acc, pipeline, from_unroll = parts
-    else:
-      raise ValueError(
-        "RCCL_DEVICE_UNROLL_MAP entry needs 5, 6, 7, or 8 fields before '->': %r"
-        % entry)
-    if to_unroll not in all_unrolls:
-      raise ValueError("Unknown unroll %r in RCCL_DEVICE_UNROLL_MAP entry: %r"
-                       % (to_unroll, entry))
-    if from_unroll is not None and from_unroll not in all_unrolls:
-      raise ValueError("Unknown source unroll %r in RCCL_DEVICE_UNROLL_MAP entry: %r"
-                       % (from_unroll, entry))
-    rules.append((coll, algo, proto, redop, ty, acc, pipeline, from_unroll, to_unroll))
-  return rules
-
-def _init_unroll_override_table():
-  global _unroll_override_table
-  table = {}
-  rules = list(_BUILTIN_UNROLL_OVERRIDE_RULES)
-  env_map = os.environ.get("RCCL_DEVICE_UNROLL_MAP", "")
-  if env_map:
-    rules.extend(_parse_unroll_map_env(env_map))
-  for coll, algo, proto, redop, ty, acc, pipeline, from_unroll, to_unroll in rules:
-    key = kernel_identity(coll, algo, proto, redop, ty, acc, pipeline)
-    table.setdefault(key, []).append((from_unroll, to_unroll))
-  _unroll_override_table = table
-
-def _unroll_overrides_for(coll, algo, proto, redop, ty, acc, pipeline):
-  if _unroll_override_table is None:
-    _init_unroll_override_table()
-  keys = [kernel_identity(coll, algo, proto, redop, ty, acc, pipeline)]
-  eq_key = equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, "1", "0")[:7]
-  if eq_key not in keys:
-    keys.append(eq_key)
-  rules = []
-  for key in keys:
-    rules.extend(_unroll_override_table.get(key, []))
-  return rules
+}
 
 def maybe_remap_unroll(coll, algo, proto, redop, ty, acc, pipeline, unroll):
-  rules = _unroll_overrides_for(coll, algo, proto, redop, ty, acc, pipeline)
-  if not rules:
+  """Skip generating the unroll 16/32 variant of a capped identity.
+
+  Also checks the equivalence-class representative (e.g. MinMax i8 folds into
+  MinMax u8) so both keep the same generated unroll set.
+  """
+  if unroll not in ("16", "32"):
     return unroll
-  for from_unroll, to_unroll in rules:
-    source_unroll = from_unroll if from_unroll is not None else arch_default_unroll(proto, ty)
-    if source_unroll is None:
-      continue
-    if unroll == source_unroll:
-      return to_unroll
-    if unroll == to_unroll and source_unroll != to_unroll:
-      return None
+  identity = (coll, algo, proto, redop, ty, acc, pipeline)
+  eq_identity = equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, "1", "0")[:7]
+  if identity in _UNROLL_8_ONLY_IDENTITIES or eq_identity in _UNROLL_8_ONLY_IDENTITIES:
+    return None
   return unroll
 
 def yield_func_row(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
   if not func_validate(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
     return
-  remapped = maybe_remap_unroll(coll, algo, proto, redop, ty, acc, pipeline, unroll)
-  if remapped is None:
+  if maybe_remap_unroll(coll, algo, proto, redop, ty, acc, pipeline, unroll) is None:
     return
-  yield (coll, algo, proto, redop, ty, acc, pipeline, remapped, reg)
+  yield (coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
 
 # Helper function to check if the conditions for the collective is being met
 def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
@@ -519,6 +399,22 @@ def parse_input(func_pattern):
 
     # Filter functions/kernels based on input
     yield from func_filter(function_params, 0)
+
+# Maps functions to the chosen representative for the equivalence class it
+# belongs to. For instance (sum, signed int) maps to (sum, unsigned int).
+def equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
+  if coll in ("AllReduce", "Reduce", "ReduceScatter"):
+    # map signed integer sum/prod to unsigned
+    if redop in ("Sum","Prod","PreMulSum","SumPostDiv") and ty[0]=="i":
+      ty = "u"+ty[1:]
+    # map signed integer min/max to unsigned for non-NVLS
+    elif redop=="MinMax" and ty[0]=="i" and ("NVLS" not in algo):
+      ty = "u"+ty[1:]
+    # map pipelined to non-pipelined for LL/LL128 to avoid extra device codegen
+    if (pipeline != "0" and proto != "SIMPLE"):
+      pipeline = "0"
+
+  return (coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
 
 # Order rows are enumerated must match formula of `ncclDevFuncId()`:
 # outermost loop should be for unroll factor; refer to host_table section
@@ -743,10 +639,12 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
   out("#include <unordered_map>\n")
   out("std::unordered_map<uint64_t, int> ncclDevFuncNameToId = {\n")
 
-  # host_table entries map device functions based on collective, algorithm, protocol, redop, and datatype
-  # For GPU targets that support multiple unrolls, e.g., gfx950
-  # (or) for non-local builds, only a single set of functions are needed in the host_table.
-  for fn in func_rows[:len(func_rows)//len(local_unroll)]:
+  # host_table entries map device functions based on collective, algorithm, protocol, redop, and datatype.
+  # funcId is independent of unroll, so only one row per identity is needed;
+  # use the func_id_unroll slice (not a positional slice: some identities, e.g.
+  # FP8 or unroll-8-clamped kernels, aren't generated at every unroll, so the
+  # per-unroll slices of func_rows aren't equal size).
+  for fn in [fn for fn in func_rows if fn.unroll == func_id_unroll]:
     fn_id = -1
     if fn is not None:
       guard = get_arch_guard(fn)
