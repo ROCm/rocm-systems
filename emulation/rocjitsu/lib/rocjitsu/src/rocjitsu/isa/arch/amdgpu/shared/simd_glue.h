@@ -31,9 +31,9 @@
 #include <limits>
 #include <type_traits>
 
-namespace rocjitsu::gfx1250 {
+namespace rocjitsu::cdna5 {
 struct Isa;
-} // namespace rocjitsu::gfx1250
+} // namespace rocjitsu::cdna5
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -259,7 +259,7 @@ inline T apply_vop3_b32_src_mod(T value, uint32_t abs, uint32_t neg, uint32_t sr
 
 template <typename Inst> inline bool vop3_fp8_decode_e5m3(const Inst &inst) {
   if constexpr (requires { typename Inst::IsaType; }) {
-    if constexpr (std::is_same_v<typename Inst::IsaType, ::rocjitsu::gfx1250::Isa> &&
+    if constexpr (std::is_same_v<typename Inst::IsaType, ::rocjitsu::cdna5::Isa> &&
                   requires { inst.inst_.clamp; })
       return inst.inst_.clamp;
   }

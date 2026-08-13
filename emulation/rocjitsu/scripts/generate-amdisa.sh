@@ -12,7 +12,7 @@
 set -Eeuo pipefail
 
 usage() {
-  printf 'usage: %s GFX1250_ISA_XML\n' "$(basename "$0")"
+  printf 'usage: %s CDNA5_ISA_XML\n' "$(basename "$0")"
 }
 
 log() {
@@ -39,7 +39,7 @@ repo="$(git -C "$script_dir" rev-parse --show-toplevel)" \
   || die "could not find repository root from $script_dir"
 repo="$(cd "$repo" && pwd -P)"
 isa_xml="$repo/shared/machine-readable-isa/isa"
-gfx1250_xml="$1"
+cdna5_xml="$1"
 isa_out="$rocjitsu/lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated"
 dbt_out="$rocjitsu/lib/rocjitsu/src/rocjitsu/code/dbt/generated"
 
@@ -79,7 +79,8 @@ isa_entries=(
   "rdna3:$isa_xml/amdgpu_isa_rdna3.xml"
   "rdna3_5:$isa_xml/amdgpu_isa_rdna3_5.xml"
   "rdna4:$isa_xml/amdgpu_isa_rdna4.xml"
-  "gfx1250:$gfx1250_xml"
+  # CDNA5 retains gfx1250 as its MR ISA and logical architecture key.
+  "gfx1250:$cdna5_xml"
 )
 
 for dir in "$repo" "$rocjitsu" "$isa_out" "$dbt_out" "$venv"; do

@@ -9,7 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -84,7 +84,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3, rdna3::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA4, rdna4::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_GFX1250, cdna5::Isa);
   default:
     break;
   }
@@ -506,7 +506,7 @@ ROCJITSU_CU_INSTANTIATE(rdna2::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna3::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna3_5::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna4::Isa);
-ROCJITSU_CU_INSTANTIATE(gfx1250::Isa);
+ROCJITSU_CU_INSTANTIATE(cdna5::Isa);
 
 #undef ROCJITSU_CU_INSTANTIATE
 

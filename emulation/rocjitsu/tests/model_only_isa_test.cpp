@@ -4,7 +4,7 @@
 /// @file model_only_isa_test.cpp
 /// @brief Link and decode smoke test for the narrow model-only ISA boundary.
 
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
