@@ -2852,6 +2852,33 @@ get_trace_thread_join()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
+double
+get_trace_delay()
+{
+    return get_setting_value<double>(std::string{ env_vars::TRACE_DELAY }).value_or(0.0);
+}
+
+double
+get_trace_duration()
+{
+    return get_setting_value<double>(std::string{ env_vars::TRACE_DURATION })
+        .value_or(0.0);
+}
+
+std::string
+get_trace_periods()
+{
+    return get_setting_value<std::string>(std::string{ env_vars::TRACE_PERIODS })
+        .value_or(std::string{});
+}
+
+std::string
+get_trace_period_clock()
+{
+    return get_setting_value<std::string>(std::string{ env_vars::TRACE_PERIOD_CLOCK_ID })
+        .value_or(std::string{ "realtime" });
+}
+
 std::string
 get_trace_region()
 {

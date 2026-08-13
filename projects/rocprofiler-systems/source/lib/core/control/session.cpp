@@ -17,7 +17,7 @@ namespace rocprofsys::control
 {
 session::session() noexcept
 {
-    for(auto& a : m_active)
+    for(auto& a : m_scope_tracing)
         a.store(true, std::memory_order_relaxed);
 }
 
@@ -33,7 +33,7 @@ session::shutdown()
         const std::scoped_lock action_lock{ m_actions_mutex };
         for(auto& scoped : m_actions)
             scoped.clear();
-        for(auto& a : m_active)
+        for(auto& a : m_scope_tracing)
             a.store(true, std::memory_order_relaxed);
     }
 }
@@ -95,10 +95,10 @@ session::apply_locked_transition(const std::function<void()>& mutate,
     {
         const std::scoped_lock action_lk{ m_actions_mutex };
 
-        was_active = m_active[scope_idx].load(std::memory_order_relaxed);
+        was_active = m_scope_tracing[scope_idx].load(std::memory_order_relaxed);
         mutate();
         now_active = resolve_locked(event_scope);
-        m_active[scope_idx].store(now_active, std::memory_order_relaxed);
+        m_scope_tracing[scope_idx].store(now_active, std::memory_order_relaxed);
     }
 
     if(was_active == now_active)
@@ -144,8 +144,7 @@ namespace
 bool
 listens_to(const subscriber& sub, scope event_scope)
 {
-    return std::find(sub.scopes.begin(), sub.scopes.end(), event_scope) !=
-           sub.scopes.end();
+    return sub.scopes.contains(event_scope);
 }
 }  // namespace
 
@@ -174,8 +173,7 @@ session::notify_resume(scope event_scope)
     {
         if(!listens_to(sub, event_scope)) continue;
         const bool all_active =
-            std::all_of(sub.scopes.begin(), sub.scopes.end(),
-                        [this](scope listened) { return is_active(listened); });
+            sub.scopes.all_of([this](scope listened) { return is_active(listened); });
         if(!all_active) continue;
         LOG_DEBUG("session: resuming subscriber '{}'", sub.name);
         if(sub.on_resume)
