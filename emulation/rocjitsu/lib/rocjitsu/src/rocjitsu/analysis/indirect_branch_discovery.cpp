@@ -2890,6 +2890,52 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
   // ISA dataflow proof; register numbers, targets, symbols, and instruction
   // offsets are all discovered from the code object.
 
+  struct IndexedLaneRead {
+    size_t index = 0;
+    VgprLane lane;
+  };
+  struct IndexedLaneWrite {
+    size_t index = 0;
+    uint16_t sgpr = 0;
+  };
+
+  std::array<std::vector<IndexedLaneRead>, REGISTER_SET_MAX_SGPRS> reads_by_sgpr;
+  std::unordered_map<uint32_t, std::vector<IndexedLaneWrite>> writes_by_lane;
+  const auto lane_key = [](VgprLane lane) {
+    return (static_cast<uint32_t>(lane.vgpr) << 8u) | lane.lane;
+  };
+  for (size_t index = 0; index < ctx.insts.size(); ++index) {
+    const auto transfer = fixed_lane_transfer(*ctx.insts[index], ctx.wavefront_size);
+    if (!transfer)
+      continue;
+    if (transfer->kind == FixedLaneTransfer::Kind::Read) {
+      if (transfer->sgpr < REGISTER_SET_MAX_SGPRS)
+        reads_by_sgpr[transfer->sgpr].push_back({.index = index, .lane = transfer->lane});
+      continue;
+    }
+    writes_by_lane[lane_key(transfer->lane)].push_back({.index = index, .sgpr = transfer->sgpr});
+  }
+
+  const auto previous_read = [&](uint16_t sgpr, size_t before) -> const IndexedLaneRead * {
+    if (sgpr >= REGISTER_SET_MAX_SGPRS)
+      return nullptr;
+    const auto &reads = reads_by_sgpr[sgpr];
+    auto it = std::lower_bound(
+        reads.begin(), reads.end(), before,
+        [](const IndexedLaneRead &read, size_t value) { return read.index < value; });
+    return it == reads.begin() ? nullptr : &*std::prev(it);
+  };
+  const auto previous_write = [&](VgprLane lane, size_t before) -> const IndexedLaneWrite * {
+    const auto found = writes_by_lane.find(lane_key(lane));
+    if (found == writes_by_lane.end())
+      return nullptr;
+    const auto &writes = found->second;
+    auto it = std::lower_bound(
+        writes.begin(), writes.end(), before,
+        [](const IndexedLaneWrite &write, size_t value) { return write.index < value; });
+    return it == writes.begin() ? nullptr : &*std::prev(it);
+  };
+
   const AnalysisDominators dominators =
       compute_analysis_dominators(ctx, blocks, block_by_offset, known_recovered);
   for (size_t consumer_index = 0; consumer_index < ctx.insts.size(); ++consumer_index) {
@@ -2907,20 +2953,14 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
     bool complete = true;
     for (uint16_t half = 0; half < 2; ++half) {
       const uint16_t sgpr = static_cast<uint16_t>(*consumer_facts.swappc_ssrc + half);
-
-      bool found_restore = false;
-      for (size_t index = consumer_index; index-- > 0;) {
-        const auto transfer = fixed_lane_transfer(*ctx.insts[index], ctx.wavefront_size);
-        if (!transfer || transfer->kind != FixedLaneTransfer::Kind::Read || transfer->sgpr != sgpr)
-          continue;
-        restore_indices[half] = index;
-        saved_lanes[half] = transfer->lane;
-        found_restore = true;
+      const IndexedLaneRead *restore = previous_read(sgpr, consumer_index);
+      if (restore == nullptr) {
+        complete = false;
         break;
       }
-
-      if (!found_restore ||
-          !instruction_range_preserves_sgpr(ctx, restore_indices[half] + 1, consumer_index, sgpr)) {
+      restore_indices[half] = restore->index;
+      saved_lanes[half] = restore->lane;
+      if (!instruction_range_preserves_sgpr(ctx, restore_indices[half] + 1, consumer_index, sgpr)) {
         complete = false;
         break;
       }
@@ -2931,19 +2971,14 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
     std::array<size_t, 2> save_indices{};
     std::array<uint16_t, 2> saved_sgprs{};
     for (uint16_t half = 0; half < 2; ++half) {
-      bool found_save = false;
-      for (size_t index = restore_indices[half]; index-- > 0;) {
-        const auto transfer = fixed_lane_transfer(*ctx.insts[index], ctx.wavefront_size);
-        if (!transfer || transfer->kind != FixedLaneTransfer::Kind::Write ||
-            transfer->lane != saved_lanes[half])
-          continue;
-        save_indices[half] = index;
-        saved_sgprs[half] = transfer->sgpr;
-        found_save = true;
+      const IndexedLaneWrite *save = previous_write(saved_lanes[half], restore_indices[half]);
+      if (save == nullptr) {
+        complete = false;
         break;
       }
-      if (!found_save ||
-          !instruction_range_preserves_lane(ctx, save_indices[half] + 1, restore_indices[half],
+      save_indices[half] = save->index;
+      saved_sgprs[half] = save->sgpr;
+      if (!instruction_range_preserves_lane(ctx, save_indices[half] + 1, restore_indices[half],
                                             saved_lanes[half])) {
         complete = false;
         break;
