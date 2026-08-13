@@ -251,6 +251,10 @@ struct testThread {
 
 // Provided by common.cu
 extern void Barrier(struct threadArgs* args);
+// Inter-thread/process reduce: average 0=bcast(r0),1=avg,2=min,3=max,4=sum.
+// Serializes MPI to the last thread (MPI is MPI_THREAD_SINGLE) and writes the
+// combined value back to every thread. Instantiated for double / long long.
+template<typename T> void Allreduce(struct threadArgs* args, T* value, int average);
 extern testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op,  const char* opName, int root);
 extern testResult_t InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks);
 extern testResult_t InitDataApplyBias(void* expected, void* bias, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op);
