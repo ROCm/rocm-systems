@@ -4250,39 +4250,36 @@ def test_gfx1250_buffer_u64_atomic_payload_width_uses_two_dwords():
 def test_ev124_125_arch_gating_in_generated_operand(
     amdgpu_root: Path, amdgpu_generated_root: Path
 ):
-    # M0 is encoded as 125 on RDNA3+ (and gfx1250) and as 124 on the
-    # older RDNA1/2 and all CDNA arches. Verify the generated operand.cpp
-    # carries the correct kM0EncodingValue constant for each ISA.
-    expected_m0_encoding = {
-        'cdna1': 124,
-        'cdna2': 124,
-        'cdna3': 124,
-        'cdna4': 124,
-        'rdna1': 124,
-        'rdna2': 124,
-        'rdna3': 125,
-        'rdna3_5': 125,
-        'rdna4': 125,
-        'gfx1250': 125,
-    }
-    for arch, encoding in expected_m0_encoding.items():
+    for arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+        'gfx1250',
+    ):
         arch_root = amdgpu_generated_root / _generated_dir_name(arch)
-        # kM0EncodingValue is emitted with execution bodies; its source is
-        # profile-selected.
         op = _execution_source_path(
             arch_root / 'operand.cpp', _profile_for_arch(arch)
         ).read_text()
         assert (
-            f'constexpr int kM0EncodingValue = {encoding};' in op
-        ), f'{arch}: expected kM0EncodingValue = {encoding}'
+            f'constexpr rj_code_arch_t kCodeArch = '
+            f'ROCJITSU_CODE_ARCH_{arch.upper()};' in op
+        )
 
-    # The M0 resolution logic is shared (parameterized by m0_ev) in
-    # scalar_operand_resolve.h rather than emitted per-arch, so verify the gating
-    # there: encoding value 124 is the NULL slot when M0 is 125, and the operand
-    # matching the arch's M0 encoding reads M0.
     shared_resolve = (amdgpu_root / 'shared' / 'scalar_operand_resolve.h').read_text()
-    assert 'if (m0_ev == 125 && ev == 124)\n    return 0u; // NULL' in shared_resolve
-    assert 'if (ev == m0_ev)\n    return wf.m0();' in shared_resolve
+    assert (
+        'if (is_null_scalar_selector(arch, ev))\n    return 0u; // NULL'
+        in shared_resolve
+    )
+    assert (
+        'if (ev == properties.scalar_m0_selector)\n    return wf.m0();'
+        in shared_resolve
+    )
 
 
 def test_generated_operands_validate_vgpr_source_selectors(
@@ -4396,9 +4393,11 @@ def test_generated_trap_register_operands_use_per_wave_storage(
         assert 'd->dst_selector = inst_.sdata;' in smem
         assert 'd->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;' not in smem
         assert 'uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;' not in smem
+        if 'store_data[i]' in smem:
+            assert 'amdgpu::resolve_src_scalar(wf, inst_.sdata + i)' in smem
 
     shared_execute = (amdgpu_generated_root / 'shared' / 'execute_shared.h').read_text()
-    assert 'write_sgpr_or_trap_register64(inst.inst_.sdata, counter);' in shared_execute
+    assert 'resolve_dst_write64(wf, inst.inst_.sdata, counter);' in shared_execute
 
 
 def test_cdna4_mfma_f8f6f4_accepts_standalone_and_prefixed_encodings(

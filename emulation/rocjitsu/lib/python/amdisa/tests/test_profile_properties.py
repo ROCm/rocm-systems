@@ -170,6 +170,27 @@ def test_saddr_null_selector_rejects_unrelated_encodings():
     assert Rdna4Profile().saddr_null_selector_expr('ENC_VSCRATCH') is None
 
 
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (CdnaProfile(), (101, 102, 104, None, 124)),
+        (Rdna1Profile(), (105, 104, None, 125, 124)),
+        (Rdna2Profile(), (105, None, None, 125, 124)),
+        (Rdna3Profile(), (105, None, None, 124, 125)),
+        (Rdna4Profile(), (105, None, None, 124, 125)),
+        (Gfx1250Profile(), (105, None, None, 124, 125)),
+    ],
+)
+def test_scalar_selector_layout_is_profile_defined(profile, expected):
+    assert (
+        profile.scalar_sgpr_max_selector,
+        profile.scalar_flat_scratch_base_selector,
+        profile.scalar_xnack_mask_base_selector,
+        profile.scalar_null_selector,
+        profile.scalar_m0_selector,
+    ) == expected
+
+
 def test_isa_properties_codegen_uses_profile_values(tmp_path):
     specs = [
         ('cdna3', SimpleNamespace(profile=CdnaProfile()), None),
@@ -184,6 +205,11 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     assert 'uint32_t wave_size_max = 0;' in output
     assert 'uint32_t descriptor_vgpr_count_granule_wave32 = 0;' in output
     assert 'uint32_t descriptor_vgpr_count_granule_wave64 = 0;' in output
+    assert 'int32_t scalar_sgpr_max_selector = -1;' in output
+    assert 'int32_t scalar_flat_scratch_base_selector = -1;' in output
+    assert 'int32_t scalar_xnack_mask_base_selector = -1;' in output
+    assert 'int32_t scalar_null_selector = -1;' in output
+    assert 'int32_t scalar_m0_selector = -1;' in output
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
     assert (
         'case ROCJITSU_CODE_ARCH_CDNA3:\n'
@@ -197,6 +223,11 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .max_addressable_vgprs_per_wf = 256,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 0,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 8,\n'
+        '        .scalar_sgpr_max_selector = 101,\n'
+        '        .scalar_flat_scratch_base_selector = 102,\n'
+        '        .scalar_xnack_mask_base_selector = 104,\n'
+        '        .scalar_null_selector = -1,\n'
+        '        .scalar_m0_selector = 124,\n'
         '    };'
     ) in output
     assert (
@@ -211,6 +242,11 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .max_addressable_vgprs_per_wf = 256,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 8,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 4,\n'
+        '        .scalar_sgpr_max_selector = 105,\n'
+        '        .scalar_flat_scratch_base_selector = -1,\n'
+        '        .scalar_xnack_mask_base_selector = -1,\n'
+        '        .scalar_null_selector = 124,\n'
+        '        .scalar_m0_selector = 125,\n'
         '    };'
     ) in output
     assert (
@@ -225,6 +261,11 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .max_addressable_vgprs_per_wf = 1024,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 16,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 0,\n'
+        '        .scalar_sgpr_max_selector = 105,\n'
+        '        .scalar_flat_scratch_base_selector = -1,\n'
+        '        .scalar_xnack_mask_base_selector = -1,\n'
+        '        .scalar_null_selector = 124,\n'
+        '        .scalar_m0_selector = 125,\n'
         '    };'
     ) in output
 

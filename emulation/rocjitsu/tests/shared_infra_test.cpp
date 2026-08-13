@@ -83,6 +83,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -3991,6 +3992,97 @@ TEST(RdnaAddrCalcTest, Rdna3MubufWrapsOffsetPartBeforeBoundsCheck) {
   EXPECT_EQ(d.per_lane_addr[0], kBase);
 }
 
+TEST(RdnaScalarSelectorTest, Rdna3BufferSoffsetS102ReadsOrdinarySgpr) {
+  amdgpu::GpuMemory mem("rdna3_s102_mem");
+  amdgpu::L2Cache l2("rdna3_s102_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna3_s102_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  constexpr uint64_t kBase = 0x1'0000'1000ULL;
+  uint32_t sbase = wf->sgpr_alloc().base;
+  cu->write_sgpr(sbase, static_cast<uint32_t>(kBase));
+  cu->write_sgpr(sbase + 1, static_cast<uint32_t>(kBase >> 32));
+  cu->write_sgpr(sbase + 2, 0x1000u);
+  cu->write_sgpr(sbase + 3, 1u << 31);
+  cu->write_sgpr(sbase + 102, 0x40u);
+  wf->set_scratch_base(0x80u);
+
+  rdna3::MubufMachineInst inst{};
+  inst.srsrc = 0;
+  inst.soffset = 102;
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  rdna3::mubuf_calculate_addresses(inst, *wf, d);
+
+  EXPECT_EQ(d.per_lane_addr[0], kBase + 0x40u);
+}
+
+TEST(RdnaScalarSelectorTest, Rdna1NullSourceResolvesToZero) {
+  amdgpu::GpuMemory mem("rdna1_null_mem");
+  amdgpu::L2Cache l2("rdna1_null_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA1;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna1_null_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  EXPECT_EQ(amdgpu::resolve_src_scalar(*wf, rdna1::OPR_SRC_NULL), 0u);
+}
+
+TEST(RdnaScalarSelectorTest, Rdna4SmemVccBaseIsResolved) {
+  amdgpu::GpuMemory mem("rdna4_vcc_sbase_mem");
+  amdgpu::L2Cache l2("rdna4_vcc_sbase_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_vcc_sbase_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kBase = 0x2'0000'2000ULL;
+  wf->set_vcc(kBase);
+  rdna4::SmemMachineInst inst{};
+  inst.sbase = rdna4::OPR_SMEM_OFFSET_VCC_LO / 2;
+  inst.soffset = rdna4::OPR_SMEM_OFFSET_NULL;
+
+  EXPECT_EQ(rdna4::smem_calculate_address(inst, *wf), kBase);
+}
+
+TEST(CdnaScalarSelectorTest, XnackSelectorFailsAsUnimplementedState) {
+  amdgpu::GpuMemory mem("cdna4_xnack_mem");
+  amdgpu::L2Cache l2("cdna4_xnack_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_xnack_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  EXPECT_THROW(static_cast<void>(amdgpu::resolve_src_scalar(*wf, cdna4::OPR_SRC_XNACK_MASK_LO)),
+               util::UnimplementedInst);
+}
+
 TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
   amdgpu::GpuMemory mem("rdna4_addr_mem");
   amdgpu::L2Cache l2("rdna4_addr_l2");
@@ -4364,6 +4456,36 @@ TEST(CdnaMemoryTest, SmemLoadWritesTtmpDestination) {
 
   EXPECT_EQ(first->read_trap_register(kTtmp0Selector), kValue);
   EXPECT_EQ(cu->read_sgpr(former_alias), 0xDEADBEEFu);
+}
+
+TEST(CdnaMemoryTest, SmemLoadWritesVccDestination) {
+  amdgpu::GpuMemory mem("cdna4_smem_vcc_destination_mem");
+  amdgpu::L2Cache l2("cdna4_smem_vcc_destination_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = std::make_unique<Cdna4MemoryTestCu>("cdna4_smem_vcc_destination_cu", cfg, &mem, &l2);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kAddress = 0x7100;
+  constexpr uint32_t kValue = 0x89ABCDEFu;
+  cu->write_sgpr(wf->sgpr_alloc().base, static_cast<uint32_t>(kAddress));
+  cu->write_sgpr(wf->sgpr_alloc().base + 1, static_cast<uint32_t>(kAddress >> 32));
+  mem.write32(kAddress, kValue);
+
+  const auto words =
+      cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sbase = 0, .sdata = cdna4::OPR_SDST_VCC_LO});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  cu->execute_and_route(inst.release(), *wf);
+
+  EXPECT_EQ(static_cast<uint32_t>(wf->vcc()), kValue);
 }
 
 TEST(TrapRegisterPcTest, SetpcPrecheckReadsDecodedTtmpPair) {

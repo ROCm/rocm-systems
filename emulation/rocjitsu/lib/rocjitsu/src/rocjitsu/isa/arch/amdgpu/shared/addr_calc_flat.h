@@ -12,6 +12,7 @@
 ///
 /// Segment encoding: seg==0 → FLAT, seg==1 → SCRATCH, seg==2 → GLOBAL.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -65,7 +66,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     uint64_t scratch_base = wf.scratch_base();
     uint32_t saddr_val = 0;
     if (inst.saddr != 0x7F)
-      saddr_val = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(inst.saddr);
+      saddr_val = amdgpu::resolve_src_scalar(wf, inst.saddr);
     uint32_t lane_stride = wf.scratch_lane_size();
     bool has_vaddr = true;
     if constexpr (requires { inst.sve; })
@@ -90,7 +91,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     //         or VGPR pair (64-bit) + offset when saddr==0x7F.
     uint64_t saddr_val = 0;
     if (inst.saddr != 0x7F)
-      saddr_val = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.saddr);
+      saddr_val = amdgpu::resolve_src_scalar64(wf, inst.saddr);
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     auto vaddr_region = regs.read_vgpr_region(vbase, inst.saddr != 0x7F ? 1 : 2, exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {

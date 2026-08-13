@@ -28,13 +28,13 @@ uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &
 
   // S_SCRATCH_LOAD / S_SCRATCH_STORE per CDNA4 ISA spec (section 8.2.1.1):
   // ADDR = SGPR[base] + inst_offset + { M0 or SGPR[soffset] or zero } * 64
-  uint64_t base = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.sbase * 2);
+  uint64_t base = amdgpu::resolve_src_scalar64(wf, inst.sbase * 2);
   int64_t inst_offset = 0;
   if (inst.imm)
     inst_offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
   uint64_t sgpr_off = 0;
   if (inst.soffset_en)
-    sgpr_off = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(inst.soffset);
+    sgpr_off = amdgpu::resolve_src_scalar(wf, inst.soffset);
   uint64_t addr = base + inst_offset + sgpr_off * 64;
   util::Logger::cp([&](auto &os) {
     static thread_local uint64_t scratch_smem_count = 0;
@@ -53,14 +53,12 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
 
 void mubuf_calculate_addresses(const MubufMachineInst &inst, amdgpu::Wavefront &wf,
                                amdgpu::VectorMemState &d) {
-  amdgpu::addr_calc::mubuf_calculate_addresses(
-      inst, wf, d, {.m0_selector = OPR_SSRC_NOLIT_M0, .null_selector = std::nullopt});
+  amdgpu::addr_calc::mubuf_calculate_addresses(inst, wf, d);
 }
 
 void mtbuf_calculate_addresses(const MtbufMachineInst &inst, amdgpu::Wavefront &wf,
                                amdgpu::VectorMemState &d) {
-  amdgpu::addr_calc::mtbuf_calculate_addresses(
-      inst, wf, d, {.m0_selector = OPR_SSRC_NOLIT_M0, .null_selector = std::nullopt});
+  amdgpu::addr_calc::mtbuf_calculate_addresses(inst, wf, d);
 }
 
 void ds_calculate_addresses(const DsMachineInst &inst, amdgpu::Wavefront &wf,

@@ -37,17 +37,8 @@ constexpr uint64_t buffer_total_offset(uint32_t index, uint32_t stride, uint32_t
   return static_cast<uint64_t>(index) * stride + offset_part + soffset;
 }
 
-struct BufferSoffsetEncoding {
-  uint32_t m0_selector;
-  std::optional<uint32_t> null_selector;
-};
-
-inline uint32_t read_buffer_soffset(uint32_t selector, amdgpu::Wavefront &wf,
-                                    BufferSoffsetEncoding encoding) {
-  if (encoding.null_selector && selector == *encoding.null_selector)
-    return 0;
-  return amdgpu::resolve_src_scalar(wf, static_cast<int>(selector),
-                                    static_cast<int>(encoding.m0_selector));
+inline uint32_t read_buffer_soffset(uint32_t selector, amdgpu::Wavefront &wf) {
+  return amdgpu::resolve_src_scalar(wf, static_cast<int>(selector));
 }
 
 /// @brief Compute per-lane addresses for MUBUF encoding.
@@ -59,8 +50,7 @@ inline uint32_t read_buffer_soffset(uint32_t selector, amdgpu::Wavefront &wf,
 /// Requires: inst.srsrc, inst.soffset, inst.idxen, inst.offen, inst.vaddr,
 ///           inst.offset.
 template <typename MubufInst>
-void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, VectorMemState &d,
-                               BufferSoffsetEncoding soffset_encoding) {
+void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, VectorMemState &d) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d.lane_mask = exec;
@@ -73,7 +63,7 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   const auto [srd0, srd1, srd2, srd3] = srd;
   uint64_t base_addr = (static_cast<uint64_t>(srd1 & 0xFFFF) << 32) | srd0;
   // SOFFSET is a scalar-source encoding, not an unrestricted SGPR index.
-  uint32_t soffset_val = read_buffer_soffset(inst.soffset, wf, soffset_encoding);
+  uint32_t soffset_val = read_buffer_soffset(inst.soffset, wf);
   // GFX9 buffer bounds checking: OOB loads return 0, OOB stores are dropped.
   // Per ISA spec (structured mode, stride=0): num_records is the buffer size
   // in bytes. The OOB check uses voffset + inst_offset only — soffset is NOT
@@ -166,8 +156,7 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
 /// Requires: inst.srsrc, inst.soffset, inst.idxen, inst.offen, inst.vaddr,
 ///           inst.offset.
 template <typename MtbufInst>
-void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, VectorMemState &d,
-                               BufferSoffsetEncoding soffset_encoding) {
+void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, VectorMemState &d) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d.lane_mask = exec;
@@ -179,7 +168,7 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   const auto srd = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register128(inst.srsrc * 4);
   const auto [srd0, srd1, srd2, srd3] = srd;
   uint64_t base_addr = (static_cast<uint64_t>(srd1 & 0xFFFF) << 32) | srd0;
-  uint32_t soffset_val = read_buffer_soffset(inst.soffset, wf, soffset_encoding);
+  uint32_t soffset_val = read_buffer_soffset(inst.soffset, wf);
   uint32_t num_records = srd2;
   uint32_t stride = (srd1 >> 16) & 0x3FFF;
   bool oob_raw = (srd3 >> 31) & 1;

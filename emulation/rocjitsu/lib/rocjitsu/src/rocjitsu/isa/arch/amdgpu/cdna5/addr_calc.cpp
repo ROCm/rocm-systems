@@ -30,27 +30,12 @@ uint32_t scaled_vaddr_factor(const amdgpu::VectorMemState &d) {
 
 bool has_saddr(uint32_t saddr) { return saddr != OPR_SREG_NULL; }
 
-bool has_smem_offset(uint32_t soffset) { return soffset != OPR_SMEM_OFFSET_NULL; }
-
-uint32_t read_sreg_m0_operand(amdgpu::Wavefront &wf, uint32_t operand) {
-  if (operand <= 105)
-    return amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(operand);
-  if (operand == 106)
-    return static_cast<uint32_t>(wf.vcc());
-  if (operand == 107)
-    return static_cast<uint32_t>(wf.vcc() >> 32);
-  if (amdgpu::Wavefront::is_trap_register_selector(operand))
-    return amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(operand);
-  if (operand == 124)
-    return 0;
-  if (operand == 125)
-    return wf.m0();
-  throw util::UnimplementedInst("unsupported gfx1250 scalar memory offset operand");
+uint32_t read_scalar_operand(amdgpu::Wavefront &wf, uint32_t operand) {
+  return amdgpu::resolve_src_scalar(wf, operand);
 }
 
-uint64_t read_sreg64_operand(amdgpu::Wavefront &wf, uint32_t operand) {
-  return (static_cast<uint64_t>(read_sreg_m0_operand(wf, operand + 1)) << 32) |
-         read_sreg_m0_operand(wf, operand);
+uint64_t read_scalar64_operand(amdgpu::Wavefront &wf, uint32_t operand) {
+  return amdgpu::resolve_src_scalar64(wf, operand);
 }
 
 uint32_t resolved_vgpr_base(const amdgpu::Wavefront &wf, uint32_t operand,
@@ -115,7 +100,7 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   bool saddr_present = has_saddr(inst.saddr);
-  uint64_t saddr_val = saddr_present ? read_sreg64_operand(wf, inst.saddr) : 0;
+  uint64_t saddr_val = saddr_present ? read_scalar64_operand(wf, inst.saddr) : 0;
   uint32_t scale = saddr_present && inst.scale_offset ? scaled_vaddr_factor(d) : 1;
   uint32_t vbase = resolved_vgpr_base(wf, inst.vaddr, amdgpu::VgprMsbRole::Src0);
   amdgpu::RegisterAccess regs(cu);
@@ -148,11 +133,10 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
                                 uint32_t access_size_bytes) {
   assert(access_size_bytes != 0);
-  uint64_t base = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.sbase * 2);
+  uint64_t base = amdgpu::resolve_src_scalar64(wf, inst.sbase * 2);
   int64_t off = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   uint32_t scale = inst.scale_offset ? access_size_bytes : 1;
-  if (has_smem_offset(inst.soffset))
-    off += static_cast<int64_t>(read_sreg_m0_operand(wf, inst.soffset)) * scale;
+  off += static_cast<int64_t>(read_scalar_operand(wf, inst.soffset)) * scale;
   uint64_t addr = base + off;
   assert(util::is_aligned(addr, std::min<uint64_t>(access_size_bytes, 4u)) &&
          "gfx1250 scalar memory address must satisfy access alignment");
@@ -190,7 +174,7 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   uint64_t scratch_base = wf.scratch_base();
   uint32_t saddr_val = 0;
   if (has_saddr(inst.saddr))
-    saddr_val = read_sreg_m0_operand(wf, inst.saddr);
+    saddr_val = read_scalar_operand(wf, inst.saddr);
   uint32_t vbase = 0;
   uint32_t scale = 1;
   if (inst.sve) {
@@ -226,7 +210,7 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   uint64_t num_records = buffer_num_records(srd1, srd2, srd3);
   uint32_t stride = buffer_stride(srd3);
   bool oob_raw = buffer_oob_raw(srd3);
-  uint32_t soffset_val = has_smem_offset(inst.soffset) ? read_sreg_m0_operand(wf, inst.soffset) : 0;
+  uint32_t soffset_val = read_scalar_operand(wf, inst.soffset);
   int64_t ioff = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   uint32_t vbase = 0;
   if (inst.idxen || inst.offen)

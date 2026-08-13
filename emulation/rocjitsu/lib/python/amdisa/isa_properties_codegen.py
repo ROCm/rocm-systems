@@ -46,6 +46,21 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         addressable_vgprs = profile.max_addressable_vgprs_per_wf
         vgpr_count_granule_wave32 = profile.descriptor_vgpr_count_granule_wave32
         vgpr_count_granule_wave64 = profile.descriptor_vgpr_count_granule_wave64
+        scalar_flat_scratch_base = (
+            profile.scalar_flat_scratch_base_selector
+            if profile.scalar_flat_scratch_base_selector is not None
+            else -1
+        )
+        scalar_xnack_mask_base = (
+            profile.scalar_xnack_mask_base_selector
+            if profile.scalar_xnack_mask_base_selector is not None
+            else -1
+        )
+        scalar_null = (
+            profile.scalar_null_selector
+            if profile.scalar_null_selector is not None
+            else -1
+        )
         max_addressable_vgprs_per_wf = max(
             max_addressable_vgprs_per_wf, addressable_vgprs
         )
@@ -61,6 +76,11 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             f'        .max_addressable_vgprs_per_wf = {addressable_vgprs},',
             f'        .descriptor_vgpr_count_granule_wave32 = {vgpr_count_granule_wave32},',
             f'        .descriptor_vgpr_count_granule_wave64 = {vgpr_count_granule_wave64},',
+            f'        .scalar_sgpr_max_selector = {profile.scalar_sgpr_max_selector},',
+            f'        .scalar_flat_scratch_base_selector = {scalar_flat_scratch_base},',
+            f'        .scalar_xnack_mask_base_selector = {scalar_xnack_mask_base},',
+            f'        .scalar_null_selector = {scalar_null},',
+            f'        .scalar_m0_selector = {profile.scalar_m0_selector},',
             '    };',
         ]
 
@@ -91,6 +111,11 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '  uint32_t max_addressable_vgprs_per_wf = 0;',
         '  uint32_t descriptor_vgpr_count_granule_wave32 = 0;',
         '  uint32_t descriptor_vgpr_count_granule_wave64 = 0;',
+        '  int32_t scalar_sgpr_max_selector = -1;',
+        '  int32_t scalar_flat_scratch_base_selector = -1;',
+        '  int32_t scalar_xnack_mask_base_selector = -1;',
+        '  int32_t scalar_null_selector = -1;',
+        '  int32_t scalar_m0_selector = -1;',
         '};',
         '',
         'inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = '

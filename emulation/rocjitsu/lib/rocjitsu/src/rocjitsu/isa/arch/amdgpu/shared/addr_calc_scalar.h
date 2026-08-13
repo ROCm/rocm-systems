@@ -12,6 +12,7 @@
 /// These functions are templated on the machine instruction type so they work
 /// with any ISA family whose encoding struct exposes the required field names.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -30,10 +31,10 @@ namespace addr_calc {
 /// Requires: inst.sbase, inst.soffset_en, inst.soffset, inst.imm, inst.offset.
 template <typename SmemInst>
 uint64_t smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf) {
-  uint64_t base = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.sbase * 2);
+  uint64_t base = amdgpu::resolve_src_scalar64(wf, inst.sbase * 2);
   uint64_t off = 0;
   if (inst.soffset_en)
-    off += amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(inst.soffset);
+    off += amdgpu::resolve_src_scalar(wf, inst.soffset);
   if (inst.imm)
     off += static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
   uint64_t addr = base + off;

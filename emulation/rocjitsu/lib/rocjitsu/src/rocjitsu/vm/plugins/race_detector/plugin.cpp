@@ -3,7 +3,9 @@
 
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_selector_layout.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -323,15 +325,17 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
   if (inst.data()->tag() == amdgpu::SCALAR_MEM) {
     auto &d = *inst.data_as<amdgpu::ScalarMemState>();
     if (d.is_load) {
-      // Trap-register hazards are intentionally outside the race detector's
-      // ordinary-SGPR model. An SMEM load into TTMP therefore does not produce
-      // a GLOBAL_TO_SGPR event, and a later TTMP read cannot diagnose a missing
+      // Special scalar-register hazards are intentionally outside the race
+      // detector's ordinary-SGPR model. Loads into VCC, EXEC, M0, NULL, flat
+      // scratch, XNACK, or trap state therefore produce no GLOBAL_TO_SGPR
+      // event. In particular, a later TTMP read cannot diagnose a missing
       // lgkmcnt wait until trap-register hazard tracking is implemented.
       std::vector<uint32_t> registers;
       registers.reserve(d.num_dwords);
       for (uint32_t i = 0; i < d.num_dwords; ++i) {
         uint32_t selector = d.dst_selector + i;
-        if (!amdgpu::Wavefront::is_trap_register_selector(selector))
+        if (selector < wf.cu().sgprs_per_wf() &&
+            amdgpu::is_ordinary_sgpr_selector(wf.cu().arch(), static_cast<int>(selector)))
           registers.push_back(selector);
       }
       if (!registers.empty())

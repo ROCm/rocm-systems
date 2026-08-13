@@ -324,6 +324,31 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def scalar_sgpr_max_selector(self) -> int:
+        """Largest ordinary SGPR selector before architecture special state."""
+        return 105
+
+    @property
+    def scalar_flat_scratch_base_selector(self) -> int | None:
+        """Selector for FLAT_SCRATCH_LO, or ``None`` when not in this window."""
+        return None
+
+    @property
+    def scalar_xnack_mask_base_selector(self) -> int | None:
+        """Selector for XNACK_MASK_LO, or ``None`` when not present."""
+        return None
+
+    @property
+    def scalar_null_selector(self) -> int | None:
+        """Architecture scalar NULL selector, if one exists."""
+        return 124 if self.scalar_null_precedes_m0 else None
+
+    @property
+    def scalar_m0_selector(self) -> int:
+        """Architecture scalar M0 selector."""
+        return 125 if self.scalar_null_precedes_m0 else 124
+
+    @property
     def vbuffer_store_data_uses_dst_vgpr_msb_role(self) -> bool:
         """True when buffer-store data operands use the destination VGPR-MSB bank."""
         return False
@@ -1093,6 +1118,18 @@ class CdnaProfile(_AmdgpuProfileBase):
         return True
 
     @property
+    def scalar_sgpr_max_selector(self) -> int:
+        return 101
+
+    @property
+    def scalar_flat_scratch_base_selector(self) -> int | None:
+        return 102
+
+    @property
+    def scalar_xnack_mask_base_selector(self) -> int | None:
+        return 104
+
+    @property
     def supported_versions(self) -> list[str]:
         return ['1.0.0', '1.1.0', '1.1.1']
 
@@ -1305,6 +1342,14 @@ class Rdna1Profile(_AmdgpuProfileBase):
         return '0x3F'
 
     @property
+    def scalar_flat_scratch_base_selector(self) -> int | None:
+        return 104
+
+    @property
+    def scalar_null_selector(self) -> int | None:
+        return 125
+
+    @property
     def supported_versions(self) -> list[str]:
         return ['1.0.0']
 
@@ -1375,6 +1420,10 @@ class Rdna2Profile(Rdna1Profile):
     Inherits the RDNA1 Wave32 default and Wave64 maximum. DPP/SDWA variants
     remain skipped (``_SKIP_DPP_SDWA = True``).
     """
+
+    @property
+    def scalar_flat_scratch_base_selector(self) -> int | None:
+        return None
 
 
 class Rdna3Profile(_AmdgpuProfileBase):

@@ -23,6 +23,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
 #define ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_selector_layout.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -1074,13 +1075,14 @@ public:
 
 private:
   void validate_sgpr_or_trap_register_range(uint32_t selector, uint32_t count) const {
-    const Wavefront &wf = wavefront();
+    const uint32_t physical_block_size = cu_->sgpr_file().regs_per_block();
     for (uint32_t i = 0; i < count; ++i) {
       const uint32_t current = selector + i;
-      const bool ordinary_sgpr = current < wf.max_sgprs() && current < wf.num_sgprs();
+      const bool ordinary_sgpr = current < physical_block_size &&
+                                 is_ordinary_sgpr_selector(cu_->arch(), static_cast<int>(current));
       if (!ordinary_sgpr && !Wavefront::is_trap_register_selector(current)) {
         throw std::logic_error("Scalar selector " + std::to_string(current) +
-                               " is neither an allocated ordinary SGPR nor a trap register");
+                               " is neither an ordinary physical SGPR nor a trap register");
       }
     }
   }

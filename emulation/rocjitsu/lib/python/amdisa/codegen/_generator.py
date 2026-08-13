@@ -5606,7 +5606,7 @@ class CodeGenerator:
             return (
                 '  static thread_local uint64_t counter = 0;\n'
                 '  counter += 100;\n'
-                '  amdgpu::RegisterAccess(wf).write_sgpr_or_trap_register64(inst_.sdata, counter);'
+                '  amdgpu::resolve_dst_write64(wf, inst_.sdata, counter);'
             )
 
         if cls == 'gl1_wbinv':
@@ -5823,8 +5823,7 @@ class CodeGenerator:
         L.append(f'  d->mtype = {self._mtype_expr(is_smem=True)};')
         L.append(f'  for (uint32_t i = 0; i < {nd}; ++i)')
         L.append(
-            '    d->store_data[i] = '
-            'amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(inst_.sdata + i);'
+            '    d->store_data[i] = amdgpu::resolve_src_scalar(wf, inst_.sdata + i);'
         )
         if self.isa_spec.profile.smem_address_uses_access_size:
             addr_args = 'inst_, wf, d->elem_size * d->num_dwords'
@@ -9751,6 +9750,11 @@ class CodeGenerator:
                     'RegisterAccess' in str(impl)
                     for impl in class_func_impls.model + class_func_impls.execution
                 )
+                uses_scalar_selector_resolve = any(
+                    'resolve_src_scalar' in str(impl)
+                    or 'resolve_dst_write' in str(impl)
+                    for impl in class_func_impls.model + class_func_impls.execution
+                )
                 if has_sem:
                     cpp_includes.extend(
                         [
@@ -9764,6 +9768,13 @@ class CodeGenerator:
                     )
                 if uses_register_access:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/register_access.h', False))
+                if uses_scalar_selector_resolve:
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h',
+                            False,
+                        )
+                    )
                 has_tensor_dma = any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))
@@ -10556,6 +10567,7 @@ class CodeGenerator:
             '#include "rocjitsu/vm/amdgpu/mem_state.h"',
             '#include "rocjitsu/vm/amdgpu/register_access.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             *simd_extra_includes(),
@@ -11077,7 +11089,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
     def gen_operand(self) -> None:
         """Generate the ISA-specific Operand class with name resolution."""
         arch = self.cpp_namespace
-        scalar_null_precedes_m0 = self.isa_spec.profile.scalar_null_precedes_m0
+        runtime_arch_enum = f'ROCJITSU_CODE_ARCH_{self.isa_spec.arch_name.upper()}'
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
         )
@@ -11962,8 +11974,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  if (is_immediate_type(opr_type_))',
                 '    return static_cast<uint32_t>(ev);',
                 '  if (size_bits_ == 16)',
-                '    return amdgpu::resolve_src_scalar16(wf, ev, kM0EncodingValue);',
-                '  return amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);',
+                '    return amdgpu::resolve_src_scalar16(wf, ev);',
+                '  return amdgpu::resolve_src_scalar(wf, ev);',
                 '}',
             ]
         )
@@ -11985,7 +11997,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return literal64_value_;\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return read_immediate64(opr_type_, ev);\n'
-            '  return amdgpu::resolve_src_scalar64(wf, ev, kM0EncodingValue);\n'
+            '  return amdgpu::resolve_src_scalar64(wf, ev);\n'
             '}'
         )
 
@@ -12197,8 +12209,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         resolve_code = cgen.Line(
             'namespace {\n'
             '\n'
-            f'constexpr int kM0EncodingValue = '
-            f'{125 if scalar_null_precedes_m0 else 124};\n'
+            f'constexpr rj_code_arch_t kCodeArch = {runtime_arch_enum};\n'
             '\n'
             + _is_vgpr_only_body
             + '\n\n'
@@ -12216,13 +12227,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + '\n\n'
             'bool Isa::simd_capable_value(OperandType opr_type, int ev) {\n'
             '  return resolved_vgpr_offset(opr_type, ev).has_value() ||\n'
-            '         is_immediate_type(opr_type) || amdgpu::can_resolve_src_scalar(ev, kM0EncodingValue);\n'
+            '         is_immediate_type(opr_type) || amdgpu::can_resolve_src_scalar(kCodeArch, ev);\n'
             '}\n'
             '\n'
             'uint32_t Isa::simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type,\n'
             '                                   int ev) {\n'
             '  return is_immediate_type(opr_type) ? static_cast<uint32_t>(ev)\n'
-            '                                     : amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);\n'
+            '                                     : amdgpu::resolve_src_scalar(wf, ev);\n'
             '}\n'
             '\n'
             + simd_methods
@@ -12233,12 +12244,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return static_cast<uint32_t>(literal64_value_);\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint32_t>(encoding_value_);\n'
-            '  return amdgpu::resolve_src_scalar(wf, encoding_value_, kM0EncodingValue);\n'
+            '  return amdgpu::resolve_src_scalar(wf, encoding_value_);\n'
             '}\n'
             '\n' + _read_lane_body + '\n\n'
             'void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {\n'
             + _inert_guard(cond='!is_writable()')
-            + '  amdgpu::resolve_dst_write(wf, encoding_value_, val, kM0EncodingValue);\n'
+            + '  amdgpu::resolve_dst_write(wf, encoding_value_, val);\n'
             '}\n'
             '\n'
             'void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {\n'
@@ -12272,7 +12283,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '    return literal64_value_;\n'
                 '  if (is_immediate_type(opr_type_))\n'
                 '    return read_immediate64(opr_type_, encoding_value_);\n'
-                '  return amdgpu::resolve_src_scalar64(wf, encoding_value_, kM0EncodingValue);\n'
+                '  return amdgpu::resolve_src_scalar64(wf, encoding_value_);\n'
                 '}\n\n'
             )
             + 'void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {\n'

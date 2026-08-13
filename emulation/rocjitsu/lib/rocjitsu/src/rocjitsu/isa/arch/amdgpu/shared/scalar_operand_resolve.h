@@ -4,12 +4,13 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_selector_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/except.h"
 #include <cstdint>
-#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -21,26 +22,34 @@ namespace amdgpu {
 // it without depending on the vm/ simulator layer. Keep the encoding-value
 // handling in resolve_src_scalar() below in sync with it.
 
-// The value of a scalar source operand resolvable from wavefront state alone
-// (SGPR/VCC/EXEC/M0 reads plus inline constants). `m0_ev` is the M0 encoding
-// value for this arch (124 on most arches; 125 on RDNA 3 / RDNA 3.5 / RDNA4
-// / GFX1250, where 124 is the NULL slot).
-inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
-  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 102)
-    return static_cast<uint32_t>(wf.scratch_base());
-  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 103)
-    return static_cast<uint32_t>(wf.scratch_base() >> 32);
-  if (ev <= 105)
-    return RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+[[noreturn]] inline void throw_unimplemented_xnack_selector(int selector) {
+  throw util::UnimplementedInst("XNACK scalar selector " + std::to_string(selector));
+}
+
+// The value of a scalar source operand resolvable from wavefront state alone:
+// ordinary SGPRs, architecture-defined special scalar state, and inline
+// constants. The ISA profile-generated property map is the single source of
+// truth for selector layouts that differ between CDNA and RDNA generations.
+inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev) {
+  const auto arch = wf.cu().arch();
+  const auto properties = isa_properties(arch);
+  if (selector_in_pair(ev, properties.scalar_flat_scratch_base_selector))
+    return ev == properties.scalar_flat_scratch_base_selector
+               ? static_cast<uint32_t>(wf.scratch_base())
+               : static_cast<uint32_t>(wf.scratch_base() >> 32);
+  if (is_xnack_scalar_selector(arch, ev))
+    throw_unimplemented_xnack_selector(ev);
+  if (is_ordinary_sgpr_selector(arch, ev))
+    return RegisterAccess(wf).read_sgpr_or_trap_register(static_cast<uint32_t>(ev));
   if (ev == 106)
     return static_cast<uint32_t>(wf.vcc());
   if (ev == 107)
     return static_cast<uint32_t>(wf.vcc() >> 32);
   if (ev >= 108 && ev <= 123)
     return wf.read_trap_register(static_cast<uint32_t>(ev));
-  if (m0_ev == 125 && ev == 124)
+  if (is_null_scalar_selector(arch, ev))
     return 0u; // NULL
-  if (ev == m0_ev)
+  if (ev == properties.scalar_m0_selector)
     return wf.m0();
   if (ev == 126)
     return static_cast<uint32_t>(wf.exec());
@@ -96,7 +105,7 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
 // 16-bit reads of the inline float constants use the half-precision bit
 // patterns rather than the single-precision ones; every other encoding value
 // resolves identically to the 32-bit path.
-inline uint32_t resolve_src_scalar16(const Wavefront &wf, int ev, int m0_ev) {
+inline uint32_t resolve_src_scalar16(const Wavefront &wf, int ev) {
   switch (ev) {
   case 240:
     return 0x3800u; // 0.5h
@@ -117,7 +126,7 @@ inline uint32_t resolve_src_scalar16(const Wavefront &wf, int ev, int m0_ev) {
   case 248:
     return 0x3118u; // f16 1/(2*pi)
   default:
-    return resolve_src_scalar(wf, ev, m0_ev);
+    return resolve_src_scalar(wf, ev);
   }
 }
 
@@ -125,24 +134,24 @@ inline uint32_t resolve_src_scalar16(const Wavefront &wf, int ev, int m0_ev) {
 // the encoding values that resolve_src_scalar handles without throwing. Used by
 // Isa::simd_capable_value() to keep the SIMD fast path off operands whose
 // scalar broadcast would throw at runtime.
-inline bool can_resolve_src_scalar(int ev, int m0_ev) {
-  bool ok = (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) || ev == 124 || ev == 126 ||
-            ev == 127 || (ev >= 128 && ev <= 208) || (ev >= 235 && ev <= 238) ||
-            (ev >= 240 && ev <= 253);
-  if (m0_ev == 125)
-    ok = ok || ev == 125 || ev == 230 || ev == 231;
-  return ok;
+inline bool can_resolve_src_scalar(rj_code_arch_t arch, int ev) {
+  const auto properties = isa_properties(arch);
+  return selector_in_pair(ev, properties.scalar_flat_scratch_base_selector) ||
+         is_ordinary_sgpr_selector(arch, ev) || ev == 106 || ev == 107 ||
+         (ev >= 108 && ev <= 123) || is_null_scalar_selector(arch, ev) ||
+         ev == properties.scalar_m0_selector || ev == 126 || ev == 127 ||
+         (ev >= 128 && ev <= 208) || ev == 230 || ev == 231 || (ev >= 235 && ev <= 253);
 }
 
-inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
-  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 102)
+inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev) {
+  const auto arch = wf.cu().arch();
+  const auto properties = isa_properties(arch);
+  if (ev == properties.scalar_flat_scratch_base_selector)
     return wf.scratch_base();
-  if (ev <= 105) {
-    uint32_t lo = RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-    uint32_t hi =
-        RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
-    return static_cast<uint64_t>(hi) << 32 | lo;
-  }
+  if (is_xnack_scalar_selector(arch, ev))
+    throw_unimplemented_xnack_selector(ev);
+  if (is_ordinary_sgpr_selector_range(arch, ev, 2))
+    return RegisterAccess(wf).read_sgpr_or_trap_register64(static_cast<uint32_t>(ev));
   if (ev == 106)
     return wf.vcc();
   if (ev >= 108 && ev <= 122) {
@@ -150,9 +159,9 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
     uint32_t hi = wf.read_trap_register(static_cast<uint32_t>(ev + 1));
     return static_cast<uint64_t>(hi) << 32 | lo;
   }
-  if (m0_ev == 125 && ev == 124)
+  if (is_null_scalar_selector(arch, ev))
     return 0u; // NULL
-  if (ev == m0_ev)
+  if (ev == properties.scalar_m0_selector)
     return wf.m0();
   if (ev == 126)
     return wf.exec_raw();
@@ -191,19 +200,24 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
   throw std::logic_error("Unsupported encoding value for scalar64 read: " + std::to_string(ev));
 }
 
-inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
-  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 102) {
+inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val) {
+  const auto arch = wf.cu().arch();
+  const auto properties = isa_properties(arch);
+  if (ev == properties.scalar_flat_scratch_base_selector) {
     uint64_t sb = wf.scratch_base();
     wf.set_scratch_base((sb & 0xFFFFFFFF00000000ULL) | val);
     return;
   }
-  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 103) {
+  if (properties.scalar_flat_scratch_base_selector >= 0 &&
+      ev == properties.scalar_flat_scratch_base_selector + 1) {
     uint64_t sb = wf.scratch_base();
     wf.set_scratch_base((sb & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
     return;
   }
-  if (ev <= 105) {
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+  if (is_xnack_scalar_selector(arch, ev))
+    throw_unimplemented_xnack_selector(ev);
+  if (is_ordinary_sgpr_selector(arch, ev)) {
+    RegisterAccess(wf).write_sgpr_or_trap_register(static_cast<uint32_t>(ev), val);
     return;
   }
   if (ev == 106) {
@@ -218,9 +232,9 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     wf.write_trap_register(static_cast<uint32_t>(ev), val);
     return;
   }
-  if (m0_ev == 125 && ev == 124)
+  if (is_null_scalar_selector(arch, ev))
     return; // NULL
-  if (ev == m0_ev) {
+  if (ev == properties.scalar_m0_selector) {
     wf.set_m0(val);
     return;
   }
@@ -236,15 +250,16 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
 }
 
 inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
-  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 102) {
+  const auto arch = wf.cu().arch();
+  const auto properties = isa_properties(arch);
+  if (ev == properties.scalar_flat_scratch_base_selector) {
     wf.set_scratch_base(val);
     return;
   }
-  if (ev <= 105) {
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
-                                  static_cast<uint32_t>(val));
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
-                                  static_cast<uint32_t>(val >> 32));
+  if (is_xnack_scalar_selector(arch, ev))
+    throw_unimplemented_xnack_selector(ev);
+  if (is_ordinary_sgpr_selector_range(arch, ev, 2)) {
+    RegisterAccess(wf).write_sgpr_or_trap_register64(static_cast<uint32_t>(ev), val);
     return;
   }
   if (ev == 106) {
@@ -256,8 +271,10 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     wf.write_trap_register(static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));
     return;
   }
-  if (ev == 124)
+  if (is_null_scalar_selector(arch, ev))
     return;
+  if (ev == properties.scalar_m0_selector)
+    throw util::UnimplementedInst("64-bit M0 scalar destination");
   if (ev == 126) {
     wf.set_exec_raw(val);
     return;

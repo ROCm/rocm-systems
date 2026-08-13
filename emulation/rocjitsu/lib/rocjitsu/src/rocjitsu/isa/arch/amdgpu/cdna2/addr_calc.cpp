@@ -26,14 +26,12 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
 
 void mubuf_calculate_addresses(const MubufMachineInst &inst, amdgpu::Wavefront &wf,
                                amdgpu::VectorMemState &d) {
-  amdgpu::addr_calc::mubuf_calculate_addresses(
-      inst, wf, d, {.m0_selector = OPR_SSRC_NOLIT_M0, .null_selector = std::nullopt});
+  amdgpu::addr_calc::mubuf_calculate_addresses(inst, wf, d);
 }
 
 void mtbuf_calculate_addresses(const MtbufMachineInst &inst, amdgpu::Wavefront &wf,
                                amdgpu::VectorMemState &d) {
-  amdgpu::addr_calc::mtbuf_calculate_addresses(
-      inst, wf, d, {.m0_selector = OPR_SSRC_NOLIT_M0, .null_selector = std::nullopt});
+  amdgpu::addr_calc::mtbuf_calculate_addresses(inst, wf, d);
 }
 
 void ds_calculate_addresses(const DsMachineInst &inst, amdgpu::Wavefront &wf,

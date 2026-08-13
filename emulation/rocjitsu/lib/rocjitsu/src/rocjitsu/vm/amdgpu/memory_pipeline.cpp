@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -228,9 +229,8 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
   auto &d = *inst.data_as<ScalarMemState>();
   if (!d.is_load)
     return MemoryAccessCompletion::Complete;
-  RegisterAccess registers(wf);
   for (uint32_t i = 0; i < d.num_dwords; ++i) {
-    registers.write_sgpr_or_trap_register(d.dst_selector + i, d.response_data[i]);
+    resolve_dst_write(wf, d.dst_selector + i, d.response_data[i]);
   }
   // Trace: log SMEM load values for debugging.
   util::Logger::vm([&](auto &os) {

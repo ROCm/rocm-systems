@@ -19,17 +19,15 @@ namespace rdna1 {
 namespace {
 
 uint32_t read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf) {
-  if (soffset == OPR_SMEM_OFFSET_NULL || soffset == 0x7F)
+  if (soffset == 0x7F)
     return 0;
-  if (soffset == OPR_SMEM_OFFSET_M0)
-    return wf.m0();
-  return amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register(soffset);
+  return amdgpu::resolve_src_scalar(wf, soffset);
 }
 
 } // namespace
 
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
-  uint64_t base = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.sbase * 2);
+  uint64_t base = amdgpu::resolve_src_scalar64(wf, inst.sbase * 2);
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
   off += read_smem_offset(inst.soffset, wf);
   return (base + off) & ~0x3ULL;
@@ -44,7 +42,7 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 20) >> 20);
   uint64_t saddr_val = 0;
   if (inst.saddr != 0x7F)
-    saddr_val = amdgpu::RegisterAccess(wf).read_sgpr_or_trap_register64(inst.saddr);
+    saddr_val = amdgpu::resolve_src_scalar64(wf, inst.saddr);
   uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
   amdgpu::RegisterAccess regs(cu);
   auto vaddr_region = regs.read_vgpr_region(vbase, inst.saddr != 0x7F ? 1 : 2, exec);
@@ -63,14 +61,12 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
 
 void mubuf_calculate_addresses(const MubufMachineInst &inst, amdgpu::Wavefront &wf,
                                amdgpu::VectorMemState &d) {
-  amdgpu::addr_calc::mubuf_calculate_addresses(
-      inst, wf, d, {.m0_selector = OPR_SREG_M0_INL_M0, .null_selector = OPR_SREG_M0_INL_NULL});
+  amdgpu::addr_calc::mubuf_calculate_addresses(inst, wf, d);
 }
 
 void mtbuf_calculate_addresses(const MtbufMachineInst &inst, amdgpu::Wavefront &wf,
                                amdgpu::VectorMemState &d) {
-  amdgpu::addr_calc::mtbuf_calculate_addresses(
-      inst, wf, d, {.m0_selector = OPR_SREG_M0_INL_M0, .null_selector = OPR_SREG_M0_INL_NULL});
+  amdgpu::addr_calc::mtbuf_calculate_addresses(inst, wf, d);
 }
 
 void ds_calculate_addresses(const DsMachineInst &inst, amdgpu::Wavefront &wf,

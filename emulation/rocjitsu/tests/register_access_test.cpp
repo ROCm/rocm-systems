@@ -500,6 +500,26 @@ TEST(RegisterAccessTest, SgprOrTrapSelectorRoutesPerWaveStorage) {
   EXPECT_THROW(registers.write_sgpr_or_trap_register(124, 0), std::logic_error);
 }
 
+TEST(RegisterAccessTest, SgprOrTrapUsesReservedPhysicalAllocationBlock) {
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
+  GpuMemory gpu_mem{"sgpr_block_mem"};
+  L2Cache l2{"sgpr_block_l2"};
+  ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = ComputeUnitCore::create("sgpr_block_cu", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, /*num_sgprs=*/40, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  cu->write_sgpr(wf->sgpr_alloc().base + 40, 0x12345678u);
+
+  EXPECT_EQ(RegisterAccess(*wf).read_sgpr_or_trap_register(40), 0x12345678u);
+}
+
 TEST(RegisterAccessTest, TtmpAccessDoesNotAliasAdjacentWaveSgprs) {
   ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
   for (uint32_t sgprs_per_wf : {104u, 106u, 128u}) {
