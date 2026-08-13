@@ -259,6 +259,7 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi) {
   const bool isGfx94x = gfxipMajor == 9 && gfxipMinor >= 4 &&
                         (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2);
   const bool isGfx90a = (gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10);
+  const bool isGfx95x = (gfxipMajor == 9 && gfxipMinor == 5);
   const bool isGfx125x = (gfxipMajor == 12) && ((gfxipMinor >= 5));
 
   auto kernelArgImpl = KernelArgImpl::HostKernelArgs;
@@ -275,9 +276,14 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi) {
 
   // Enable device kernel args by default on gfx94x/gfx125x. Device-memory AQL
   // ring buffers are controlled separately via DEBUG_CLR_AQL_DEV_QUEUE below.
+  // kernel_arg_opt_ also requests hardware kernarg preload for the blit program
+  // (device.cpp passes -amdgpu-kernarg-preload-count). Leave it off on gfx95x: CP/SPI
+  // can deliver a stale preloaded dword to individual waves there, and a wave whose
+  // end_ptr is stale branches past its stores, silently dropping one wavefront of the
+  // copy. See ROCM-26300.
   if (isGfx94x || isGfx125x) {
     kernel_arg_impl_ = kernelArgImpl;
-    kernel_arg_opt_ = true;
+    kernel_arg_opt_ = !isGfx95x;
   }
 
   if (!flagIsDefault(HIP_FORCE_DEV_KERNARG)) {
