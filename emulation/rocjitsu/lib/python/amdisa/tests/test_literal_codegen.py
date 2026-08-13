@@ -688,7 +688,7 @@ def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
 def test_scalar_addpc_generated_execute_uses_unsigned_pc_addition():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
-        arch_name='gfx1250',
+        arch_name='cdna5',
         profile=Gfx1250Profile(),
         inst_encodings=[],
         encoding_map={},
@@ -722,9 +722,7 @@ def test_literal_fma_can_share_with_matching_operand_layouts_only():
     rdna_codegen.config = SimpleNamespace(unshared_execute_keys=frozenset())
 
     gfx_codegen = object.__new__(CodeGenerator)
-    gfx_codegen.isa_spec = SimpleNamespace(
-        arch_name='gfx1250', profile=Gfx1250Profile()
-    )
+    gfx_codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Gfx1250Profile())
     gfx_codegen.shared_plan = plan
     gfx_codegen.config = SimpleNamespace(unshared_execute_keys=frozenset())
 

@@ -258,7 +258,7 @@ def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
 def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     generator = CodeGenerator(
         SimpleNamespace(
-            arch_name='gfx1250',
+            arch_name='cdna5',
             generated_dir_name='cdna5',
             cpp_namespace='cdna5',
             opnd_selectors=[],
@@ -304,7 +304,7 @@ def test_gfx1250_instruction_execution_backend_is_dense_and_scoped(tmp_path):
     generator = object.__new__(CodeGenerator)
     generator.out_path = str(tmp_path)
     generator.isa_spec = SimpleNamespace(
-        arch_name='gfx1250',
+        arch_name='cdna5',
         generated_dir_name='cdna5',
         cpp_namespace='cdna5',
         profile=Gfx1250Profile(),
@@ -620,7 +620,7 @@ class TestGfx1250Profile:
         )
 
     def test_generated_identities(self):
-        assert self.p.generated_arch_name == 'gfx1250'
+        assert self.p.generated_arch_name == 'cdna5'
         assert self.p.generated_dir_name == 'cdna5'
         assert self.p.cpp_namespace == 'cdna5'
 
@@ -824,7 +824,7 @@ class TestGfx1250Profile:
     def test_operand_read_lane64_preserves_literal64(self, tmp_path):
         generator = CodeGenerator(
             SimpleNamespace(
-                arch_name='gfx1250',
+                arch_name='cdna5',
                 generated_dir_name='cdna5',
                 cpp_namespace='cdna5',
                 opnd_selectors=[],

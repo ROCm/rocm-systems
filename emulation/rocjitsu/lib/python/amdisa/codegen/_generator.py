@@ -3597,7 +3597,7 @@ class CodeGenerator:
 
     def _supports_gfx1250_scaled_wmma_vop3px2(self) -> bool:
         return (
-            self.isa_spec.arch_name.lower() == 'gfx1250'
+            self.isa_spec.arch_name.lower() == 'cdna5'
             and self.isa_spec.profile.generate_scaled_wmma_vop3px2
         )
 
@@ -3633,7 +3633,7 @@ class CodeGenerator:
     def _gfx1250_f8f6f4_wmma_shape(
         self, inst: Instruction
     ) -> tuple[int, int, int] | None:
-        if self.isa_spec.arch_name != 'gfx1250' or not inst.name.startswith('V_WMMA_'):
+        if self.isa_spec.arch_name != 'cdna5' or not inst.name.startswith('V_WMMA_'):
             return None
         m = re.match(
             r'V_WMMA_(?:F32|F16|BF16|I32)_(\d+)X(\d+)X(\d+)_?F8F6F4$',
@@ -3654,9 +3654,7 @@ class CodeGenerator:
         return tuple(int(x) for x in m.groups())
 
     def _gfx1250_swmmac_has_modifiers(self, inst: Instruction) -> bool:
-        return self.isa_spec.arch_name == 'gfx1250' and inst.name.startswith(
-            'V_SWMMAC_'
-        )
+        return self.isa_spec.arch_name == 'cdna5' and inst.name.startswith('V_SWMMAC_')
 
     def _gfx1250_matrix_fmt_operand_size_expr(
         self, shape: tuple[int, int, int] | None, opnd_name: str
@@ -5095,7 +5093,7 @@ class CodeGenerator:
                     or cls == 'vector_cvt_sr_fp8_f16'
                 )
                 and is_vop3
-                and self.isa_spec.arch_name.lower() == 'gfx1250'
+                and self.isa_spec.arch_name.lower() == 'cdna5'
                 else None
             )
             return gen_vector_cvt_pk(
@@ -7488,7 +7486,7 @@ class CodeGenerator:
                         # here makes def/use and liveness falsely clobber the
                         # following SGPR.
                         if (
-                            self.isa_spec.arch_name == 'gfx1250'
+                            self.isa_spec.arch_name == 'cdna5'
                             and inst_sem is not None
                             and inst_sem.semantic_class
                             in ('vector_cmp', 'vector_cmp_class')
@@ -9383,7 +9381,7 @@ class CodeGenerator:
                 # from data_types.h (included via cpp_includes when has_sem).
 
                 if (
-                    self.isa_spec.arch_name.lower() == 'gfx1250'
+                    self.isa_spec.arch_name.lower() == 'cdna5'
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
                     matrix_outputs = self._emit_gfx1250_matrix_fmt_helpers()
