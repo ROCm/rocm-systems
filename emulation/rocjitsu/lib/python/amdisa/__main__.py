@@ -52,7 +52,6 @@ _PROFILES = {
     'rdna3.5': Rdna3_5Profile,
     'rdna4': Rdna4Profile,
     'cdna5': Gfx1250Profile,
-    'gfx1250': Gfx1250Profile,
 }
 
 
@@ -119,7 +118,7 @@ def _detect_profile(isa_xml: str) -> str:
     # TODO: Remove this filename override once the gfx1250 XML carries a
     # finalized architecture name that can be detected through the normal path.
     if 'gfx1250' in Path(isa_xml).stem:
-        return 'gfx1250'
+        return 'cdna5'
 
     root = elem_tree.parse(isa_xml).getroot()
     isa_node = xs.get_node(root, xs.ISA)
