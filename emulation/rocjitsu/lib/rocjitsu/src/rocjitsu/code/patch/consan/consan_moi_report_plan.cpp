@@ -463,6 +463,18 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
     }
     return candidate;
   };
+  const auto has_adaptable_record_replay_geometry = [&] {
+    const auto valid_power_of_two = [](uint64_t value, uint64_t maximum) {
+      return value != 0u && value <= maximum && (value & (value - 1u)) == 0u;
+    };
+    return inventory.record_replay_bank_count_adaptive &&
+           valid_power_of_two(inventory.record_replay_access_dispatch_bank_count,
+                              kConSanMoiRecordReplayMaximumDispatchBankCount) &&
+           valid_power_of_two(inventory.record_replay_access_owner_bank_count,
+                              kConSanMoiRecordReplayMaximumOwnerBankCount) &&
+           valid_power_of_two(inventory.record_replay_address_group_headroom,
+                              kConSanMoiRecordReplayMaximumAddressGroupsPerWave);
+  };
 
   for (;;) {
     uint64_t headroom = kConSanMoiRecordReplayDynamicEventHeadroom;
@@ -471,8 +483,13 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
       const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(candidate);
       if (plan.complete())
         return candidate;
-      if (plan.outcome != ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity ||
-          plan.reason != ConSanMoiAutoReportPlanReason::PerBufferCeiling) {
+      const bool capacity_limited =
+          plan.outcome == ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity &&
+          plan.reason == ConSanMoiAutoReportPlanReason::PerBufferCeiling;
+      const bool adaptive_abi_capacity_limited =
+          plan.reason == ConSanMoiAutoReportPlanReason::AbiCapacityOverflow &&
+          has_adaptable_record_replay_geometry();
+      if (!capacity_limited && !adaptive_abi_capacity_limited) {
         return candidate;
       }
       if (headroom == 1u)

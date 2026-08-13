@@ -4335,6 +4335,39 @@ TEST(ConSanMoi, AutoReportInventoryAdaptsAddressGroupHeadroomForVeryLargeObjects
   EXPECT_LE(plan.required_bytes, kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
 }
 
+TEST(ConSanMoi, AutoReportInventoryAdaptsBeforeLargeAccessGeometryExceedsAbiCapacity) {
+  ConSanMoiAutoReportInventory inventory;
+  inventory.engine = ConSanMoiEngine::RecordReplay;
+  inventory.access_range_count = 68190u;
+  inventory.diagnostic_count = inventory.access_range_count;
+  inventory.barrier_event_count = 6138u;
+  inventory.record_replay_bank_count_adaptive = true;
+
+  auto expanded = inventory;
+  expanded.barrier_event_count *= kConSanMoiRecordReplayDynamicEventHeadroom;
+  expanded.diagnostic_count = expanded.access_range_count *
+                              expanded.record_replay_access_dispatch_bank_count *
+                              expanded.record_replay_access_owner_bank_count *
+                              expanded.record_replay_address_group_headroom;
+  const ConSanMoiAutoReportPlan expanded_plan = plan_consan_moi_auto_report(expanded);
+  ASSERT_EQ(expanded_plan.outcome, ConSanMoiAutoReportPlanOutcome::Overflow);
+  ASSERT_EQ(expanded_plan.reason, ConSanMoiAutoReportPlanReason::AbiCapacityOverflow);
+
+  const ConSanMoiAutoReportInventory fitted =
+      fit_consan_moi_record_replay_auto_report_inventory(inventory);
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(fitted);
+
+  ASSERT_TRUE(plan.complete());
+  EXPECT_EQ(fitted.access_range_count, inventory.access_range_count);
+  EXPECT_GE(fitted.barrier_event_count, inventory.barrier_event_count);
+  EXPECT_EQ(fitted.barrier_event_count % inventory.barrier_event_count, 0u);
+  EXPECT_LT(fitted.record_replay_access_dispatch_bank_count,
+            inventory.record_replay_access_dispatch_bank_count);
+  EXPECT_LT(fitted.record_replay_access_owner_bank_count,
+            inventory.record_replay_access_owner_bank_count);
+  EXPECT_LE(plan.required_bytes, kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
+}
+
 TEST(ConSanMoi, FirstLightProbeAddsNativeLdsImmediateOffset) {
   std::array<uint32_t, 320> text_words{};
   text_words[0] = 0xDA980480u;
