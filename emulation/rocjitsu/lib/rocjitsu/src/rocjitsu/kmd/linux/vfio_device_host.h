@@ -63,6 +63,9 @@ public:
   void map(const simdojo::DmaRegion &region) override;
   void unmap(const simdojo::DmaRegion &region) override;
 
+  // DMA region entry — exposed so the BAR2 callback (a lambda) can read it.
+  struct DmaEntry { uint64_t iova; void *vaddr; uint64_t length; };
+
 private:
   int init();
   int setup_bars();
@@ -71,12 +74,16 @@ private:
   // Fence/ring-test service thread.
   std::thread       fence_thread_;
   std::atomic<bool> fence_stop_{false};
+  std::atomic<bool> sdma_needs_scan_{false};
   void fence_service_loop();
 
-  // Registered DMA regions (system RAM) for GTT writeback scanning.
-  struct DmaEntry { void *vaddr; uint64_t length; };
+  // Registered DMA regions (system RAM) for GTT/SDMA ring access.
   std::vector<DmaEntry> dma_regions_;
   std::mutex            dma_mutex_;
+
+  // Translate a guest IOVA to host virtual address.  Returns nullptr if not
+  // mapped or if [iova, iova+len) spans multiple or no DMA regions.
+  void *iova_to_hva(uint64_t iova, size_t len) const;
 
   std::string           socket_path_;
   simdojo::PciDevice   *device_;

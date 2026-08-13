@@ -228,12 +228,15 @@ std::vector<uint8_t> build_gfx944_discovery_blob() {
   emit_ip(w, kHwIdSmuio, 0, 13, 0, 6,
           {0x16800, 0x16a00, 0x2401000, 0x3440000});                     ++num_ips;
 
-  // SDMA — 5 instances (SDMA 4.4.5). Strides from aldebaran SDMA0_BASE.
-  for (uint8_t i = 0; i < 5; ++i) {
-    uint32_t base0 = 0x1260 + static_cast<uint32_t>(i) * 0x600;
-    uint32_t base1 = 0x12540 + static_cast<uint32_t>(i) * 0x20;
-    uint32_t base2 = 0x40a800 + static_cast<uint32_t>(i) * 0x400;
-    emit_ip(w, kHwIdSdma0, i, 4, 4, 5, {base0, base1, base2});
+  // SDMA — 1 instance (SDMA 4.4.5). Reduced from 5 to avoid exhausting VM
+  // invalidation engines: each SDMA ring needs its own engine, and the MMHUB
+  // only has 4 available in our configuration.  A single SDMA instance is
+  // sufficient for the ring test and basic DMA operations in vfio-user emulation.
+  {
+    uint32_t base0 = 0x1260;
+    uint32_t base1 = 0x12540;
+    uint32_t base2 = 0x40a800;
+    emit_ip(w, kHwIdSdma0, 0, 4, 4, 5, {base0, base1, base2});
     ++num_ips;
   }
 

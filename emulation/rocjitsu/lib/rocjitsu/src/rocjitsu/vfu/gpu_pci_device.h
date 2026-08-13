@@ -60,6 +60,10 @@ public:
   void dma_map(const simdojo::DmaRegion &region) override;
   void dma_unmap(const simdojo::DmaRegion &region) override;
 
+  uint32_t mmio_peek(uint32_t byte_offset) const override {
+    return bar5_.reg_peek(byte_offset);
+  }
+
 private:
   SimulatedKfd *kfd_;       ///< Non-owning; lifetime managed by the caller.
   uint32_t      guest_pid_;

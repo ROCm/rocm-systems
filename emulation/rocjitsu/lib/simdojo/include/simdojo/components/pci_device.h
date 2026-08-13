@@ -154,6 +154,13 @@ public:
   /// @brief Optional warm reset from the guest.
   virtual void reset() {}
 
+  /// @brief Peek a 32-bit shadow register from the device's MMIO model without
+  /// side effects.  Used by the transport to read SDMA ring-base registers when
+  /// servicing a doorbell write.  Default returns 0.
+  virtual uint32_t mmio_peek(uint32_t byte_offset) const {
+    (void)byte_offset; return 0;
+  }
+
   // --- Injection (called by the transport before any bar_access calls) ---
 
   void set_irq_sink(IrqSink *irq)     { irq_ = irq; }

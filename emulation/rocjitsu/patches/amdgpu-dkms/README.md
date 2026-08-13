@@ -72,3 +72,19 @@ path that rocminfo triggers.
 `vm_update_mode=3` forces CPU-based VM page table updates (no SDMA), which
 works correctly in vfio-user emulation. This is a documented module parameter
 (see `modinfo amdgpu | grep vm_update_mode`).
+
+### `gpu_recovery=0`
+
+Also pass `gpu_recovery=0` when using `ip_block_mask=0x1F` (SDMA enabled):
+
+```sh
+modprobe amdgpu discovery=2 fw_load_type=0 ip_block_mask=0x1F \
+         vm_update_mode=3 gpu_recovery=0
+```
+
+**Why:** With SDMA enabled, the DRM job scheduler submits memory transfer jobs
+(e.g. `hipMemset`, `hipMemcpy`) to SDMA rings. Without real SDMA hardware, these
+jobs time out after 10 seconds and trigger a GPU reset sequence. The GPU reset
+itself fails (-22 EINVAL) in vfio-user emulation, causing a reset loop that crashes
+the HIP/KFD stack. With `gpu_recovery=0`, job timeouts signal the fence with
+`-ETIME` and return immediately, letting HIP report an error instead of crashing.

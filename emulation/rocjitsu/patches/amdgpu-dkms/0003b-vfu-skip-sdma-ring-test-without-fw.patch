@@ -1,0 +1,33 @@
+From: rocjitsu vfio-user GPU emulation
+Subject: [PATCH] vfu: skip SDMA ring test when fw_version==0
+
+When fw_load_type=0 (direct firmware load without PSP) and no SDMA
+firmware is present, adev->sdma.instance[i].fw_version stays 0.  The
+SDMA ring test requires the SDMA engine to execute a WRITE_LINEAR packet
+which never completes without actual SDMA hardware.
+
+Skip the ring test when fw_version==0 so SDMA hw_init succeeds in a
+vfio-user emulation environment where the SDMA engine is not yet
+implemented.
+
+Signed-off-by: rocjitsu vfio-user GPU emulation <rocjitsu@example.com>
+---
+ amd/amdgpu/sdma_v4_4_2.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/amd/amdgpu/sdma_v4_4_2.c b/amd/amdgpu/sdma_v4_4_2.c
+index XXXXXXX..YYYYYYY 100644
+--- a/amd/amdgpu/sdma_v4_4_2.c
++++ b/amd/amdgpu/sdma_v4_4_2.c
+@@ -1058,6 +1058,10 @@ static int sdma_v4_4_2_ring_test_ring(struct amdgpu_ring *ring)
+ {
+ 	struct amdgpu_device *adev = ring->adev;
+ 	unsigned i;
++
++	/* Skip ring test when SDMA firmware is not loaded (vfio-user emulation). */
++	if (adev->sdma.instance[ring->me].fw_version == 0)
++		return 0;
++
+ 	unsigned index;
+ 	int r;
+ 	u32 tmp;

@@ -43,6 +43,17 @@ public:
   /// Fence thread polls this for ring-test sentinel values.
   volatile uint32_t *bar5_mem() const { return bar5_mem_; }
 
+  /// @brief Direct shadow register read (byte offset within BAR5).
+  /// Reads from the BAR5 memfd mapping (bar5_mem_) which reflects CPU MMIO
+  /// writes from the guest — the vfio-user callback only fires for writes
+  /// that QEMU proxies through the socket, not for direct CPU MMIO writes
+  /// to the memfd-backed window.  Falls back to regs_[] if memfd unavailable.
+  uint32_t reg_peek(uint32_t byte_offset) const {
+    if (byte_offset + 4 > 256 * 1024) return 0;
+    if (bar5_mem_) return bar5_mem_[byte_offset / 4];
+    return regs_[byte_offset / 4];
+  }
+
   /// @brief Read handler — called by vfio-user when guest reads BAR5.
   /// @param buf    Buffer to fill with read data.
   /// @param count  Number of bytes to read (must be 4 for register accesses).
