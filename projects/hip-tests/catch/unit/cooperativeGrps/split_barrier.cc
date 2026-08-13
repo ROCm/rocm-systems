@@ -138,10 +138,13 @@ static __global__ void wg_split_barrier_multi(float* out, const float* in,
     size_t neighbour = (i + 1) % blockDim.x;
     float nb = scratch[neighbour];
 
+    // WAR barrier: nobody may overwrite scratch[i] until every thread has read
+    // its neighbour. The sum itself is register-only, so it belongs in the gap.
     auto tok2 = tb.barrier_arrive();
+    const float next = local + nb;
     tb.barrier_wait(std::move(tok2));
 
-    scratch[i] = local + nb;
+    scratch[i] = next;
   }
   out[i] = scratch[i];
 }
