@@ -480,6 +480,23 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
     return hipErrorOutOfMemory;
   }
 
+  // Record device-wide coop capacity (same value the static check uses) so the device layer can
+  // gate the AQL barrier bit on in-flight occupancy (see submitKernel).
+  if (params & amd::NDRangeKernelCommand::CooperativeGroups) {
+    const amd::Device& device = stream->vdev()->device();
+    int num_blocks = 0;
+    int max_blocks_per_grid = 0;
+    int best_block_size = 0;
+    const int block_size = static_cast<int>(launch_params.local_.product());
+    if (block_size > 0 &&
+        hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
+            &num_blocks, &max_blocks_per_grid, &best_block_size, device, f, block_size,
+            launch_params.sharedMemBytes_, false) == hipSuccess &&
+        max_blocks_per_grid > 0) {
+      kernelCommand->setCoopMaxGridBlocks(static_cast<uint32_t>(max_blocks_per_grid));
+    }
+  }
+
   command = kernelCommand;
 
   return hipSuccess;

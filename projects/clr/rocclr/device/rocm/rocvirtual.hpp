@@ -758,9 +758,16 @@ class VirtualGPU : public device::VirtualDevice {
   //! Snapshot shared barrier state before atomically reserving AQL queue slots.
   AqlSlotReservation ReserveAqlSlots(size_t packet_count);
 
-  //! Clear a caller-requested barrier when prior queue state already preserves stream ordering.
-  void OptimizeStreamOrderingBarrier(uint16_t& header,
-                                     const AqlSlotReservation& reservation) const;
+  //! Clear a caller-requested barrier when prior queue state already preserves stream ordering,
+  //! or when the dispatch is coop-concurrent (ordering carried by the completion-signal chain).
+  void OptimizeStreamOrderingBarrier(uint16_t& header, const AqlSlotReservation& reservation);
+
+  //! Occupancy-aware coop gate; hold the coop queue's blit lock. Prune retired grids and return
+  //! whether this grid fits alongside the in-flight coop ones. Called at ring-reservation time.
+  bool coopAdmitFits(double grid_fraction);
+  //! Retain this dispatch's completion signal as in-flight; call right after the coop dispatch so
+  //! GetLastSignal() is this grid's signal.
+  void coopTrackInflight(double grid_fraction);
 
   //! Record a final packet header in the shared HW-queue barrier state.
   void RecordAqlPacketHeader(const AqlSlotReservation& reservation, size_t packet_offset,
@@ -899,6 +906,14 @@ class VirtualGPU : public device::VirtualDevice {
   std::shared_ptr<std::atomic<uint64_t>> largest_aql_barrier_bit_slot_;
   //! Final AQL slot submitted by this stream, or kInvalidAqlSlot before its first packet.
   uint64_t last_aql_packet_slot_ = kInvalidAqlSlot;
+  //! In-flight coop grids (retained completion signal, occupancy fraction); retaining the signal
+  //! blocks ring reuse so its value stays pollable until the grid retires. Guarded by the blit lock.
+  std::vector<std::pair<ProfilingSignal*, double>> coop_inflight_;
+  //! Occupancy fraction of the coop grid being dispatched; coopAdmitFits reads it at reservation time.
+  double coop_pending_fraction_ = 1.0;
+  //! Set only for the duration of a coop-concurrent kernel dispatch so OptimizeStreamOrderingBarrier
+  //! takes the occupancy-gated path; reset right after submit so later packets use the normal path.
+  bool coop_concurrent_dispatch_ = false;
   alignas(64) hsa_barrier_and_packet_t barrier_packet_ {};
   alignas(64) hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 
