@@ -7276,6 +7276,50 @@ TEST(HsaHooksUnitTest, ConSanDynamicStackDispatchAddsMaximumFrameAboveRuntimePri
   EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
 }
 
+TEST(HsaHooksUnitTest, ConSanDynamicPrivateReplacementRequiresDispatchPacketInterception) {
+  for (const bool fail_closed : {false, true}) {
+    SCOPED_TRACE(fail_closed ? "fail-closed" : "fail-open");
+    reset_code_object_observations();
+    configure_consan_profile(kConSanHookProfiles[0], fail_closed);
+    ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", "trap");
+
+    g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+    g_transform_override_result.arch = ROCJITSU_CODE_ARCH_CDNA3;
+    g_transform_override_result.modified = true;
+    g_transform_override_result.final_validation_passed = true;
+    g_transform_override_result.elf_bytes = {0x7f, 'E', 'L', 'F', 'd', 'y', 'n'};
+    rocjitsu::ConSanPatchInfo patch;
+    patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
+    patch.kind = rocjitsu::ConSanPatchKind::LocalCaveFlatLoadCheckTrap;
+    patch.dynamic_private_segment_addend = 32u;
+    g_transform_override_result.patches.push_back(patch);
+
+    FakeApiTable api;
+    api.amd.hsa_amd_queue_intercept_create_fn = nullptr;
+    api.amd.hsa_amd_queue_intercept_register_fn = nullptr;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    const hsa_status_t status = api.core.hsa_executable_load_agent_code_object_fn(
+        kFakeExecutable, kGuestAgent, reader, nullptr, nullptr);
+
+    if (fail_closed) {
+      EXPECT_EQ(status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+      EXPECT_TRUE(g_loaded_code_object_readers.empty());
+    } else {
+      EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+      EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{reader.handle});
+    }
+    EXPECT_EQ(g_code_object_reader_create_calls, 1);
+    EXPECT_TRUE(g_destroyed_code_object_readers.empty());
+  }
+}
+
 void configure_consan_symbol_binding_case() {
   reset_code_object_observations();
   reset_queue_fakes();

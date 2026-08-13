@@ -2794,6 +2794,11 @@ public:
     return original_queue_create_;
   }
 
+  [[nodiscard]] bool dispatch_packet_interception_enabled() const {
+    std::lock_guard lock(mutex_);
+    return intercept_dispatch_packets_;
+  }
+
   [[nodiscard]] hsa_amd_queue_intercept_create_fn_t queue_intercept_create() const {
     std::lock_guard lock(mutex_);
     return amd_ext_ == nullptr ? nullptr : amd_ext_->hsa_amd_queue_intercept_create_fn;
@@ -3450,6 +3455,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   hsa_code_object_reader_t replacement_reader{};
   bool using_replacement_reader = false;
   bool replacement_storage_retained = false;
+  bool replacement_instrumentation_selected = false;
   const auto release_replacement_storage = [&] {
     if (!replacement_storage_retained) {
       replacement_storage.reset();
@@ -3475,8 +3481,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   const auto record_static_coverage = [&](bool replacement_installed) {
     if (!static_coverage_storage)
       return;
-    if (install_action == rocjitsu::ConSanInstallAction::LoadReplacement &&
-        !replacement_installed) {
+    if (replacement_instrumentation_selected && !replacement_installed) {
       mark_consan_static_coverage_uninstrumented(*static_coverage_storage);
     }
     ConSanStaticCoverageRegistry::instance().record(*static_coverage_storage);
@@ -4007,6 +4012,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       register_auto_moi_report_metadata(code_object_reader.handle,
                                         *registered_auto_moi_report_generation, patch_result);
     install_action = rocjitsu::consan_install_action(patch_result, config->fail_closed);
+    replacement_instrumentation_selected =
+        install_action == rocjitsu::ConSanInstallAction::LoadReplacement;
     log_message(kLogInfo,
                 "ConSan patch end reader=%llu visited=%s modified=%s outcome=%s errors=%zu "
                 "warnings=%zu patches=%zu",
@@ -4162,6 +4169,25 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
                                      code_object_reader.handle, "non-installable-transform-outcome",
                                      fault_installation_evidence);
+    }
+    const bool requires_dynamic_private_dispatch_adjustment =
+        replacement_instrumentation_selected &&
+        std::ranges::any_of(patch_result.patches, [](const rocjitsu::ConSanPatchInfo &patch) {
+          return patch.dynamic_private_segment_addend != 0u;
+        });
+    if (requires_dynamic_private_dispatch_adjustment &&
+        !layer().dispatch_packet_interception_enabled()) {
+      std::fprintf(stderr, "[rocjitsu-dbi-hooks] ConSan replacement requires dispatch-packet "
+                           "interception to extend dynamic private segments\n");
+      if (config->fail_closed) {
+        return reject_code_object_load(
+            *config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, code_object_reader.handle,
+            "dynamic-private-dispatch-interception-unavailable", fault_installation_evidence);
+      }
+      log_message(kLogInfo,
+                  "ConSan dispatch-packet interception unavailable; loading original reader=%llu",
+                  static_cast<unsigned long long>(code_object_reader.handle));
+      install_action = rocjitsu::ConSanInstallAction::LoadOriginal;
     }
 
     log_message(
