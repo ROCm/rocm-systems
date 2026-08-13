@@ -326,6 +326,7 @@ jobs:
 
       - name: Run corpus tests
         if: matrix.name == 'release'
+        timeout-minutes: 20
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         env:
