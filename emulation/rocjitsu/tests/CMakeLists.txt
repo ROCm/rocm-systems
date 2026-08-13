@@ -319,6 +319,42 @@ endfunction()
 
 # --- Unit / integration test suite ---
 
+add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
+target_link_libraries(
+    rj_decode_fuzz_test
+    PRIVATE rj_decode_fuzz_core GTest::gtest_main
+)
+rj_configure_target(rj_decode_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_decode_fuzz_test rj_decode_fuzz)
+rj_add_gtest_tests(rj_decode_fuzz_test)
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(
+    NAME DecodeDifferentialUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_differential.py -v
+)
+add_test(
+    NAME DecodeSeedExtractorUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_prepare_decode_seeds.py -v
+)
+add_test(
+    NAME DecodeFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_DECODE_FUZZ=$<TARGET_FILE:rj_decode_fuzz>
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_cli.py -v
+)
+add_test(
+    NAME PretranslateScriptUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
+)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLUGIN_LOADER_FIXTURE_DIR
         "${CMAKE_CURRENT_BINARY_DIR}/plugin_loader_fixtures"
@@ -354,10 +390,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endfunction()
 
     rj_add_plugin_loader_fixture(good)
-    rj_add_plugin_loader_fixture(
-        badabi
-        PLUGIN_FIXTURE_ABI=::rocjitsu::kPluginAbiVersion+1
-    )
     rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
     rj_add_plugin_loader_fixture(duplicate)
 endif()
@@ -370,7 +402,13 @@ add_executable(
     daemon_api_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
-    gfx1250_sim_test.cpp
+    cdna5_architecture_test.cpp
+    cdna5_cluster_test.cpp
+    cdna5_dispatch_memory_test.cpp
+    cdna5_execution_test.cpp
+    cdna5_instruction_test.cpp
+    cdna5_sdma_test.cpp
+    cdna5_tensor_dma_test.cpp
     l2_cache_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp
@@ -519,7 +557,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_dependencies(
         rocjitsu_tests
         plugin_loader_fixture_good
-        plugin_loader_fixture_badabi
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
     )
@@ -561,7 +598,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_model_only_test
         PRIVATE
             rocjitsu_dbt_internal
-            rocjitsu_gfx1250_model_registry
+            rocjitsu_cdna5_model_registry
             simdojo_headers
             GTest::gtest_main
     )
@@ -600,11 +637,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         WARNINGS
     )
     rj_add_gtest_tests(gfx1250_b0_to_a0_library_test)
+    # Checked on the translator rather than the hook. The hook used to link the
+    # translator as a static archive and so carried the model code itself; now it
+    # loads a shared object, and the boundary this guards -- model in, execution
+    # out -- belongs to whichever artifact holds that code. Pointed at the hook it
+    # would now pass vacuously, which is the failure mode the required-symbol
+    # check at the end of the script exists to catch.
     add_test(
         NAME Gfx1250B0ToA0Library.SymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:hsa_hotswap_rocjitsu> -P
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0> -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 
@@ -653,7 +696,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_narrow_isa_registry_fixture
         PRIVATE
             rocjitsu_dbt_internal
-            rocjitsu_gfx1250_model_registry
+            rocjitsu_cdna5_model_registry
             simdojo_headers
     )
     rj_configure_target(rocjitsu_narrow_isa_registry_fixture LIB)
@@ -1197,9 +1240,72 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             hsa_hotswap_rocjitsu_unit_test
             probe_relocation_function_table_dispatch_gfx1250
         )
+        # The pre-translated tier is filled by a separate program and read by the
+        # hook. Running the real tool is the only way to test that the two agree
+        # on a key; writing entries through a test seam would exercise the hook's
+        # own derivation twice and prove nothing about the pair.
+        target_compile_definitions(
+            hsa_hotswap_rocjitsu_unit_test
+            PRIVATE RJ_PRETRANSLATE_TOOL="$<TARGET_FILE:rj_pretranslate>"
+        )
+        add_dependencies(hsa_hotswap_rocjitsu_unit_test rj_pretranslate)
     endif()
     rj_configure_target(hsa_hotswap_rocjitsu_unit_test TEST)
     gtest_discover_tests(hsa_hotswap_rocjitsu_unit_test)
+
+    # Compiles the translation store as a plain DBT component rather than
+    # reaching it through a hook, which is how a second consumer would use it.
+    add_executable(
+        translation_store_test
+        dbt/translation_store_test.cpp
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/code/dbt/translation_store.cpp
+    )
+    target_include_directories(
+        translation_store_test
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+    )
+    target_compile_definitions(
+        translation_store_test
+        PRIVATE RJ_TRANSLATION_STORE_TEST_HOOKS
+    )
+    # The store keys entries on this note and disables itself without it.
+    target_link_options(translation_store_test PRIVATE "LINKER:--build-id=sha1")
+    target_link_libraries(
+        translation_store_test
+        PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(translation_store_test TEST)
+    gtest_discover_tests(translation_store_test)
+
+    # One source, two modules differing only in build id -- which is what a
+    # rebuilt translator is. Entries written against one must be invisible to the
+    # other, and no single binary can show that: the store derives identity from
+    # the module containing an address, so two identities need two modules.
+    #
+    # The ids are fixed rather than content-derived so this stays a test of the
+    # store rather than of the linker. Content-derived ids would also differ, but
+    # only incidentally, and would churn whenever either file was touched.
+    foreach(_probe_suffix a b)
+        set(_probe rj_translator_build_probe_${_probe_suffix})
+        add_library(${_probe} MODULE dbt/translator_build_probe.cpp)
+        rj_configure_target(${_probe} TEST)
+        target_compile_definitions(
+            translation_store_test
+            PRIVATE
+                RJ_TRANSLATOR_PROBE_${_probe_suffix}="$<TARGET_FILE:${_probe}>"
+        )
+        add_dependencies(translation_store_test ${_probe})
+    endforeach()
+    target_link_options(
+        rj_translator_build_probe_a
+        PRIVATE "LINKER:--build-id=0xaaaaaaaaaaaaaaaa"
+    )
+    target_link_options(
+        rj_translator_build_probe_b
+        PRIVATE "LINKER:--build-id=0xbbbbbbbbbbbbbbbb"
+    )
 endif()
 
 # A separate loadable module is the only way to observe the force-scalar gate's
@@ -2518,34 +2624,6 @@ if(RJ_ENABLE_HIP_TESTS)
             ENVIRONMENT
                 "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
                 "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
-        )
-
-        # --- Profiled plugin group end-to-end test ---
-        rj_add_hip_test(
-            hip_profiled_plugin_test
-            ARCH gfx950
-            SOURCE logging/hip_profiled_plugin_test.hip
-        )
-        set(PROFILED_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/profiled_test_output)
-        set(PROFILED_RUNTIME_DIR ${PROFILED_SINK_DIR}/runtime)
-        file(MAKE_DIRECTORY ${PROFILED_SINK_DIR})
-        file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
-        if(RJ_INSTALL_TESTS)
-            install(
-                FILES
-                    ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
-                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs/tests
-                RENAME profiled.json
-            )
-        endif()
-        rj_add_hip_test_case(
-            hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
-            CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
-            INSTALL_CONFIG "\${RJ_INSTALLED_CONFIG_DIR}/tests/profiled.json"
-            TIMEOUT 30
-            ENVIRONMENT
-                "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
-                "RJ_SINK_DIR=${PROFILED_SINK_DIR}"
         )
 
         add_subdirectory(race-detector)

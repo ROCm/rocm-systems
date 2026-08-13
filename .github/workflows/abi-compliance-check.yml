@@ -56,7 +56,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           echo "Fetching base branch: $BASE_REF"
-          git fetch origin "$BASE_REF:$BASE_REF"
+          git fetch origin -- "$BASE_REF:$BASE_REF"
           git branch -a
 
       - name: Determine Base Ref
@@ -64,12 +64,12 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
-          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_BEFORE: ${{ github.event.before }}
         run: |
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             echo "ref=$BASE_REF" >> $GITHUB_OUTPUT
-          elif [[ "$EVENT_NAME" == "push" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
-            echo "ref=$BEFORE_SHA" >> $GITHUB_OUTPUT
+          elif [[ "$EVENT_NAME" == "push" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+            echo "ref=$EVENT_BEFORE" >> $GITHUB_OUTPUT
           else
             echo "ref=" >> $GITHUB_OUTPUT
           fi
@@ -81,7 +81,7 @@ jobs:
           BASE_REF: ${{ steps.base_ref.outputs.ref }}
           HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: |
-          python3 _base/projects/amdsmi/tests/abi_check/abi_check.py \
+          python3 projects/amdsmi/tests/abi_check/abi_check.py \
             --base-ref "$BASE_REF" \
             --head-ref "$HEAD_REF" \
             --project-path projects/amdsmi \
@@ -90,12 +90,18 @@ jobs:
 
       - name: Save outcome for PR labeling
         if: always() && github.event_name == 'pull_request'
-        env:
-          OUTCOME: ${{ steps.run_major.outcome }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          echo "$OUTCOME" > outcome.txt
-          echo "$PR_NUMBER" > pr_number.txt
+          if [[ "$RUN_MAJOR_OUTCOME" == "failure" ]]; then
+            echo "Major ABI check failed, adding MAJOR ABI BREAKAGE label to PR #${PR_NUMBER}"
+            gh pr edit "$PR_NUMBER" --add-label "MAJOR ABI BREAKAGE"
+          else
+            echo "Major ABI check passed, removing MAJOR ABI BREAKAGE label if present"
+            gh pr edit "$PR_NUMBER" --remove-label "MAJOR ABI BREAKAGE" || true
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_MAJOR_OUTCOME: ${{ steps.run_major.outcome }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
 
       - name: Upload Major ABI Report
         if: always()
@@ -111,11 +117,11 @@ jobs:
       - name: Report Major ABI Check Results
         if: always()
         env:
-          OUTCOME: ${{ steps.run_major.outcome }}
+          RUN_MAJOR_OUTCOME: ${{ steps.run_major.outcome }}
         run: |
-          if [[ "$OUTCOME" == "failure" ]]; then
+          if [[ "$RUN_MAJOR_OUTCOME" == "failure" ]]; then
             echo "::warning::MAJOR ABI BREAKAGE FOUND. Check Run Major ABI Compliance Check logs or the major-abi-report artifact."
-          elif [[ "$OUTCOME" == "success" ]]; then
+          elif [[ "$RUN_MAJOR_OUTCOME" == "success" ]]; then
             echo "Major ABI check succeeded."
           else
             echo "Major ABI check was skipped (no baseline ref available)."
@@ -158,7 +164,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           echo "Fetching base branch: $BASE_REF"
-          git fetch origin "$BASE_REF:$BASE_REF"
+          git fetch origin -- "$BASE_REF:$BASE_REF"
           git branch -a
 
       - name: Determine Base Ref
@@ -166,12 +172,12 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
-          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_BEFORE: ${{ github.event.before }}
         run: |
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             echo "ref=$BASE_REF" >> $GITHUB_OUTPUT
-          elif [[ "$EVENT_NAME" == "push" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
-            echo "ref=$BEFORE_SHA" >> $GITHUB_OUTPUT
+          elif [[ "$EVENT_NAME" == "push" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+            echo "ref=$EVENT_BEFORE" >> $GITHUB_OUTPUT
           else
             echo "ref=" >> $GITHUB_OUTPUT
           fi
@@ -183,7 +189,7 @@ jobs:
           BASE_REF: ${{ steps.base_ref_minor.outputs.ref }}
           HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: |
-          python3 _base/projects/amdsmi/tests/abi_check/abi_check.py \
+          python3 projects/amdsmi/tests/abi_check/abi_check.py \
             --base-ref "$BASE_REF" \
             --head-ref "$HEAD_REF" \
             --project-path projects/amdsmi \
@@ -192,10 +198,18 @@ jobs:
 
       - name: Save outcome for PR labeling
         if: always() && github.event_name == 'pull_request'
-        env:
-          OUTCOME: ${{ steps.run_minor.outcome }}
         run: |
-          echo "$OUTCOME" > outcome.txt
+          if [[ "$RUN_MINOR_OUTCOME" == "failure" ]]; then
+            echo "Minor ABI check failed, adding MINOR ABI BREAKAGE label to PR #${PR_NUMBER}"
+            gh pr edit "$PR_NUMBER" --add-label "MINOR ABI BREAKAGE"
+          else
+            echo "Minor ABI check passed, removing MINOR ABI BREAKAGE label if present"
+            gh pr edit "$PR_NUMBER" --remove-label "MINOR ABI BREAKAGE" || true
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_MINOR_OUTCOME: ${{ steps.run_minor.outcome }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
 
       - name: Upload Minor ABI Report
         if: always()
@@ -210,11 +224,11 @@ jobs:
       - name: Report Minor ABI Check Results
         if: always()
         env:
-          OUTCOME: ${{ steps.run_minor.outcome }}
+          RUN_MINOR_OUTCOME: ${{ steps.run_minor.outcome }}
         run: |
-          if [[ "$OUTCOME" == "failure" ]]; then
+          if [[ "$RUN_MINOR_OUTCOME" == "failure" ]]; then
             echo "::warning::MINOR ABI CHANGES FOUND (STRICT CHECK). Check Run Minor ABI Compliance Check logs or the minor-abi-report artifact."
-          elif [[ "$OUTCOME" == "success" ]]; then
+          elif [[ "$RUN_MINOR_OUTCOME" == "success" ]]; then
             echo "Minor ABI check (Strict) succeeded."
           else
             echo "Minor ABI check was skipped (no baseline ref available)."
