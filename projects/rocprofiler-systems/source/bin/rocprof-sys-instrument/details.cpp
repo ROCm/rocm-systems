@@ -9,6 +9,7 @@
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 
+#include "common/path.hpp"
 #include "core/demangler.hpp"
 
 #include <spdlog/fmt/ranges.h>
@@ -639,7 +640,6 @@ rocprofsys_get_exe_realpath()
             ROCPROFSYS_ADD_LOG_ENTRY(
                 fmt::format("cmdline:: [ {} ]", fmt::join(_cmd_line, " ")));
             return _cmd_line.front();
-            // return tim::filepath::realpath(_cmd_line.front(), nullptr, false);
         }
         return std::string{};
     }();
@@ -774,7 +774,7 @@ rocprofsys_get_loaded_path(const char* _name, std::vector<int>&& _open_modes)
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return tim::filepath::realpath(_link_map->l_name, nullptr, false);
+            return rocprofsys::path::realpath(_link_map->l_name);
         }
         if(_noload == false) dlclose(_handle);
     }
@@ -807,7 +807,7 @@ rocprofsys_get_origin(const char* _name, std::vector<int>&& _open_modes)
         dlinfo(_handle, RTLD_DI_ORIGIN, _buffer);
         if(strnlen(_buffer, PATH_MAX + 1) <= PATH_MAX)
         {
-            return tim::filepath::realpath(_buffer, nullptr, false);
+            return rocprofsys::path::realpath(_buffer);
         }
         if(_noload == false) dlclose(_handle);
     }
@@ -890,7 +890,6 @@ error_func_fake(error_level_t level, int num, const char* const* params)
 #include "internal_libs.hpp"
 
 #include <timemory/components/timing/wall_clock.hpp>
-#include <timemory/utility/filepath.hpp>
 
 //======================================================================================//
 //
@@ -1037,8 +1036,8 @@ filter_modules(std::vector<module_t*>* app_modules)
         if(!mod) continue;
 
         auto _module_name = std::string{ get_name(mod) };
-        auto _module_base = std::string{ tim::filepath::basename(_module_name) };
-        auto _module_real = tim::filepath::realpath(_module_name, nullptr, false);
+        auto _module_base = rocprofsys::path::filename(_module_name);
+        auto _module_real = rocprofsys::path::realpath(_module_name);
 
         bool _is_excluded = false;
 
@@ -1053,7 +1052,7 @@ filter_modules(std::vector<module_t*>* app_modules)
         {
             for(const auto& [lib_path, sub_map] : _internal_libs)
             {
-                auto _lib_base = std::string{ tim::filepath::basename(lib_path) };
+                auto _lib_base = rocprofsys::path::filename(lib_path);
                 if(_module_base == _lib_base || _module_real == lib_path ||
                    sub_map.find(_module_base) != sub_map.end() ||
                    sub_map.find(_module_real) != sub_map.end() ||
@@ -1255,10 +1254,8 @@ process_modules(const std::vector<module_t*>& _app_modules)
 
     for(auto* itr : symtab_data.modules)
     {
-        const auto* _base_name = tim::filepath::basename(itr->fullName());
-        auto        _real_name = tim::filepath::realpath(itr->fullName(), nullptr, false);
-
-        if(!_base_name) continue;
+        auto _base_name = rocprofsys::path::filename(itr->fullName());
+        auto _real_name = rocprofsys::path::realpath(itr->fullName());
 
         if(_names.count(_base_name) == 0 && _names.count(_real_name) == 0)
         {

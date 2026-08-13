@@ -101,4 +101,20 @@ hipError_t capturehipMallocAsync(hipStream_t stream, hipMemPool_t mem_pool, size
                                  void** dev_ptr);
 
 hipError_t capturehipFreeAsync(hipStream_t stream, void* dev_ptr);
+
+hipError_t capturehipStreamBatchMemOp(hipStream_t& stream, unsigned int& count,
+                                      hipStreamBatchMemOpParams*& paramArray,
+                                      unsigned int& flags);
+
+hipError_t capturehipStreamWaitValue32(hipStream_t& stream, void*& ptr, uint32_t& value,
+                                       unsigned int& flags, uint32_t& mask);
+
+hipError_t capturehipStreamWaitValue64(hipStream_t& stream, void*& ptr, uint64_t& value,
+                                       unsigned int& flags, uint64_t& mask);
+
+hipError_t capturehipStreamWriteValue32(hipStream_t& stream, void*& ptr, uint32_t& value,
+                                        unsigned int& flags);
+
+hipError_t capturehipStreamWriteValue64(hipStream_t& stream, void*& ptr, uint64_t& value,
+                                        unsigned int& flags);
 }  // namespace hip

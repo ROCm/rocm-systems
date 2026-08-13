@@ -9,6 +9,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #include "comm.h"
 #include "common/ErrCode.hpp"
@@ -16,6 +17,7 @@
 #include "debug.h"
 #include "graph/topo.h"
 #include "net.h"
+#include "rccl_common.h"
 #include "rocmwrap.h"
 
 namespace RcclUnitTesting
@@ -1470,20 +1472,32 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         std::unordered_map<std::string, std::string> extraEnv;
     };
 
-    const size_t HALF = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
-    const size_t FULL = HIERARCHICAL_AG_TEMP_BUFFER_SIZE;
+    const size_t HALF = HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
+    const size_t QUARTER = HIERARCHICAL_TEMP_BUFFER_SIZE / 4;
+    const size_t FULL = HIERARCHICAL_TEMP_BUFFER_SIZE;
 
     std::vector<HierAGCase> testCases = {
         // nNodes < 8 --> disabled
-        {"LessThan8Nodes",            4,  true,  1ULL << 20, false, {}},
+        {"LessThan8Nodes",               4,  true,  1ULL << 20,  false, {}},
         // sub-comms not initialized --> disabled
-        {"CommsNotInitialized",       16, false, 1ULL << 20, false, {}},
-        // 8 node size > 64MB --> disabled
-        {"Disabled_8Nodes_AboveHalf", 8,  true,  HALF + 1,   false, {}},
-        // 16 node size > 128MB --> disabled
-        {"Disabled_16N_AboveFull",    16, true,  FULL + 1,   false, {}},
+        {"CommsNotInitialized",          16, false, 1ULL << 20,  false, {}},
+        // 8-15 nodes --> limit is 32MB
+        {"Enabled_8Nodes_AtQuarter",     8,  true,  QUARTER,     true,  {}},
+        {"Disabled_8Nodes_AboveQuarter", 8,  true,  QUARTER + 1, false, {}},
+        {"Enabled_15Nodes_AtQuarter",    15, true,  QUARTER,     true,  {}},
+        {"Disabled_15Nodes_AtHalf",      15, true,  HALF,        false, {}},
+        // 16-31 nodes --> limit is 64MB
+        {"Enabled_16Nodes_AtHalf",       16, true,  HALF,        true,  {}},
+        {"Disabled_16Nodes_AboveHalf",   16, true,  HALF + 1,    false, {}},
+        {"Enabled_31Nodes_AtHalf",       31, true,  HALF,        true,  {}},
+        {"Disabled_31Nodes_AtFull",      31, true,  FULL,        false, {}},
+        // 32+ nodes --> limit is 128MB
+        {"Enabled_32Nodes_AtHalf",       32, true,  HALF,        true,  {}},
+        {"Enabled_32Nodes_AtFull",       32, true,  FULL,        true,  {}},
+        {"Disabled_32Nodes_AboveFull",   32, true,  FULL + 1,    false, {}},
+        {"Enabled_64Nodes_AtFull",       64, true,  FULL,        true,  {}},
         // env var forces off --> disabled
-        {"DisabledByEnvVar",          16, true,  1ULL << 20, false, {{"RCCL_HIERARCHICAL_ALLGATHER", "0"}}},
+        {"DisabledByEnvVar",             16, true,  1ULL << 20,  false, {{"RCCL_HIERARCHICAL_ALLGATHER", "0"}}},
     };
 
     // Base environment shared by every case
@@ -1542,6 +1556,830 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         << "One or more rcclUseHierarchicalAllGather tests failed";
 
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalAllGather Tests Completed ===");
+}
+
+TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
+{
+    TEST_INFO("=== Starting Process-Isolated rcclUseHierarchicalReduceScatter Tests ===");
+    struct HierRSCase
+    {
+        std::string                                  name;
+        int                                          nNodes;
+        bool                                         hierCommsInit;
+        size_t                                       msgSize;
+        bool                                         expected;
+        std::unordered_map<std::string, std::string> extraEnv;
+    };
+
+    const size_t HALF = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 8-node threshold (64MB)
+    const size_t FULL = HIERARCHICAL_TEMP_BUFFER_SIZE;     // 16-node threshold (128MB)
+
+    std::vector<HierRSCase> testCases = {
+        // nNodes < 8 --> disabled
+        {"LessThan8Nodes",            4,  true,  1ULL << 20, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // sub-comms not initialized --> disabled
+        {"CommsNotInitialized",       16, false, 1ULL << 20, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 8 node size > 64MB --> disabled
+        {"Disabled_8Nodes_AboveHalf", 8,  true,  HALF + 1,   false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 16 node size > 128MB --> disabled
+        {"Disabled_16N_AboveFull",    16, true,  FULL + 1,   false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // disabled by default
+        {"DisabledByDefault",          16, true,  1ULL << 20, false, {}},
+        // env var forces off --> disabled
+        {"DisabledByEnvVar",          16, true,  1ULL << 20, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "0"}}},
+        // 8 nodes, initialized, below threshold --> enabled
+        {"Enabled_8Nodes_BelowHalf",  8,  true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 8 nodes, exactly at threshold --> enabled
+        {"Enabled_8Nodes_AtHalf",     8,  true,  HALF,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 16 nodes, initialized, below threshold --> enabled
+        {"Enabled_16Nodes_BelowFull", 16, true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 16 nodes, exactly at threshold --> enabled
+        {"Enabled_16Nodes_AtFull",    16, true,  FULL,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+    };
+
+    // Base environment shared by every case
+    std::unordered_map<std::string, std::string> baseEnv = {
+        {       "NCCL_DEBUG", "TRACE"},
+        {"NCCL_DEBUG_SUBSYS",   "ALL"}
+    };
+
+    for(const auto& tc : testCases)
+    {
+        ProcessIsolatedTestRunner::registerTest(
+            ProcessIsolatedTestRunner::TestConfig(
+                tc.name,
+                [tc]()
+                {
+                    ncclComm_t            mockComm = nullptr;
+                    struct ncclTopoSystem mockTopo;
+                    struct ncclTopoNode   mockGpu;
+                    CreateMockComm(mockComm,
+                                   mockTopo,
+                                   mockGpu,
+                                   "gfx942",
+                                   /*nRanks=*/8 * tc.nNodes);
+                    mockComm->nNodes                       = tc.nNodes;
+                    mockComm->hierarchicalCommsInitialized = tc.hierCommsInit;
+
+                    EXPECT_EQ(rcclUseHierarchicalReduceScatter(mockComm, tc.msgSize),
+                              tc.expected)
+                        << "Case: " << tc.name
+                        << " (nNodes=" << tc.nNodes
+                        << ", hierCommsInit=" << tc.hierCommsInit
+                        << ", msgSize=" << tc.msgSize << ")";
+
+                    CleanupMockComm(mockComm);
+                }
+            )
+                .withEnvironment(
+                    [&tc, &baseEnv]()
+                    {
+                        auto env = baseEnv;
+                        env.insert(tc.extraEnv.begin(), tc.extraEnv.end());
+                        return env;
+                    }()
+                )
+                .withTimeout(std::chrono::seconds(60))
+        );
+    }
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    bool allTestsPassed = ProcessIsolatedTestRunner::executeAllTests(options);
+
+    EXPECT_TRUE(allTestsPassed)
+        << "One or more rcclUseHierarchicalReduceScatter tests failed";
+
+    TEST_INFO("=== Process-Isolated rcclUseHierarchicalReduceScatter Tests Completed ===");
+}
+
+TEST(Rcclwrap, RcclHierarchicalTempBufferSizeTests)
+{
+    const size_t QUARTER = HIERARCHICAL_TEMP_BUFFER_SIZE / 4;
+    const size_t HALF    = HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
+    const size_t FULL    = HIERARCHICAL_TEMP_BUFFER_SIZE;
+
+    // Below 8 nodes neither algorithm is eligible, so nothing needs to be allocated.
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(7, true, true), size_t{0});
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(64, false, false), size_t{0});
+
+    // Per-collective thresholds
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(8, true, false), QUARTER);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(15, true, false), QUARTER);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(16, true, false), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(31, true, false), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(32, true, false), FULL);
+
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(8, false, true), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(15, false, true), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(16, false, true), FULL);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(32, false, true), FULL);
+}
+
+TEST(Rcclwrap, RcclHierarchicalAlgoInfoTests)
+{
+    TEST_INFO("=== Starting Process-Isolated rcclHierarchicalAlgoInfo Tests ===");
+
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "HierAlgoInfo_DirectAllGather_ReportsInterComm",
+            []()
+            {
+                if(rcclUseAinic())
+                {
+                    GTEST_SKIP() << "Direct AllGather is disabled on AINIC";
+                }
+
+                ncclComm_t          parent = nullptr, inter = nullptr, intra = nullptr;
+                struct ncclTopoNode parentGpu, interGpu, intraGpu;
+
+                auto parentTopo = std::make_unique<ncclTopoSystem>();
+                auto interTopo  = std::make_unique<ncclTopoSystem>();
+                auto intraTopo  = std::make_unique<ncclTopoSystem>();
+
+                // 8 nodes x 8 local ranks.
+                CreateMockComm(parent, *parentTopo, parentGpu, "gfx942", 64);
+                CreateMockComm(inter, *interTopo, interGpu, "gfx942", 8);
+                CreateMockComm(intra, *intraTopo, intraGpu, "gfx942", 8);
+
+                parent->p2pnChannels          = 32;
+                inter->p2pnChannels           = 12;
+                intra->p2pnChannels           = 5;
+                parent->hierarchicalInterComm = inter;
+                parent->hierarchicalIntraComm = intra;
+
+                // 4 KiB per rank keeps both phases well under the Direct threshold.
+                const uint64_t count    = 1024;
+                size_t         interMsg = count * sizeof(float) * inter->nRanks;
+                size_t         intraMsg = count * inter->nRanks * sizeof(float) * intra->nRanks;
+
+                if(!rcclUseAllGatherDirect(inter, interMsg) || !rcclUseAllGatherDirect(intra, intraMsg))
+                {
+                    CleanupMockComm(parent);
+                    CleanupMockComm(inter);
+                    CleanupMockComm(intra);
+                    GTEST_SKIP() << "Direct AllGather unavailable in this environment; the "
+                                    "tuner fallback cannot run against a mock communicator";
+                }
+
+                int algo = -1, protocol = -1, maxChannels = -1;
+                EXPECT_EQ(rcclHierarchicalAlgoInfo(parent,
+                                                   ncclFuncAllGather,
+                                                   count,
+                                                   ncclFloat32,
+                                                   &algo,
+                                                   &protocol,
+                                                   &maxChannels),
+                          ncclSuccess);
+
+                EXPECT_EQ(algo, RCCL_HIERARCHICAL_ALLGATHER);
+                EXPECT_EQ(protocol, NCCL_PROTO_SIMPLE);
+                EXPECT_EQ(maxChannels, inter->p2pnChannels);
+
+                CleanupMockComm(parent);
+                CleanupMockComm(inter);
+                CleanupMockComm(intra);
+            }
+        )
+            // Direct AllGather bails out when user buffer registration is enabled.
+            .withEnvironment({{"NCCL_LOCAL_REGISTER", "0"}, {"RCCL_DIRECT_ALLGATHER_DISABLE", "0"}})
+            .clearVariable("RCCL_DIRECT_ALLGATHER_THRESHOLD")
+            .withTimeout(std::chrono::seconds(60))
+            .withNumGpus(0)
+    );
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options))
+        << "rcclHierarchicalAlgoInfo test failed";
+
+    TEST_INFO("=== Process-Isolated rcclHierarchicalAlgoInfo Tests Completed ===");
+}
+
+// ===========================================================================
+// CE AllReduce graph latch state machine (rccl_wrap.cc). Regression coverage
+// for the capture-vs-eager ordering bug: the latch must stay set for the
+// entire lifetime of a captured plan and must never clear mid-capture.
+// ===========================================================================
+
+TEST(RcclCeGraphLatch, SetsLatchOnFirstCapture)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = false;
+    comm.localPersistentRefs  = 0;
+
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/true);
+
+    EXPECT_TRUE(comm.ceColl.graphModeSeen);
+    EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+}
+
+TEST(RcclCeGraphLatch, StaysSetAcrossRepeatedCaptureTicks)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = false;
+    comm.localPersistentRefs  = 0;
+
+    for(int i = 0; i < 3; ++i)
+    {
+        rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/true);
+        EXPECT_TRUE(comm.ceColl.graphModeSeen) << "iteration " << i;
+    }
+}
+
+// Regression: an unrelated plan reclaiming to zero refs must not re-enable
+// CE AR while still capturing -- this previously caused a cross-rank deadlock.
+TEST(RcclCeGraphLatch, DoesNotClearMidCaptureEvenWithZeroRefs)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = true;
+    comm.localPersistentRefs  = 0;
+
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/true);
+
+    EXPECT_TRUE(comm.ceColl.graphModeSeen);
+    EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+}
+
+TEST(RcclCeGraphLatch, ClearsWhenCaptureEndsAndNoRefsRemain)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = true;
+    comm.localPersistentRefs  = 0;
+
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/false);
+
+    EXPECT_FALSE(comm.ceColl.graphModeSeen);
+    EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
+}
+
+TEST(RcclCeGraphLatch, StaysSetWhileCapturedPlanStillReferencesComm)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = true;
+    comm.localPersistentRefs  = 1;
+
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/false);
+
+    EXPECT_TRUE(comm.ceColl.graphModeSeen)
+        << "Latch must stay set until every captured plan is reclaimed";
+    EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+
+    // Reclaim completes: the next tick clears the latch.
+    comm.localPersistentRefs = 0;
+    rcclCeAllReduceGraphLatchTick(&comm, /*ceCapturing=*/false);
+    EXPECT_FALSE(comm.ceColl.graphModeSeen);
+    EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
+}
+
+TEST(RcclCeGraphLatch, AllowedQueryHasNoSideEffects)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = true;
+
+    for(int i = 0; i < 5; ++i)
+    {
+        EXPECT_FALSE(rcclCeAllReduceAllowed(&comm));
+    }
+    EXPECT_TRUE(comm.ceColl.graphModeSeen) << "Query must be a pure read, not a state transition";
+}
+
+TEST(RcclCeGraphLatch, NeverLatchedAllowsCeAllReduceByDefault)
+{
+    ncclComm comm{};
+    comm.ceColl.graphModeSeen = false;
+
+    EXPECT_TRUE(rcclCeAllReduceAllowed(&comm));
+}
+
+#ifdef ENABLE_WARP_SPEED
+
+// ---------------------------------------------------------------------------
+// WarpSpeed enablement / channel-math helpers (rccl_wrap.cc)
+//
+// These exercise the pure decision/tuning helpers that gate WarpSpeed:
+//   - rcclCanUseWarpSpeedAuto     (arch/node/env eligibility)
+//   - rcclGetMaxWarpsPerBlock     (warps-per-block multiplier)
+//   - rcclWarpSpeedComputeNChannels (connect.cc channel math)
+//   - rcclWarpSpeedAdjustChannels   (enqueue.cc per-collective channel adj.)
+// ---------------------------------------------------------------------------
+
+// rcclCanUseWarpSpeedAuto: gfx950 single-node with auto mode on -> eligible.
+TEST(Rcclwrap, CanUseWarpSpeedAuto_Gfx950SingleNode_True)
+{
+    // Auto mode defaults to 1; if the environment forces it off, the eligibility
+    // result would legitimately be false, so skip to keep the test deterministic.
+    if(rcclParamWarpSpeedAutoMode() == 0)
+    {
+        GTEST_SKIP() << "RCCL_WARP_SPEED_AUTO=0 in environment";
+    }
+
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->cuCount = 256; // SPX mode (256 CU on gfx950); auto mode requires cuCount > 128
+
+    EXPECT_TRUE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/1));
+
+    comm->cuCount = 128; // Not SPX mode (128 CU on gfx950); auto mode requires cuCount > 128
+
+    EXPECT_FALSE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/1));
+
+    CleanupMockComm(comm);
+}
+
+// rcclCanUseWarpSpeedAuto: non-gfx950 arch is never eligible.
+TEST(Rcclwrap, CanUseWarpSpeedAuto_NonGfx950_False)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx942", /*nRanks=*/8);
+
+    EXPECT_FALSE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/1));
+
+    CleanupMockComm(comm);
+}
+
+// rcclCanUseWarpSpeedAuto: multi-node is never eligible (auto mode is single-node).
+TEST(Rcclwrap, CanUseWarpSpeedAuto_MultiNode_False)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/16);
+
+    EXPECT_FALSE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/2));
+
+    CleanupMockComm(comm);
+}
+
+// rcclCanUseWarpSpeedAuto: RCCL_WARP_SPEED_AUTO=0 disables eligibility even on
+// gfx950 single-node. Isolated so the cached RCCL_PARAM value doesn't leak.
+TEST(Rcclwrap, CanUseWarpSpeedAuto_AutoModeDisabled_False)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "CanUseWarpSpeedAuto_AutoModeDisabled_False",
+        []()
+        {
+            ncclComm_t            comm = nullptr;
+            struct ncclTopoSystem topo;
+            struct ncclTopoNode   gpu;
+            CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+            comm->cuCount = 256; // ensure only RCCL_WARP_SPEED_AUTO=0 makes this ineligible
+
+            EXPECT_FALSE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/1));
+
+            CleanupMockComm(comm);
+        },
+        {{"RCCL_WARP_SPEED_AUTO", "0"}}
+    );
+}
+
+// rcclGetMaxWarpsPerBlock: single node -> RCCL_SINGLE_NODE_MAX_NTHREADS / WarpSize.
+TEST(Rcclwrap, GetMaxWarpsPerBlock_SingleNode)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->nNodes   = 1;
+    comm->WarpSize = 64;
+
+    EXPECT_EQ(rcclGetMaxWarpsPerBlock(comm), RCCL_SINGLE_NODE_MAX_NTHREADS / 64);
+
+    CleanupMockComm(comm);
+}
+
+// rcclGetMaxWarpsPerBlock: multi-node gfx950 -> RCCL_GFX950_MAX_NTHREADS / WarpSize.
+TEST(Rcclwrap, GetMaxWarpsPerBlock_MultiNodeGfx950)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/16);
+    comm->nNodes   = 2;
+    comm->WarpSize = 64;
+
+    EXPECT_EQ(rcclGetMaxWarpsPerBlock(comm), RCCL_GFX950_MAX_NTHREADS / 64);
+
+    CleanupMockComm(comm);
+}
+
+// rcclGetMaxWarpsPerBlock: multi-node non-gfx950 -> RCCL_DEFAULT_MAX_NTHREADS / WarpSize.
+TEST(Rcclwrap, GetMaxWarpsPerBlock_MultiNodeOtherArch)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx942", /*nRanks=*/16);
+    comm->nNodes   = 2;
+    comm->WarpSize = 64;
+
+    EXPECT_EQ(rcclGetMaxWarpsPerBlock(comm), RCCL_DEFAULT_MAX_NTHREADS / 64);
+
+    CleanupMockComm(comm);
+}
+
+// Documents a latent issue: rcclGetMaxWarpsPerBlock branches on single-node vs
+// multi-node (and arch), and the single-node comment claims "half the number of
+// threads", but RCCL_SINGLE_NODE_MAX_NTHREADS == RCCL_GFX950_MAX_NTHREADS ==
+// RCCL_DEFAULT_MAX_NTHREADS (all 256), so every branch returns the same value and
+// the intended single-node halving is currently a no-op. If the constants are ever
+// differentiated (as the comment intends), this test should be updated.
+TEST(Rcclwrap, GetMaxWarpsPerBlock_BranchesCurrentlyEquivalent)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->WarpSize = 64;
+
+    comm->nNodes    = 1;
+    const int single = rcclGetMaxWarpsPerBlock(comm);
+    comm->nNodes    = 2;
+    const int multi  = rcclGetMaxWarpsPerBlock(comm);
+
+    EXPECT_EQ(single, multi)
+        << "Single-node is documented to use half the threads, but the MAX_NTHREADS "
+           "constants are identical so the branch has no effect.";
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedComputeNChannels: single-node, no user override, gfx950 8-rank ->
+// nc*nChannels*mult, then halved for the gfx950 single-node 8-rank special case.
+TEST(Rcclwrap, ComputeNChannels_SingleNode_Gfx950_8Ranks_Halved)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->nNodes    = 1;
+    comm->nChannels = 2;
+
+    // maxNchannels = nc(2) * nChannels(2) * mult(4) = 16; single-node keeps 16;
+    // gfx950 && single-node && nRanks==8 -> nc /= 2 -> 8.
+    const int nc = rcclWarpSpeedComputeNChannels(comm, /*nc=*/2, /*channelMultiplier=*/4,
+                                                 /*maxChannels=*/64, /*adjustedMaxNchannels=*/64,
+                                                 /*userUpdatedMaxChannels=*/false);
+    EXPECT_EQ(nc, 8);
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedComputeNChannels: single-node, non-8-rank -> no halving.
+TEST(Rcclwrap, ComputeNChannels_SingleNode_4Ranks_NoHalving)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/4);
+    comm->nNodes    = 1;
+    comm->nChannels = 2;
+
+    const int nc = rcclWarpSpeedComputeNChannels(comm, /*nc=*/2, /*channelMultiplier=*/4,
+                                                 /*maxChannels=*/64, /*adjustedMaxNchannels=*/64,
+                                                 /*userUpdatedMaxChannels=*/false);
+    EXPECT_EQ(nc, 16); // 2*2*4, no halving
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedComputeNChannels: multi-node, no user override -> capped by maxChannels,
+// no halving (halving is single-node only).
+TEST(Rcclwrap, ComputeNChannels_MultiNode_CappedByMaxChannels)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->nNodes    = 2;
+    comm->nChannels = 2;
+
+    // maxNchannels = 2*2*4 = 16; multi-node -> min(16, maxChannels=8) = 8; no halving.
+    const int nc = rcclWarpSpeedComputeNChannels(comm, /*nc=*/2, /*channelMultiplier=*/4,
+                                                 /*maxChannels=*/8, /*adjustedMaxNchannels=*/64,
+                                                 /*userUpdatedMaxChannels=*/false);
+    EXPECT_EQ(nc, 8);
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedComputeNChannels: user override path uses adjustedMaxNchannels*mult
+// (never halved), below the MAXCHANNELS clamp.
+TEST(Rcclwrap, ComputeNChannels_UserOverride_NoClamp)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->nNodes    = 1;
+    comm->nChannels = 2;
+
+    // userUpdated -> nc = min(adjusted(10) * mult(4), MAXCHANNELS) = 40; no halving.
+    const int nc = rcclWarpSpeedComputeNChannels(comm, /*nc=*/2, /*channelMultiplier=*/4,
+                                                 /*maxChannels=*/64, /*adjustedMaxNchannels=*/10,
+                                                 /*userUpdatedMaxChannels=*/true);
+    EXPECT_EQ(nc, 40);
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedComputeNChannels: user override clamps to MAXCHANNELS (512 with WS).
+TEST(Rcclwrap, ComputeNChannels_UserOverride_ClampedToMaxChannels)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->nNodes    = 1;
+    comm->nChannels = 2;
+
+    // adjusted(200) * mult(4) = 800, clamped to MAXCHANNELS.
+    const int nc = rcclWarpSpeedComputeNChannels(comm, /*nc=*/2, /*channelMultiplier=*/4,
+                                                 /*maxChannels=*/64, /*adjustedMaxNchannels=*/200,
+                                                 /*userUpdatedMaxChannels=*/true);
+    EXPECT_EQ(nc, MAXCHANNELS);
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedAdjustChannels: disabled -> nc unchanged.
+TEST(Rcclwrap, AdjustChannels_Disabled_NoChange)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    comm->topo->warpSpeedEnabled     = false;
+    comm->warpSpeedChannelMultiplier = 4;
+
+    ncclTaskColl info = {};
+    info.func         = ncclFuncAllReduce;
+
+    EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/32), 32);
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedAdjustChannels: enabled -> nc divided by the channel multiplier.
+// Non-gfx950 arch avoids the single-node 8-rank doubling special case.
+TEST(Rcclwrap, AdjustChannels_Enabled_DividesByMultiplier)
+{
+    ncclComm_t            comm = nullptr;
+    struct ncclTopoSystem topo;
+    struct ncclTopoNode   gpu;
+    CreateMockComm(comm, topo, gpu, "gfx942", /*nRanks=*/8);
+    comm->topo->warpSpeedEnabled     = true;
+    comm->warpSpeedChannelMultiplier = 4;
+
+    ncclTaskColl info = {};
+    info.func         = ncclFuncAllReduce;
+
+    EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/32), 8); // 32/4
+
+    CleanupMockComm(comm);
+}
+
+// rcclWarpSpeedAdjustChannels: gfx950 single-node 8-rank, non-(AR/AG/RS) collective
+// -> divided then doubled (the "reduced CU usage" special case).
+TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles)
+{
+    // Relies on default RCCL_MAX_NCHANNELS (-2, i.e. < 0). Isolate so the cached
+    // ncclParamMaxNchannels() value is deterministic regardless of test ordering.
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles",
+        []()
+        {
+            ncclComm_t            comm = nullptr;
+            struct ncclTopoSystem topo;
+            struct ncclTopoNode   gpu;
+            CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+            comm->nNodes                     = 1;
+            comm->topo->warpSpeedEnabled     = true;
+            comm->warpSpeedChannelMultiplier = 4;
+
+            ncclTaskColl info = {};
+            info.func         = ncclFuncBroadcast; // not AR/AG/RS
+
+            EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/32), 16); // 32/4=8, *2=16
+
+            CleanupMockComm(comm);
+        },
+        {}
+    );
+}
+
+// rcclWarpSpeedAdjustChannels: gfx950 single-node 8-rank, main collective
+// (AllReduce) -> divided only, not doubled.
+TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble",
+        []()
+        {
+            ncclComm_t            comm = nullptr;
+            struct ncclTopoSystem topo;
+            struct ncclTopoNode   gpu;
+            CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+            comm->nNodes                     = 1;
+            comm->topo->warpSpeedEnabled     = true;
+            comm->warpSpeedChannelMultiplier = 4;
+
+            ncclTaskColl info = {};
+            info.func         = ncclFuncAllReduce; // main collective, excluded from doubling
+
+            EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/32), 8); // 32/4, no doubling
+
+            CleanupMockComm(comm);
+        },
+        {}
+    );
+}
+
+#endif // ENABLE_WARP_SPEED
+
+// ---------------------------------------------------------------------------
+// rcclAllReduceShouldTakeDdaPath: the AllReduce DDA-vs-CE dispatch decision.
+//
+// The helper returns true when ncclAllReduce_impl should take the DDA path, and
+// false when it should yield (to CE AllReduce, the symmetric kernel, or the
+// generic ring/tree fallback). DDA is taken when the buffers are not
+// symmetric-kernel eligible, CE AllReduce will not service the call, and DDA is
+// enabled for this arch and size. CE is only allowed to claim the call when it
+// can actually run it: symmetricSupport, single node, count divisible by nRanks,
+// a supported op and datatype, and an in-range size. Otherwise DDA keeps it.
+//
+// These tests drive the real decision (no GPU): RCCL_DDA_ENABLE defaults to 1,
+// LAUNCH_ORDER_IMPLICIT to 0 and ncclGroupDepth to 0, so rcclDdaEnabled() runs
+// its real arch/threshold logic. RCCL_CE_ALLREDUCE defaults to 1, so CE is
+// gated only by symmetricSupport / nNodes / count / op / dtype / size.
+namespace
+{
+// Fill a zero-initialized comm with just the fields the decision reads. Filled by
+// reference because ncclComm is not copyable.
+void InitDdaDecisionComm(ncclComm& comm, const char* arch, int nRanks, int nNodes, bool symmetricSupport)
+{
+    comm.archName         = const_cast<char*>(arch);
+    comm.nRanks           = nRanks;
+    comm.nNodes           = nNodes;
+    comm.symmetricSupport = symmetricSupport ? 1 : 0;
+}
+
+// count for a target byte size and datatype.
+size_t CountForBytes(size_t bytes, ncclDataType_t dt)
+{
+    return bytes / ncclTypeSize(dt);
+}
+} // namespace
+
+// gfx950 with symmetricSupport off: CE cannot run, so an 8 MiB call (at/above the
+// 4 MiB CE minimum) must still take DDA rather than fall to the generic kernel.
+TEST(RcclAllReduceDdaDecision, Gfx950_SymOff_LargeMsg_TakesDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
+    size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
+                                               /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+}
+
+// gfx950, small message with CE unavailable: squarely in DDA's range, takes DDA.
+TEST(RcclAllReduceDdaDecision, Gfx950_SymOff_SmallMsg_TakesDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
+    size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
+                                               /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+}
+
+// gfx950 with symmetricSupport on and every CE prerequisite met: CE will service
+// the call, so the DDA guard must yield (returns false).
+TEST(RcclAllReduceDdaDecision, Gfx950_SymOn_CeEligible_YieldsToCe)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
+    size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32); // divisible by 8 ranks
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
+                                                /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+}
+
+// CE eligible by size/op/dtype but disabled by the graph latch (ceArGraphAllowed
+// false): CE will not run, so DDA must reclaim the call.
+TEST(RcclAllReduceDdaDecision, Gfx950_SymOn_GraphLatched_TakesDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
+    size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
+                                               /*symEligible=*/false, /*ceArGraphAllowed=*/false));
+}
+
+// CE declines on an unsupported op (ncclAvg) even with symmetricSupport on, so
+// DDA reclaims the call.
+TEST(RcclAllReduceDdaDecision, Gfx950_SymOn_UnsupportedOp_TakesDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
+    size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclAvg,
+                                               /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+}
+
+// gfx942 with symmetricSupport off: a 6 MiB call is within the 8 MiB gfx942 DDA
+// cap and, with CE unavailable, takes DDA.
+TEST(RcclAllReduceDdaDecision, Gfx942_SymOff_MidMsg_TakesDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
+    size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32);
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
+                                               /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+}
+
+// gfx942 above its 8 MiB DDA cap: rcclDdaEnabled returns false, so no DDA.
+TEST(RcclAllReduceDdaDecision, Gfx942_SymOff_AboveCap_NoDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
+    size_t   count = CountForBytes(9ull * 1024 * 1024, ncclFloat32);
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
+                                                /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+}
+
+// gfx942 with symmetricSupport on and every CE prerequisite met: CE claims the call
+// and the DDA guard yields, even though 6 MiB is within the 8 MiB gfx942 DDA cap.
+// Mirror of Gfx942_SymOff_MidMsg_TakesDda: symmetricSupport flips the decision.
+TEST(RcclAllReduceDdaDecision, Gfx942_SymOn_CeEligible_YieldsToCe)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
+    size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32); // divisible by 8 ranks
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
+                                                /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+}
+
+// gfx942 with symmetricSupport on but CE declines on an unsupported op (ncclAvg):
+// DDA reclaims the call since 6 MiB is within the 8 MiB gfx942 cap.
+TEST(RcclAllReduceDdaDecision, Gfx942_SymOn_UnsupportedOp_TakesDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
+    size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32);
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclAvg,
+                                               /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+}
+
+// gfx1250 forces the DDA fabric path regardless of CE eligibility: the
+// ddaFabricArch1250 short-circuit means CE never claims the call on this arch.
+// symmetricSupport is on (the gfx1250 default) and the call is otherwise fully
+// CE-eligible (64 MiB, sum, divisible), so the short-circuit is the only reason
+// DDA is chosen here.
+TEST(RcclAllReduceDdaDecision, Gfx1250_CeEligible_StillTakesDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx1250", 8, 1, /*symmetricSupport=*/true);
+    size_t   count = CountForBytes(64ull * 1024 * 1024, ncclFloat32); // CE-eligible size, divisible by 8
+    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
+                                               /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+}
+
+// An arch DDA never runs on: rcclDdaEnabled returns false, so no DDA on any size.
+TEST(RcclAllReduceDdaDecision, UnsupportedArch_NoDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx90a", 8, 1, /*symmetricSupport=*/false);
+    size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
+                                                /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+}
+
+// gfx942/gfx950 DDA requires the full 8-GPU node; fewer ranks disables it.
+TEST(RcclAllReduceDdaDecision, Gfx950_TooFewRanks_NoDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx950", 4, 1, /*symmetricSupport=*/false);
+    size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
+                                                /*symEligible=*/false, /*ceArGraphAllowed=*/true));
+}
+
+// Symmetric-kernel eligible buffers win outright: the DDA guard yields (returns false)
+// regardless of arch/size.
+TEST(RcclAllReduceDdaDecision, SymEligible_YieldsToSymmetricKernel)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
+    size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
+    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32, ncclSum,
+                                                /*symEligible=*/true, /*ceArGraphAllowed=*/true));
 }
 
 } // namespace RcclUnitTesting

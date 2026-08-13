@@ -32,8 +32,7 @@ bool isConfigGzPath(const char* pathTemplate) {
   return strstr(pathTemplate, "/proc/config.gz") != NULL;
 }
 
-void formatKernelConfigPath(const char* pathTemplate, const char* release,
-                            char* pathOut, size_t pathOutLen) {
+void formatKernelConfigPath(const char* pathTemplate, const char* release, char* pathOut, size_t pathOutLen) {
   snprintf(pathOut, pathOutLen, pathTemplate, release);
 }
 
@@ -74,8 +73,7 @@ bool ncclKernelConfigReadGzip(const char* path, std::string* content) {
   return status != -1 && !content->empty();
 }
 
-bool ncclKernelConfigReadFirstAvailable(std::string* content, char* pathOut,
-                                        size_t pathOutLen) {
+bool ncclKernelConfigReadFirstAvailable(std::string* content, char* pathOut, size_t pathOutLen) {
   if (content == NULL) return false;
 
   struct utsname utsname;

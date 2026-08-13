@@ -1,0 +1,225 @@
+# RCCL paired A/B perf-regression gate.
+#
+# DEPLOYMENT: RCCL now lives in the ROCm/rocm-systems monorepo at projects/rccl.
+# This file belongs in that repo at
+#   .github/workflows/rccl_perf_regression.yml
+# It runs on the self-hosted org runner "tw-gfx950-ainic-ROCm-scale-runner"
+# (org: ROCm). Adjust `runs-on` labels to match how that runner was registered.
+# The `paths` filter keeps the gate scoped to RCCL-only changes in the monorepo;
+# build_rccl.sh auto-detects the projects/rccl cmake subdir in the checkout.
+#
+# The Slurm submit/poll/report scripts these steps call
+# (rccl_build.sbatch, rccl_ab.sbatch, submit_and_poll.sh, format_report.py)
+# are version-controlled in ROCm/cvs, on a branch with further related
+# changes landing before it merges to main:
+#   https://github.com/ROCm/cvs/tree/aimvt-196-rccl-regression-robustness/ci/rccl_perf_gate
+#
+# Flow per PR:
+#   1. Check out PR head with full history (merge-base resolution needs it).
+#   2. [build job] rccl_build.sbatch: build librccl.so for reference (merge-base)
+#      and candidate (PR head) on a single build node, then template their lib
+#      dirs into a per-run copy of ci_detect.json. This is a single-node CPU
+#      compile with no RDMA/MPI involved, so it runs under its own concurrency
+#      lock instead of the pinned 4-node lock below -- it no longer holds all
+#      4 nodes idle for its ~15-20min duration.
+#   3. [detect job] rccl_ab.sbatch: run the A/B detector on the pinned 4-node
+#      set, using the config the build job produced.
+#   4. format_report.py: render verdict to the job summary + PR comment.
+#   5. Advisory mode: job fails hard only on infra/polling errors, not on
+#      a detected regression yet (see PR description).
+name: RCCL Perf Regression Gate
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'projects/rccl/**'
+      - '.github/workflows/rccl_perf_regression.yml'
+  # Allow manual dispatch for testing the pipeline before the workflow is on develop.
+  # Inputs mirror what a PR run would supply; omit them to use the defaults
+  # (A=A detect: ref == cand == current built lib, expects 0 regressions).
+  workflow_dispatch:
+    inputs:
+      config:
+        description: 'Config JSON path on TW cluster'
+        required: false
+        default: '/it-share/rccl-ci/configs/ci_detect_prod.json'
+      build_rccl:
+        description: 'Build librccl from PR source (1=yes, 0=use fixed lib)'
+        required: false
+        default: '0'
+
+env:
+  RCCL_CI_ROOT: /it-share/rccl-ci
+  SLURM_RESERVATION: rccl_ci
+  NODELIST: mia1-p01-g[22,26,28,32]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  build:
+    # Forked PRs cannot run this workflow: it builds and MPI-executes the PR's
+    # own source on a self-hosted runner, so arbitrary fork code would get
+    # arbitrary code execution on our infrastructure. Scope to same-repo PRs
+    # only; workflow_dispatch is unaffected (it already requires repo write
+    # access to trigger).
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Separate lock from the detect job below: build never touches the pinned
+    # nodes, so it shouldn't queue behind another PR's in-flight A/B run.
+    # (Real cross-PR parallelism from this also needs a 2nd self-hosted runner
+    # -- see "Runner capacity" in the PR's known gaps. With one runner, this
+    # still shortens how long the 4-node reservation is held per PR.)
+    concurrency:
+      group: rccl-perf-gate-build
+      cancel-in-progress: false
+    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    timeout-minutes: 60
+    outputs:
+      config_json: ${{ steps.resolve.outputs.config_json }}
+    steps:
+      - name: Checkout PR (full history)
+        uses: actions/checkout@v4
+        with:
+          # github.sha/github.ref point at the PR's synthetic merge commit on
+          # pull_request events, not the PR head -- use the head SHA directly
+          # so candidate == PR head exactly (matters for merge-base diffing).
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: paths
+        if: github.event_name == 'pull_request'
+        run: |
+          git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            | grep -q '^projects/rccl/' \
+            && echo "rccl_changed=1" >> "$GITHUB_OUTPUT" \
+            || echo "rccl_changed=0" >> "$GITHUB_OUTPUT"
+
+      - name: Build reference + candidate librccl (single build node)
+        id: resolve
+        env:
+          BUILD_RCCL: ${{ github.event_name == 'pull_request' && steps.paths.outputs.rccl_changed || inputs.build_rccl || '0' }}
+          CANDIDATE_SRC: ${{ github.workspace }}
+          BASE_REF: origin/${{ github.base_ref || 'develop' }}
+          _CONFIG: ${{ inputs.config || '/it-share/rccl-ci/configs/ci_detect_prod.json' }}
+        run: |
+          if [[ "${BUILD_RCCL}" == "1" ]]; then
+            # This job's concurrency lock no longer matches the detect job's
+            # lock, so another PR's build can now run while this PR is still
+            # waiting for/running its detect step. Templating the shared prod
+            # config file in place (the old behavior) would let one PR's build
+            # clobber another PR's in-flight detect config -- give every run
+            # its own copy instead.
+            RUN_CONFIG="${RCCL_CI_ROOT}/configs/ci_detect_run_${{ github.run_id }}.json"
+            cp "${_CONFIG}" "${RUN_CONFIG}"
+            # Set the output before sbatch runs (not after) so the cleanup-on-
+            # failure step below can still find this path if sbatch fails.
+            echo "config_json=${RUN_CONFIG}" >> "$GITHUB_OUTPUT"
+            sbatch --wait \
+              --export="ALL,CANDIDATE_SRC=${CANDIDATE_SRC},BASE_REF=${BASE_REF},CONFIG_JSON=${RUN_CONFIG}" \
+              --reservation="${SLURM_RESERVATION}" \
+              "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/rccl_build.sbatch"
+          else
+            echo "config_json=${_CONFIG}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Clean up per-run config copy on build failure
+        # Covers the case the detect job's own cleanup step can't: if sbatch
+        # fails after the per-run config copy was made, `detect` never runs
+        # (needs: build), so nothing else removes this file from NFS.
+        if: failure()
+        env:
+          _CONFIG: ${{ steps.resolve.outputs.config_json }}
+        run: |
+          case "${_CONFIG}" in
+            "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
+          esac
+
+  detect:
+    needs: build
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Serialise: the pinned calibration nodes can host only one A/B job at a
+    # time, and thresholds are only valid there. Do NOT cancel in-progress (a
+    # running allocation must finish cleanly to release the nodes).
+    concurrency:
+      group: rccl-perf-gate-pinned-nodes
+      cancel-in-progress: false
+    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    timeout-minutes: 540
+    steps:
+      - name: Run A/B detector (pinned 4-node allocation)
+        id: detect
+        # Don't fail here; we still want to post the report below -- the final
+        # "Gate" step enforces it based on the captured exit code below, not
+        # this step's outcome (continue-on-error reports "failure" the same
+        # way for a detected regression and for a polling error, so outcome
+        # alone can't tell them apart).
+        continue-on-error: true
+        env:
+          _CONFIG: ${{ needs.build.outputs.config_json }}
+        run: |
+          set +e
+          bash "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/submit_and_poll.sh" "${_CONFIG}"
+          code=$?
+          set -e
+          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+          exit "${code}"
+
+      - name: Render report
+        if: always()
+        run: |
+          python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
+            "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
+            --no-exit-code \
+            --output "${RUNNER_TEMP}/rccl_report.md"
+          cat "${RUNNER_TEMP}/rccl_report.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Post / update PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
+        with:
+          header: rccl-perf-gate
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ runner.temp }}/rccl_report.md
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rccl-ab-report
+          path: |
+            /it-share/rccl-ci/ab_artifacts/ab_regression_report.json
+            /it-share/rccl-ci/ab_artifacts/ab_derived_thresholds.json
+            /it-share/rccl-ci/ab_artifacts/rccl_runs.log
+
+      - name: Clean up per-run config copy
+        if: always()
+        env:
+          _CONFIG: ${{ needs.build.outputs.config_json }}
+        run: |
+          case "${_CONFIG}" in
+            "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
+          esac
+
+      - name: Gate on detector verdict
+        if: always()
+        run: |
+          # submit_and_poll.sh exit codes: 0 = pass, 1 = regression detected,
+          # 2 = submission/polling error (job never reached a terminal state).
+          # steps.detect.outcome can't distinguish 1 from 2 -- continue-on-error
+          # reports "failure" for any nonzero exit -- so branch on the exit
+          # code we captured explicitly instead.
+          code="${{ steps.detect.outputs.exit_code }}"
+          if [[ "${code}" != "0" && "${code}" != "1" ]]; then
+            echo "::error::Detector failed to run (SLURM submission/polling error or timeout, exit ${code}). Report on NFS may be stale — not gating on it."
+            exit 2
+          fi
+          # Advisory mode (see PR description): report the verdict but don't
+          # fail the job on a detected regression yet. Infra failures above
+          # still fail hard regardless of mode.
+          python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
+            "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
+            --no-exit-code \
+            --output /dev/null

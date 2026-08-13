@@ -20,7 +20,15 @@ import json
 import sys
 from pathlib import Path
 
-DEFAULT_HASH_DB = "src/utils/.config_hashes.json"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]  # rocprofiler-compute/
+
+#: Absolute path to the repo's canonical config-hash database.
+HASH_DB_PATH = _PROJECT_ROOT / "tools" / "config_management" / ".config_hashes.json"
+
+#: Absolute path to the SoC analysis-config tree the hashes cover.
+ANALYSIS_CONFIGS_PATH = (
+    _PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
+)
 
 
 def compute_file_hash(filepath: Path) -> str:
@@ -48,12 +56,41 @@ def compute_arch_hashes(arch_dir: Path) -> dict:
     return {"files": file_hashes}
 
 
+def compare_arch_to_db(arch_dir: Path, stored_files: dict[str, str]) -> dict:
+    """
+    Compare an arch's on-disk panel YAMLs against recorded hashes.
+
+    Recomputes hashes for the YAML files in arch_dir and diffs them against the
+    stored_files mapping ({filename: hash}) recorded in the hash DB. Returns a
+    dict:
+        - added: list[str] -- files on disk with no recorded hash
+        - mismatched: list[tuple[str, str, str]] -- (filename, expected, actual)
+        - missing: list[str] -- files in the DB but absent on disk
+    """
+    current_files = compute_arch_hashes(arch_dir)["files"]
+
+    current_names = set(current_files)
+    stored_names = set(stored_files)
+
+    mismatched: list[tuple[str, str, str]] = [
+        (name, stored_files[name], current_files[name])
+        for name in sorted(current_names & stored_names)
+        if current_files[name] != stored_files[name]
+    ]
+
+    return {
+        "added": sorted(current_names - stored_names),
+        "mismatched": mismatched,
+        "missing": sorted(stored_names - current_names),
+    }
+
+
 def load_hash_db(hash_file: Path) -> dict:
     """Load hash database from file (or initialize)."""
     hash_path = Path(hash_file)
     if not hash_path.exists():
         return {"archs": {}}
-    with open(hash_path) as f:
+    with open(hash_path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -61,7 +98,7 @@ def save_hash_db(hash_file: Path, data: dict) -> None:
     """Save hash database to file."""
     hash_path = Path(hash_file)
     hash_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(hash_path, "w") as f:
+    with open(hash_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, sort_keys=True)
         f.write("\n")
 
@@ -92,23 +129,12 @@ def detect_changes(configs_dir: Path, hash_file: Path) -> dict:
 
     for arch in sorted(current_archs & stored_archs):
         arch_dir = configs_path / arch
-        current_hashes = compute_arch_hashes(arch_dir)
-        stored_hashes = hash_db["archs"].get(arch, {"files": {}})
+        stored_files = hash_db["archs"].get(arch, {}).get("files", {})
+        comparison = compare_arch_to_db(arch_dir, stored_files)
 
-        modified_files: list[str] = []
-
-        current_files = set(current_hashes["files"].keys())
-        stored_files = set(stored_hashes.get("files", {}).keys())
-
-        for f in sorted(current_files - stored_files):
-            modified_files.append(f)
-
-        for f in sorted(current_files & stored_files):
-            if current_hashes["files"][f] != stored_hashes["files"][f]:
-                modified_files.append(f)
-
-        for f in sorted(stored_files - current_files):
-            modified_files.append(f"[DELETED] {f}")
+        modified_files: list[str] = list(comparison["added"])
+        modified_files += [name for name, _, _ in comparison["mismatched"]]
+        modified_files += [f"[DELETED] {name}" for name in comparison["missing"]]
 
         if modified_files:
             changes["modified_archs"][arch] = modified_files
@@ -198,7 +224,7 @@ def main() -> int:
     parser.add_argument(
         "hash_file",
         nargs="?",
-        default=DEFAULT_HASH_DB,
+        default=HASH_DB_PATH,
         help="Path to hash database file",
     )
 

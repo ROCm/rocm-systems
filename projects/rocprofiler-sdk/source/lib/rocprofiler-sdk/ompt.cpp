@@ -32,7 +32,7 @@
 #include <rocprofiler-sdk/ompt/api_args.h>
 #include <rocprofiler-sdk/ompt/omp-tools.h>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <cstdint>
 #include <iostream>
 
