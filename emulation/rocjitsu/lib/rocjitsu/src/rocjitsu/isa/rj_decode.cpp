@@ -5,7 +5,9 @@
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/refcount.h"
+#include "util/except.h"
 
 #include <memory>
 
@@ -16,7 +18,7 @@ struct rj_code_decoder_t : RefCounted {
 };
 
 rj_status_t rj_code_decoder_create(rj_code_arch_t arch, rj_code_decoder_t **decoder) {
-  if (!decoder || arch < 0 || arch >= ROCJITSU_CODE_ARCH_NUM_ARCHS)
+  if (!decoder || arch < ROCJITSU_CODE_ARCH_CDNA1 || arch >= ROCJITSU_CODE_ARCH_NUM_ARCHS)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
   auto d = Decoder::create(arch);
@@ -25,6 +27,20 @@ rj_status_t rj_code_decoder_create(rj_code_arch_t arch, rj_code_decoder_t **deco
 
   *decoder = new rj_code_decoder_t{};
   (*decoder)->decoder = std::move(d);
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
+rj_status_t rj_code_decoder_create_for_target(const char *target_id, rj_code_decoder_t **decoder) {
+  if (target_id == nullptr || target_id[0] == '\0' || decoder == nullptr)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+
+  std::unique_ptr<Decoder> target_decoder =
+      Decoder::create(default_isa_target_registry(), target_id);
+  if (!target_decoder)
+    return ROCJITSU_STATUS_ERROR;
+
+  *decoder = new rj_code_decoder_t{};
+  (*decoder)->decoder = std::move(target_decoder);
   return ROCJITSU_STATUS_SUCCESS;
 }
 
@@ -53,7 +69,13 @@ rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
   if (!decoder || !decoder->decoder || !binary_inst || !inst)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto decoded = decoder->decoder->decode(binary_inst);
+  *inst = nullptr;
+  Instruction *decoded = nullptr;
+  try {
+    decoded = decoder->decoder->decode(binary_inst);
+  } catch (const util::InvalidInst &) {
+    return ROCJITSU_STATUS_ERROR;
+  }
   if (!decoded)
     return ROCJITSU_STATUS_ERROR;
 

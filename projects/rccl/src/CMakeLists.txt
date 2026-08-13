@@ -33,9 +33,17 @@ set(SRC_FILES
   dda_all_gather_ipc.cu
   dda_alltoall_ipc.cu
   dda_all_reduce_fabric.cu
+  dda_all_reduce_fabric_ll.cu
+  dda_all_reduce_fabric_ll128.cu
   dda_reduce_scatter_fabric.cu
   dda_all_gather_fabric.cu
+  dda_all_gather_fabric_ll.cu
+  dda_all_gather_fabric_ll128.cu
   dda_alltoall_fabric.cu
+  dda_alltoall_fabric_ll.cu
+  dda_alltoall_fabric_ll128.cu
+  dda_reduce_scatter_fabric_ll.cu
+  dda_reduce_scatter_fabric_ll128.cu
   device_buffer.cc
   enqueue.cc
   fabric_gpu_barrier.cu
@@ -70,7 +78,8 @@ set(SRC_FILES
   device/reduce_scatter.h
   device/rccl_metadata.h
   device/sendrecv.h
-  device/hierarchical_ag_shuffle.h
+  device/hierarchical_shuffle.h
+  device/ce_reduce.cc
   device/common.cu
   device/onerank.cu
   device/network/unpack/unpack_defs.h
@@ -106,14 +115,23 @@ set(SRC_FILES
   include/mem_manager.h
   include/allocator.h
   include/algorithms/CollCommon.h
+  include/algorithms/CollCommon_ll128.h
   include/algorithms/all_reduce/all_reduce_dda.h
+  include/algorithms/all_reduce/all_reduce_dda_ll.h
+  include/algorithms/all_reduce/all_reduce_dda_fabric_ll128.h
   include/algorithms/reduce_scatter/reduce_scatter_dda.h
   include/algorithms/all_gather/all_gather_dda.h
   include/algorithms/alltoall/alltoall_dda.h
   include/algorithms/all_reduce/all_reduce_dda_fabric.h
   include/algorithms/reduce_scatter/reduce_scatter_dda_fabric.h
   include/algorithms/all_gather/all_gather_dda_fabric.h
+  include/algorithms/all_gather/all_gather_dda_fabric_ll.h
+  include/algorithms/all_gather/all_gather_dda_fabric_ll128.h
   include/algorithms/alltoall/alltoall_dda_fabric.h
+  include/algorithms/alltoall/alltoall_dda_fabric_ll.h
+  include/algorithms/alltoall/alltoall_dda_fabric_ll128.h
+  include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll.h
+  include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
   include/alt_rsmi.h
   include/archinfo.h
   include/api_trace.h
@@ -149,6 +167,7 @@ set(SRC_FILES
   include/fabric_init.h
   include/fabric_gpu_barrier.h
   include/fabric_mem_handler.h
+  include/gdr_peermem.h
   include/gdrwrap.h
   include/git_version.h
   include/graph.h
@@ -332,6 +351,7 @@ set(SRC_FILES
   misc/api_trace.c
   misc/api_trace.cc
 # misc/cudawrap.cc
+  misc/gdr_peermem.cc
 # misc/gdrwrap.cc
   misc/ibvsymbols.cc
   misc/ibvwrap.cc
@@ -640,6 +660,7 @@ endif()
 
 set(GEN_DIR "${HIPIFY_DIR}/gensrc")
 set(GEN_SYM_DIR "${GEN_DIR}/symmetric")
+set(GEN_CE_REDUCE_DIR "${GEN_DIR}/ce_reduce")
 
 if(ONLY_FUNCS)
   message(WARNING "Using ONLY_FUNCS = ${ONLY_FUNCS}. Not meant for release builds.")
@@ -669,6 +690,20 @@ if (GENERATE_SYM_KERNELS)
     message(SEND_ERROR "Error: ${gen_sym_py_error}")
     message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/symmetric/generate.py failed")
   endif()
+endif()
+
+# Execute the python script to generate one TU per CE-reduce kernel
+# instantiation (see src/device/ce_reduce/generate.py for why this is split
+# out instead of living in a single ce_reduce.cc).
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/ce_reduce/generate.py ${GEN_CE_REDUCE_DIR}
+    WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
+    RESULT_VARIABLE gen_ce_reduce_py_result
+    ERROR_VARIABLE gen_ce_reduce_py_error
+)
+if (gen_ce_reduce_py_result)
+  message(SEND_ERROR "Error: ${gen_ce_reduce_py_error}")
+  message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/ce_reduce/generate.py failed")
 endif()
 
 # Find the generated files in the output directory
@@ -703,10 +738,23 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll128\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_fabric\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_fabric_ll\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_fabric_ll128\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric\\.cu\\.cpp$")
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_alltoall_fabric.cu.cpp)")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric_ll\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric_ll128\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll128\\.cu\\.cpp$")
+  # ce_reduce.cc is now pure host code (a dispatcher calling into the
+  # per-instantiation launchers generated under gensrc/ce_reduce/, which are
+  # excluded above by the "gensrc/.*\\.cpp$" filter and compiled separately
+  # by cmake/DeviceLinker.cmake). It stays in the main target and is
+  # compiled --offload-host-only like ce_coll.cc.
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_all_reduce_fabric_ll.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_all_gather_fabric_ll.cu.cpp, dda_alltoall_fabric.cu.cpp)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
@@ -996,7 +1044,7 @@ else()  # Enable hidden visibility for library without tests/code coverage enabl
   target_compile_options(rccl PRIVATE -fvisibility=hidden)
 endif()
 
-if (HAVE_KERNARG_PRELOAD)
+if (HAVE_KERNARG_PRELOAD AND NOT DISABLE_KERNARG_PRELOAD)
   target_compile_options(rccl PRIVATE -mllvm --amdgpu-kernarg-preload-count=16)
 endif()
 
@@ -1250,7 +1298,7 @@ if(NOT BUILD_SHARED_LIBS)
 else()
   message(STATUS "Building shared RCCL library")
 endif()
-if (HAVE_KERNARG_PRELOAD AND NOT ENABLE_DEVICE_LINKER)
+if (HAVE_KERNARG_PRELOAD AND NOT ENABLE_DEVICE_LINKER AND NOT DISABLE_KERNARG_PRELOAD)
   target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker -mllvm=-amdgpu-kernarg-preload-count=16")
 endif()
 
