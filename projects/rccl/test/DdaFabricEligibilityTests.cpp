@@ -198,7 +198,7 @@ TEST_F(DdaFabricEligibilityTest, AllToAll_DerivedScratchRejectsOversizedMessage)
     mockComm_.comm.ddaScratchBytes = derivedScratch;
     // LL128 floor at 8 ranks = ~8.5 MiB. Large message exceeds derived scratch.
     const size_t largeCount = 2 * 1024 * 1024;  // 2M elements
-    EXPECT_FALSE(ncclAlltoAllDdaFabricEligible(
+    EXPECT_FALSE(ncclAllToAllDdaFabricEligible(
         mockComm_.get(), sendbuff_, recvbuff_, largeCount, ncclFloat32));
 }
 
