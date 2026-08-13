@@ -11149,8 +11149,8 @@ TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaRejectsNonVgprMatrixInputs) {
     EXPECT_FALSE(result.ok());
     EXPECT_EQ(result.elf_bytes, image);
     EXPECT_TRUE(
-        rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
-                                       "K=128 WMMA matrix operands are not ordinary VGPR ranges"));
+        rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                       "invalid VGPR source selector at .text byte offset 0"));
   }
 }
 
@@ -11357,6 +11357,7 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaAcceptsInlineZeroAccumulator) {
 
 TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaRejectsNonVgprNonzeroAccumulator) {
   for (const uint16_t accumulator : {uint16_t{0}, uint16_t{129}}) {
+    SCOPED_TRACE(accumulator);
     const auto source_wmma =
         cdna5::build_vop3p(cdna5::kVWmmaF1616x16x128Fp8Fp8Vop3p,
                            {.vdst = 54, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = accumulator});
@@ -11371,9 +11372,10 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaRejectsNonVgprNonzeroAccumulator) {
     const auto result = translator.translate(source);
     EXPECT_FALSE(result.ok());
     EXPECT_EQ(result.elf_bytes, image);
-    EXPECT_TRUE(rocjitsu::has_error_containing(
-        result, rocjitsu::DiagnosticKind::ExpandFailed,
-        "K=128 WMMA accumulator is not a VGPR range or inline zero"));
+    EXPECT_TRUE(
+        rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
+                                       "K=128 WMMA accumulator is not a VGPR range or inline zero"))
+        << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
   }
 }
 
@@ -12461,6 +12463,52 @@ TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnExcludedBarrierSignalIsfirst) {
   EXPECT_TRUE(rocjitsu::has_error_containing(
       result, rocjitsu::DiagnosticKind::ExpandFailed,
       "s_barrier_signal_isfirst cannot name barrier id -3 (inline selector 195)"));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250RejectsLiteralSpellingOfExcludedBarrierId) {
+  constexpr auto barrier = cdna5::build_sop1(cdna5::kSBarrierSignalIsfirstSop1, {.ssrc0 = 255});
+  constexpr uint32_t kLiteralMinusThree = 0xfffffffdu;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {barrier[0], kLiteralMinusThree, kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_FALSE(result.dispatchable());
+  EXPECT_EQ(result.elf_bytes, image) << "a fail-closed translation must leave the object unchanged";
+  EXPECT_TRUE(
+      rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                     "does not support 32-bit literals at .text byte offset 0"))
+      << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnReservedBarrierSignalSelector) {
+  constexpr uint8_t kReservedSelector = 0;
+  constexpr auto barrier =
+      cdna5::build_sop1(cdna5::kSBarrierSignalIsfirstSop1, {.ssrc0 = kReservedSelector});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({barrier[0], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_FALSE(result.dispatchable());
+  EXPECT_EQ(result.elf_bytes, image) << "a fail-closed translation must leave the object unchanged";
+  EXPECT_TRUE(
+      rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                     "invalid scalar source selector at .text byte offset 0"));
 }
 
 // Every other barrier id must survive translation unchanged. This operand
@@ -14885,11 +14933,9 @@ TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnStandalone32x16Fp4NonVgprMatrixFor
     EXPECT_FALSE(result.ok());
     EXPECT_EQ(result.elf_bytes, image)
         << "a fail-closed translation must leave the object unchanged";
-    // Matched in full rather than by its tail: the scaled caller reports a
-    // message of the same shape, so a suffix would not notice this rule
-    // adopting the other caller's wording.
-    EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
-                                               "gfx1250 32x16 FP4 operands are not VGPR ranges"));
+    EXPECT_TRUE(
+        rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                       "invalid VGPR source selector at .text byte offset 0"));
   }
 }
 
@@ -16623,7 +16669,7 @@ TEST(BinaryTranslatorE2E, Gfx1250ReportsOncePerDeferredMnemonicWithinOneTranslat
 TEST(BinaryTranslatorE2E, Gfx1250ReportsSeparatelyForEachDeferredMnemonic) {
   const uint32_t deferred = gfx1250_deferred_word();
   const uint32_t barrier_state =
-      cdna5::build_sop1(cdna5::kSGetBarrierStateSop1, {.ssrc0 = 0, .sdst = 0})[0];
+      cdna5::build_sop1(cdna5::kSGetBarrierStateSop1, {.ssrc0 = 128, .sdst = 0})[0];
   auto translator = make_gfx1250_b0_to_a0_translator();
   const auto result = translate_gfx1250_b0_to_a0_result(
       translator, {deferred, barrier_state, deferred, barrier_state});
