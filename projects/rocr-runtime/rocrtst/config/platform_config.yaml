@@ -184,6 +184,18 @@ platforms:
       - rocrtstStress.Queue_CAS_Write_Index_ConcurrentTest
       - rocrtstStress.Queue_LoadStore_Write_Index_ConcurrentTest
 
+  # WSL - most tests work, but virtual memory is unsupported
+  WSL:
+    allowed_groups: ["*"]
+    blocked_tests:
+      # Virtual memory tests: hsa_amd_vmem_set_access returns HSA_STATUS_ERROR on WSL
+      - rocrtstFunc.VirtMemory_Accounting_Test
+      - rocrtstFunc.VirtMemory_NonContiguousChunks_Test
+      - rocrtstFunc.VirtMemory_GPUtoHostAccess_Test
+      # Trap handler tests: unsupported on WSL
+      - rocrtstFunc.TrapHandler_Abort
+      - rocrtstFunc.TrapHandler_Generic
+
   # FFM Simulator - only Core and Extended groups allowed
   FFM_SIMULATOR:
     allowed_groups: [Core, Extended]

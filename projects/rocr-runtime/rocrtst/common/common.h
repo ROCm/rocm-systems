@@ -117,6 +117,7 @@ enum class PlatformType {
   REAL_HARDWARE,
   EMULATOR,
   FFM_SIMULATOR,
+  WSL,
   UNKNOWN
 };
 

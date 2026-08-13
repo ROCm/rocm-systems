@@ -90,6 +90,8 @@ bool TestFilterManager::loadConfiguration(const std::string& path) {
           platformType = PlatformType::EMULATOR;
         } else if (platformName == "FFM_SIMULATOR") {
           platformType = PlatformType::FFM_SIMULATOR;
+        } else if (platformName == "WSL") {
+          platformType = PlatformType::WSL;
         } else {
           continue;  // Skip unknown platforms
         }
