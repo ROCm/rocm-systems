@@ -77,6 +77,10 @@ jobs:
       asan_presubmit: true
       # PR test:* labels must not widen the pinned test scope.
       lock_test_labels: true
+      # The sanity check currently reports a LeakSanitizer failure originating
+      # in libamdhip64, which would otherwise hide every hip-tests and rocrtst
+      # result behind it. Sanity still runs and still reports its own status.
+      sanity_blocks_components: false
       # Post-processing that a partial build cannot satisfy.
       validate_artifact_structure: false
       build_native_linux: false
