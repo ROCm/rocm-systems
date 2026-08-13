@@ -823,11 +823,6 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-# Build the torch_trace_collector pybind11 extension and its gtest.
-if(ENABLE_TESTS)
-    add_subdirectory(src/lib/torch_trace_collector)
-endif()
-
 if(TARGET test-roctx-recordfn)
     if(TEST_FROM_INSTALL)
         set(_rcfn_test_cmd tests/test-roctx-recordfn)
@@ -1161,17 +1156,6 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "rooflines*" EXCLUDE
-    PATTERN "__pycache__" EXCLUDE
-)
-# Install the torch_trace_collector sources so the runtime loader can build the
-# extension against the user's PyTorch environment on first use.
-install(
-    DIRECTORY src/lib/torch_trace_collector
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
-    COMPONENT main
-    PATTERN "_build" EXCLUDE
-    PATTERN "build" EXCLUDE
-    PATTERN "tests" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
 # src/roofline

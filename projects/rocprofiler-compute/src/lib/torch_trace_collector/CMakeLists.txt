@@ -2,19 +2,30 @@
 ## SPDX-License-Identifier:  MIT
 ##
 ## Builds the torch-trace-collector library and the torch_trace_collector-<tag>.so pybind
-## module for --torch-trace. Configured in two modes:
-##   A. parent add_subdirectory() under ENABLE_TESTS (CI fixture + gtest).
-##   B. standalone, driven at runtime by
-##      utils/inject_roctx/_backends/torch_cpp_loader.py (JIT build).
-set(_ttc_standalone OFF)
-if(NOT PROJECT_NAME)
-    cmake_minimum_required(VERSION 3.16)
-    project(torch_trace_collector_runtime LANGUAGES CXX)
-    set(_ttc_standalone ON)
+## module for --torch-trace.
+set(BUILD_TORCH_TRACE_COLLECTOR
+    "AUTO"
+    CACHE STRING
+    "Build the torch_trace_collector extension: AUTO, ON (error if torch is absent), OFF"
+)
+set_property(CACHE BUILD_TORCH_TRACE_COLLECTOR PROPERTY STRINGS AUTO ON OFF)
+
+if(NOT BUILD_TORCH_TRACE_COLLECTOR MATCHES "^(AUTO|ON|OFF)$")
+    message(
+        FATAL_ERROR
+        "BUILD_TORCH_TRACE_COLLECTOR must be AUTO, ON or OFF (got "
+        "'${BUILD_TORCH_TRACE_COLLECTOR}')."
+    )
 endif()
 
-if(NOT _ttc_standalone AND NOT ENABLE_TESTS)
+if(BUILD_TORCH_TRACE_COLLECTOR STREQUAL "OFF")
     return()
+endif()
+
+if(BUILD_TORCH_TRACE_COLLECTOR STREQUAL "ON")
+    set(_ttc_unavailable_severity FATAL_ERROR)
+else()
+    set(_ttc_unavailable_severity STATUS)
 endif()
 
 # Interpreter used for the torch/python probe below.
@@ -31,17 +42,15 @@ endif()
 
 if(NOT _ttc_python)
     message(
-        STATUS
-        "torch_trace_collector: skipping build (no Python3 interpreter available); "
-        "torch-trace tests will skip."
+        ${_ttc_unavailable_severity}
+        "torch_trace_collector: no Python3 interpreter available; the extension is "
+        "not built."
     )
     return()
 endif()
 
 # Probe the environment for python/torch metadata and the source fingerprint.
-# Exit code 3 means torch or torch.utils.cpp_extension is unavailable and the
-# build is skipped. ERROR_VARIABLE captures the probe's stderr, so the skip
-# branch has to print it or the reason is never seen.
+# Exit code 3 means torch or torch.utils.cpp_extension is unavailable.
 execute_process(
     COMMAND "${_ttc_python}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/probe_torch.py"
     OUTPUT_VARIABLE _ttc_probe
@@ -51,10 +60,9 @@ execute_process(
 )
 if(_ttc_probe_rc EQUAL 3)
     message(
-        STATUS
-        "torch_trace_collector: skipping build (torch or torch.utils.cpp_extension "
-        "not importable in ${_ttc_python}); torch-trace tests will "
-        "skip.\n${_ttc_probe_err}"
+        ${_ttc_unavailable_severity}
+        "torch_trace_collector: torch or torch.utils.cpp_extension is not importable "
+        "in ${_ttc_python}; the extension is not built.\n${_ttc_probe_err}"
     )
     return()
 elseif(NOT _ttc_probe_rc EQUAL 0)
@@ -259,15 +267,13 @@ target_compile_options(
 )
 set_target_properties(${_so_name} PROPERTIES PREFIX "")
 
-if(NOT _ttc_standalone)
-    # The loader globs lib*/rocprofiler-compute/ for this artifact.
-    install(
-        TARGETS ${_so_name}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
-    )
-endif()
+# The loader globs lib*/rocprofiler-compute/ for this artifact.
+install(
+    TARGETS ${_so_name}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
+)
 
-if(NOT _ttc_standalone AND ENABLE_TESTS AND TARGET gtest_main)
+if(ENABLE_TESTS AND TARGET gtest_main)
     add_subdirectory(tests)
 endif()
 
