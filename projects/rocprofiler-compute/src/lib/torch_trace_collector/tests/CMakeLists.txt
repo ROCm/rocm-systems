@@ -62,7 +62,7 @@ if(INSTALL_TESTS)
     install(
         TARGETS ${target}
         RUNTIME
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${CMAKE_PROJECT_NAME}/tests
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocprofiler-compute/tests
             COMPONENT tests
     )
 endif()
