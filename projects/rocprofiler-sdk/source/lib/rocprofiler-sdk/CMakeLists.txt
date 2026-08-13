@@ -78,6 +78,33 @@ target_compile_definitions(
     PRIVATE rocprofiler_EXPORTS=1
             $<$<BOOL:${ROCPROFILER_BUILD_AQLPROFILE}>:ROCPROFILER_BUILD_AQLPROFILE=1>)
 
+find_package(rocprof-trace-decoder QUIET)
+# NOTE: guard on DEFINED, not truthiness. The decoder's major version is 0, and CMake's
+# if(<var>) treats a value of "0" as a false constant, so a plain
+# "if(... AND rocprof-trace-decoder_VERSION_MAJOR)" would skip this block entirely.
+if(rocprof-trace-decoder_FOUND AND DEFINED rocprof-trace-decoder_VERSION_MAJOR)
+    target_compile_definitions(
+        rocprofiler-sdk-object-library
+        PRIVATE
+            "ROCPROFILER_ATT_DECODER_SOVERSION=\"${rocprof-trace-decoder_VERSION_MAJOR}.${rocprof-trace-decoder_VERSION_MINOR}\""
+    )
+else()
+    # The decoder is a runtime dlopen dependency, so we intentionally
+    # keep discovery soft (QUIET, not REQUIRED) to avoid forcing a hard build-time
+    # dependency on decoder-less builds. But without the version we cannot form the
+    # versioned SONAME, so the loader would only try the unversioned
+    # 'librocprof-trace-decoder.so' and regress on runtime-only installs.
+    # Fail loudly here so a misconfigured build is caught instead of silently shipping
+    # the bug.
+    message(
+        WARNING
+        "rocprof-trace-decoder package/version not found: "
+        "ROCPROFILER_ATT_DECODER_SOVERSION will not be defined. The ATT decoder loader "
+        "will only try the unversioned 'librocprof-trace-decoder.so' and will fail to "
+        "load the versioned decoder on runtime-only ROCm installs. Ensure "
+        "the rocprof-trace-decoder CMake config is on CMAKE_PREFIX_PATH.")
+endif()
+
 set_target_properties(rocprofiler-sdk-object-library PROPERTIES POSITION_INDEPENDENT_CODE
                                                                 ON)
 
