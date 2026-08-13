@@ -1838,7 +1838,12 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     // Phase 3: allgather directly into the user's receive window.
     batchOpsParams.numOps = 0;
     myRecvSlot = (uint8_t*)recvbuff + (size_t)comm->rank * shardBytes;
-    const size_t recvWindowOffset = (size_t)((uint8_t*)recvbuff - (uint8_t*)recvWin->userPtr);
+    size_t recvWindowOffset = (size_t)((uint8_t*)recvbuff - (uint8_t*)recvWin->userPtr);
+#ifdef ENABLE_FAULT_INJECTION
+    if (comm->ceColl.ceFaults & CE_FAULT_LEGACY_RECV_OFFSET) {
+      recvWindowOffset = 0;
+    }
+#endif
     recvSlotOffset = recvWindowOffset + (size_t)comm->rank * shardBytes;
 
     // The reduce kernel writes the reduced shard straight into recvbuff, so outShard and

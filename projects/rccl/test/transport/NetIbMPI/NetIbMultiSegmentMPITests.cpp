@@ -86,6 +86,21 @@ protected:
         return true;
     }
 
+    static void FillDeviceConstant(void* dptr, size_t size, uint8_t value) {
+        if (size == 0) return;
+        ASSERT_EQ(hipMemset(dptr, value, size), hipSuccess);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    }
+
+    static bool VerifyDeviceConstant(void* dptr, size_t size, uint8_t value) {
+        if (size == 0) return true;
+        std::vector<uint8_t> h(size, 0);
+        if (hipMemcpy(h.data(), dptr, size, hipMemcpyDeviceToHost) != hipSuccess) return false;
+        for (uint8_t byte : h)
+            if (byte != value) return false;
+        return true;
+    }
+
     // One-directional transfer (rank1 -> rank0) with independent source and
     // destination registration-relative offsets. This is the general form
     // required by DeepEP-style per-peer window layouts.
@@ -120,17 +135,40 @@ protected:
         SendRecvChunkAtOffsets(pair, sBuf, rBuf, off, off, size, tag, seed);
     }
 
+    void SendRecvChunkAtOffsetsChecked(ConnectionPair& pair, void* sBuf, void* rBuf,
+                                       size_t totalSize, size_t srcOff, size_t dstOff,
+                                       size_t size, int tag, uint8_t seed, uint8_t sentinel) {
+        const int rank = MPIEnvironment::world_rank;
+        if (rank == 0) FillDeviceConstant(rBuf, totalSize, sentinel);
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        SendRecvChunkAtOffsets(pair, sBuf, rBuf, srcOff, dstOff, size, tag, seed);
+
+        if (rank == 0) {
+            EXPECT_TRUE(VerifyDeviceConstant(rBuf, dstOff, sentinel))
+                << "bytes before destination were overwritten";
+            EXPECT_TRUE(VerifyDeviceConstant(static_cast<uint8_t*>(rBuf) + dstOff + size,
+                                             totalSize - dstOff - size, sentinel))
+                << "bytes after destination were overwritten";
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
     // Common setup: prerequisites, GDR, allocate an nSeg window, connect, and
     // register it through the multi-segment entry point. Returns false if any
     // precondition is unmet; when the failure is a graceful skip it records
     // skipReason_ so the caller can GTEST_SKIP() from the test body (GTEST_SKIP
     // expands to a void return and cannot be used inside this bool helper).
     // Use SETUP_OR_SKIP() at the call site to honor a recorded skip.
-    bool SetupRegistered(int nSeg, ConnectionPair& pair, NetConnectionGuard& guard, void** mh, void** comm) {
+    bool SetupRegistered(int nSeg, ConnectionPair& pair, NetConnectionGuard& guard,
+                         void** mh, void** comm, int minNodes = kMinGpusPerNode) {
         skipReason_.clear();
         if (!validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                       false, kMinGpusPerNode, kNoNodeLimit))
+                                       false, minNodes, kNoNodeLimit)) {
+            if (minNodes > kMinGpusPerNode)
+                skipReason_ = "test requires ranks on at least two nodes";
             return false;
+        }
         int ndev = 0; AssertInitAndGetDevices(&ndev);
         if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) {
             skipReason_ = "DMA-BUF registration not supported";
@@ -222,6 +260,41 @@ TEST_F(NetIbMultiSegmentMPITest, CrossBoundaryTransferSucceeds) {
     const size_t off  = lastBuf_->segSize - 65536;
     const size_t size = 131072;
     SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, off, size, /*tag=*/400, /*seed=*/0xC3);
+}
+
+// MULTI-NODE STRESS: repeatedly cross independently selected source and
+// destination boundaries in an 8-segment window. The destination is reset to a
+// sentinel on every iteration so incorrect WR splitting, lkey/rkey selection,
+// or length accounting is detected as payload corruption or an adjacent write.
+TEST_F(NetIbMultiSegmentMPITest, DeepEP_MultiNodeAsymmetricCrossBoundaryStress) {
+    constexpr int kWideSegments = 8;
+    constexpr int kIterations   = 32;
+
+    ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
+    if (!SetupRegistered(kWideSegments, pair, guard, &mh, &comm, /*minNodes=*/2))
+        SETUP_OR_SKIP();
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+    sendMh_ = recvMh_ = mh;
+
+    const size_t seg = lastBuf_->segSize;
+    const size_t total = lastBuf_->totalSize;
+    const std::vector<size_t> edgeWidths = {
+        size_t{1}, size_t{63}, size_t{4095}, size_t{65535}, size_t{131071}
+    };
+
+    for (int i = 0; i < kIterations; ++i) {
+        const int srcBoundary = 1 + (i % (kWideSegments - 1));
+        const int dstBoundary = 1 + ((i * 5 + 1) % (kWideSegments - 1));
+        const size_t left = edgeWidths[static_cast<size_t>(i) % edgeWidths.size()];
+        const size_t right = edgeWidths[static_cast<size_t>(i + 2) % edgeWidths.size()];
+        const size_t srcOff = static_cast<size_t>(srcBoundary) * seg - left;
+        const size_t dstOff = static_cast<size_t>(dstBoundary) * seg - left;
+        const size_t size = left + right;
+
+        SendRecvChunkAtOffsetsChecked(pair, lastBuf_->ptr, lastBuf_->ptr, total,
+                                      srcOff, dstOff, size, /*tag=*/800 + i,
+                                      static_cast<uint8_t>(0x20 + i), /*sentinel=*/0xE5);
+    }
 }
 
 // OPTION B: a single transfer spanning the ENTIRE multi-segment buffer (crosses

@@ -388,6 +388,74 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_EngramMixedWindowIGet)
     Barrier();
 }
 
+// Multi-node stress form of the DeepEP Engram fetch pattern. The registered
+// window is [GPU receive area][CPU Engram storage] at DeepEP's 2 MiB alignment.
+// Each IGet reads a changing non-zero remote CPU offset into an unrelated local
+// GPU offset, while sentinels ensure the GPU receive area is not over-written.
+TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
+{
+    if (!SetUpFixture(2, 2)) return;
+    if (MPIEnvironment::cached_multi_node_result != 1)
+        GTEST_SKIP() << "requires exactly one rank on each of two nodes";
+
+    constexpr size_t kMiB       = 1024 * 1024;
+    constexpr size_t kGpuBytes  = 8 * kMiB;
+    constexpr size_t kCpuBytes  = 4 * kMiB;
+    constexpr int    kIterations = 32;
+    constexpr uint8_t kSentinel = 0xD9;
+    const std::vector<size_t> payloadSizes = {
+        size_t{1}, size_t{63}, size_t{4095}, size_t{4096},
+        size_t{65535}, size_t{65536}, size_t{131072}, size_t{262144}
+    };
+
+    MultiSegmentVmmBuffer* window = AllocDeepEpElastic(kGpuBytes, kCpuBytes);
+    if (SyncSkip(window == nullptr))
+        GTEST_SKIP() << "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime";
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    if (SyncSkip(!AllTookMultiSegPath()))
+        GTEST_SKIP() << "DeepEP window did not take the multi-segment GIN registration path";
+
+    for (int i = 0; i < kIterations; ++i)
+    {
+        const size_t len = payloadSizes[static_cast<size_t>(i) % payloadSizes.size()];
+        const size_t remoteSpan = kCpuBytes - len - 4096;
+        const size_t localSpan = kGpuBytes - len - 65536;
+        const size_t remoteOff = kGpuBytes + 4096 +
+                                 (static_cast<size_t>(i) * 131071) % remoteSpan;
+        const size_t localOff = 65536 +
+                                (static_cast<size_t>(i) * 65537) % localSpan;
+        const uint8_t seed = static_cast<uint8_t>(0x40 + i);
+
+        if (worldRank_ == 1)
+            FillBuf(static_cast<uint8_t*>(window->ptr) + remoteOff, len, seed);
+        if (worldRank_ == 0)
+            FillSentinel(window->ptr, kGpuBytes, kSentinel);
+
+        Barrier();
+        if (worldRank_ == 0)
+        {
+            void* req = nullptr;
+            ASSERT_EQ(ncclSuccess,
+                      rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
+                                 localOff, mh, /*peerRank=*/1, &req))
+                << "DeepEP Engram IGet post failed at iteration " << i;
+            ASSERT_TRUE(PollUntilDone(req))
+                << "DeepEP Engram IGet stalled at iteration " << i;
+            EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(window->ptr) + localOff,
+                                  len, seed))
+                << "DeepEP Engram payload mismatch at iteration " << i;
+            EXPECT_TRUE(AllSentinel(window->ptr, localOff, kSentinel))
+                << "bytes before DeepEP fetch destination were overwritten";
+            EXPECT_TRUE(AllSentinel(static_cast<uint8_t*>(window->ptr) + localOff + len,
+                                    kGpuBytes - localOff - len, kSentinel))
+                << "bytes after DeepEP fetch destination were overwritten";
+        }
+        Barrier();
+    }
+}
+
 // Receiver-side flush over a multi-segment buffer: after a plain iput, rank 1
 // must fence EVERY physical segment via iflush (one loopback read per segment)
 // before reading. Exercises the multi-segment flush path; a segment-0-only
@@ -1021,6 +1089,73 @@ TEST_F(RmaMultiSegmentMPITest, BoundaryStressNoCorruption)
     if (worldRank_ == 1)
         EXPECT_TRUE(VerifyBuf(rb->ptr, total, /*seed=*/0xAB))
             << "full multi-segment window transfer corrupted data";
+}
+
+// MULTI-NODE IGET STRESS: DeepEP-style operations use independent remote and
+// local offsets. Repeatedly cross a different physical boundary on each side,
+// exercising remote rkey and local lkey selection while sentinels detect writes
+// outside the requested destination range.
+TEST_F(RmaMultiSegmentMPITest, MultiNodeAsymmetricIGetBoundaryStress)
+{
+    if (!SetUpFixture(2, 2)) return;
+    if (MPIEnvironment::cached_multi_node_result != 1)
+        GTEST_SKIP() << "requires exactly one rank on each of two nodes";
+
+    constexpr int kWideSegments = 8;
+    constexpr int kIterations   = 32;
+    MultiSegmentVmmBuffer* sb = AllocSym(kWideSegments, kSegRequestBytes);
+    MultiSegmentVmmBuffer* rb = AllocSym(kWideSegments, kSegRequestBytes);
+    if (SyncSkip(sb == nullptr || rb == nullptr))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t total = sb->totalSize;
+    const size_t seg = sb->segSize;
+    constexpr uint8_t kSentinel = 0xA7;
+    const std::vector<size_t> edgeWidths = {
+        size_t{1}, size_t{63}, size_t{4095}, size_t{65535}, size_t{131071}
+    };
+
+    void *srcMh, *srcGh, *dstMh, *dstGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, total, &srcMh, &srcGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, total, &dstMh, &dstGh));
+    if (SyncSkip(!AllTookMultiSegPath()))
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    for (int i = 0; i < kIterations; ++i)
+    {
+        const int remoteBoundary = 1 + (i % (kWideSegments - 1));
+        const int localBoundary = 1 + ((i * 3 + 2) % (kWideSegments - 1));
+        const size_t left = edgeWidths[static_cast<size_t>(i) % edgeWidths.size()];
+        const size_t right = edgeWidths[static_cast<size_t>(i + 3) % edgeWidths.size()];
+        const size_t remoteOff = static_cast<size_t>(remoteBoundary) * seg - left;
+        const size_t localOff = static_cast<size_t>(localBoundary) * seg - left;
+        const size_t len = left + right;
+        const uint8_t seed = static_cast<uint8_t>(0x30 + i);
+
+        if (worldRank_ == 1)
+            FillBuf(static_cast<uint8_t*>(sb->ptr) + remoteOff, len, seed);
+        if (worldRank_ == 0)
+            FillSentinel(rb->ptr, total, kSentinel);
+
+        Barrier();
+        if (worldRank_ == 0)
+        {
+            void* req = nullptr;
+            ASSERT_EQ(ncclSuccess,
+                      rma_->iget(rmaCtx_, 0, remoteOff, srcMh, len,
+                                 localOff, dstMh, /*peerRank=*/1, &req))
+                << "iget post failed at iteration " << i;
+            ASSERT_TRUE(PollUntilDone(req)) << "iget stalled at iteration " << i;
+            EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(rb->ptr) + localOff, len, seed))
+                << "payload mismatch at iteration " << i;
+            EXPECT_TRUE(AllSentinel(rb->ptr, localOff, kSentinel))
+                << "bytes before local destination were overwritten at iteration " << i;
+            EXPECT_TRUE(AllSentinel(static_cast<uint8_t*>(rb->ptr) + localOff + len,
+                                    total - localOff - len, kSentinel))
+                << "bytes after local destination were overwritten at iteration " << i;
+        }
+        Barrier();
+    }
 }
 
 } // namespace RCCLRmaTests

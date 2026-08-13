@@ -191,6 +191,22 @@
         }
       ]
     },
+    "multisegment_host_boundary_math": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "MultiSegment_HostBoundaryMath_All",
+          "description": "All host-only classic NET/IB segment selection and split arithmetic tests",
+          "test_filter": "NetIbMultiSeg.*:NetIbSplit.*"
+        }
+      ]
+    },
     "ubr_multisegment_comprehensive": {
       "extends": "default",
       "is_gtest": true,
@@ -215,19 +231,48 @@
           "test_filter": "UBR_MultiSegment.Generic"
         },
         {
+          "name": "UBR_MultiSegment_Generic_Reuse_BEFORE",
+          "description": "BEFORE control: CE reuses its collective plan, so the second identical AllReduce bypasses the IPC/NET registration cache",
+          "test_filter": "UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "1"
+          }
+        },
+        {
           "name": "UBR_MultiSegment_Generic_Reuse",
-          "description": "Register once, AllReduce twice - exercises the multi-segment registration reuse fast path (IPC or NET reuse)",
-          "test_filter": "UBR_MultiSegment.Generic_Reuse"
+          "description": "AFTER regression: CE disabled so the second identical AllReduce must hit the IPC/NET registration cache",
+          "test_filter": "UBR_MultiSegment.Generic_Reuse",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_PROTO": "Simple"
+          }
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Lsa",
-          "description": "Multi-segment registration on the symmetric-window LSA path (ncclCommWindowRegister, NCCL_WIN_COLL_SYMMETRIC)",
-          "test_filter": "UBR_MultiSegment.Symmetric_Lsa"
+          "description": "AFTER regression: CE AllReduce addresses a receive buffer at a non-zero symmetric-window offset correctly",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "1"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Lsa_BEFORE",
+          "description": "BEFORE control: fault-injected legacy CE receive-offset calculation reproduces symmetric LSA result corruption",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "1"
+          }
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
           "description": "LSA-only elastic buffer: symmetric window with a host-backed trailing segment (NCCL_ELASTIC_BUFFER_REGISTER=1)",
           "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa"
+        },
+        {
+          "name": "UBR_MultiSegment_DeepEP_ElasticWindowRegistration",
+          "description": "DeepEP [GPU][CPU] elastic window registration with strict ordering and local LSA pointer resolution",
+          "test_filter": "UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Elastic_Gating",
@@ -262,6 +307,29 @@
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
           "description": "Cross-node ReduceScatter over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
           "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
+        }
+      ]
+    },
+    "multisegment_transport_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2"
+      },
+      "tests": [
+        {
+          "name": "MultiSegment_Transport_All_MultiNode",
+          "description": "All classic NET/IB and GIN multi-segment tests, including DeepEP patterns, cross-boundary sweeps, flushes, stress, and negative coverage",
+          "test_filter": "NetIbMultiSegmentMPITest.*:GinMultiSegmentMPITest.*"
         }
       ]
     },
@@ -3847,6 +3915,30 @@
       "name": "P2P Tests - Complete Suite",
       "description": "All peer-to-peer transport tests (single node)",
       "config": "p2p_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Host Boundary Math",
+      "description": "Host-only segment selection and split arithmetic",
+      "config": "multisegment_host_boundary_math",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Registration and LSA",
+      "description": "All single-node UBR, symmetric-window, elastic, and DeepEP registration tests",
+      "config": "ubr_multisegment_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Classic NET/IB and GIN (Multi-Node)",
+      "description": "All classic and GIN transport tests, including DeepEP and boundary stress",
+      "config": "multisegment_transport_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - LSA plus GIN (Multi-Node)",
+      "description": "Four-rank combined intra-node LSA and inter-node GIN coverage",
+      "config": "ubr_multisegment_lsagin_multinode",
       "enabled": true
     },
     {
