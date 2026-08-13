@@ -112,7 +112,7 @@ void thread_run(const int iThread) {
   // Lauching kernel from host
   hipLaunchKernelGGL(
       matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
-      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix, gpuMatrix, WIDTH);
+      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, nullptr, gpuTransposeMatrix, gpuMatrix, WIDTH);
   // Record the stop event
   HIP_CHECK_THREAD(hipEventRecord(stop));
 

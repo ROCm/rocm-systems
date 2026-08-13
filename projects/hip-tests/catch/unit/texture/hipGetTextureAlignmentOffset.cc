@@ -42,7 +42,7 @@ HIP_TEST_CASE(Unit_hipGetTextureAlignmentOffset_Positive) {
  * Test Description
  * ------------------------
  *    - Negative test for hipGetTextureAlignmentOffset
- *    - Test should give invalid error if one of params is NULL
+ *    - Test should give invalid error if one of params is nullptr
  * Test source
  * ------------------------
  *    - unit/texture/hipGetTextureAlignmentOffset.cc

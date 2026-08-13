@@ -84,7 +84,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_SetGet) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemRelease(handle))
   // Set access
@@ -159,7 +159,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_MultDevSetGet) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemRelease(handle))
   // Set access
@@ -222,7 +222,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_EntireVMMRangeSetGet) {
   void* ptrA;
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemRelease(handle))
   // Set access
@@ -280,7 +280,7 @@ HIP_TEST_CASE(Unit_hipMemGetAccess_NegTst) {
   void* ptrA;
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemRelease(handle))
   // Set access
@@ -348,7 +348,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_FuncTstOnMultDev) {
     hipMemGenericAllocationHandle_t handle;
     HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
     // Allocate virtual address range
-    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
     HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
     HIP_CHECK(hipMemRelease(handle))
     // Set access
@@ -420,7 +420,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_ChangeAccessProp) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate num_buf virtual address ranges
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   hipMemAccessDesc accessDesc = {};
   accessDesc.location.type = hipMemLocationTypeDevice;
@@ -503,7 +503,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_SegmentsAccess) {
   const size_t total_size = segment0_size + segment1_size + segment2_size;
 
   void* base = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&base, total_size, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&base, total_size, 0, nullptr, 0))
 
   auto* base_c = reinterpret_cast<char*>(base);
   void* segment_0 = base_c;
@@ -630,7 +630,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2UnifiedMemCpy) {
   void *ptrA, *ptrB;
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemRelease(handle))
   // Set access
@@ -701,7 +701,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2DevMemCpy) {
   void *ptrA, *ptrB;
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemRelease(handle))
   // Set access
@@ -766,7 +766,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2PeerDevMemCpy) {
   void* ptrA;
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemRelease(handle))
   // Set access
@@ -856,7 +856,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy) {
   void* ptrA;
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemRelease(handle))
   // Set access
@@ -947,8 +947,8 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2VMMMemCpy) {
   HIP_CHECK(hipMemCreate(&handle2, size_mem, &prop, 0))
   // Allocate virtual address range
   void *ptrA, *ptrB;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
-  HIP_CHECK(hipMemAddressReserve(&ptrB, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrB, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle1, 0))
   HIP_CHECK(hipMemMap(ptrB, size_mem, 0, handle2, 0))
   HIP_CHECK(hipMemRelease(handle1))
@@ -1017,7 +1017,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemRelease(handle))
   // Set access
@@ -1062,7 +1062,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy) {
     HIP_CHECK(hipMemCreate(&handle_loc, size_mem_loc, &prop_loc, 0))
     // Allocate virtual address range
     void* ptrB;
-    HIP_CHECK(hipMemAddressReserve(&ptrB, size_mem_loc, 0, 0, 0))
+    HIP_CHECK(hipMemAddressReserve(&ptrB, size_mem_loc, 0, nullptr, 0))
     HIP_CHECK(hipMemMap(ptrB, size_mem_loc, 0, handle_loc, 0))
     HIP_CHECK(hipMemRelease(handle_loc))
     // Set access
@@ -1167,7 +1167,7 @@ class vmm_resize_class {
     // Unmap and Free the old vmm
     HIP_CHECK(hipMemUnmap(ptrVmm, current_size_rounded_tot))
     HIP_CHECK(hipMemAddressFree(ptrVmm, current_size_rounded_tot))
-    HIP_CHECK(hipMemAddressReserve(&ptrVmm, (size_rounded + current_size_rounded_tot), 0, 0, 0))
+    HIP_CHECK(hipMemAddressReserve(&ptrVmm, (size_rounded + current_size_rounded_tot), 0, nullptr, 0))
     int idx = 0;
     for (hipMemGenericAllocationHandle_t& myhandle : vhandle) {
       if (idx == 0) {
@@ -1363,7 +1363,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_negative) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
   void* ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   // Set access
   hipMemAccessDesc accessDesc = {};
@@ -1419,7 +1419,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_negative) {
 
   SECTION("uninitialized virtual memory") {
     void* ptrB;
-    HIP_CHECK(hipMemAddressReserve(&ptrB, size_mem, 0, 0, 0))
+    HIP_CHECK(hipMemAddressReserve(&ptrB, size_mem, 0, nullptr, 0))
     REQUIRE(hipMemSetAccess(ptrB, size_mem, &accessDesc, 1) == hipErrorInvalidValue);
     HIP_CHECK(hipMemAddressFree(ptrB, size_mem))
   }
@@ -1459,7 +1459,7 @@ HIP_TEST_CASE(Unit_hipMemSetGetAccess_Capture) {
   HIP_CHECK(hipMemCreate(&mem_handle, vmm_bytes, &alloc_prop, 0))
 
   void* vmm_ptr = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&vmm_ptr, vmm_bytes, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&vmm_ptr, vmm_bytes, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(vmm_ptr, vmm_bytes, 0, mem_handle, 0))
   HIP_CHECK(hipMemRelease(mem_handle))
 
@@ -1518,7 +1518,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccessHostDevice_hostalloc) {
 
   // Reserve VA and map
   void* addr = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&addr, mapSize, 0 /*align*/, 0 /*addr*/, 0 /*flags*/))
+  HIP_CHECK(hipMemAddressReserve(&addr, mapSize, 0 /*align*/, nullptr /*addr*/, 0 /*flags*/))
 
   HIP_CHECK(hipMemMap(addr, mapSize, 0 /*offset*/, handle, 0 /*flags*/))
 
@@ -1590,7 +1590,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccessHost_devicealloc) {
 
   // Reserve VA and map
   void* addr = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&addr, mapSize, 0 /*align*/, 0 /*addr*/, 0 /*flags*/))
+  HIP_CHECK(hipMemAddressReserve(&addr, mapSize, 0 /*align*/, nullptr /*addr*/, 0 /*flags*/))
 
   HIP_CHECK(hipMemMap(addr, mapSize, 0 /*offset*/, handle, 0 /*flags*/))
 

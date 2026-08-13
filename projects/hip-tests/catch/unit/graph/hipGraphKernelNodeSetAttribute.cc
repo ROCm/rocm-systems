@@ -57,7 +57,7 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow) {
   node_attribute_1.accessPolicyWindow.base_ptr = reinterpret_cast<void*>(A_d);
   node_attribute_1.accessPolicyWindow.num_bytes =
       std::min<unsigned long>(static_cast<unsigned long>(max_window_size), sizeof(int) * N);
-  node_attribute_1.accessPolicyWindow.hitRatio = 0.6;
+  node_attribute_1.accessPolicyWindow.hitRatio = 0.6f;
   node_attribute_1.accessPolicyWindow.hitProp = hit_prop;
   node_attribute_1.accessPolicyWindow.missProp = miss_prop;
 
@@ -150,7 +150,7 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters) {
   node_attribute.accessPolicyWindow.base_ptr = reinterpret_cast<void*>(A_d);
   node_attribute.accessPolicyWindow.num_bytes =
       std::min<unsigned long>(static_cast<unsigned long>(max_window_size), sizeof(int) * N);
-  node_attribute.accessPolicyWindow.hitRatio = 0.6;
+  node_attribute.accessPolicyWindow.hitRatio = 0.6f;
   node_attribute.accessPolicyWindow.hitProp = hipAccessPropertyPersisting;
   node_attribute.accessPolicyWindow.missProp = hipAccessPropertyStreaming;
 
@@ -190,14 +190,14 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters) {
   }
 
   SECTION("accessPolicyWindow.hitRatio < 0") {
-    node_attribute.accessPolicyWindow.hitRatio = -0.6;
+    node_attribute.accessPolicyWindow.hitRatio = -0.6f;
     HIP_CHECK_ERROR(hipGraphKernelNodeSetAttribute(
                         graph_node, hipKernelNodeAttributeAccessPolicyWindow, &node_attribute),
                     hipErrorInvalidValue);
   }
 
   SECTION("accessPolicyWindow.hitRatio > 1.0") {
-    node_attribute.accessPolicyWindow.hitRatio = 1.1;
+    node_attribute.accessPolicyWindow.hitRatio = 1.1f;
     HIP_CHECK_ERROR(hipGraphKernelNodeSetAttribute(
                         graph_node, hipKernelNodeAttributeAccessPolicyWindow, &node_attribute),
                     hipErrorInvalidValue);

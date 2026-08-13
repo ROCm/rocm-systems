@@ -25,7 +25,7 @@
 static constexpr auto element_count{512 * 1024 * 1024};
 static constexpr size_t kOneGiB{1024ULL * 1024ULL * 1024ULL};
 
-__global__ void validateGPU(int* const vec, const int value, size_t N, unsigned int* mismatch) {
+static __global__ void validateGPU(int* const vec, const int value, size_t N, unsigned int* mismatch) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (idx < N) {
@@ -816,7 +816,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_2) {
     allocParam.poolProps.location.id = i;
     allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-    HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, NULL, 0, &allocParam))
+    HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam))
     REQUIRE(allocParam.dptr != nullptr);
     HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph, &allocNodeA, 1,
                                      reinterpret_cast<void*>(allocParam.dptr)));
@@ -1353,7 +1353,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph) {
   hipGraph_t graph, graph_2, clone_graph, clone_graph_2;
   hipGraphExec_t graphExec, graphExec_2;
   hipStream_t stream;
-  hipGraphNode_t allocNodeA, freeNodeA, freeNodeB;
+  hipGraphNode_t allocNodeA, freeNodeA, freeNodeB = nullptr;
   hipMemAllocNodeParams allocParam;
   hipError_t ret;
 

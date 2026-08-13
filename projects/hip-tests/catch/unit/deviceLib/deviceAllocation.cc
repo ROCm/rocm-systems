@@ -682,7 +682,7 @@ static bool TestAlloc_Load_SingleKer_AllocFree(int test_type, int value,
 
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipModuleLaunchKernel(Function, GRIDSIZE, 1, 1, BLOCKSIZE, 1, 1, 0, stream, NULL,
+  HIP_CHECK(hipModuleLaunchKernel(Function, GRIDSIZE, 1, 1, BLOCKSIZE, 1, 1, 0, stream, nullptr,
                                   reinterpret_cast<void**>(&config)));
   HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer
@@ -762,13 +762,13 @@ static bool TestAlloc_Load_MultKernels(int test_type, int value) {
   void* config3[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args3, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size3,
                      HIP_LAUNCH_PARAM_END};
   // Launch ker_Alloc_MultCodeObj
-  HIP_CHECK(hipModuleLaunchKernel(FunctionAlloc, GRIDSIZE, 1, 1, BLOCKSIZE, 1, 1, 0, stream, NULL,
+  HIP_CHECK(hipModuleLaunchKernel(FunctionAlloc, GRIDSIZE, 1, 1, BLOCKSIZE, 1, 1, 0, stream, nullptr,
                                   reinterpret_cast<void**>(&config1)));
   // Launch ker_Write_MultCodeObj
-  HIP_CHECK(hipModuleLaunchKernel(FunctionAcess, GRIDSIZE, 1, 1, BLOCKSIZE, 1, 1, 0, stream, NULL,
+  HIP_CHECK(hipModuleLaunchKernel(FunctionAcess, GRIDSIZE, 1, 1, BLOCKSIZE, 1, 1, 0, stream, nullptr,
                                   reinterpret_cast<void**>(&config2)));
   // Launch ker_Free_MultCodeObj
-  HIP_CHECK(hipModuleLaunchKernel(FunctionFree, GRIDSIZE, 1, 1, BLOCKSIZE, 1, 1, 0, stream, NULL,
+  HIP_CHECK(hipModuleLaunchKernel(FunctionFree, GRIDSIZE, 1, 1, BLOCKSIZE, 1, 1, 0, stream, nullptr,
                                   reinterpret_cast<void**>(&config3)));
   HIP_CHECK(hipDeviceSynchronize())
   // Copy to host buffer

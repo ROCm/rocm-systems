@@ -42,7 +42,7 @@ inline void testHipMemset3DApis(hipPitchedPtr& pitchedDevPtr, int value, const h
 }
 
 HIP_TEST_CASE(Unit_hipMemset_Negative_InvalidPtr) {
-  void* dst;
+  void* dst = nullptr;
 
   SECTION("Uninitialized Dst") {}
   SECTION("Nullptr as dst") { dst = nullptr; }
@@ -77,7 +77,7 @@ HIP_TEST_CASE(Unit_hipMemset_Negative_OutOfBoundsPtr) {
 }
 
 HIP_TEST_CASE(Unit_hipMemset2D_Negative_InvalidPtr) {
-  void* dst;
+  void* dst = nullptr;
   SECTION("Uninitialized Dst") {}
   SECTION("Nullptr as Dst") { dst = nullptr; }
 

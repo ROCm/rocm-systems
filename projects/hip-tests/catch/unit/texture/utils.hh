@@ -25,7 +25,7 @@ class TextureGuard {
   hipTextureObject_t object() const { return tex_obj_; }
 
  private:
-  hipTextureObject_t tex_obj_ = 0;
+  hipTextureObject_t tex_obj_ = nullptr;
 };
 
 template <typename T> std::enable_if_t<std::is_integral_v<T>, float> NormalizeInteger(const T x) {

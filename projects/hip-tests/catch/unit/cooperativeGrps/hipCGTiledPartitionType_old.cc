@@ -64,7 +64,7 @@ template <unsigned int tile_size>
 __global__ void kernel_cg_group_partition_static(int* result, bool is_global_mem, int* global_mem) {
   cg::thread_block thread_block_CG_ty = cg::this_thread_block();
 
-  int* workspace = NULL;
+  int* workspace = nullptr;
 
   if (is_global_mem) {
     workspace = global_mem;
@@ -115,7 +115,7 @@ __global__ void kernel_cg_group_partition_dynamic(unsigned int tile_size, int* r
                                                   bool is_global_mem, int* global_mem) {
   cg::thread_block thread_block_CG_ty = cg::this_thread_block();
 
-  int* workspace = NULL;
+  int* workspace = nullptr;
 
   if (is_global_mem) {
     workspace = global_mem;
@@ -216,15 +216,15 @@ template <typename F> static void common_group_partition(F kernel_func, unsigned
     expected_sum[i - 1] = temp - sum;
   }
 
-  int* result_dev = NULL;
+  int* result_dev = nullptr;
   HIP_CHECK(hipMalloc((void**)&result_dev, num_tiles * sizeof(int)))
 
-  int* global_mem = NULL;
+  int* global_mem = nullptr;
   if (use_global_mem) {
     HIP_CHECK(hipMalloc((void**)&global_mem, threads_per_blk * sizeof(int)))
   }
 
-  int* result_host = NULL;
+  int* result_host = nullptr;
   HIP_CHECK(hipHostMalloc(&result_host, num_tiles * sizeof(int), hipHostMallocDefault))
   memset(result_host, 0, num_tiles * sizeof(int));
 
@@ -234,12 +234,12 @@ template <typename F> static void common_group_partition(F kernel_func, unsigned
 
   if (use_global_mem) {
     // Launch Kernel
-    HIP_CHECK(hipLaunchCooperativeKernel(kernel_func, block_size, threads_per_blk, params, 0, 0))
+    HIP_CHECK(hipLaunchCooperativeKernel(kernel_func, block_size, threads_per_blk, params, 0, nullptr))
     HIP_CHECK(hipDeviceSynchronize())
   } else {
     // Launch Kernel
     HIP_CHECK(hipLaunchCooperativeKernel(kernel_func, block_size, threads_per_blk, params,
-                                         threads_per_blk * sizeof(int), 0));
+                                         threads_per_blk * sizeof(int), nullptr));
     HIP_CHECK(hipDeviceSynchronize())
   }
 
@@ -308,7 +308,7 @@ static void test_group_partition_nested(unsigned int outer_tile_size,
 
   HIP_CHECK(hipLaunchCooperativeKernel(
       (void*)kernel_cg_group_partition_nested,
-      block_size, threads_per_blk, params, shared_mem_bytes, 0));
+      block_size, threads_per_blk, params, shared_mem_bytes, nullptr));
   HIP_CHECK(hipDeviceSynchronize())
 
   HIP_CHECK(hipMemcpy(result_host, result_dev, num_subtiles * sizeof(int),

@@ -63,7 +63,7 @@ Negative:
 
 #define TEST_LOOP_SIZE 50
 
-__global__ void dummy_kernel(float* data) {
+static __global__ void dummy_kernel(float* data) {
   int idx = threadIdx.x + blockIdx.x * blockDim.x;
   data[idx] = data[idx] * 2.0f;
 }

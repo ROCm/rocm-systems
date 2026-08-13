@@ -17,13 +17,13 @@
   }
 
 #define REQUIRE(res)                                                                               \
-  {                                                                                                \
+  do {                                                                                             \
     if (res) {                                                                                     \
       return 0;                                                                                    \
     } else {                                                                                       \
       return -1;                                                                                   \
     }                                                                                              \
-  }
+  } while (0)
 
 /*
  * This funtion perform the below operations,
@@ -44,9 +44,8 @@ int main() {
   REQUIRE(max > 0);
 
   HIP_CHECK(hipDeviceGetLimit(&orgCurrent, hipExtLimitScratchCurrent))
-  REQUIRE(orgCurrent >= 0);
 
-  size_t setCurrent = 0.5 * max;
+  size_t setCurrent = max / 2;
   HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setCurrent))
 
   size_t getCurrent = 0;

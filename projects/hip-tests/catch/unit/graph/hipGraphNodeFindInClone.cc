@@ -95,14 +95,14 @@ HIP_TEST_CASE(Unit_hipGraphNodeFindInClone_Negative) {
   HIP_CHECK(hipGraphDestroy(clonedgraph))
 }
 
-void hipGraphNodeFindInClone_Func(bool ModifyOrigGraph = false) {
+static void hipGraphNodeFindInClone_Func(bool ModifyOrigGraph = false) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
   hipGraph_t graph, clonedgraph;
   hipGraphNode_t memset_A, memset_B, memsetKer_C;
-  hipGraphNode_t memcpyH2D_A, memcpyH2D_B, memcpyD2H_C, memcpyD2D_C, memcpyD2H_C_new;
+  hipGraphNode_t memcpyH2D_A, memcpyH2D_B, memcpyD2H_C, memcpyD2D_C, memcpyD2H_C_new = nullptr;
   hipGraphNode_t kernel_vecAdd;
   hipKernelNodeParams kernelNodeParams{};
   int *A_d, *B_d, *C_d;
@@ -198,7 +198,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeFindInClone_Functional) {
   SECTION("hipGraphNodeFindInClone Modify Original graph") { hipGraphNodeFindInClone_Func(true); }
 }
 
-void hipGraphNodeFindInClone_DoubleClone(bool ModifyOrigGraph = false) {
+static void hipGraphNodeFindInClone_DoubleClone(bool ModifyOrigGraph = false) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency

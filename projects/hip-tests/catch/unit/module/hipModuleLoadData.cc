@@ -130,7 +130,7 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Functional) {
   HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice))
   HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice))
 
-  hipModule_t Module;
+  hipModule_t Module = nullptr;
   hipFunction_t Function = nullptr;
   std::ifstream file(FILENAME, std::ios::binary | std::ios::ate);
   std::streamsize fsize = file.tellg();
@@ -154,7 +154,7 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Functional) {
 
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, stream, NULL,
+  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, stream, nullptr,
                                   reinterpret_cast<void**>(&config)));
 
   HIP_CHECK(hipStreamDestroy(stream))

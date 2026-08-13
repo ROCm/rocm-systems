@@ -23,10 +23,13 @@ template <typename T> class ChannelDescriptorTestShell {
     switch (dimension) {
       case ChannelDimension::FourDim:
         referent_channel_desc.w = size;
+        [[fallthrough]];
       case ChannelDimension::ThreeDim:
         referent_channel_desc.z = size;
+        [[fallthrough]];
       case ChannelDimension::TwoDim:
         referent_channel_desc.y = size;
+        [[fallthrough]];
       default:
         referent_channel_desc.x = size;
     }
@@ -38,6 +41,7 @@ template <typename T> class ChannelDescriptorTestShell {
     REQUIRE(channel_desc.f == referent_channel_desc.f);
   }
 
+  virtual ~ChannelDescriptorTestShell() = default;
   ChannelDescriptorTestShell(const ChannelDimension dimension)
       : size(0), kind(hipChannelFormatKindNone), dimension(dimension) {}
   ChannelDescriptorTestShell(const ChannelDescriptorTestShell&) = delete;
@@ -49,7 +53,7 @@ template <typename T> class ChannelDescriptorTest1D : public ChannelDescriptorTe
   ChannelDescriptorTest1D() : ChannelDescriptorTestShell<T>(ChannelDimension::OneDim) {}
 
  protected:
-  void SetSizeAndKind() {
+  void SetSizeAndKind() override {
     if (std::is_same_v<char, T>) {
       this->size = static_cast<int>(sizeof(char) * 8);
       this->kind = hipChannelFormatKindSigned;
@@ -94,7 +98,7 @@ template <typename T> class ChannelDescriptorTest2D : public ChannelDescriptorTe
   ChannelDescriptorTest2D() : ChannelDescriptorTestShell<T>(ChannelDimension::TwoDim) {}
 
  protected:
-  void SetSizeAndKind() {
+  void SetSizeAndKind() override {
     if (std::is_same_v<uchar2, T>) {
       this->size = static_cast<int>(sizeof(unsigned char) * 8);
       this->kind = hipChannelFormatKindUnsigned;
@@ -135,7 +139,7 @@ template <typename T> class ChannelDescriptorTest3D : public ChannelDescriptorTe
   ChannelDescriptorTest3D() : ChannelDescriptorTestShell<T>(ChannelDimension::ThreeDim) {}
 
  protected:
-  void SetSizeAndKind() {
+  void SetSizeAndKind() override {
     if (std::is_same_v<uchar3, T>) {
       this->size = static_cast<int>(sizeof(unsigned char) * 8);
       this->kind = hipChannelFormatKindUnsigned;
@@ -176,7 +180,7 @@ template <typename T> class ChannelDescriptorTest4D : public ChannelDescriptorTe
   ChannelDescriptorTest4D() : ChannelDescriptorTestShell<T>(ChannelDimension::FourDim) {}
 
  protected:
-  void SetSizeAndKind() {
+  void SetSizeAndKind() override {
     if (std::is_same_v<uchar4, T>) {
       this->size = static_cast<int>(sizeof(unsigned char) * 8);
       this->kind = hipChannelFormatKindUnsigned;
@@ -216,5 +220,5 @@ template <typename T> class ChannelDescriptorTestNone : public ChannelDescriptor
   ChannelDescriptorTestNone() : ChannelDescriptorTestShell<T>(ChannelDimension::OneDim) {}
 
  protected:
-  void SetSizeAndKind() {}
+  void SetSizeAndKind() override {}
 };

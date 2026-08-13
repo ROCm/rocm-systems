@@ -101,7 +101,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Negative) {
   HIP_CHECK(hipStreamCreate(&mystream))
 
   SECTION("Pass nullptr as function") {
-    REQUIRE(hipLaunchHostFunc(mystream, nullptr, 0) == hipErrorInvalidValue);
+    REQUIRE(hipLaunchHostFunc(mystream, nullptr, nullptr) == hipErrorInvalidValue);
   }
   HIP_CHECK(hipStreamDestroy(mystream))
 }
@@ -130,7 +130,7 @@ static void launchOperationOnStrm(usrDataS* usrDataptr, hipStream_t stream) {
 HIP_TEST_CASE(Unit_hipLaunchHostFunc_streams) {
   hipStream_t stream[NUM_OF_STREAM];
   HIP_CHECK(hipStreamCreate(&stream[0]))
-  stream[1] = 0;  // Null stream
+  stream[1] = nullptr;  // Null stream
   stream[2] = hipStreamPerThread;
   usrDataS* usrDataptr = reinterpret_cast<usrDataS*>(malloc(sizeof(usrDataS)));
   REQUIRE(usrDataptr != nullptr);
@@ -365,7 +365,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Diffpriority) {
   int numOfPriorities = priority_low - priority_high;
   const float arr_size = numOfPriorities + 1;
   hipStream_t* stream = reinterpret_cast<hipStream_t*>(malloc(arr_size * sizeof(hipStream_t)));
-  stream[0] = 0;
+  stream[0] = nullptr;
   int count = 1;
   // Create a stream for each of the priority levels
   for (priority = priority_high; priority < priority_low; priority++) {
@@ -418,8 +418,8 @@ void myHostNodeCallback(void* data) {
 HIP_TEST_CASE(Unit_hipLaunchHostFunc_Graph) {
   size_t size = 1 << 12;
   size_t maxBlocks = 512;
-  float *inputVec_d = NULL, *inputVec_h = NULL;
-  double *outputVec_d = NULL, *result_d;
+  float *inputVec_d = nullptr, *inputVec_h = nullptr;
+  double *outputVec_d = nullptr, *result_d;
   inputVec_h = reinterpret_cast<float*>(malloc(sizeof(float) * size));
   HIP_CHECK(hipMalloc(&inputVec_d, sizeof(float) * size))
   HIP_CHECK(hipMalloc(&outputVec_d, sizeof(double) * maxBlocks))
@@ -462,7 +462,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Graph) {
   HIP_CHECK(hipLaunchHostFunc(stream1, fn, &hostFnData))
 
   HIP_CHECK(hipStreamEndCapture(stream1, &graph))
-  hipGraphNode_t* nodes = NULL;
+  hipGraphNode_t* nodes = nullptr;
   size_t numNodes = 0;
   HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes))
   printf(
@@ -473,7 +473,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Graph) {
   printf("root nodes in the graph created using stream capture API = %zu\n", numNodes);
   hipGraphExec_t graphExec;
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   auto start1 = std::chrono::high_resolution_clock::now();
   const int graphIters = isQuickLevel() ? 10 : GRAPH_LAUNCH_ITERATIONS;
   for (int i = 0; i < graphIters; i++) {

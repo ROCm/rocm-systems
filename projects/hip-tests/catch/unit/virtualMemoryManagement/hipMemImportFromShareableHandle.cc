@@ -172,7 +172,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
               hipMemHandleTypePosixFileDescriptor));
     // Allocate virtual address range
     void* ptrA;
-    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
     HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0))
     // Set access
     hipMemAccessDesc accessDesc = {};
@@ -309,7 +309,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
               hipMemHandleTypePosixFileDescriptor));
     // Allocate virtual address range
     void* ptrA;
-    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
     HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0))
     // Set access
     hipMemAccessDesc accessDesc = {};
@@ -360,7 +360,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
 
     // Allocate virtual address range
     void* ptrA;
-    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
     HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
     // Set access
     hipMemAccessDesc accessDesc = {};
@@ -451,7 +451,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
                 hipMemHandleTypePosixFileDescriptor));
       // Allocate virtual address range
       void* ptrA;
-      HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+      HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
       HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0))
       // Set access
       hipMemAccessDesc accessDesc = {};

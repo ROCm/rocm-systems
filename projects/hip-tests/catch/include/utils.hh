@@ -127,8 +127,8 @@ template <typename T> __global__ void VectorSet(T* const vec, const T value, siz
 static __global__ void Delay(uint32_t interval, const uint32_t ticks_per_ms) {
   while (interval--) {
     #if HT_AMD
-    uint64_t start = clock_function();
-    while (clock_function() - start < ticks_per_ms) {
+    uint64_t start = static_cast<uint64_t>(clock_function());
+    while (static_cast<uint64_t>(clock_function()) - start < ticks_per_ms) {
       __builtin_amdgcn_s_sleep(10);
     }
     #endif
@@ -164,7 +164,7 @@ inline void LaunchDelayKernel(const std::chrono::milliseconds interval, const hi
   #if HT_NVIDIA
   HIPCHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0))
   #endif
-  Delay<<<1, 1, 0, stream>>>(interval.count(), ticks_per_ms);
+  Delay<<<1, 1, 0, stream>>>(static_cast<uint32_t>(interval.count()), static_cast<uint32_t>(ticks_per_ms));
 }
 
 // Keeps a stream busy for at least `interval` by enqueuing a host callback that

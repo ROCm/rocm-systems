@@ -36,8 +36,8 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Paramet
       },
       blockSize);
 
-  SECTION("Kernel function is NULL") {
-    HIP_CHECK_ERROR(hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, NULL, blockSize, 0),
+  SECTION("Kernel function is nullptr") {
+    HIP_CHECK_ERROR(hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, (const void*)nullptr, blockSize, 0),
                     hipErrorInvalidDeviceFunction);
   }
 

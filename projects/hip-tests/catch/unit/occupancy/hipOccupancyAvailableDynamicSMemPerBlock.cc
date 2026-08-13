@@ -72,7 +72,7 @@ HIP_TEST_CASE(Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative) {
 #if HT_AMD
   SECTION("Invalid driver funtion") {
     HIP_CHECK_ERROR(hipOccupancyAvailableDynamicSMemPerBlock(
-                        &dynamicSmemSize, NULL, numBlocks, SIZE),
+                        &dynamicSmemSize, (const void*)nullptr, numBlocks, SIZE),
                     hipErrorInvalidDeviceFunction);
   }
 

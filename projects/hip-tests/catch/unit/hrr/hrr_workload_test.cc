@@ -1641,10 +1641,10 @@ TEST_CASE("Unit_HRR_HostAliases_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipFree(pp.ptr))
 
   // hipMemAllocPitch — driver-style pitched alloc
-  hipDeviceptr_t dptr = 0;
+  hipDeviceptr_t dptr = nullptr;
   size_t rowPitch = 0;
   HIP_CHECK(hipMemAllocPitch(&dptr, &rowPitch, N * sizeof(int), 4, sizeof(int)))
-  REQUIRE(dptr != 0);
+  REQUIRE(dptr != nullptr);
   HIP_CHECK(hipFree(reinterpret_cast<void*>(dptr)))
 
   // D2H blob (value = 8)
@@ -3264,7 +3264,7 @@ TEST_CASE("Unit_HRR_Texture_Direct", "[.][hrr][direct]") {
     } }
 
   // hipCreateTextureObject / hipDestroyTextureObject
-  { hipTextureObject_t tex = 0;
+  { hipTextureObject_t tex = nullptr;
     hipResourceDesc rd{}; rd.resType = hipResourceTypeArray; rd.res.array.array = arr0;
     hipTextureDesc  td{}; td.addressMode[0] = hipAddressModeClamp;
                           td.filterMode = hipFilterModePoint;
@@ -3273,7 +3273,7 @@ TEST_CASE("Unit_HRR_Texture_Direct", "[.][hrr][direct]") {
     if (e == hipSuccess) { (void)hipDestroyTextureObject(tex); } }
 
   // hipTexObjectCreate / hipTexObjectDestroy
-  { hipTextureObject_t tex = 0;
+  { hipTextureObject_t tex = nullptr;
     HIP_RESOURCE_DESC rd{}; rd.resType = HIP_RESOURCE_TYPE_ARRAY; rd.res.array.hArray = arr0;
     HIP_TEXTURE_DESC  td{};
     hipError_t e = hipTexObjectCreate(&tex, &rd, &td, nullptr);

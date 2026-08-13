@@ -103,7 +103,7 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Positive_Functional) {
   }
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
   HIP_CHECK(hipStreamSynchronize(streamForGraph))
 
@@ -179,7 +179,7 @@ HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Positive_CapturedStream) {
 #endif
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph))
   HIP_CHECK(hipStreamSynchronize(streamForGraph))
 

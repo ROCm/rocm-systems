@@ -75,7 +75,7 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Basic) {
   REQUIRE(hipStreamCaptureStatusNone == cStatus);
 }
 
-void checkStreamCaptureStatus(hipStreamCaptureMode mode, hipStream_t stream) {
+static void checkStreamCaptureStatus(hipStreamCaptureMode mode, hipStream_t stream) {
   const size_t N = captureN();
 
   hipStreamCaptureStatus cStatus;

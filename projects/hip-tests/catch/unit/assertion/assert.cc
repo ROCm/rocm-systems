@@ -77,7 +77,7 @@ HIP_TEST_CASE(Unit_Assert_Positive_Basic_KernelPass) {
   int* d_a;
   HIP_CHECK(hipMalloc(&d_a, sizeof(int)))
 
-  AssertPassKernel<<<num_blocks, num_threads, 0, 0>>>(d_a);
+  AssertPassKernel<<<num_blocks, num_threads, 0, nullptr>>>(d_a);
 
   HIP_CHECK(hipDeviceSynchronize())
   HIP_CHECK(hipFree(d_a))
@@ -116,7 +116,7 @@ HIP_TEST_CASE(Unit_Assert_Positive_Basic_KernelFail) {
   int* d_a;
   HIP_CHECK(hipMalloc(&d_a, sizeof(int)))
 
-  AssertFailKernel<<<num_blocks, num_threads, 0, 0>>>(d_a);
+  AssertFailKernel<<<num_blocks, num_threads, 0, nullptr>>>(d_a);
 
 #if HT_AMD
   HIP_CHECK_ERROR(hipDeviceSynchronize(), hipErrorLaunchFailure);

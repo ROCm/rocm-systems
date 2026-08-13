@@ -159,7 +159,7 @@ HIP_TEST_CASE(Unit_hiprtc_getloweredname) {
   std::string name_expression = "my_sqrt<complex<double> >";
   REQUIRE(HIPRTC_SUCCESS == hiprtcAddNameExpression(prog, name_expression.c_str()));
 
-  hiprtcResult compileResult{hiprtcCompileProgram(prog, 0, 0)};
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 0, nullptr)};
 
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));

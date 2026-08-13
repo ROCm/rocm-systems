@@ -60,7 +60,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource) {
  * Test Description
  * ------------------------
  *  - Verifies that hipStreamGetDevResource returns alignment values matching
- *    hipDeviceGetDevResource for the same device, for both the NULL stream
+ *    hipDeviceGetDevResource for the same device, for both the nullptr stream
  *    and a user-created stream.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_StreamGetDevResource) {
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_StreamGetDevResource) {
   hipDevResource devResource{};
   HIP_CHECK(hipDeviceGetDevResource(device, &devResource, hipDevResourceTypeSm))
 
-  // NULL stream
+  // nullptr stream
   hipDevResource nullStreamRes{};
   HIP_CHECK(hipStreamGetDevResource(nullptr, &nullStreamRes, hipDevResourceTypeSm))
   REQUIRE(nullStreamRes.sm.smCoscheduledAlignment == devResource.sm.smCoscheduledAlignment);

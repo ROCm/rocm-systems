@@ -37,7 +37,7 @@ hipStream_t gstream;
 void HIPRT_CB Callback(hipStream_t stream, hipError_t status, void* userData) {
   UNUSED(stream);
   HIP_CHECK(status)
-  REQUIRE(userData == NULL);
+  REQUIRE(userData == nullptr);
   gPassed = true;
   for (size_t i = 0; i < NSize; i++) {
     if (C_h[i] != A_h[i] * A_h[i]) {
@@ -68,16 +68,16 @@ bool testStreamCallbackFunctionality(bool isDefault) {
   HIP_CHECK(hipMalloc(&A_d, Nbytes))
   HIP_CHECK(hipMalloc(&C_d, Nbytes))
   if (isDefault) {
-    HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, 0))
+    HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, nullptr))
 
     const unsigned threadsPerBlock = 1024;
     const int blocks = (NSize % threadsPerBlock == 0) ? (NSize / threadsPerBlock)
                                                       : ((NSize / threadsPerBlock) + 1);
-    hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, 0, A_d,
-                       C_d, NSize);
+    hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, nullptr,
+                       A_d, C_d, NSize);
     HIP_CHECK(hipGetLastError())
-    HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, 0))
-    HIP_CHECK(hipStreamAddCallback(0, Callback, nullptr, 0))
+    HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, nullptr))
+    HIP_CHECK(hipStreamAddCallback(nullptr, Callback, nullptr, 0))
     while (!gcbDone)
       std::this_thread::sleep_for(std::chrono::microseconds(100000));  // Sleep for 100 ms
   } else {
@@ -191,7 +191,7 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Negative) {
   }
   // Scenario2
   SECTION("callback is nullptr for default stream") {
-    REQUIRE_FALSE(hipSuccess == hipStreamAddCallback(0, nullptr, nullptr, 0));
+    REQUIRE_FALSE(hipSuccess == hipStreamAddCallback(nullptr, nullptr, nullptr, 0));
   }
   // Scenario3
   SECTION("flag is nonzero for non-default stream") {
@@ -199,7 +199,7 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Negative) {
   }
   // Scenario4
   SECTION("flag is nonzero for default stream") {
-    REQUIRE_FALSE(hipSuccess == hipStreamAddCallback(0, Callback, nullptr, 10));
+    REQUIRE_FALSE(hipSuccess == hipStreamAddCallback(nullptr, Callback, nullptr, 10));
   }
   HIP_CHECK(hipStreamDestroy(mystream))
 }

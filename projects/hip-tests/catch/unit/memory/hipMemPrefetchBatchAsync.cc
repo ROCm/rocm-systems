@@ -285,8 +285,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity) {
 /**
  * Test Description
  * ------------------------
- *  - Test NULL dptrs, sizes, prefetchLocs, and prefetchLocIdxs arrays
- *  - Verify API returns hipErrorInvalidValue for NULL parameters and hipMalloc device memory
+ *  - Test nullptr dptrs, sizes, prefetchLocs, and prefetchLocIdxs arrays
+ *  - Verify API returns hipErrorInvalidValue for nullptr parameters and hipMalloc device memory
  */
 HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers) {
   REQUIRE_MANAGED_ACCESS_DEVICE(device);
@@ -304,28 +304,28 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers) {
   std::array<size_t, 1> location_indices = {0};
   constexpr unsigned long long flags = 0;
 
-  SECTION("NULL device pointers array") {
+  SECTION("nullptr device pointers array") {
     HIP_CHECK_ERROR(hipMemPrefetchBatchAsync(nullptr, buffer_sizes.data(), buffer_sizes.size(),
                                              locations.data(), location_indices.data(),
                                              locations.size(), flags, stream_guard.stream()),
                     hipErrorInvalidValue);
   }
 
-  SECTION("NULL sizes array") {
+  SECTION("nullptr sizes array") {
     HIP_CHECK_ERROR(hipMemPrefetchBatchAsync(managed_ptrs.data(), nullptr, managed_ptrs.size(),
                                              locations.data(), location_indices.data(),
                                              locations.size(), flags, stream_guard.stream()),
                     hipErrorInvalidValue);
   }
 
-  SECTION("NULL prefetch locations array") {
+  SECTION("nullptr prefetch locations array") {
     HIP_CHECK_ERROR(hipMemPrefetchBatchAsync(managed_ptrs.data(), buffer_sizes.data(),
                                              managed_ptrs.size(), nullptr, location_indices.data(),
                                              locations.size(), flags, stream_guard.stream()),
                     hipErrorInvalidValue);
   }
 
-  SECTION("NULL prefetch location indices array") {
+  SECTION("nullptr prefetch location indices array") {
     HIP_CHECK_ERROR(hipMemPrefetchBatchAsync(managed_ptrs.data(), buffer_sizes.data(),
                                              managed_ptrs.size(), locations.data(), nullptr,
                                              locations.size(), flags, stream_guard.stream()),
@@ -501,7 +501,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_ParameterValidation) {
         hipErrorInvalidValue);
   }
 
-  SECTION("NULL stream") {
+  SECTION("nullptr stream") {
     HIP_CHECK_ERROR(
         hipMemPrefetchBatchAsync(managed_ptrs.data(), buffer_sizes.data(), managed_ptrs.size(),
                                  locations.data(), location_indices.data(), locations.size(), flags,

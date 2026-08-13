@@ -118,7 +118,7 @@ static void hostNodeCallback(void* data) {
   gCbackIter++;
 }
 
-bool CaptureStreamAndLaunchGraph(float* A_d, float* C_d, float* A_h, float* C_h,
+static bool CaptureStreamAndLaunchGraph(float* A_d, float* C_d, float* A_h, float* C_h,
                                  hipStreamCaptureMode mode, hipStream_t stream) {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};

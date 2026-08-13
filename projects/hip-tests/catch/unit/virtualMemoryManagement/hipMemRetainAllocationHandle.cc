@@ -32,7 +32,7 @@
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemRetainAllocationHandle_SetGet) {
-  HIP_CHECK(hipFree(0))
+  HIP_CHECK(hipFree(nullptr))
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -53,7 +53,7 @@ HIP_TEST_CASE(Unit_hipMemRetainAllocationHandle_SetGet) {
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
-  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&ptrA), size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&ptrA), size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap((void*)ptrA, size_mem, 0, handle, 0))
   // Test hipMemRetainAllocationHandle
   hipMemGenericAllocationHandle_t gethandle;
@@ -77,7 +77,7 @@ HIP_TEST_CASE(Unit_hipMemRetainAllocationHandle_SetGet) {
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemRetainAllocationHandle_NegTst) {
-  HIP_CHECK(hipFree(0))
+  HIP_CHECK(hipFree(nullptr))
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -98,7 +98,7 @@ HIP_TEST_CASE(Unit_hipMemRetainAllocationHandle_NegTst) {
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
   // Allocate virtual address range
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   // Test hipMemRetainAllocationHandle
   hipMemGenericAllocationHandle_t gethandle;
@@ -111,7 +111,7 @@ HIP_TEST_CASE(Unit_hipMemRetainAllocationHandle_NegTst) {
   }
   SECTION("not mapped address") {
     void* ptrB;
-    HIP_CHECK(hipMemAddressReserve(&ptrB, size_mem, 0, 0, 0))
+    HIP_CHECK(hipMemAddressReserve(&ptrB, size_mem, 0, nullptr, 0))
     REQUIRE(hipMemRetainAllocationHandle(&gethandle, reinterpret_cast<void*>(ptrB)) ==
             hipErrorInvalidValue);
     HIP_CHECK(hipMemAddressFree(ptrB, size_mem))
@@ -147,7 +147,7 @@ HIP_TEST_CASE(Unit_hipMemRetainAllocationHandle_Capture) {
   hipMemGenericAllocationHandle_t allocation_handle;
   void* device_ptr = nullptr;
   HIP_CHECK(hipMemCreate(&allocation_handle, allocation_size, &allocation_prop, 0))
-  HIP_CHECK(hipMemAddressReserve(&device_ptr, allocation_size, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&device_ptr, allocation_size, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(device_ptr, allocation_size, 0, allocation_handle, 0))
 
   hipMemGenericAllocationHandle_t retained_handle;

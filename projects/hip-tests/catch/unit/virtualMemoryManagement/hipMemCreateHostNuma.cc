@@ -225,7 +225,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_ChkDev2HstMemcpy) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
 
   void* ptrA = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
 
   hipMemAccessDesc accessDesc = {};
@@ -301,7 +301,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_ChkWithKerLaunch) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
 
   void* ptrA = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
   HIP_CHECK(hipMemRelease(handle))
 
@@ -390,7 +390,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_HostAndDeviceAccess) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
 
   void* ptrA = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
 
   hipMemAccessDesc descs[2] = {};
@@ -490,7 +490,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_NumaTypedAccess) {
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
 
   void* ptrA = nullptr;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
 
   // Grant host access via the NUMA-typed descriptor under test.

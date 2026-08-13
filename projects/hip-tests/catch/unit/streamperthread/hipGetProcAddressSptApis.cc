@@ -677,8 +677,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memset2D3D) {
     }
 
     // set the whole matrix first to something different than 'value'
-    HIP_CHECK(dyn_hipMemset2DAsync_spt_ptr(devMem, pitch, 5, width, height, 0))
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(dyn_hipMemset2DAsync_spt_ptr(devMem, pitch, 5, width, height, nullptr))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     for (int s = 0; s < Ns; s++) {
       int startIndex = s * (N / Ns);
@@ -743,7 +743,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memset2D3D) {
     HIP_CHECK(hipMalloc3D(&devMem, extent3d))
     REQUIRE(devMem.ptr != nullptr);
 
-    HIP_CHECK(dyn_hipMemset3DAsync_spt_ptr(devMem, value, extent3d, NULL))
+    HIP_CHECK(dyn_hipMemset3DAsync_spt_ptr(devMem, value, extent3d, nullptr))
 
     char* hostMem = reinterpret_cast<char*>(malloc(N * sizeof(char)));
     REQUIRE(hostMem != nullptr);
@@ -1037,7 +1037,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy2D) {
       REQUIRE(dHostMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_spt_ptr(dHostMem, width, sHostMem, width, width, height,
-                                             hipMemcpyHostToHost, NULL));
+                                             hipMemcpyHostToHost, nullptr));
 
       REQUIRE(validateCharHostArray(dHostMem, N, value) == true);
 
@@ -1056,7 +1056,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy2D) {
       REQUIRE(devMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_spt_ptr(devMem, pitch, hostMem, pitch, width, height,
-                                             hipMemcpyHostToDevice, NULL));
+                                             hipMemcpyHostToDevice, nullptr));
 
       REQUIRE(validateCharDeviceArray(devMem, N, value) == true);
 
@@ -1075,7 +1075,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy2D) {
       REQUIRE(hostMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_spt_ptr(hostMem, width, devMem, pitch, width, height,
-                                             hipMemcpyDeviceToHost, NULL));
+                                             hipMemcpyDeviceToHost, nullptr));
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
@@ -1097,7 +1097,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy2D) {
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_spt_ptr(dDevMem, dPitch, sDevMem, sPitch, width, height,
-                                             hipMemcpyDeviceToDevice, NULL));
+                                             hipMemcpyDeviceToDevice, nullptr));
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
@@ -1119,7 +1119,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy2D) {
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_spt_ptr(dDevMem, dPitch, sDevMem, sPitch, width, height,
-                                             hipMemcpyDeviceToDeviceNoCU, NULL));
+                                             hipMemcpyDeviceToDeviceNoCU, nullptr));
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
@@ -1137,7 +1137,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy2D) {
       REQUIRE(dHostMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_spt_ptr(dHostMem, width, sHostMem, width, width, height,
-                                             hipMemcpyDefault, NULL));
+                                             hipMemcpyDefault, nullptr));
 
       REQUIRE(validateCharHostArray(dHostMem, N, value) == true);
 
@@ -1156,7 +1156,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy2D) {
       REQUIRE(devMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_spt_ptr(devMem, pitch, hostMem, pitch, width, height,
-                                             hipMemcpyDefault, NULL));
+                                             hipMemcpyDefault, nullptr));
 
       REQUIRE(validateCharDeviceArray(devMem, N, value) == true);
 
@@ -1175,7 +1175,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy2D) {
       REQUIRE(hostMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_spt_ptr(hostMem, width, devMem, pitch, width, height,
-                                             hipMemcpyDefault, NULL));
+                                             hipMemcpyDefault, nullptr));
 
       REQUIRE(validateCharHostArray(hostMem, N, value) == true);
 
@@ -1197,7 +1197,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy2D) {
       REQUIRE(dDevMem != nullptr);
 
       HIP_CHECK(dyn_hipMemcpy2DAsync_spt_ptr(dDevMem, dPitch, sDevMem, sPitch, width, height,
-                                             hipMemcpyDefault, NULL));
+                                             hipMemcpyDefault, nullptr));
 
       REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
@@ -2542,7 +2542,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_LaunchCooperativeKernel) {
 
   // Validating hipLaunchCooperativeKernel_spt API
   HIP_CHECK(dyn_hipLaunchCooperativeKernel_spt_ptr(
-      reinterpret_cast<void*>(addOneKernel), blocksPerGrid, threadsPerBlock, kernel_args, 0, 0));
+      reinterpret_cast<void*>(addOneKernel), blocksPerGrid, threadsPerBlock, kernel_args, 0, nullptr));
   HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost))
   REQUIRE(validateHostArray(hostArr, N, 11) == true);
 
@@ -2873,13 +2873,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Event) {
     HIP_CHECK(hipEventCreate(&stop))
     REQUIRE(stop != nullptr);
 
-    HIP_CHECK(dyn_hipEventRecord_spt_ptr(start, NULL))
+    HIP_CHECK(dyn_hipEventRecord_spt_ptr(start, nullptr))
 
     HIP_CHECK(hipMemcpy(devMem, hostMem, Nbytes, hipMemcpyHostToDevice))
     addOneKernel<<<1, 1>>>(devMem, N);
     HIP_CHECK(hipMemcpy(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost))
 
-    HIP_CHECK(dyn_hipEventRecord_spt_ptr(stop, NULL))
+    HIP_CHECK(dyn_hipEventRecord_spt_ptr(stop, nullptr))
     HIP_CHECK(hipEventSynchronize(stop))
 
     REQUIRE(validateHostArray(hostMem, N, 11) == true);

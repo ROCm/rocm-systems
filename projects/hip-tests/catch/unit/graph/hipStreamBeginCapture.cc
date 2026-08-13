@@ -72,7 +72,7 @@ class eventQuery {
 static size_t captureN() { return isQuickLevel() ? 10000 : 1000000; }
 
 template <typename T, typename F>
-void captureStreamAndLaunchGraph(F graphFunc, hipStreamCaptureMode mode, hipStream_t stream) {
+static void captureStreamAndLaunchGraph(F graphFunc, hipStreamCaptureMode mode, hipStream_t stream) {
   const size_t N = captureN();
   size_t Nbytes = N * sizeof(T);
 

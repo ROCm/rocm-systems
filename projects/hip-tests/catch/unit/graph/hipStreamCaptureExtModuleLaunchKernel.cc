@@ -76,9 +76,9 @@ void GraphModuleLaunchKernel::allocateMemory() {
   args1._Bd = Bd;
   args1._Cd = C;
   args1._n = N;
-  args2._Ad = NULL;
-  args2._Bd = NULL;
-  args2._Cd = NULL;
+  args2._Ad = nullptr;
+  args2._Bd = nullptr;
+  args2._Cd = nullptr;
   args2._n = 0;
   size1 = sizeof(args1);
   size2 = sizeof(args2);
@@ -105,8 +105,8 @@ bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmul() {
   int mismatch = 0;
   void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
                      HIP_LAUNCH_PARAM_END};
-  HIPCHECK(hipExtModuleLaunchKernel(multKernel, N, N, 1, 32, 32, 1, 0, stream1, NULL,
-                                    reinterpret_cast<void**>(&config1), NULL, NULL, 0));
+  HIPCHECK(hipExtModuleLaunchKernel(multKernel, N, N, 1, 32, 32, 1, 0, stream1, nullptr,
+                                    reinterpret_cast<void**>(&config1), nullptr, nullptr, 0));
   HIPCHECK(hipStreamSynchronize(stream1))
 
   for (int i = 0; i < N; i++) {
@@ -134,8 +134,8 @@ bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmulwithStreamCapture(
   void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
                      HIP_LAUNCH_PARAM_END};
 
-  HIPCHECK(hipExtModuleLaunchKernel(multKernel, N, N, 1, 32, 32, 1, 0, stream1, NULL,
-                                    reinterpret_cast<void**>(&config1), NULL, NULL, 0));
+  HIPCHECK(hipExtModuleLaunchKernel(multKernel, N, N, 1, 32, 32, 1, 0, stream1, nullptr,
+                                    reinterpret_cast<void**>(&config1), nullptr, nullptr, 0));
 
   HIP_CHECK(hipStreamEndCapture(stream1, &graph))
 

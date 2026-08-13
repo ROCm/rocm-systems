@@ -29,14 +29,14 @@ Negative:
 
 #define SIZE 1024
 
-void callbackfunc(void* A_h) {
+static void callbackfunc(void* A_h) {
   int* A = reinterpret_cast<int*>(A_h);
   for (int i = 0; i < SIZE; i++) {
     A[i] = i;
   }
 }
 
-void callbackfunc_setparams(void* B_h) {
+static void callbackfunc_setparams(void* B_h) {
   int* B = reinterpret_cast<int*>(B_h);
   for (int i = 0; i < SIZE; i++) {
     B[i] = i * i;
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Unit_hipGraphExecHostNodeSetParams_Negative) {
                                     hipMemcpyDeviceToHost));
 
   hipGraphNode_t hostNode;
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
@@ -77,7 +77,7 @@ HIP_TEST_CASE(Unit_hipGraphExecHostNodeSetParams_Negative) {
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_C, &memcpyD2H_AC, 1))
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyD2H_AC, &hostNode, 1))
 
-  hipHostNodeParams sethostParams = {0, 0};
+  hipHostNodeParams sethostParams = {nullptr, nullptr};
   sethostParams.fn = callbackfunc_setparams;
   sethostParams.userData = C_h;
 
@@ -109,7 +109,7 @@ HIP_TEST_CASE(Unit_hipGraphExecHostNodeSetParams_Negative) {
   }
 
   SECTION("Passing uninitialized hostParams") {
-    hipHostNodeParams unintParams = {0, 0};
+    hipHostNodeParams unintParams = {nullptr, nullptr};
     HIP_CHECK_ERROR(hipGraphExecHostNodeSetParams(graphExec, hostNode, &unintParams),
                     hipErrorInvalidValue);
   }
@@ -163,7 +163,7 @@ HIP_TEST_CASE(Unit_hipGraphExecHostNodeSetParams_ClonedGraphWithHostNode) {
   HIP_CHECK(hipGraphClone(&clonedgraph, graph))
 
   hipGraphNode_t hostNode;
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, clonedgraph, nullptr, 0, &hostParams))
@@ -171,7 +171,7 @@ HIP_TEST_CASE(Unit_hipGraphExecHostNodeSetParams_ClonedGraphWithHostNode) {
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &memcpyD2H_AC, 1))
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_C, &memcpyD2H_AC, 1))
 
-  hipHostNodeParams sethostParams = {0, 0};
+  hipHostNodeParams sethostParams = {nullptr, nullptr};
   sethostParams.fn = callbackfunc_setparams;
   sethostParams.userData = C_h;
 
@@ -223,7 +223,7 @@ HIP_TEST_CASE(Unit_hipGraphExecHostNodeSetParams_BasicFunc) {
                                     hipMemcpyDeviceToHost));
 
   hipGraphNode_t hostNode;
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
@@ -232,7 +232,7 @@ HIP_TEST_CASE(Unit_hipGraphExecHostNodeSetParams_BasicFunc) {
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_C, &memcpyD2H_AC, 1))
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyD2H_AC, &hostNode, 1))
 
-  hipHostNodeParams sethostParams = {0, 0};
+  hipHostNodeParams sethostParams = {nullptr, nullptr};
   sethostParams.fn = callbackfunc_setparams;
   sethostParams.userData = C_h;
 

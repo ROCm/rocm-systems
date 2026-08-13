@@ -152,7 +152,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeType) {
 
   SECTION("Get Host node NodeType") {
     hipGraphNode_t hostNode;
-    hipHostNodeParams hostParams = {0, 0};
+    hipHostNodeParams hostParams = {nullptr, nullptr};
     hostParams.fn = callbackfunc;
     hostParams.userData = A_h;
     // Create a host node
@@ -176,7 +176,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeType) {
   }
 
   SECTION("Get Memcpy NodeType") {
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, NULL, 0, A_d, A_h, Nbytes,
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h, Nbytes,
                                       hipMemcpyHostToDevice));
     HIP_CHECK(hipGraphNodeGetType(memcpyNode, &nodeType))
 
@@ -304,7 +304,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread) {
       numEmpty{}, numChild{};
 
   // Host Node
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
@@ -317,7 +317,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread) {
   numHost++;
 
   // MemCpy Node
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, NULL, 0, A_d, A_h, Nbytes,
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   numMemcpy++;
   // Host Node
@@ -461,17 +461,17 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeTypeOfChildGraph) {
   HIP_CHECK(hipGraphAddEventRecordNode(&recordeventNode, childGraph, nullptr, 0, event2))
   numEventRecord++;
   // Add Host Node to parent graph
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
   numHost++;
   // Add MemCpy Node to parent graph
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, NULL, 0, A_d, A_h, Nbytes,
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   numMemcpy++;
   // Add MemCpy Node to parent graph
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, NULL, 0, A_d, A_h, Nbytes,
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   numMemcpy++;
 
@@ -569,12 +569,12 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetType_ClonedGraph_InThread_WithDependencies) {
       waiteventNode, recordeventNode;
 
   // Host Node
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
   // MemCpy Node
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, NULL, 0, A_d, A_h, Nbytes,
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddDependencies(graph, &hostNode, &memcpyNode, 1))
 
@@ -700,13 +700,13 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeTypeOfChildGraph_WithDependency) {
   HIP_CHECK(hipGraphAddDependencies(childGraph, &emptyNode, &recordeventNode, 1))
 
   // Add Host Node to parent graph
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
 
   // Add MemCpy Node to parent graph
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, NULL, 0, A_d, A_h, Nbytes,
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddDependencies(graph, &hostNode, &memcpyNode, 1))
 

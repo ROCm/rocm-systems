@@ -195,8 +195,8 @@ static void hipGraphExecMemcpyNodeSetParamsFromSymbol_GlobalMem(bool useConstVar
                                                         hipMemcpyDeviceToDevice));
   }
 
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   // Validating the result
   for (int i = 0; i < SIZE; i++) {

@@ -74,7 +74,7 @@ HIP_TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
     // this default mask is expected to be returned when there is no
     // custom or global CU mask defined
 
-    HIP_CHECK(hipExtStreamGetCUMask(0, cuMask.size(), &cuMask[0]))
+    HIP_CHECK(hipExtStreamGetCUMask(nullptr, cuMask.size(), &cuMask[0]))
 
     ss << std::hex;
     for (int i = cuMask.size() - 1; i >= 0; i--) {
@@ -162,12 +162,12 @@ HIP_TEST_CASE(Unit_hipExtStreamGetCUMask_Negative) {
   std::vector<uint32_t> cuMask(maxNum);
 
   SECTION("cuMask is nullptr") {
-    ret = hipExtStreamGetCUMask(0, cuMask.size(), nullptr);
+    ret = hipExtStreamGetCUMask(nullptr, cuMask.size(), nullptr);
     REQUIRE(ret == hipErrorInvalidValue);
   }
 
   SECTION("cuMaskSize is 0") {
-    ret = hipExtStreamGetCUMask(0, 0, &cuMask[0]);
+    ret = hipExtStreamGetCUMask(nullptr, 0, &cuMask[0]);
     REQUIRE(ret == hipErrorInvalidValue);
   }
 }

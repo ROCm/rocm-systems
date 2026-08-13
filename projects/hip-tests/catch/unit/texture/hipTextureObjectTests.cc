@@ -13,7 +13,7 @@ class TextureObjectTestWrapper {
   bool ommit_destroy_;
 
  public:
-  hipTextureObject_t texture_object = 0;
+  hipTextureObject_t texture_object = nullptr;
   hipResourceDesc res_desc;
   hipTextureDesc tex_desc;
   hipChannelFormatDesc channel_desc;
@@ -144,7 +144,7 @@ HIP_TEST_CASE(Unit_hipGetTextureObjectResourceDesc_Negative_Parameters) {
 
   SECTION("texture is invalid") {
     HIP_CHECK_ERROR(
-        hipGetTextureObjectResourceDesc(&check_desc, static_cast<hipTextureObject_t>(0)),
+        hipGetTextureObjectResourceDesc(&check_desc, static_cast<hipTextureObject_t>(nullptr)),
         hipErrorInvalidValue);
   }
 }
@@ -227,7 +227,7 @@ HIP_TEST_CASE(Unit_hipGetTextureObjectResourceViewDesc_Negative_Parameters) {
 
   SECTION("texture is invalid") {
     HIP_CHECK_ERROR(
-        hipGetTextureObjectResourceViewDesc(&check_desc, static_cast<hipTextureObject_t>(0)),
+        hipGetTextureObjectResourceViewDesc(&check_desc, static_cast<hipTextureObject_t>(nullptr)),
         hipErrorInvalidValue);
   }
 }
@@ -312,7 +312,7 @@ HIP_TEST_CASE(Unit_hipGetTextureObjectTextureDesc_Negative_Parameters) {
   }
 
   SECTION("texture is invalid") {
-    HIP_CHECK_ERROR(hipGetTextureObjectTextureDesc(&check_desc, static_cast<hipTextureObject_t>(0)),
+    HIP_CHECK_ERROR(hipGetTextureObjectTextureDesc(&check_desc, static_cast<hipTextureObject_t>(nullptr)),
                     hipErrorInvalidValue);
   }
 }

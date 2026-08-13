@@ -120,7 +120,7 @@ template <typename T> void runTestShflSync(int option) {
   HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, n, 1, 1, 0, nullptr, nullptr, config))
 
   HIP_CHECK(hipMemcpy(&a, d_a, bufferSize, hipMemcpyDefault))
-  bool result;
+  bool result = false;
   switch (option) {
     case 1:  // shflUpSum
       result = compare(a[n - 1], cpuSum);
@@ -128,6 +128,8 @@ template <typename T> void runTestShflSync(int option) {
     case 2:  // shflDownSum
     case 3:  // shflXorSum
       result = compare(a[0], cpuSum);
+      break;
+    default:
       break;
   }
 

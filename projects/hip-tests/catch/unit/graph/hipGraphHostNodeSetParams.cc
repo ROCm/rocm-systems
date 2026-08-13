@@ -73,7 +73,7 @@ HIP_TEST_CASE(Unit_hipGraphHostNodeSetParams_Negative) {
   }
 
   SECTION("Passing uninitialized hostParams") {
-    hipHostNodeParams unintParams = {0, 0};
+    hipHostNodeParams unintParams = {nullptr, nullptr};
     HIP_CHECK_ERROR(hipGraphHostNodeSetParams(hostNode, &unintParams), hipErrorInvalidValue);
   }
 

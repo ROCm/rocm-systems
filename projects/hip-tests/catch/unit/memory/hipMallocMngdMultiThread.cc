@@ -36,7 +36,7 @@ __global__ void KernelMul_MngdMem123(int* Hmm, int* Dptr, size_t n) {
 static bool IfTestPassed = true;
 
 static void LaunchKrnl(int* Hmm1, size_t NumElms, int InitVal, int GpuOrdnl, int AdviseFlg) {
-  int* Hmm2 = NULL;
+  int* Hmm2 = nullptr;
   hipStream_t strm;
   HIPCHECK(hipSetDevice(GpuOrdnl))
   HIPCHECK(hipStreamCreate(&strm))
@@ -110,7 +110,7 @@ static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
 }
 
 static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
-  int *Hmm = NULL, blockSize = 64;
+  int *Hmm = nullptr, blockSize = 64;
   hipStream_t strm;
   HIPCHECK(hipStreamCreate(&strm))
   HIPCHECK(hipMallocManaged(&Hmm, (sizeof(int) * NumElms)))
@@ -135,7 +135,7 @@ static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
 
 
 static void LaunchKrnl5(int* Hmm1, size_t NumElms, int InitVal, int KerneltoLaunch) {
-  int *Hmm2 = NULL, blockSize = 64;
+  int *Hmm2 = nullptr, blockSize = 64;
   hipStream_t strm;
   HIPCHECK(hipStreamCreate(&strm))
   HIPCHECK(hipMallocManaged(&Hmm2, (sizeof(int) * NumElms)))
@@ -174,8 +174,8 @@ static void LaunchKrnl5(int* Hmm1, size_t NumElms, int InitVal, int KerneltoLaun
 static void TestFlagParamGlobal(int dev) {
   std::atomic<int> DataMismatch{0};
   int NUM_ELMS = 4096, ITERATIONS = 10;
-  float *HmmAG = NULL, INIT_VAL = 2.5;
-  float *Ad = NULL, *Ah = NULL;
+  float *HmmAG = nullptr, INIT_VAL = 2.5;
+  float *Ad = nullptr, *Ah = nullptr;
   Ah = new float[NUM_ELMS];
   hipStream_t strm;
   HIPCHECK(hipSetDevice(dev))
@@ -259,7 +259,7 @@ static void TestFlagParamHost(int dev) {
 
 static void AllocateHmmMemory(int flag, int device) {
   int ITERATIONS = 10;
-  void *HmmAG = NULL, *HmmAH = NULL;
+  void *HmmAG = nullptr, *HmmAH = nullptr;
   HIPCHECK(hipSetDevice(device))
   for (int i = 0; i < ITERATIONS; ++i) {
     if (!flag) {
@@ -332,7 +332,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
-  int InitVal = 123, *Hmm1 = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 4;
+  int InitVal = 123, *Hmm1 = nullptr, NumElms = isQuickLevel() ? 4096 : 4096 * 4;
   HIP_CHECK(hipMallocManaged(&Hmm1, (NumElms * sizeof(int))))
   for (int i = 0; i < NumElms; ++i) {
     Hmm1[i] = InitVal;
@@ -365,7 +365,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
 
   IfTestPassed = true;
 
-  int InitVal = 123, *Hmm = NULL, NumElms = isQuickLevel() ? 4096 : 1024 * 4, TotThrds = 2;
+  int InitVal = 123, *Hmm = nullptr, NumElms = isQuickLevel() ? 4096 : 1024 * 4, TotThrds = 2;
   int HmmMem2 = 0, *HstPtr = nullptr;  //  to indicate the thread that
   //  hipMalloc() memory has to be used
   HstPtr = reinterpret_cast<int*>(new int[NumElms]);
@@ -396,7 +396,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
-  int InitVal = 123, *Dptr = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 8, TotThrds = 2;
+  int InitVal = 123, *Dptr = nullptr, NumElms = isQuickLevel() ? 4096 : 4096 * 8, TotThrds = 2;
   int* HstPtr = reinterpret_cast<int*>(new int[NumElms]);
   HIP_CHECK(hipMalloc(&Dptr, (NumElms * sizeof(int))))
   for (int i = 0; i < NumElms; ++i) {
@@ -426,7 +426,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
   IfTestPassed = true;
 
   int NumElms = isQuickLevel() ? 4096 : 4096 * 4;
-  int *Hmm1 = NULL, TotlThrds = 4, InitVal = 123;
+  int *Hmm1 = nullptr, TotlThrds = 4, InitVal = 123;
   int HmmMem = 1;  //  to indicate the thread that Hmm memory need to be
   //  used inside it
   HIP_CHECK(hipMallocManaged(&Hmm1, (NumElms * sizeof(int))))
@@ -455,7 +455,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_TwoKrnlsComnHmmMem) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
   IfTestPassed = true;
-  int InitVal = 123, *Dptr = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 4, TotThrds = 2;
+  int InitVal = 123, *Dptr = nullptr, NumElms = isQuickLevel() ? 4096 : 4096 * 4, TotThrds = 2;
   int* HstPtr = reinterpret_cast<int*>(new int[NumElms]);
   HIP_CHECK(hipMalloc(&Dptr, (NumElms * sizeof(int))))
   for (int i = 0; i < NumElms; ++i) {

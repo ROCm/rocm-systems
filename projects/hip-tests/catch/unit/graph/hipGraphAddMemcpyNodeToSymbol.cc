@@ -19,7 +19,7 @@ HIP_GRAPH_MEMCPY_FROM_SYMBOL_NODE_DEFINE_GLOBALS(float)
 HIP_GRAPH_MEMCPY_FROM_SYMBOL_NODE_DEFINE_GLOBALS(double)
 
 template <typename T>
-void GraphMemcpyToSymbolShell(const void* symbol, size_t offset, const std::vector<T> set_values) {
+static void GraphMemcpyToSymbolShell(const void* symbol, size_t offset, const std::vector<T> set_values) {
   const auto f = [](const void* symbol, void* src, size_t count, size_t offset,
                     hipMemcpyKind direction) {
     hipGraph_t graph = nullptr;

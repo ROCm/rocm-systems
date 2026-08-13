@@ -18,7 +18,7 @@ HIP_TEST_CASE(Unit_hipSetupArgument_Simple) {
   dim3 grid_dim(1, 1, 1);
   dim3 block_dim(1, 1, 1);
 
-  HIP_CHECK(hipConfigureCall(grid_dim, block_dim, 0, 0))
+  HIP_CHECK(hipConfigureCall(grid_dim, block_dim, 0, nullptr))
 
   int arg = 42;
   HIP_CHECK(hipSetupArgument(&arg, sizeof(int), 0))
@@ -42,7 +42,7 @@ HIP_TEST_CASE(Unit_hipSetupArgument_Execute_Kernel_And_Check_Result) {
   dim3 grid_dim(block_num, 1, 1);
   dim3 block_dim(block_size, 1, 1);
 
-  HIP_CHECK(hipConfigureCall(grid_dim, block_dim, 0, 0))
+  HIP_CHECK(hipConfigureCall(grid_dim, block_dim, 0, nullptr))
 
   std::vector<int> vec_a, vec_b, vec_c;
   for (size_t i = 0; i < vec_size; i++) {

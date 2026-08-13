@@ -123,7 +123,7 @@ static void populateMipmaps(hipMipmappedArray_t mipmapArray, hipExtent size,
     texDescr.addressMode[1] = addressMode;
     texDescr.addressMode[2] = addressMode;
     texDescr.readMode = readMode;
-    HIP_CHECK(hipCreateTextureObject(&texIn, &texRes, &texDescr, NULL))
+    HIP_CHECK(hipCreateTextureObject(&texIn, &texRes, &texDescr, nullptr))
 
     hipSurfaceObject_t surfOut;
     hipResourceDesc surfRes;
@@ -276,7 +276,7 @@ static void testMipmapTextureObj(size_t width, size_t height, float offsetX = 0.
   texDescr.readMode = readMode;
 
   hipTextureObject_t texMipmap = nullptr;
-  HIP_CHECK(hipCreateTextureObject(&texMipmap, &resDescr, &texDescr, NULL))
+  HIP_CHECK(hipCreateTextureObject(&texMipmap, &resDescr, &texDescr, nullptr))
 
   for (unsigned int level = 0; level < mipmapData.size(); level++) {
     mipmapLevelArray<T>& data = mipmapData.at(level);

@@ -213,7 +213,7 @@ void HipMemcpyWithStreamMultiThreadtests::TestDtoDonSameDevice(bool& val_res) {
   HIP_CHECK_THREAD(hipMalloc(&B_d[1], Nbytes))
   HIP_CHECK_THREAD(hipMalloc(&C_d[1], Nbytes))
   C_h[1] = reinterpret_cast<int*>(malloc(Nbytes));
-  HIPASSERT(C_h[1] != NULL);
+  HIPASSERT(C_h[1] != nullptr);
 
   HIP_CHECK_THREAD(hipMemcpyWithStream(A_d[0], A_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]))
   HIP_CHECK_THREAD(hipMemcpyWithStream(B_d[0], B_h[0], Nbytes, hipMemcpyHostToDevice, stream[0]))
@@ -369,7 +369,7 @@ void HipMemcpyWithStreamMultiThreadtests::TestkindDtoD(bool& val_res) {
     HIP_CHECK_THREAD(hipMalloc(&B_d[i], Nbytes))
     HIP_CHECK_THREAD(hipMalloc(&C_d[i], Nbytes))
     C_h[i] = reinterpret_cast<int*>(malloc(Nbytes));
-    HIPASSERT(C_h[i] != NULL);
+    HIPASSERT(C_h[i] != nullptr);
   }
 
 
@@ -476,7 +476,7 @@ void HipMemcpyWithStreamMultiThreadtests::TestkindDefaultForDtoD(bool& val_res) 
     HIP_CHECK_THREAD(hipMalloc(&B_d[i], Nbytes))
     HIP_CHECK_THREAD(hipMalloc(&C_d[i], Nbytes))
     C_h[i] = reinterpret_cast<int*>(malloc(Nbytes));
-    HIPASSERT(C_h[i] != NULL);
+    HIPASSERT(C_h[i] != nullptr);
   }
 
   hipStream_t stream[MaxGPUDevices];

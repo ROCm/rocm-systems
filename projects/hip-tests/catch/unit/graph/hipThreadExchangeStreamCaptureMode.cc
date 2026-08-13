@@ -35,7 +35,7 @@ static void hipGraphLaunchWithMode(hipStream_t stream, hipStreamCaptureMode mode
   LinearAllocGuard<float> B_h(LinearAllocs::malloc, Nbytes);
   LinearAllocGuard<float> A_d(LinearAllocs::hipMalloc, Nbytes);
   LinearAllocGuard<float> B_d(LinearAllocs::hipMalloc, Nbytes);
-  float* C_d;
+  float* C_d = nullptr;
 
   HIP_CHECK_OPT_THREAD(threadSafe, hipThreadExchangeStreamCaptureMode(&mode));
 

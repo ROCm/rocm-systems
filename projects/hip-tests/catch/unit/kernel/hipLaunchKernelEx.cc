@@ -136,7 +136,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelExC_NegetiveTsts) {
   config.gridDim = dim3{(uint32_t)numBlocks, 1, 1};
   config.blockDim = dim3{(uint32_t)blockSize, 1, 1};
   config.dynamicSmemBytes = 0;
-  config.stream = 0;
+  config.stream = nullptr;
 
   hipLaunchAttribute attr;
   attr.id = hipLaunchAttributeCooperative;
@@ -167,7 +167,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelExC_NegetiveTsts) {
   invalidConfig.gridDim = dim3{0, 1, 1};
   invalidConfig.blockDim = dim3{0, 1, 1};
   invalidConfig.dynamicSmemBytes = 0;
-  invalidConfig.stream = 0;
+  invalidConfig.stream = nullptr;
 
   hipLaunchAttribute invalidAttr;
   invalidAttr.id = hipLaunchAttributeCooperative;
@@ -205,7 +205,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_NegetiveTsts) {
   config.gridDim = dim3{(uint32_t)numBlocks, 1, 1};
   config.blockDim = dim3{(uint32_t)blockSize, 1, 1};
   config.dynamicSmemBytes = 0;
-  config.stream = 0;
+  config.stream = nullptr;
 
   hipLaunchAttribute attr;
   attr.id = hipLaunchAttributeCooperative;
@@ -231,7 +231,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_NegetiveTsts) {
   invalidConfig.gridDim = dim3{0, 1, 1};
   invalidConfig.blockDim = dim3{0, 1, 1};
   invalidConfig.dynamicSmemBytes = 0;
-  invalidConfig.stream = 0;
+  invalidConfig.stream = nullptr;
 
   hipLaunchAttribute attr_1;
   attr_1.id = hipLaunchAttributeCooperative;
@@ -259,7 +259,7 @@ bool runTest(const char* testName, const void* kernelFunc, int totalThreads, int
   config.gridDim = dim3{(uint32_t)numBlocks, 1, 1};
   config.blockDim = dim3{(uint32_t)blockSize, 1, 1};
   config.dynamicSmemBytes = 0;
-  config.stream = 0;
+  config.stream = nullptr;
 
   hipLaunchAttribute attr;
   attr.id = hipLaunchAttributeCooperative;
@@ -272,7 +272,7 @@ bool runTest(const char* testName, const void* kernelFunc, int totalThreads, int
   void* kernelArgs[] = {&d_output, (void*)&totalThreads};
 
   if (useTemplate) {
-    HIP_CHECK(hipLaunchKernelEx(&config, (void (*)(int*, int))kernelFunc, d_output, totalThreads))
+    HIP_CHECK(hipLaunchKernelEx(&config, reinterpret_cast<void (*)(int*, int)>(const_cast<void*>(kernelFunc)), d_output, totalThreads))
   } else {
     HIP_CHECK(hipLaunchKernelExC(&config, kernelFunc, kernelArgs))
   }
@@ -356,7 +356,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_Different_Kernels) {
   config.gridDim = dim3{2, 2, 1};
   config.blockDim = dim3{2, 2, 1};
   config.dynamicSmemBytes = 0;
-  config.stream = 0;
+  config.stream = nullptr;
 
   hipLaunchAttribute attr;
   attr.id = hipLaunchAttributeCooperative;
@@ -427,7 +427,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_CooperativeKernelWithArgs) {
   config.gridDim = dim3{N, 1, 1};
   config.blockDim = dim3{1, 1, 1};
   config.dynamicSmemBytes = 0;
-  config.stream = 0;
+  config.stream = nullptr;
 
   hipLaunchAttribute attr;
   attr.id = hipLaunchAttributeCooperative;
@@ -489,7 +489,7 @@ HIP_TEST_CASE(Unit_hipLaunchKernelEx_With_MaxBlockDims) {
   config.gridDim = dim3{1, 1, 1};
   config.blockDim = dim3{1, 1, 1};
   config.dynamicSmemBytes = 0;
-  config.stream = 0;
+  config.stream = nullptr;
 
   hipLaunchAttribute attr;
   attr.id = hipLaunchAttributeCooperative;

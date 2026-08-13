@@ -271,7 +271,7 @@ VulkanTest::GetSemaphoreHandle(VkSemaphore semaphore) {
 
   VkSemaphoreGetWin32HandleInfoKHR semaphoreGetWin32HandleInfoKHR = {};
   semaphoreGetWin32HandleInfoKHR.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_WIN32_HANDLE_INFO_KHR;
-  semaphoreGetWin32HandleInfoKHR.pNext = NULL;
+  semaphoreGetWin32HandleInfoKHR.pNext = nullptr;
   semaphoreGetWin32HandleInfoKHR.semaphore = semaphore;
   semaphoreGetWin32HandleInfoKHR.handleType = _sem_handle_type;
 
@@ -294,7 +294,7 @@ int VulkanTest::GetSemaphoreHandle(VkSemaphore semaphore) {
 
   VkSemaphoreGetFdInfoKHR semaphoreGetFdInfoKHR = {};
   semaphoreGetFdInfoKHR.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
-  semaphoreGetFdInfoKHR.pNext = NULL;
+  semaphoreGetFdInfoKHR.pNext = nullptr;
   semaphoreGetFdInfoKHR.semaphore = semaphore;
   semaphoreGetFdInfoKHR.handleType = _sem_handle_type;
 
@@ -413,16 +413,16 @@ void VulkanTest::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 #ifdef _WIN64
     vulkan_export_memory_win32_handle_info.sType =
         VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
-    vulkan_export_memory_win32_handle_info.pNext = NULL;
+    vulkan_export_memory_win32_handle_info.pNext = nullptr;
     vulkan_export_memory_win32_handle_info.pAttributes = &win_security_attributes;
     vulkan_export_memory_win32_handle_info.dwAccess =
         DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE;
-    vulkan_export_memory_win32_handle_info.name = (LPCWSTR)NULL;
+    vulkan_export_memory_win32_handle_info.name = (LPCWSTR)nullptr;
 
     vulkan_export_memory_allocate_info.pNext =
         _mem_handle_type & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR
         ? &vulkan_export_memory_win32_handle_info
-        : NULL;
+        : nullptr;
 #endif
 
     alloc_info.pNext = &vulkan_export_memory_allocate_info;

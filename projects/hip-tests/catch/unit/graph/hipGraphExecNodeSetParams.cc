@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_hipGraphExecNodeSetParams_Negative_Parameters) {
 
   HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &node_params))
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
 
   SECTION("hGraphExec == nullptr") {
     HIP_CHECK_ERROR(hipGraphExecNodeSetParams(nullptr, node, &node_params), hipErrorInvalidValue);
@@ -102,8 +102,8 @@ HIP_TEST_CASE(Unit_hipGraphExecNodeSetParams_Positive) {
 
   HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &node_params))
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   A_h = reinterpret_cast<char*>(malloc(Nbytes));
   HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost))
   for (int i = 0; i < 10; i++) {
@@ -120,8 +120,8 @@ HIP_TEST_CASE(Unit_hipGraphExecNodeSetParams_Positive) {
   node_params2.memset.value = 110;
 
   HIP_CHECK(hipGraphExecNodeSetParams(graphExec, node, &node_params2))
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
   HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost))
   for (int i = 0; i < 10; i++) {
     REQUIRE(A_h[i] == 110);

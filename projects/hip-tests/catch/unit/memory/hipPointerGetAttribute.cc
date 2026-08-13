@@ -140,7 +140,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_KernelUpdation) {
   Nbytes = N * sizeof(int);
   int *A_d, *A_h;
   HIP_CHECK(hipMalloc(&A_d, Nbytes))
-  hipDeviceptr_t data = 0;
+  hipDeviceptr_t data = nullptr;
   A_h = reinterpret_cast<int*>(malloc(Nbytes));
   for (unsigned int i = 0; i < N; i++) {
     A_h[i] = INT_VAL;
@@ -252,7 +252,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_MappedMem) {
     A_h[i] = INT_VAL;
   }
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
-  int *ptr1 = 0, *ptr2 = 0;
+  int *ptr1 = nullptr, *ptr2 = nullptr;
   unsigned int hostMalloc_mapped = 0;
   unsigned int mallocManaged = 0;
   HIP_CHECK(hipHostMalloc(&ptr1, Nbytes, hipHostMallocMapped))
@@ -277,7 +277,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_Negative) {
   Nbytes = N * sizeof(char);
   char* A_d;
   HIP_CHECK(hipMalloc(&A_d, Nbytes))
-  hipDeviceptr_t data = 0;
+  hipDeviceptr_t data = nullptr;
   char* A_h;
   A_h = reinterpret_cast<char*>(malloc(Nbytes));
   SECTION("Pass nullptr to data") {
@@ -395,7 +395,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
     HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0))
     // Allocate virtual address range
     void* ptrA;
-    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0))
+    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, nullptr, 0))
     HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0))
     // Set access
     hipMemAccessDesc accessDesc = {};

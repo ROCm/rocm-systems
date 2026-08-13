@@ -109,9 +109,9 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams) {
   hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
   HIP_CHECK(hipMallocArray(&A_a, &desc, col, row, hipArrayDefault))
   SECTION("With Default Stream") {
-    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, 0))
-    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, 0))
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, nullptr))
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, nullptr))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
   }
   SECTION("With User Stream") {
     hipStream_t stream;

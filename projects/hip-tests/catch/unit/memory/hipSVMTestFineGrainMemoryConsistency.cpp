@@ -89,7 +89,7 @@ void build_hash_table_on_host(unsigned int* input, size_t inputSize, BinNode* pN
     pNew->n = n;
 #endif
     pNew->value = input[i];
-    BinNode* next = AtomicFetchAdd64(&pNodes[b].pNext, (BinNode*)0ll);
+    BinNode* next = AtomicFetchAdd64(&pNodes[b].pNext, (BinNode*)nullptr);
     do {
       AtomicExchange64(&(pNew->pNext), next);
       // always inserting at head of list

@@ -24,7 +24,7 @@ static void HipModuleGetGlobalTest(hipModule_t module, const std::string global_
   hipDeviceptr_t global;
   size_t global_size = 0;
   HIP_CHECK(hipModuleGetGlobal(&global, &global_size, module, global_name.c_str()))
-  REQUIRE(global != 0);
+  REQUIRE(global != hipDeviceptr_t{});
   REQUIRE(size == global_size);
 
   hipFunction_t kernel = nullptr;
@@ -81,7 +81,7 @@ HIP_TEST_CASE(Unit_hipModuleGetGlobal_Positive_Basic) {
 
 HIP_TEST_CASE(Unit_hipModuleGetGlobal_Positive_Parameters) {
   hipModule_t module = GetModule();
-  hipDeviceptr_t global = 0;
+  hipDeviceptr_t global = {};
   size_t global_size = 0;
 
   SECTION("dptr == nullptr") {
@@ -95,7 +95,7 @@ HIP_TEST_CASE(Unit_hipModuleGetGlobal_Positive_Parameters) {
 
 HIP_TEST_CASE(Unit_hipModuleGetGlobal_Negative_Parameters) {
   hipModule_t module = GetModule();
-  hipDeviceptr_t global = 0;
+  hipDeviceptr_t global = {};
   size_t global_size = 0;
 
   SECTION("name == nullptr") {
@@ -109,7 +109,7 @@ HIP_TEST_CASE(Unit_hipModuleGetGlobal_Negative_Parameters) {
 }
 
 HIP_TEST_CASE(Unit_hipModuleGetGlobal_Negative_Hmod_Is_Nullptr) {
-  hipDeviceptr_t global = 0;
+  hipDeviceptr_t global = {};
   size_t global_size = 0;
 
   CTX_CREATE();
@@ -120,7 +120,7 @@ HIP_TEST_CASE(Unit_hipModuleGetGlobal_Negative_Hmod_Is_Nullptr) {
 
 HIP_TEST_CASE(Unit_hipModuleGetGlobal_Negative_Name_Is_Empty_String) {
   hipModule_t module = GetModule();
-  hipDeviceptr_t global = 0;
+  hipDeviceptr_t global = {};
   size_t global_size = 0;
 
   HIP_CHECK_ERROR(hipModuleGetGlobal(&global, &global_size, module, ""), hipErrorInvalidValue);
@@ -144,6 +144,6 @@ HIP_TEST_CASE(Unit_hipModuleGetGlobal_DiffDevice) {
   hipDeviceptr_t global;
   size_t global_size = 0;
   HIP_CHECK(hipModuleGetGlobal(&global, &global_size, module, "int_var"))
-  REQUIRE(global != 0);
+  REQUIRE(global != hipDeviceptr_t{});
   REQUIRE(sizeof(int) == global_size);
 }

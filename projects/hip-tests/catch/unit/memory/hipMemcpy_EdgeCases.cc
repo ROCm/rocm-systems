@@ -19,7 +19,7 @@ This testcase verifies following scenarios
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#include <Windows.h>
 #else
 #include "sys/types.h"
 #include "sys/sysinfo.h"
@@ -68,7 +68,7 @@ template <typename T> DeviceMemory<T>::~DeviceMemory() {
   T* np = nullptr;
   HipTest::freeArrays<T>(_A_d, _B_d, _C_d, np, np, np, 0);
   HIP_CHECK(hipFree(_C_dd))
-  _C_dd = NULL;
+  _C_dd = nullptr;
 }
 
 template <typename T> class HostMemory {
@@ -105,8 +105,8 @@ template <typename T> HostMemory<T>::HostMemory(size_t numElements, bool usePinn
   T** np = nullptr;
   HipTest::initArrays(np, np, np, &_A_h, &_B_h, &_C_h, numElements, usePinnedHost);
 
-  A_hh = NULL;
-  B_hh = NULL;
+  A_hh = nullptr;
+  B_hh = nullptr;
 
 
   size_t sizeElements = numElements * sizeof(T);
@@ -123,8 +123,8 @@ template <typename T> HostMemory<T>::HostMemory(size_t numElements, bool usePinn
 template <typename T> void HostMemory<T>::reset(size_t numElements, bool full) {
   // Initialize the host data:
   for (size_t i = 0; i < numElements; i++) {
-    (A_hh)[i] = 1097.0 + i;
-    (B_hh)[i] = 1492.0 + i;  // Phi
+    (A_hh)[i] = 1097.0f + i;
+    (B_hh)[i] = 1492.0f + i;  // Phi
 
     if (full) {
       (_A_h)[i] = 3.146f + i;  // Pi
@@ -557,7 +557,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_PinnedRegMemWithKernelLaunch,
     HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
     HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM());
 
-    unsigned int seed = time(0);
+    unsigned int seed = static_cast<unsigned int>(time(nullptr));
     HIP_CHECK(hipSetDevice(HipTest::RAND_R(&seed) % (numDevices - 1) + 1))
 
     int device;

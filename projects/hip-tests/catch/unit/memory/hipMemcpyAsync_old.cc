@@ -292,7 +292,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_PinnedRegMemWithKernelLaunch, int, fl
     HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost))
     HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM);
 
-    unsigned int seed = time(0);
+    unsigned int seed = static_cast<unsigned int>(time(nullptr));
     HIP_CHECK(hipSetDevice(HipTest::RAND_R(&seed) % (numDevices - 1) + 1))
 
     int device;

@@ -56,7 +56,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Sanity) {
  * Test Description
  * ------------------------
  *  - Splits device SM resources via hipDevSmResourceSplitByCount using discovery
- *    mode (result=NULL) to query possible groups, then performs the actual split
+ *    mode (result=nullptr) to query possible groups, then performs the actual split
  *    and verifies group counts and SM totals.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Sanity) {
@@ -94,7 +94,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Sanity) {
  * Test Description
  * ------------------------
  *  - Validates error codes from hipDevSmResourceSplit for invalid parameters:
- *    NULL input, NULL groupParams, non-zero flags, wrong resource type,
+ *    nullptr input, nullptr groupParams, non-zero flags, wrong resource type,
  *    smCount < 2, and smCount exceeding total SMs.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Negative) {
@@ -110,11 +110,11 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Negative) {
   params[0].smCount = 2;
   params[1].smCount = 2;
 
-  // NULL input
+  // nullptr input
   REQUIRE(hipDevSmResourceSplit(result, 2, nullptr, nullptr, 0, params)
           == hipErrorInvalidValue);
 
-  // NULL groupParams
+  // nullptr groupParams
   REQUIRE(hipDevSmResourceSplit(result, 2, &input, nullptr, 0, nullptr)
           == hipErrorInvalidValue);
 
@@ -207,7 +207,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Functional) {
  * Test Description
  * ------------------------
  *  - Validates error codes from hipDevSmResourceSplitByCount for invalid
- *    parameters: NULL nbGroups, NULL input, and wrong resource type.
+ *    parameters: nullptr nbGroups, nullptr input, and wrong resource type.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Negative) {
   HIP_CHECK(hipSetDevice(0))
@@ -219,11 +219,11 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Negative) {
 
   unsigned int nbGroups = 2;
 
-  // NULL nbGroups
+  // nullptr nbGroups
   REQUIRE(hipDevSmResourceSplitByCount(nullptr, nullptr, &input, nullptr, 0, 2)
           == hipErrorInvalidValue);
 
-  // NULL input
+  // nullptr input
   REQUIRE(hipDevSmResourceSplitByCount(nullptr, &nbGroups, nullptr, nullptr, 0, 2)
           == hipErrorInvalidValue);
 

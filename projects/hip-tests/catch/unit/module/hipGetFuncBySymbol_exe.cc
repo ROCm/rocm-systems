@@ -73,7 +73,7 @@ int main() {
                               HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
 
   if (hipModuleLaunchKernel(funcPointer, blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z,
-                            threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z, 0, 0, nullptr,
+                            threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z, 0, nullptr, nullptr,
                             kernel_parameter) != hipSuccess) {
     return -1;
   }

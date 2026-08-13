@@ -72,9 +72,9 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_StrmSyncTiming) {
   size_t Nbytes = N_elmts * sizeof(float);
 
   A_h = (float*)malloc(Nbytes);
-  HIPCHECK(A_h == 0 ? hipErrorOutOfMemory : hipSuccess)
+  HIPCHECK(A_h == nullptr ? hipErrorOutOfMemory : hipSuccess)
   C_h = (float*)malloc(Nbytes);
-  HIPCHECK(C_h == 0 ? hipErrorOutOfMemory : hipSuccess)
+  HIPCHECK(C_h == nullptr ? hipErrorOutOfMemory : hipSuccess)
 
   // Fill with Phi + i
   for (size_t i = 0; i < N_elmts; i++) {
@@ -94,7 +94,7 @@ HIP_TEST_CASE(Unit_hipStreamAddCallback_StrmSyncTiming) {
   hipLaunchKernelGGL((vector_square), dim3(blocks), dim3(threadsPerBlock), 0, mystream, C_d, A_d,
                      N_elmts);
   HIPCHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream))
-  HIPCHECK(hipStreamAddCallback(mystream, Callback1, NULL, 0))
+  HIPCHECK(hipStreamAddCallback(mystream, Callback1, nullptr, 0))
 
   // Wait untill Callback() function changes the cbDone value to true
   while (!cbDone) {

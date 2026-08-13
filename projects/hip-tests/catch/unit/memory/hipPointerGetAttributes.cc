@@ -138,7 +138,7 @@ void clusterAllocs(int numAllocs, size_t minSize, size_t maxSize) {
     totalDeviceAllocated[i] = 0;
   }
   for (int i = 0; i < numAllocs; i++) {
-    unsigned rand_seed = time(NULL);
+    unsigned rand_seed = time(nullptr);
     bool isDevice = HipTest::RAND_R(&rand_seed) & 0x1;
     reference[i]._sizeBytes = zrand(maxSize - minSize) + minSize;
 
@@ -152,7 +152,7 @@ void clusterAllocs(int numAllocs, size_t minSize, size_t maxSize) {
       HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr), reference[i]._sizeBytes))
       reference[i]._attrib.type = hipMemoryTypeDevice;
       reference[i]._attrib.devicePointer = ptr;
-      reference[i]._attrib.hostPointer = NULL;
+      reference[i]._attrib.hostPointer = nullptr;
       reference[i]._attrib.allocationFlags = 0;
     } else {
       HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&ptr), reference[i]._sizeBytes,
@@ -488,7 +488,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter_Unregistered_Memory) {
     int ptr4[1000];
 #ifdef __linux__
     void* ptr5{nullptr};
-    ptr5 = mmap(NULL, N * sizeof(int), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+    ptr5 = mmap(nullptr, N * sizeof(int), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
 
     if (ptr5 == MAP_FAILED) {
       INFO("Mapping Failed\n");

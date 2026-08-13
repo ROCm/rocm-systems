@@ -59,7 +59,7 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeGetParams_Negative) {
   hipError_t ret;
   hipGraphNode_t memcpyNode;
   HIP_CHECK(hipGraphCreate(&graph, 0))
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, NULL, 0, &myparms))
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, nullptr, 0, &myparms))
 
   SECTION("Pass node as nullptr") {
     ret = hipGraphMemcpyNodeGetParams(nullptr, &myparms);
@@ -154,7 +154,7 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeGetParams_Functional) {
   hipGraph_t graph;
   hipGraphNode_t memcpyNode;
   HIP_CHECK(hipGraphCreate(&graph, 0))
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, NULL, 0, &myparms))
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, nullptr, 0, &myparms))
 
   SECTION("Get Memcpy Param and verify.") {
     hipMemcpy3DParms m3DGetParams;

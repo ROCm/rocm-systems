@@ -12,7 +12,7 @@
  * Allocate pinned host buffer.
  */
 #include <hip_test_common.hh>
-#include <windows.h>
+#include <Windows.h>
 #include <processtopologyapi.h>
 #include <iostream>
 #include <vector>

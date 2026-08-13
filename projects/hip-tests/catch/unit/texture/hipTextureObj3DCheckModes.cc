@@ -86,8 +86,8 @@ static void runTest(const int width, const int height, const int depth, const fl
   texDesc.normalizedCoords = normalizedCoords;
 
   // Create texture object
-  hipTextureObject_t textureObject = 0;
-  hipError_t res = hipCreateTextureObject(&textureObject, &resDesc, &texDesc, NULL);
+  hipTextureObject_t textureObject = nullptr;
+  hipError_t res = hipCreateTextureObject(&textureObject, &resDesc, &texDesc, nullptr);
   if (res != hipSuccess) {
     HIP_CHECK(hipFreeArray(arr))
     free(hData);

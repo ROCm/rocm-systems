@@ -20,7 +20,7 @@
   }
 constexpr auto CODEOBJ_FILE = "kernel_composite_test.code";
 
-bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTestID) {
+static bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTestID) {
   constexpr auto CODEOBJ_GLOB_KERNEL1 = "testWeightedCopy";
   size_t N = 16 * 16;
   size_t Nbytes = N * sizeof(int);
@@ -40,7 +40,7 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTest
   }
   // Copy buffer from host to device
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
-  hipModule_t Module;
+  hipModule_t Module = nullptr;
   hipFunction_t Function;
   int check = atoi(globTestID);
   /**
@@ -58,13 +58,15 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTest
     case 3:
       HIP_CHECK(hipModuleLoadDataEx(&Module, &buffer[0], 0, nullptr, nullptr))
       break;
+    default:
+      break;
   }
   HIP_CHECK(hipModuleGetFunction(&Function, Module, CODEOBJ_GLOB_KERNEL1))
-  float deviceGlobalFloatH = 3.14;
+  float deviceGlobalFloatH = 3.14f;
   int deviceGlobalInt1H = 100 * deviceid;
   int deviceGlobalInt2H = 50 * deviceid;
-  uint32_t deviceGlobalShortH = 25 * deviceid;
-  char deviceGlobalCharH = 13 * deviceid;
+  uint32_t deviceGlobalShortH = static_cast<uint32_t>(25 * deviceid);
+  char deviceGlobalCharH = static_cast<char>(13 * deviceid);
   hipDeviceptr_t deviceGlobal;
   size_t deviceGlobalSize;
   HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, "deviceGlobalFloat"))
@@ -92,8 +94,8 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTest
 
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, N, 1, 1, 0, stream, NULL,
-                                  reinterpret_cast<void**>(&config)));
+  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, static_cast<unsigned int>(N), 1, 1, 0, stream,
+                                  nullptr, reinterpret_cast<void**>(&config)))
   // Copy buffer from decice to host
   HIP_CHECK(hipMemcpyAsync(B_h, B_d, Nbytes, hipMemcpyDeviceToHost, stream))
   HIP_CHECK(hipDeviceSynchronize())
@@ -123,7 +125,7 @@ int main(int argc, char* argv[]) {
     std::ifstream file(CODEOBJ_FILE, std::ios::binary | std::ios::ate);
     std::streamsize fsize = file.tellg();
     file.seekg(0, std::ios::beg);
-    std::vector<char> buffer(fsize);
+    std::vector<char> buffer(static_cast<size_t>(fsize));
     if (!file.read(buffer.data(), fsize)) {
       value = false;
     }

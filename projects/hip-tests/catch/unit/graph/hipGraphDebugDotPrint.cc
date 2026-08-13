@@ -143,10 +143,10 @@ static void hipGraphDebugDotPrint_Functional(const char* fName, unsigned int fla
   HIP_CHECK(hipGraphAddDependencies(graph, &kNodeAdd, &memcpy_C, 1))
 
   // Add emptyNode to graph & validate its DebugDotPrint descriptions
-  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, NULL, 0))
+  HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, nullptr, 0))
 
   // Add hostNode to graph & validate its DebugDotPrint descriptions
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = mem_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
@@ -248,7 +248,7 @@ static void hipGraphDebugDotPrint_Functional(const char* fName, unsigned int fla
   REQUIRE(true == validateDotFile(fName, graphData));
   deleteFile(fName);
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, stream))
   HIP_CHECK(hipStreamSynchronize(stream))
 

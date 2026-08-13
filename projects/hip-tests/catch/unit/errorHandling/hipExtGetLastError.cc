@@ -348,7 +348,7 @@ HIP_TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpy2D_To_From_ArrayAsync) {
 HIP_TEST_CASE(Unit_hipExtGetLastError_with_hipStreamAttachMemAsync) {
   void* d_memory{nullptr};
   HIP_CHECK(hipExtGetLastError())
-  HIP_CHECK_ERROR(hipMemPrefetchAsync(reinterpret_cast<void*>(d_memory), 0, hipMemAttachHost, 0),
+  HIP_CHECK_ERROR(hipMemPrefetchAsync(reinterpret_cast<void*>(d_memory), 0, hipMemAttachHost, nullptr),
                   hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError())
@@ -533,7 +533,7 @@ HIP_TEST_CASE(Unit_hipExtGetLastError_with_MemCpyAsync) {
   HIP_CHECK(hipStreamSynchronize(stream))
 
   // testing to check error manually
-  HIP_CHECK_ERROR(hipMemcpyAsync(C_h, C_d, Nbytes + N, hipMemcpyDeviceToHost, 0),
+  HIP_CHECK_ERROR(hipMemcpyAsync(C_h, C_d, Nbytes + N, hipMemcpyDeviceToHost, nullptr),
                   hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError())
@@ -589,7 +589,7 @@ HIP_TEST_CASE(Unit_hipExtGetLastError_with_MemCpyAsync_thread) {
   std::thread t(thread_wait_func, 2);
 
   // testing to check error manually
-  HIP_CHECK_ERROR(hipMemcpyAsync(C_h, C_d, Nbytes + N, hipMemcpyDeviceToHost, 0),
+  HIP_CHECK_ERROR(hipMemcpyAsync(C_h, C_d, Nbytes + N, hipMemcpyDeviceToHost, nullptr),
                   hipErrorInvalidValue);
 
   t.join();

@@ -60,8 +60,8 @@ HIP_TEST_CASE(Unit_Rtc_TextureTypes_header) {
   float* result_h;
   float* result_d;
   int n = 17;
-  int Nbytes = n * sizeof(float);
-  result_h = new float[n];
+  size_t Nbytes = static_cast<size_t>(n) * sizeof(float);
+  result_h = new float[static_cast<size_t>(n)];
   for (int i = 0; i < n; i++) {
     result_h[i] = 0;
   }
@@ -74,7 +74,7 @@ HIP_TEST_CASE(Unit_Rtc_TextureTypes_header) {
   const char* compiler_option = complete_CO.c_str();
   hiprtcProgram prog;
 
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, TextureTypes_string, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, TextureTypes_string, kername, 0, nullptr, nullptr));
   hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, &compiler_option)};
   if (!(compileResult == HIPRTC_SUCCESS)) {
     WARN("hiprtcCompileProgram() api failed!!");
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_Rtc_TextureTypes_header) {
   hipFunction_t function;
   HIP_CHECK(hipModuleLoadData(&module, codec.data()))
   HIP_CHECK(hipModuleGetFunction(&function, module, kername))
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter))
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, kernel_parameter))
   HIP_CHECK(hipDeviceSynchronize())
   HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost))
   for (int i = 0; i < n; i++) {

@@ -54,7 +54,7 @@ void test(unsigned testMask, int* C_d, int* C_h, int64_t numElements, hipStream_
     C_h[i] = -1;  // initialize
   }
 
-  hipEvent_t neverCreated = 0, neverRecorded, timingDisabled;
+  hipEvent_t neverCreated = nullptr, neverRecorded, timingDisabled;
   HIP_CHECK(hipEventCreate(&neverRecorded))
   HIP_CHECK(hipEventCreateWithFlags(&timingDisabled, hipEventDisableTiming))
 
@@ -160,11 +160,11 @@ void runTests(int64_t numElements) {
 
   for (int waitStart = 1; waitStart >= 0; waitStart--) {
     unsigned W = waitStart ? 0x1000 : 0;
-    test(W | 0x01, C_d, C_h, numElements, 0, 0, syncNone);
+    test(W | 0x01, C_d, C_h, numElements, nullptr, 0, syncNone);
     test(W | 0x02, C_d, C_h, numElements, stream, 0, syncNone);
-    test(W | 0x04, C_d, C_h, numElements, 0, waitStart, syncStream);
+    test(W | 0x04, C_d, C_h, numElements, nullptr, waitStart, syncStream);
     test(W | 0x08, C_d, C_h, numElements, stream, waitStart, syncStream);
-    test(W | 0x10, C_d, C_h, numElements, 0, waitStart, syncStopEvent);
+    test(W | 0x10, C_d, C_h, numElements, nullptr, waitStart, syncStopEvent);
     test(W | 0x20, C_d, C_h, numElements, stream, waitStart, syncStopEvent);
   }
 

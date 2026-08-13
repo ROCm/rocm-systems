@@ -48,7 +48,7 @@ __device__ int globalIn[SIZE];
 __device__ int globalOut[SIZE];
 __device__ __constant__ int globalConst[SIZE];
 
-__global__ void MemcpyFromSymbolKernel(int* B_d) {
+static __global__ void MemcpyFromSymbolKernel(int* B_d) {
   for (int i = 0; i < SIZE; i++) {
     globalIn[i] = B_d[i];
   }
@@ -151,8 +151,8 @@ This function is used to verify the following scenarios
    hipGraphAddMemcpyNodeFromSymbol API in GPU-1 and validate the result
 */
 
-void hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(bool device_ctxchg = false,
-                                                  bool const_device_var = false) {
+static void hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(bool device_ctxchg = false,
+                                                         bool const_device_var = false) {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   int* A_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};
@@ -202,8 +202,8 @@ void hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(bool device_ctxchg = false,
 
   // Instantiate and launch the graph
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   // Validating the result
   for (int i = 0; i < SIZE; i++) {
@@ -337,8 +337,8 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryWithKernel) {
 
   // Instantiate and launch the graph
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
-  HIP_CHECK(hipGraphLaunch(graphExec, 0))
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipGraphLaunch(graphExec, nullptr))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   // Validating the result
   for (int i = 0; i < SIZE; i++) {

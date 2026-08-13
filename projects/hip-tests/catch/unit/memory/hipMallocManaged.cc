@@ -100,11 +100,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
   hipEvent_t event0, event1;
   HIP_CHECK(hipEventCreate(&event0))
   HIP_CHECK(hipEventCreate(&event1))
-  HIP_CHECK(hipEventRecord(event0, 0))
+  HIP_CHECK(hipEventRecord(event0, nullptr))
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                      static_cast<const float*>(A), static_cast<const float*>(B), C, N);
   HIP_CHECK(hipGetLastError())
-  HIP_CHECK(hipEventRecord(event1, 0))
+  HIP_CHECK(hipEventRecord(event1, nullptr))
   HIP_CHECK(hipDeviceSynchronize())
   float time = 0.0f;
   HIP_CHECK(hipEventElapsedTime(&time, event0, event1))

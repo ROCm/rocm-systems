@@ -194,7 +194,7 @@ bool test_complexMathFunc1_dev(enum ComplexFuncType mathFuncType) {
   HIPCHECK(hipMemcpy(C, Cd, size, hipMemcpyDeviceToHost))
   // Validate the output of the kernel functions.
   T2 epsilon = 0.0001f;
-  T2 real, imag;
+  T2 real{}, imag{};
   for (uint32_t i = 0; i < LEN; i++) {
     if (mathFuncType == COMPLEX_ADD) {
       real = (A[i].x + B[i].x);

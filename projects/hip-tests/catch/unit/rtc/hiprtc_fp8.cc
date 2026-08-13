@@ -22,6 +22,8 @@ THE SOFTWARE.
 
 #include <vector>
 #include <string>
+#include <cstring>
+#include <cstdint>
 
 #include <hip/hiprtc.h>
 #include <hip/hip_fp8.h>
@@ -92,7 +94,7 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
 
   std::vector<float> in(size, 0.0f);
   for (size_t i = 0; i < size; i++) {
-    in[i] = -5.0f + i;
+    in[i] = -5.0f + static_cast<float>(i);
   }
 
   HIP_CHECK(hipMemcpy(d_in, in.data(), size * sizeof(float), hipMemcpyHostToDevice))
@@ -118,7 +120,11 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
     __hip_fp8_e4m3 tmp = in[i];
     float cpu_out = tmp;
     INFO("Index: " << i << " in: " << in[i] << " GPU: " << out[i] << " cpu: " << cpu_out);
-    REQUIRE(cpu_out == out[i]);
+    // Exact bit-level equality expected: both values come from the same fp8 encoding
+    uint32_t cpu_bits, gpu_bits;
+    std::memcpy(&cpu_bits, &cpu_out, sizeof(cpu_bits));
+    std::memcpy(&gpu_bits, &out[i], sizeof(gpu_bits));
+    REQUIRE(cpu_bits == gpu_bits);
   }
 
   args.e4m3 = false;
@@ -130,7 +136,10 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
     __hip_fp8_e5m2 tmp = in[i];
     float cpu_out = tmp;
     INFO("Index: " << i << " in: " << in[i] << " GPU: " << out[i] << " cpu: " << cpu_out);
-    REQUIRE(cpu_out == out[i]);
+    uint32_t cpu_bits, gpu_bits;
+    std::memcpy(&cpu_bits, &cpu_out, sizeof(cpu_bits));
+    std::memcpy(&gpu_bits, &out[i], sizeof(gpu_bits));
+    REQUIRE(cpu_bits == gpu_bits);
   }
 
   HIP_CHECK(hipFree(d_in))

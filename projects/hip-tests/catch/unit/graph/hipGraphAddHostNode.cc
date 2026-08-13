@@ -72,7 +72,7 @@ HIP_TEST_CASE(Unit_hipGraphAddHostNode_Negative) {
   HIP_CHECK(hipGraphCreate(&graph, 0))
 
   hipGraphNode_t hostNode;
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   std::vector<hipGraphNode_t> dependencies;
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
@@ -141,7 +141,7 @@ HIP_TEST_CASE(Unit_hipGraphAddHostNode_ClonedGraphWithHostNode) {
   HIP_CHECK(hipGraphNodeFindInClone(&cloned_memcpyD2H_AC, memcpyD2H_AC, clonedgraph))
 
   hipGraphNode_t hostNode;
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, clonedgraph, nullptr, 0, &hostParams))
@@ -190,7 +190,7 @@ HIP_TEST_CASE(Unit_hipGraphAddHostNode_VectorSquare) {
   hipStream_t streamForGraph;
   HIP_CHECK(hipStreamCreate(&streamForGraph))
   hipGraphNode_t hostNode;
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = vectorsquare_callback;
   hostParams.userData = param;
 
@@ -253,7 +253,7 @@ HIP_TEST_CASE(Unit_hipGraphAddHostNode_BasicFunc) {
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_AC, graph, nullptr, 0, A_h, C_d, Nbytes,
                                     hipMemcpyDeviceToHost));
   hipGraphNode_t hostNode;
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callbackfunc;
   hostParams.userData = A_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))

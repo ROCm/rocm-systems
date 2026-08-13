@@ -154,9 +154,9 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
     // Import and use pointer
     void* ptrImp;
     HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp))
-    square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
+    square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, nullptr>>>(
         (int*)ptrImp);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
     // Import and use pointer
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
@@ -366,9 +366,9 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
       // Import and use pointer
       void* ptrImp;
       HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp))
-      square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
+      square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, nullptr>>>(
           (int*)ptrImp);
-      HIP_CHECK(hipStreamSynchronize(0))
+      HIP_CHECK(hipStreamSynchronize(nullptr))
       REQUIRE(close(fd[0]) == 0);
       REQUIRE(close(fdSig[1]) == 0);
       checkSysCallErrors(sockObj.closeThisSock());
@@ -602,9 +602,9 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc_child) {
   void *ptrImp;
   HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp))
 
-  square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
+  square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, nullptr>>>(
       (int *)ptrImp);
-  HIP_CHECK(hipStreamSynchronize(0))
+  HIP_CHECK(hipStreamSynchronize(nullptr))
 
   HIP_CHECK(hipFree(ptrImp))
   HIP_CHECK(hipMemPoolDestroy(mempoolImp))

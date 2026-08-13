@@ -271,7 +271,7 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
   params[2] = &is_valid_dev;
   params[3] = &sync_dev;
   params[4] = &group_dim_dev;
-  HIP_CHECK(hipLaunchCooperativeKernel(kernel_func, 2, block_size, params, 0, 0))
+  HIP_CHECK(hipLaunchCooperativeKernel(kernel_func, 2, block_size, params, 0, nullptr))
 
   // Copy result from device to host
   HIP_CHECK(hipMemcpy(size_host, size_dev, num_bytes, hipMemcpyDeviceToHost))
@@ -319,7 +319,7 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_Basic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
-  void* kernel_func;
+  void* kernel_func = nullptr;
   GridTypeTests kernel_type = GridTypeTests::gridGroupType;
 
   SECTION("Default grid group API test") {
@@ -491,7 +491,7 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_Barrier) {
   params[1] = reinterpret_cast<void*>(&kernel_buffer);
   params[2] = reinterpret_cast<void*>(&loops);
   HIP_CHECK(hipLaunchCooperativeKernel(test_kernel_used, requested_blocks, num_threads_in_block,
-                                       params, 0, 0));
+                                       params, 0, nullptr));
 
   // Read back the buffer to host
   HIP_CHECK(hipMemcpy(host_buffer, kernel_buffer, sizeof(unsigned int) * total_buffer_len,

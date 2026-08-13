@@ -40,7 +40,7 @@ void getDeviceCount(int* pdevCnt) {
     // close the read-descriptor
     close(fd[0]);
     // wait for child exit
-    wait(NULL);
+    wait(nullptr);
     *pdevCnt = val;
   } else if (!childpid) {  // Child
     int devCnt = 1;
@@ -90,7 +90,7 @@ bool testMaskedDevice(int actualNumGPUs) {
     close(fd[1]);
     read(fd[0], &testResult, sizeof(testResult));
     close(fd[0]);
-    wait(NULL);
+    wait(nullptr);
 
   } else {
     printf("Info:fork() failed\n");
@@ -279,8 +279,8 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
  *    - Validates negative scenarios for hipExtGetLinkTypeAndHopCount
  * 1)Test Scenario to verify when device1 is visible and device2 is masked
  * 2)Test Scenario to verify Invalid Device Number(s)
- * 3)Test Scenario to verify when linktype = NULL
- * 4)Test Scenario to verify when hopcount = NULL
+ * 3)Test Scenario to verify when linktype = nullptr
+ * 4)Test Scenario to verify when hopcount = nullptr
  * 5)Test Scenario to verify when device1 = device2
  * 6)Test Scenario: Verify (hopcount, linktype) values for (src= device1, dest = device2)
  * and (src = device2, dest = device1), where device1 and device2 are valid device numbers.

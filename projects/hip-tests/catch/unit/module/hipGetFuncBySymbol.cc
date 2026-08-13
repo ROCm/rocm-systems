@@ -92,9 +92,9 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_PositiveTest) {
   hipDeviceProp_t props;
   HIPCHECK(hipGetDeviceProperties(&props, device))
   A_h = reinterpret_cast<uint32_t*>(malloc(Nbytes));
-  REQUIRE(A_h != NULL);
+  REQUIRE(A_h != nullptr);
   C_h = reinterpret_cast<uint32_t*>(malloc(Nbytes));
-  REQUIRE(C_h != NULL);
+  REQUIRE(C_h != nullptr);
 
   for (size_t i = 0; i < N; i++) {
     A_h[i] = i;
@@ -121,7 +121,7 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_PositiveTest) {
   hipFunction_t Function;
   HIPCHECK(hipGetFuncBySymbol(&Function, reinterpret_cast<void*>(bit_extract_kernel)))
 
-  HIPCHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, 0, NULL,
+  HIPCHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, nullptr, nullptr,
                                  reinterpret_cast<void**>(&config)));
 
   HIPCHECK(hipMemcpyDtoH(C_h, (hipDeviceptr_t)(C_d), Nbytes))
@@ -141,7 +141,7 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_PositiveTest) {
 /**
  * Test Description
  * ------------------------
- *    - Pass the NULL as a symbolPtr it should return
+ *    - Pass the nullptr as a symbolPtr it should return
  *      hipErrorInvalidDeviceFunction
  *    - Pass a host function as a symbolPtr it should return
  *      hipErrorInvalidDeviceFunction
@@ -156,8 +156,8 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_PositiveTest) {
 HIP_TEST_CASE(Unit_hipGetFuncBySymbol_NegativeTests) {
   hipFunction_t funcPointer;
 
-  // Passing NULL as second parameter
-  REQUIRE(hipGetFuncBySymbol(&funcPointer, NULL) != hipSuccess);
+  // Passing nullptr as second parameter
+  REQUIRE(hipGetFuncBySymbol(&funcPointer, nullptr) != hipSuccess);
 
   // Passing hostFunction as second parameter
   REQUIRE(hipGetFuncBySymbol(&funcPointer, reinterpret_cast<const void*>(hostFunction)));
@@ -233,7 +233,7 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDev) {
                                 HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
 
     REQUIRE(hipModuleLaunchKernel(funcPointer, blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z,
-                                  threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z, 0, 0,
+                                  threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z, 0, nullptr,
                                   nullptr, kernel_parameter) == hipSuccess);
 
     HIP_CHECK(hipMemcpy(h_a, d_a, SIZE_BYTES, hipMemcpyDeviceToHost))

@@ -97,9 +97,9 @@ void test_dynamicLoading(void* sym_hipGetDevice, void* sym_hipMalloc, void* sym_
   hipDeviceProp_t props;
   HIPCHECK(dyn_hipGetDeviceProperties(&props, device))
   A_h = reinterpret_cast<uint32_t*>(malloc(Nbytes));
-  REQUIRE(A_h != NULL);
+  REQUIRE(A_h != nullptr);
   C_h = reinterpret_cast<uint32_t*>(malloc(Nbytes));
-  REQUIRE(C_h != NULL);
+  REQUIRE(C_h != nullptr);
 
   for (size_t i = 0; i < N; i++) {
     A_h[i] = i;
@@ -129,7 +129,7 @@ void test_dynamicLoading(void* sym_hipGetDevice, void* sym_hipMalloc, void* sym_
   hipFunction_t Function;
   HIPCHECK(dyn_hipModuleGetFunction(&Function, Module, "bit_extract_kernel"))
 
-  HIPCHECK(dyn_hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, 0, NULL,
+  HIPCHECK(dyn_hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, 0, nullptr,
                                      reinterpret_cast<void**>(&config)));
 
   HIPCHECK(dyn_hipMemcpyDtoH(C_h, (hipDeviceptr_t)(C_d), Nbytes))
@@ -181,7 +181,7 @@ HIP_TEST_CASE(Unit_hipApiDynamicLoad_hipGetProcAddress) {
 
 HIP_TEST_CASE(Unit_hipApiDynamicLoad) {
   void* handle = dlopen("libamdhip64.so", RTLD_LAZY);
-  REQUIRE(handle != NULL);
+  REQUIRE(handle != nullptr);
 
   void* sym_hipGetDevice = dlsym(handle, "hipGetDevice");
   void* sym_hipMalloc = dlsym(handle, "hipMalloc");

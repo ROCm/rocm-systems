@@ -37,7 +37,7 @@ HIP_TEST_CASE(Unit_hipPtrGetAttribute_Simple) {
          (total / 1024.0 / 1024.0));
   REQUIRE(free + Nbytes <= total);
 
-  hipDeviceptr_t data = 0;
+  hipDeviceptr_t data = nullptr;
 
   // Device memory
   printf("\nDevice memory (hipMalloc)\n");

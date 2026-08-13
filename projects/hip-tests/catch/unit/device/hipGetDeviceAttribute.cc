@@ -40,7 +40,7 @@ static hipError_t test_hipDeviceGetAttribute(int deviceId, hipDeviceAttribute_t 
 
 static hipError_t test_hipDeviceGetHdpAddress(int deviceId, hipDeviceAttribute_t attr,
                                               uint32_t* expectedValue) {
-  uint32_t* value = 0;
+  uint32_t* value = nullptr;
   std::cout << "Test hipDeviceGetHdpAddress attribute " << attr;
   if (expectedValue != reinterpret_cast<uint32_t*>(0xdeadbeef)) {
     std::cout << " expected value " << expectedValue;

@@ -82,12 +82,12 @@ HIP_TEST_CASE(Unit_hmax_hmin_Tsts) {
   __half y = GENERATE(1.5, 2, 10);
   SECTION("Running test for __hmax()") {
     HMinMaxHalfOps<<<1, 1>>>(x, y, y, Dptr, 1);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
     if (*Hptr == 0) {
       REQUIRE(false);
     }
     HMinMaxHalfOps<<<1, 1>>>(y, x, y, Dptr, 1);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
     if (*Hptr == 0) {
       REQUIRE(false);
     }
@@ -96,12 +96,12 @@ HIP_TEST_CASE(Unit_hmax_hmin_Tsts) {
   *Hptr = 1;
   SECTION("Running test for __hmin()") {
     HMinMaxHalfOps<<<1, 1>>>(x, y, x, Dptr, 2);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
     if (*Hptr == 0) {
       REQUIRE(false);
     }
     HMinMaxHalfOps<<<1, 1>>>(y, x, x, Dptr, 2);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
     if (*Hptr == 0) {
       REQUIRE(false);
     }
@@ -110,35 +110,35 @@ HIP_TEST_CASE(Unit_hmax_hmin_Tsts) {
   *Hptr = 1;
   SECTION("Running test for __hmax_nan()") {
     HMinMaxHalfOps<<<1, 1>>>(x, nan("1"), nan("1"), Dptr, 3);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     if (*Hptr == 0) {
       REQUIRE(false);
     }
 
     HMinMaxHalfOps<<<1, 1>>>(nan("1"), x, nan("1"), Dptr, 3);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     if (*Hptr == 0) {
       REQUIRE(false);
     }
 
     HMinMaxHalfOps<<<1, 1>>>(nan("1"), nan("1"), nan("1"), Dptr, 3);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     if (*Hptr == 0) {
       REQUIRE(false);
     }
 
     HMinMaxHalfOps<<<1, 1>>>(x, y, y, Dptr, 3);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     if (*Hptr == 0) {
       REQUIRE(false);
     }
 
     HMinMaxHalfOps<<<1, 1>>>(y, x, y, Dptr, 3);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     if (*Hptr == 0) {
       REQUIRE(false);
@@ -148,35 +148,35 @@ HIP_TEST_CASE(Unit_hmax_hmin_Tsts) {
   *Hptr = 1;
   SECTION("Running test for __hmin_nan()") {
     HMinMaxHalfOps<<<1, 1>>>(x, nan("1"), nan("1"), Dptr, 4);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     if (*Hptr == 0) {
       REQUIRE(false);
     }
 
     HMinMaxHalfOps<<<1, 1>>>(nan("1"), x, nan("1"), Dptr, 4);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     if (*Hptr == 0) {
       REQUIRE(false);
     }
 
     HMinMaxHalfOps<<<1, 1>>>(nan("1"), nan("1"), nan("1"), Dptr, 4);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     if (*Hptr == 0) {
       REQUIRE(false);
     }
 
     HMinMaxHalfOps<<<1, 1>>>(x, y, x, Dptr, 4);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     if (*Hptr == 0) {
       REQUIRE(false);
     }
 
     HMinMaxHalfOps<<<1, 1>>>(y, x, x, Dptr, 4);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
 
     if (*Hptr == 0) {
       REQUIRE(false);
@@ -196,7 +196,7 @@ HIP_TEST_CASE(Unit_hmax_hmin_Tsts_Negative) {
   __half y = 1.5;
   SECTION("Running Negative test for __hmax()") {
     HMinMaxHalfOps<<<1, 1>>>(x, y, y, Dptr, 1);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
     if (*Hptr == 0) {
       REQUIRE(false);
     }
@@ -204,7 +204,7 @@ HIP_TEST_CASE(Unit_hmax_hmin_Tsts_Negative) {
 
   SECTION("Running Negative test for __hmin()") {
     HMinMaxHalfOps<<<1, 1>>>(x, y, y, Dptr, 2);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
     if (*Hptr == 0) {
       REQUIRE(false);
     }
@@ -228,7 +228,7 @@ HIP_TEST_CASE(Unit_hmax_hmin_Tsts_With_Array) {
   HIP_CHECK(hipMemcpy(Bd, y, NElms * sizeof(__half), hipMemcpyHostToDevice))
   SECTION("Running test for __hmax() with an array") {
     HMinMaxHalfOpsArray<<<1, NElms>>>(Ad, Bd, Bd, Dptr, 1);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
     if (*Hptr == 0) {
       REQUIRE(false);
     }
@@ -236,7 +236,7 @@ HIP_TEST_CASE(Unit_hmax_hmin_Tsts_With_Array) {
 
   SECTION("Running test for __hmin() with an array") {
     HMinMaxHalfOpsArray<<<1, NElms>>>(Ad, Bd, Ad, Dptr, 2);
-    HIP_CHECK(hipStreamSynchronize(0))
+    HIP_CHECK(hipStreamSynchronize(nullptr))
     if (*Hptr == 0) {
       REQUIRE(false);
     }

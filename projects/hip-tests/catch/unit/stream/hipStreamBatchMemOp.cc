@@ -53,7 +53,7 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_Negative_Tests) {
   paramArray[0].writeValue.address = opsArray[0];
   paramArray[0].writeValue.value = 1000;
   paramArray[0].writeValue.flags = 0x0;
-  paramArray[0].writeValue.alias = 0;
+  paramArray[0].writeValue.alias = nullptr;
 
   paramArray[1].operation = hipStreamMemOpWaitValue32;
   paramArray[1].waitValue.address = opsArray[0];
@@ -64,7 +64,7 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_Negative_Tests) {
   invalidParamArray[0].writeValue.address = opsArray[0];
   invalidParamArray[0].writeValue.value = 1000;
   invalidParamArray[0].writeValue.flags = 32;
-  invalidParamArray[0].writeValue.alias = 0;
+  invalidParamArray[0].writeValue.alias = nullptr;
 
   invalidParamArray[1].operation = hipStreamMemOpBarrier;
   invalidParamArray[1].waitValue.address = opsArray[0];
@@ -130,7 +130,7 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_SequentialOrdering) {
   HIP_CHECK(hipDeviceGet(&device, 0))
   HIP_CHECK(hipCtxCreate(&ctx, 0, device))
 
-  hipDeviceptr_t devPtr = 0;
+  hipDeviceptr_t devPtr = nullptr;
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
   *reinterpret_cast<uint64_t*>(devPtr) = 0;
@@ -208,7 +208,7 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_SequentialOrdering_MultiGPU) {
   // so the race is triggered more frequently per iteration.
   constexpr int kIterations = 100;
 
-  std::vector<hipDeviceptr_t> devPtrs(deviceCount, 0);
+  std::vector<hipDeviceptr_t> devPtrs(deviceCount, nullptr);
   std::vector<hipStream_t> streams(deviceCount, nullptr);
   std::vector<hipCtx_t> ctxs(deviceCount, nullptr);
 

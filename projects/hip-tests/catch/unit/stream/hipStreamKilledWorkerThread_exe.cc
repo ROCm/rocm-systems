@@ -94,12 +94,12 @@ DWORD WINAPI TerminateWorkerThreadAfterDelay(LPVOID data) {
 }  // namespace
 
 int main() {
-  HIP_CHECK(hipSetDevice(0))
+  HIP_CHECK(hipSetDevice(0));
 
   const std::vector<DWORD> before_stream_create = GetCurrentProcessThreadIds();
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream))
+  HIP_CHECK(hipStreamCreate(&stream));
 
   const std::vector<DWORD> after_stream_create = GetCurrentProcessThreadIds();
   const std::vector<DWORD> worker_thread_ids =
@@ -113,7 +113,7 @@ int main() {
   if (using_rocr) {
     // ROCr backend: test is not applicable, exit successfully
     std::cout << "ROCr backend detected, skipping worker thread test (not applicable)" << std::endl;
-    HIP_CHECK(hipStreamDestroy(stream))
+    HIP_CHECK(hipStreamDestroy(stream));
     return 0;
   }
 
@@ -130,11 +130,11 @@ int main() {
   }
 
   NoopKernel<<<1, 1, 0, stream>>>();
-  HIP_CHECK(hipGetLastError())
-  HIP_CHECK(hipStreamSynchronize(stream))
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipStreamSynchronize(stream));
 
   hipEvent_t event = nullptr;
-  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming))
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
 
   // Suspend worker so it cannot dequeue/process anything
   if (SuspendThread(worker_thread) == static_cast<DWORD>(-1)) {
@@ -143,7 +143,7 @@ int main() {
     return 1;
   }
 
-  HIP_CHECK(hipEventRecord(event, stream))
+  HIP_CHECK(hipEventRecord(event, stream));
 
   HANDLE killer_thread =
       CreateThread(nullptr, 0, TerminateWorkerThreadAfterDelay, worker_thread, 0, nullptr);

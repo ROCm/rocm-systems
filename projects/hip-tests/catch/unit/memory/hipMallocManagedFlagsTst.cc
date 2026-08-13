@@ -20,10 +20,10 @@ HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
 
   std::atomic<int> DataMismatch{0};
   bool IfTestPassed = true;
-  float *HmmAG = NULL, *HmmAH1 = NULL, *HmmAH2 = NULL, INIT_VAL = 2.5;
+  float *HmmAG = nullptr, *HmmAH1 = nullptr, *HmmAH2 = nullptr, INIT_VAL = 2.5;
   int NumDevs = 0, NUM_ELMS = 4096;
   HIP_CHECK(hipGetDeviceCount(&NumDevs))
-  float *Ad = NULL, *Ah = NULL;
+  float *Ad = nullptr, *Ah = nullptr;
   Ah = new float[NUM_ELMS];
   // Testing hipMemAttachGlobal Flag
   HIP_CHECK(hipMallocManaged(&HmmAG, NUM_ELMS * sizeof(float), hipMemAttachGlobal))
@@ -104,7 +104,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
 
   std::atomic<int> DataMismatch{0};
   bool IfTestPassed = true;
-  float *HmmAG = NULL, *HmmAH1 = NULL, *HmmAH2 = NULL, INIT_VAL = 2.5;
+  float *HmmAG = nullptr, *HmmAH1 = nullptr, *HmmAH2 = nullptr, INIT_VAL = 2.5;
   int NumStrms = 0, MultiDevice = 0, NUM_ELMS = 4096;
   HIP_CHECK(hipGetDeviceCount(&MultiDevice))
   if (MultiDevice >= 2) {
@@ -113,7 +113,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
     NumStrms = 4;
   }
   std::vector<hipStream_t> streams(NumStrms);
-  float *Ad = NULL, *Ah = NULL;
+  float *Ad = nullptr, *Ah = nullptr;
   Ah = new float[NUM_ELMS];
   for (int i = 0; i < NumStrms; ++i) {
     if (MultiDevice >= 2) {

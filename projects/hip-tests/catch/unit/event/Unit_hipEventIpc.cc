@@ -53,7 +53,7 @@ HIP_TEST_CASE(Unit_hipEventIpc) {
 
   hipEvent_t start, stop;
 
-  // NULL stream check:
+  // nullptr stream check:
   HIP_CHECK(hipEventCreateWithFlags(&start, hipEventDisableTiming | hipEventInterprocess))
   HIP_CHECK(hipEventCreateWithFlags(&stop, hipEventDisableTiming | hipEventInterprocess))
 
@@ -65,13 +65,13 @@ HIP_TEST_CASE(Unit_hipEventIpc) {
     //--- START TIMED REGION
     long long hostStart = HipTest::get_time();
     // Record the start event
-    HIP_CHECK(hipEventRecord(start, NULL))
+    HIP_CHECK(hipEventRecord(start, nullptr))
 
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                        static_cast<const float*>(A_d), static_cast<const float*>(B_d), C_d, N);
     HIP_CHECK(hipGetLastError())
 
-    HIP_CHECK(hipEventRecord(stop, NULL))
+    HIP_CHECK(hipEventRecord(stop, nullptr))
     HIP_CHECK(hipEventSynchronize(stop))
     HIP_CHECK(hipEventQuery(stop))
     long long hostStop = HipTest::get_time();

@@ -36,8 +36,8 @@ __global__ void ReverseSeq(int* A, int* B, int N) {
  * - HIP_VERSION >= 5.6
 */
 HIP_TEST_CASE(Unit_hipFuncSetSharedMemConfig_functional) {
-  int *Ah = NULL, *RAh = NULL, NELMTS = 128;
-  int *Ad = NULL, *RAd = NULL;
+  int *Ah = nullptr, *RAh = nullptr, NELMTS = 128;
+  int *Ad = nullptr, *RAd = nullptr;
   Ah = reinterpret_cast<int*>(malloc(NELMTS * sizeof(int)));
   RAh = reinterpret_cast<int*>(malloc(NELMTS * sizeof(int)));
   HIP_CHECK(hipMalloc(&Ad, NELMTS * sizeof(int)))

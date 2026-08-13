@@ -122,7 +122,7 @@ HIP_TEST_CASE(Unit_hipStreamGetDevResource_RegularStream_Functional) {
  * Test Description
  * ------------------------
  *  - Validates error codes from hipStreamGetDevResource for invalid parameters:
- *    NULL resource pointer, unsupported resource types (workqueue, workqueue
+ *    nullptr resource pointer, unsupported resource types (workqueue, workqueue
  *    config), and invalid resource type.
  */
 HIP_TEST_CASE(Unit_hipStreamGetDevResource_Negative) {
@@ -131,7 +131,7 @@ HIP_TEST_CASE(Unit_hipStreamGetDevResource_Negative) {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream))
 
-  // NULL resource pointer
+  // nullptr resource pointer
   REQUIRE(hipStreamGetDevResource(stream, nullptr, hipDevResourceTypeSm)
           == hipErrorInvalidValue);
 

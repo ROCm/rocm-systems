@@ -4,8 +4,12 @@
  * SPDX-License-Identifier: MIT
  */
 
+// These macros are not used in host code; they are passed as -D flags to the RTC compiler below
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-macros"
 #define HIP_ENABLE_WARP_SYNC_BUILTINS
 #define HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
+#pragma clang diagnostic pop
 
 #include "warp_common.hh"
 #include <hip/hip_runtime.h>
@@ -30,7 +34,7 @@ void compileProgram(hiprtcProgram& prog, const std::tuple<T, Types...>&) {
 template <class T, class MaskType, template <typename> class Op>
 void runRtcReduceOp(hiprtcProgram& prog, T* output, const T* input, const MaskType* masks,
                     int numReduces, Op<T>) {
-  unsigned int wavefrontSize = getWarpSize();
+  unsigned int wavefrontSize = static_cast<unsigned int>(getWarpSize());
   const char* loweredName;
   hipFunction_t kernel;
   hipModule_t module;
@@ -55,7 +59,7 @@ void runRtcReduceOp(hiprtcProgram& prog, T* output, const T* input, const MaskTy
   HIPRTC_CHECK(hiprtcGetLoweredName(prog, expression.c_str(), &loweredName));
   HIP_CHECK(hipModuleGetFunction(&kernel, module, loweredName))
   HIP_CHECK(hipModuleLaunchKernel(kernel, grdDim.x, grdDim.y, grdDim.z, blkDim.x, blkDim.y,
-                                  blkDim.z, 0, 0, nullptr, config));
+                                  blkDim.z, 0, nullptr, nullptr, config));
   HIP_CHECK(hipModuleUnload(module))
 }
 

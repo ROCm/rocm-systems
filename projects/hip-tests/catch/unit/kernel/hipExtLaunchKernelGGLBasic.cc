@@ -37,7 +37,7 @@ void testMixData() {
   int16_t b = 2, d = 4;
   double c = 3.0;
   char ff = 10;
-  hipExtLaunchKernelGGL(mKernel, 1, 1, 0, 0, nullptr, nullptr, 0, ff, b, a, c, d, e, d_m);
+  hipExtLaunchKernelGGL(mKernel, 1, 1, 0, nullptr, nullptr, nullptr, 0, ff, b, a, c, d, e, d_m);
   HIP_CHECK(hipMemcpy(&m, d_m, sizeof(double), hipMemcpyDeviceToHost))
   REQUIRE(m == 30.0);
   HIP_CHECK(hipFree(d_m))
@@ -48,7 +48,7 @@ void testStruct() {
   double* d_m;
   HIP_CHECK(hipMalloc(&d_m, sizeof(double)))
   _T s{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-  hipExtLaunchKernelGGL(sKernel, 1, 1, 0, 0, nullptr, nullptr, 0, s, d_m);
+  hipExtLaunchKernelGGL(sKernel, 1, 1, 0, nullptr, nullptr, nullptr, 0, s, d_m);
   HIP_CHECK(hipMemcpy(&m, d_m, sizeof(double), hipMemcpyDeviceToHost))
   REQUIRE(m == 55.0);
   HIP_CHECK(hipFree(d_m))
@@ -66,7 +66,7 @@ void test(size_t N) {
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice))
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
-  hipExtLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0, nullptr,
+  hipExtLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, nullptr, nullptr,
                         nullptr, 0, static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d,
                         N);
 

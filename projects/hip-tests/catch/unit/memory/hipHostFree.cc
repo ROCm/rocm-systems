@@ -61,7 +61,7 @@ HIP_TEST_CASE(Unit_hipHostFree_InvalidMemory) {
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipHostFree_DoubleFree) {
-  void* ptr = NULL;
+  void* ptr = nullptr;
   size_t ptr_size = 1024;
 
   HIP_CHECK(hipHostMalloc(&ptr, ptr_size))

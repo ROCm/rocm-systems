@@ -130,7 +130,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetExecutionCtx_Negative) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount))
 
-  // NULL ctx pointer
+  // nullptr ctx pointer
   REQUIRE(hipDeviceGetExecutionCtx(nullptr, 0) == hipErrorInvalidValue);
 
   // Invalid device (negative)
@@ -140,19 +140,19 @@ HIP_TEST_CASE(Unit_hipDeviceGetExecutionCtx_Negative) {
   // Invalid device (out of range)
   REQUIRE(hipDeviceGetExecutionCtx(&ctx, deviceCount) == hipErrorInvalidDevice);
 
-  // hipExecutionCtxGetDevice: NULL device pointer
+  // hipExecutionCtxGetDevice: nullptr device pointer
   HIP_CHECK(hipDeviceGetExecutionCtx(&ctx, 0))
   REQUIRE(hipExecutionCtxGetDevice(nullptr, ctx) == hipErrorInvalidValue);
 
-  // hipExecutionCtxGetDevice: NULL ctx
+  // hipExecutionCtxGetDevice: nullptr ctx
   int dev = -1;
   REQUIRE(hipExecutionCtxGetDevice(&dev, nullptr) == hipErrorInvalidValue);
 
-  // hipExecutionCtxGetId: NULL ctx
+  // hipExecutionCtxGetId: nullptr ctx
   unsigned long long id = 0;
   REQUIRE(hipExecutionCtxGetId(nullptr, &id) == hipErrorInvalidValue);
 
-  // hipExecutionCtxGetId: NULL id pointer
+  // hipExecutionCtxGetId: nullptr id pointer
   REQUIRE(hipExecutionCtxGetId(ctx, nullptr) == hipErrorInvalidValue);
 }
 

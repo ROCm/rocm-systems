@@ -58,9 +58,9 @@ HIP_TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Functional) {
     nGpu = MAX_GPUS;
   }
   A_h = reinterpret_cast<float*>(malloc(Nbytes));
-  HIP_CHECK(A_h == 0 ? hipErrorOutOfMemory : hipSuccess)
+  HIP_CHECK(A_h == nullptr ? hipErrorOutOfMemory : hipSuccess)
   C_h = reinterpret_cast<float*>(malloc(Nbytes));
-  HIP_CHECK(C_h == 0 ? hipErrorOutOfMemory : hipSuccess)
+  HIP_CHECK(C_h == nullptr ? hipErrorOutOfMemory : hipSuccess)
   // Fill with Phi + i
   for (size_t i = 0; i < N; i++) {
     A_h[i] = 1.618f + i;

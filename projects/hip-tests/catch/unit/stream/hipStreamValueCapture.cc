@@ -50,7 +50,7 @@ HIP_TEST_CASE(Unit_hipStreamWaitWriteValue32_Capture) {
     HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
   }
 
-  hipDeviceptr_t devPtr = 0;
+  hipDeviceptr_t devPtr = nullptr;
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
   *reinterpret_cast<uint64_t*>(devPtr) = 0;
@@ -106,7 +106,7 @@ HIP_TEST_CASE(Unit_hipStreamWaitWriteValue64_Capture) {
     HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
   }
 
-  hipDeviceptr_t devPtr = 0;
+  hipDeviceptr_t devPtr = nullptr;
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
   *reinterpret_cast<uint64_t*>(devPtr) = 0;
@@ -167,7 +167,7 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_Capture) {
   HIP_CHECK(hipDeviceGet(&device, 0))
   HIP_CHECK(hipCtxCreate(&ctx, 0, device))
 
-  hipDeviceptr_t devPtr = 0;
+  hipDeviceptr_t devPtr = nullptr;
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));
   *reinterpret_cast<uint64_t*>(devPtr) = 0;

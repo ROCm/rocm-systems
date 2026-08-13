@@ -32,8 +32,8 @@
 #include <hip_test_common.hh>
 #include <hip_test_process.hh>
 #include <hip/hiprtc.h>
-#include "hrr_reader.h"
-#include "hrr_api_args.h"
+#include <hrr_reader.h>
+#include <hrr_api_args.h>
 
 #include <algorithm>
 #include <cctype>
@@ -785,7 +785,7 @@ HIP_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
  * ----------------
  *   - Capture Unit_HRR_NullOptionalPtr_Direct: a divergence loop (uncaptured
  *     host write) followed by a slotmap kernel whose optional output pointer is
- *     NULL at capture and would be written at byte offset 0x20000 on replay.
+ *     nullptr at capture and would be written at byte offset 0x20000 on replay.
  *   - Replay with the divergence guard ON: the guard trips during the readback
  *     loop and stops the replay (exit 2) BEFORE the faulting kernel runs, so the
  *     null + 0x20000 write never happens.  REQUIRE a clean exit 2 rather than a

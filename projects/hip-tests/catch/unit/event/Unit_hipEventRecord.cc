@@ -14,7 +14,7 @@
  * @addtogroup hipEventRecord hipEventRecord
  * @{
  * @ingroup EventTest
- * `hipEventRecord(hipEvent_t event, hipStream_t stream = NULL)` -
+ * `hipEventRecord(hipEvent_t event, hipStream_t stream = nullptr)` -
  * Record an event in the specified stream.
  * ________________________
  * Test cases from other modules:
@@ -85,7 +85,7 @@ HIP_TEST_CASE(Unit_hipEventRecord) {
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice))
 
   // Warmup
-  HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, 0,
+  HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, nullptr,
                                static_cast<const float*>(A_d), static_cast<const float*>(B_d), C_d,
                                N);
   HIP_CHECK(hipDeviceSynchronize())
@@ -93,13 +93,13 @@ HIP_TEST_CASE(Unit_hipEventRecord) {
     //--- START TIMED REGION
     long long hostStart = HipTest::get_time();
     // Record the start event
-    HIP_CHECK(hipEventRecord(start, NULL))
+    HIP_CHECK(hipEventRecord(start, nullptr))
 
-    HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, 0,
+    HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, nullptr,
                                  static_cast<const float*>(A_d), static_cast<const float*>(B_d),
                                  C_d, N);
     HIP_CHECK(hipGetLastError())
-    HIP_CHECK(hipEventRecord(stop, NULL))
+    HIP_CHECK(hipEventRecord(stop, nullptr))
     HIP_CHECK(hipEventSynchronize(stop))
     long long hostStop = HipTest::get_time();
     //--- STOP TIMED REGION

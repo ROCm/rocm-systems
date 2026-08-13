@@ -30,7 +30,7 @@
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Positive_Basic) {
-  HIP_CHECK(hipFree(0))
+  HIP_CHECK(hipFree(nullptr))
 
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0))
@@ -69,7 +69,7 @@ HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Positive_Basic) {
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Negative_Parameters) {
-  HIP_CHECK(hipFree(0))
+  HIP_CHECK(hipFree(nullptr))
 
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0))
@@ -189,7 +189,7 @@ TEST_CASE("Unit_hipMemExportFabricHandleToStdout_Positive_Basic") {
   allocSize = ((granularity + allocSize -1) / granularity) * granularity;
 
   hipDeviceptr_t addr = 0;
-  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&addr), allocSize, 0, 0, 0))
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&addr), allocSize, 0, nullptr, 0))
 
   hipMemGenericAllocationHandle_t allocHandle;
   HIP_CHECK(hipMemCreate(&allocHandle, granularity * 2, &prop, 0))

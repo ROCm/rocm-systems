@@ -26,10 +26,10 @@ HIP_TEST_CASE(Unit_hiprtc_includepath) {
     if (f.is_open()) {
       size_t sizeFile;
       f.seekg(0, fstream::end);
-      size_t size = sizeFile = (size_t)f.tellg();
+      size_t size = sizeFile = static_cast<size_t>(f.tellg());
       f.seekg(0, fstream::beg);
       saxpy.resize(size, ' ');
-      f.read(&saxpy[0], size);
+      f.read(&saxpy[0], static_cast<std::streamsize>(size));
       f.close();
     } else {
       FAIL("Failed to open saxpy.h. Please ensure the file exists and is accessible.");
@@ -122,8 +122,8 @@ HIP_TEST_CASE(Unit_hiprtc_includepath) {
   HIP_CHECK(hipModuleUnload(module))
 
   for (size_t i = 0; i < n; ++i) {
-    INFO("For " << i << " Value: " << fabs(a * hX[i] + hY[i] - hOut[i])
-                << " with: " << (fabs(hOut[i] * 1.0f) * 1e-6));
-    REQUIRE(fabs(a * hX[i] + hY[i] - hOut[i]) <= fabs(hOut[i]) * 1e-6);
+    INFO("For " << i << " Value: " << fabsf(a * hX[i] + hY[i] - hOut[i])
+                << " with: " << (fabsf(hOut[i]) * 1e-6f));
+    REQUIRE(fabsf(a * hX[i] + hY[i] - hOut[i]) <= fabsf(hOut[i]) * 1e-6f);
   }
 }

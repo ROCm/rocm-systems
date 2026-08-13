@@ -16,7 +16,7 @@
 #include <iterator>
 #include <vector>
 
-const char* funcname = "getWarpSize";
+static const char* funcname = "getWarpSize";
 static constexpr auto code{
     R"(
 extern "C"
@@ -44,7 +44,7 @@ HIP_TEST_CASE(Unit_hiprtc_warpsize) {
   vector<const char*> opts;
   opts.push_back(sarg.c_str());
 
-  hiprtcResult compileResult{hiprtcCompileProgram(prog, opts.size(), opts.data())};
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, static_cast<int>(opts.size()), opts.data())};
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
   if (logSize) {
@@ -69,7 +69,7 @@ HIP_TEST_CASE(Unit_hiprtc_warpsize) {
   HIP_CHECK(hipModuleGetFunction(&function, module, funcname))
 
   void* args[] = {&d_warpSize};
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 64, 1, 1, 0, 0, args, 0))
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 64, 1, 1, 0, nullptr, args, nullptr))
   HIP_CHECK(hipDeviceSynchronize())
 
   int h_warpSize;

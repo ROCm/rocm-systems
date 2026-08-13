@@ -78,7 +78,7 @@ static void validate_hipGraphAddEventWaitNode_internodedep(int test, int nstep,
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   size_t NElem{N};
   hipGraph_t graph1, graph2;
-  hipStream_t streamForGraph1, streamForGraph2;
+  hipStream_t streamForGraph1, streamForGraph2 = nullptr;
   hipGraphExec_t graphExec1, graphExec2;
   HIP_CHECK(hipStreamCreate(&streamForGraph1))
   HIP_CHECK(hipGraphCreate(&graph1, 0))
@@ -105,7 +105,7 @@ static void validate_hipGraphAddEventWaitNode_internodedep(int test, int nstep,
   HIP_CHECK(hipMalloc(&out_d_g2, memsize))
   // Initialize host buffer
   for (uint32_t i = 0; i < N; i++) {
-    inp_h[i] = i;
+    inp_h[i] = static_cast<int>(i);
     out_h_g1[i] = 0;
     out_h_g2[i] = 0;
   }

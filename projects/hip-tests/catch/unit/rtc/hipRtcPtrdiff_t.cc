@@ -50,7 +50,7 @@ HIP_TEST_CASE(Unit_hipRTC_Ptrdiff_t_Check) {
   const char* kername = kernel_name.c_str();
   unsigned int* result_h;
   unsigned int* result_d;
-  unsigned int Nbytes = sizeof(unsigned int);
+  size_t Nbytes = sizeof(unsigned int);
   result_h = new unsigned int;
   *result_h = 0;
   HIP_CHECK(hipMalloc(&result_d, Nbytes))
@@ -73,7 +73,7 @@ HIP_TEST_CASE(Unit_hipRTC_Ptrdiff_t_Check) {
     compiler_options[1] = "-D__HIPRTC_PTRDIFF_T_IS_LONG_LONG__=1";
   }
 
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ptrdiff_Kernel_String, kername, 0, NULL, NULL));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ptrdiff_Kernel_String, kername, 0, nullptr, nullptr));
   hiprtcResult compileResult{hiprtcCompileProgram(prog, 2, compiler_options)};
   if (!(compileResult == HIPRTC_SUCCESS)) {
     WARN("hiprtcCompileProgram() api failed!!");
@@ -96,7 +96,7 @@ HIP_TEST_CASE(Unit_hipRTC_Ptrdiff_t_Check) {
   hipFunction_t function;
   HIP_CHECK(hipModuleLoadData(&module, codec.data()))
   HIP_CHECK(hipModuleGetFunction(&function, module, kername))
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter))
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, kernel_parameter))
   HIP_CHECK(hipDeviceSynchronize())
   HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost))
   if (*result_h != 1) {

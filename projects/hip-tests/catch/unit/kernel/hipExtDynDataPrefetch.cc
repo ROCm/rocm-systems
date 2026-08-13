@@ -57,7 +57,7 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_NegativeTests) {
     cfg.gridDim  = dim3{4, 1, 1};
     cfg.blockDim = dim3{256, 1, 1};
     cfg.dynamicSmemBytes = 0;
-    cfg.stream   = 0;
+    cfg.stream   = nullptr;
     cfg.attrs    = attr;
     cfg.numAttrs = numAttrs;
     return cfg;
@@ -287,7 +287,7 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_FunctionalDaxpy) {
   config.gridDim  = dim3{(N + blockSize - 1) / blockSize, 1, 1};
   config.blockDim = dim3{blockSize, 1, 1};
   config.dynamicSmemBytes = 0;
-  config.stream   = 0;
+  config.stream   = nullptr;
   config.attrs    = &attr;
   config.numAttrs = 1;
 
@@ -362,7 +362,7 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_SingleRegion) {
   config.gridDim  = dim3{(N + blockSize - 1) / blockSize, 1, 1};
   config.blockDim = dim3{blockSize, 1, 1};
   config.dynamicSmemBytes = 0;
-  config.stream   = 0;
+  config.stream   = nullptr;
   config.attrs    = &attr;
   config.numAttrs = 1;
 
@@ -439,7 +439,7 @@ HIP_TEST_CASE(Unit_hipExtDynDataPrefetch_TemporalHints) {
   config.gridDim  = dim3{1, 1, 1};
   config.blockDim = dim3{(unsigned)N, 1, 1};
   config.dynamicSmemBytes = 0;
-  config.stream   = 0;
+  config.stream   = nullptr;
   config.attrs    = &attr;
   config.numAttrs = 1;
 

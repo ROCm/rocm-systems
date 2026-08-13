@@ -44,8 +44,8 @@ struct FlatPitched {
   FlatPitched(FlatPitched&&) = delete;
 };
 
-void Verify2DMemsetResult(void* dst, size_t pitch, size_t width_bytes, size_t height,
-                          unsigned char expected) {
+static void Verify2DMemsetResult(void* dst, size_t pitch, size_t width_bytes, size_t height,
+                                 unsigned char expected) {
   std::vector<unsigned char> host(width_bytes * height);
   HIP_CHECK(hipMemcpy2D(host.data(), width_bytes, dst, pitch, width_bytes, height,
                         hipMemcpyDeviceToHost));

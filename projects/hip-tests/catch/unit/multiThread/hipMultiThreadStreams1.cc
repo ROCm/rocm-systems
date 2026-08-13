@@ -118,7 +118,7 @@ HIP_TEST_CASE(Unit_hipMultiThreadStreams1_AsyncAsync) {
   HIPCHECK(hipStreamCreate(&stream1))
 
   // Easy tests to verify the test works - these don't allow overlap between the threads:
-  test_multiThread_1<float, HipTest::MemcpyAsync>(NULL, NULL, true);
+  test_multiThread_1<float, HipTest::MemcpyAsync>(nullptr, nullptr, true);
   test_multiThread_1<float, HipTest::MemcpyAsync>(stream0, stream1, true);
 
   HIPCHECK(hipStreamDestroy(stream0))
@@ -128,8 +128,8 @@ HIP_TEST_CASE(Unit_hipMultiThreadStreams1_AsyncSame) {
   hipStream_t stream;
   HIPCHECK(hipStreamCreate(&stream))
 
-  // test_multiThread_1<float, HipTest::MemcpyAsync> ("Multithread with NULL stream", NULL,
-  // NULL, false); test_multiThread_1<float, HipTest::MemcpyAsync> ("Multithread with two
+  // test_multiThread_1<float, HipTest::MemcpyAsync> ("Multithread with nullptr stream", nullptr,
+  // nullptr, false); test_multiThread_1<float, HipTest::MemcpyAsync> ("Multithread with two
   // streams", stream0, stream1, false);
   test_multiThread_1<float, HipTest::MemcpyAsync>(stream, stream, false);
 

@@ -136,8 +136,8 @@ template <unsigned int tile_size> static void test_group_partition(TiledGroupShf
 
   int* expected_result = new int[num_elem];
 
-  int* result_dev = NULL;
-  int* result_host = NULL;
+  int* result_dev = nullptr;
+  int* result_host = nullptr;
 
   HIP_CHECK(hipHostMalloc(&result_host, num_elem * sizeof(int), hipHostMallocDefault))
   memset(result_host, 0, num_elem * sizeof(int));

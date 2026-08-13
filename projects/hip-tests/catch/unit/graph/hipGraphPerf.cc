@@ -552,7 +552,7 @@ static void hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams(const hipStream_t
                                     C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphLaunch(graphExec, stream))
   HIP_CHECK(hipStreamSynchronize(stream))
   HIP_CHECK(hipGraphExecDestroy(graphExec))
@@ -566,7 +566,7 @@ static void hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams(const hipStream_t
   kNodeParams1.kernelParams = reinterpret_cast<void**>(kernelArgs);
 
   // Instantiate again and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0))
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0))
   HIP_CHECK(hipGraphExecKernelNodeSetParams(graphExec, kNode, &kNodeParams1))
   HIP_CHECK(hipGraphLaunch(graphExec, stream))
   HIP_CHECK(hipStreamSynchronize(stream))
@@ -2192,7 +2192,7 @@ HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecEventWaitNodeSetEvent) {
   }
 }
 
-void callBackFunc_1(void* A_h) {
+static void callBackFunc_1(void* A_h) {
   int* A = reinterpret_cast<int*>(A_h);
   for (int i = 0; i < N; i++) {
     A[i] = i + i;
@@ -2207,7 +2207,7 @@ static void callBackFunc_1_Verify(int* C_h) {
   }
 }
 
-void callBackFunc_2(void* A_h) {
+static void callBackFunc_2(void* A_h) {
   int* A = reinterpret_cast<int*>(A_h);
   for (int i = 0; i < N; i++) {
     A[i] = i * i;
@@ -2259,7 +2259,7 @@ static void hipGraph_PerfCheck_hipGraphExecHostNodeSetParams(const hipStream_t& 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memCpy3, graph, nullptr, 0, C_h, C_d, Nbytes,
                                     hipMemcpyDeviceToHost));
   hipGraphNode_t hostNode;
-  hipHostNodeParams hostParams = {0, 0};
+  hipHostNodeParams hostParams = {nullptr, nullptr};
   hostParams.fn = callBackFunc_1;
   hostParams.userData = C_h;
   HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams))
@@ -2274,7 +2274,7 @@ static void hipGraph_PerfCheck_hipGraphExecHostNodeSetParams(const hipStream_t& 
   // Verify execution result
   callBackFunc_1_Verify(C_h);
 
-  hipHostNodeParams sethostParam = {0, 0};
+  hipHostNodeParams sethostParam = {nullptr, nullptr};
   sethostParam.fn = callBackFunc_2;
   sethostParam.userData = C_h;
 

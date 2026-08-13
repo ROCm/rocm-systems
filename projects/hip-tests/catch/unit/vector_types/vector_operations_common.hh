@@ -333,7 +333,7 @@ T PerformVectorOperationDevice(VectorOperation operation, decltype(T().x) value1
   T* vector_d;
   HIP_CHECK(hipMalloc(&vector_d, sizeof(T)))
   HIP_CHECK(hipMemcpy(vector_d, &vector_h, sizeof(T), hipMemcpyHostToDevice))
-  VectorOperationKernel<T, two_vectors><<<1, 1, 0, 0>>>(operation, vector_d, value1, value2);
+  VectorOperationKernel<T, two_vectors><<<1, 1, 0, nullptr>>>(operation, vector_d, value1, value2);
   HIP_CHECK(hipMemcpy(&vector_h, vector_d, sizeof(T), hipMemcpyDeviceToHost))
   HIP_CHECK(hipFree(vector_d))
   return vector_h;

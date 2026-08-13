@@ -14,7 +14,7 @@
 #ifdef __linux__
 #include <sys/sysinfo.h>
 #else
-#include <windows.h>
+#include <Windows.h>
 #include <sysinfoapi.h>
 #endif
 

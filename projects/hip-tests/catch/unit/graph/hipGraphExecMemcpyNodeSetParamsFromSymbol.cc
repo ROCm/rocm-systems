@@ -24,8 +24,8 @@ HIP_GRAPH_MEMCPY_FROM_SYMBOL_NODE_DEFINE_ALTERNATE_GLOBALS(float)
 HIP_GRAPH_MEMCPY_FROM_SYMBOL_NODE_DEFINE_ALTERNATE_GLOBALS(double)
 
 template <typename T>
-void GraphExecMemcpyFromSymbolSetParamsShell(const void* symbol, const void* alt_symbol,
-                                             size_t offset, const std::vector<T> expected) {
+static void GraphExecMemcpyFromSymbolSetParamsShell(const void* symbol, const void* alt_symbol,
+                                                    size_t offset, const std::vector<T> expected) {
   const auto f = [alt_symbol, is_arr = expected.size() > 1](void* dst, const void* symbol,
                                                             size_t count, size_t offset,
                                                             hipMemcpyKind direction) {

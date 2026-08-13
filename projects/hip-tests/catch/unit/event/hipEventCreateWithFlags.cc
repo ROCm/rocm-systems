@@ -106,7 +106,7 @@ static void testMemCoherency(eSyncToTest test, eMemoryToTest mem, uint32_t flags
   HIP_CHECK(hipEventCreateWithFlags(&event, flags))
   hipStream_t stream;
   HIP_CHECK(hipStreamCreateWithFlags(&stream, 0x0))
-  int *ibuf_h, *buf_d;
+  int *ibuf_h, *buf_d = nullptr;
   ibuf_h = new int[buffer_size];
   REQUIRE(ibuf_h != nullptr);
   int total_iter = 0;

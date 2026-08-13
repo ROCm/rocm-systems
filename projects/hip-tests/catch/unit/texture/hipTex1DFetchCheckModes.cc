@@ -56,8 +56,8 @@ static void runTest(hipTextureAddressMode addressMode, hipTextureFilterMode filt
   texDesc.normalizedCoords = false;
 
   // Creating texture object
-  hipTextureObject_t texObj = 0;
-  HIP_CHECK(hipCreateTextureObject(&texObj, &resDescLinear, &texDesc, NULL))
+  hipTextureObject_t texObj = nullptr;
+  HIP_CHECK(hipCreateTextureObject(&texObj, &resDescLinear, &texDesc, nullptr))
 
   dim3 dimBlock(1, 1, 1);
   dim3 dimGrid(N, 1, 1);
