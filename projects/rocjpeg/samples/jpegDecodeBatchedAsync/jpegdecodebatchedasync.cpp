@@ -46,10 +46,6 @@ int main(int argc, char **argv) {
 
     RocJpegUtils::ParseCommandLine(input_path, output_file_path, save_images, device_id, rocjpeg_backend, decode_params, nullptr, &batch_size, argc, argv);
 
-    bool is_roi_valid = false;
-    uint32_t roi_width  = decode_params.crop_rectangle.right  - decode_params.crop_rectangle.left;
-    uint32_t roi_height = decode_params.crop_rectangle.bottom - decode_params.crop_rectangle.top;
-
     if (!RocJpegUtils::GetFilePaths(input_path, file_paths, is_dir, is_file)) {
         std::cerr << "ERROR: Failed to get input file paths!" << std::endl;
         return EXIT_FAILURE;
