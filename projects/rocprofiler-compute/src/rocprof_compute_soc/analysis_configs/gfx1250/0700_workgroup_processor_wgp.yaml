@@ -25,9 +25,9 @@ Panel Config:
           max: MAX(SQG_REFCLKS_sum)
           unit: Cycles
         Active WGPs:
-          avg: AVG(SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum)
-          min: MIN(SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum)
-          max: MAX(SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum)
+          avg: AVG(SQG_LEVEL_WGP_ACTIVE_ACCUM_sum / SQG_CYCLES_sum)
+          min: MIN(SQG_LEVEL_WGP_ACTIVE_ACCUM_sum / SQG_CYCLES_sum)
+          max: MAX(SQG_LEVEL_WGP_ACTIVE_ACCUM_sum / SQG_CYCLES_sum)
           unit: Count
 
   - metric_table:

@@ -12405,7 +12405,7 @@ rocprofiler-sdk:
     - architectures:
       - gfx1250
       expression: accumulate(SQC_DCACHE_TC_INFLIGHT_LEVEL, HIGH_RES)
-  - name: SQG_LEVEL_WGP_ACTIVE_sum
+  - name: SQG_LEVEL_WGP_ACTIVE_ACCUM_sum
     description: Accumulated SQG_LEVEL_WGP_ACTIVE (sum across SQG instances).
     properties: []
     definitions:
