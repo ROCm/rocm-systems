@@ -243,7 +243,7 @@ TEST(OperandSelectorDecodeTest, Cdna1RestrictedScalarSourceRejectsLiteralSelecto
 
 TEST(OperandSelectorDecodeTest, DirectSourceAndSmemOffsetRejectReservedSelectors) {
   constexpr auto vop1 = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 209, .vdst = 0});
-  auto gfx1250_decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto gfx1250_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(gfx1250_decoder, nullptr);
   EXPECT_THROW(std::unique_ptr<Instruction>(gfx1250_decoder->decode(vop1.data())),
                util::InvalidInst);
@@ -256,7 +256,7 @@ TEST(OperandSelectorDecodeTest, DirectSourceAndSmemOffsetRejectReservedSelectors
 }
 
 TEST(OperandSelectorDecodeTest, RestrictedVectorAndLaneOperandsRejectLiteralMarkers) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   const auto expect_rejected = [&](const auto &encoding) {
@@ -276,7 +276,7 @@ TEST(OperandSelectorDecodeTest, RestrictedVectorAndLaneOperandsRejectLiteralMark
 }
 
 TEST(OperandSelectorDecodeTest, Gfx1250WmmaSrc2ValidatesVgprOrInlineSelector) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   const auto words_for = [](uint16_t selector) {
@@ -352,7 +352,7 @@ TEST(OperandSelectorDecodeTest, Gfx1250AndRdna4ValidateBarrierIdSelectors) {
   };
 
   validate(
-      ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
+      ROCJITSU_CODE_ARCH_CDNA5, "cdna5",
       [](uint8_t selector) {
         return cdna5::build_sop1(cdna5::kSBarrierSignalIsfirstSop1, {.ssrc0 = selector});
       },

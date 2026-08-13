@@ -18,7 +18,7 @@ private:
 };
 
 TEST(Gfx1250ExecutionTest, TargetProvidesImmutableExecutionBackend) {
-  const IsaTargetDescriptor *target = default_isa_target_registry().find("gfx1250");
+  const IsaTargetDescriptor *target = default_isa_target_registry().find("cdna5");
   ASSERT_NE(target, nullptr);
   EXPECT_TRUE(target->supports_execution);
   EXPECT_TRUE(cdna5::Operand::full_execution_backend_complete());
