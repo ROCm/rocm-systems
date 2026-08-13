@@ -1,5 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
+from __future__ import annotations
+
 import shlex
 from pathlib import Path
 
