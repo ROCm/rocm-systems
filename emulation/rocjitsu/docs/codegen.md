@@ -122,7 +122,7 @@ python -m amdisa \
     rdna3:$MRISA/amdgpu_isa_rdna3.xml \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
-    gfx1250:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
+    cdna5:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
 
@@ -144,7 +144,7 @@ python -m amdisa \
     rdna3:$MRISA/amdgpu_isa_rdna3.xml \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
-    gfx1250:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
+    cdna5:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
   --gen-isas \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated
 
@@ -166,7 +166,7 @@ python -m amdisa \
     rdna3:$MRISA/amdgpu_isa_rdna3.xml \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
-    gfx1250:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
+    cdna5:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
   --gen-dbt \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
 
