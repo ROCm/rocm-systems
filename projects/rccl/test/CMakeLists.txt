@@ -652,6 +652,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/GdrFlushTests.cpp
       transport/NetIbMPI/NetIbMultiSegmentMPITests.cpp
+      transport/NetIbMPI/GdrFlushTests.cpp
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp
