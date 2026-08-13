@@ -38,13 +38,25 @@ extern "C" {
 // Even though we did not include an external MPI header file
 // The includer may have (e.g., a unit test).
 
-typedef void* MPI_Comm;
-typedef void* MPI_Win;
-typedef void* MPI_Group;
-typedef void* MPI_Op;
-typedef void* MPI_Datatype;
-typedef void* MPI_Request;
-typedef void* MPI_Info;
+// Forward-declare the OMPI internal struct so MPI_Comm mangles as
+// ompi_communicator_t* — identical to what OMPI's mpi.h produces.
+// This makes rocshmem_init(MPI_Comm) link correctly against a library
+// compiled without pulling in mpi.h, since the pointer representation
+// and calling convention are ABI-compatible with the full struct.
+struct ompi_communicator_t;
+struct ompi_win_t;
+struct ompi_group_t;
+struct ompi_op_t;
+struct ompi_datatype_t;
+struct ompi_request_t;
+struct ompi_info_t;
+typedef ompi_communicator_t* MPI_Comm;
+typedef ompi_win_t*          MPI_Win;
+typedef ompi_group_t*        MPI_Group;
+typedef ompi_op_t*           MPI_Op;
+typedef ompi_datatype_t*     MPI_Datatype;
+typedef ompi_request_t*      MPI_Request;
+typedef ompi_info_t*         MPI_Info;
 
 struct ompi_status_public_t {
     int MPI_SOURCE;

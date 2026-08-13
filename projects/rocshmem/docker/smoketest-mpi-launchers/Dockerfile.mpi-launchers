@@ -405,10 +405,34 @@ COPY --from=base-src /workspace/src /workspace/src
 ENV ROCSHMEM_SRC=/workspace/src/projects/rocshmem
 RUN cd ${ROCSHMEM_SRC} && mkdir -p build-ompi-auto && cd build-ompi-auto \
  && INSTALL_PREFIX=/opt/rocshmem-ompi-auto \
-    ../scripts/build_configs/all_backends -DUSE_IPC=ON -DBUILD_UNIT_TESTS=OFF -DGPU_TARGETS="${GPU_TARGETS}" \
+    ../scripts/build_configs/all_backends -DUSE_IPC=ON -DBUILD_UNIT_TESTS=ON -DGPU_TARGETS="${GPU_TARGETS}" \
  && ! grep "^#define HAVE_EXTERNAL_MPI" include/rocshmem/rocshmem_config.h \
  || { echo "FAIL: Open MPI AUTO expected HAVE_EXTERNAL_MPI NOT defined"; exit 1; } \
  && echo "=== Open MPI + AUTO: OK (HAVE_EXTERNAL_MPI=OFF as expected) ==="
+
+## ==========================================================================
+## ompi-auto-tests-only: two-stage cmake build to catch MPI_Comm ABI mismatches.
+## Stage 1: build library only (no tests) — establishes HAVE_EXTERNAL_MPI=OFF.
+## Stage 2: separate cmake invocation builds unit tests against the stage-1
+##   build tree, with OMPI headers in PATH. Internal source headers resolve
+##   (source tree present), and the independent MPI discovery in stage 2
+##   exercises the same ABI path as BUILD_TESTS_ONLY.
+## No GPU needed — compile-only check.
+## ==========================================================================
+FROM ompi-auto AS ompi-auto-tests-only
+ARG GPU_TARGETS=gfx950
+ENV ROCSHMEM_SRC=/workspace/src/projects/rocshmem
+## Separate cmake invocation builds tests against the already-built ompi-auto
+## library tree. OMPI headers are in PATH, library has HAVE_EXTERNAL_MPI=OFF —
+## this exercises the same ABI path as a BUILD_TESTS_ONLY downstream build.
+RUN cd ${ROCSHMEM_SRC} && mkdir -p build-ompi-auto-tests && cd build-ompi-auto-tests \
+ && cmake .. \
+      -DBUILD_UNIT_TESTS=ON \
+      -DBUILD_FUNCTIONAL_TESTS=ON \
+      -Drocshmem_DIR=${ROCSHMEM_SRC}/build-ompi-auto \
+      -DGPU_TARGETS="${GPU_TARGETS}" \
+ && cmake --build . --parallel $(nproc) \
+ && echo "=== separate unit+functional test build against ompi-auto library: OK ==="
 
 ## ==========================================================================
 ## final: Open MPI base + source-built MPICH copied in + all six build trees
@@ -439,6 +463,8 @@ COPY --from=mpich-auto /workspace/src/projects/rocshmem/build-mpich-auto /worksp
 COPY --from=ompi-off   /workspace/src/projects/rocshmem/build-ompi-off   /workspace/src/projects/rocshmem/build-ompi-off
 COPY --from=ompi-on    /workspace/src/projects/rocshmem/build-ompi-on    /workspace/src/projects/rocshmem/build-ompi-on
 COPY --from=ompi-auto  /workspace/src/projects/rocshmem/build-ompi-auto  /workspace/src/projects/rocshmem/build-ompi-auto
+## Reference ompi-auto-tests-only so Docker includes it in the build graph.
+COPY --from=ompi-auto-tests-only /workspace/src/projects/rocshmem/build-ompi-auto-tests/CMakeCache.txt /dev/null
 
 ENV ROCSHMEM_SRC=/workspace/src/projects/rocshmem
 ENV OMPI_ALLOW_RUN_AS_ROOT=1
