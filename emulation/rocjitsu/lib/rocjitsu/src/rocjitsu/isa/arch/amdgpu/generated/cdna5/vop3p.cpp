@@ -2930,14 +2930,22 @@ VWmmaF3216x16x128Fp8Fp8Vop3p::VWmmaF3216x16x128Fp8Fp8Vop3p(const MachineInst *in
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(256, OperandType::OPR_SRC_VGPR_OR_INLINE,
-           reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(256, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  if (!((reinterpret_cast<const OpEncoding *>(inst)->src2 >= 0 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 124) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 128 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 208) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 240 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 248) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 256 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 511)))
+    throw util::InvalidInst("V_WMMA_F32_16X16X128_FP8_FP8 has an invalid accumulator selector", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X128_FP8_FP8 does not support DPP", "");
@@ -2957,14 +2965,22 @@ VWmmaF3216x16x128Fp8Bf8Vop3p::VWmmaF3216x16x128Fp8Bf8Vop3p(const MachineInst *in
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(256, OperandType::OPR_SRC_VGPR_OR_INLINE,
-           reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(256, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  if (!((reinterpret_cast<const OpEncoding *>(inst)->src2 >= 0 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 124) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 128 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 208) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 240 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 248) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 256 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 511)))
+    throw util::InvalidInst("V_WMMA_F32_16X16X128_FP8_BF8 has an invalid accumulator selector", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X128_FP8_BF8 does not support DPP", "");
@@ -2984,14 +3000,22 @@ VWmmaF3216x16x128Bf8Fp8Vop3p::VWmmaF3216x16x128Bf8Fp8Vop3p(const MachineInst *in
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(256, OperandType::OPR_SRC_VGPR_OR_INLINE,
-           reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(256, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  if (!((reinterpret_cast<const OpEncoding *>(inst)->src2 >= 0 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 124) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 128 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 208) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 240 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 248) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 256 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 511)))
+    throw util::InvalidInst("V_WMMA_F32_16X16X128_BF8_FP8 has an invalid accumulator selector", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X128_BF8_FP8 does not support DPP", "");
@@ -3011,14 +3035,22 @@ VWmmaF3216x16x128Bf8Bf8Vop3p::VWmmaF3216x16x128Bf8Bf8Vop3p(const MachineInst *in
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(256, OperandType::OPR_SRC_VGPR_OR_INLINE,
-           reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(256, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  if (!((reinterpret_cast<const OpEncoding *>(inst)->src2 >= 0 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 124) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 128 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 208) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 240 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 248) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 256 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 511)))
+    throw util::InvalidInst("V_WMMA_F32_16X16X128_BF8_BF8 has an invalid accumulator selector", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X128_BF8_BF8 does not support DPP", "");
@@ -3038,14 +3070,22 @@ VWmmaF1616x16x128Fp8Fp8Vop3p::VWmmaF1616x16x128Fp8Fp8Vop3p(const MachineInst *in
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(128, OperandType::OPR_SRC_VGPR_OR_INLINE,
-           reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  if (!((reinterpret_cast<const OpEncoding *>(inst)->src2 >= 0 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 124) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 128 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 208) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 240 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 248) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 256 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 511)))
+    throw util::InvalidInst("V_WMMA_F16_16X16X128_FP8_FP8 has an invalid accumulator selector", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X128_FP8_FP8 does not support DPP", "");
@@ -3065,14 +3105,22 @@ VWmmaF1616x16x128Fp8Bf8Vop3p::VWmmaF1616x16x128Fp8Bf8Vop3p(const MachineInst *in
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(128, OperandType::OPR_SRC_VGPR_OR_INLINE,
-           reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  if (!((reinterpret_cast<const OpEncoding *>(inst)->src2 >= 0 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 124) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 128 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 208) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 240 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 248) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 256 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 511)))
+    throw util::InvalidInst("V_WMMA_F16_16X16X128_FP8_BF8 has an invalid accumulator selector", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X128_FP8_BF8 does not support DPP", "");
@@ -3092,14 +3140,22 @@ VWmmaF1616x16x128Bf8Fp8Vop3p::VWmmaF1616x16x128Bf8Fp8Vop3p(const MachineInst *in
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(128, OperandType::OPR_SRC_VGPR_OR_INLINE,
-           reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  if (!((reinterpret_cast<const OpEncoding *>(inst)->src2 >= 0 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 124) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 128 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 208) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 240 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 248) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 256 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 511)))
+    throw util::InvalidInst("V_WMMA_F16_16X16X128_BF8_FP8 has an invalid accumulator selector", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X128_BF8_FP8 does not support DPP", "");
@@ -3119,14 +3175,22 @@ VWmmaF1616x16x128Bf8Bf8Vop3p::VWmmaF1616x16x128Bf8Bf8Vop3p(const MachineInst *in
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(128, OperandType::OPR_SRC_VGPR_OR_INLINE,
-           reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(128, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  if (!((reinterpret_cast<const OpEncoding *>(inst)->src2 >= 0 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 124) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 128 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 208) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 240 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 248) ||
+        (reinterpret_cast<const OpEncoding *>(inst)->src2 >= 256 &&
+         reinterpret_cast<const OpEncoding *>(inst)->src2 <= 511)))
+    throw util::InvalidInst("V_WMMA_F16_16X16X128_BF8_BF8 has an invalid accumulator selector", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X128_BF8_BF8 does not support DPP", "");

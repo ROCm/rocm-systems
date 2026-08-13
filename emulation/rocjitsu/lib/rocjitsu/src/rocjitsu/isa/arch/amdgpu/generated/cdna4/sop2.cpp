@@ -1028,16 +1028,6 @@ SCbranchGForkSop2::SCbranchGForkSop2(const MachineInst *inst)
   dst_operands_[0] = &pc;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
   pc.apply_fieldless_caps(false, false, false);
 }
 
