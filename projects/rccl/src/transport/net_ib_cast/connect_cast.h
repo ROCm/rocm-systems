@@ -53,6 +53,9 @@ struct ncclIbQpCreateAttr {
   int channelId;
   int ibDevN;
   bool useIonic;
+  bool isQpSharingEnabled;
+  int  cqDepthMultiplier;
+  int  qpSharingGroupIdx;
 };
 
 // Per-QP connection metatdata
@@ -101,6 +104,11 @@ struct ncclIbConnectionMetadata {
   int sl;
   int isP2p;
   bool isRMA;
+
+  // QP Sharing metadata
+  int      sharedGroupIdx;      // QP sharing group index (-1 = not shared)
+  uint16_t commId;              // QP sharing comm ID (0 = not shared)
+  int      senderIbDevIdx;      // sender's IB device index
 };
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
