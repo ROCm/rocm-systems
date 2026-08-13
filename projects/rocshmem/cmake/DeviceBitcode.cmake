@@ -195,11 +195,6 @@ if(USE_GDA)
       ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/bnxt/queue_pair_bnxt.cpp
     )
   endif()
-  if(GDA_MLX5)
-    list(APPEND BITCODE_SOURCES
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/mlx5/queue_pair_mlx5.cpp
-    )
-  endif()
 endif()
 
 # Build bitcode for each GPU architecture

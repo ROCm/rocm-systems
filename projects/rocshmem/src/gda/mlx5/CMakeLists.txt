@@ -32,6 +32,5 @@ target_sources(
   ${PROJECT_NAME}
   PRIVATE
     backend_gda_mlx5.cpp
-    queue_pair_mlx5.cpp
 )
 endif()
