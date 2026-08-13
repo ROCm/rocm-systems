@@ -521,11 +521,10 @@ configure_file(
     @ONLY
     FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
 )
-list(
-    APPEND CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
-    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/postinst"
-    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm"
-)
+# Deliberately not set as a generic CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA: a
+# component without its own control-extra inherits the generic one, which is
+# how the asan package would end up running the main package's postinst/prerm
+# against shared absolute paths. Each component names its own scripts below.
 
 # Configure pre-rm for tests only
 configure_file(
@@ -536,7 +535,9 @@ configure_file(
 )
 
 # Assign control scripts to the AMDSMI Lib & Tests packages
-set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_CONTROL_EXTRA
+    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/postinst;${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm"
+)
 set(CPACK_DEBIAN_TESTS_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm")
 
 # install copyright file into share/doc/amd-smi-lib/copyright
@@ -672,9 +673,27 @@ endif()
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/post.in" RPM/post @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/preun.in" RPM/preun @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/postun.in" RPM/postun @ONLY)
-set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post")
-set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/preun")
-set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/tests-preun.in" RPM/tests-preun @ONLY)
+# Assign the maintainer scriptlets per component. An unprefixed
+# CPACK_RPM_<KIND>_SCRIPT_FILE is copied into EVERY component RPM, which is how
+# the tests package came to run the main package's ldconfig registration and
+# cleanup and corrupt a still-installed amd-smi-lib. The state those scripts
+# touch (/etc/ld.so.conf.d, /var/log/amd_smi_lib, /etc/logrotate.d) lives at
+# absolute paths shared by every variant, so an inheriting component clobbers
+# the main package even when it installs under a different prefix.
+#
+# Name the owner explicitly instead, matching rocm-core, clr and rdc. Note the
+# name is the component GROUP: generic_package_post() puts dev/runtime/unspecified
+# into the "runtime" group, so CPack emits one package per group and looks up
+# CPACK_*_RUNTIME_* for the main package. A CPACK_*_DEV_* variable is silently
+# ignored. The tests component's group is also called "tests", so that one matches.
+# Anything not listed here ships no scriptlets, so a component added later
+# cannot silently inherit them; the tests package keeps only its own
+# pre-uninstall, which clears the bytecode its installed tests generate.
+set(CPACK_RPM_RUNTIME_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post")
+set(CPACK_RPM_RUNTIME_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/preun")
+set(CPACK_RPM_RUNTIME_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun")
+set(CPACK_RPM_TESTS_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/tests-preun")
 
 #Set the names now using CPACK utility
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")

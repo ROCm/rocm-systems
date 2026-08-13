@@ -8,18 +8,18 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/config/config_loader.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/sop2.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vglobal.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vimage.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop2.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/sop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vds.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vglobal.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vimage.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -502,6 +502,7 @@ enum class VopdOp : uint16_t {
   MovB32 = 8,
   CndmaskB32 = 9,
   FmaF32 = 19,
+  FmaF64 = 32,
 };
 
 struct VopdSlot {
@@ -4199,6 +4200,90 @@ TEST(Gfx1250DecodeTest, Vop3LiteralConsumesThreeDwords) {
   EXPECT_EQ(inst->size(), sizeof(words));
 }
 
+TEST(Gfx1250DecodeTest, Vop3RejectsLiteral64Selector) {
+  const uint32_t words[] = {
+      0xD5D50000u, // v_sqrt_f16 v0, reserved literal64 selector
+      0x000000FEu,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop1RejectsUnsupportedLiteral32WithoutExtensionWord) {
+  const auto words = gfx1250::build_vop1(gfx1250::kVReadfirstlaneB32Vop1, {.src0 = 255});
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral32WithoutExtensionWord) {
+  const auto words = gfx1250::build_vop2(gfx1250::kVFmamkF64Vop2, {.src0 = 255});
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral64WithoutExtensionWords) {
+  const auto words = gfx1250::build_vop2(gfx1250::kVFmamkF32Vop2, {.src0 = 254});
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, SaluRejectsMixedLiteralWidths) {
+  const uint32_t words[] = {
+      0xBF5DFFFEu, // s_cmp_neq_f16 literal64, literal32
+      0x00000000u,
+      0x00000000u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, SendmsgRtnSelectorsAreNotLiterals) {
+  const uint32_t words[] = {
+      0xBE804CFFu, // s_sendmsg_rtn_b32 s0, 255
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "s_sendmsg_rtn_b32");
+  EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->src_operand(0)->name(), "255");
+}
+
+TEST(Gfx1250DecodeTest, VopdRejectsLiteral64Selector) {
+  const uint32_t words[] = {
+      0xCA52FFFFu,
+      0xFFFFFCFEu,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop3RejectsDppWithLiteral) {
+  const uint32_t words[] = {
+      0xD6290B00u, // v_min3_num_f32 with src0:DPP and src2:literal
+      0x83FF00FAu,
+      0x00001500u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
 TEST(Gfx1250DecodeTest, Vop3SdstLiteralConsumesThreeDwords) {
   const uint32_t words[] = {
       0xD7020001u, // v_subrev_co_u32 v1, s0, 0x60, s12
@@ -4348,6 +4433,27 @@ TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesVop3px2Pair) {
   EXPECT_EQ(inst->size(), sizeof(words));
   EXPECT_EQ(inst->disassemble(),
             "v_wmma_scale_f32_16x16x128_f8f6f4 v[6:13], v[18:33], v[52:67], 0, v0, v4");
+}
+
+TEST(Gfx1250DecodeTest, WmmaScalePairDoesNotConsumeEmbeddedExtensions) {
+  constexpr uint32_t extension_selectors[] = {255u, 250u, 233u, 234u};
+  for (const uint32_t embedded_src0 : extension_selectors) {
+    SCOPED_TRACE(embedded_src0);
+    const uint32_t words[] = {
+        0xCC350000u,
+        0x20020700u,
+        0xCC330000u,
+        0xD600D400u | embedded_src0,
+    };
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->size(), sizeof(words));
+    for (size_t i = 0; i < std::size(words); ++i)
+      EXPECT_EQ(inst->raw_encoding()[i], words[i]);
+  }
 }
 
 TEST(Gfx1250DecodeTest, WmmaScale16F8f6f4ConsumesVop3px2Pair) {
@@ -4514,6 +4620,30 @@ TEST(Gfx1250DecodeTest, Vopd3ConsumesThreeDwords) {
   EXPECT_NE(inst->disassemble().find("v_dual_lshrrev_b32"), std::string::npos);
 }
 
+TEST(Gfx1250DecodeTest, Vopd3RejectsSrcX0Literal32Selector) {
+  const uint32_t words[] = {
+      0xCF4550FFu,
+      0x00000086u,
+      0x0A000001u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vopd3RejectsSrcY0Literal32Selector) {
+  const uint32_t words[] = {
+      0xCF455083u,
+      0x000000FFu,
+      0x0A000001u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
 TEST(Gfx1250DecodeTest, VopdLiteralConsumesThreeDwords) {
   const uint32_t words[] = {
       0xC8D006FFu, // v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0
@@ -4547,6 +4677,50 @@ TEST(Gfx1250DecodeTest, VopdSourceOperandsFollowPrintedSlots) {
   EXPECT_EQ(inst->src_operand(2)->name(), "s11");
   ASSERT_TRUE(inst->src_operand(2)->to_register_ref().has_value());
   EXPECT_EQ(*inst->src_operand(2)->to_register_ref(), (RegisterRef{RegClass::SGPR, 11, 1}));
+}
+
+TEST(Gfx1250DecodeTest, VopdRejectsInvalidOpcodes) {
+  const std::array<std::array<uint32_t, 3>, 2> words = {{
+      // Opcode 18 is valid in the Y slot, but not the X slot.
+      {0xCF000000u | (18u << 18) | (3u << 12), 0, 0},
+      // Opcode 32 is valid in the X slot, but not the Y slot.
+      {0xCF000000u | (3u << 18) | (32u << 12), 0, 0},
+  }};
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &encoding : words)
+    EXPECT_THROW(static_cast<void>(decoder->decode(encoding.data())), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, PublicDecoderReportsInvalidVopdEncoding) {
+  const uint32_t words[] = {
+      (0x32u << 26) | (12u << 22) | (8u << 17), // Opcode 12 is not an X op.
+      0,
+  };
+
+  rj_code_decoder_t *decoder = nullptr;
+  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_GFX1250, &decoder), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *inst = reinterpret_cast<rj_code_inst_t *>(static_cast<uintptr_t>(1));
+  EXPECT_EQ(rj_code_decoder_decode(decoder, words, &inst), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(inst, nullptr);
+  rj_code_decoder_destroy(decoder);
+}
+
+TEST(Gfx1250DecodeTest, Vopd3RejectsOverlappingDestinations) {
+  const std::array<std::array<uint32_t, 3>, 2> words = {{
+      make_vopd3_pair({.op = VopdOp::CndmaskB32, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 10},
+                      {.op = VopdOp::MulF32, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 10}),
+      make_vopd3_pair({.op = VopdOp::FmaF64, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 10},
+                      {.op = VopdOp::MulF32, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 11}),
+  }};
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &encoding : words)
+    EXPECT_THROW(static_cast<void>(decoder->decode(encoding.data())), util::InvalidInst);
 }
 
 TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
