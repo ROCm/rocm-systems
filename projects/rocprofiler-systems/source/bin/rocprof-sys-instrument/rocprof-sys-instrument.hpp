@@ -130,11 +130,11 @@ private:
 //======================================================================================//
 //
 static inline bool
-rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
+rocprofsys_get_is_executable(const std::string& _cmd, bool _default_v)
 {
     bool _is_executable = _default_v;
 
-    if(_cmd.empty())
+    if(!_cmd.empty())
     {
         if(!rocprofsys::path::is_regular_file(_cmd))
         {
