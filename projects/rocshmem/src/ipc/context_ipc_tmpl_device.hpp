@@ -386,11 +386,13 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
   long *pSync = team_obj->reduce_pSync;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
   int my_pe_in_team = team_obj->my_pe;
+
   int off_seg, off_send, off_recv;
   int send_pe = (my_pe_in_team + 1) % PE_size;
   // send_pe is relative to team, convert it relative to team world
   send_pe = team_obj->get_pe_in_world(send_pe);
   long wait_val;  // NOLINT(runtime/int)
+
   int wg_size = get_flat_block_size();
   int wg_id = get_flat_block_id();
 
@@ -401,31 +403,43 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
 
   for (int seg = 0; seg < n_seg; seg++) {
     off_seg = seg * seg_size;
-    for (int iter = 0; iter < 2 * PE_size - 2; iter++) {
+    // Loop 1 in the algorithm above
+    for (int iter = 0; iter < PE_size - 1; iter++) {
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
       off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
 
       internal_putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
                     reinterpret_cast<void *>(&dst[off_send + off_seg]),
                     chunk_size * sizeof(T), send_pe);
-      fence();
 
-      wait_val = (seg + 1) * 1000 + iter + 1;
       if (is_thread_zero_in_block()) {
-        internal_putmem(&pSync[iter], &wait_val, sizeof(wait_val), send_pe);
+        wait_val = seg + 100;
+        fence(send_pe);
+        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
+        wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
-      wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       detail::atomic::threadfence<detail::atomic::memory_scope_system, 
                              detail::atomic::memory_order_acquire>();
+      __syncthreads();
 
-      if (iter < PE_size - 1) {
-        ipc_compute_reduce<T, Op>(&pWrk[off_recv], &dst[off_seg + off_recv],
-                              chunk_size, wg_id, wg_size);
-      } else {
-        for (int i = wg_id; i < chunk_size; i += wg_size) {
-          dst[off_recv + off_seg + i] = pWrk[off_recv + i];
-        }
+      ipc_compute_reduce<T, Op>(&pWrk[off_recv], &dst[off_seg + off_recv],
+                            chunk_size, wg_id, wg_size);
+    }
+
+    // Loop 2 in the example above
+    for (int iter = PE_size - 1; iter < 2 * PE_size - 2; iter++) {
+      off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
+      putmem_nbi_wg(reinterpret_cast<void *>(&dst[off_send + off_seg]),
+                    reinterpret_cast<void *>(&dst[off_send + off_seg]),
+                    chunk_size * sizeof(T), send_pe);
+
+      if (is_thread_zero_in_block()) {
+        wait_val = seg + 10;
+        fence(send_pe);
+        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
+        wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
+
       __syncthreads();
     }
   }
@@ -445,11 +459,12 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
   long *pSync = team_obj->reduce_pSync;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
   int my_pe_in_team = team_obj->my_pe;
+
   int off_seg, off_send, off_recv;
   int send_pe = (my_pe_in_team + 1) % PE_size;
-  // send_pe is relative to team, convert it relative to team world
   send_pe = team_obj->get_pe_in_world(send_pe);
   long wait_val;  // NOLINT(runtime/int)
+
   int wf_tid = get_flat_block_id() % WF_SIZE;
 
   for (int i = wf_tid; i < nelems; i += WF_SIZE) {
@@ -458,35 +473,46 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
 
   for (int seg = 0; seg < n_seg; seg++) {
     off_seg = seg * seg_size;
-    for (int iter = 0; iter < 2 * PE_size - 2; iter++) {
+    // Loop 1: reduce-scatter
+    for (int iter = 0; iter < PE_size - 1; iter++) {
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
       off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
 
       internal_putmem_wave(reinterpret_cast<void *>(&pWrk[off_send]),
-                    reinterpret_cast<void *>(&dst[off_send + off_seg]),
-                    chunk_size * sizeof(T), send_pe);
-      fence();
+                           reinterpret_cast<void *>(&dst[off_send + off_seg]),
+                           chunk_size * sizeof(T), send_pe);
 
-      wait_val = (seg + 1) * 1000 + iter + 1;
       if (is_thread_zero_in_wave()) {
-        internal_putmem(&pSync[iter], &wait_val, sizeof(wait_val), send_pe);
+        wait_val = seg + 100;
+        fence(send_pe);
+        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
+        wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
-      wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
+      detail::atomic::threadfence<detail::atomic::memory_scope_system, 
                              detail::atomic::memory_order_acquire>();
 
-      if (iter < PE_size - 1) {
-        for (int j = wf_tid; j < chunk_size; j += WF_SIZE) {
-          OpWrap<Op>::Calc(&pWrk[off_recv], &dst[off_seg + off_recv], j);
-        }
-      } else {
-        for (int i = wf_tid; i < chunk_size; i += WF_SIZE) {
-          dst[off_recv + off_seg + i] = pWrk[off_recv + i];
-        }
+      for (int j = wf_tid; j < chunk_size; j += WF_SIZE) {
+        OpWrap<Op>::Calc(&pWrk[off_recv], &dst[off_seg + off_recv], j);
+      }
+    }
+
+    // Loop 2: all-gather
+    for (int iter = PE_size - 1; iter < 2 * PE_size - 2; iter++) {
+      off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
+      putmem_nbi_wave(reinterpret_cast<void *>(&dst[off_send + off_seg]),
+                      reinterpret_cast<void *>(&dst[off_send + off_seg]),
+                      chunk_size * sizeof(T), send_pe);
+
+      if (is_thread_zero_in_wave()) {
+        wait_val = seg + 10;
+        fence(send_pe);
+        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
+        wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
     }
   }
+
   if (is_thread_zero_in_wave()) {
     for (int i = 0; i < 2 * constmem.num_pes - 2; i++) {
       pSync[i] = ROCSHMEM_SYNC_VALUE;
