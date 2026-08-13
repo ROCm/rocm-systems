@@ -628,7 +628,7 @@ OMPT trace
 
     rocprofv3 --ompt-trace --output-format rocpd -- <application_path>
 
-OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. If ``--ompt-trace`` is used with another ``--output-format``, ``rocprofv3`` warns and adds ``rocpd`` automatically; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
+OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. OMPT records are only captured when ``rocpd`` is among the requested ``--output-format`` values, so a run that requests only the deprecated direct generators contains no OMPT data; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
 
 .. note::
 
@@ -953,7 +953,7 @@ Sample output for the list-avail command:
 
 You can also customize the counters according to the requirement. Such counters are named :ref:`extra-counters`.
 
-For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300-mi200-performance-counters.html>`_.
+For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/reference/gpu-arch/mi300-mi200-performance-counters.html>`_.
 
 .. note::
 

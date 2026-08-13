@@ -35,6 +35,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "util/except.h"
 
 #include <algorithm>
 #include <array>
@@ -127,13 +128,21 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
     for (uint16_t slot = 0; slot < kDirectBranchIslandPoolSlots; ++slot) {
       const uint64_t slot_offset =
           offset + (kGeneratedIslandPoolHeaderWords + slot) * sizeof(uint32_t);
-      uint32_t slot_word = text_word_at(text, slot_offset);
-      std::unique_ptr<Instruction> slot_inst(decoder->decode(&slot_word));
-      if (!slot_inst || slot_inst->size() != static_cast<int>(sizeof(uint32_t)) ||
-          slot_inst->mnemonic() != "s_branch" || !slot_inst->branch_offset_bytes()) {
-        has_canonical_slots = false;
-        break;
+      // A malformed slot can select an extension-bearing format. Pad the
+      // speculative decode so pool recognition never reads beyond its input.
+      const std::array<uint32_t, 3> slot_words = {text_word_at(text, slot_offset), 0, 0};
+      try {
+        std::unique_ptr<Instruction> slot_inst(decoder->decode(slot_words.data()));
+        if (slot_inst && slot_inst->size() == static_cast<int>(sizeof(uint32_t)) &&
+            slot_inst->mnemonic() == "s_branch" && slot_inst->branch_offset_bytes()) {
+          continue;
+        }
+      } catch (const util::InvalidInst &) {
+        // A marker-shaped region containing an invalid instruction is not a
+        // generated pool. Normal block decoding will report the instruction.
       }
+      has_canonical_slots = false;
+      break;
     }
     if (has_canonical_slots)
       offsets.insert(offset);
@@ -1455,8 +1464,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // helper block, Phase 3 emits that helper into both relocated bodies so every
   // branch or call target can be resolved through the current kernel's placement
   // map without borrowing another kernel's return continuation.
-  auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders,
-                                  ExternalEntryPolicy::ExplicitOnly);
+  std::vector<std::unique_ptr<BasicBlock>> blocks;
+  try {
+    blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders,
+                               ExternalEntryPolicy::ExplicitOnly);
+  } catch (const util::InvalidInst &error) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization, error.what());
+    return leave_unchanged();
+  }
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   const uint64_t text_vaddr = obj.text_sections().front()->vaddr();
   const auto relocation_pair_analysis =

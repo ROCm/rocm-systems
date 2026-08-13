@@ -11,10 +11,58 @@ from rocm_kpack.database_handlers import (
     AotritonHandler,
     MIOpenHandler,
     HipKernelProviderRockeHandler,
+    HotswapCacheHandler,
     WHEEL_TYPE_PRESETS,
     get_database_handlers,
     list_available_handlers,
 )
+
+
+class TestHotswapCacheHandler:
+    @pytest.fixture
+    def handler(self):
+        return HotswapCacheHandler()
+
+    @pytest.fixture
+    def prefix_root(self, tmp_path):
+        root = tmp_path / "prefix"
+        root.mkdir()
+        return root
+
+    def test_name(self, handler):
+        assert handler.name() == "hotswap_cache"
+
+    @pytest.mark.parametrize("extension", ["obj", "man"])
+    def test_detect_gfx1250_entry(self, handler, prefix_root, extension):
+        digest = "0123456789abcdef" * 4
+        file_path = (
+            prefix_root
+            / f"share/rocjitsu/translations/gfx1250-b0-a0/v1/{digest}.{extension}"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+        assert handler.detect(file_path, prefix_root) == "gfx1250"
+
+    @pytest.mark.parametrize(
+        "relative_path",
+        [
+            "share/rocjitsu/translations/gfx1250-b0-a0/v2/" + "a" * 64 + ".obj",
+            "share/rocjitsu/translations/gfx1250-b0-a1/v1/" + "a" * 64 + ".obj",
+            "share/rocjitsu/translations/gfx1250-b0-a0/v1/not-a-digest.obj",
+            "share/rocjitsu/translations/gfx1250-b0-a0/v1/" + "a" * 64 + ".txt",
+            "share/rocjitsu/translations/gfx1250-b0-a0/v1/nested/" + "a" * 64 + ".obj",
+            "share/other/translations/gfx1250-b0-a0/v1/" + "a" * 64 + ".obj",
+        ],
+    )
+    def test_reject_unowned_layout(self, handler, prefix_root, relative_path):
+        file_path = prefix_root / relative_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+        assert handler.detect(file_path, prefix_root) is None
+
+    def test_reject_file_outside_prefix(self, handler, prefix_root):
+        with pytest.raises(ValueError, match="is not under prefix_root"):
+            handler.detect(Path("/tmp/outside.obj"), prefix_root)
 
 
 class TestRocBLASHandler:
@@ -787,9 +835,7 @@ class TestHipKernelProviderRockeHandler:
 
     def test_detect_deeply_nested_file(self, handler, prefix_root):
         """Any file nested below the arch dir routes to that arch."""
-        file_path = (
-            prefix_root / f"{self._ENGINE_DIR}/gfx942/sub/extra/blob.bin"
-        )
+        file_path = prefix_root / f"{self._ENGINE_DIR}/gfx942/sub/extra/blob.bin"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
@@ -906,7 +952,8 @@ class TestDatabaseHandlerRegistry:
         assert "aotriton" in handlers
         assert "miopen" in handlers
         assert "hipkernelprovider" in handlers
-        assert len(handlers) == 6
+        assert "hotswap_cache" in handlers
+        assert len(handlers) == 7
 
     def test_get_database_handlers_single(self):
         """Test getting a single handler by name."""
@@ -931,15 +978,17 @@ class TestDatabaseHandlerRegistry:
                 "aotriton",
                 "miopen",
                 "hipkernelprovider",
+                "hotswap_cache",
             ]
         )
-        assert len(handlers) == 6
+        assert len(handlers) == 7
         assert isinstance(handlers[0], RocBLASHandler)
         assert isinstance(handlers[1], HipBLASLtHandler)
         assert isinstance(handlers[2], HipSparseLtHandler)
         assert isinstance(handlers[3], AotritonHandler)
         assert isinstance(handlers[4], MIOpenHandler)
         assert isinstance(handlers[5], HipKernelProviderRockeHandler)
+        assert isinstance(handlers[6], HotswapCacheHandler)
 
     def test_wheel_type_preset(self):
         """Test that wheel type presets resolve to valid handlers."""

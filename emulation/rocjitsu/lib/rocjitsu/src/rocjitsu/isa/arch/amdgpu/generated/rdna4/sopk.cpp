@@ -5,24 +5,15 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/sopk.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/hwreg.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "util/except.h"
-#include "util/log.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
 
 namespace rocjitsu {
 namespace rdna4 {
 
 SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
-    : Sopk("s_movk_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMovkI32Sopk>()),
+    : Sopk("s_movk_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SMovkI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   dst_operands_[0] = &sdst;
@@ -31,25 +22,18 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SMovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_movk_i32_sopk(*this, wf);
-}
-
 SVersionSopk::SVersionSopk(const MachineInst *inst)
-    : Sopk("s_version", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SVersionSopk>()),
+    : Sopk("s_version", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SVersionSopk)),
       simm16(16, OperandType::OPR_VERSION, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
 }
 
-void SVersionSopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_version_sopk(*this, wf);
-}
-
 SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
     : Sopk("s_cmovk_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmovkI32Sopk>()),
+           selected_exec_fn(InstructionExecutionId::SCmovkI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -63,13 +47,9 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   flags_ |= PREDICATED_DEF;
 }
 
-void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmovk_i32_sopk(*this, wf);
-}
-
 SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
     : Sopk("s_addk_co_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAddkCoI32Sopk>()),
+           selected_exec_fn(InstructionExecutionId::SAddkCoI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -82,20 +62,9 @@ SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SAddkCoI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(
-      amdgpu::RegisterAccess(wf).read_scalar(sdst),
-      static_cast<uint32_t>(static_cast<int32_t>(
-          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(simm16) << 16) >> 16))));
-  amdgpu::RegisterAccess(wf).write_scalar(
-      sdst,
-      (amdgpu::RegisterAccess(wf).read_scalar(sdst) +
-       static_cast<uint32_t>(static_cast<int32_t>(
-           static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(simm16) << 16) >> 16))));
-}
-
 SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
-    : Sopk("s_mulk_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMulkI32Sopk>()),
+    : Sopk("s_mulk_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SMulkI32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   src_operands_[0] = &sdst;
@@ -105,13 +74,9 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SMulkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_mulk_i32_sopk(*this, wf);
-}
-
 SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
     : Sopk("s_getreg_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SGetregB32Sopk>()),
+           selected_exec_fn(InstructionExecutionId::SGetregB32Sopk)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
   dst_operands_[0] = &sdst;
@@ -120,19 +85,9 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t hwreg = simm16.encoding_value_;
-  uint32_t reg_val = 0;
-  auto result = amdgpu::read_hwreg_field(wf, hwreg, reg_val);
-  if (result != amdgpu::HwregAccessResult::Success)
-    util::Logger::warn("s_getreg_b32: ", amdgpu::hwreg_access_result_name(result),
-                       " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
-  amdgpu::RegisterAccess(wf).write_scalar(sdst, reg_val);
-}
-
 SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
     : Sopk("s_setreg_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSetregB32Sopk>()),
+           selected_exec_fn(InstructionExecutionId::SSetregB32Sopk)),
       simm16(16, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst) {
   dst_operands_[0] = &simm16;
@@ -147,18 +102,9 @@ void SSetregB32Sopk::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t hwreg = simm16.encoding_value_;
-  uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(sdst);
-  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);
-  if (result != amdgpu::HwregAccessResult::Success)
-    util::Logger::warn("s_setreg_b32: ", amdgpu::hwreg_access_result_name(result),
-                       " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
-}
-
 SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
     : Sopk("s_setreg_imm32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSetregImm32B32Sopk>()),
+           selected_exec_fn(InstructionExecutionId::SSetregImm32B32Sopk)),
       simm16(16, OperandType::OPR_HWREG, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       simm32(32, OperandType::OPR_SIMM32, 0) {
   dst_operands_[0] = &simm16;
@@ -175,17 +121,9 @@ void SSetregImm32B32Sopk::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t hwreg = simm16.encoding_value_;
-  uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(simm32);
-  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);
-  if (result != amdgpu::HwregAccessResult::Success)
-    util::Logger::warn("s_setreg_imm32_b32: ", amdgpu::hwreg_access_result_name(result),
-                       " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
-}
-
 SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
-    : Sopk("s_call_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCallB64Sopk>()),
+    : Sopk("s_call_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCallB64Sopk)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       pc(64, OperandType::OPR_PC, 0), pc_in(64, OperandType::OPR_PC, 0) {
@@ -203,12 +141,6 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
 std::optional<int64_t> SCallB64Sopk::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
-}
-
-void SCallB64Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::RegisterAccess(wf).write_scalar64(sdst, wf.pc + size_);
-  int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
-  wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
 }
 
 } // namespace rdna4

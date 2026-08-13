@@ -36,10 +36,14 @@ class LivenessAnalysis;
 /// @brief Rewrite a 64-bit FLAT_SCRATCH_BASE source for the A0 profile.
 ///
 /// @details Scalar reads keep their instruction and change the selector to 230.
-/// Vector reads cannot name the selector at all, so the base is first moved
-/// into a dead SGPR pair with a 64-bit scalar read and the source position is
-/// repointed at that pair; one pair serves every affected position in the
-/// instruction.
+/// A 64-bit vector source cannot name the selector directly. The preferred
+/// replacement moves the base into a dead SGPR pair. When none is available,
+/// an explicitly opted-in EXEC-masked VALU encoding may instead use two 32-bit
+/// vector moves to stage the halves in the instruction's overwritten two-VGPR
+/// destination. Destination staging requires no explicit or implicit read of
+/// that pair and known, matching source/destination VGPR-MSB banks. One chosen
+/// temporary serves every affected source position. The replacement can grow
+/// by one scalar move, or by two vector moves plus dependency padding.
 ///
 /// @param inst        The decoded instruction.
 /// @param offset      Byte offset of @p inst in @p source_text.

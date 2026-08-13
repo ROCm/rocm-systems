@@ -25,7 +25,7 @@ real hardware. Supports three execution strategies:
 | RDNA3&trade; | gfx1100 | GFX11 | Experimental | Experimental | Planned |
 | RDNA3.5&trade; | gfx1150 | GFX11 | Experimental | Experimental | Planned |
 | RDNA4&trade; | gfx1200 | GFX12 | Experimental | Experimental | Planned |
-| gfx1250      | gfx1250 | GFX12 | Experimental | Experimental | Planned |
+| CDNA5&trade; | gfx1250 | GFX12 | Experimental | Experimental | Planned |
 | RISC-V | RV64I | RV | Experimental | &mdash; | &mdash; |
 
 <!-- \NPI new GPU: add a row to the supported-architectures table above. -->

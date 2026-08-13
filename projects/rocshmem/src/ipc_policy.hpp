@@ -174,21 +174,19 @@ class IpcOnImpl {
    * matched against the symmetrically-registered user buffers.
    *
    * @param[in] sym_addr Symmetric address (valid in the local address space)
-   * @param[in] my_pe    Local PE id (index into ipc_bases for the local base)
    * @param[in] pe       Target PE id
    * @return Address of the corresponding data in PE 'pe'
    */
-  __device__ __forceinline__ char *ipcPeerPtr(const void *sym_addr, int my_pe,
-                                               int pe) {
+  __device__ __forceinline__ char *ipcPeerPtr(const void *sym_addr, int pe) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
-    uintptr_t heap_base = reinterpret_cast<uintptr_t>(ipc_bases[my_pe]);
+    uintptr_t heap_base = constmem.heap_base;
 
     /*
      * Common case: the address lives in the symmetric heap. Translate it
      * directly and skip the registered-buffer search. The single unsigned
      * compare also rejects addresses below the heap base (they wrap large).
      */
-    if (addr - heap_base < heap_size) {
+    if (addr - heap_base < constmem.heap_size) {
       return ipc_bases[pe] + (addr - heap_base);
     }
 
@@ -505,9 +503,8 @@ class IpcOffImpl {
   int ipc_first_pe{0};
   int ipc_stride{0};
 
-  __device__ __forceinline__ char *ipcPeerPtr([[maybe_unused]] const void *sym_addr,
-                                               [[maybe_unused]] int my_pe,
-                                               [[maybe_unused]] int pe) {
+  __device__ __forceinline__ char *ipcPeerPtr(
+      [[maybe_unused]] const void *sym_addr, [[maybe_unused]] int pe) {
     return nullptr;
   }
 
