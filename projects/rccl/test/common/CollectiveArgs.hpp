@@ -122,6 +122,8 @@ namespace RcclUnitTesting
     PtrUnion       outputGpu;
     PtrUnion       outputCpu;
     PtrUnion       expected;
+    PtrUnion       expectedGpu;        // Device-built expected (UT_DEVICE_DATA mode)
+    bool           expectedOnDevice = false; // True once a prep func fills expectedGpu
     bool           inPlace;
     bool           useManagedMem;
     bool           userRegistered;

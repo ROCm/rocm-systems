@@ -99,6 +99,16 @@ namespace RcclUnitTesting
     }
     CHECK_CALL(this->outputCpu.AllocateCpuMem(this->numOutputBytesAllocated));
 
+    // Device-data mode: a device-resident expected buffer for device-side validate.
+    // Allocated only for collectives whose prep func builds expected on the GPU
+    // (currently AllToAll), so no other collective pays an extra device buffer.
+    this->expectedOnDevice = false;
+    if (UtDeviceDataEnabled() &&
+        (this->funcType == ncclCollAlltoAll || this->funcType == ncclCollAllReduce))
+    {
+      CHECK_CALL(this->expectedGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, false));
+    }
+
     // Allocate bias buffers if bias is enabled
     if (this->options.useBias)
     {
@@ -128,9 +138,25 @@ namespace RcclUnitTesting
     if (this->funcType == ncclCollSend) return TEST_SUCCESS; // on the send receive pair only recv needs to be checked
     size_t const numOutputBytes = (this->numOutputElements * DataTypeToBytes(this->dataType));
 
+    bool isMatch = true;
+
+    // Device-data mode: compare outputGpu vs the device-built expectedGpu on the GPU
+    // (no D2H copy, no host element loop), using the same per-type tolerances as IsEqual.
+    if (UtDeviceDataEnabled() && this->expectedOnDevice)
+    {
+      size_t mismatches = 0;
+      CHECK_CALL(PtrUnion::IsEqualDevice(this->dataType,
+                                         this->numOutputElements,
+                                         this->outputGpu.ptr,
+                                         this->expectedGpu.ptr,
+                                         mismatches));
+      isMatch = (mismatches == 0);
+      if (!isMatch) TEST_ERROR("Mismatch (%zu elements) for %s", mismatches, this->GetDescription().c_str());
+      return isMatch ? TEST_SUCCESS : TEST_FAIL;
+    }
+
     CHECK_HIP(hipMemcpy(this->outputCpu.ptr, this->outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
 
-    bool isMatch = true;
     CHECK_CALL(this->outputCpu.IsEqual(this->dataType,
                                        this->numOutputElements,
                                        this->expected,
@@ -158,6 +184,7 @@ namespace RcclUnitTesting
 
     this->outputCpu.FreeCpuMem();
     this->expected.FreeCpuMem();
+    if (this->expectedGpu.ptr != nullptr) this->expectedGpu.FreeGpuMem();
 
     if (this->localScalar.ptr != nullptr)
     {

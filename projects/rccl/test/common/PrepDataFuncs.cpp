@@ -104,6 +104,24 @@ namespace RcclUnitTesting
 
     size_t const numBytes = collArgs.numInputElements * DataTypeToBytes(collArgs.dataType);
 
+    // Device-data mode (AllReduce only, standard reduction): build this rank's input
+    // and the all-ranks reduced expected entirely on the GPU. Custom-op / scalar /
+    // bias / constant-input variants keep the host reference path.
+    if (UtDeviceDataEnabled() && isAllReduce
+        && UtDeviceDtypeSupported(collArgs.dataType)
+        && collArgs.options.scalarMode < 0
+        && !collArgs.options.useBias
+        && collArgs.options.inputConstantValue < 0)
+    {
+      CHECK_CALL(collArgs.outputGpu.ClearGpuMem(numBytes));
+      CHECK_CALL(collArgs.inputGpu.FillPatternDevice(collArgs.dataType, collArgs.numInputElements,
+                                                     collArgs.globalRank, 0));
+      CHECK_CALL(collArgs.expectedGpu.FillReducedPatternDevice(collArgs.dataType, collArgs.numInputElements,
+                                                               collArgs.totalRanks, collArgs.options.redOp));
+      collArgs.expectedOnDevice = true;
+      return TEST_SUCCESS;
+    }
+
     // Clear output for all ranks (done before filling input in case of in-place)
     CHECK_CALL(collArgs.outputGpu.ClearGpuMem(numBytes));
 
@@ -383,6 +401,37 @@ namespace RcclUnitTesting
     size_t const numInputBytes = collArgs.numInputElements * DataTypeToBytes(collArgs.dataType);
     size_t const numOutputBytes = collArgs.numOutputElements * DataTypeToBytes(collArgs.dataType);
     size_t const numBytes = numInputBytes / collArgs.totalRanks;
+
+    // Device-data mode: build input and expected entirely on the GPU (no host fill,
+    // no H2D copy). AllToAll is a pure permutation, so expected block `rank` is this
+    // rank's slice of source rank `rank`'s pattern: FillPatternDevice with the source
+    // rank and a start index of globalRank*elemsPerBlock reproduces it exactly.
+    if (UtDeviceDataEnabled() && UtDeviceDtypeSupported(collArgs.dataType))
+    {
+      size_t const elemsPerBlock = collArgs.numInputElements / collArgs.totalRanks;
+      CHECK_CALL(collArgs.outputGpu.ClearGpuMem(numOutputBytes));
+      CHECK_CALL(collArgs.inputGpu.FillPatternDevice(collArgs.dataType,
+                                                     collArgs.numInputElements,
+                                                     collArgs.globalRank, 0));
+      for (int rank = 0; rank < collArgs.totalRanks; ++rank)
+      {
+        PtrUnion blockDst;
+        blockDst.Attach(collArgs.expectedGpu.U1 + (numBytes * rank));
+        CHECK_CALL(blockDst.FillPatternDevice(collArgs.dataType, elemsPerBlock, rank,
+                                              (size_t)collArgs.globalRank * elemsPerBlock));
+      }
+      // Negative control (UT_DEVICE_DATA_FAULT=1): corrupt one expected element so a
+      // correct collective output MUST mismatch. Proves device validate is not a no-op.
+      if (getenv("UT_DEVICE_DATA_FAULT"))
+      {
+        CHECK_HIP(hipMemset(collArgs.expectedGpu.ptr, 0xFF, DataTypeToBytes(collArgs.dataType)));
+        fprintf(stdout, "[UT][device-data] FAULT injected into expectedGpu[0] (rank %d)\n",
+                collArgs.globalRank);
+        fflush(stdout);
+      }
+      collArgs.expectedOnDevice = true;
+      return TEST_SUCCESS;
+    }
 
     // Clear outputs on all ranks (prior to input in case of in-place)
     collArgs.outputGpu.ClearGpuMem(numOutputBytes);
