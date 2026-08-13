@@ -342,6 +342,12 @@ if(BUILD_TESTS)
     list(APPEND TEST_FIXTURE_SOURCE_FILES
       gin/GinAnvilIpcTableHost_test.cpp
       ../src/gin/gin_anvil_ipc_table_host.cc
+      # GIN rocSHMEM-GDA device template test. Self-contained: supplies its own
+      # rocshmem::QueuePair device stubs in-TU (no librocshmem device link, no
+      # header shadow), so it only needs ENABLE_ROCSHMEM_GIN (which enables
+      # NCCL_GIN_ROCSHMEM_GDA_ENABLE) and does not depend on the SDMA
+      # anvil_device.hpp shadow used by the Anvil-SDMA template test below.
+      device/GinRocshmemGdaTemplate_test.cpp
     )
   endif()
 
