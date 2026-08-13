@@ -381,8 +381,8 @@ Inspector profiling
 The NCCL Inspector is a profiler plugin that emits per-communicator,
 per-operation performance data (collectives and point-to-point) as JSON or
 Prometheus textfile metrics. For a full walkthrough, see
-:doc:`../how-to/using-rccl-inspector-plugin`. The most common Inspector
-environment variables are collected in the following table.
+:doc:`../how-to/using-rccl-inspector-plugin`. The Inspector environment
+variables are collected in the following table.
 
 .. list-table::
     :header-rows: 1
@@ -410,6 +410,13 @@ environment variables are collected in the following table.
       - | ``0``: JSON output (default).
         | ``1``: Prometheus textfile output.
 
+    * - | ``NCCL_INSPECTOR_DUMP_THREAD_ENABLE``
+        | Enables the internal dump thread. When disabled, output is only
+        | written at communicator teardown, regardless of the configured
+        | dump interval.
+      - | ``0``: Disabled.
+        | ``1``: Enabled (default).
+
     * - | ``NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS``
         | Interval, in microseconds, at which the internal dump thread writes
         | output. Output is always written at communicator teardown.
@@ -434,3 +441,37 @@ environment variables are collected in the following table.
     * - | ``NCCL_INSPECTOR_DUMP_MIN_SIZE_BYTES``
         | Minimum message size (in bytes) tracked by the Inspector.
       - | Integer value in bytes (default: ``8192``).
+
+    * - | ``NCCL_INSPECTOR_REQUIRE_KERNEL_TIMING``
+        | Requires GPU-based kernel timing for an event to be recorded. When
+        | enabled, events that fall back to CPU-measured timing are discarded.
+      - | ``0``: Record events regardless of timing source.
+        | ``1``: Record only GPU-timed events (default).
+
+    * - | ``NCCL_INSPECTOR_DUMP_COLL_RING_SIZE``
+        | Per-communicator capacity of the ring buffer holding completed
+        | collectives waiting to be dumped.
+      - | Integer number of entries (default: ``1024``).
+
+    * - | ``NCCL_INSPECTOR_DUMP_P2P_RING_SIZE``
+        | Per-communicator capacity of the ring buffer holding completed
+        | point-to-point operations waiting to be dumped.
+      - | Integer number of entries (default: ``1024``).
+
+    * - | ``NCCL_INSPECTOR_COLL_POOL_SIZE``
+        | Initial size, and growth stride, of the collective event pool.
+      - | Integer number of entries (default: ``256``).
+
+    * - | ``NCCL_INSPECTOR_P2P_POOL_SIZE``
+        | Initial size, and growth stride, of the point-to-point event pool.
+      - | Integer number of entries (default: ``256``).
+
+    * - | ``NCCL_INSPECTOR_COMM_POOL_SIZE``
+        | Initial size, and growth stride, of the communicator event pool.
+      - | Integer number of entries (default: ``256``).
+
+    * - | ``NCCL_INSPECTOR_POOL_GROW``
+        | Allows the event pools above to grow beyond their initial size. When
+        | disabled, events are dropped once a pool is exhausted.
+      - | ``0``: Fixed-size pools.
+        | ``1``: Pools grow on demand (default).

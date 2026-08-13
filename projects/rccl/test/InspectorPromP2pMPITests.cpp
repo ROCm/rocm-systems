@@ -44,17 +44,19 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
-#include <dirent.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include <hip/hip_runtime.h>
 #include <mpi.h>
+
+namespace fs = std::filesystem;
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
@@ -114,29 +116,25 @@ protected:
     // without cross-rank/filesystem races (works single- and multi-node).
     std::string makeDumpDir()
     {
-        const char* base = getenv("NCCL_INSPECTOR_TEST_DUMP_DIR");
-        std::string dir  = std::string(base && base[0] ? base : "/tmp") +
-                          "/rccl_inspector_prom_pid" + std::to_string(getpid()) +
-                          "_rank" + std::to_string(MPIEnvironment::world_rank);
-        mkdir(dir.c_str(), 0777);
+        const char*     base = getenv("NCCL_INSPECTOR_TEST_DUMP_DIR");
+        const fs::path  root = base && base[0] ? fs::path(base) : fs::temp_directory_path();
+        const fs::path  dir  = root / ("rccl_inspector_prom_pid" + std::to_string(getpid()) +
+                                     "_rank" + std::to_string(MPIEnvironment::world_rank));
+        std::error_code ec;
+        fs::create_directories(dir, ec);
         // Clear any stale .prom files.
-        removePromFiles(dir);
-        return dir;
+        removePromFiles(dir.string());
+        return dir.string();
     }
 
     static void removePromFiles(const std::string& dir)
     {
-        DIR* d = opendir(dir.c_str());
-        if(!d)
-            return;
-        struct dirent* ent;
-        while((ent = readdir(d)) != nullptr)
+        std::error_code ec;
+        for(const auto& entry : fs::directory_iterator(dir, ec))
         {
-            std::string name(ent->d_name);
-            if(name.size() > 5 && name.compare(name.size() - 5, 5, ".prom") == 0)
-                unlink((dir + "/" + name).c_str());
+            if(entry.path().extension() == ".prom")
+                fs::remove(entry.path(), ec);
         }
-        closedir(d);
     }
 
     void setInspectorEnv(bool enableP2p)
@@ -221,17 +219,13 @@ protected:
         const std::string nranksLabel = "nranks=\"" +
                                         std::to_string(MPIEnvironment::world_size) + "\"";
 
-        DIR* d = opendir(dump_dir_.c_str());
-        if(!d)
-            return;
-        struct dirent* ent;
-        while((ent = readdir(d)) != nullptr)
+        std::error_code ec;
+        for(const auto& entry : fs::directory_iterator(dump_dir_, ec))
         {
-            std::string name(ent->d_name);
-            if(!(name.size() > 5 && name.compare(name.size() - 5, 5, ".prom") == 0))
+            if(entry.path().extension() != ".prom")
                 continue;
 
-            std::ifstream f(dump_dir_ + "/" + name);
+            std::ifstream f(entry.path());
             std::string   line;
             while(std::getline(f, line))
             {
@@ -262,7 +256,6 @@ protected:
                 }
             }
         }
-        closedir(d);
     }
 
     void SetUp() override
@@ -277,7 +270,8 @@ protected:
         if(!dump_dir_.empty())
         {
             removePromFiles(dump_dir_);
-            rmdir(dump_dir_.c_str());
+            std::error_code ec;
+            fs::remove(dump_dir_, ec);
         }
     }
 };
