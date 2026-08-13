@@ -3670,7 +3670,7 @@ class CodeGenerator:
                 '((reinterpret_cast<const OpEncoding *>(inst)->pad_14 << 2) | '
                 'reinterpret_cast<const OpEncoding *>(inst)->opsel_hi)'
             )
-        return f'gfx1250_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
+        return f'cdna5_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
 
     @staticmethod
     def _cdna4_matrix_fmt_operand_size_expr(
@@ -3841,7 +3841,7 @@ class CodeGenerator:
                 '  }\n'
                 '}\n'
                 '\n'
-                'int gfx1250_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {\n'
+                'int cdna5_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {\n'
                 '  return static_cast<int>((dim * k * cdna5_matrix_fmt_element_bits(fmt)) / 32);\n'
                 '}\n'
                 '\n'
@@ -3873,14 +3873,14 @@ class CodeGenerator:
                 '  const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);\n'
                 '  if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))\n'
                 '    return 512;\n'
-                '  return gfx1250_matrix_fmt_operand_size_bits(high->opsel, 16, 128);\n'
+                '  return cdna5_matrix_fmt_operand_size_bits(high->opsel, 16, 128);\n'
                 '}\n'
                 '\n'
                 'int gfx1250_scaled_wmma_src1_size_bits(const MachineInst *inst) {\n'
                 '  const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);\n'
                 '  if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))\n'
                 '    return 256;\n'
-                '  return gfx1250_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);\n'
+                '  return cdna5_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);\n'
                 '}\n'
             )
             + '\n} // namespace'
