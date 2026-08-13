@@ -21,13 +21,13 @@ from collections.abc import Iterator, Sequence
 from contextlib import ExitStack
 from typing import Callable, Optional
 
-from utils.csv_compression import open_csv_read, open_csv_write
+from utils import csv_compression
 
 
 def read_csv_as_dicts(csv_file: str) -> tuple[list[dict], list[str]]:
     """Read a whole CSV file into a list of dicts, plus its fieldnames."""
     try:
-        with open_csv_read(csv_file) as f:
+        with csv_compression.open_csv_read(csv_file) as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             if fieldnames is None:
@@ -45,7 +45,7 @@ def iter_csv_dicts(csv_file: str) -> Iterator[dict]:
 
     Raises ValueError if the file has no header row.
     """
-    with open_csv_read(csv_file) as f:
+    with csv_compression.open_csv_read(csv_file) as f:
         reader = csv.DictReader(f)
         if reader.fieldnames is None:
             raise ValueError(f"CSV file {csv_file} has no header row")
@@ -65,7 +65,7 @@ def write_csv_from_dicts(
             raise ValueError("Cannot write CSV: no rows and no fieldnames provided")
         fieldnames = list(rows[0].keys())
 
-    with open_csv_write(csv_file) as f:
+    with csv_compression.open_csv_write(csv_file) as f:
         # extrasaction='ignore': silently ignore extra keys in rows (not in fieldnames)
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
@@ -116,7 +116,7 @@ def stream_csv_to_file(
     """
     dropped = set(drop_columns)
     with ExitStack() as stack:
-        infile = stack.enter_context(open_csv_read(src))
+        infile = stack.enter_context(csv_compression.open_csv_read(src))
         reader = csv.DictReader(infile)
         if reader.fieldnames is None:
             raise ValueError(f"CSV file {src} has no header row")
@@ -129,7 +129,7 @@ def stream_csv_to_file(
         header_source = reader.fieldnames if first_row is None else first_row
         fieldnames = [f for f in header_source if f not in dropped]
 
-        outfile = stack.enter_context(open_csv_write(dest))
+        outfile = stack.enter_context(csv_compression.open_csv_write(dest))
         writer = csv.DictWriter(outfile, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
 

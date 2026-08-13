@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils.csv_compression import find_csvs
+from utils import csv_compression
 
 MODULE = "rocprof_compute_analyze.analysis_base"
 
@@ -77,27 +77,10 @@ def test_concat_result_csvs_skips_zero_byte_compressed_pass(
 
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     inst.concat_result_csvs(
-        find_csvs(tmp_path, "results_*.csv"), tmp_path / "pmc_perf.csv"
+        csv_compression.find_csvs(tmp_path, "results_*.csv"), tmp_path / "pmc_perf.csv"
     )
 
     assert pd.read_csv(tmp_path / "pmc_perf.csv")["Counter_Value"].tolist() == [10]
-
-
-def test_concat_result_csvs_reads_compressed_results(tmp_path, monkeypatch) -> None:
-    """Profile writes results_*.csv.gz, so the concat reads compressed input."""
-    common.patch_console(monkeypatch, MODULE, "debug", "warning")
-
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    with gzip.open(tmp_path / "results_pmc_perf_0.csv.gz", "wt") as f:
-        f.write(header + "0,kernel_a,SQ_WAVES,10\n")
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    inst.concat_result_csvs(
-        find_csvs(tmp_path, "results_*.csv"), tmp_path / "pmc_perf.csv"
-    )
-    merged = pd.read_csv(tmp_path / "pmc_perf.csv")
-
-    assert merged["Counter_Value"].tolist() == [10]
 
 
 def test_concat_result_csvs_mixes_compressed_and_plain(tmp_path, monkeypatch) -> None:
@@ -113,7 +96,7 @@ def test_concat_result_csvs_mixes_compressed_and_plain(tmp_path, monkeypatch) ->
 
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     inst.concat_result_csvs(
-        find_csvs(tmp_path, "results_*.csv"), tmp_path / "pmc_perf.csv"
+        csv_compression.find_csvs(tmp_path, "results_*.csv"), tmp_path / "pmc_perf.csv"
     )
     merged = pd.read_csv(tmp_path / "pmc_perf.csv")
 
@@ -153,7 +136,8 @@ def test_concat_result_csvs_errors_on_truncated_compressed_results(
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     with pytest.raises(SystemExit):
         inst.concat_result_csvs(
-            find_csvs(tmp_path, "results_*.csv"), tmp_path / "pmc_perf.csv"
+            csv_compression.find_csvs(tmp_path, "results_*.csv"),
+            tmp_path / "pmc_perf.csv",
         )
 
     assert not (tmp_path / "pmc_perf.csv").exists()

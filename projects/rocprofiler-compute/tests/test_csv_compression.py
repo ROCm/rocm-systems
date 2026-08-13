@@ -60,7 +60,7 @@ def test_write_compresses_when_name_says_to(tmp_path):
     with csv_compression.open_csv_write(path) as f:
         f.write(CONTENT)
 
-    assert csv_compression.is_compressed(path)
+    assert csv_compression._is_compressed(path)
     with gzip.open(path, "rt", encoding="utf-8") as f:
         assert f.read() == CONTENT
 
@@ -72,7 +72,7 @@ def test_write_leaves_plain_name_uncompressed(tmp_path):
     with csv_compression.open_csv_write(path) as f:
         f.write(CONTENT)
 
-    assert not csv_compression.is_compressed(path)
+    assert not csv_compression._is_compressed(path)
     assert path.read_text(encoding="utf-8") == CONTENT
 
 
@@ -148,18 +148,18 @@ def test_corrupt_gzip_raises_a_corrupt_csv_error(tmp_path):
 
 
 def test_is_compressed_reports_false_for_plain(plain_csv):
-    assert not csv_compression.is_compressed(plain_csv)
+    assert not csv_compression._is_compressed(plain_csv)
 
 
 def test_is_compressed_reports_false_for_missing_file(tmp_path):
-    assert not csv_compression.is_compressed(tmp_path / "absent.csv")
+    assert not csv_compression._is_compressed(tmp_path / "absent.csv")
 
 
 def test_is_compressed_reports_false_for_empty_file(tmp_path):
     """A run killed before the first flush leaves a zero-byte file."""
     empty = tmp_path / "empty.csv"
     empty.touch()
-    assert not csv_compression.is_compressed(empty)
+    assert not csv_compression._is_compressed(empty)
 
 
 # =============================================================================
@@ -258,4 +258,3 @@ def test_native_counter_csv_header_matches_the_reader():
         "counter_name",
         "counter_value",
     ]
-    assert {"dispatch_id", "counter_id", "counter_value"} <= set(columns)

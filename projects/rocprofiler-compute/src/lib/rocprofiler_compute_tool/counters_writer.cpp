@@ -17,8 +17,16 @@ namespace
 constexpr std::string_view kHeader = "dispatch_id,gpu_id,kernel_id,lds_per_workgroup,"
                                      "counter_id,counter_name,counter_value\n";
 
-// Batch rows so millions of records do not cross the sink per row.
+// Amortizes the sink indirection and the gzwrite call over many rows rather
+// than paying both per row. Not tuned; any size well above a row works.
 constexpr std::size_t kBatchBytes = 256 * 1024;
+
+// The filename advertises gzip, so the writer must actually produce it.
+static_assert(CsvCountersWriter::kFileSuffix.size() >= compression::kGzipSuffix.size() &&
+                  CsvCountersWriter::kFileSuffix.substr(CsvCountersWriter::kFileSuffix.size() -
+                                                        compression::kGzipSuffix.size()) ==
+                      compression::kGzipSuffix,
+              "CsvCountersWriter::kFileSuffix must end in the gzip suffix");
 }  // namespace
 
 bool format_counters_csv(const tool_data_t& tool_data, const std::function<bool(std::string_view)>& sink)

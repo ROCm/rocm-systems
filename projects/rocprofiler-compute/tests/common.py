@@ -21,7 +21,7 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 # Imported after sys.path is extended, since it lives under src/.
-from utils.csv_compression import open_csv_read  # noqa: E402
+from utils import csv_compression  # noqa: E402
 
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
@@ -65,7 +65,7 @@ def check_file_pattern(pattern, file_path):
     searched by its contents, the same as a plain one.
     """
     content = ""
-    with open_csv_read(file_path) as f:
+    with csv_compression.open_csv_read(file_path) as f:
         content = f.read()
     return len(re.findall(pattern, content)) != 0
 

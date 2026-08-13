@@ -10,7 +10,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 
-from utils.csv_compression import CORRUPT_CSV_ERRORS, find_csvs, resolve_csv
+from utils import csv_compression
 from utils.logger import (
     console_debug,
     console_error,
@@ -458,7 +458,7 @@ def process_ml_api_trace_output(
         Path(workload_dir).glob("**/ml_api_trace*_marker_api_trace.csv")
     )
     counter_collection_csvs = [
-        resolve_csv(
+        csv_compression.resolve_csv(
             markers_file.parent
             / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
         )
@@ -595,7 +595,7 @@ def validate_workload(path: str) -> None:
         files_to_check = [pmc_perf_path]
     else:
         # read_csv infers gzip from the .gz suffix, so both forms read alike.
-        files_to_check = find_csvs(workload_dir, "results_*.csv")
+        files_to_check = csv_compression.find_csvs(workload_dir, "results_*.csv")
 
     if not files_to_check:
         console_error("analysis", "No profiling data found.")
@@ -611,7 +611,7 @@ def validate_workload(path: str) -> None:
                 f"No counter data in {file_path}.\nProfiling data could be corrupt.",
             )
             return
-        except CORRUPT_CSV_ERRORS as e:
+        except csv_compression.CORRUPT_CSV_ERRORS as e:
             console_error(
                 "profiling",
                 f"Could not read {file_path}: {e}\n"

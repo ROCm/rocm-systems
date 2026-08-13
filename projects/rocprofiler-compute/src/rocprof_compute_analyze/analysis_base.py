@@ -15,13 +15,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema
-from utils.csv_compression import (
-    CORRUPT_CSV_ERRORS,
-    find_csvs,
-    open_csv_read,
-    open_csv_write,
-)
+from utils import csv_compression, file_io, parser, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
@@ -386,11 +380,12 @@ class OmniAnalyze_Base:
         )
 
         rows_written = 0
-        try:
-            with open_csv_write(output_file) as outfile:
-                writer = None
-                for file in result_files:
-                    with open_csv_read(file) as infile:
+        with csv_compression.open_csv_write(output_file) as outfile:
+            writer = None
+            for file in result_files:
+                # Only the read can fail on compression; output_file is plain.
+                try:
+                    with csv_compression.open_csv_read(file) as infile:
                         reader = csv.reader(infile)
                         header = next(reader, None)
                         if header is None:
@@ -409,15 +404,15 @@ class OmniAnalyze_Base:
                         for row in reader:
                             writer.writerow(row)
                             rows_written += 1
-        except CORRUPT_CSV_ERRORS as e:
-            # Drop partial pmc_perf.csv if a source file was truncated mid-read.
-            output_file.unlink(missing_ok=True)
-            console_error(
-                f"Could not build {output_file} from the workload's "
-                f"results_*.csv: {e}\n"
-                "A profile run killed mid-write leaves a truncated file behind; "
-                "re-run 'rocprof-compute profile' to regenerate it."
-            )
+                except csv_compression.CORRUPT_CSV_ERRORS as e:
+                    # Drop the partial pmc_perf.csv built from earlier files.
+                    output_file.unlink(missing_ok=True)
+                    console_error(
+                        f"{file} is truncated or corrupt: {e}\n"
+                        "A profile run killed mid-write leaves this behind; "
+                        "re-run 'rocprof-compute profile' to regenerate the "
+                        "workload."
+                    )
 
         # A header-only pmc_perf.csv would be reused by later analyze runs.
         if rows_written == 0:
@@ -436,7 +431,7 @@ class OmniAnalyze_Base:
             workload_dir: Path to the workload directory
         """
         pmc_perf = workload_dir / "pmc_perf.csv"
-        result_files = find_csvs(workload_dir, "results_*.csv")
+        result_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
 
         if pmc_perf.exists() and pmc_perf.stat().st_size > 0:
             console_debug(f"Using existing {pmc_perf}")

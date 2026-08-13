@@ -3,6 +3,7 @@
 
 import builtins
 import functools
+import gzip
 import io
 import logging
 import math
@@ -19,8 +20,8 @@ from common import SRC
 import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
+from utils import csv_compression
 from utils.amdsmi_interface import _per_device_query
-from utils.csv_compression import find_csvs, is_compressed, open_csv_write
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import (
     format_duration,
@@ -1084,7 +1085,7 @@ def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
     def fake_convert(db_paths, counter_csv, marker_csv):
         assert counter_csv.endswith(".csv.gz"), counter_csv
         if counter_csv_body is not None:
-            with open_csv_write(counter_csv) as f:
+            with csv_compression.open_csv_write(counter_csv) as f:
                 f.write(counter_csv_body)
 
     monkeypatch.setattr(
@@ -1126,7 +1127,7 @@ def test_run_prof_zero_kernels_writes_no_results_csv(
     )
 
     assert any("No GPU kernel data collected" in m for m in warnings)
-    assert find_csvs(workload_dir, "results_*.csv") == []
+    assert csv_compression.find_csvs(workload_dir, "results_*.csv") == []
     assert not (workload_dir / "out").exists()
 
 
@@ -1155,7 +1156,7 @@ def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
     )
 
     results_csv = workload_dir / "results_pmc_perf_test.csv.gz"
-    assert is_compressed(results_csv)
+    assert csv_compression._is_compressed(results_csv)
 
     results = pd.read_csv(results_csv)
     assert "PID" not in results.columns
@@ -1877,7 +1878,6 @@ def test_validate_workload_completely_empty_gzip_csv(tmp_path):
     Returns:
         None: Asserts function detects empty CSV file.
     """
-    import gzip
     from unittest.mock import patch
 
     workload_dir = tmp_path / "workload"

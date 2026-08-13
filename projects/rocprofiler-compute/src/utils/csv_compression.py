@@ -3,12 +3,10 @@
 
 """CSV compression boundary for profile and analyze."""
 
-from __future__ import annotations
-
 import gzip
 import zlib
 from pathlib import Path
-from typing import IO, Union
+from typing import IO, List, Union
 
 GZIP_SUFFIX = ".gz"
 
@@ -28,18 +26,9 @@ def compressed_name(path: PathLike) -> Path:
     return Path(text if text.endswith(GZIP_SUFFIX) else text + GZIP_SUFFIX)
 
 
-def is_compressed(path: PathLike) -> bool:
-    """Report whether a file holds gzip data, by content rather than by name."""
-    try:
-        with open(path, "rb") as f:
-            return f.read(len(_GZIP_MAGIC)) == _GZIP_MAGIC
-    except OSError:
-        return False
-
-
 def open_csv_read(path: PathLike) -> IO[str]:
     """Open a CSV for reading, compressed or not."""
-    if is_compressed(path):
+    if _is_compressed(path):
         return gzip.open(path, "rt", newline="", encoding="utf-8")
     return open(path, newline="", encoding="utf-8")
 
@@ -53,7 +42,7 @@ def open_csv_write(path: PathLike) -> IO[str]:
     return open(path, "w", newline="", encoding="utf-8")
 
 
-def find_csvs(directory: PathLike, pattern: str) -> list[Path]:
+def find_csvs(directory: PathLike, pattern: str) -> List[Path]:
     """Glob pattern in directory, one path per artifact, compressed or plain."""
     directory = Path(directory)
     found = {
@@ -78,3 +67,12 @@ def resolve_csv(path: PathLike) -> Path:
     if plain.is_file():
         return plain
     return compressed
+
+
+def _is_compressed(path: PathLike) -> bool:
+    """Report whether a file holds gzip data, by content rather than by name."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(len(_GZIP_MAGIC)) == _GZIP_MAGIC
+    except OSError:
+        return False

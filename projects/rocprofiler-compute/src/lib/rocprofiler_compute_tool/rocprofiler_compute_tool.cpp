@@ -3,7 +3,6 @@
 
 #include "rocprofiler_compute_tool.h"
 
-#include "compression/gzip_output_stream.h"
 #include "counters_writer.h"
 #include "input_parameters.h"
 #include "sdk_callbacks.h"
@@ -206,11 +205,8 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     auto tool_data = std::make_unique<tool_data_t>();
 
     const auto output_path = g_input_parameters->get_output_path();
-    // The default counters writer compresses, so the artifact is named for it.
-    // Profile mode reads either form, so a rebuild does not strand a workload.
-    tool_data->output_filename = generate_output_filename(
-        output_path,
-        std::string{"_native_counter_collection.csv"} + std::string{compression::kGzipSuffix});
+    tool_data->output_filename =
+        generate_output_filename(output_path, CsvCountersWriter::kFileSuffix);
 
     const auto pc_sampling_method = g_input_parameters->get_pc_sampling_method();
     if (!pc_sampling_method.empty())
