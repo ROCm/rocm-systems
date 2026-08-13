@@ -27,6 +27,5 @@ target_sources(
   ${PROJECT_NAME}
   PRIVATE
     backend_gda_ionic.cpp
-    queue_pair_ionic.cpp
 )
 endif()
