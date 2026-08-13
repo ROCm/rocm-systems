@@ -1058,7 +1058,7 @@ DmaBlitManager::BufferState DmaBlitManager::AcquireHostBuffer(const_address host
     if (pinned_mem != nullptr) {
       Memory* pinned_memory = dev().getRocMemory(pinned_mem);
       address pin_buffer = pinned_memory->getDeviceMemory();
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Pinned resource size %d",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Pinned resource size %zu",
               xfer_size);
       buffer_state.copySize_ = xfer_size;
       buffer_state.buffer_ = pin_buffer + partial;
@@ -1070,7 +1070,7 @@ DmaBlitManager::BufferState DmaBlitManager::AcquireHostBuffer(const_address host
 
   // If memory pinning fails, fall back to a staging buffer.
   xfer_size = std::min(xfer_size, StagingXferSize);
-  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Staging resource size %d",
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "HSA Copy Using Staging resource size %zu",
           xfer_size);
   buffer_state.copySize_ = xfer_size;
   buffer_state.buffer_ = gpu().Staging().Acquire(xfer_size);
