@@ -225,11 +225,6 @@ void MemoryAllocationTest::GroupMemoryDynamicAllocation(hsa_agent_t cpuAgent,
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
 
-    // Allocate the kernel argument buffer from the kernarg_pool.
-    err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
-                                        reinterpret_cast<void **>(&kernArgs));
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-
     // initialize the host buffers
     for (int i = 0; i < kMemoryAllocSize; ++i) {
       // unsigned int seed = time(NULL);
@@ -254,15 +249,8 @@ void MemoryAllocationTest::GroupMemoryDynamicAllocation(hsa_agent_t cpuAgent,
     // Allow gpuAgent access to all allocated system memory.
     err = hsa_amd_agents_allow_access(1, &gpuAgent, NULL, Indata);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-    err = hsa_amd_agents_allow_access(1, &gpuAgent, NULL, kernArgs);
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     uint32_t grp_offset = group_segment_size();
-    kernArgs->a = Indata;
-    // gpu memory where data will be copied from dynamically group memory
-    kernArgs->b = OutData;
-    kernArgs->grp_offset = grp_offset;
-    kernArgs->count = kMemoryAllocSize;
 
     // Fill up the kernel packet except header
     err = rocrtst::InitializeAQLPacket(this, &aql());
@@ -273,6 +261,28 @@ void MemoryAllocationTest::GroupMemoryDynamicAllocation(hsa_agent_t cpuAgent,
     set_kernel_name("group_memory_dynamic");
     err = rocrtst::LoadKernelFromObjFile(this, &gpuAgent);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+    // Allocate the kernel argument buffer from the kernarg_pool.  This is done
+    // after the code object is loaded so that the kernel's kernarg segment
+    // size is known.  That segment is larger than the explicit arguments: it
+    // also holds the hidden arguments (global offsets, printf buffer, ...).
+    // Allocate the full segment and zero it, so the hidden arguments are not
+    // read back as stale kernarg pool contents.
+    const size_t kernarg_buf_size =
+        std::max(static_cast<size_t>(kernarg_size()), sizeof(args_t));
+    err = hsa_amd_memory_pool_allocate(kernarg_pool, kernarg_buf_size, 0,
+                                        reinterpret_cast<void **>(&kernArgs));
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+    memset(kernArgs, 0, kernarg_buf_size);
+
+    err = hsa_amd_agents_allow_access(1, &gpuAgent, NULL, kernArgs);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+    kernArgs->a = Indata;
+    // gpu memory where data will be copied from dynamically group memory
+    kernArgs->b = OutData;
+    kernArgs->grp_offset = grp_offset;
+    kernArgs->count = kMemoryAllocSize;
 
     // The total byte size of group memory, static + dynamic
     uint32_t total_grp_byte_size = group_segment_size() + kMemoryAllocSize * sizeof(uint32_t);
