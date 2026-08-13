@@ -37,16 +37,53 @@ erDiagram
         int end_timestamp
     }
 
-    compute_pcsampling {
-        int pc_sampling_uuid PK
+    compute_code_object_store {
+        int code_object_uuid PK
+        int workload_id FK
+        int pid
+        int code_object_id
+        int load_base
+    }
+
+    compute_instruction_line {
+        int instruction_uuid PK
+        int code_object_uuid FK
         int kernel_uuid FK
-        string source
-        string instruction
+        int code_object_offset
+        text comment
+        text instruction
+    }
+
+    compute_pc_sample_state {
+        int pc_sample_state_uuid PK
+        int instruction_uuid FK
+        int total_count
+        int issue_count
+        int stall_count
+    }
+
+    compute_pc_sample_stall_reason_lookup {
+        int pc_sample_stall_reason_lookup_uuid PK
+        string text
+    }
+
+    compute_pc_sample_stall_reason {
+        int pc_sample_stall_reason_uuid PK
+        int pc_sample_state_uuid FK
+        int pc_sample_stall_reason_lookup_uuid FK
         int count
-        int offset
-        int count_issue
-        int count_stall
-        json stall_reason
+    }
+
+    compute_instruction_sample_lookup {
+        int instruction_sample_lookup_uuid PK
+        string text
+    }
+
+    compute_instruction_sample {
+        int instruction_sample_uuid PK
+        int pc_sample_state_uuid FK
+        int instruction_sample_lookup_uuid FK
+        int count
     }
 
     compute_kernel_roofline_data {
@@ -98,11 +135,19 @@ erDiagram
     compute_workload ||--o{ compute_metric_definition : workload_id
     compute_workload ||--o{ compute_workload_metric_value : workload_id
     compute_workload ||--o{ compute_workload_roofline_data : workload_id
+    compute_workload ||--o{ compute_code_object_store : workload_id
 
     compute_kernel ||--o{ compute_dispatch : kernel_uuid
-    compute_kernel ||--o{ compute_pcsampling : kernel_uuid
     compute_kernel ||--o{ compute_kernel_roofline_data : kernel_uuid
     compute_kernel ||--o{ compute_kernel_metric_value : kernel_uuid
+    compute_kernel ||--o{ compute_instruction_line : kernel_uuid
+
+    compute_code_object_store ||--o{ compute_instruction_line : code_object_uuid
+    compute_instruction_line ||--o| compute_pc_sample_state : instruction_uuid
+    compute_pc_sample_state ||--o{ compute_pc_sample_stall_reason : pc_sample_state_uuid
+    compute_pc_sample_state ||--o{ compute_instruction_sample : pc_sample_state_uuid
+    compute_pc_sample_stall_reason_lookup ||--o{ compute_pc_sample_stall_reason : pc_sample_stall_reason_lookup_uuid
+    compute_instruction_sample_lookup ||--o{ compute_instruction_sample : instruction_sample_lookup_uuid
 
     compute_metric_definition ||--o{ compute_kernel_metric_value : metric_uuid
     compute_metric_definition ||--o{ compute_workload_metric_value : metric_uuid

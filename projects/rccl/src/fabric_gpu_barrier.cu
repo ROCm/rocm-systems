@@ -18,34 +18,25 @@
 
 namespace meta::comms {
 
-/* static */ __host__
-    std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>
-    FabricGpuBarrier::mallocAndInit(
-        int nRanks,
-        int nBlocks,
-        int selfRank,
-        void* bootstrap,
-        struct ncclMemManager* manager) {
+/* static */ __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>
+FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* bootstrap,
+                                struct ncclMemManager* manager) {
   if (nRanks <= 0 || nRanks > kDdaMaxNranks) {
-    WARN("FabricGpuBarrier::mallocAndInit: nRanks %d out of range (1..%d)",
-         nRanks, kDdaMaxNranks);
+    WARN("FabricGpuBarrier::mallocAndInit: nRanks %d out of range (1..%d)", nRanks, kDdaMaxNranks);
     return {nullptr, FabricGpuBarrier{}};
   }
 
-  const size_t flagBytes =
-      static_cast<size_t>(nRanks) * nBlocks * sizeof(FlagType);
+  const size_t flagBytes = static_cast<size_t>(nRanks) * nBlocks * sizeof(FlagType);
 
   // This rank's flag buffer, shared with peers (VMM-backed when available).
-  auto selfFlagBuf =
-      std::make_unique<DeviceBuffer>(flagBytes, /*useVmm=*/true, manager);
+  auto selfFlagBuf = std::make_unique<DeviceBuffer>(flagBytes, /*useVmm=*/true, manager);
   if (selfFlagBuf == nullptr || selfFlagBuf->get() == nullptr) {
     ERROR("FabricGpuBarrier::mallocAndInit: flag buffer allocation failed");
     return {nullptr, FabricGpuBarrier{}};
   }
   cudaError_t err = cudaMemset(selfFlagBuf->get(), 0, flagBytes);
   if (err != cudaSuccess) {
-    WARN("FabricGpuBarrier::mallocAndInit: cudaMemset failed (%s)",
-         cudaGetErrorString(err));
+    WARN("FabricGpuBarrier::mallocAndInit: cudaMemset failed (%s)", cudaGetErrorString(err));
     return {nullptr, FabricGpuBarrier{}};
   }
 
@@ -57,11 +48,9 @@ namespace meta::comms {
     return {nullptr, FabricGpuBarrier{}};
   }
 
-  auto memHandler = std::make_unique<ncclFabricMemHandler>(
-      bootstrap, selfRank, nRanks, manager);
+  auto memHandler = std::make_unique<ncclFabricMemHandler>(bootstrap, selfRank, nRanks, manager);
 
-  ncclResult_t result = memHandler->addSelfDeviceMem(
-      selfFlagBuf->get(), selfFlagBuf->vmmHandle(), flagBytes);
+  ncclResult_t result = memHandler->addSelfDeviceMem(selfFlagBuf->get(), selfFlagBuf->vmmHandle(), flagBytes);
   if (result != ncclSuccess && result != ncclInProgress) {
     if (ncclDebugNoWarn == 0) {
       INFO(NCCL_ALL, "%s:%d -> %d", __FILE__, __LINE__, result);
@@ -95,28 +84,19 @@ namespace meta::comms {
   }
 
   // Stage the pointer table into device memory so the barrier can index it.
-  auto peerFlagsDev = std::make_unique<DeviceBuffer>(
-      static_cast<size_t>(nRanks) * sizeof(FlagType*));
+  auto peerFlagsDev = std::make_unique<DeviceBuffer>(static_cast<size_t>(nRanks) * sizeof(FlagType*));
   if (peerFlagsDev == nullptr || peerFlagsDev->get() == nullptr) {
     ERROR("FabricGpuBarrier::mallocAndInit: peer pointer table allocation failed");
     return {nullptr, FabricGpuBarrier{}};
   }
-  err = cudaMemcpy(
-      peerFlagsDev->get(),
-      hostPeerFlags.data(),
-      static_cast<size_t>(nRanks) * sizeof(FlagType*),
-      cudaMemcpyHostToDevice);
+  err = cudaMemcpy(peerFlagsDev->get(), hostPeerFlags.data(), static_cast<size_t>(nRanks) * sizeof(FlagType*),
+                   cudaMemcpyHostToDevice);
   if (err != cudaSuccess) {
-    WARN("FabricGpuBarrier::mallocAndInit: cudaMemcpy(table) failed (%s)",
-         cudaGetErrorString(err));
+    WARN("FabricGpuBarrier::mallocAndInit: cudaMemcpy(table) failed (%s)", cudaGetErrorString(err));
     return {nullptr, FabricGpuBarrier{}};
   }
 
-  FabricGpuBarrier barrier(
-      nBlocks,
-      selfRank,
-      nRanks,
-      static_cast<FlagType**>(peerFlagsDev->get()));
+  FabricGpuBarrier barrier(nBlocks, selfRank, nRanks, static_cast<FlagType**>(peerFlagsDev->get()));
 
   auto resources = std::make_unique<FabricGpuBarrierResources>();
   resources->fabricMemHandler = std::move(memHandler);

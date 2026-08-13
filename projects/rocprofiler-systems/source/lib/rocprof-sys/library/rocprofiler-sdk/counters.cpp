@@ -129,9 +129,11 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
 }
 
 counter_storage::counter_storage(const client_data* _tool_data, std::uint64_t _devid,
-                                 size_t _idx, std::string_view _name)
+                                 std::uint32_t _device_type_index, size_t _idx,
+                                 std::string_view _name)
 : tool_data{ _tool_data }
 , device_id{ _devid }
+, device_type_index{ _device_type_index }
 , index{ static_cast<std::int64_t>(_idx) }
 , metric_name{ _name }
 , metric_description{ get_counter_description(_tool_data, metric_name) }
@@ -195,9 +197,9 @@ counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
     // Write zero to cache (for rocpd database)
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
-        track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}",
-        static_cast<std::uint32_t>(device_id), static_cast<std::uint8_t>(agent_type::GPU),
-        track_name.c_str(), 0.0, std::nullopt });
+        track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}", device_type_index,
+        static_cast<std::uint8_t>(agent_type::GPU), track_name.c_str(), 0.0,
+        std::nullopt });
 }
 
 void

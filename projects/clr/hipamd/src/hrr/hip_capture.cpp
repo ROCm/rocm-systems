@@ -29,6 +29,7 @@
  */
 
 #include "hip_capture.h"
+#include "hip_capture_metadata.h"
 #include "hip_capture_writer.h"
 
 // hrr_api_args.h — for hrr_args_* struct types and hrr_api_id_t enum
@@ -1475,6 +1476,9 @@ void hip_capture_init() {
 
   // Open the events writer now — Flag::init() has run so output_dir is valid.
   if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
+
+  hrr_cap::writer::set_capture_metadata_json(
+      hrr_cap::metadata::collect_json());
 
   hrr_install_clr_exception_handler();
 

@@ -27,15 +27,9 @@ template <typename T, int NRANKS_CT, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-__global__ void ddaAllReduceFlatFabric(
-    T* const* __restrict__ ipcbuffs,
-    T* __restrict__ recvbuff,
-    size_t count,
-    const T* __restrict__ sendbuff,
-    int selfRank,
-    int nRanks,
-    FabricGpuBarrier barrier,
-    const T* __restrict__ acc) {
+  __global__ void ddaAllReduceFlatFabric(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
+                                         const T* __restrict__ sendbuff, int selfRank, int nRanks,
+                                         FabricGpuBarrier barrier, const T* __restrict__ acc) {
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -43,40 +37,26 @@ __global__ void ddaAllReduceFlatFabric(
   const auto idxEnd = count;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
-  copyFromSrcToDest<T>(
-      sendbuff, ipcbuffs[selfRank], idxStart, idxEnd, idxStride);
+  copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, idxEnd, idxStride);
 
-  barrier.syncOnSameBlockIdx<
-      true /* hasPreviousMemAccess */,
-      true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   // pattern=2: full reduce into recvbuff (one-shot). The unified helper folds
   // nRanks to NRANKS_CT (full unroll) when specialized, else uses the runtime
   // nRanks with an 8-wide partial unroll.
-  reduceScatter<T, NRANKS_CT, hasAcc>(
-      ipcbuffs, recvbuff, acc, selfRank, nRanks, idxStart, idxEnd, idxStride, 2);
+  reduceScatter<T, NRANKS_CT, hasAcc>(ipcbuffs, recvbuff, acc, selfRank, nRanks, idxStart, idxEnd, idxStride, 2);
 
-  barrier.syncOnSameBlockIdx<
-      true /* hasPreviousMemAccess */,
-      false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }
 
 template <typename T, int NRANKS_CT, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-__global__ void ddaAllReduceTreeFabric(
-    T* const* __restrict__ ipcbuffs,
-    T* __restrict__ recvbuff,
-    size_t count,
-    const T* __restrict__ sendbuff,
-    int selfRank,
-    int nRanks,
-    FabricGpuBarrier barrier,
-    const T* __restrict__ acc) {
-  barrier.syncOnSameBlockIdx<
-      false /* hasPreviousMemAccess */,
-      true /* hasSubsequentMemAccess */>();
+  __global__ void ddaAllReduceTreeFabric(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
+                                         const T* __restrict__ sendbuff, int selfRank, int nRanks,
+                                         FabricGpuBarrier barrier, const T* __restrict__ acc) {
+  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   // Use the compile-time rank count as the divisor when specialized.
   const int nRanksEff = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;
@@ -91,20 +71,14 @@ __global__ void ddaAllReduceTreeFabric(
   // Two-shot: reduce-scatter this rank's shard, then all-gather. The unified
   // helpers fold nRanks to NRANKS_CT (full unroll) when specialized, else use
   // the runtime nRanks with an 8-wide partial unroll.
-  reduceScatter<T, NRANKS_CT, hasAcc>(
-      ipcbuffs, ipcbuffs[selfRank], acc, selfRank, nRanks, idxStart, idxEnd,
-      idxStride, 1);
+  reduceScatter<T, NRANKS_CT, hasAcc>(ipcbuffs, ipcbuffs[selfRank], acc, selfRank, nRanks, idxStart, idxEnd, idxStride,
+                                      1);
 
-  barrier.syncOnSameBlockIdx<
-      true /* hasPreviousMemAccess */,
-      true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
-  allGather<T, NRANKS_CT>(
-      ipcbuffs, recvbuff, selfRank, nRanks, idxStart, idxEnd, idxStride, true);
+  allGather<T, NRANKS_CT>(ipcbuffs, recvbuff, selfRank, nRanks, idxStart, idxEnd, idxStride, true);
 
-  barrier.syncOnSameBlockIdx<
-      true /* hasPreviousMemAccess */,
-      false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }
 
 } // namespace meta::comms

@@ -10,8 +10,9 @@ import pytest
 from conftest import RocprofsysTest
 
 import subprocess
-from functools import lru_cache
 from typing import Optional
+
+from rocprofsys.cache import persistent_cache
 
 pytestmark = [pytest.mark.julia]
 
@@ -21,11 +22,12 @@ pytestmark = [pytest.mark.julia]
 # =============================================================================
 
 
-@lru_cache(maxsize=1)
+@persistent_cache("julia.lib_paths")
 def _resolve_julia_lib_paths(julia_binary: str) -> Optional[tuple[str, str]]:
     """Resolve Julia library paths by invoking the Julia binary.
 
-    Results are cached so the subprocess is only run once per session.
+    Results are cached across processes (``persistent_cache``), so the Julia
+    subprocess runs at most once per build tree until the cache is regenerated.
 
     Args:
         julia_binary: Path to the Julia binary (string for hashability).

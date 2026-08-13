@@ -44,7 +44,7 @@ set(_v2_common_libs
     rocprofiler-sdk::rocprofiler-sdk-amd-comgr
     rocprofiler-sdk::rocprofiler-sdk-drm)
 
-# HSA-tool shared library: loaded via LD_PRELOAD, hooks hsa_queue_create to enable
+# HSA-tool shared library: loaded via HSA_TOOLS_LIB, hooks hsa_queue_create to enable
 # aqlprofile profiling on the queue (uses the in-tree v1 get_info).
 add_library(aqlprofile-v2-intercept SHARED)
 target_sources(aqlprofile-v2-intercept PRIVATE intercept.cpp)
@@ -71,6 +71,18 @@ set_target_properties(
 target_link_libraries(aqlprofile-v2-test PRIVATE ${_v2_common_libs}
                                                  rocprofiler-sdk::rocprofiler-sdk-hip)
 
+# This target links as HIP, but its CXX objects and static deps may be built with
+# -fsanitize=address (e.g. TheRock's ASan build). Sanitizer link flags are only injected
+# for C/CXX link languages, so the ASan runtime is missing on a HIP link line, leaving
+# __asan_* symbols undefined. Add it explicitly when ASan is in the CXX flags.
+# TODO(mkuriche) See: https://github.com/ROCm/rocm-systems/issues/8678
+if(CMAKE_CXX_FLAGS MATCHES "-fsanitize=address")
+    target_link_options(aqlprofile-v2-test PRIVATE -fsanitize=address)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_link_options(aqlprofile-v2-test PRIVATE -shared-libsan)
+    endif()
+endif()
+
 set(_v2_ld_library_path
     "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     )
@@ -80,7 +92,7 @@ set_tests_properties(
     tests.integration.aqlprofile.v2
     PROPERTIES
         ENVIRONMENT
-        "LD_PRELOAD=$<TARGET_FILE:aqlprofile-v2-intercept>;LD_LIBRARY_PATH=${_v2_ld_library_path}"
+        "HSA_TOOLS_LIB=$<TARGET_FILE:aqlprofile-v2-intercept>;LD_LIBRARY_PATH=${_v2_ld_library_path}"
         WORKING_DIRECTORY
         ${CMAKE_CURRENT_BINARY_DIR}
         LABELS

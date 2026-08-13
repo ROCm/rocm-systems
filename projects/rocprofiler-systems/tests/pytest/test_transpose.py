@@ -4,7 +4,7 @@
 """
 Tests for the transpose example.
 Equivalent to rocprof-sys-rocm-tests.cmake
-    Note: MPI is not yet supported
+    Note: MPI multi-process execution is exercised if built with MPI support.
 
 This module tests the transpose HIP example with various instrumentation modes:
 - Baseline execution (no instrumentation)
@@ -355,8 +355,12 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
         gpu_info,
         validation_rules_dir,
     ):
-        if "gfx1151" in gpu_info.architectures:
-            pytest.skip("transpose GPU perf counter test skipped on gfx1151")
+        unsupported = gpu_info.unsupported_perf_counter_archs
+        if unsupported:
+            pytest.skip(
+                "transpose GPU perf counter test skipped on "
+                f"{', '.join(sorted(unsupported))}"
+            )
 
         result = self.run_test(
             "sampling",

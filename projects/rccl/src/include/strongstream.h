@@ -38,29 +38,29 @@ struct ncclCudaGraph {
 
 inline struct ncclCudaGraph ncclCudaGraphNone(int graphUsageMode) {
   struct ncclCudaGraph tmp;
-  #if ROCM_VERSION >= 60100
-    tmp.origin = nullptr;
-    tmp.graph = nullptr;
-    tmp.graphId = ULLONG_MAX;
-    tmp.graphUsageMode = graphUsageMode;
-  #endif
+#if ROCM_VERSION >= 60100
+  tmp.origin = nullptr;
+  tmp.graph = nullptr;
+  tmp.graphId = ULLONG_MAX;
+  tmp.graphUsageMode = graphUsageMode;
+#endif
   return tmp;
 }
 
 inline bool ncclCudaGraphValid(struct ncclCudaGraph graph) {
-  #if ROCM_VERSION >= 60100
-    return graph.graphId != ULLONG_MAX;
-  #else
-    return false;
-  #endif
+#if ROCM_VERSION >= 60100
+  return graph.graphId != ULLONG_MAX;
+#else
+  return false;
+#endif
 }
 
 inline bool ncclCudaGraphSame(struct ncclCudaGraph a, struct ncclCudaGraph b) {
-  #if ROCM_VERSION >= 60100
-    return a.graphId == b.graphId;
-  #else
-    return true;
-  #endif
+#if ROCM_VERSION >= 60100
+  return a.graphId == b.graphId;
+#else
+  return true;
+#endif
 }
 
 ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph* graph, cudaStream_t stream, int graphUsageMode);
@@ -88,23 +88,19 @@ ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss);
 
 // Acquire the strong stream. Upon return `*workStream` will be usable to add work.
 // `concurrent` indicates if other threads may be using the strong stream.
-ncclResult_t ncclStrongStreamAcquire(
-  struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent, cudaStream_t* workStream
-);
+ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent,
+                                     cudaStream_t* workStream);
 
 // Get the workStream for an already acquired strong stream.
 // `concurrent` indicates if other threads may be using the strong stream.
-ncclResult_t ncclStrongStreamAcquiredWorkStream(
-  struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent, cudaStream_t* workStream
-);
+ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph graph, struct ncclStrongStream* ss,
+                                                bool concurrent, cudaStream_t* workStream);
 
 // Release of the strong stream.
 // `concurrent` indicates if other threads may be using the strong stream.
 ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent);
 
-ncclResult_t ncclStreamWaitStream(
-  cudaStream_t a, cudaStream_t b, cudaEvent_t scratchEvent
-);
+ncclResult_t ncclStreamWaitStream(cudaStream_t a, cudaStream_t b, cudaEvent_t scratchEvent);
 
 // Like cudaStreamWaitEvent except `e` must be strictly ahead of everything in `s`.
 ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cudaEvent_t e);

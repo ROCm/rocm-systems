@@ -252,7 +252,7 @@ pub fn rocm_sdk_root() -> Option<PathBuf> {
     if root.is_empty() {
         return None;
     }
-    PathBuf::try_from(root).ok()
+    Some(PathBuf::from(root))
 }
 
 /// Convenience helper: a directory contains a usable library.

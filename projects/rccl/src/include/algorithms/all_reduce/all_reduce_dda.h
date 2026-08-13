@@ -18,14 +18,9 @@ template <typename T, int NRANKS, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-__global__ void ddaAllReduceFlatIpc(
-    T* const* __restrict__ ipcbuffs,
-    T* __restrict__ recvbuff,
-    size_t count,
-    const T* __restrict__ sendbuff,
-    int selfRank,
-    IpcGpuBarrier barrier,
-    const T* __restrict__ acc) {
+  __global__ void ddaAllReduceFlatIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
+                                      const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier,
+                                      const T* __restrict__ acc) {
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -33,37 +28,24 @@ __global__ void ddaAllReduceFlatIpc(
   const auto idxEnd = count;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
-  copyFromSrcToDest<T>(
-      sendbuff, ipcbuffs[selfRank], idxStart, idxEnd, idxStride);
+  copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, idxEnd, idxStride);
 
-  barrier.syncOnSameBlockIdx<
-      true /* hasPreviousMemAccess */,
-      true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   // pattern=2: full reduce into recvbuff (one-shot, not scatter)
-  reduceScatter<T, NRANKS, hasAcc>(
-      ipcbuffs, recvbuff, acc, selfRank, NRANKS, idxStart, idxEnd, idxStride, 2);
+  reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, acc, selfRank, NRANKS, idxStart, idxEnd, idxStride, 2);
 
-  barrier.syncOnSameBlockIdx<
-      true /* hasPreviousMemAccess */,
-      false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }
 
 template <typename T, int NRANKS, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-__global__ void ddaAllReduceTreeIpc(
-    T* const* __restrict__ ipcbuffs,
-    T* __restrict__ recvbuff,
-    size_t count,
-    const T* __restrict__ sendbuff,
-    int selfRank,
-    IpcGpuBarrier barrier,
-    const T* __restrict__ acc) {
-  barrier.syncOnSameBlockIdx<
-      false /* hasPreviousMemAccess */,
-      true /* hasSubsequentMemAccess */>();
+  __global__ void ddaAllReduceTreeIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
+                                      const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier,
+                                      const T* __restrict__ acc) {
+  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   const size_t countPerRank = count / NRANKS;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
@@ -73,27 +55,13 @@ __global__ void ddaAllReduceTreeIpc(
   const auto idxEnd = countPerRank;
   const size_t idxStride = gridDim.x * blockDim.x * countPerThread;
 
-  reduceScatter<T, NRANKS, hasAcc>(
-      ipcbuffs,
-      ipcbuffs[selfRank],
-      acc,
-      selfRank,
-      NRANKS,
-      idxStart,
-      idxEnd,
-      idxStride,
-      1);
+  reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, ipcbuffs[selfRank], acc, selfRank, NRANKS, idxStart, idxEnd, idxStride, 1);
 
-  barrier.syncOnSameBlockIdx<
-      true /* hasPreviousMemAccess */,
-      true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
-  allGather<T, NRANKS>(
-      ipcbuffs, recvbuff, selfRank, NRANKS, idxStart, idxEnd, idxStride, true);
+  allGather<T, NRANKS>(ipcbuffs, recvbuff, selfRank, NRANKS, idxStart, idxEnd, idxStride, true);
 
-  barrier.syncOnSameBlockIdx<
-      true /* hasPreviousMemAccess */,
-      false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }
 
 } // namespace meta::comms
