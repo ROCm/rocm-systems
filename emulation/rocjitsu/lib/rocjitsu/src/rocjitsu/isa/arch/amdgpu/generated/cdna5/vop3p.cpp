@@ -44,7 +44,7 @@ const char *cdna5_matrix_scale_fmt_name(uint32_t fmt) {
   }
 }
 
-uint32_t gfx1250_matrix_fmt_element_bits(uint32_t fmt) {
+uint32_t cdna5_matrix_fmt_element_bits(uint32_t fmt) {
   switch (fmt) {
   case 2:
   case 3:
@@ -57,7 +57,7 @@ uint32_t gfx1250_matrix_fmt_element_bits(uint32_t fmt) {
 }
 
 int gfx1250_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {
-  return static_cast<int>((dim * k * gfx1250_matrix_fmt_element_bits(fmt)) / 32);
+  return static_cast<int>((dim * k * cdna5_matrix_fmt_element_bits(fmt)) / 32);
 }
 
 bool gfx1250_scaled_wmma_is_scale16(const MachineInst *inst) {
