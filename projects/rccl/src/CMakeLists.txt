@@ -78,7 +78,7 @@ set(SRC_FILES
   device/reduce_scatter.h
   device/rccl_metadata.h
   device/sendrecv.h
-  device/hierarchical_ag_shuffle.h
+  device/hierarchical_shuffle.h
   device/ce_reduce.cc
   device/common.cu
   device/onerank.cu
@@ -132,6 +132,7 @@ set(SRC_FILES
   include/algorithms/alltoall/alltoall_dda_fabric_ll128.h
   include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
+  include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
   include/api_trace.h
@@ -1114,7 +1115,6 @@ if(RCCL_ROCPROFILER_REGISTER)
   target_link_libraries(
       rccl PRIVATE rocprofiler-register::rocprofiler-register)
 endif()
-
 # Device Linker: include pipeline and wire up dependencies
 # (placed after all target_compile_definitions so DeviceLinker.cmake
 #  can read the rccl target's definitions directly)

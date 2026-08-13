@@ -7,7 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/test_encodings.h"
@@ -126,7 +126,7 @@ size_t emit_seeds(const std::filesystem::path &directory, std::string_view targe
   else if (target == "rdna4")
     write_encodings(rocjitsu::rdna4::test_data::ENCODINGS);
   else if (target == "gfx1250")
-    write_encodings(rocjitsu::gfx1250::test_data::ENCODINGS);
+    write_encodings(rocjitsu::cdna5::test_data::ENCODINGS);
   else
     throw std::runtime_error("unsupported decoder target: " + std::string(target));
 

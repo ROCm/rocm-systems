@@ -191,6 +191,13 @@ public:
   [[nodiscard]] std::optional<uint8_t> vgpr_msb_bank_before(const Instruction &inst,
                                                             amdgpu::VgprMsbRole role) const;
 
+  /// @brief Whether statically decoded operands cover every VGPR access in the scope.
+  ///
+  /// @details False when relative addressing or runtime GPR indexing can redirect
+  /// an encoded VGPR operand. Transformations that compare or reuse physical
+  /// VGPR ranges must fail closed when this query returns false.
+  [[nodiscard]] bool global_vgpr_usage_is_complete() const;
+
   /// @brief Find a VGPR tuple that no instruction in the kernel reads or writes.
   ///
   /// @details This query is cheaper and stronger than point liveness: the

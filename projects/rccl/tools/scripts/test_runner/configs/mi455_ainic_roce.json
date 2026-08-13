@@ -2300,6 +2300,17 @@
           "name": "CE_AlltoAll_3Ranks",
           "description": "AlltoAll CE correctness with odd (non-power-of-two) rank count",
           "test_filter": "CeMPI_AlltoAll.ThreeRanks"
+        },
+        {
+          "name": "CE_AllReduce_3Ranks",
+          "description": "AllReduce CE correctness with odd (non-power-of-two) rank count",
+          "test_filter": "CeMPI_AllReduce.ThreeRanks"
+        },
+        {
+          "name": "CE_AllReduce_Pipelined_3Ranks",
+          "description": "AllReduce CE multi-chunk pipeline at a non-power-of-two rank count: 256 MiB / 3 is not 16B-aligned, so slotChunkBytes < maxChunkBytes and the shard ends in a partial tail chunk, covering the stride rounding alongside slot recycling and the drain loop",
+          "test_filter": "CeMPI_AllReduce.PipelinedMultiChunk",
+          "timeout": 300
         }
       ]
     },
@@ -2366,6 +2377,22 @@
           "name": "CE_Gather_8Ranks",
           "description": "Gather CE correctness, root=0 \u2014 default production topology (8 ranks)",
           "test_filter": "CeMPI_Gather.EightRanksRoot0"
+        },
+        {
+          "name": "CE_AllReduce_8Ranks",
+          "description": "AllReduce CE correctness \u2014 default production topology (8 ranks)",
+          "test_filter": "CeMPI_AllReduce.EightRanks"
+        },
+        {
+          "name": "CE_AllReduce_LargeMessage_8Ranks",
+          "description": "AllReduce CE correctness on a large single-shot message (8 ranks)",
+          "test_filter": "CeMPI_AllReduce.LargeMessage"
+        },
+        {
+          "name": "CE_AllReduce_Pipelined_8Ranks",
+          "description": "AllReduce CE multi-chunk pipeline at a power-of-two rank count: 512 MiB yields 4 chunks per shard with no tail, covering slot recycling and the drain loop where slotChunkBytes == maxChunkBytes",
+          "test_filter": "CeMPI_AllReduce.PipelinedMultiChunk",
+          "timeout": 300
         }
       ]
     },
@@ -2761,6 +2788,23 @@
           "name": "AllReduce_fp8_e5m2",
           "description": "AllReduce perf, datatype fp8_e5m2",
           "command_args": "-d fp8_e5m2"
+        }
+      ]
+    },
+    "ce_allreduce_graph_latch": {
+      "extends": "perf_base",
+      "binary": "all_reduce_perf",
+      "num_nodes": 1,
+      "timeout": 120,
+      "env_variables": {
+        "RCCL_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "AllReduce_CE_GraphThenEager_4MB_32MB",
+          "description": "CE AllReduce graph latch regression: captured (-G 2) then eager AllReduce, CE-eligible sizes (4MB-32MB). A latch bug corrupts data or hangs; timeout turns a hang into a fast failure.",
+          "command_args": "-b 4M -e 32M -f 2 -g 1 -n 5 -w 2 -c 1 -G 2 -o sum",
+          "timeout": 90
         }
       ]
     },
@@ -3886,6 +3930,12 @@
       "name": "Perf - AllReduce (datatype sweep)",
       "description": "rccl-tests AllReduce perf sweep across 12 datatypes (1B-4G)",
       "config": "all_reduce_perf",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - CE AllReduce Graph Latch",
+      "description": "Regression for the CE AllReduce graph-capture latch: captured AllReduce immediately followed by eager AllReduce on the same comm, at CE-eligible sizes",
+      "config": "ce_allreduce_graph_latch",
       "enabled": true
     },
     {
