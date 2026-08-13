@@ -194,6 +194,7 @@ RCCL_PARAM(DdaLL, "DDA_LL", 1);
 RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));       // 32 KiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
+RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
@@ -222,20 +223,24 @@ static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx94
 // Decides whether ncclAllReduce_impl takes the DDA path for this call. Kept as a small named helper
 // (rather than an inline expression) so the dispatch decision is reachable from host unit tests; the
 // logic is identical to the guard at the AllReduce call site below.
+//
+// `ceAllReduceAllowed` is the caller's single source of truth for "will CE AllReduce actually service
+// this call" -- computed once at the call site from rcclUseCeAllReduce() plus whatever additional
+// gating the CE AllReduce implementation requires (graph latch, ncclGroupDepth, force/symReg
+// eligibility, etc). This helper does not re-derive CE eligibility itself: threading the same boolean
+// through both the early CE return and this guard keeps the two decisions from silently drifting apart
+// as CE AllReduce's own eligibility rules evolve.
 bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclDataType_t datatype,
-                                    ncclRedOp_t op, bool symEligible, bool ceArGraphAllowed) {
+                                    bool symEligible, bool ceAllReduceAllowed) {
   const size_t msgBytes = count * ncclTypeSize(datatype);
   // gfx1250 DDA fabric AR is bounded by rcclDdaEnabled (RCCL_DDA_THRESHOLD) and the per-tier
-  // thresholds, so it may claim the full range. On the other arches CE AllReduce owns
-  // [NCCL_CE_AR_MIN_MSG_BYTES, NCCL_CE_AR_MAX_MSG_BYTES], but only yield to it when it can actually
-  // service this call: it additionally requires single-node symmetric-memory support, a count
-  // divisible by nRanks and a supported op/datatype. Yielding on message size alone left comms
-  // without those prerequisites (e.g. gfx950 with symmetricSupport off) with no DDA and no CE,
-  // falling back to the generic ring/tree kernel across the whole 4 MiB+ range that DDA still wins.
+  // thresholds, so it may claim the full range regardless of CE eligibility -- ddaFabricArch1250
+  // forces this branch unconditionally. On other arches, yield to DDA whenever CE won't actually
+  // service this call; yielding on message size alone left comms without CE's prerequisites (e.g.
+  // gfx950 with symmetricSupport off) with no DDA and no CE, falling back to the generic ring/tree
+  // kernel across the whole 4 MiB+ range that DDA still wins.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  const bool ceAllReduceHandlesCall =
-    !ddaFabricArch1250 && ceArGraphAllowed && rcclUseCeAllReduce(const_cast<ncclComm*>(comm), count, datatype, op);
-  return !symEligible && !ceAllReduceHandlesCall && rcclDdaEnabled(comm, msgBytes, 8388608);
+  return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) && rcclDdaEnabled(comm, msgBytes, 8388608);
 }
 
 // Check if symmteric kernels is requested for this collective
@@ -676,8 +681,17 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   bool ceCapturing = ncclCudaGraphValid(ceGraph);
   rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
   bool ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
-  if (!symEligible && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op) &&
-      comm->ceColl.ceARTmpBuf != NULL) {
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+  const bool force = rcclParamForceCeAllReduce() != 0;
+  const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType);
+  bool ceAllReduceAllowed =
+    ncclGroupDepth == 0 && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op) && (force || symReg);
+  if (!symEligible && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
     if (count == 0) return ncclSuccess;
     INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d", count, (int)datatype, (int)op,
          comm->rank, comm->nRanks);
@@ -687,7 +701,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   info.ceCapturing = ceCapturing;
   info.ceArGraphAllowed = ceArGraphAllowed;
   info.ceGraphDecisionValid = true;
-  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, op, symEligible, ceArGraphAllowed)) {
+  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (rcclParamDdaLL() && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLThreshold() &&

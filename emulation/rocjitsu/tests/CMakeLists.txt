@@ -402,7 +402,13 @@ add_executable(
     daemon_api_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
-    gfx1250_sim_test.cpp
+    cdna5_architecture_test.cpp
+    cdna5_cluster_test.cpp
+    cdna5_dispatch_memory_test.cpp
+    cdna5_execution_test.cpp
+    cdna5_instruction_test.cpp
+    cdna5_sdma_test.cpp
+    cdna5_tensor_dma_test.cpp
     l2_cache_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp
