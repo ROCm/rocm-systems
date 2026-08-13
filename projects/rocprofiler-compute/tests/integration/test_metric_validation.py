@@ -6,8 +6,6 @@ import pandas as pd
 
 from tests.integration import common as integration_common
 
-_, soc = integration_common.gpu_soc()
-
 
 def get_hbm_data_transfer(analysis_workload_dir, data):
     bw_df = pd.read_csv(f"{analysis_workload_dir}/{data['bw_csv']}")
@@ -121,7 +119,7 @@ VALIDATE_METRICS = {
 
 
 def test_validate_metrics(
-    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute, soc
 ):
     for workload in VALIDATE_METRICS:
         metrics = VALIDATE_METRICS[workload].get(soc, [])

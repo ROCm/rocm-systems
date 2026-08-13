@@ -20,7 +20,7 @@ import pytest
 from common import ROOT
 from conftest import ProfileModeImportGuard
 
-from tests.integration.common import inject_mpirun
+from tests.integration.common import gpu_soc, inject_mpirun
 
 rocprof_compute_script_path = Path(ROOT) / "src/rocprof-compute"
 if not rocprof_compute_script_path.exists():
@@ -28,6 +28,24 @@ if not rocprof_compute_script_path.exists():
 if not rocprof_compute_script_path.exists():
     raise FileNotFoundError("Cannot find rocprof-compute script")
 rocprof_compute_script_path = str(rocprof_compute_script_path)
+
+
+@pytest.fixture(scope="session")
+def gpu_soc_info():
+    """(arch, model) probed from rocminfo once per session, ('', '') with no GPU."""
+    return gpu_soc()
+
+
+@pytest.fixture(scope="session")
+def gpu_arch(gpu_soc_info):
+    """GPU architecture string, e.g. 'gfx942'."""
+    return gpu_soc_info[0]
+
+
+@pytest.fixture(scope="session")
+def soc(gpu_soc_info):
+    """GPU model string, e.g. 'MI300'."""
+    return gpu_soc_info[1]
 
 
 @pytest.fixture(autouse=True)

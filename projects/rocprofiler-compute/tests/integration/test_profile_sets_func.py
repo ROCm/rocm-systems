@@ -9,9 +9,12 @@ import common
 import pytest
 
 from tests.integration import common as integration_common
-from tests.integration.common import (
-    AVAILABLE_SETS,
-    config,
+from tests.integration.common import config
+
+# Parametrization is resolved at collection, before fixtures exist, so this is the
+# one place the GPU has to be probed at import rather than through the soc fixture.
+AVAILABLE_SETS = integration_common.get_available_sets_for_arch(
+    integration_common.gpu_soc()[0]
 )
 
 

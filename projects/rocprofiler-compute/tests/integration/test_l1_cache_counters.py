@@ -7,8 +7,6 @@ import common
 import pandas as pd
 import pytest
 
-from tests.integration import common as integration_common
-
 config = {}
 config["vseq"] = ["./tests/vsequential_access"]
 config["vrand"] = ["./tests/vrandom_access"]
@@ -26,11 +24,8 @@ def load_metrics(csv_file_path):
     )
 
 
-_, soc = integration_common.gpu_soc()
-
-
 def test_L1_cache_counters(
-    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute, soc
 ):
     if not soc or "MI300" not in soc:
         pytest.skip("Skipping L1 cache test for non-mi300 socs.")

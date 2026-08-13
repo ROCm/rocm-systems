@@ -16,12 +16,11 @@ from tests.integration.common import (
     is_gfx115x_soc,
     num_devices,
     num_kernels,
-    soc,
     validate,
 )
 
 
-def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute):
+def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute, soc):
     """
     Test multi-rank profiling of a non-MPI application.
 
@@ -66,6 +65,7 @@ def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute
 
 def test_multi_rank_profiling_mpi_comm(
     binary_handler_profile_rocprof_compute,
+    soc,
 ):
     """
     Test multi-rank profiling of an MPI application.

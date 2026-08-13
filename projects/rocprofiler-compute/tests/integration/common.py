@@ -5,8 +5,8 @@
 
 Imported as `integration_common` alongside the shared `tests/common.py`, never
 star-imported, so the two helper sets stay distinguishable at the call site.
-Module-level `gpu_soc()` shells out to `rocminfo`; this module is integration-only
-so that never runs during a unit run.
+`gpu_soc()` shells out to `rocminfo` and is called lazily, via the `gpu_arch` and
+`soc` fixtures, so importing this module never probes the GPU.
 """
 
 import importlib.util
@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 import common
@@ -25,6 +26,136 @@ import yaml
 from common import SUPPORTED_ARCHS
 
 from utils.utils_common import canonical_config_arch
+
+# Runtime config options
+config = {}
+config["kernel_name_1"] = "vecCopy"
+config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
+config["app_occupancy"] = ["./tests/occupancy"]
+config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
+config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
+config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
+config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
+config["app_laplace_eqn_insufficient"] = ["./tests/laplace_eqn", "-i", "3"]
+config["app_vcopy_multikernel_iter"] = [
+    "./tests/vcopy",
+    "-n",
+    "1048576",
+    "-b",
+    "256",
+    "-i",
+    "500",
+    "--multikernel",
+]
+config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
+config["rocflop"] = ["./tests/rocflop", "--device", "0", "--fp16"]
+config["torch_test_app"] = ["python3", "./tests/simple_net.py"]
+config["triton_test_app"] = ["python3", "./tests/triton_ffn.py"]
+config["torch_compile_test_app"] = ["python3", "./tests/torch_compile_triton.py"]
+config["cleanup"] = True
+config["METRIC_COMPARE"] = False
+config["METRIC_LOGGING"] = False
+
+arch_config = {}
+
+num_kernels = 3
+num_devices = 1
+
+attach_detach_interval_msec_no_delay = 1000
+DEFAULT_ABS_DIFF = 15
+DEFAULT_REL_DIFF = 50
+MAX_REOCCURING_COUNT = 28
+
+CSVS = sorted([
+    "sysinfo.csv",
+])
+
+ROOF_ONLY_FILES = sorted([
+    "roofline.csv",
+    "sysinfo.csv",
+])
+
+METRIC_THRESHOLDS = {
+    "2.1.11": {"absolute": 0, "relative": 8},
+    "3.1.1": {"absolute": 0, "relative": 10},
+    "3.1.10": {"absolute": 0, "relative": 10},
+    "3.1.11": {"absolute": 0, "relative": 1},
+    "3.1.12": {"absolute": 0, "relative": 1},
+    "3.1.13": {"absolute": 0, "relative": 1},
+    "5.1.0": {"absolute": 0, "relative": 15},
+    "5.2.0": {"absolute": 0, "relative": 15},
+    "6.1.4": {"absolute": 4, "relative": 0},
+    "6.1.5": {"absolute": 0, "relative": 1},
+    "6.1.0": {"absolute": 0, "relative": 15},
+    "6.1.3": {"absolute": 0, "relative": 11},
+    "6.2.12": {"absolute": 0, "relative": 1},
+    "6.2.13": {"absolute": 0, "relative": 1},
+    "7.1.0": {"absolute": 0, "relative": 1},
+    "7.1.1": {"absolute": 0, "relative": 1},
+    "7.1.2": {"absolute": 0, "relative": 1},
+    "7.1.5": {"absolute": 0, "relative": 1},
+    "7.1.6": {"absolute": 0, "relative": 1},
+    "7.1.7": {"absolute": 0, "relative": 1},
+    "7.2.1": {"absolute": 0, "relative": 10},
+    "7.2.3": {"absolute": 0, "relative": 12},
+    "7.2.6": {"absolute": 0, "relative": 1},
+    "10.1.4": {"absolute": 0, "relative": 1},
+    "10.1.5": {"absolute": 0, "relative": 1},
+    "10.1.6": {"absolute": 0, "relative": 1},
+    "10.1.7": {"absolute": 0, "relative": 1},
+    "10.3.4": {"absolute": 0, "relative": 1},
+    "10.3.5": {"absolute": 0, "relative": 1},
+    "10.3.6": {"absolute": 0, "relative": 1},
+    "11.2.1": {"absolute": 0, "relative": 1},
+    "11.2.4": {"absolute": 0, "relative": 5},
+    "13.2.0": {"absolute": 0, "relative": 1},
+    "13.2.2": {"absolute": 0, "relative": 1},
+    "14.2.0": {"absolute": 0, "relative": 1},
+    "14.2.5": {"absolute": 0, "relative": 1},
+    "14.2.7": {"absolute": 0, "relative": 1},
+    "14.2.8": {"absolute": 0, "relative": 1},
+    "15.1.4": {"absolute": 0, "relative": 1},
+    "15.1.5": {"absolute": 0, "relative": 1},
+    "15.1.6": {"absolute": 0, "relative": 1},
+    "15.1.7": {"absolute": 0, "relative": 1},
+    "15.2.4": {"absolute": 0, "relative": 1},
+    "15.2.5": {"absolute": 0, "relative": 1},
+    "16.1.0": {"absolute": 0, "relative": 1},
+    "16.1.3": {"absolute": 0, "relative": 1},
+    "16.3.0": {"absolute": 0, "relative": 1},
+    "16.3.1": {"absolute": 0, "relative": 1},
+    "16.3.2": {"absolute": 0, "relative": 1},
+    "16.3.5": {"absolute": 0, "relative": 1},
+    "16.3.6": {"absolute": 0, "relative": 1},
+    "16.3.7": {"absolute": 0, "relative": 1},
+    "16.3.9": {"absolute": 0, "relative": 1},
+    "16.3.10": {"absolute": 0, "relative": 1},
+    "16.3.11": {"absolute": 0, "relative": 1},
+    "16.4.3": {"absolute": 0, "relative": 1},
+    "16.4.4": {"absolute": 0, "relative": 1},
+    "16.5.0": {"absolute": 0, "relative": 1},
+    "17.3.3": {"absolute": 0, "relative": 1},
+    "17.3.6": {"absolute": 0, "relative": 1},
+    "18.1.0": {"absolute": 0, "relative": 1},
+    "18.1.1": {"absolute": 0, "relative": 1},
+    "18.1.2": {"absolute": 0, "relative": 1},
+    "18.1.3": {"absolute": 0, "relative": 1},
+    "18.1.5": {"absolute": 0, "relative": 1},
+    "18.1.6": {"absolute": 1, "relative": 0},
+}
+
+# Shared constants for output directory tests.
+GPU_MODEL = "MIXXX"
+GPU_ARCH = "gfx000"
+
+# SLURM rank/size env var pair used in rank-related tests
+SLURM_RANK_VAR, SLURM_SIZE_VAR = "SLURM_PROCID", "SLURM_NTASKS"
+
+# check for parallel resource allocation
+common.check_resource_allocation()
+
+# Set default profiler
+os.environ["ROCPROF"] = "rocprofiler-sdk"
 
 
 def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=None):
@@ -156,18 +287,23 @@ def get_num_pmc_file(output_dir):
     ])
 
 
+@lru_cache(maxsize=None)
 def gpu_soc():
     """Return (arch, model) from rocminfo, e.g. ('gfx942', 'MI300').
 
-    Both are '' when no supported GPU is detected.
+    Both are '' when no supported GPU is detected, including when rocminfo is
+    absent from PATH on a CPU-only host.
     """
     # decode with utf-8 to account for rocm-smi changes in latest rocm
-    rocminfo = (
-        subprocess
-        .run(["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        .stdout.decode("utf-8")
-        .split("\n")
-    )
+    try:
+        rocminfo = (
+            subprocess
+            .run(["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            .stdout.decode("utf-8")
+            .split("\n")
+        )
+    except FileNotFoundError:
+        return "", ""
     soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
     devices = list(filter(soc_regex.match, rocminfo))
     if not devices:
@@ -244,137 +380,6 @@ def require_triton(*, gpu: bool = False) -> None:
         pytest.skip(f"Triton import failed: {type(e).__name__}: {e}")
 
 
-# Runtime config options
-config = {}
-config["kernel_name_1"] = "vecCopy"
-config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
-config["app_occupancy"] = ["./tests/occupancy"]
-config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
-config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
-config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
-config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
-config["app_laplace_eqn_insufficient"] = ["./tests/laplace_eqn", "-i", "3"]
-config["app_vcopy_multikernel_iter"] = [
-    "./tests/vcopy",
-    "-n",
-    "1048576",
-    "-b",
-    "256",
-    "-i",
-    "500",
-    "--multikernel",
-]
-config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
-config["rocflop"] = ["./tests/rocflop", "--device", "0", "--fp16"]
-config["torch_test_app"] = ["python3", "./tests/simple_net.py"]
-config["triton_test_app"] = ["python3", "./tests/triton_ffn.py"]
-config["torch_compile_test_app"] = ["python3", "./tests/torch_compile_triton.py"]
-config["cleanup"] = True
-config["METRIC_COMPARE"] = False
-config["METRIC_LOGGING"] = False
-
-arch_config = {}
-
-num_kernels = 3
-num_devices = 1
-
-attach_detach_interval_msec_no_delay = 1000
-DEFAULT_ABS_DIFF = 15
-DEFAULT_REL_DIFF = 50
-MAX_REOCCURING_COUNT = 28
-
-CSVS = sorted([
-    "sysinfo.csv",
-])
-
-ROOF_ONLY_FILES = sorted([
-    "roofline.csv",
-    "sysinfo.csv",
-])
-
-METRIC_THRESHOLDS = {
-    "2.1.11": {"absolute": 0, "relative": 8},
-    "3.1.1": {"absolute": 0, "relative": 10},
-    "3.1.10": {"absolute": 0, "relative": 10},
-    "3.1.11": {"absolute": 0, "relative": 1},
-    "3.1.12": {"absolute": 0, "relative": 1},
-    "3.1.13": {"absolute": 0, "relative": 1},
-    "5.1.0": {"absolute": 0, "relative": 15},
-    "5.2.0": {"absolute": 0, "relative": 15},
-    "6.1.4": {"absolute": 4, "relative": 0},
-    "6.1.5": {"absolute": 0, "relative": 1},
-    "6.1.0": {"absolute": 0, "relative": 15},
-    "6.1.3": {"absolute": 0, "relative": 11},
-    "6.2.12": {"absolute": 0, "relative": 1},
-    "6.2.13": {"absolute": 0, "relative": 1},
-    "7.1.0": {"absolute": 0, "relative": 1},
-    "7.1.1": {"absolute": 0, "relative": 1},
-    "7.1.2": {"absolute": 0, "relative": 1},
-    "7.1.5": {"absolute": 0, "relative": 1},
-    "7.1.6": {"absolute": 0, "relative": 1},
-    "7.1.7": {"absolute": 0, "relative": 1},
-    "7.2.1": {"absolute": 0, "relative": 10},
-    "7.2.3": {"absolute": 0, "relative": 12},
-    "7.2.6": {"absolute": 0, "relative": 1},
-    "10.1.4": {"absolute": 0, "relative": 1},
-    "10.1.5": {"absolute": 0, "relative": 1},
-    "10.1.6": {"absolute": 0, "relative": 1},
-    "10.1.7": {"absolute": 0, "relative": 1},
-    "10.3.4": {"absolute": 0, "relative": 1},
-    "10.3.5": {"absolute": 0, "relative": 1},
-    "10.3.6": {"absolute": 0, "relative": 1},
-    "11.2.1": {"absolute": 0, "relative": 1},
-    "11.2.4": {"absolute": 0, "relative": 5},
-    "13.2.0": {"absolute": 0, "relative": 1},
-    "13.2.2": {"absolute": 0, "relative": 1},
-    "14.2.0": {"absolute": 0, "relative": 1},
-    "14.2.5": {"absolute": 0, "relative": 1},
-    "14.2.7": {"absolute": 0, "relative": 1},
-    "14.2.8": {"absolute": 0, "relative": 1},
-    "15.1.4": {"absolute": 0, "relative": 1},
-    "15.1.5": {"absolute": 0, "relative": 1},
-    "15.1.6": {"absolute": 0, "relative": 1},
-    "15.1.7": {"absolute": 0, "relative": 1},
-    "15.2.4": {"absolute": 0, "relative": 1},
-    "15.2.5": {"absolute": 0, "relative": 1},
-    "16.1.0": {"absolute": 0, "relative": 1},
-    "16.1.3": {"absolute": 0, "relative": 1},
-    "16.3.0": {"absolute": 0, "relative": 1},
-    "16.3.1": {"absolute": 0, "relative": 1},
-    "16.3.2": {"absolute": 0, "relative": 1},
-    "16.3.5": {"absolute": 0, "relative": 1},
-    "16.3.6": {"absolute": 0, "relative": 1},
-    "16.3.7": {"absolute": 0, "relative": 1},
-    "16.3.9": {"absolute": 0, "relative": 1},
-    "16.3.10": {"absolute": 0, "relative": 1},
-    "16.3.11": {"absolute": 0, "relative": 1},
-    "16.4.3": {"absolute": 0, "relative": 1},
-    "16.4.4": {"absolute": 0, "relative": 1},
-    "16.5.0": {"absolute": 0, "relative": 1},
-    "17.3.3": {"absolute": 0, "relative": 1},
-    "17.3.6": {"absolute": 0, "relative": 1},
-    "18.1.0": {"absolute": 0, "relative": 1},
-    "18.1.1": {"absolute": 0, "relative": 1},
-    "18.1.2": {"absolute": 0, "relative": 1},
-    "18.1.3": {"absolute": 0, "relative": 1},
-    "18.1.5": {"absolute": 0, "relative": 1},
-    "18.1.6": {"absolute": 1, "relative": 0},
-}
-
-# Shared constants for output directory tests.
-GPU_MODEL = "MIXXX"
-GPU_ARCH = "gfx000"
-
-# SLURM rank/size env var pair used in rank-related tests
-SLURM_RANK_VAR, SLURM_SIZE_VAR = "SLURM_PROCID", "SLURM_NTASKS"
-
-# check for parallel resource allocation
-common.check_resource_allocation()
-
-# Get soc info
-gpu_arch, soc = gpu_soc()
-
-
 def get_available_sets_for_arch(gpu_arch):
     """Return available set options for the given GPU arch,
     or [] if gpu_arch is falsy."""
@@ -392,12 +397,6 @@ def get_available_sets_for_arch(gpu_arch):
         return []
     data = yaml.safe_load(sets_file.read_text())
     return [s["set_option"] for s in data.get("sets", []) if s.get("set_option")]
-
-
-AVAILABLE_SETS = get_available_sets_for_arch(gpu_arch)
-
-# Set default profiler
-os.environ["ROCPROF"] = "rocprofiler-sdk"
 
 
 def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
@@ -461,6 +460,7 @@ def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
 
 
 def baseline_compare_metric(test_name, workload_dir, args=[]):
+    _, soc = gpu_soc()
     baseline_dir = (Path("tests/workloads/vcopy") / soc).resolve()
     if not baseline_dir.exists():
         pytest.skip(f"Skipping test since {baseline_dir} does not exist")
@@ -808,12 +808,13 @@ def clear_rank_env(monkeypatch, *env_vars):
 
 
 def skip_unsupported_roofline_soc():
+    _, soc = gpu_soc()
     if soc == "MI100":
         pytest.skip(f"Roofline is not supported on {soc}")
 
 
 def is_gfx115x_soc():
-    return soc in {
+    return gpu_soc()[1] in {
         "RDNA35_POINT_1",
         "RDNA35_HALO",
         "RDNA35_POINT_2",
@@ -822,7 +823,7 @@ def is_gfx115x_soc():
 
 
 def is_gfx1250_soc():
-    return soc == "GFX1250_SERIES"
+    return gpu_soc()[1] == "GFX1250_SERIES"
 
 
 # --

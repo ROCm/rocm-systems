@@ -20,7 +20,6 @@ from tests.integration.common import (
     num_devices,
     num_kernels,
     skip_unsupported_roofline_soc,
-    soc,
     validate,
 )
 
@@ -192,6 +191,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
 def test_iteration_multiplexing_stochastic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
+    soc,
 ):
     skip_unsupported_roofline_soc()
 

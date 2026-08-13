@@ -9,7 +9,6 @@ import subprocess
 import common
 import pytest
 
-from tests.integration import common as integration_common
 from utils.specs import (
     generate_machine_specs,
 )
@@ -90,9 +89,8 @@ def get_num_xcds():
 
 
 @pytest.mark.num_xcds_spec_class
-def test_num_xcds_spec_class(monkeypatch):
+def test_num_xcds_spec_class(monkeypatch, gpu_arch):
     # 1. Check if gfx942 soc
-    gpu_arch = integration_common.gpu_soc()[0]
     if gpu_arch is None or gpu_arch.lower() != "gfx942":
         pytest.skip("Skipping num xcds test for non-gfx942 socs.")
 
@@ -109,9 +107,8 @@ def test_num_xcds_spec_class(monkeypatch):
 
 
 @pytest.mark.num_xcds_cli_output
-def test_num_xcds_cli_output():
+def test_num_xcds_cli_output(gpu_arch):
     # 1. Check if gfx942 soc
-    gpu_arch = integration_common.gpu_soc()[0]
     if gpu_arch is None or gpu_arch.lower() != "gfx942":
         pytest.skip("Skipping num xcds test for non-gfx942 socs.")
 
