@@ -312,6 +312,16 @@ void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pa
         << profile.name << " " << mnemonic;
     EXPECT_EQ(def_use.defs.ordinary_size(), static_cast<size_t>(width))
         << profile.name << " " << mnemonic;
+
+    // wrexec reads and writes EXEC and sets SCC: these fieldless special
+    // operands are singleton members of the def/use sets (outside the ordinary
+    // projection asserted above).
+    EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::EXEC, 0, 1}))
+        << profile.name << " " << mnemonic;
+    EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::EXEC, 0, 1}))
+        << profile.name << " " << mnemonic;
+    EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::SCC, 0, 1}))
+        << profile.name << " " << mnemonic;
   }
 }
 
@@ -718,6 +728,8 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
           << profile.name << " " << mnemonic;
       // The implicit SCC def is a special member of defs; the ordinary
       // projection is just the s4 read-modify-write.
+      EXPECT_EQ(def_use.defs.contains(RegisterRef{RegClass::SCC, 0, 1}), sets_scc)
+          << profile.name << " " << mnemonic;
       EXPECT_EQ(def_use.uses.ordinary_size(), 1u) << profile.name << " " << mnemonic;
       EXPECT_EQ(def_use.defs.ordinary_size(), 1u) << profile.name << " " << mnemonic;
     }

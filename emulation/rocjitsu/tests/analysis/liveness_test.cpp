@@ -785,6 +785,52 @@ TEST(SpecialEffectAnalysis, SelectorEncodedExecWriteIsNotSurfaced) {
   }
 }
 
+// The selector-drop policy must also cover implicit reads. s_cvt_f16_f32 writes
+// the low 16 bits of sdst and preserves the high half, so its generated
+// implicit_uses() hook surfaces a preserve-read of sdst via to_register_ref().
+// With an ordinary sdst that read is a real ordinary use; with a selector-encoded
+// special sdst (exec_lo) it collapses to a class-wide EXEC singleton and must be
+// dropped, or EXEC would be used-but-never-defined (the explicit dst path already
+// drops the selector-encoded def).
+TEST(SpecialEffectAnalysis, ImplicitPreserveReadDropsSelectorEncodedSpecial) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  // Ordinary destination: the implicit preserve-read of s4 is a real use.
+  {
+    const auto built = rdna4::build_sop1(rdna4::kSCvtF16F32Sop1, {.ssrc0 = 0, .sdst = 4});
+    const std::array<uint32_t, 2> words{built[0], 0u};
+    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), "s_cvt_f16_f32");
+
+    InstDefUse du(*inst);
+    EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 4, 1}));
+    EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 0, 1}));
+    EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 4, 1})); // preserve-read via the hook
+    EXPECT_FALSE(du.defs.has_specials());
+    EXPECT_FALSE(du.uses.has_specials());
+  }
+
+  // Selector-encoded exec_lo destination (OPR_SDST value 126): the preserve-read
+  // decodes to a class-wide EXEC ref and must be dropped from uses, and the def
+  // is likewise dropped, leaving no special members and no ordinary destination.
+  {
+    const auto built = rdna4::build_sop1(rdna4::kSCvtF16F32Sop1, {.ssrc0 = 0, .sdst = 126});
+    const std::array<uint32_t, 2> words{built[0], 0u};
+    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), "s_cvt_f16_f32");
+
+    InstDefUse du(*inst);
+    EXPECT_FALSE(du.uses.has_specials());
+    EXPECT_FALSE(du.defs.has_specials());
+    EXPECT_EQ(du.defs.ordinary_size(), 0u); // selector-encoded dst dropped
+    EXPECT_EQ(du.uses.ordinary_size(), 1u); // only the ordinary ssrc0 (s0) remains
+    EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 0, 1}));
+  }
+}
+
 TEST(SpecialEffectAnalysis, OrdinaryInstructionReportsNoSpecialEffects) {
   // A plain vector op with only ordinary register operands exposes no special
   // effects -- both special sets stay empty.

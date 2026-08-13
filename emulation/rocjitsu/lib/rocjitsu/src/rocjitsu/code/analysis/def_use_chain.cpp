@@ -102,8 +102,13 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
   // No generated instruction currently reports an implicit VGPR def. If one is
   // added for gfx1250, it must expose an operand with a VGPR-MSB role so global
   // usage can resolve the physical bank instead of recording only the raw low
-  // eight-bit index.
-  inst.implicit_defs(defs);
+  // eight-bit index. Merge only the ordinary projection: an implicit hook that
+  // surfaces a special via a generic selector (to_register_ref()) collapses it
+  // to a class-wide singleton, so it is dropped here for the same reason the
+  // explicit dst loop above drops selector-encoded specials.
+  RegisterSet implicit_defs_set;
+  inst.implicit_defs(implicit_defs_set);
+  defs |= implicit_defs_set.ordinary_only();
 
   for (int i = 0; i < inst.num_src_operands(); ++i) {
     const auto *op = inst.src_operand(i);
@@ -118,8 +123,13 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
 
   if (vgpr_msb == nullptr) {
     // No dynamic VGPR banking (non-gfx1250): the flat hook already reports every
-    // implicit read at its physical index.
-    inst.implicit_uses(uses);
+    // implicit read at its physical index. Merge only the ordinary projection so
+    // a selector-encoded special surfaced by the hook (e.g. an exec_lo
+    // preserve-read on a partial-write op) is dropped rather than recorded as an
+    // imprecise class-wide singleton — matching the explicit src loop above.
+    RegisterSet implicit_uses_set;
+    inst.implicit_uses(implicit_uses_set);
+    uses |= implicit_uses_set.ordinary_only();
     return;
   }
 
@@ -144,11 +154,12 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
   // operand (e.g. FLAT/GLOBAL saddr, an SGPR). Merge only those: the VGPR reads
   // it would add carry no bank, and the operand path above already resolved them
   // to the correct physical tuple, so re-adding the raw low-8 index would mark a
-  // wrong, unbanked register live.
+  // wrong, unbanked register live. Also drop any selector-encoded special the
+  // hook surfaces, for the same reason as the non-gfx1250 path above.
   RegisterSet flat_implicit;
   inst.implicit_uses(flat_implicit);
   flat_implicit.clear_class(RegClass::VGPR);
-  uses |= flat_implicit;
+  uses |= flat_implicit.ordinary_only();
 }
 
 } // namespace rocjitsu
