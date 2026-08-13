@@ -104,6 +104,8 @@ static constexpr hsa_barrier_and_packet_t kBarrierAcquirePacket = {
 static constexpr hsa_barrier_and_packet_t kBarrierReleasePacket = {
     kBarrierPacketReleaseHeader, 0, 0, {{0}}, 0, {0}};
 
+static constexpr uint16_t kBarrierBit = 1 << HSA_PACKET_HEADER_BARRIER;
+
 namespace {
 
 void CL_CALLBACK ReleasePinnedMemoryCallback(cl_event event, int32_t command_exec_status,
@@ -1229,6 +1231,9 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 
 // ================================================================================================
 void VirtualGPU::SetGpuQueue(hsa_queue_t* queue) {
+  if (gpu_queue_ != queue) {
+    last_aql_packet_slot_ = kInvalidAqlSlot;
+  }
   gpu_queue_ = queue;
 
   cached_read_dispatch_id_ = 0;
@@ -1244,12 +1249,14 @@ void VirtualGPU::SetGpuQueue(hsa_queue_t* queue) {
     device_mem_ring_buf_ = extras.deviceMemRingBuf;
     use_movdir64b_ = roc_device_.info().movdir64b_ && device_mem_ring_buf_;
     doorbell_ptr_ = extras.doorbellPtr;
+    largest_aql_barrier_bit_slot_ = extras.largestAqlBarrierBitSlot;
     metadata_preloader_.SetQueueBase(extras.metadataRingBuffer,
                                      roc_device_.MetadataVersionHeader());
   } else {
     device_mem_ring_buf_ = false;
     use_movdir64b_ = false;
     doorbell_ptr_ = nullptr;
+    largest_aql_barrier_bit_slot_.reset();
     metadata_preloader_.SetQueueBase(nullptr, roc_device_.MetadataVersionHeader());
   }
 }
@@ -1411,16 +1418,72 @@ void VirtualGPU::ringQueueDoorbell(uint64_t index) {
 }
 
 // ================================================================================================
+AqlSlotReservation VirtualGPU::ReserveAqlSlots(size_t packet_count) {
+  assert(packet_count > 0);
+  assert(largest_aql_barrier_bit_slot_ != nullptr);
+
+  const uint64_t barrier_bit_slot_before_reservation =
+      largest_aql_barrier_bit_slot_->load(std::memory_order_acquire);
+  const uint64_t start_slot = Hsa::queue_add_write_index_screlease(gpu_queue_, packet_count);
+  return {start_slot, packet_count, barrier_bit_slot_before_reservation};
+}
+
+// ================================================================================================
+void VirtualGPU::OptimizeStreamOrderingBarrier(
+    uint16_t& header, const AqlSlotReservation& reservation) const {
+  if (!roc_device_.settings().aql_barrier_opt_) {
+    return;
+  }
+
+  const bool needs_stream_ordering_barrier =
+      last_aql_packet_slot_ != kInvalidAqlSlot &&
+      (reservation.barrier_bit_slot_before_reservation == kInvalidAqlSlot ||
+       reservation.barrier_bit_slot_before_reservation <= last_aql_packet_slot_);
+  if (!needs_stream_ordering_barrier) {
+    header &= ~kBarrierBit;
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::RecordAqlPacketHeader(const AqlSlotReservation& reservation,
+                                       size_t packet_offset, uint16_t header) {
+  assert(packet_offset < reservation.packet_count);
+  assert(largest_aql_barrier_bit_slot_ != nullptr);
+  if ((header & kBarrierBit) != 0) {
+    const uint64_t barrier_bit_slot = reservation.start_slot + packet_offset;
+    uint64_t largest_barrier_bit_slot =
+        largest_aql_barrier_bit_slot_->load(std::memory_order_relaxed);
+    while ((largest_barrier_bit_slot == kInvalidAqlSlot ||
+            largest_barrier_bit_slot < barrier_bit_slot) &&
+           !largest_aql_barrier_bit_slot_->compare_exchange_weak(
+               largest_barrier_bit_slot, barrier_bit_slot, std::memory_order_release,
+               std::memory_order_relaxed)) {
+    }
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::CompleteAqlSubmission(const AqlSlotReservation& reservation) {
+  last_aql_packet_slot_ = reservation.start_slot + reservation.packet_count - 1;
+}
+
+// ================================================================================================
 template <typename AqlPacket>
 bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, uint16_t rest,
-                                          bool blocking, bool attach_signal, bool cluster_launch) {
+                                          bool blocking, bool attach_signal) {
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
   const uint32_t sw_queue_size = queueMask;
 
-  // Check for queue full and wait if needed.
-  uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
+  const bool header_requested_barrier = (header & kBarrierBit) != 0;
+  AqlSlotReservation reservation = ReserveAqlSlots(1);
+  const uint64_t index = reservation.start_slot;
   adjustHeader(header);
+  if (header_requested_barrier) {
+    OptimizeStreamOrderingBarrier(header, reservation);
+  }
+  RecordAqlPacketHeader(reservation, 0, header);
+  CompleteAqlSubmission(reservation);
 
   bool attachSignal = timestamp_ != nullptr || attach_signal;
   // Get active signal for current dispatch if profiling is necessary
@@ -1523,7 +1586,12 @@ void VirtualGPU::adjustHeader(uint16_t& header) {
 
   if (fence_state_ == amd::Device::kCacheStateSystem &&
       expected_fence_state == amd::Device::kCacheStateSystem) {
+    // honor an explicit any-order
+    const bool any_order = (header & kBarrierBit) == 0;
     header = dispatchPacketHeader_;
+    if (any_order) {
+      header &= ~kBarrierBit;
+    }
     setFenceDirty(true);
   }
 
@@ -1580,12 +1648,6 @@ bool VirtualGPU::dispatchAqlPacket(AqlPacket* packet, uint16_t header,
     return dispatchGenericAqlPacket(packet, header, rest, blocking, attach_signal);
   }
 }
-// ================================================================================================
-bool VirtualGPU::dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t header, uint16_t rest,
-                                   bool blocking, bool attach_signal) {
-  return dispatchGenericAqlPacket(packet, header, rest, blocking, attach_signal);
-}
-
 // ================================================================================================
 // Publish one metadata-prefetch packet (256B = 4 x 64B segments) to the metadata ring at |dst|.
 // |src| is the captured metadata packet with valid headers already baked into each segment
@@ -1661,6 +1723,14 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   uint16_t firstHeader = static_cast<uint16_t>(validFullHeaders[0]);
   uint16_t firstSetup  = static_cast<uint16_t>(validFullHeaders[0] >> 16);
   uint16_t lastHeader  = static_cast<uint16_t>(validFullHeaders[numPackets - 1]);
+  const uint8_t firstPacketType =
+      extractAqlBits(firstHeader, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
+  const bool firstPacketIsKernel =
+      firstPacketType == HSA_PACKET_TYPE_KERNEL_DISPATCH ||
+      (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+       (firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+  const bool firstHeaderRequestedBarrier =
+      firstPacketIsKernel && ((firstHeader & kBarrierBit) != 0);
   if (addSystemScope_) {
     firstHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
     firstHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
@@ -1683,7 +1753,13 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   // Per-chunk: yield if the queue is full (handles graphs larger than the queue), then
   // memcpy + per-packet fixups + headers + doorbell.  For graphs that fit in the queue
   // the yield never fires.
-  uint64_t startIndex = Hsa::queue_add_write_index_screlease(gpu_queue_, numPackets);
+  AqlSlotReservation reservation = ReserveAqlSlots(numPackets);
+  const uint64_t startIndex = reservation.start_slot;
+  if (firstHeaderRequestedBarrier) {
+    OptimizeStreamOrderingBarrier(firstHeader, reservation);
+  }
+
+  CompleteAqlSubmission(reservation);
   setFenceDirty(true);
 
   // Update cached fence state from the last packet's release scope.
@@ -1760,7 +1836,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   auto logBatchPacket = [&](size_t i, uint64_t slotIdx) {
     const auto* hostPkt = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
         flatPacketData.data() + i * kPacketSize);
-    const uint16_t hdr = static_cast<uint16_t>(validFullHeaders[i]);
+    const uint16_t hdr =
+        i == 0 ? firstHeader
+               : (i == numPackets - 1 ? lastHeader : static_cast<uint16_t>(validFullHeaders[i]));
     const uint8_t pktType =
         extractAqlBits(hdr, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
     const uint8_t amdFormat = static_cast<uint8_t>((validFullHeaders[i] >> 16) & 0xFF);
@@ -2011,7 +2089,11 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
     }
   }
 
-  uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
+  AqlSlotReservation reservation = ReserveAqlSlots(1);
+  const uint64_t index = reservation.start_slot;
+  OptimizeStreamOrderingBarrier(packetHeader, reservation);
+  RecordAqlPacketHeader(reservation, 0, packetHeader);
+  CompleteAqlSubmission(reservation);
 
   setFenceDirty(true);
   auto cache_state = extractAqlBits(packetHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
@@ -2110,7 +2192,11 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
     setFenceDirty(false);
   }
 
-  uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
+  AqlSlotReservation reservation = ReserveAqlSlots(1);
+  const uint64_t index = reservation.start_slot;
+  OptimizeStreamOrderingBarrier(packetHeader, reservation);
+  RecordAqlPacketHeader(reservation, 0, packetHeader);
+  CompleteAqlSubmission(reservation);
 
   TrackQueueProgress(barrier_value_packet_, index, external_signal);
 

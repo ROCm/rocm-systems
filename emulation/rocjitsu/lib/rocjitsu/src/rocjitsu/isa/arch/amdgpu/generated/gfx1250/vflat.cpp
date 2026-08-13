@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vflat.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "util/except.h"
 
@@ -19,7 +20,8 @@ template <typename VmemMachineInst> uint32_t vflat_vaddr_bits(const VmemMachineI
 } // namespace
 
 FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
-    : Vflat("flat_load_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1439)),
+    : Vflat("flat_load_u8", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatLoadU8Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -39,7 +41,8 @@ FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
 }
 
 FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
-    : Vflat("flat_load_i8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1440)),
+    : Vflat("flat_load_i8", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatLoadI8Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -59,7 +62,8 @@ FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
 }
 
 FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
-    : Vflat("flat_load_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1441)),
+    : Vflat("flat_load_u16", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatLoadU16Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -79,7 +83,8 @@ FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
 }
 
 FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
-    : Vflat("flat_load_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1442)),
+    : Vflat("flat_load_i16", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatLoadI16Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -99,7 +104,8 @@ FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
 }
 
 FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
-    : Vflat("flat_load_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1443)),
+    : Vflat("flat_load_b32", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatLoadB32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -119,7 +125,8 @@ FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
 }
 
 FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
-    : Vflat("flat_load_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1444)),
+    : Vflat("flat_load_b64", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatLoadB64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -139,7 +146,8 @@ FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
 }
 
 FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
-    : Vflat("flat_load_b96", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1445)),
+    : Vflat("flat_load_b96", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatLoadB96Vflat)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -159,7 +167,8 @@ FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
 }
 
 FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
-    : Vflat("flat_load_b128", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1446)),
+    : Vflat("flat_load_b128", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatLoadB128Vflat)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -179,7 +188,8 @@ FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
 }
 
 FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
-    : Vflat("flat_store_b8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1447)),
+    : Vflat("flat_store_b8", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatStoreB8Vflat)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -199,7 +209,8 @@ FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
 }
 
 FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
-    : Vflat("flat_store_b16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1448)),
+    : Vflat("flat_store_b16", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatStoreB16Vflat)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -219,7 +230,8 @@ FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
 }
 
 FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
-    : Vflat("flat_store_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1449)),
+    : Vflat("flat_store_b32", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatStoreB32Vflat)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -239,7 +251,8 @@ FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
 }
 
 FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
-    : Vflat("flat_store_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1450)),
+    : Vflat("flat_store_b64", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatStoreB64Vflat)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -259,7 +272,8 @@ FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
 }
 
 FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
-    : Vflat("flat_store_b96", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1451)),
+    : Vflat("flat_store_b96", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatStoreB96Vflat)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -279,7 +293,8 @@ FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
 }
 
 FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
-    : Vflat("flat_store_b128", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1452)),
+    : Vflat("flat_store_b128", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatStoreB128Vflat)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -299,7 +314,8 @@ FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
 }
 
 FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
-    : Vflat("flat_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1453)),
+    : Vflat("flat_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatLoadD16U8Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -332,7 +348,8 @@ void FlatLoadD16U8Vflat::implicit_use_operands(
 }
 
 FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
-    : Vflat("flat_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1454)),
+    : Vflat("flat_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatLoadD16I8Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -366,7 +383,7 @@ void FlatLoadD16I8Vflat::implicit_use_operands(
 
 FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1455)),
+            selected_exec_fn(InstructionExecutionId::FlatLoadD16B16Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -400,7 +417,7 @@ void FlatLoadD16B16Vflat::implicit_use_operands(
 
 FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1456)),
+            selected_exec_fn(InstructionExecutionId::FlatLoadD16HiU8Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -434,7 +451,7 @@ void FlatLoadD16HiU8Vflat::implicit_use_operands(
 
 FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1457)),
+            selected_exec_fn(InstructionExecutionId::FlatLoadD16HiI8Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -468,7 +485,7 @@ void FlatLoadD16HiI8Vflat::implicit_use_operands(
 
 FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1458)),
+            selected_exec_fn(InstructionExecutionId::FlatLoadD16HiB16Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -502,7 +519,7 @@ void FlatLoadD16HiB16Vflat::implicit_use_operands(
 
 FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
     : Vflat("flat_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1459)),
+            selected_exec_fn(InstructionExecutionId::FlatStoreD16HiB8Vflat)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -523,7 +540,7 @@ FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
 
 FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
     : Vflat("flat_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1460)),
+            selected_exec_fn(InstructionExecutionId::FlatStoreD16HiB16Vflat)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -544,7 +561,7 @@ FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
 
 FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1461)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicSwapB32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -571,7 +588,7 @@ FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
 
 FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1462)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicCmpswapB32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -598,7 +615,7 @@ FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
 
 FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1463)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicAddU32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -625,7 +642,7 @@ FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
 
 FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1464)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicSubU32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -652,7 +669,7 @@ FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
 
 FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1465)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicSubClampU32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -679,7 +696,7 @@ FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
 
 FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1466)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicMinI32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -706,7 +723,7 @@ FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
 
 FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1467)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicMinU32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -733,7 +750,7 @@ FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
 
 FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1468)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicMaxI32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -760,7 +777,7 @@ FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
 
 FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1469)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicMaxU32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -787,7 +804,7 @@ FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
 
 FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1470)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicAndB32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -814,7 +831,7 @@ FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
 
 FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1471)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicOrB32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -841,7 +858,7 @@ FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
 
 FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1472)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicXorB32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -868,7 +885,7 @@ FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
 
 FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1473)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicIncU32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -895,7 +912,7 @@ FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
 
 FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1474)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicDecU32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -922,7 +939,7 @@ FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
 
 FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1475)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicSwapB64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -949,7 +966,7 @@ FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
 
 FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1476)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicCmpswapB64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -976,7 +993,7 @@ FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
 
 FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1477)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicAddU64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1003,7 +1020,7 @@ FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
 
 FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1478)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicSubU64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1030,7 +1047,7 @@ FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
 
 FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1479)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicMinI64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1057,7 +1074,7 @@ FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
 
 FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1480)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicMinU64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1084,7 +1101,7 @@ FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
 
 FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1481)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicMaxI64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1111,7 +1128,7 @@ FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
 
 FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1482)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicMaxU64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1138,7 +1155,7 @@ FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
 
 FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1483)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicAndB64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1165,7 +1182,7 @@ FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
 
 FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1484)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicOrB64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1192,7 +1209,7 @@ FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
 
 FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1485)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicXorB64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1219,7 +1236,7 @@ FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
 
 FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1486)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicIncU64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1246,7 +1263,7 @@ FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
 
 FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1487)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicDecU64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1273,7 +1290,7 @@ FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
 
 FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1488)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicCondSubU32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1300,7 +1317,7 @@ FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
 
 FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1489)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicMinNumF32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1327,7 +1344,7 @@ FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
 
 FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1490)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicMaxNumF32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1354,7 +1371,7 @@ FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
 
 FlatAtomicAddF64Vflat::FlatAtomicAddF64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_f64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1491)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicAddF64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1381,7 +1398,7 @@ FlatAtomicAddF64Vflat::FlatAtomicAddF64Vflat(const MachineInst *inst)
 
 FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1492)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicAddF32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1408,7 +1425,7 @@ FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
 
 FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1493)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicPkAddF16Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1435,7 +1452,7 @@ FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
 
 FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1494)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicPkAddBf16Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1462,7 +1479,7 @@ FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
 
 FlatAtomicMinNumF64Vflat::FlatAtomicMinNumF64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1495)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicMinNumF64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1489,7 +1506,7 @@ FlatAtomicMinNumF64Vflat::FlatAtomicMinNumF64Vflat(const MachineInst *inst)
 
 FlatAtomicMaxNumF64Vflat::FlatAtomicMaxNumF64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1496)),
+            selected_exec_fn(InstructionExecutionId::FlatAtomicMaxNumF64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1515,7 +1532,8 @@ FlatAtomicMaxNumF64Vflat::FlatAtomicMaxNumF64Vflat(const MachineInst *inst)
 }
 
 FlatPrefetchB8Vflat::FlatPrefetchB8Vflat(const MachineInst *inst)
-    : Vflat("flat_prefetch_b8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(1497)),
+    : Vflat("flat_prefetch_b8", reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::FlatPrefetchB8Vflat)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -1532,7 +1550,7 @@ FlatPrefetchB8Vflat::FlatPrefetchB8Vflat(const MachineInst *inst)
 
 FlatLoadMonitorB32Vflat::FlatLoadMonitorB32Vflat(const MachineInst *inst)
     : Vflat("flat_load_monitor_b32", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1498)),
+            selected_exec_fn(InstructionExecutionId::FlatLoadMonitorB32Vflat)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1553,7 +1571,7 @@ FlatLoadMonitorB32Vflat::FlatLoadMonitorB32Vflat(const MachineInst *inst)
 
 FlatLoadMonitorB64Vflat::FlatLoadMonitorB64Vflat(const MachineInst *inst)
     : Vflat("flat_load_monitor_b64", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1499)),
+            selected_exec_fn(InstructionExecutionId::FlatLoadMonitorB64Vflat)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1574,7 +1592,7 @@ FlatLoadMonitorB64Vflat::FlatLoadMonitorB64Vflat(const MachineInst *inst)
 
 FlatLoadMonitorB128Vflat::FlatLoadMonitorB128Vflat(const MachineInst *inst)
     : Vflat("flat_load_monitor_b128", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(1500)),
+            selected_exec_fn(InstructionExecutionId::FlatLoadMonitorB128Vflat)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),

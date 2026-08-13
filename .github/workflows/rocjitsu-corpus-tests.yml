@@ -51,6 +51,7 @@ env:
   ROCM_SDK_VERSION: 7.15.0a20260728
   ROCM_SDK_DEVICE_GFX_GROUP: "gfx1100 gfx1201 gfx1250 gfx942 gfx950"
   UV_VERSION: 0.9.26
+  UV_HTTP_RETRIES: 10
 
 jobs:
   test:
@@ -343,6 +344,7 @@ jobs:
             --soft-timeout 15 \
             --hard-timeout 30 \
             --rerun-failed \
+            --warn-perf \
           )
           bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
           exit "${corpus_test_status}"

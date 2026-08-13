@@ -5,13 +5,15 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/sopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
 #include "util/except.h"
 
 namespace rocjitsu {
 namespace gfx1250 {
 
 SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_eq_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(91)),
+    : Sopc("s_cmp_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpEqI32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -20,6 +22,11 @@ SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_EQ_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -46,7 +53,8 @@ SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
 }
 
 SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_lg_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(92)),
+    : Sopc("s_cmp_lg_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLgI32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -55,6 +63,11 @@ SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LG_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -81,7 +94,8 @@ SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
 }
 
 SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_gt_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(93)),
+    : Sopc("s_cmp_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpGtI32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -90,6 +104,11 @@ SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_GT_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -116,7 +135,8 @@ SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
 }
 
 SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_ge_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(94)),
+    : Sopc("s_cmp_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpGeI32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -125,6 +145,11 @@ SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_GE_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -151,7 +176,8 @@ SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
 }
 
 SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_lt_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(95)),
+    : Sopc("s_cmp_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLtI32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -160,6 +186,11 @@ SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LT_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -186,7 +217,8 @@ SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
 }
 
 SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_le_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(96)),
+    : Sopc("s_cmp_le_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLeI32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -195,6 +227,11 @@ SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LE_I32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -221,7 +258,8 @@ SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
 }
 
 SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_eq_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(97)),
+    : Sopc("s_cmp_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpEqU32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -230,6 +268,11 @@ SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_EQ_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -256,7 +299,8 @@ SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
 }
 
 SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_lg_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(98)),
+    : Sopc("s_cmp_lg_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLgU32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -265,6 +309,11 @@ SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LG_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -291,7 +340,8 @@ SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
 }
 
 SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_gt_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(99)),
+    : Sopc("s_cmp_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpGtU32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -300,6 +350,11 @@ SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_GT_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -326,7 +381,8 @@ SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
 }
 
 SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_ge_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(100)),
+    : Sopc("s_cmp_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpGeU32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -335,6 +391,11 @@ SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_GE_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -361,7 +422,8 @@ SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
 }
 
 SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_lt_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(101)),
+    : Sopc("s_cmp_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLtU32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -370,6 +432,11 @@ SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LT_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -396,7 +463,8 @@ SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
 }
 
 SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_le_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(102)),
+    : Sopc("s_cmp_le_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLeU32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -405,6 +473,11 @@ SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LE_U32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -431,7 +504,8 @@ SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
 }
 
 SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
-    : Sopc("s_bitcmp0_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(103)),
+    : Sopc("s_bitcmp0_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SBitcmp0B32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -440,6 +514,11 @@ SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_BITCMP0_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -466,7 +545,8 @@ SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
 }
 
 SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
-    : Sopc("s_bitcmp1_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(104)),
+    : Sopc("s_bitcmp1_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SBitcmp1B32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -475,6 +555,11 @@ SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_BITCMP1_B32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -501,7 +586,8 @@ SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
 }
 
 SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
-    : Sopc("s_bitcmp0_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(105)),
+    : Sopc("s_bitcmp0_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SBitcmp0B64Sopc)),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -510,6 +596,11 @@ SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_BITCMP0_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
         64,
@@ -537,7 +628,8 @@ SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
 }
 
 SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
-    : Sopc("s_bitcmp1_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(106)),
+    : Sopc("s_bitcmp1_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SBitcmp1B64Sopc)),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -546,6 +638,11 @@ SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_BITCMP1_B64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
         64,
@@ -573,7 +670,8 @@ SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
 }
 
 SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_eq_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(107)),
+    : Sopc("s_cmp_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpEqU64Sopc)),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -582,6 +680,11 @@ SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_EQ_U64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
         64,
@@ -610,7 +713,8 @@ SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
 }
 
 SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_lg_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(108)),
+    : Sopc("s_cmp_lg_u64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLgU64Sopc)),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -619,6 +723,11 @@ SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LG_U64 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand::make_literal32(
         64,
@@ -647,7 +756,8 @@ SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
 }
 
 SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_lt_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(109)),
+    : Sopc("s_cmp_lt_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLtF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -656,6 +766,11 @@ SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LT_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -682,7 +797,8 @@ SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
 }
 
 SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_lt_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(110)),
+    : Sopc("s_cmp_lt_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLtF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -691,6 +807,11 @@ SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LT_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -719,7 +840,8 @@ SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
 }
 
 SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_eq_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(111)),
+    : Sopc("s_cmp_eq_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpEqF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -728,6 +850,11 @@ SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_EQ_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -754,7 +881,8 @@ SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
 }
 
 SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_eq_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(112)),
+    : Sopc("s_cmp_eq_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpEqF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -763,6 +891,11 @@ SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_EQ_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -791,7 +924,8 @@ SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
 }
 
 SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_le_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(113)),
+    : Sopc("s_cmp_le_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLeF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -800,6 +934,11 @@ SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LE_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -826,7 +965,8 @@ SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
 }
 
 SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_le_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(114)),
+    : Sopc("s_cmp_le_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLeF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -835,6 +975,11 @@ SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LE_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -863,7 +1008,8 @@ SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
 }
 
 SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_gt_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(115)),
+    : Sopc("s_cmp_gt_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpGtF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -872,6 +1018,11 @@ SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_GT_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -898,7 +1049,8 @@ SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
 }
 
 SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_gt_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(116)),
+    : Sopc("s_cmp_gt_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpGtF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -907,6 +1059,11 @@ SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_GT_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -935,7 +1092,8 @@ SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
 }
 
 SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_lg_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(117)),
+    : Sopc("s_cmp_lg_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLgF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -944,6 +1102,11 @@ SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LG_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -970,7 +1133,8 @@ SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
 }
 
 SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_lg_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(118)),
+    : Sopc("s_cmp_lg_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpLgF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -979,6 +1143,11 @@ SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_LG_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1007,7 +1176,8 @@ SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
 }
 
 SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_ge_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(119)),
+    : Sopc("s_cmp_ge_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpGeF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1016,6 +1186,11 @@ SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_GE_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1042,7 +1217,8 @@ SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
 }
 
 SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_ge_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(120)),
+    : Sopc("s_cmp_ge_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpGeF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1051,6 +1227,11 @@ SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_GE_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1079,7 +1260,8 @@ SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
 }
 
 SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_o_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(121)),
+    : Sopc("s_cmp_o_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpOF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1088,6 +1270,11 @@ SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_O_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1114,7 +1301,8 @@ SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
 }
 
 SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_o_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(122)),
+    : Sopc("s_cmp_o_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpOF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1123,6 +1311,11 @@ SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_O_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1151,7 +1344,8 @@ SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
 }
 
 SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_u_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(123)),
+    : Sopc("s_cmp_u_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpUF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1160,6 +1354,11 @@ SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_U_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1186,7 +1385,8 @@ SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
 }
 
 SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_u_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(124)),
+    : Sopc("s_cmp_u_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpUF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1195,6 +1395,11 @@ SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_U_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1223,7 +1428,8 @@ SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
 }
 
 SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_nge_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(125)),
+    : Sopc("s_cmp_nge_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpNgeF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1232,6 +1438,11 @@ SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_NGE_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1258,7 +1469,8 @@ SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
 }
 
 SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_nge_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(126)),
+    : Sopc("s_cmp_nge_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpNgeF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1267,6 +1479,11 @@ SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_NGE_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1295,7 +1512,8 @@ SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
 }
 
 SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_nlg_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(127)),
+    : Sopc("s_cmp_nlg_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpNlgF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1304,6 +1522,11 @@ SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_NLG_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1330,7 +1553,8 @@ SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
 }
 
 SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_nlg_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(128)),
+    : Sopc("s_cmp_nlg_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpNlgF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1339,6 +1563,11 @@ SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_NLG_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1367,7 +1596,8 @@ SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
 }
 
 SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_ngt_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(129)),
+    : Sopc("s_cmp_ngt_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpNgtF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1376,6 +1606,11 @@ SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_NGT_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1402,7 +1637,8 @@ SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
 }
 
 SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_ngt_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(130)),
+    : Sopc("s_cmp_ngt_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpNgtF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1411,6 +1647,11 @@ SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_NGT_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1439,7 +1680,8 @@ SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
 }
 
 SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_nle_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(131)),
+    : Sopc("s_cmp_nle_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpNleF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1448,6 +1690,11 @@ SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_NLE_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1474,7 +1721,8 @@ SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
 }
 
 SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_nle_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(132)),
+    : Sopc("s_cmp_nle_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpNleF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1483,6 +1731,11 @@ SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_NLE_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1511,7 +1764,8 @@ SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
 }
 
 SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_neq_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(133)),
+    : Sopc("s_cmp_neq_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpNeqF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1520,6 +1774,11 @@ SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_NEQ_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1546,7 +1805,8 @@ SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
 }
 
 SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_neq_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(134)),
+    : Sopc("s_cmp_neq_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpNeqF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1555,6 +1815,11 @@ SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_NEQ_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,
@@ -1583,7 +1848,8 @@ SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
 }
 
 SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_nlt_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(135)),
+    : Sopc("s_cmp_nlt_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpNltF32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1592,6 +1858,11 @@ SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_NLT_F32 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1618,7 +1889,8 @@ SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
 }
 
 SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
-    : Sopc("s_cmp_nlt_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(136)),
+    : Sopc("s_cmp_nlt_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmpNltF16Sopc)),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -1627,6 +1899,11 @@ SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
   dst_operands_[0] = &scc;
   num_src_ = 2;
   num_dst_ = 1;
+  if ((reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255) &&
+      (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 254 ||
+       reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 254))
+    throw util::InvalidInst("S_CMP_NLT_F16 may not mix 32-bit and 64-bit literals", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 =
         Operand(16, OperandType::OPR_SIMM32,

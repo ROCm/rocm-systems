@@ -24,10 +24,12 @@
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
@@ -188,6 +190,18 @@ TEST(RawEncodingTest, PreservesScalarLiteralWordsAcrossAmdgpuIsas) {
   }
 }
 
+TEST(SendmsgReturnDecodeTest, Rdna3Selector255DoesNotConsumeLiteral) {
+  constexpr uint32_t word = 0xBE804CFFu; // s_sendmsg_rtn_b32 s0, 255
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_NE(decoder, nullptr);
+
+  std::unique_ptr<Instruction> inst(decoder->decode(&word));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "s_sendmsg_rtn_b32");
+  EXPECT_EQ(inst->size(), sizeof(word));
+  EXPECT_EQ(inst->src_operand(0)->name(), "255");
+}
+
 TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
   const uint32_t words[] = {
       0xBE802000u, // s_and_saveexec_b64 s[0:1], s[0:1]
@@ -237,6 +251,8 @@ TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
 // API -- is_vgpr()/simd_capable()/to_register_ref(), the read/write accessors,
 // and the SIMD chunk paths -- while value-bearing fieldless operands stay live.
 TEST(FieldlessOperandDecodeTest, PlaceholderVaddrInertButSimm32StaysValueBearing) {
+  ScopedIsaExecutionBackend execution_backend_scope{&rdna4::execution_backend()};
+
   // Control: a real (field-bearing) VGPR classifies and reads as a register,
   // and is a normal readable/writable operand.
   rdna4::Operand v0(128, rdna4::OperandType::OPR_VGPR, 0);
@@ -396,6 +412,7 @@ TEST(LiteralDisassemblyTest, Simm32HexUsesUnsignedEncodingBits) {
 }
 
 TEST(Rdna3Vop3LiteralDecodeTest, TrigPreopF64ClassifiesMixedWidthLiteralsPerOperand) {
+  ScopedIsaExecutionBackend execution_backend_scope{&rdna3::execution_backend()};
   constexpr uint32_t literal = 0xaf123456u;
 
   amdgpu::GpuMemory gpu_mem("f64_literal_mem");
@@ -437,6 +454,7 @@ TEST(Rdna3Vop3LiteralDecodeTest, TrigPreopF64ClassifiesMixedWidthLiteralsPerOper
 }
 
 TEST(Rdna4LiteralOperandTest, SignedI64SignExtendsWithoutClaimingLiteral64Encoding) {
+  ScopedIsaExecutionBackend execution_backend_scope{&rdna4::execution_backend()};
   amdgpu::GpuMemory gpu_mem("signed_i64_literal_mem");
   amdgpu::L2Cache l2("signed_i64_literal_l2");
   amdgpu::ComputeUnitCore::Config cfg{};

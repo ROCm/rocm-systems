@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
+#include "util/except.h"
 #include <cstring>
 #include <string>
 
@@ -17,8 +18,10 @@ Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
-  if (!default_encoding())
-    size_ += sizeof(MachineInst);
+  if (inst_.op != 76 && inst_.op != 77) {
+    if (!default_encoding())
+      size_ += sizeof(MachineInst);
+  }
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
 }
@@ -225,6 +228,9 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+      (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255))
+    throw util::InvalidInst("DPP and literal operands cannot be combined", "");
   if (has_lit_0() || has_lit_1() || has_lit_0_has_lit_1() || has_lit_2() || has_lit_0_has_lit_2() ||
       has_lit_1_has_lit_2() || has_lit_0_has_lit_1_has_lit_2())
     size_ += sizeof(MachineInst);
@@ -286,6 +292,9 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+      (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255))
+    throw util::InvalidInst("DPP and literal operands cannot be combined", "");
   if (has_lit_0() || has_lit_1() || has_lit_0_has_lit_1() || has_lit_2() || has_lit_0_has_lit_2() ||
       has_lit_1_has_lit_2() || has_lit_0_has_lit_1_has_lit_2())
     size_ += sizeof(MachineInst);
@@ -465,6 +474,9 @@ Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+      (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255))
+    throw util::InvalidInst("DPP and literal operands cannot be combined", "");
   if (has_lit_0() || has_lit_1() || has_lit_0_has_lit_1() || has_lit_2() || has_lit_0_has_lit_2() ||
       has_lit_1_has_lit_2() || has_lit_0_has_lit_1_has_lit_2())
     size_ += sizeof(MachineInst);

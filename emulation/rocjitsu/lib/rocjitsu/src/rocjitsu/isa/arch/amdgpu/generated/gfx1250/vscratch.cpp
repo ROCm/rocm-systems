@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vscratch.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "util/except.h"
 
@@ -13,7 +14,7 @@ namespace gfx1250 {
 
 ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_u8", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1501)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadU8Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -32,7 +33,7 @@ ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
 
 ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_i8", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1502)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadI8Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -51,7 +52,7 @@ ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
 
 ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_u16", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1503)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadU16Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -70,7 +71,7 @@ ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
 
 ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_i16", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1504)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadI16Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -89,7 +90,7 @@ ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
 
 ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_b32", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1505)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadB32Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -108,7 +109,7 @@ ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
 
 ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_b64", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1506)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadB64Vscratch)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -127,7 +128,7 @@ ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
 
 ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_b96", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1507)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadB96Vscratch)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -146,7 +147,7 @@ ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
 
 ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_b128", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1508)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadB128Vscratch)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -165,7 +166,7 @@ ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
 
 ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b8", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1509)),
+               selected_exec_fn(InstructionExecutionId::ScratchStoreB8Vscratch)),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -184,7 +185,7 @@ ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst)
 
 ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b16", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1510)),
+               selected_exec_fn(InstructionExecutionId::ScratchStoreB16Vscratch)),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -203,7 +204,7 @@ ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst)
 
 ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b32", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1511)),
+               selected_exec_fn(InstructionExecutionId::ScratchStoreB32Vscratch)),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -222,7 +223,7 @@ ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst)
 
 ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b64", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1512)),
+               selected_exec_fn(InstructionExecutionId::ScratchStoreB64Vscratch)),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -241,7 +242,7 @@ ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst)
 
 ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b96", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1513)),
+               selected_exec_fn(InstructionExecutionId::ScratchStoreB96Vscratch)),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -260,7 +261,7 @@ ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst)
 
 ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b128", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1514)),
+               selected_exec_fn(InstructionExecutionId::ScratchStoreB128Vscratch)),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -279,7 +280,7 @@ ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst)
 
 ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1515)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadD16U8Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -311,7 +312,7 @@ void ScratchLoadD16U8Vscratch::implicit_use_operands(
 
 ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1516)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadD16I8Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -343,7 +344,7 @@ void ScratchLoadD16I8Vscratch::implicit_use_operands(
 
 ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1517)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadD16B16Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -375,7 +376,7 @@ void ScratchLoadD16B16Vscratch::implicit_use_operands(
 
 ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1518)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadD16HiU8Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -407,7 +408,7 @@ void ScratchLoadD16HiU8Vscratch::implicit_use_operands(
 
 ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1519)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadD16HiI8Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -439,7 +440,7 @@ void ScratchLoadD16HiI8Vscratch::implicit_use_operands(
 
 ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1520)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadD16HiB16Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -471,7 +472,7 @@ void ScratchLoadD16HiB16Vscratch::implicit_use_operands(
 
 ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1521)),
+               selected_exec_fn(InstructionExecutionId::ScratchStoreD16HiB8Vscratch)),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -490,7 +491,7 @@ ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst
 
 ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1522)),
+               selected_exec_fn(InstructionExecutionId::ScratchStoreD16HiB16Vscratch)),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -509,7 +510,7 @@ ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *in
 
 ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
     : Vscratch("scratch_load_block", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1523)),
+               selected_exec_fn(InstructionExecutionId::ScratchLoadBlockVscratch)),
       vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
@@ -530,7 +531,7 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
 
 ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
     : Vscratch("scratch_store_block", reinterpret_cast<const OpEncoding *>(inst),
-               selected_exec_fn(1524)),
+               selected_exec_fn(InstructionExecutionId::ScratchStoreBlockVscratch)),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),

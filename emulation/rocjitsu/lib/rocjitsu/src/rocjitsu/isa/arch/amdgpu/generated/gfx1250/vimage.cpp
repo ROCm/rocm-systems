@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vimage.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
 #include "util/except.h"
 
 namespace rocjitsu {
@@ -12,7 +13,7 @@ namespace gfx1250 {
 
 TensorLoadToLdsVimage::TensorLoadToLdsVimage(const MachineInst *inst)
     : Vimage("tensor_load_to_lds", reinterpret_cast<const OpEncoding *>(inst),
-             selected_exec_fn(1437)),
+             selected_exec_fn(InstructionExecutionId::TensorLoadToLdsVimage)),
       vaddr0(128, OperandType::OPR_SGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr0),
       vaddr1(256, OperandType::OPR_SGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr1),
       vaddr2(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vaddr2),
@@ -27,7 +28,7 @@ TensorLoadToLdsVimage::TensorLoadToLdsVimage(const MachineInst *inst)
 
 TensorStoreFromLdsVimage::TensorStoreFromLdsVimage(const MachineInst *inst)
     : Vimage("tensor_store_from_lds", reinterpret_cast<const OpEncoding *>(inst),
-             selected_exec_fn(1438)),
+             selected_exec_fn(InstructionExecutionId::TensorStoreFromLdsVimage)),
       vaddr0(128, OperandType::OPR_SGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr0),
       vaddr1(256, OperandType::OPR_SGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr1),
       vaddr2(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vaddr2),
