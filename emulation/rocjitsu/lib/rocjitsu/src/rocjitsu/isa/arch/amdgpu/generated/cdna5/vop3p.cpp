@@ -76,7 +76,7 @@ const char *cdna5_scaled_wmma_mnemonic(const MachineInst *inst) {
                                             : "v_wmma_scale_f32_16x16x128_f8f6f4";
 }
 
-int gfx1250_scale_operand_size_bits(const MachineInst *inst) {
+int cdna5_scale_operand_size_bits(const MachineInst *inst) {
   return cdna5_scaled_wmma_is_scale16(inst) ? 64 : 32;
 }
 
@@ -3175,9 +3175,9 @@ VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
            reinterpret_cast<const OpEncoding *>(inst + 2)->src1),
       src2(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
            reinterpret_cast<const OpEncoding *>(inst + 2)->src2),
-      scale_src0(gfx1250_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+      scale_src0(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
                  reinterpret_cast<const OpEncoding *>(inst)->src0),
-      scale_src1(gfx1250_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+      scale_src1(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
                  reinterpret_cast<const OpEncoding *>(inst)->src1),
       scale_inst_(*reinterpret_cast<const OpEncoding *>(inst)) {
   raw_words_ = {inst[0], inst[1], inst[2], inst[3]};
