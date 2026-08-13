@@ -371,6 +371,7 @@ if(BUILD_TESTS)
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
       CeAllReduceEligibilityTests.cpp
+      CeAlltoAllvEligibilityTests.cpp
       EnqueueTests.cpp
       LL128RegVariantKernelTests.cpp
       IpcsocketTests.cpp

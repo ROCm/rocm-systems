@@ -26,6 +26,7 @@ test_categories:
       - "DdaFabricEligibilityTest.*"
       - "CeAllReduceEligibilityTest.*"
       - "RcclCeAllReduceEligibility.*"
+      - "CeAlltoAllvEligibilityTest.*"
       - "NetSocketTests.*"
       - "SocketPollTimeout.*"
       - "Ipcsocket.*"

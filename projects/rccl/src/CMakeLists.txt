@@ -132,6 +132,7 @@ set(SRC_FILES
   include/algorithms/alltoall/alltoall_dda_fabric_ll128.h
   include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
+  include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
   include/api_trace.h
