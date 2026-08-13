@@ -1512,7 +1512,7 @@ VFmamkF64Vop2::VFmamkF64Vop2(const MachineInst *inst)
                ? "v_fmamk_f64_dpp"
                : "v_fmamk_f64_e32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFmamkF64Vop2)),
+           selected_exec_fn(InstructionExecutionId::VFmamkF64Vop2), LiteralSupport::Literal64),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       literal64(64, OperandType::OPR_SIMM64, 0),
@@ -1523,11 +1523,6 @@ VFmamkF64Vop2::VFmamkF64Vop2(const MachineInst *inst)
   src_operands_[2] = &vsrc1;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1552,7 +1547,7 @@ VFmaakF64Vop2::VFmaakF64Vop2(const MachineInst *inst)
                ? "v_fmaak_f64_dpp"
                : "v_fmaak_f64_e32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFmaakF64Vop2)),
+           selected_exec_fn(InstructionExecutionId::VFmaakF64Vop2), LiteralSupport::Literal64),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -1563,11 +1558,6 @@ VFmaakF64Vop2::VFmaakF64Vop2(const MachineInst *inst)
   src_operands_[2] = &literal64;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::F64HighBits);
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -1899,7 +1889,7 @@ VFmamkF32Vop2::VFmamkF32Vop2(const MachineInst *inst)
                ? "v_fmamk_f32_dpp"
                : "v_fmamk_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFmamkF32Vop2)),
+           selected_exec_fn(InstructionExecutionId::VFmamkF32Vop2), LiteralSupport::Literal32),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       literal(32, OperandType::OPR_SIMM32, 0),
@@ -1914,13 +1904,6 @@ VFmamkF32Vop2::VFmamkF32Vop2(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   literal =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
@@ -1937,7 +1920,7 @@ VFmaakF32Vop2::VFmaakF32Vop2(const MachineInst *inst)
                ? "v_fmaak_f32_dpp"
                : "v_fmaak_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFmaakF32Vop2)),
+           selected_exec_fn(InstructionExecutionId::VFmaakF32Vop2), LiteralSupport::Literal32),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -1952,13 +1935,6 @@ VFmaakF32Vop2::VFmaakF32Vop2(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
-  }
   literal =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
@@ -2474,7 +2450,7 @@ VFmamkF16Vop2::VFmamkF16Vop2(const MachineInst *inst)
                ? "v_fmamk_f16_dpp"
                : "v_fmamk_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFmamkF16Vop2)),
+           selected_exec_fn(InstructionExecutionId::VFmamkF16Vop2), LiteralSupport::Literal32),
       vdst(16, OperandType::OPR_VGPR,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
            true),
@@ -2494,13 +2470,6 @@ VFmamkF16Vop2::VFmamkF16Vop2(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
-  }
   literal =
       Operand(16, OperandType::OPR_SIMM16,
               static_cast<int>(
@@ -2531,7 +2500,7 @@ VFmaakF16Vop2::VFmaakF16Vop2(const MachineInst *inst)
                ? "v_fmaak_f16_dpp"
                : "v_fmaak_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFmaakF16Vop2)),
+           selected_exec_fn(InstructionExecutionId::VFmaakF16Vop2), LiteralSupport::Literal32),
       vdst(16, OperandType::OPR_VGPR,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), false,
            true),
@@ -2551,13 +2520,6 @@ VFmaakF16Vop2::VFmaakF16Vop2(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
-    const auto *words = reinterpret_cast<const uint32_t *>(inst);
-    uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
-    uint64_t literal64 =
-        (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
-    src0 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
-  }
   literal =
       Operand(16, OperandType::OPR_SIMM16,
               static_cast<int>(
