@@ -3242,7 +3242,7 @@ TEST(LivenessAnalysis, Gfx1250UnknownBankDefMakesEveryCandidateGloballyUsed) {
 TEST(LivenessAnalysis, Gfx1250RelativeVgprAccessDisablesGlobalUnusedQuery) {
   // M0 can redirect the encoded v0 source to any relative tuple, including v1
   // which would otherwise appear globally unused.
-  constexpr auto move = cdna5::build_vop1(cdna5::kVMovrelsB32Vop1, {.src0 = 0, .vdst = 2});
+  constexpr auto move = cdna5::build_vop1(cdna5::kVMovrelsB32Vop1, {.src0 = 256, .vdst = 2});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({move[0], end[0]});
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
@@ -3265,7 +3265,7 @@ TEST(LivenessAnalysis, Gfx1250RelativeVgprAccessDisablesGlobalUnusedQuery) {
 }
 
 TEST(LivenessAnalysis, Gfx1250SwaprelDisablesGlobalUnusedQuery) {
-  constexpr auto swap = cdna5::build_vop1(cdna5::kVSwaprelB32Vop1, {.src0 = 0, .vdst = 2});
+  constexpr auto swap = cdna5::build_vop1(cdna5::kVSwaprelB32Vop1, {.src0 = 256, .vdst = 2});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
   TestCodeObject co({swap[0], end[0]});
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);

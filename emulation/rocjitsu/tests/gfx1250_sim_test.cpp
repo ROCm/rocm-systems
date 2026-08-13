@@ -1816,45 +1816,35 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
     run_case(false);
 }
 
-TEST(Gfx1250LiteralOperandTest, WidenedMaskLiteralsPreserveEffectiveOperandSize) {
+TEST(Gfx1250LiteralOperandTest, ScalarMaskOperandsRejectLiteralMarkers) {
   struct TestCase {
     const char *name;
     std::array<uint32_t, 2> encoding;
   };
-  constexpr std::array test_cases{
-      TestCase{"v_cndmask_b32",
-               cdna5::build_vop3(cdna5::kVCndmaskB32Vop3, {.src0 = 128, .src1 = 128, .src2 = 255})},
-      TestCase{"v_cndmask_b16",
-               cdna5::build_vop3(cdna5::kVCndmaskB16Vop3, {.src0 = 128, .src1 = 128, .src2 = 255})},
-      TestCase{"v_add_co_ci_u32",
-               cdna5::build_vop3_sdst_enc(cdna5::kVAddCoCiU32Vop3SdstEnc,
-                                          {.src0 = 128, .src1 = 128, .src2 = 255})},
-      TestCase{"v_sub_co_ci_u32",
-               cdna5::build_vop3_sdst_enc(cdna5::kVSubCoCiU32Vop3SdstEnc,
-                                          {.src0 = 128, .src1 = 128, .src2 = 255})},
-      TestCase{"v_subrev_co_ci_u32",
-               cdna5::build_vop3_sdst_enc(cdna5::kVSubrevCoCiU32Vop3SdstEnc,
-                                          {.src0 = 128, .src1 = 128, .src2 = 255})},
-  };
-  constexpr uint32_t kLiteral = 0xffffffffu;
-
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  for (const TestCase &test_case : test_cases) {
-    SCOPED_TRACE(test_case.name);
-    const std::array words{test_case.encoding[0], test_case.encoding[1], kLiteral};
-    std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
-    ASSERT_NE(instruction, nullptr);
-    EXPECT_EQ(instruction->mnemonic(), test_case.name);
-    EXPECT_EQ(instruction->size(), 12);
-    ASSERT_EQ(instruction->num_src_operands(), 3);
-
-    const Operand *literal = instruction->src_operand(2);
-    ASSERT_NE(literal, nullptr);
-    EXPECT_EQ(literal->size_bits(), 32);
-    EXPECT_EQ(literal->vgpr_count(), 1);
-    EXPECT_EQ(static_cast<uint32_t>(literal->encoding_value()), kLiteral);
-    EXPECT_FALSE(literal->literal64_value().has_value());
+  for (const uint16_t marker : {uint16_t{254}, uint16_t{255}}) {
+    const std::array test_cases{
+        TestCase{"v_cndmask_b32", cdna5::build_vop3(cdna5::kVCndmaskB32Vop3,
+                                                    {.src0 = 128, .src1 = 128, .src2 = marker})},
+        TestCase{"v_cndmask_b16", cdna5::build_vop3(cdna5::kVCndmaskB16Vop3,
+                                                    {.src0 = 128, .src1 = 128, .src2 = marker})},
+        TestCase{"v_add_co_ci_u32",
+                 cdna5::build_vop3_sdst_enc(cdna5::kVAddCoCiU32Vop3SdstEnc,
+                                            {.src0 = 128, .src1 = 128, .src2 = marker})},
+        TestCase{"v_sub_co_ci_u32",
+                 cdna5::build_vop3_sdst_enc(cdna5::kVSubCoCiU32Vop3SdstEnc,
+                                            {.src0 = 128, .src1 = 128, .src2 = marker})},
+        TestCase{"v_subrev_co_ci_u32",
+                 cdna5::build_vop3_sdst_enc(cdna5::kVSubrevCoCiU32Vop3SdstEnc,
+                                            {.src0 = 128, .src1 = 128, .src2 = marker})},
+    };
+    for (const TestCase &test_case : test_cases) {
+      SCOPED_TRACE(test_case.name);
+      SCOPED_TRACE(marker);
+      const std::array words{test_case.encoding[0], test_case.encoding[1], 0xffffffffu, 0u};
+      EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+    }
   }
 }
 
@@ -4185,6 +4175,16 @@ TEST(Gfx1250DecodeTest, SMovB64Literal64ConsumesThreeDwords) {
   EXPECT_EQ(inst->raw_encoding()[2], words[2]);
 }
 
+TEST(Gfx1250DecodeTest, ScalarSourceRejectsReservedSelector) {
+  const uint32_t words[] = {
+      0x8C9000E2u, // s_or_b64 s[16:17], reserved selector 226, s0
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
 TEST(Gfx1250DecodeTest, Vop3LiteralConsumesThreeDwords) {
   const uint32_t words[] = {
       0xD6570001u, // v_and_or_b32 v1, 0xf8, v1, v2
@@ -4282,6 +4282,65 @@ TEST(Gfx1250DecodeTest, Vop3RejectsDppWithLiteral) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop3RejectsInvalidScalarDestination) {
+  const uint32_t words[] = {
+      0xD41B10FFu, // v_cmp_ngt_f32 with reserved scalar destination 255
+      0x000000FAu,
+      0x00000000u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop3RejectsInvalidVgprSource) {
+  const uint32_t words[] = {
+      0xD7600000u, // v_readlane_b32 s0, invalid, null
+      0x0000F8D7u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop3ReadlaneValidatesLaneSelector) {
+  const uint32_t valid_words[] = {
+      0xD7600000u, // v_readlane_b32 s0, v215, 1
+      0x000103D7u,
+  };
+  const uint32_t invalid_words[] = {
+      0xD7600000u, // v_readlane_b32 with reserved lane selector 491
+      0x0003D7D7u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> valid(decoder->decode(valid_words));
+  ASSERT_NE(valid, nullptr);
+  EXPECT_EQ(valid->disassemble(), "v_readlane_b32 s0, v215, 1");
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(invalid_words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop3CmpxValidatesExecDestination) {
+  const uint32_t valid_words[] = {
+      0xD4CD007Eu, // v_cmpx_ne_u32 exec, v0, v1
+      0x00020300u,
+  };
+  const uint32_t invalid_words[] = {
+      0xD4CD00F4u, // v_cmpx_ne_u32 with reserved EXEC destination 244
+      0x00020300u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> valid(decoder->decode(valid_words));
+  ASSERT_NE(valid, nullptr);
+  EXPECT_EQ(valid->disassemble(), "v_cmpx_ne_u32 exec, v0, v1");
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(invalid_words)), util::InvalidInst);
 }
 
 TEST(Gfx1250DecodeTest, Vop3SdstLiteralConsumesThreeDwords) {
@@ -4435,9 +4494,9 @@ TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesVop3px2Pair) {
             "v_wmma_scale_f32_16x16x128_f8f6f4 v[6:13], v[18:33], v[52:67], 0, v0, v4");
 }
 
-TEST(Gfx1250DecodeTest, WmmaScalePairDoesNotConsumeEmbeddedExtensions) {
-  constexpr uint32_t extension_selectors[] = {255u, 250u, 233u, 234u};
-  for (const uint32_t embedded_src0 : extension_selectors) {
+TEST(Gfx1250DecodeTest, WmmaScalePairRejectsInvalidEmbeddedSourceSelectors) {
+  constexpr uint32_t invalid_src0_selectors[] = {255u, 250u, 233u, 234u};
+  for (const uint32_t embedded_src0 : invalid_src0_selectors) {
     SCOPED_TRACE(embedded_src0);
     const uint32_t words[] = {
         0xCC350000u,
@@ -4448,11 +4507,7 @@ TEST(Gfx1250DecodeTest, WmmaScalePairDoesNotConsumeEmbeddedExtensions) {
 
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
     ASSERT_NE(decoder, nullptr);
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
-    ASSERT_NE(inst, nullptr);
-    EXPECT_EQ(inst->size(), sizeof(words));
-    for (size_t i = 0; i < std::size(words); ++i)
-      EXPECT_EQ(inst->raw_encoding()[i], words[i]);
+    EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
   }
 }
 
