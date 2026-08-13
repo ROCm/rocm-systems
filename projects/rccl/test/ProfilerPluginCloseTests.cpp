@@ -16,9 +16,9 @@
 #include <unistd.h>
 
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <string>
-#include <vector>
 
 #include "common/ProcessIsolatedTestRunner.hpp"
 
@@ -59,25 +59,13 @@ bool fileHasContent(const std::string& path) {
   return f.peek() != std::ifstream::traits_type::eof();
 }
 
-std::string executableDir() {
-  char buf[4096] = {0};
-  ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-  if (len <= 0) return "";
-
-  std::string path(buf, static_cast<size_t>(len));
-  size_t slash = path.find_last_of('/');
-  return slash == std::string::npos ? "" : path.substr(0, slash);
-}
-
-// The stub is installed next to the test binary, which is the only location that
-// holds for both a build tree and an installed package. The build-tree path baked
-// in by CMake is kept as a fallback for anything that runs the binary in place.
-std::vector<std::string> stubCandidates() {
-  std::vector<std::string> candidates;
-  if (std::string dir = executableDir(); !dir.empty())
-    candidates.push_back(dir + "/" + RCCL_TEST_PROFILER_STUB_NAME);
-  candidates.push_back(RCCL_TEST_PROFILER_STUB_BUILD_PATH);
-  return candidates;
+// The stub is built and installed beside the test binary, so it is always one step
+// away from wherever this executable is running from -- build tree or install.
+std::string stubPluginPath() {
+  std::error_code ec;
+  std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+  if (ec) return "";
+  return (exe.parent_path() / RCCL_TEST_PROFILER_STUB_NAME).string();
 }
 
 // Returns the reason this host cannot run the test, or "" when it can.
@@ -99,16 +87,10 @@ TEST(ProfilerPluginClose, UnusablePluginIsUnloaded) {
     if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
     ASSERT_EQ(hipSetDevice(0), hipSuccess);
 
-    std::string stubPath;
-    std::string tried;
-    for (const std::string& candidate : stubCandidates()) {
-      tried += "\n  " + candidate;
-      if (access(candidate.c_str(), R_OK) == 0) {
-        stubPath = candidate;
-        break;
-      }
-    }
-    ASSERT_FALSE(stubPath.empty()) << "stub profiler plugin not found, tried:" << tried;
+    const std::string stubPath = stubPluginPath();
+    ASSERT_FALSE(stubPath.empty()) << "could not resolve the test binary's own directory";
+    ASSERT_EQ(access(stubPath.c_str(), R_OK), 0)
+        << "stub profiler plugin missing: " << stubPath;
     if (stubPath.size() >= kPluginPathLimit)
       GTEST_SKIP() << "stub path exceeds the " << kPluginPathLimit
                    << " byte plugin path limit and would never be loaded: " << stubPath;
