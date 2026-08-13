@@ -22,6 +22,8 @@ THE SOFTWARE.
 
 #include "roc_video_dec.h"
 
+#include <limits>
+
 RocVideoDecoder::RocVideoDecoder(int device_id, OutputSurfaceMemoryType out_mem_type, rocDecVideoCodec codec, bool force_zero_latency,
               const Rect *p_crop_rect, bool extract_user_sei_Message, uint32_t disp_delay, int max_width, int max_height, uint32_t clk_rate, bool skip_init) :
               device_id_{device_id}, out_mem_type_(out_mem_type), codec_id_(codec), b_force_zero_latency_(force_zero_latency), 
@@ -30,8 +32,6 @@ RocVideoDecoder::RocVideoDecoder(int device_id, OutputSurfaceMemoryType out_mem_
     if (p_crop_rect) crop_rect_ = *p_crop_rect;
     if (b_extract_sei_message_) {
         fp_sei_ = fopen("rocdec_sei_message.txt", "wb");
-        curr_sei_message_ptr_ = new RocdecSeiMessageInfo;
-        memset(&sei_message_display_q_, 0, sizeof(sei_message_display_q_));
     }
     // derived class can skip the following initialization by setting skip_init flag
     if (!skip_init) {
@@ -56,11 +56,6 @@ RocVideoDecoder::RocVideoDecoder(int device_id, OutputSurfaceMemoryType out_mem_
 
 RocVideoDecoder::~RocVideoDecoder() {
     auto start_time = StartTimer();
-    if (curr_sei_message_ptr_) {
-        delete curr_sei_message_ptr_;
-        curr_sei_message_ptr_ = nullptr;
-    }
-
     if (fp_sei_) {
         fclose(fp_sei_);
         fp_sei_ = nullptr;
@@ -114,6 +109,36 @@ RocVideoDecoder::~RocVideoDecoder() {
     }
     double elapsed_time = StopTimer(start_time);
     AddDecoderSessionOverHead(std::this_thread::get_id(), elapsed_time);
+}
+
+bool RocVideoDecoder::HandleSeiMessageDisplay(int picture_index) {
+    if (picture_index < 0 ||
+        static_cast<size_t>(picture_index) >= sei_message_display_q_.size()) {
+        RocVideoDecCriticalLog("Invalid SEI display picture index: " + ROCVIDEODEC_TOSTR(picture_index));
+        return false;
+    }
+
+    SeiMessageEntry &entry = sei_message_display_q_[picture_index];
+    size_t offset = 0;
+    for (const RocdecSeiMessage &message : entry.messages) {
+        if (message.sei_message_size > entry.data.size() - offset) {
+            RocVideoDecCriticalLog("Invalid SEI message size for picture index: " + ROCVIDEODEC_TOSTR(picture_index));
+            entry = {};
+            return false;
+        }
+
+        const bool write_message =
+            codec_id_ == rocDecVideoCodec_AV1 ||
+            ((codec_id_ == rocDecVideoCodec_AVC ||
+              codec_id_ == rocDecVideoCodec_HEVC) &&
+             message.sei_message_type == SEI_TYPE_USER_DATA_UNREGISTERED);
+        if (fp_sei_ && write_message && message.sei_message_size) {
+            fwrite(entry.data.data() + offset, message.sei_message_size, 1, fp_sei_);
+        }
+        offset += message.sei_message_size;
+    }
+    entry = {};
+    return true;
 }
 
 static const char * GetVideoCodecString(rocDecVideoCodec e_codec) {
@@ -336,6 +361,7 @@ int RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
     disp_width_ = p_video_format->display_area.right - p_video_format->display_area.left;
     disp_height_ = p_video_format->display_area.bottom - p_video_format->display_area.top;
     num_decode_surfaces_ = p_video_format->min_num_decode_surfaces;
+    sei_message_display_q_.resize(num_decode_surfaces_);
 
     // AV1 has max width/height of sequence in sequence header
     if (codec_id_ == rocDecVideoCodec_AV1 && p_video_format->seqhdr_data_length > 0) {
@@ -559,6 +585,7 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
     }
 
     num_decode_surfaces_ = p_video_format->min_num_decode_surfaces;
+    sei_message_display_q_.resize(num_decode_surfaces_);
 
     if (p_video_format->reconfig_options == ROCDEC_RECONFIG_NEW_SURFACES) {
         if (out_mem_type_ == OUT_SURFACE_MEM_DEV_INTERNAL || out_mem_type_ == OUT_SURFACE_MEM_NOT_MAPPED) {
@@ -674,10 +701,18 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
  * @return int 1: success 0: fail
  */
 int RocVideoDecoder::HandlePictureDecode(RocdecPicParams *pPicParams) {
+    if (!pPicParams) {
+        RocVideoDecCriticalLog("Invalid picture parameters");
+        return 0;
+    }
     if (!roc_decoder_) {
         ROCDEC_THROW("RocDecoder not initialized: failed with ErrCode: " +  ROCVIDEODEC_TOSTR(ROCDEC_NOT_INITIALIZED), ROCDEC_NOT_INITIALIZED);
     }
-    pic_num_in_dec_order_[pPicParams->curr_pic_idx] = decode_poc_++;
+    if (pPicParams->curr_pic_idx < 0 ||
+        static_cast<uint32_t>(pPicParams->curr_pic_idx) >= num_decode_surfaces_) {
+        RocVideoDecCriticalLog("Invalid decode picture index: " + ROCVIDEODEC_TOSTR(pPicParams->curr_pic_idx));
+        return 0;
+    }
     ROCDEC_API_CALL(rocDecDecodeFrame(roc_decoder_, pPicParams));
     last_decode_surf_idx_ = pPicParams->curr_pic_idx;
     decoded_pic_cnt_++;
@@ -699,41 +734,19 @@ int RocVideoDecoder::HandlePictureDecode(RocdecPicParams *pPicParams) {
  * @return int 0:fail 1: success
  */
 int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
+    if (!pDispInfo || pDispInfo->picture_index < 0 ||
+        static_cast<uint32_t>(pDispInfo->picture_index) >= num_decode_surfaces_) {
+        RocVideoDecCriticalLog("Invalid display picture index");
+        return 0;
+    }
+
     RocdecProcParams video_proc_params = {};
     video_proc_params.progressive_frame = pDispInfo->progressive_frame;
     video_proc_params.top_field_first = pDispInfo->top_field_first;
 
-    if (b_extract_sei_message_) {
-        if (sei_message_display_q_[pDispInfo->picture_index].sei_data) {
-            // Write SEI Message
-            uint8_t *sei_buffer = (uint8_t *)(sei_message_display_q_[pDispInfo->picture_index].sei_data);
-            uint32_t sei_num_messages = sei_message_display_q_[pDispInfo->picture_index].sei_message_count;
-            RocdecSeiMessage *sei_message = sei_message_display_q_[pDispInfo->picture_index].sei_message;
-            if (fp_sei_) {
-                for (uint32_t i = 0; i < sei_num_messages; i++) {
-                    if (codec_id_ == rocDecVideoCodec_AVC || codec_id_ == rocDecVideoCodec_HEVC) {
-                        switch (sei_message[i].sei_message_type) {
-                            case SEI_TYPE_TIME_CODE: {
-                                //todo:: check if we need to write timecode
-                            }
-                            break;
-                            case SEI_TYPE_USER_DATA_UNREGISTERED: {
-                                fwrite(sei_buffer, sei_message[i].sei_message_size, 1, fp_sei_);
-                            }
-                            break;
-                        }
-                    }
-                    if (codec_id_ == rocDecVideoCodec_AV1) {
-                        fwrite(sei_buffer, sei_message[i].sei_message_size, 1, fp_sei_);
-                    }    
-                    sei_buffer += sei_message[i].sei_message_size;
-                }
-            }
-            free(sei_message_display_q_[pDispInfo->picture_index].sei_data);
-            sei_message_display_q_[pDispInfo->picture_index].sei_data = NULL; // to avoid double free
-            free(sei_message_display_q_[pDispInfo->picture_index].sei_message);
-            sei_message_display_q_[pDispInfo->picture_index].sei_message = NULL; // to avoid double free
-        }
+    if (b_extract_sei_message_ &&
+        !HandleSeiMessageDisplay(pDispInfo->picture_index)) {
+        return 0;
     }
     if (out_mem_type_ != OUT_SURFACE_MEM_NOT_MAPPED) {
         void * src_dev_ptr[3] = { 0 };
@@ -824,36 +837,57 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
 }
 
 int RocVideoDecoder::GetSEIMessage(RocdecSeiMessageInfo *pSEIMessageInfo) {
-    uint32_t sei_num_mesages = pSEIMessageInfo->sei_message_count;
-    if (sei_num_mesages) {
-      RocdecSeiMessage *p_sei_msg_info = pSEIMessageInfo->sei_message;
-      size_t total_SEI_buff_size = 0;
-      if ((pSEIMessageInfo->picIdx < 0) || (pSEIMessageInfo->picIdx >= MAX_FRAME_NUM)) {
-          RocVideoDecCriticalLog("Invalid picture index for SEI message: " + ROCVIDEODEC_TOSTR(pSEIMessageInfo->picIdx));
-          return 0;
-      }
-      for (uint32_t i = 0; i < sei_num_mesages; i++) {
-          total_SEI_buff_size += p_sei_msg_info[i].sei_message_size;
-      }
-      if (!curr_sei_message_ptr_) {
-          RocVideoDecCriticalLog("Out of Memory, Allocation failed for m_pCurrSEIMessage");
-          return 0;
-      }
-      curr_sei_message_ptr_->sei_data = malloc(total_SEI_buff_size);
-      if (!curr_sei_message_ptr_->sei_data) {
-          RocVideoDecCriticalLog("Out of Memory, Allocation failed for SEI Buffer");
-          return 0;
-      }
-      memcpy(curr_sei_message_ptr_->sei_data, pSEIMessageInfo->sei_data, total_SEI_buff_size);
-      curr_sei_message_ptr_->sei_message = (RocdecSeiMessage *)malloc(sizeof(RocdecSeiMessage) * sei_num_mesages);
-      if (!curr_sei_message_ptr_->sei_message) {
-          free(curr_sei_message_ptr_->sei_data);
-          curr_sei_message_ptr_->sei_data = NULL;
-          return 0;
-      }
-      memcpy(curr_sei_message_ptr_->sei_message, pSEIMessageInfo->sei_message, sizeof(RocdecSeiMessage) * sei_num_mesages);
-      curr_sei_message_ptr_->sei_message_count = pSEIMessageInfo->sei_message_count;
-      sei_message_display_q_[pSEIMessageInfo->picIdx] = *curr_sei_message_ptr_;
+    if (!pSEIMessageInfo) {
+        RocVideoDecCriticalLog("Invalid SEI message info");
+        return 0;
+    }
+    if (pSEIMessageInfo->picIdx >= num_decode_surfaces_ ||
+        pSEIMessageInfo->picIdx >= sei_message_display_q_.size()) {
+        RocVideoDecCriticalLog("Invalid picture index for SEI message: " + ROCVIDEODEC_TOSTR(pSEIMessageInfo->picIdx));
+        return 0;
+    }
+
+    const uint32_t sei_num_messages = pSEIMessageInfo->sei_message_count;
+    SeiMessageEntry &entry = sei_message_display_q_[pSEIMessageInfo->picIdx];
+    if (!sei_num_messages) {
+        entry = {};
+        return 1;
+    }
+
+    if (!pSEIMessageInfo->sei_message) {
+        RocVideoDecCriticalLog("Invalid SEI message metadata");
+        return 0;
+    }
+
+    size_t total_sei_buffer_size = 0;
+    for (uint32_t i = 0; i < sei_num_messages; i++) {
+        const size_t message_size =
+            pSEIMessageInfo->sei_message[i].sei_message_size;
+        if (message_size >
+            std::numeric_limits<size_t>::max() - total_sei_buffer_size) {
+            RocVideoDecCriticalLog("SEI message data size overflow");
+            return 0;
+        }
+        total_sei_buffer_size += message_size;
+    }
+    if (total_sei_buffer_size && !pSEIMessageInfo->sei_data) {
+        RocVideoDecCriticalLog("Invalid SEI message data");
+        return 0;
+    }
+
+    try {
+        entry.messages.assign(pSEIMessageInfo->sei_message,
+                              pSEIMessageInfo->sei_message + sei_num_messages);
+        entry.data.clear();
+        if (total_sei_buffer_size) {
+            const uint8_t *sei_data =
+                static_cast<const uint8_t *>(pSEIMessageInfo->sei_data);
+            entry.data.assign(sei_data, sei_data + total_sei_buffer_size);
+        }
+    } catch (const std::exception &) {
+        entry = {};
+        RocVideoDecCriticalLog("Allocation failed for SEI message");
+        return 0;
     }
     return 1;
 }
