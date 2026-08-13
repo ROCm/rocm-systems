@@ -49,6 +49,37 @@ THE SOFTWARE.
 #  include <hip/amd_detail/amd_gfx1250_TDM.h>   // gfx1250_TDM_GROUP0/1 descriptor types
 #endif
 
+#ifndef __has_builtin
+#  define __has_builtin(x) 0
+#endif
+
+// Capability macros for the two builtin families this header wraps. Unlike
+// TDM_TOOLCHAIN_AVAILABLE above, these are device-pass only: each is 1 only when
+// compiling for an arch that has the instructions AND whose compiler exposes the
+// builtin. They are defined here, ahead of the wrappers below, because a
+// multi-arch build (e.g. --amdgpu_targets gfx950 gfx1250) compiles this header
+// once per target, and naming a gfx1250-only builtin on any other device pass is
+// a hard error -- so every body that emits one has to be gated on these.
+#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
+                                  /* extend: || (defined(__gfxNNNN__) && ...) */
+#  define ASYNC_COPY_SUPPORTED 1
+#else
+#  define ASYNC_COPY_SUPPORTED 0
+#endif
+
+// Same condition as tdmCopy.h's copy, kept #ifndef-guarded so the two headers can
+// be included together in either order.
+#ifndef TDM_SUPPORTED
+#  if defined(__gfx1250__) && \
+      __has_builtin(__builtin_amdgcn_tensor_load_to_lds) && \
+      TDM_TOOLCHAIN_AVAILABLE
+                                  /* extend: || (defined(__gfxNNNN__) && ...) */
+#    define TDM_SUPPORTED 1
+#  else
+#    define TDM_SUPPORTED 0
+#  endif
+#endif
+
 // Used for setting TDM descriptor fields and arguments to the async load/store builtins
 using __rccl_int32x2 = int32_t __attribute__((__vector_size__(8)));
 using __rccl_int32x4 = int32_t __attribute__((__vector_size__(16)));
@@ -292,6 +323,10 @@ struct AsyncDataCopier{
   size_t sizeInBytes_{0};
   T* shmemPtr_{nullptr};
 
+// The bodies below issue the async-to/from-LDS builtins, so on a device pass for an
+// arch without them the members are deleted rather than left empty: a caller that
+// slipped through gets a compile error at the call site instead of a silent no-op copy.
+#if ASYNC_COPY_SUPPORTED
   // An entire warp makes this call.  The shmemPtr and srcPtr should be the same across all lanes in the warp.
   __device__ void loadTile(T* shmemPtr, const T* srcPtr, int numElementsToProcess){
     sizeInBytes_ = static_cast<size_t>(numElementsToProcess) * sizeof(T);
@@ -312,6 +347,12 @@ struct AsyncDataCopier{
   __device__ void waitTile(){
     asyncWait<WAIT_CNT>();
   }
+#else
+  __device__ void loadTile(T* shmemPtr, const T* srcPtr, int numElementsToProcess) = delete;
+  __device__ void storeTile(T* dstPtr) = delete;
+  template<int WAIT_CNT = 0>
+  __device__ void waitTile() = delete;
+#endif
 };
 
 #if TDM_TOOLCHAIN_AVAILABLE
@@ -321,6 +362,12 @@ template<typename T, CachePolicy cp = DEFAULT_CACHE_POLICY>
 struct TileMover{
   gfx1250_TDM_GROUP0 group0;
   gfx1250_TDM_GROUP1 group1;
+
+// The descriptor members above only need the SDK header, but the bodies below emit the
+// TDM instructions, so they are gated on the arch as well and deleted otherwise -- same
+// reasoning as AsyncDataCopier. The enclosing TDM_TOOLCHAIN_AVAILABLE guard keeps this
+// type nameable in the host pass, where TDM_SUPPORTED is always 0.
+#if TDM_SUPPORTED
   __device__ TileMover(){
     constexpr int log2DataSize = __builtin_ctzll(sizeof(T));
     static_assert(log2DataSize <= 3, "Datatype must be 1, 2, 4, or 8 bytes in width"); // TODO(breslow): Replace with C++ concepts when we migrate to C++20
@@ -345,6 +392,12 @@ struct TileMover{
   __device__ void waitTile(){
     __builtin_amdgcn_s_wait_tensorcnt(WAIT_CNT);
   }
+#else
+  __device__ void loadTile(T* shmemPtr, const T* srcPtr, int numElementsToProcess) = delete;
+  __device__ void storeTile(T* dstPtr) = delete;
+  template<int WAIT_CNT = 0>
+  __device__ void waitTile() = delete;
+#endif
 };
 #endif // TDM_TOOLCHAIN_AVAILABLE
 
@@ -366,17 +419,8 @@ struct TileMover{
 // compile-time error at the call site. async::IsTdmCopySupported() is always
 // callable (host and device) and is the runtime/host-side guard.
 // ============================================================================
-#ifndef __has_builtin
-#  define __has_builtin(x) 0
-#endif
-
-#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
-                                  /* extend: || (defined(__gfxNNNN__) && ...) */
-#  define ASYNC_COPY_SUPPORTED 1
-#else
-#  define ASYNC_COPY_SUPPORTED 0
-#endif
-
+// ASYNC_COPY_SUPPORTED is defined near the top of this header, above the wrappers
+// that also need it.
 #if ASYNC_COPY_SUPPORTED
 #  define ASYNC_API      inline
 #  define ASYNC_DELETED

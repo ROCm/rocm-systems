@@ -28,7 +28,13 @@ namespace RcclUnitTesting
  // Naive TDM copy kernel: each warp copies one 1-D tile of data from global memory to LDS at a time and then writes back to global memory.
  // Exercises the SDK's TDM descriptor header
   template<typename T>
-__global__ void kernelNaiveTDMCopy(const T* __restrict__ src, T* __restrict__ dst, size_t numElements, int numElementsPerTile, int offAlignmentLDS) {
+__global__ void kernelNaiveTDMCopy([[maybe_unused]] const T* __restrict__ src, [[maybe_unused]] T* __restrict__ dst,
+                                   [[maybe_unused]] size_t numElements, [[maybe_unused]] int numElementsPerTile,
+                                   [[maybe_unused]] int offAlignmentLDS) {
+// The TDM instructions below only exist on gfx1250, and this file is compiled once per
+// target in a multi-arch build, so the body has to compile out on every other device
+// pass (and in the host pass). The fixture skips at runtime when support is absent.
+#if TDM_SUPPORTED
   extern __shared__ __align__(128) unsigned char sharedBytes[];
   T* shmem = reinterpret_cast<T*>(sharedBytes + offAlignmentLDS);
   int waveId = threadIdx.x / warpSize;
@@ -68,6 +74,7 @@ __global__ void kernelNaiveTDMCopy(const T* __restrict__ src, T* __restrict__ ds
     srcPtr += itemsProcessedPerGridIteration;
     dstPtr += itemsProcessedPerGridIteration;
   }
+#endif // TDM_SUPPORTED
 }
 #endif // TDM_TOOLCHAIN_AVAILABLE
 
@@ -77,7 +84,13 @@ __global__ void kernelNaiveTDMCopy(const T* __restrict__ src, T* __restrict__ ds
  // mover is named explicitly by each launcher rather than defaulted here, keeping this
  // kernel usable when TileMover is unavailable.
  template<typename T, typename TileMoverType>
- __global__ void kernelNaiveTDMCopyTileApi(const T* __restrict__ src, T* __restrict__ dst, size_t numElements, int numElementsPerTile, int offAlignmentLDS) {
+ __global__ void kernelNaiveTDMCopyTileApi([[maybe_unused]] const T* __restrict__ src, [[maybe_unused]] T* __restrict__ dst,
+                                           [[maybe_unused]] size_t numElements, [[maybe_unused]] int numElementsPerTile,
+                                           [[maybe_unused]] int offAlignmentLDS) {
+// Both movers issue gfx1250-only instructions, and their members are deleted on a device
+// pass for any other arch, so the body -- which is what instantiates them -- compiles out
+// there rather than failing to build a target that never runs these tests.
+#if TDM_SUPPORTED || ASYNC_COPY_SUPPORTED
    extern __shared__ __align__(128) unsigned char sharedBytes[];
    T* shmem = reinterpret_cast<T*>(sharedBytes + offAlignmentLDS); // 
    int waveId = threadIdx.x / warpSize;
@@ -106,6 +119,7 @@ __global__ void kernelNaiveTDMCopy(const T* __restrict__ src, T* __restrict__ ds
      srcPtr += itemsProcessedPerGridIteration;
      dstPtr += itemsProcessedPerGridIteration;
    }
+#endif // TDM_SUPPORTED || ASYNC_COPY_SUPPORTED
  }
 
 // Launcher policies select which kernel a fixture exercises. Each provides a
