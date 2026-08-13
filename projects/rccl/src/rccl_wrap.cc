@@ -356,6 +356,59 @@ void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclT
 extern ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, int collNetSupport, int nvlsSupport,
                                 int numPipeOps, ncclSimInfo_t* simInfo = NULL);
 
+ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
+                                      int* algo, int* protocol, int* maxChannels) {
+  const bool isAllGather = (coll == ncclFuncAllGather);
+  ncclComm* interComm = comm->hierarchicalInterComm;
+  ncclComm* intraComm = comm->hierarchicalIntraComm;
+  int nNodes = interComm->nRanks;
+
+  *algo =
+    isAllGather ? rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER : rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER;
+
+  // Inter-node phase. Direct AllGather is only tuned up to 16 nodes.
+  size_t interMsgSize = count * ncclTypeSize(dataType) * nNodes;
+  bool interDirect = isAllGather ? (nNodes <= 16 && rcclUseAllGatherDirect(interComm, interMsgSize)) :
+                                   rcclUseReduceScatterDirect(interComm, interMsgSize);
+  if (interDirect) {
+    *protocol = NCCL_PROTO_SIMPLE;
+    *maxChannels = interComm->p2pnChannels;
+  } else {
+    struct ncclTaskColl task = {};
+    task.func = coll;
+    task.count = count;
+    task.datatype = dataType;
+    NCCLCHECK(getAlgoInfo(interComm, &task, 0, 0, 1));
+    *protocol = task.protocol;
+    *maxChannels = task.nMaxChannels;
+  }
+
+  // Intra-node phase. The hierarchical ReduceScatter never runs Direct intra-node,
+  // so only AllGather gets the fast path here.
+  int intraProto, intraChan;
+  size_t intraCount = count * nNodes;
+  size_t intraMsgSize = intraCount * ncclTypeSize(dataType) * intraComm->nRanks;
+  if (isAllGather && rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
+    intraProto = NCCL_PROTO_SIMPLE;
+    intraChan = intraComm->p2pnChannels;
+  } else {
+    struct ncclTaskColl task = {};
+    task.func = coll;
+    task.count = intraCount;
+    task.datatype = dataType;
+    NCCLCHECK(getAlgoInfo(intraComm, &task, 0, 0, 1));
+    intraProto = task.protocol;
+    intraChan = task.nMaxChannels;
+  }
+
+  // For hierarchical algorithm, only the inter-comm protocol/channels are
+  // reported in rccl-tests -A output.
+  // The intra-comm values are logged below for debugging purposes
+  INFO(NCCL_COLL, "Hierarchical %s inter: proto=%d channels=%d, intra: proto=%d channels=%d", isAllGather ? "AG" : "RS",
+       *protocol, *maxChannels, intraProto, intraChan);
+  return ncclSuccess;
+}
+
 ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
                              int collNetSupport, int nvlsSupport, int numPipeOps, int* algo, int* protocol,
                              int* maxChannels) {
@@ -363,48 +416,9 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   int nRanks;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   size_t msgSize = count * ncclTypeSize(dataType) * nRanks;
-  if (coll == ncclFuncAllGather && rcclUseHierarchicalAllGather(comm, msgSize)) {
-    *algo = rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER;
-    ncclComm* interComm = comm->hierarchicalInterComm;
-    ncclComm* intraComm = comm->hierarchicalIntraComm;
-    int nNodes = interComm->nRanks;
-
-    size_t interMsgSize = count * ncclTypeSize(dataType) * nNodes;
-    if (nNodes <= 16 && rcclUseAllGatherDirect(interComm, interMsgSize)) {
-      *protocol = NCCL_PROTO_SIMPLE;
-      *maxChannels = interComm->p2pnChannels;
-    } else {
-      struct ncclTaskColl task;
-      task.func = ncclFuncAllGather;
-      task.count = count;
-      task.datatype = dataType;
-      NCCLCHECK(getAlgoInfo(interComm, &task, 0, 0, 1));
-      *protocol = task.protocol;
-      *maxChannels = task.nMaxChannels;
-    }
-
-    int intraProto, intraChan;
-    size_t intraCount = count * nNodes;
-    size_t intraMsgSize = intraCount * ncclTypeSize(dataType) * intraComm->nRanks;
-    if (rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
-      intraProto = NCCL_PROTO_SIMPLE;
-      intraChan = intraComm->p2pnChannels;
-    } else {
-      struct ncclTaskColl task;
-      task.func = ncclFuncAllGather;
-      task.count = intraCount;
-      task.datatype = dataType;
-      NCCLCHECK(getAlgoInfo(intraComm, &task, 0, 0, 1));
-      intraProto = task.protocol;
-      intraChan = task.nMaxChannels;
-    }
-
-    // For hierarchical algorithm, only the inter-comm protocol/channels are
-    // reported in rccl-tests -A output.
-    // The intra-comm values are logged below for debugging purposes
-    INFO(NCCL_COLL, "Hierarchical AG inter: proto=%d channels=%d, intra: proto=%d channels=%d", *protocol, *maxChannels,
-         intraProto, intraChan);
-    return ncclSuccess;
+  if ((coll == ncclFuncAllGather && rcclUseHierarchicalAllGather(comm, msgSize)) ||
+      (coll == ncclFuncReduceScatter && rcclUseHierarchicalReduceScatter(comm, msgSize))) {
+    return rcclHierarchicalAlgoInfo(comm, coll, count, dataType, algo, protocol, maxChannels);
   }
   if (coll == ncclFuncAllGather && rcclUseAllGatherDirect(comm, msgSize)) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER;
@@ -412,7 +426,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
-  struct ncclTaskColl task;
+  struct ncclTaskColl task = {};
   task.func = coll;
   task.count = count;
   task.datatype = dataType;
@@ -480,6 +494,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER:
       *algoName = "Hier";
       break;
+    case rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER:
+      *algoName = "Hier";
+      break;
 #ifdef ENABLE_WARP_SPEED
     case rcclAddonAlgos_t::RCCL_WARP_SPEED:
       *algoName = "RING*"; // WarpSpeed (*) uses RING algorithm
@@ -518,6 +535,30 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm) {
   return false;
 }
 
+size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter) {
+  size_t agThreshold = 0;
+  if (allGather) {
+    if (nNodes >= 32) {
+      agThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE; // 128MB
+    } else if (nNodes >= 16) {
+      agThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 64MB
+    } else if (nNodes >= 8) {
+      agThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 4; // 32MB
+    }
+  }
+
+  size_t rsThreshold = 0;
+  if (reduceScatter) {
+    if (nNodes >= 16) {
+      rsThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE; // 128MB
+    } else if (nNodes >= 8) {
+      rsThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 64MB
+    }
+  }
+
+  return std::max(agThreshold, rsThreshold);
+}
+
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 1);
 
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
@@ -525,15 +566,7 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   if (rcclParamHierarchicalAllGather() != 1) return false;
   if (!comm->hierarchicalCommsInitialized) return false;
 
-  size_t threshold = 0;
-  if (comm->nNodes >= 32) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE; // 128MB
-  } else if (comm->nNodes >= 16) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2; // 64MB
-  } else if (comm->nNodes >= 8) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 4; // 32MB
-  }
-
+  size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/true, /*reduceScatter=*/false);
   return threshold > 0 && msgSize <= threshold;
 }
 
@@ -689,6 +722,17 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   if (comm->nNodes == 4) return (msgSize <= (size_t)4194304);
   if (comm->nNodes == 8 || comm->nNodes == 16) return true;
   return false;
+}
+
+RCCL_PARAM(HierarchicalReduceScatter, "HIERARCHICAL_REDUCE_SCATTER", 0);
+
+bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize) {
+  if (comm->nNodes < 8 || rcclParamHierarchicalReduceScatter() != 1 || !comm->hierarchicalCommsInitialized) {
+    return false;
+  }
+
+  size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/false, /*reduceScatter=*/true);
+  return threshold > 0 && msgSize <= threshold;
 }
 
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable) {

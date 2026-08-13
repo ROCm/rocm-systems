@@ -579,11 +579,11 @@ Here are the contents of ``rocjpeg_api_trace.csv`` file:
 rocSHMEM trace
 ++++++++++++++
 
-`rocSHMEM <https://rocm.docs.amd.com/projects/rocshmem/en/latest/>`_ is an intra-kernel networking library that provides GPU-centric networking through an OpenSHMEM-like interface. This option traces the rocSHMEM host-stream API (the ``rocshmem_*_on_stream`` routines that enqueue communication and synchronization operations on a HIP stream).
+`rocSHMEM <https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/>`_ is an intra-kernel networking library that provides GPU-centric networking through an OpenSHMEM-like interface. This option traces the rocSHMEM host-stream API (the ``rocshmem_*_on_stream`` routines that enqueue communication and synchronization operations on a HIP stream).
 
 .. note::
 
-   rocSHMEM tracing requires rocSHMEM to be built with rocprofiler-register support (the ``USE_ROCPROFILER_REGISTER`` build option, enabled by default). See the `rocSHMEM build documentation <https://rocm.docs.amd.com/projects/rocshmem/en/latest/build.html>`_ for details.
+   rocSHMEM tracing requires rocSHMEM to be built with rocprofiler-register support (the ``USE_ROCPROFILER_REGISTER`` build option, enabled by default). See the `rocSHMEM build documentation <https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/build.html>`_ for details.
 
 .. code-block:: shell
 
@@ -628,7 +628,7 @@ OMPT trace
 
     rocprofv3 --ompt-trace --output-format rocpd -- <application_path>
 
-OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. If ``--ompt-trace`` is used with another ``--output-format``, ``rocprofv3`` warns and adds ``rocpd`` automatically; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
+OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. OMPT records are only captured when ``rocpd`` is among the requested ``--output-format`` values, so a run that requests only the deprecated direct generators contains no OMPT data; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
 
 .. note::
 
