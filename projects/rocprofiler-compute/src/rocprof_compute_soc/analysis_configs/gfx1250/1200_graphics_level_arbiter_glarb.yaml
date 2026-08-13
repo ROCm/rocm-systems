@@ -30,19 +30,19 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          avg: AVG(100 * GLARBA_BUSY_sum / GLARBA_CYCLE_sum)
-          min: MIN(100 * GLARBA_BUSY_sum / GLARBA_CYCLE_sum)
-          max: MAX(100 * GLARBA_BUSY_sum / GLARBA_CYCLE_sum)
+          avg: 100 * AVG(GLARBA_BUSY_sum / GLARBA_CYCLE_sum)
+          min: 100 * MIN(GLARBA_BUSY_sum / GLARBA_CYCLE_sum)
+          max: 100 * MAX(GLARBA_BUSY_sum / GLARBA_CYCLE_sum)
           unit: Percent
         GLARBA Request Bus Utilization:
-          avg: AVG(100 * GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum)
-          min: MIN(100 * GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum)
-          max: MAX(100 * GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum)
+          avg: 100 * AVG(GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum)
+          min: 100 * MIN(GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum)
+          max: 100 * MAX(GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum)
           unit: Percent
         GLARBA Return Bus Utilization:
-          avg: AVG(100 * GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum)
-          min: MIN(100 * GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum)
-          max: MAX(100 * GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum)
+          avg: 100 * AVG(GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum)
+          min: 100 * MIN(GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum)
+          max: 100 * MAX(GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum)
           unit: Percent
         GLARBA Requests:
           avg: AVG(GLARBA_ARB_REQUESTS_sum / $denom)
@@ -66,9 +66,9 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          avg: AVG(100 * GLARBC_BUSY_sum / GLARBC_CYCLE_sum)
-          min: MIN(100 * GLARBC_BUSY_sum / GLARBC_CYCLE_sum)
-          max: MAX(100 * GLARBC_BUSY_sum / GLARBC_CYCLE_sum)
+          avg: 100 * AVG(GLARBC_BUSY_sum / GLARBC_CYCLE_sum)
+          min: 100 * MIN(GLARBC_BUSY_sum / GLARBC_CYCLE_sum)
+          max: 100 * MAX(GLARBC_BUSY_sum / GLARBC_CYCLE_sum)
           unit: Percent
         GLARBC Return Arbitration Latency:
           avg: AVG(GLARBC_ARB_RET_LEVEL_sum / GLARBC_REQ_sum)
@@ -76,9 +76,9 @@ Panel Config:
           max: MAX(GLARBC_ARB_RET_LEVEL_sum / GLARBC_REQ_sum)
           unit: Cycles
         GLARBC Buffer Full Stall:
-          avg: AVG(100 * GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum)
-          min: MIN(100 * GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum)
-          max: MAX(100 * GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum)
+          avg: 100 * AVG(GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum)
+          min: 100 * MIN(GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum)
+          max: 100 * MAX(GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum)
           unit: Percent
 
   - metric_table:

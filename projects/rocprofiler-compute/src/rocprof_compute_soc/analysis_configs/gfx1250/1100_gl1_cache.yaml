@@ -20,19 +20,19 @@ Panel Config:
         unit: Unit
       metric:
         GL1A Utilization:
-          avg: AVG(100 * GL1A_BUSY_sum / GL1A_CYCLE_sum)
-          min: MIN(100 * GL1A_BUSY_sum / GL1A_CYCLE_sum)
-          max: MAX(100 * GL1A_BUSY_sum / GL1A_CYCLE_sum)
+          avg: 100 * AVG(GL1A_BUSY_sum / GL1A_CYCLE_sum)
+          min: 100 * MIN(GL1A_BUSY_sum / GL1A_CYCLE_sum)
+          max: 100 * MAX(GL1A_BUSY_sum / GL1A_CYCLE_sum)
           unit: Percent
         GL1A Request Bus Utilization:
-          avg: AVG(100 * GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
-          min: MIN(100 * GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
-          max: MAX(100 * GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
+          avg: 100 * AVG(GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
+          min: 100 * MIN(GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
+          max: 100 * MAX(GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
           unit: Percent
         GL1A Return Bus Utilization:
-          avg: AVG(100 * GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
-          min: MIN(100 * GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
-          max: MAX(100 * GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
+          avg: 100 * AVG(GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
+          min: 100 * MIN(GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
+          max: 100 * MAX(GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
           unit: Percent
         GL1A Requests:
           avg: AVG(GL1A_ARB_REQUESTS_sum / $denom)
@@ -56,9 +56,9 @@ Panel Config:
         unit: Unit
       metric:
         GL1C Utilization:
-          avg: AVG(100 * GL1C_BUSY_sum / GL1C_CYCLE_sum)
-          min: MIN(100 * GL1C_BUSY_sum / GL1C_CYCLE_sum)
-          max: MAX(100 * GL1C_BUSY_sum / GL1C_CYCLE_sum)
+          avg: 100 * AVG(GL1C_BUSY_sum / GL1C_CYCLE_sum)
+          min: 100 * MIN(GL1C_BUSY_sum / GL1C_CYCLE_sum)
+          max: 100 * MAX(GL1C_BUSY_sum / GL1C_CYCLE_sum)
           unit: Percent
         GL1C Return Arbitration Latency:
           avg: AVG(GL1C_ARB_RET_LEVEL_sum / GL1C_REQ_sum)
@@ -66,9 +66,9 @@ Panel Config:
           max: MAX(GL1C_ARB_RET_LEVEL_sum / GL1C_REQ_sum)
           unit: Cycles
         GL1C Buffer Full Stall:
-          avg: AVG(100 * GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
-          min: MIN(100 * GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
-          max: MAX(100 * GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
+          avg: 100 * AVG(GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
+          min: 100 * MIN(GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
+          max: 100 * MAX(GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -137,9 +137,9 @@ Panel Config:
         unit: Unit
       metric:
         GL1C Multicast Tracker Depletion Stall:
-          avg: AVG(100 * GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
-          min: MIN(100 * GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
-          max: MAX(100 * GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
+          avg: 100 * AVG(GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
+          min: 100 * MIN(GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
+          max: 100 * MAX(GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast Request - 128B:
           avg: AVG(GL1C_REQ_MULTICAST_128B_sum / $denom)
@@ -157,29 +157,29 @@ Panel Config:
           max: MAX((GL1C_REQ_MULTICAST_128B_sum * 128 + GL1C_REQ_MULTICAST_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL1C Multicast Tracker 0 Timeout Rate:
-          avg: AVG(100 * GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
-          min: MIN(100 * GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
-          max: MAX(100 * GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
+          avg: 100 * AVG(GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
+          min: 100 * MIN(GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
+          max: 100 * MAX(GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast Tracker 1 Timeout Rate:
-          avg: AVG(100 * GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
-          min: MIN(100 * GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
-          max: MAX(100 * GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
+          avg: 100 * AVG(GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
+          min: 100 * MIN(GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
+          max: 100 * MAX(GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast Tracker 2 Timeout Rate:
-          avg: AVG(100 * GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
-          min: MIN(100 * GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
-          max: MAX(100 * GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
+          avg: 100 * AVG(GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
+          min: 100 * MIN(GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
+          max: 100 * MAX(GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast Tracker 3 Timeout Rate:
-          avg: AVG(100 * GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
-          min: MIN(100 * GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
-          max: MAX(100 * GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
+          avg: 100 * AVG(GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
+          min: 100 * MIN(GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
+          max: 100 * MAX(GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast-to-Unicast Downgrade Rate:
-          avg: AVG(100 * GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
-          min: MIN(100 * GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
-          max: MAX(100 * GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
+          avg: 100 * AVG(GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
+          min: 100 * MIN(GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
+          max: 100 * MAX(GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
           unit: Percent
 
   - metric_table:

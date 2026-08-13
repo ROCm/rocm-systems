@@ -30,9 +30,9 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          avg: AVG(100 * CHA_BUSY_sum / CHA_CYCLE_sum)
-          min: MIN(100 * CHA_BUSY_sum / CHA_CYCLE_sum)
-          max: MAX(100 * CHA_BUSY_sum / CHA_CYCLE_sum)
+          avg: 100 * AVG(CHA_BUSY_sum / CHA_CYCLE_sum)
+          min: 100 * MIN(CHA_BUSY_sum / CHA_CYCLE_sum)
+          max: 100 * MAX(CHA_BUSY_sum / CHA_CYCLE_sum)
           unit: Percent
 
   - metric_table:
@@ -51,24 +51,24 @@ Panel Config:
           max: MAX(CHA_REQ_INFLIGHT_LEVEL_sum / CHA_ARB_REQUESTS_sum)
           unit: Cycles
         CHA-CHC0 Request Stall Rate:
-          avg: AVG(100 * CHA_STALL_CHC0_sum / CHA_BUSY_sum)
-          min: MIN(100 * CHA_STALL_CHC0_sum / CHA_BUSY_sum)
-          max: MAX(100 * CHA_STALL_CHC0_sum / CHA_BUSY_sum)
+          avg: 100 * AVG(CHA_STALL_CHC0_sum / CHA_BUSY_sum)
+          min: 100 * MIN(CHA_STALL_CHC0_sum / CHA_BUSY_sum)
+          max: 100 * MAX(CHA_STALL_CHC0_sum / CHA_BUSY_sum)
           unit: Percent
         CHA-CHC1 Request Stall Rate:
-          avg: AVG(100 * CHA_STALL_CHC1_sum / CHA_BUSY_sum)
-          min: MIN(100 * CHA_STALL_CHC1_sum / CHA_BUSY_sum)
-          max: MAX(100 * CHA_STALL_CHC1_sum / CHA_BUSY_sum)
+          avg: 100 * AVG(CHA_STALL_CHC1_sum / CHA_BUSY_sum)
+          min: 100 * MIN(CHA_STALL_CHC1_sum / CHA_BUSY_sum)
+          max: 100 * MAX(CHA_STALL_CHC1_sum / CHA_BUSY_sum)
           unit: Percent
         CHA Request Path Utilization:
-          avg: AVG(100 * CHA_REQ_PATH_BUSY_sum / CHA_BUSY_sum)
-          min: MIN(100 * CHA_REQ_PATH_BUSY_sum / CHA_BUSY_sum)
-          max: MAX(100 * CHA_REQ_PATH_BUSY_sum / CHA_BUSY_sum)
+          avg: 100 * AVG(CHA_REQ_PATH_BUSY_sum / CHA_BUSY_sum)
+          min: 100 * MIN(CHA_REQ_PATH_BUSY_sum / CHA_BUSY_sum)
+          max: 100 * MAX(CHA_REQ_PATH_BUSY_sum / CHA_BUSY_sum)
           unit: Percent
         CHA Return Path Utilization:
-          avg: AVG(100 * CHA_RET_PATH_BUSY_sum / CHA_BUSY_sum)
-          min: MIN(100 * CHA_RET_PATH_BUSY_sum / CHA_BUSY_sum)
-          max: MAX(100 * CHA_RET_PATH_BUSY_sum / CHA_BUSY_sum)
+          avg: 100 * AVG(CHA_RET_PATH_BUSY_sum / CHA_BUSY_sum)
+          min: 100 * MIN(CHA_RET_PATH_BUSY_sum / CHA_BUSY_sum)
+          max: 100 * MAX(CHA_RET_PATH_BUSY_sum / CHA_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -82,14 +82,14 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          avg: AVG(100 * CHC_BUSY_sum / CHC_CYCLE_sum)
-          min: MIN(100 * CHC_BUSY_sum / CHC_CYCLE_sum)
-          max: MAX(100 * CHC_BUSY_sum / CHC_CYCLE_sum)
+          avg: 100 * AVG(CHC_BUSY_sum / CHC_CYCLE_sum)
+          min: 100 * MIN(CHC_BUSY_sum / CHC_CYCLE_sum)
+          max: 100 * MAX(CHC_BUSY_sum / CHC_CYCLE_sum)
           unit: Percent
         Buffer Stall Rate:
-          avg: AVG(100 * CHC_STALL_BUFFER_FULL_sum / CHC_BUSY_sum)
-          min: MIN(100 * CHC_STALL_BUFFER_FULL_sum / CHC_BUSY_sum)
-          max: MAX(100 * CHC_STALL_BUFFER_FULL_sum / CHC_BUSY_sum)
+          avg: 100 * AVG(CHC_STALL_BUFFER_FULL_sum / CHC_BUSY_sum)
+          min: 100 * MIN(CHC_STALL_BUFFER_FULL_sum / CHC_BUSY_sum)
+          max: 100 * MAX(CHC_STALL_BUFFER_FULL_sum / CHC_BUSY_sum)
           unit: Percent
 
   - metric_table:

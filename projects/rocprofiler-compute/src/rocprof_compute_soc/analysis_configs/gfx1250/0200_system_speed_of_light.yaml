@@ -160,7 +160,7 @@ Panel Config:
           pct_of_peak: false
         # GL2: Level-2 Graphics Cache (Last-level cache on AID)
         GL2 Cache Hit Rate:
-          value: AVG(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
+          value: 100 * AVG(GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
           unit: Percent
           peak: 100
           pct_of_peak: false
@@ -190,7 +190,7 @@ Panel Config:
           peak: None
           pct_of_peak: false
         Scalar Data Cache Hit Rate:
-          value: AVG(100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
+          value: 100 * AVG(SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
           unit: Percent
           peak: 100
           pct_of_peak: false
@@ -200,7 +200,7 @@ Panel Config:
           peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
           pct_of_peak: true
         Instruction Cache Hit Rate:
-          value: AVG(100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
+          value: 100 * AVG(SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
           unit: Percent
           peak: 100
           pct_of_peak: false
