@@ -4637,7 +4637,7 @@ except AttributeError:
 try:
     amdsmi_get_cpu_xgmi_width = _libraries['libamd_smi.so'].amdsmi_get_cpu_xgmi_width
     amdsmi_get_cpu_xgmi_width.restype = amdsmi_status_t
-    amdsmi_get_cpu_xgmi_width.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint8)]
+    amdsmi_get_cpu_xgmi_width.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_ubyte)]
 except AttributeError:
     pass
 try:
@@ -4661,7 +4661,7 @@ except AttributeError:
 try:
     amdsmi_get_cpu_apb_status = _libraries['libamd_smi.so'].amdsmi_get_cpu_apb_status
     amdsmi_get_cpu_apb_status.restype = amdsmi_status_t
-    amdsmi_get_cpu_apb_status.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint8)]
+    amdsmi_get_cpu_apb_status.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_ubyte)]
 except AttributeError:
     pass
 try:

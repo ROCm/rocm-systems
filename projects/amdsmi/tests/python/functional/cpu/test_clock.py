@@ -118,6 +118,17 @@ class TestCpuClock(unittest.TestCase):
         self.common.Test_API_Per_GPU(amdsmi_cpu_apb_enable=amdsmi.amdsmi_cpu_apb_enable)
         return
 
+    def test_get_cpu_apb_status(self):
+        self.common.print_func_name("")
+
+        if self.common.TODO_SKIP_FAIL:
+            msg = "\tSkipping test_get_cpu_apb_status as it fails (IO Error)."
+            self.common.print(msg)
+            self.skipTest(msg)
+
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_apb_status=amdsmi.amdsmi_get_cpu_apb_status)
+        return
+
     def test_get_cpu_cclk_limit(self):
         self.common.print_func_name("")
         self.common.Test_API_Per_GPU(amdsmi_get_cpu_cclk_limit=amdsmi.amdsmi_get_cpu_cclk_limit)
@@ -198,6 +209,19 @@ class TestCpuClock(unittest.TestCase):
         )
         return
 
+    def test_get_cpu_df_pstate_range(self):
+        self.common.print_func_name("")
+
+        if self.common.TODO_SKIP_FAIL:
+            msg = "\tSkipping test_get_cpu_df_pstate_range as it fails (IO Error)."
+            self.common.print(msg)
+            self.skipTest(msg)
+
+        self.common.Test_API_Per_GPU(
+            amdsmi_get_cpu_df_pstate_range=amdsmi.amdsmi_get_cpu_df_pstate_range
+        )
+        return
+
     def test_set_cpu_gmi3_link_width_range(self):
         self.common.print_func_name("")
 
@@ -273,4 +297,15 @@ class TestCpuClock(unittest.TestCase):
             min_width=min_width,
             max_width=max_width,
         )
+        return
+
+    def test_get_cpu_xgmi_width(self):
+        self.common.print_func_name("")
+
+        if self.common.TODO_SKIP_FAIL:
+            msg = "\tSkipping test_get_cpu_xgmi_width as it fails (IO Error)."
+            self.common.print(msg)
+            self.skipTest(msg)
+
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_xgmi_width=amdsmi.amdsmi_get_cpu_xgmi_width)
         return
