@@ -26,7 +26,6 @@ endif()
 
 # Set these up as variables to make reading the generated file easier
 set(HIP_HIPCC_EXECUTABLE "@HIP_HIPCC_EXECUTABLE@") # path
-set(HIP_HIPCONFIG_EXECUTABLE "@HIP_HIPCONFIG_EXECUTABLE@") #path
 set(HIP_HOST_COMPILER "@HIP_HOST_COMPILER@") # path
 set(CMAKE_COMMAND "@CMAKE_COMMAND@") # path
 set(HIP_run_make2cmake "@HIP_run_make2cmake@") # path
@@ -45,9 +44,10 @@ set(source_file "@source_file@") # path
 set(host_flag "@host_flag@") # bool
 
 # Determine compiler and compiler flags
-execute_process(COMMAND ${HIP_HIPCONFIG_EXECUTABLE} --platform OUTPUT_VARIABLE HIP_PLATFORM OUTPUT_STRIP_TRAILING_WHITESPACE)
-execute_process(COMMAND ${HIP_HIPCONFIG_EXECUTABLE} --compiler OUTPUT_VARIABLE HIP_COMPILER OUTPUT_STRIP_TRAILING_WHITESPACE)
-execute_process(COMMAND ${HIP_HIPCONFIG_EXECUTABLE} --runtime OUTPUT_VARIABLE HIP_RUNTIME OUTPUT_STRIP_TRAILING_WHITESPACE)
+# These values are substituted at configure time by FindHIP.cmake (no hipconfig call needed)
+set(HIP_PLATFORM "@HIP_PLATFORM@")
+set(HIP_COMPILER "@HIP_COMPILER@")
+set(HIP_RUNTIME "@HIP_RUNTIME@")
 if(NOT host_flag)
     set(__CC ${HIP_HIPCC_EXECUTABLE})
     if("${HIP_PLATFORM}" STREQUAL "amd")
