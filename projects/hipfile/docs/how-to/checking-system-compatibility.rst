@@ -58,8 +58,19 @@ present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, 
            amdgpu                  : True
            hipFile-capable volume  : True
 
-| ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available. 
+| ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available.
 | ``HIP runtime``: A discovered HIP runtime library exports  ``hipAmdFileRead()`` and ``hipAmdFileWrite()``.
 | ``amdgpu``: The loaded amdgpu kernel driver exposes ``kfd_ais_rw_file`` in ``/proc/kallsyms``.
 | ``hipFile-capable volume``: At least one row in the mounted volumes table has ``HIPFILE`` set to ``yes``.
+
+SR-IOV virtual functions
+========================
+
+hipFile's fastpath is only supported on GPU physical functions (PFs). When a GPU
+is an SR-IOV virtual function (VF), the fastpath is disabled and I/O falls back to
+the slower compatibility path. ``ais-check`` uses ``amd-smi`` to detect VFs (a
+VF's device name ends in ``VF``, for example ``AMD Instinct MI300X VF``) and, if
+any are present, prints a ``WARNING`` to stderr. Because a VF is a performance
+caveat rather than a missing component, this warning does not change the exit
+code. If ``amd-smi`` is not installed the check is skipped.
 
