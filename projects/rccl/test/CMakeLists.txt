@@ -329,6 +329,38 @@ if(BUILD_TESTS)
   endif()
   endif()
 
+  # rccl-UnitTestsDevRuntime: self-contained host micro-test that #includes the
+  # hipified src/dev_runtime.cc directly to reach its file-static symMemory*
+  # helpers. Links no librccl.so; dependencies come from DevRuntimeTestsStubs.cc.
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsDevRuntime)
+
+    add_executable(rccl-UnitTestsDevRuntime
+      DevRuntimeTests.cpp
+      DevRuntimeTestsStubs.cc
+      common/main_fixtures.cpp
+      common/EnvVars.cpp
+      common/TestChecks.cpp
+      common/ProcessIsolatedTestRunner.cpp
+    )
+
+    target_include_directories(rccl-UnitTestsDevRuntime PRIVATE
+      ${PROJECT_BINARY_DIR}/hipify/src
+      ${PROJECT_BINARY_DIR}/hipify/src/include
+      ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
+      ${PROJECT_BINARY_DIR}/hipify/src/device
+    )
+
+    set_source_files_properties(DevRuntimeTests.cpp PROPERTIES
+      COMPILE_DEFINITIONS
+        "DEV_RUNTIME_CC_PATH=\"${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc\"")
+
+    # The included source and its headers live in the hipify-staged tree.
+    add_dependencies(rccl-UnitTestsDevRuntime
+      hipify_all copy_nccl_device_headers
+      net_ib_header_symlinks rma_header_symlinks)
+  endif()
+
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
   # librccl.so which are only visible in Debug builds (hidden visibility in Release).
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
@@ -469,9 +501,10 @@ if(BUILD_TESTS)
     # ENABLE_ROCSHMEM_GIN=ON but ENABLE_ROCSHMEM=OFF, librccl.so carries unresolved
     # rocSHMEM symbols (e.g. rocshmem::envvar::log_flags) that would fail at load
     # time for any executable linking it.
-    if(test_executable STREQUAL "rccl-UnitTestsGinAnvilPlugin")
+    if(test_executable STREQUAL "rccl-UnitTestsGinAnvilPlugin" OR
+       test_executable STREQUAL "rccl-UnitTestsDevRuntime")
       # Intentionally no rccl link; needed symbols come from the compiled-in
-      # plugin sources + stubs and RCCL_COMMON_LINK_LIBS (hip/hsa/gtest/dl).
+      # source(s) + stubs and RCCL_COMMON_LINK_LIBS (hip/hsa/gtest/dl).
     elseif(BUILD_SHARED_LIBS)
       target_link_libraries(${test_executable} PRIVATE rccl)
       if(${HOST_OS_ID} STREQUAL "debian")
