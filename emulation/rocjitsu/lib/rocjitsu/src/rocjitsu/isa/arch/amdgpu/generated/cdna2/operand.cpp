@@ -5,11 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
-#include "rocjitsu/isa/isa_operand_simd_inl.h"
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include <format>
 #include <optional>
 #include <stdexcept>
@@ -29,20 +25,23 @@ std::string reg_name(const char *prefix, int reg_num, int size_bits) {
 } // namespace
 
 Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
-    : AmdgpuIsaOperand<Isa>(size_bits, opr_type, encoding_value) {
+    : IsaOperand<Isa>(size_bits, opr_type, encoding_value),
+      execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())) {
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
 Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
                  uint16_t literal16_display_value, bool has_literal16_display)
-    : AmdgpuIsaOperand<Isa>(size_bits, opr_type, encoding_value),
+    : IsaOperand<Isa>(size_bits, opr_type, encoding_value),
+      execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
       literal16_display_value_(literal16_display_value),
       has_literal16_display_(has_literal16_display) {
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
 
 Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64)
-    : AmdgpuIsaOperand<Isa>(size_bits, opr_type, static_cast<int>(literal64_value)),
+    : IsaOperand<Isa>(size_bits, opr_type, static_cast<int>(literal64_value)),
+      execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
       literal64_value_(literal64_value), has_literal64_(is_literal64) {
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
@@ -1085,208 +1084,171 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
   return std::nullopt;
 }
 
-namespace {
-
-constexpr int kM0EncodingValue = 124;
-
-bool is_vgpr_only_type(OperandType t) {
-  return t == OperandType::OPR_VGPR || t == OperandType::OPR_VGPR_OR_ACCVGPR ||
-         t == OperandType::OPR_VGPR_OR_LDS || t == OperandType::OPR_SRC_VGPR ||
-         t == OperandType::OPR_ACCVGPR || t == OperandType::OPR_SRC_ACCVGPR ||
-         t == OperandType::OPR_SRC_VGPR_OR_ACCVGPR;
+bool Operand::simd_capable() const {
+  decltype(ExecutionBackend::simd_capable) callback =
+      execution_backend_ ? execution_backend_->simd_capable : nullptr;
+  return callback ? (this->*callback)() : false;
 }
 
-uint32_t vgpr_index(OperandType opr_type, int ev) {
-  if (opr_type == OperandType::OPR_VGPR || opr_type == OperandType::OPR_VGPR_OR_ACCVGPR) {
-    if (ev >= OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)
-      return 256 + static_cast<uint32_t>(ev - OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN);
-    return static_cast<uint32_t>(ev);
-  }
-  if (opr_type == OperandType::OPR_ACCVGPR) {
-    if (ev >= OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)
-      return 256 + static_cast<uint32_t>(ev - OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN);
-    return 256 + static_cast<uint32_t>(ev);
-  }
-  if (opr_type == OperandType::OPR_SRC_ACCVGPR) {
-    if (ev >= OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN)
-      return 256 + static_cast<uint32_t>(ev - OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN);
-    if (ev >= 256)
-      return 256 + static_cast<uint32_t>(ev - 256);
-    return 256 + static_cast<uint32_t>(ev);
-  }
-  if (opr_type == OperandType::OPR_SRC_VGPR_OR_ACCVGPR) {
-    if (ev >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN)
-      return 256 +
-             static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN);
-    if (ev >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)
-      return static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN);
-    return static_cast<uint32_t>(ev);
-  }
-  return static_cast<uint32_t>(ev - 256);
+void Operand::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                              uint32_t *out) const {
+  decltype(ExecutionBackend::read_lane_chunk) callback =
+      execution_backend_ ? execution_backend_->read_lane_chunk : nullptr;
+  if (!callback)
+    throw std::logic_error("operand execution backend is not linked");
+  (this->*callback)(wf, lane_base, count, out);
 }
 
-uint64_t read_immediate64(OperandType opr_type, int ev) {
-  if (opr_type == OperandType::OPR_SIMM32)
-    return static_cast<uint64_t>(static_cast<uint32_t>(ev));
-  return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));
-}
-
-} // namespace
-
-// Isa::-scoped SIMD traits — see rocjitsu/isa/isa_operand_simd_inl.h
-// for the templated callers in AmdgpuIsaOperand<Isa>.
-std::optional<uint32_t> Isa::resolved_vgpr_offset(OperandType opr_type, int ev) {
-  if (is_vgpr_only_type(opr_type))
-    return vgpr_index(opr_type, ev);
-  if (is_immediate_type(opr_type))
-    return std::nullopt;
-  if (ev >= 256 && ev <= 511)
-    return static_cast<uint32_t>(ev - 256);
-  if (opr_type == OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST &&
-      ev >= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN &&
-      ev <= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MAX) {
-    return 256 + static_cast<uint32_t>(
-                     ev - OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN);
-  }
-  return std::nullopt;
-}
-
-bool Isa::simd_capable_value(OperandType opr_type, int ev) {
-  return resolved_vgpr_offset(opr_type, ev).has_value() || is_immediate_type(opr_type) ||
-         amdgpu::can_resolve_src_scalar(ev, kM0EncodingValue);
-}
-
-uint32_t Isa::simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev) {
-  return is_immediate_type(opr_type) ? static_cast<uint32_t>(ev)
-                                     : amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);
+void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                               const uint32_t *vals, uint64_t mask) const {
+  decltype(ExecutionBackend::write_lane_chunk) callback =
+      execution_backend_ ? execution_backend_->write_lane_chunk : nullptr;
+  if (!callback)
+    throw std::logic_error("operand execution backend is not linked");
+  (this->*callback)(wf, lane_base, count, vals, mask);
 }
 
 uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
-  if (delegate())
-    return amdgpu::RegisterAccess(wf).read_scalar(*delegate());
-  // Fieldless operands whose capability policy makes this
-  // accessor inert (reads yield a benign 0, writes are no-ops).
-  // Driven by the construction-time capability flags applied
-  // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!reads_value())
-    return 0u;
-  if (has_literal64_)
-    return static_cast<uint32_t>(literal64_value_);
-  if (is_immediate_type(opr_type_))
-    return static_cast<uint32_t>(encoding_value_);
-  return amdgpu::resolve_src_scalar(wf, encoding_value_, kM0EncodingValue);
+  decltype(ExecutionBackend::read_scalar) callback =
+      execution_backend_ ? execution_backend_->read_scalar : nullptr;
+  if (!callback)
+    throw std::logic_error("operand execution backend is not linked");
+  return (this->*callback)(wf);
 }
 
 uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
-  if (delegate())
-    return amdgpu::RegisterAccess(wf).read_lane(*delegate(), lane);
-  // Fieldless operands whose capability policy makes this
-  // accessor inert (reads yield a benign 0, writes are no-ops).
-  // Driven by the construction-time capability flags applied
-  // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!reads_value())
-    return 0u;
-  int ev = encoding_value_;
-  if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
-    return amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);
-  }
-  if (is_immediate_type(opr_type_))
-    return static_cast<uint32_t>(ev);
-  if (size_bits_ == 16)
-    return amdgpu::resolve_src_scalar16(wf, ev, kM0EncodingValue);
-  return amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);
+  decltype(ExecutionBackend::read_lane) callback =
+      execution_backend_ ? execution_backend_->read_lane : nullptr;
+  if (!callback)
+    throw std::logic_error("operand execution backend is not linked");
+  return (this->*callback)(wf, lane);
 }
 
 void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
-  // Fieldless operands whose capability policy makes this
-  // accessor inert (reads yield a benign 0, writes are no-ops).
-  // Driven by the construction-time capability flags applied
-  // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!is_writable())
-    return;
-  amdgpu::resolve_dst_write(wf, encoding_value_, val, kM0EncodingValue);
+  decltype(ExecutionBackend::write_scalar) callback =
+      execution_backend_ ? execution_backend_->write_scalar : nullptr;
+  if (!callback)
+    throw std::logic_error("operand execution backend is not linked");
+  (this->*callback)(wf, val);
 }
 
 void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
-  // Fieldless operands whose capability policy makes this
-  // accessor inert (reads yield a benign 0, writes are no-ops).
-  // Driven by the construction-time capability flags applied
-  // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!is_writable())
-    return;
-  if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
-    amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);
-    return;
-  }
-  throw std::logic_error("write_lane called on non-VGPR operand type");
+  decltype(ExecutionBackend::write_lane) callback =
+      execution_backend_ ? execution_backend_->write_lane : nullptr;
+  if (!callback)
+    throw std::logic_error("operand execution backend is not linked");
+  (this->*callback)(wf, lane, val);
 }
 
 uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {
-  if (delegate())
-    return amdgpu::RegisterAccess(wf).read_lane64(*delegate(), lane);
-  // Fieldless operands whose capability policy makes this
-  // accessor inert (reads yield a benign 0, writes are no-ops).
-  // Driven by the construction-time capability flags applied
-  // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!reads_value())
-    return 0;
-  int ev = encoding_value_;
-  if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
-    uint32_t idx = wf.vgpr_alloc().base + voff;
-    return amdgpu::RegisterAccess(wf.cu()).read_vgpr64(idx, lane);
-  }
-  if (literal32_widening_)
-    return widened_literal32_value();
-  if (has_literal64_)
-    return literal64_value_;
-  if (is_immediate_type(opr_type_))
-    return read_immediate64(opr_type_, ev);
-  return amdgpu::resolve_src_scalar64(wf, ev, kM0EncodingValue);
+  decltype(ExecutionBackend::read_lane64) callback =
+      execution_backend_ ? execution_backend_->read_lane64 : nullptr;
+  if (!callback)
+    throw std::logic_error("operand execution backend is not linked");
+  return (this->*callback)(wf, lane);
 }
 
 void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {
-  // Fieldless operands whose capability policy makes this
-  // accessor inert (reads yield a benign 0, writes are no-ops).
-  // Driven by the construction-time capability flags applied
-  // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!is_writable())
-    return;
-  if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {
-    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
-    uint32_t idx = wf.vgpr_alloc().base + voff;
-    amdgpu::RegisterAccess(wf.cu()).write_vgpr64(idx, lane, val);
-    return;
-  }
-  throw std::logic_error("write_lane64 called on non-VGPR operand type");
+  decltype(ExecutionBackend::write_lane64) callback =
+      execution_backend_ ? execution_backend_->write_lane64 : nullptr;
+  if (!callback)
+    throw std::logic_error("operand execution backend is not linked");
+  (this->*callback)(wf, lane, val);
 }
 
 uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
-  // Fieldless operands whose capability policy makes this
-  // accessor inert (reads yield a benign 0, writes are no-ops).
-  // Driven by the construction-time capability flags applied
-  // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!reads_value())
-    return 0;
-  if (literal32_widening_)
-    return widened_literal32_value();
-  if (has_literal64_)
-    return literal64_value_;
-  if (is_immediate_type(opr_type_))
-    return read_immediate64(opr_type_, encoding_value_);
-  return amdgpu::resolve_src_scalar64(wf, encoding_value_, kM0EncodingValue);
+  decltype(ExecutionBackend::read_scalar64) callback =
+      execution_backend_ ? execution_backend_->read_scalar64 : nullptr;
+  if (!callback)
+    throw std::logic_error("operand execution backend is not linked");
+  return (this->*callback)(wf);
 }
 
 void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {
-  // Fieldless operands whose capability policy makes this
-  // accessor inert (reads yield a benign 0, writes are no-ops).
-  // Driven by the construction-time capability flags applied
-  // via apply_fieldless_caps() (see fieldless_policy.py).
-  if (!is_writable())
-    return;
-  amdgpu::resolve_dst_write64(wf, encoding_value_, val);
+  decltype(ExecutionBackend::write_scalar64) callback =
+      execution_backend_ ? execution_backend_->write_scalar64 : nullptr;
+  if (!callback)
+    throw std::logic_error("operand execution backend is not linked");
+  (this->*callback)(wf, val);
+}
+
+std::optional<uint32_t> Operand::simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const {
+  decltype(ExecutionBackend::simd_vgpr_base) callback =
+      execution_backend_ ? execution_backend_->simd_vgpr_base : nullptr;
+  return callback ? (this->*callback)(wf) : std::nullopt;
+}
+
+std::optional<uint32_t> Operand::simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const {
+  decltype(ExecutionBackend::simd_vgpr_base_mut) callback =
+      execution_backend_ ? execution_backend_->simd_vgpr_base_mut : nullptr;
+  return callback ? (this->*callback)(wf) : std::nullopt;
+}
+
+const amdgpu::VgprStorage *Operand::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
+  decltype(ExecutionBackend::simd_vgpr_storage) callback =
+      execution_backend_ ? execution_backend_->simd_vgpr_storage : nullptr;
+  return callback ? (this->*callback)(wf) : nullptr;
+}
+
+amdgpu::VgprStorage *Operand::simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
+  decltype(ExecutionBackend::simd_vgpr_storage_mut) callback =
+      execution_backend_ ? execution_backend_->simd_vgpr_storage_mut : nullptr;
+  return callback ? (this->*callback)(wf) : nullptr;
+}
+
+amdgpu::ConstVgprStoragePair64
+Operand::simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const {
+  decltype(ExecutionBackend::simd_vgpr_storage64) callback =
+      execution_backend_ ? execution_backend_->simd_vgpr_storage64 : nullptr;
+  return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStoragePair64{nullptr, nullptr};
+}
+
+amdgpu::VgprStoragePair64 Operand::simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const {
+  decltype(ExecutionBackend::simd_vgpr_storage64_mut) callback =
+      execution_backend_ ? execution_backend_->simd_vgpr_storage64_mut : nullptr;
+  return callback ? (this->*callback)(wf) : amdgpu::VgprStoragePair64{nullptr, nullptr};
+}
+
+void Operand::simd_notify_read_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                    uint8_t byte_mask) const {
+  if (decltype(ExecutionBackend::simd_notify_read) callback =
+          execution_backend_ ? execution_backend_->simd_notify_read : nullptr)
+    (this->*callback)(wf, lane_mask, byte_mask);
+}
+
+void Operand::simd_notify_read_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                        uint8_t byte_mask) const {
+  if (decltype(ExecutionBackend::simd_notify_read_mut) callback =
+          execution_backend_ ? execution_backend_->simd_notify_read_mut : nullptr)
+    (this->*callback)(wf, lane_mask, byte_mask);
+}
+
+void Operand::simd_notify_read64_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                      uint8_t byte_mask) const {
+  if (decltype(ExecutionBackend::simd_notify_read64) callback =
+          execution_backend_ ? execution_backend_->simd_notify_read64 : nullptr)
+    (this->*callback)(wf, lane_mask, byte_mask);
+}
+
+void Operand::simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                          uint8_t byte_mask) const {
+  if (decltype(ExecutionBackend::simd_notify_read64_mut) callback =
+          execution_backend_ ? execution_backend_->simd_notify_read64_mut : nullptr)
+    (this->*callback)(wf, lane_mask, byte_mask);
+}
+
+void Operand::simd_notify_write_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                         uint8_t byte_mask) const {
+  if (decltype(ExecutionBackend::simd_notify_write_mut) callback =
+          execution_backend_ ? execution_backend_->simd_notify_write_mut : nullptr)
+    (this->*callback)(wf, lane_mask, byte_mask);
+}
+
+void Operand::simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                           uint8_t byte_mask) const {
+  if (decltype(ExecutionBackend::simd_notify_write64_mut) callback =
+          execution_backend_ ? execution_backend_->simd_notify_write64_mut : nullptr)
+    (this->*callback)(wf, lane_mask, byte_mask);
 }
 
 } // namespace cdna2

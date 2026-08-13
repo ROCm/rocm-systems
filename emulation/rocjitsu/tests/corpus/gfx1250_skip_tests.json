@@ -22,5 +22,7 @@
     "cts.gfx1250.fpsan.fpsan_swmmac_16x16x64_16_gfx1250_test",
     "cts.gfx1250.fpsan.fpsan_amdgcn_math_extra_test"
   ],
-  "kernels": []
+  "kernels": [
+    "rocblas_sgemm::large_2048x2048"
+  ]
 }

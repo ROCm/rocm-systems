@@ -9,7 +9,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
 #include <cstdint>
@@ -418,6 +418,7 @@ public:
 class Vop1 : public IsaInstruction<Isa> {
 public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
@@ -448,6 +449,7 @@ public:
 class Vopc : public IsaInstruction<Isa> {
 public:
   Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
   using OpEncoding = VopcMachineInst;
@@ -476,6 +478,7 @@ public:
 class Vop2 : public IsaInstruction<Isa> {
 public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
@@ -508,6 +511,7 @@ public:
 class Vop3 : public IsaInstruction<Isa> {
 public:
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
@@ -532,6 +536,7 @@ public:
 class Vop3p : public IsaInstruction<Isa> {
 public:
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
@@ -619,6 +624,7 @@ public:
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();

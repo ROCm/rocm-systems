@@ -37,6 +37,7 @@ test_categories:
       - "PackRoundtripTest.LoadStorePack_*"
       - "PackRoundtripTest.L2_StorePackBoundary"
       - "PackRoundtripTest.Store16Load16Global_Direct"
+      - "HierarchicalShuffleTest.*"
     exclude_windows:
       - "*"
     labels:
@@ -56,6 +57,7 @@ test_categories:
       - "BitOpsTemplateAllIntTestsFixture.*"
       - "BitOpsTemplateUnsignedTestsFixture.*"
       - "PackRoundtripTest.*"
+      - "HierarchicalShuffleTest.*"
       - "DIVUP.*"
       - "ROUNDUP.*"
       - "ALIGN_POWER.*"

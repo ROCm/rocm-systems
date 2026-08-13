@@ -31,6 +31,9 @@ using namespace rocjitsu;
 namespace {
 
 void shutdown_plugin_group(rj_vm_t *vm) {
+  // Host API preconditions keep this outside the simulation-callback interval:
+  // either execution has not started, or the engine workers have stopped and
+  // joined. callback_mutex_ is intentionally not lifecycle synchronization.
   if (vm && vm->soc && vm->plugin_group_active.exchange(false, std::memory_order_acq_rel))
     vm->soc->plugin_group().onShutdown();
 }
@@ -223,8 +226,9 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
   try {
-    auto group = PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "",
-                                                      vm->engine_config);
+    auto group = PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "");
+    // rj_vm_load_plugins() is a pre-run operation, so replacing and initializing
+    // the group cannot overlap simulation callbacks.
     shutdown_plugin_group(vm);
     vm->soc->set_plugin_group(group);
     group->onInit();
@@ -250,6 +254,7 @@ void rj_vm_release(rj_vm_t *vm) {
 void rj_vm_destroy(rj_vm_t *vm) {
   if (!vm)
     return;
+  // The API requires an asynchronous host to stop and join rj_vm_run() first.
   shutdown_plugin_group(vm);
   if (vm->destroy())
     delete vm;
@@ -280,6 +285,7 @@ rj_status_t rj_vm_run(rj_vm_t *vm, uint64_t *ticks_executed) {
   if (ticks_executed)
     *ticks_executed = exit.tick;
 
+  // shutdown() joins all engine workers before plugin state is torn down.
   vm->engine->shutdown();
   shutdown_plugin_group(vm);
   return (exit.code == 0) ? ROCJITSU_STATUS_SUCCESS : ROCJITSU_STATUS_ERROR;

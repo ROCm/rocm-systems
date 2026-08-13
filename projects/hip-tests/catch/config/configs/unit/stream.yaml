@@ -36,6 +36,11 @@ stream:
   Unit_hipMultiStream_sameDevice:
     <<: *level_2
     tags: [lifecycle]
+  Unit_hipMultiStream_SharedHwQueuePacketOrdering:
+    # Uses wall_clock64(), so the test is only compiled on AMD.
+    <<: *level_2
+    disabled: [nvidia_linux, nvidia_windows]
+    tags: [synchronization]
   Unit_hipMultiStream_multimeDevice:
     <<: *level_2
     tags: [lifecycle]
@@ -118,6 +123,16 @@ stream:
     # AMD_LOG AQL output, so AMD/Linux only.
     disabled: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
     tags: [lifecycle]
+  Unit_hipStreamAqlBarrierBit_ChildWorkload:
+    <<: *level_2
+    # Internal helper invoked by the parent test via re-exec.
+    disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    tags: [synchronization]
+  Unit_hipStreamAqlBarrierBit_Scenarios:
+    <<: *level_2
+    # Parses AMD AQL logs and requires fork/exec.
+    disabled: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    tags: [synchronization]
   Unit_hipStreamDestroy_Default:
     <<: *level_2
     tags: [lifecycle, smoke]

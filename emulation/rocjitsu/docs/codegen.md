@@ -21,14 +21,17 @@ XML specification via the `amdisa` Python library in `lib/python/amdisa/`.
 
 ## Installation
 
-Install in editable mode from the rocjitsu project root:
+Create or activate a virtual environment, then install in editable mode from
+the rocjitsu project root together with pre-commit:
 
 ```bash
-pip install -e lib/python/
+python -m pip install -e lib/python/ pre-commit
 ```
 
-This installs `amdisa` and its dependency (`cgen`) into your active
-virtualenv.
+The helper deliberately takes both Python and pre-commit from the same active
+virtual environment. It prepends this checkout's `lib/python/` to `PYTHONPATH`,
+so the generator implementation comes from the same checkout as the helper
+while its installed dependencies come from the environment.
 
 ## MR ISA location
 
@@ -40,14 +43,20 @@ rocm-systems/shared/machine-readable-isa/isa/
 
 | Generated files | Location | Generator |
 |---|---|---|
-| ISA decoders, encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<isa>/` | `codegen.py` |
+| ISA decoders, encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen.py` |
 | Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen.py` |
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
 | Encoding decode/encode functions | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `encoding_translator_codegen.py` |
 
+CDNA5's MR ISA name, logical architecture key, runtime target, ELF identity,
+configuration, and public DBT target identity remain `gfx1250`. Its filesystem
+directories, generated and hand-written C++ namespace (`rocjitsu::cdna5`), and
+internal CMake provider targets use `cdna5`.
+
 Hand-written per-ISA files (`isa.h`, `mma_exec.h`, `addr_calc.h/.cpp`) remain
-under `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<isa>/` and are not
-overwritten by the generator. Hand-written shared headers remain under
+under `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<output-directory>/` and are
+not overwritten by the generator. CDNA5 hand-written files are under
+`arch/amdgpu/cdna5/`. Hand-written shared headers remain under
 `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/`.
 
 The encoding translator engine (`code/dbt/encoding_translator.h`) is
@@ -73,17 +82,34 @@ When neither `--gen-isas` nor `--gen-dbt` is specified, both are
 generated.
 
 <!-- \NPI new ISA family: add a `<isa>:$MRISA/amdgpu_isa_<isa>.xml` entry to \
-     each `--multi` invocation in the commands below. -->
+     each manual `--multi` invocation below and to the supported-ISA list in \
+     scripts/generate-amdisa.sh. -->
 
 ## Regenerating everything
 
-All commands are run from the rocjitsu project root. Set `MRISA` to the
-shared MR ISA directory and `GFX1250_MRISA` to the out-of-tree gfx1250
-XML directory:
+The repository helper derives the repository, shared MR ISA, and generated
+output directories from its own location. Its argument is the CDNA5 MR ISA XML,
+whose concrete GPU filename and logical architecture key remain `gfx1250`.
+Activate a Python virtual environment containing the generator dependencies and
+`pre-commit`, then run this command from the `rocm-systems` repository root:
+
+```bash
+./emulation/rocjitsu/scripts/generate-amdisa.sh \
+  /path/to/amdgpu_isa_gfx1250.xml
+```
+
+The helper can be invoked from any working directory when given by an
+appropriate relative or absolute path. It discovers the active environment
+through `VIRTUAL_ENV` or the active Python interpreter, then formats changed
+generated files through the repository's pre-commit configuration.
+
+The manual commands below are useful for focused generator development and are
+run from the rocjitsu project root. Set `MRISA` to the shared MR ISA directory
+and `CDNA5_MRISA` to the out-of-tree CDNA5 MR ISA XML directory:
 
 ```bash
 MRISA=../../shared/machine-readable-isa/isa
-GFX1250_MRISA=/path/to/gfx1250-mrisa
+CDNA5_MRISA=/path/to/cdna5-mrisa
 
 python -m amdisa \
   --multi \
@@ -96,7 +122,7 @@ python -m amdisa \
     rdna3:$MRISA/amdgpu_isa_rdna3.xml \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
-    gfx1250:$GFX1250_MRISA/amdgpu_isa_gfx1250.xml \
+    gfx1250:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
 
@@ -118,7 +144,7 @@ python -m amdisa \
     rdna3:$MRISA/amdgpu_isa_rdna3.xml \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
-    gfx1250:$GFX1250_MRISA/amdgpu_isa_gfx1250.xml \
+    gfx1250:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
   --gen-isas \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated
 
@@ -140,7 +166,7 @@ python -m amdisa \
     rdna3:$MRISA/amdgpu_isa_rdna3.xml \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
-    gfx1250:$GFX1250_MRISA/amdgpu_isa_gfx1250.xml \
+    gfx1250:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
   --gen-dbt \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
 
@@ -154,6 +180,7 @@ When modifying ISA semantics or adding instruction support:
 
 1. Edit `lib/python/amdisa/codegen/_generator.py` (never the generated
    C++ files)
-2. Regenerate with `--multi` as shown above
-3. Format the generated files with `clang-format`
+2. Regenerate with `scripts/generate-amdisa.sh` or `--multi` as shown above
+3. If you regenerated manually, format the generated files with `clang-format`
+   (the helper formats changed generated files for you)
 4. Stage ALL generated files before committing
