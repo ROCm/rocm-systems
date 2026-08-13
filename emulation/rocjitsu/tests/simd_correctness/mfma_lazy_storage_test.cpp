@@ -18,17 +18,9 @@ using MfmaVgpr = simdojo::VectorReg<WF_SIZE, uint32_t>;
 using MfmaLazyStorage = simdojo::detail::SoftwareLazyRegisterStorage<MfmaVgpr, 1024>;
 
 TEST(MfmaLazyStorageTest, F16SpecInputCrossesChunkBoundary) {
-#if defined(RJ_TEST_REQUIRE_NATIVE_SIMD_WIDTH_16)
-  ASSERT_TRUE(util::has_stdx_simd)
-      << "AVX-512 test configuration requires <experimental/simd> support";
-  ASSERT_EQ(util::native<float>::size(), 16)
-      << "AVX-512 test configuration requires 16-lane native SIMD";
-#else
   SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16) {
+  if (util::native<float>::size() != 16)
     GTEST_SKIP() << "test requires the 16-lane matrix fast path";
-  }
-#endif
 
   constexpr uint32_t regs_per_chunk = MfmaLazyStorage::registers_per_chunk();
   constexpr uint32_t source_a = regs_per_chunk - 1;

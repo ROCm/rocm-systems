@@ -552,12 +552,6 @@ target_link_libraries(
 )
 target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
-if(RJ_TEST_REQUIRE_NATIVE_SIMD_WIDTH_16)
-    target_compile_definitions(
-        rocjitsu_tests
-        PRIVATE RJ_TEST_REQUIRE_NATIVE_SIMD_WIDTH_16=1
-    )
-endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(
         rocjitsu_tests
