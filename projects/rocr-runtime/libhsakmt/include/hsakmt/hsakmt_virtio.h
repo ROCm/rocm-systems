@@ -197,6 +197,9 @@ int vamdgpu_bo_va_op(amdgpu_bo_handle bo, uint64_t offset, uint64_t size, uint64
 int vamdgpu_bo_query_info(amdgpu_bo_handle bo, struct amdgpu_bo_info* info);
 int vamdgpu_bo_set_metadata(amdgpu_bo_handle bo, struct amdgpu_bo_metadata* info);
 
+HSAKMT_STATUS HSAKMTAPI vhsaKmtVirtioMapHandleToVA(void* MemoryHandle, void* Va, HSAuint64 Size);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtVirtioUnmapHandleFromVA(void* Va, HSAuint64 Size);
+
 #ifdef __cplusplus
 }
 #endif

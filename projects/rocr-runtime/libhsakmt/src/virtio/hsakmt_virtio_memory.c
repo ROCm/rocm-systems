@@ -330,7 +330,8 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint
   if (!rsp->memory_handle) return -ENOMEM;
 
   r = vhsakmt_init_host_blob(dev, SizeInBytes, VIRTGPU_BLOB_MEM_HOST3D,
-                             vhsakmt_mappable(MemFlags) ? VIRTGPU_BLOB_FLAG_USE_MAPPABLE : 0,
+                             (vhsakmt_mappable(MemFlags) || MemFlags.ui32.NoAddress)
+                                 ? VIRTGPU_BLOB_FLAG_USE_MAPPABLE : 0,
                              req.blob_id, VHSA_BO_KFD_MEM, (void*)rsp->memory_handle, &bo);
   if (r) return r;
   bo->flags = MemFlags;
@@ -362,6 +363,41 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint
 HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
                                            HsaMemFlags MemFlags, void** MemoryAddress) {
   return vhsaKmtAllocMemoryAlign(PreferredNode, SizeInBytes, 0, MemFlags, MemoryAddress);
+}
+
+/* VMM (hsa_amd_vmem_*) support over virtio-gpu.
+ *
+ * A physical memory handle (HsaMemFlags.NoAddress) is created as a mappable host
+ * blob (USE_MAPPABLE) but is not CPU-mapped at allocation time because it has no
+ * VA yet. When ROCr later maps the handle into a reserved VA (via the virtio
+ * driver Map()), vhsaKmtVirtioMapHandleToVA() blob-maps the owning allocation at
+ * that VA (MAP_FIXED) so CPU accesses to the VMM-mapped range resolve, mirroring
+ * the GPU-side amdgpu VA mapping. MemoryHandle is the physical vhsakmt_bo (the
+ * value stored in core::DriverMemoryHandle::handle). */
+HSAKMT_STATUS HSAKMTAPI vhsaKmtVirtioMapHandleToVA(void* MemoryHandle, void* Va, HSAuint64 Size) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_bo_handle bo = (vhsakmt_bo_handle)MemoryHandle;
+  if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
+
+  void* cpu = Va;
+  int r = virtio_gpu_map_handle(bo->dev->vgdev, bo->real.handle, Size, &cpu, Va);
+  if (r || cpu != Va) {
+    vhsa_err("%s: blob map failed va=%p size=%lx handle=%u r=%d cpu=%p\n", __FUNCTION__, Va, Size,
+             bo->real.handle, r, cpu);
+    return HSAKMT_STATUS_ERROR;
+  }
+
+  vhsa_debug("%s: mapped blob handle=%u at va=%p size=%lx\n", __FUNCTION__, bo->real.handle, Va,
+             Size);
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtVirtioUnmapHandleFromVA(void* Va, HSAuint64 Size) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  virtio_gpu_unmap(Va, Size);
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 int vhsakmt_bo_free(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
