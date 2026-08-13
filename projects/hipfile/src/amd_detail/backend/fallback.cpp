@@ -84,6 +84,27 @@ Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
         throw std::invalid_argument("The selected file or buffer region is invalid");
     }
 
+    // hipMemcpy operates on the current device's context, so make the buffer's GPU current for the
+    // duration of the copies and restore the caller's device on exit (including exceptions).
+    int  prev_device   = Context<Hip>::get()->hipGetDevice();
+    int  buffer_device = buffer->getGpuId();
+    bool device_switched{false};
+    if (buffer_device != prev_device) {
+        Context<Hip>::get()->hipSetDevice(buffer_device);
+        device_switched = true;
+    }
+    auto device_deleter = [&](void *) {
+        if (device_switched) {
+            try {
+                Context<Hip>::get()->hipSetDevice(prev_device);
+            }
+            catch (...) {
+                Context<Sys>::get()->syslog(LOG_CRIT, "Unable to restore the caller's HIP device.");
+            }
+        }
+    };
+    unique_ptr<void, decltype(device_deleter)> device_guard{&device_switched, device_deleter};
+
     auto ptr     = Context<Sys>::get()->mmap(nullptr, chunk_size, PROT_READ | PROT_WRITE,
                                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     auto deleter = [&](void *addr) { Context<Sys>::get()->munmap(addr, chunk_size); };

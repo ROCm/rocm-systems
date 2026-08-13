@@ -122,6 +122,7 @@ struct FallbackIo : public HipFileOpened {
 
     FallbackIo() : buffer_data(1024 * 1024)
     {
+        EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
 
         expect_buffer_registration(mhip, hipMemoryTypeDevice);
         Context<DriverState>::get()->registerBuffer(buffer_data.data(), buffer_data.size(), 0);
@@ -193,6 +194,8 @@ struct FallbackParam : ::testing::TestWithParam<IoType> {
     FallbackParam()
     {
         assert(hipFileDriverOpen() == HIPFILE_SUCCESS);
+
+        EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
 
         expect_buffer_registration(mhip, hipMemoryTypeDevice);
         void *buf{reinterpret_cast<void *>(0xFEFEFEFE)};
