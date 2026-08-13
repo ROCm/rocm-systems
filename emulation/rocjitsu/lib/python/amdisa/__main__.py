@@ -51,6 +51,7 @@ _PROFILES = {
     'rdna3': Rdna3Profile,
     'rdna3.5': Rdna3_5Profile,
     'rdna4': Rdna4Profile,
+    'cdna5': Gfx1250Profile,
     'gfx1250': Gfx1250Profile,
 }
 
