@@ -12,7 +12,7 @@ ROCm Compute Profiler (``rocprofiler-compute``) is a kernel-level profiling tool
 
 This kernel-level view matters once you already know *which* kernel is worth optimizing. Where ROCm Systems Profiler characterizes an entire application to find where time goes, ROCm Compute Profiler drills into a specific dispatch to explain why it runs at the speed it does, down to the hardware block level.
 
-This topic orients you to how ROCm Compute Profiler is put together and how to invoke it. For a narrative introduction, see :doc:`../what-is-rocprof-compute`; for the full performance-model reference, see :doc:`../conceptual/performance-model`.
+This topic orients you to how ROCm Compute Profiler is put together and how to invoke it. For a narrative introduction, see :doc:`../what-is-rocprof-compute` for the full performance-model reference, see :doc:`../conceptual/performance-model`.
 
 .. _glance-key-features:
 
@@ -185,7 +185,7 @@ This isn't an exhaustive list of flags; run ``rocprof-compute profile -h`` or ``
 Output formats
 ================
 
-``profile`` and ``analyze`` each accept their own output-format option: ``--format-rocprof-output`` for raw counter data, and ``--output-format`` for the analysis report.
+``profile`` and ``analyze`` each accept their own output-format option: ``--format-rocprof-output`` for raw counter data, and ``--output-format`` for the analysis report. The following table lists the available values for each:
 
 .. list-table::
    :header-rows: 1
@@ -246,7 +246,7 @@ Roofline micro-benchmark support varies by :ref:`SoC family <def-soc>` independe
      - ✅
      - ❌
      - Roofline micro-benchmarks require MI200 or later. See :ref:`standalone-roofline`.
-   * - AMD Ryzen AI Max / Ryzen™ AI Max+ 300 and 400 Series (Strix/Halo, Gorgon/Halo; gfx1150/gfx1151/gfx1152)
+   * - AMD Ryzen™ AI Max / Ryzen AI Max+ 300 and 400 Series (Strix/Halo, Gorgon/Halo; gfx1150/gfx1151/gfx1152)
      - ✅
      - ✅
      - Full feature support; roofline benchmarking for gfx1150 and gfx1152 was added in ROCm Compute Profiler 3.7.0, with the gfx1151 (Strix Halo) gap closed in 3.8.0. Uses Wave Matrix Multiply Accumulate (WMMA) in place of MFMA.
