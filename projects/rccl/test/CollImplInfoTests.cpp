@@ -27,6 +27,7 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
