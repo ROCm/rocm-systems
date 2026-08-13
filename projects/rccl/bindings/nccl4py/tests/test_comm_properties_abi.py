@@ -67,9 +67,7 @@ import ctypes
 
 import pytest
 
-pytest.importorskip("nccl.bindings", reason="nccl4py extension is not built")
-
-from nccl.bindings import CommProperties, GinType, comm_properties_dtype  # noqa: E402
+from nccl.bindings import CommProperties, GinType, comm_properties_dtype
 
 
 class _NcclCommPropertiesRef(ctypes.Structure):
