@@ -1695,8 +1695,12 @@ public:
   void note_patch_requirements(hsa_executable_t executable, const rocjitsu::ConSanResult &result) {
     std::lock_guard lock(mutex_);
     for (const rocjitsu::ConSanPatchInfo &patch : result.patches) {
-      if (patch.required_private_segment_size == 0 && patch.dynamic_private_segment_addend == 0 &&
-          patch.required_group_segment_size == 0) {
+      const bool has_segment_requirement = patch.required_private_segment_size != 0 ||
+                                           patch.dynamic_private_segment_addend != 0 ||
+                                           patch.required_group_segment_size != 0;
+      const bool records_moi_site = patch.phase == rocjitsu::ConSanPatchPhase::Instrumentation &&
+                                    consan_patch_resource_site_kind(patch, result).has_value();
+      if (!has_segment_requirement && !records_moi_site) {
         continue;
       }
       const auto note_kernel = [&](const auto &kernel) {
@@ -1706,7 +1710,7 @@ public:
         if (pending == pending_.end()) {
           pending_.push_back({executable.handle, kernel.name, patch.required_private_segment_size,
                               patch.dynamic_private_segment_addend,
-                              patch.required_group_segment_size});
+                              patch.required_group_segment_size, records_moi_site});
         } else {
           pending->required_private_bytes =
               std::max(pending->required_private_bytes, patch.required_private_segment_size);
@@ -1714,6 +1718,7 @@ public:
               std::max(pending->dynamic_private_addend, patch.dynamic_private_segment_addend);
           pending->required_group_bytes =
               std::max(pending->required_group_bytes, patch.required_group_segment_size);
+          pending->records_moi_site |= records_moi_site;
         }
       };
 
@@ -1762,7 +1767,8 @@ public:
         bound_, [&](const Bound &candidate) { return candidate.symbol == symbol.handle; });
     if (bound == bound_.end()) {
       bound_.push_back({symbol.handle, kernel_object, pending->required_private_bytes,
-                        pending->dynamic_private_addend, pending->required_group_bytes});
+                        pending->dynamic_private_addend, pending->required_group_bytes,
+                        pending->records_moi_site});
     } else {
       bound->kernel_object = kernel_object;
       bound->required_private_bytes =
@@ -1771,6 +1777,7 @@ public:
           std::max(bound->dynamic_private_addend, pending->dynamic_private_addend);
       bound->required_group_bytes =
           std::max(bound->required_group_bytes, pending->required_group_bytes);
+      bound->records_moi_site |= pending->records_moi_site;
     }
     log_message(kLogInfo,
                 "ConSan dispatch-segment binding executable=%llu symbol=%llu kernel_object=0x%llx "
@@ -1824,10 +1831,26 @@ public:
                                  : std::optional<uint32_t>(bound->required_group_bytes);
   }
 
+  void note_dispatch_for_kernel_object(uint64_t kernel_object) {
+    std::lock_guard lock(mutex_);
+    if (std::ranges::none_of(bound_, [&](const Bound &candidate) {
+          return candidate.kernel_object == kernel_object && candidate.records_moi_site;
+        }))
+      return;
+    if (instrumented_dispatch_count_ != std::numeric_limits<uint64_t>::max())
+      ++instrumented_dispatch_count_;
+  }
+
+  [[nodiscard]] uint64_t instrumented_dispatch_count() const {
+    std::lock_guard lock(mutex_);
+    return instrumented_dispatch_count_;
+  }
+
   void clear() {
     std::lock_guard lock(mutex_);
     pending_.clear();
     bound_.clear();
+    instrumented_dispatch_count_ = 0;
   }
 
 private:
@@ -1837,6 +1860,7 @@ private:
     uint32_t required_private_bytes = 0;
     uint32_t dynamic_private_addend = 0;
     uint32_t required_group_bytes = 0;
+    bool records_moi_site = false;
   };
   struct Bound {
     uint64_t symbol = 0;
@@ -1844,6 +1868,7 @@ private:
     uint32_t required_private_bytes = 0;
     uint32_t dynamic_private_addend = 0;
     uint32_t required_group_bytes = 0;
+    bool records_moi_site = false;
   };
 
   [[nodiscard]] static std::string_view normalize_kernel_name(std::string_view name) {
@@ -1855,6 +1880,7 @@ private:
   mutable std::mutex mutex_;
   std::vector<Pending> pending_;
   std::vector<Bound> bound_;
+  uint64_t instrumented_dispatch_count_ = 0;
 };
 
 hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_memory(
@@ -1907,6 +1933,8 @@ public:
     moi_forbid_diagnostics_ = config.moi_forbid_diagnostics;
     moi_require_replay_conflict_ = config.moi_require_replay_conflict;
     moi_forbid_overflow_ = config.moi_forbid_overflow;
+    moi_runtime_sample_stride_ = config.moi_runtime_sample_stride;
+    moi_runtime_sample_offset_ = config.moi_runtime_sample_offset;
     fault_load_selector_.reset();
     if (config.fault_load_occurrence)
       fault_load_selector_.emplace(*config.fault_load_occurrence);
@@ -2119,6 +2147,10 @@ public:
     const bool moi_forbid_diagnostics = moi_forbid_diagnostics_;
     const bool moi_require_replay_conflict = moi_require_replay_conflict_;
     const bool moi_forbid_overflow = moi_forbid_overflow_;
+    const uint32_t moi_runtime_sample_stride = moi_runtime_sample_stride_;
+    const uint32_t moi_runtime_sample_offset = moi_runtime_sample_offset_;
+    const uint64_t instrumented_dispatch_count =
+        KernelPrivateDispatchRegistry::instance().instrumented_dispatch_count();
     const rocjitsu::ConSanMoiEngine moi_engine =
         config_ ? config_->moi_engine : rocjitsu::ConSanMoiEngine::RecordReplay;
     const bool fault_require_exactly_one = config_ && config_->fault_require_exactly_one;
@@ -2391,13 +2423,31 @@ public:
         std::_Exit(90);
     }
     if (required_records_missing) {
-      std::fprintf(stderr,
-                   "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_RECORDS requested, but %llu auto "
-                   "MOI report buffer(s) contained zero visible "
-                   "access/barrier/atomic/fence/diagnostic/exact-shadow/inline-atomic/"
-                   "inline-token/sampled "
-                   "records\n",
-                   static_cast<unsigned long long>(moi_report_summary.buffer_count));
+      if (instrumented_dispatch_count == 0u) {
+        std::fprintf(stderr,
+                     "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_RECORDS requested, but %llu auto "
+                     "MOI report buffer(s) contained zero visible records and no instrumented "
+                     "kernel dispatch packet was observed\n",
+                     static_cast<unsigned long long>(moi_report_summary.buffer_count));
+      } else if (moi_runtime_sample_stride > 1u) {
+        std::fprintf(stderr,
+                     "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_RECORDS requested, but %llu auto "
+                     "MOI report buffer(s) contained zero visible records after %llu "
+                     "instrumented dispatch packet(s); runtime sampling selected no workgroups "
+                     "(stride=%u offset=%u). Set RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1 for "
+                     "deterministic dense capture\n",
+                     static_cast<unsigned long long>(moi_report_summary.buffer_count),
+                     static_cast<unsigned long long>(instrumented_dispatch_count),
+                     moi_runtime_sample_stride, moi_runtime_sample_offset);
+      } else {
+        std::fprintf(stderr,
+                     "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_RECORDS requested, but %llu auto "
+                     "MOI report buffer(s) contained zero visible records after %llu "
+                     "instrumented dispatch packet(s); the dense record path produced no "
+                     "evidence\n",
+                     static_cast<unsigned long long>(moi_report_summary.buffer_count),
+                     static_cast<unsigned long long>(instrumented_dispatch_count));
+      }
       std::fflush(stderr);
       std::_Exit(86);
     }
@@ -2602,6 +2652,8 @@ private:
     moi_forbid_diagnostics_ = false;
     moi_require_replay_conflict_ = false;
     moi_forbid_overflow_ = false;
+    moi_runtime_sample_stride_ = 1u;
+    moi_runtime_sample_offset_ = 0u;
     fault_load_selector_.reset();
     original_create_from_file_ = nullptr;
     original_create_from_memory_ = nullptr;
@@ -2630,6 +2682,8 @@ private:
   bool moi_forbid_diagnostics_ = false;
   bool moi_require_replay_conflict_ = false;
   bool moi_forbid_overflow_ = false;
+  uint32_t moi_runtime_sample_stride_ = 1u;
+  uint32_t moi_runtime_sample_offset_ = 0u;
   std::optional<rocjitsu::ConSanFaultLoadSelector> fault_load_selector_;
   bool active_ = false;
   decltype(hsa_code_object_reader_create_from_file) *original_create_from_file_ = nullptr;
@@ -2906,7 +2960,8 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
         (type == HSA_PACKET_TYPE_VENDOR_SPECIFIC || type == HSA_PACKET_TYPE_INVALID);
     if (type != HSA_PACKET_TYPE_KERNEL_DISPATCH && !is_extended_dispatch)
       continue;
-    const auto &registry = KernelPrivateDispatchRegistry::instance();
+    auto &registry = KernelPrivateDispatchRegistry::instance();
+    registry.note_dispatch_for_kernel_object(packet->kernel_object);
     const auto required_private = registry.required_for_kernel_object(packet->kernel_object);
     const auto dynamic_private_addend =
         registry.dynamic_private_addend_for_kernel_object(packet->kernel_object);
