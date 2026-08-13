@@ -1779,6 +1779,26 @@ TEST(BinaryTranslatorE2E, EmptyTextGfx1250StillRejectsA0ToB0) {
                                    "A0-to-B0 translation is not supported"));
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250InvalidInstructionIsDiagnosedAndLeavesObjectUnchanged) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto invalid = gfx1250::build_vop1(gfx1250::kVReadfirstlaneB32Vop1, {.src0 = 255});
+  const std::vector<uint32_t> words = {invalid[0], kGfx1250SEndpgm};
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslatorOptions options;
+  options.input_revision = ProcessorRevision::Gfx1250B0;
+  options.output_revision = ProcessorRevision::Gfx1250A0;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::Legalization,
+                                   "does not support 32-bit literals"));
+}
+
 TEST(BinaryTranslatorE2E, DescriptorlessExecutableTextIsSuccessfulNoOp) {
   auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
   write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
@@ -6198,6 +6218,35 @@ TEST(BinaryTranslatorE2E, Gfx1250RejectsGeneratedIslandPoolSlotTargetingOutsideT
       "generated direct branch island pool targets outside source .text"));
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250InvalidPoolCandidateFallsBackToNormalDecodeDiagnostic) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  std::vector<uint32_t> words = {
+      rocjitsu::build_s_nop(rocjitsu::kBranchIslandPoolMarkerNopImmediate,
+                            ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_branch(static_cast<int16_t>(rocjitsu::kDirectBranchIslandPoolSlots),
+                               ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  words.insert(words.end(), rocjitsu::kDirectBranchIslandPoolSlots,
+               rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_GFX1250));
+  words[rocjitsu::kGeneratedIslandPoolHeaderWords] =
+      gfx1250::build_vop1(gfx1250::kVReadfirstlaneB32Vop1, {.src0 = 255})[0];
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                             "does not support 32-bit literals"));
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250RejectsNearMissGeneratedIslandPool) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   std::vector<uint32_t> words = {
@@ -10372,10 +10421,8 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3PackRejectsLiteral64) {
                                    rocjitsu::ProcessorRevision::Gfx1250A0));
       const auto result = translator.translate(source);
       ASSERT_FALSE(result.ok());
-      ASSERT_FALSE(result.diagnostics.empty());
-      EXPECT_NE(result.diagnostics.front().message.find("does not support SRC_LITERAL64"),
-                std::string::npos)
-          << result.diagnostics.front().message;
+      EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                                 "does not support 64-bit literals"));
     }
   }
 }

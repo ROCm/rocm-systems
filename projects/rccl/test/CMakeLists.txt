@@ -270,6 +270,7 @@ if(BUILD_TESTS)
       device/TestOp128.cpp
       device/GinDeviceTests.cpp
       device/GinAnvilIpcDevice_test.cpp
+      device/HierarchicalShuffleTests.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -369,6 +370,7 @@ if(BUILD_TESTS)
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
+      CeAlltoAllvEligibilityTests.cpp
       EnqueueTests.cpp
       LL128RegVariantKernelTests.cpp
       IpcsocketTests.cpp

@@ -160,6 +160,8 @@ Vopd::Vopd(const MachineInst *inst)
       throw util::InvalidInst("invalid VOPD3 Y opcode", "");
     uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
     uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
+    if (srcx0 == 254 || srcx0 == 255 || srcy0 == 254 || srcy0 == 255)
+      throw util::InvalidInst("VOPD3 does not support literal selectors", "");
     negx_ = static_cast<uint8_t>((word1_ >> 9) & 0x7);
     negy_ = static_cast<uint8_t>((word1_ >> 12) & 0x7);
     uint16_t vsrcx1 = static_cast<uint16_t>((word1_ >> 16) & 0xFF);
@@ -198,6 +200,8 @@ Vopd::Vopd(const MachineInst *inst)
     uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
     uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
     uint16_t vsrcy1 = static_cast<uint16_t>((word1_ >> 9) & 0xFF);
+    if (srcx0 == 254 || srcy0 == 254)
+      throw util::InvalidInst("VOPD does not support 64-bit literals", "");
     uint16_t vdstx = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
     uint16_t vdsty_hi = static_cast<uint16_t>((word1_ >> 17) & 0x7F);
     uint16_t vdsty = static_cast<uint16_t>((vdsty_hi << 1) | ((~vdstx) & 1u));
