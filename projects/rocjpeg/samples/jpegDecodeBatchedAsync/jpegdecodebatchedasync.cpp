@@ -174,6 +174,7 @@ int main(int argc, char **argv) {
 
     std::cout << "Decoding started, please wait! ... " << std::endl;
     auto total_start_time = std::chrono::high_resolution_clock::now();
+    bool timing_started = false;
 
     for (int i = 0; i < static_cast<int>(file_paths.size()); i += batch_size) {
         int batch_end = std::min(i + batch_size, static_cast<int>(file_paths.size()));
@@ -285,6 +286,10 @@ int main(int argc, char **argv) {
         slot->current_batch_size = current_batch_size;
 
         if (current_batch_size > 0) {
+            if (!timing_started) {
+                total_start_time = std::chrono::high_resolution_clock::now();
+                timing_started = true;
+            }
             RocJpegStatus rocjpeg_status = rocJpegDecodeBatchedAsync(rocjpeg_handle, stream_handles_for_batch.data(), current_batch_size, slot->decode_params_batch.data(), slot->images.data());
             if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
                 std::cerr << "ERROR: rocJpegDecodeBatchedAsync returned " << rocJpegGetErrorName(rocjpeg_status) << std::endl;

@@ -151,6 +151,7 @@ private:
     * @brief Waits for a submitted surface and copies/converts the decoded output.
     */
    RocJpegStatus FinalizeDecode(VASurfaceID surface_id, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
+   RocJpegStatus FinalizeDecodeBatched(const VASurfaceID *surface_ids, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations, int batch_size);
 
    /**
     * @brief Retrieves the height of the chroma channel.
