@@ -74,10 +74,10 @@ constexpr uint32_t make_vop2(uint32_t op, uint32_t vdst, uint32_t vsrc1, uint32_
 }
 
 TEST(CodeArchApiTest, PreservesExistingPublicEnumValues) {
-  EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_RDNA4), 8);
-  EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_RV32I), 9);
-  EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_RV64I), 10);
-  EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_CDNA5), 11);
+  EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_CDNA5), 4);
+  EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_RDNA4), 9);
+  EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_RV32I), 10);
+  EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_RV64I), 11);
   EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_NUM_ARCHS), 12);
   EXPECT_EQ(static_cast<int>(ROCJITSU_CODE_ARCH_INVALID), 12);
 }

@@ -4206,7 +4206,7 @@ TEST(Gfx1250DecodeTest, Vop3RejectsLiteral64Selector) {
       0x000000FEu,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
 }
@@ -4214,7 +4214,7 @@ TEST(Gfx1250DecodeTest, Vop3RejectsLiteral64Selector) {
 TEST(Gfx1250DecodeTest, Vop1RejectsUnsupportedLiteral32WithoutExtensionWord) {
   const auto words = cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 255});
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
 }
@@ -4222,7 +4222,7 @@ TEST(Gfx1250DecodeTest, Vop1RejectsUnsupportedLiteral32WithoutExtensionWord) {
 TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral32WithoutExtensionWord) {
   const auto words = cdna5::build_vop2(cdna5::kVFmamkF64Vop2, {.src0 = 255});
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
 }
@@ -4230,7 +4230,7 @@ TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral32WithoutExtensionWord) {
 TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral64WithoutExtensionWords) {
   const auto words = cdna5::build_vop2(cdna5::kVFmamkF32Vop2, {.src0 = 254});
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
 }
@@ -4242,7 +4242,7 @@ TEST(Gfx1250DecodeTest, SaluRejectsMixedLiteralWidths) {
       0x00000000u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
 }
@@ -4252,7 +4252,7 @@ TEST(Gfx1250DecodeTest, SendmsgRtnSelectorsAreNotLiterals) {
       0xBE804CFFu, // s_sendmsg_rtn_b32 s0, 255
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decoder->decode(words));
   ASSERT_NE(inst, nullptr);
@@ -4267,7 +4267,7 @@ TEST(Gfx1250DecodeTest, VopdRejectsLiteral64Selector) {
       0xFFFFFCFEu,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
 }
@@ -4279,7 +4279,7 @@ TEST(Gfx1250DecodeTest, Vop3RejectsDppWithLiteral) {
       0x00001500u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
 }
@@ -4627,7 +4627,7 @@ TEST(Gfx1250DecodeTest, Vopd3RejectsSrcX0Literal32Selector) {
       0x0A000001u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
 }
@@ -4639,7 +4639,7 @@ TEST(Gfx1250DecodeTest, Vopd3RejectsSrcY0Literal32Selector) {
       0x0A000001u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
 }
