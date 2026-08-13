@@ -174,7 +174,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     specs = [
         ('cdna3', SimpleNamespace(profile=CdnaProfile()), None),
         ('rdna4', SimpleNamespace(profile=Rdna4Profile()), None),
-        ('gfx1250', SimpleNamespace(profile=Gfx1250Profile()), None),
+        ('cdna5', SimpleNamespace(profile=Gfx1250Profile()), None),
     ]
 
     output = emit_isa_properties(str(tmp_path), specs).read_text()
@@ -214,7 +214,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '    };'
     ) in output
     assert (
-        'case ROCJITSU_CODE_ARCH_GFX1250:\n'
+        'case ROCJITSU_CODE_ARCH_CDNA5:\n'
         '    return {\n'
         '        .supports_wgp_mode = false,\n'
         '        .descriptor_sgpr_count_encoded = false,\n'
@@ -240,7 +240,7 @@ def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
         ('rdna3', Rdna3Profile()),
         ('rdna3_5', Rdna3_5Profile()),
         ('rdna4', Rdna4Profile()),
-        ('gfx1250', Gfx1250Profile()),
+        ('cdna5', Gfx1250Profile()),
     ]
     specs = [
         (name, SimpleNamespace(profile=profile), None) for name, profile in profiles
