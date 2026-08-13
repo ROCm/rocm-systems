@@ -128,6 +128,8 @@ jobs:
             sanitizer_runtime: SHARED
             c_compiler: gcc
             cxx_compiler: g++
+            arch_flags: -march=x86-64-v4
+            require_native_simd_width_16: 1
 
     steps:
       - name: Install base dependencies
@@ -151,6 +153,18 @@ jobs:
             emulation/rocjitsu
             .github
             shared/machine-readable-isa/isa
+
+      - name: Verify AVX-512 runner support
+        if: matrix.require_native_simd_width_16 == 1
+        shell: bash
+        run: |
+          required_features=(avx512f avx512bw avx512cd avx512dq avx512vl)
+          for feature in "${required_features[@]}"; do
+            if ! grep -qw "${feature}" /proc/cpuinfo; then
+              echo "::error::The ${feature} CPU feature is required by the ${{ matrix.name }} job."
+              exit 1
+            fi
+          done
 
       - name: Checkout corpus
         if: matrix.enable_tsan == 0
@@ -240,9 +254,10 @@ jobs:
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_CXX_COMPILER="${{ matrix.cxx_compiler }}")
           fi
 
-          CXXFLAGS=""
+          CFLAGS="${{ matrix.arch_flags }}"
+          CXXFLAGS="${{ matrix.arch_flags }}"
           if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
-            CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+            CXXFLAGS+=" -Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
           fi
           ROCM_PATH=`rocm-sdk path --root` \
             cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
@@ -254,6 +269,7 @@ jobs:
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
+            -DRJ_TEST_REQUIRE_NATIVE_SIMD_WIDTH_16=${{ matrix.require_native_simd_width_16 || 0 }} \
             -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
           # Set a conservative number of workers to avoid OOM and excessive system load.

@@ -1916,7 +1916,7 @@ inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
-    alignas(64) uint32_t C_words[M * N] = {};
+    alignas(64) uint32_t C_words[M * N];
     if (reads.acc)
       copy_matrix_region_words(*reads.acc, C_words);
     // A and B each occupy 8 VGPRs x wf lanes = 2*8*wf packed f16 (16 f16/lane
@@ -1994,7 +1994,7 @@ inline void exec_wmma_f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uin
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
-    alignas(64) uint32_t C_words[M * N] = {};
+    alignas(64) uint32_t C_words[M * N];
     if (reads.acc)
       copy_matrix_region_words(*reads.acc, C_words);
     // A and B each occupy 8 VGPRs x wf lanes = 2*8*wf packed bf16 (16 bf16/lane
@@ -2119,7 +2119,7 @@ void exec_wmma_f32_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
-    alignas(64) uint32_t C_words[M * N] = {};
+    alignas(64) uint32_t C_words[M * N];
     if (reads.acc)
       copy_matrix_region_words(*reads.acc, C_words);
     // Bulk-convert each whole packed f8 region to f32 once, then the hoist is a
@@ -2201,7 +2201,7 @@ void exec_wmma_f32_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
     alignas(64) float C_buf[M * N];
     alignas(64) uint32_t A_words[M * K];
     alignas(64) uint32_t B_words[N * K];
-    alignas(64) uint32_t C_words[M * N] = {};
+    alignas(64) uint32_t C_words[M * N];
     copy_matrix_region_words(reads.a, A_words);
     copy_matrix_region_words(reads.b, B_words);
     if (reads.acc)
@@ -2661,7 +2661,7 @@ void exec_wmma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32
     alignas(64) float C_buf[M * N];
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    alignas(64) uint32_t C_words[M * N] = {};
+    alignas(64) uint32_t C_words[M * N];
     if (reads.acc)
       copy_matrix_region_words(*reads.acc, C_words);
     convert_f16_matrix_region(reads.a, A_f32, M * K);
@@ -2787,7 +2787,7 @@ void exec_wmma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint3
     alignas(64) float C_buf[M * N];
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    alignas(64) uint32_t C_words[M * N] = {};
+    alignas(64) uint32_t C_words[M * N];
     if (reads.acc)
       copy_matrix_region_words(*reads.acc, C_words);
     convert_bf16_matrix_region(reads.a, A_f32, M * K);
@@ -2889,7 +2889,7 @@ void exec_wmma_f16_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
     alignas(64) float C_buf[M * N];
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    alignas(64) uint32_t C_words[M * N] = {};
+    alignas(64) uint32_t C_words[M * N];
     if (reads.acc)
       copy_matrix_region_words(*reads.acc, C_words);
     convert_f8_matrix_region<A_FP8, FNUZ>(reads.a, A_f32, M * K);
@@ -3441,7 +3441,7 @@ inline void exec_wmma_i32_16x16x64_iu8(auto &cu, uint32_t dst, uint32_t s0, uint
     alignas(64) uint32_t A_buf[M * K]; // A[row][k] (sign-/zero-extended bits)
     alignas(64) uint32_t B_buf[K * N]; // B[k][col] (sign-/zero-extended bits)
     alignas(64) uint32_t S_buf[M * N]; // sum-of-products, accumulator added at pack
-    alignas(64) uint32_t C_words[M * N] = {};
+    alignas(64) uint32_t C_words[M * N];
     if (reads.acc)
       copy_matrix_region_words(*reads.acc, C_words);
     // Bulk-extend the packed byte regions to int32 once, then the hoist is a
@@ -4165,7 +4165,7 @@ void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
     alignas(64) float C_buf[M * N * BATCH];
     alignas(64) uint32_t A_words[M * K * BATCH];
     alignas(64) uint32_t B_words[N * K * BATCH];
-    alignas(64) uint32_t C_words[M * N * BATCH] = {};
+    alignas(64) uint32_t C_words[M * N * BATCH];
     copy_matrix_region_words(reads.a, A_words);
     copy_matrix_region_words(reads.b, B_words);
     if (reads.acc)
@@ -4247,7 +4247,7 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
     static_assert(M * N * B * sizeof(float) <= 8 * 1024,
                   "specialized MFMA result staging exceeds the stack budget");
     alignas(64) float C_buf[M * N * B]; // C[batch][row][col]
-    alignas(64) uint32_t C_words[M * N * B] = {};
+    alignas(64) uint32_t C_words[M * N * B];
     if (reads.acc)
       copy_matrix_region_words(*reads.acc, C_words);
     // A/B occupy M*K*B and N*K*B packed f16 over their VGPRs. Bulk-convert each
@@ -4342,7 +4342,7 @@ void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, u
     static_assert(M * N * B * sizeof(float) <= 8 * 1024,
                   "specialized MFMA result staging exceeds the stack budget");
     alignas(64) float C_buf[M * N * B]; // C[batch][row][col]
-    alignas(64) uint32_t C_words[M * N * B] = {};
+    alignas(64) uint32_t C_words[M * N * B];
     if (reads.acc)
       copy_matrix_region_words(*reads.acc, C_words);
     // Bulk-convert the packed bf16 regions to f32 once (zero-extend + shift),
@@ -4433,7 +4433,7 @@ void exec_f32_mfma_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
-    alignas(64) uint32_t C_words[M * N] = {};
+    alignas(64) uint32_t C_words[M * N];
     if (reads.acc)
       copy_matrix_region_words(*reads.acc, C_words);
     // Bulk-convert the packed f8 regions to f32 once through the LUTs, then the
@@ -4526,7 +4526,7 @@ void exec_i32_mfma_i8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
     static_assert(M * N * B * sizeof(uint32_t) <= 8 * 1024,
                   "specialized MFMA result staging exceeds the stack budget");
     alignas(64) uint32_t C_buf[M * N * B]; // C[batch][row][col]
-    alignas(64) uint32_t C_words[M * N * B] = {};
+    alignas(64) uint32_t C_words[M * N * B];
     if (reads.acc)
       copy_matrix_region_words(*reads.acc, C_words);
     // Bulk sign-extend the packed i8 regions to int32 once, then the hoist is

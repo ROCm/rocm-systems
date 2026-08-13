@@ -104,6 +104,11 @@ option(
     "Enable expensive exhaustive test suites (MFMA/WMMA SIMD bit-exactness)"
     OFF
 )
+option(
+    RJ_TEST_REQUIRE_NATIVE_SIMD_WIDTH_16
+    "Require 16-lane native SIMD in tests that exercise AVX-512 fast paths"
+    OFF
+)
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
 option(
     LTO
