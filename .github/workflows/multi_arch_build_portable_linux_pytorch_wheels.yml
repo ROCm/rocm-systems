@@ -249,6 +249,7 @@ jobs:
 
       - name: Checkout PyTorch source repos (nightly)
         if: ${{ inputs.pytorch_git_ref == 'nightly' }}
+        timeout-minutes: 30
         run: |
           ./external-builds/pytorch/pytorch_torch_repo.py checkout \
             --repo-hashtag nightly \
@@ -267,6 +268,7 @@ jobs:
 
       - name: Checkout PyTorch source repos (stable)
         if: ${{ inputs.pytorch_git_ref != 'nightly' }}
+        timeout-minutes: 30
         run: |
           pytorch_origin="${{ inputs.pytorch_gitrepo_origin }}"
           if [ -z "${pytorch_origin}" ]; then
