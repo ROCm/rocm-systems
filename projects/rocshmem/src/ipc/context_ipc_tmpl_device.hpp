@@ -1835,6 +1835,17 @@ __device__ inline int IPCContext::tile_reduce_typed_impl(
       internal_putmem_wg(my_pWrk, src_base, segment_elems * sizeof(T),
                          root_pe_world);
     }
+  } else if (src_contiguous && my_pe_in_team == root) {
+    const T *src_typed = reinterpret_cast<const T *>(src_base);
+    if (worker_count == 1) {
+      __builtin_memcpy(my_pWrk, src_typed, segment_elems * sizeof(T));
+    } else if (worker_count == WF_SIZE) {
+      for (size_t elem = worker_id; elem < segment_elems; elem += worker_count)
+        my_pWrk[elem] = src_typed[elem];
+    } else {
+      for (size_t elem = worker_id; elem < segment_elems; elem += worker_count)
+        my_pWrk[elem] = src_typed[elem];
+    }
   } else {
     for (size_t elem = worker_id; elem < segment_elems; elem += worker_count) {
       const size_t tile_elem = segment_start + elem;
