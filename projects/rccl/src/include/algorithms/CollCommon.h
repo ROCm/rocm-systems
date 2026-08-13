@@ -259,4 +259,69 @@ __device__ __forceinline__ void ddaLLLoadLineB128(const uint32_t* src, uint32_t&
 #endif
 }
 
+// ---- Shared per-block epoch arithmetic (used by all LL and LL128 kernels) ----
+// The pure helpers below are host-callable (__host__ __device__) so the host
+// unit tests exercise the exact same code the kernels run; the device wrappers
+// (ddaLLEpochBegin/ddaLLEpochEnd) add the thread-0 guard and barrier and stay
+// __device__ only.
+
+// Derive this launch's flag from a block's epoch cell: f = cell + 1, skipping
+// the 0 "cleared scratch" sentinel so bank parity (flag & 1) is preserved.
+__host__ __device__ __forceinline__ uint32_t ddaLLEpochFlag(uint32_t cell) {
+  uint32_t f = cell + 1u;
+  if (f == 0u) {
+    f = 2u; // skip 0 sentinel; keep bank parity
+  }
+  return f;
+}
+
+// Double-buffer bank selector: bank = flag & 1.
+__host__ __device__ __forceinline__ unsigned ddaLLEpochBank(uint32_t flag) {
+  return flag & 1u;
+}
+
+// Advance every epoch cell this block strides over to `flag`, so all cells stay
+// in lock-step even when a later launch uses a different block count.
+// Preconditions (no runtime assert -- this is a kernel utility; callers, i.e.
+// the device wrappers and the test's applyLaunch, are constructed to satisfy
+// them): total > 0 (total == 0 would make the loop non-terminating),
+// 0 <= flatBlockId, 0 <= epochLen, and epochDev points to at least epochLen cells.
+__host__ __device__ __forceinline__ void ddaLLEpochRestamp(uint32_t* __restrict__ epochDev, int flatBlockId, int total,
+                                                           int epochLen, uint32_t flag) {
+  for (int e = flatBlockId; e < epochLen; e += total) {
+    epochDev[e] = flag;
+  }
+}
+
+// HIP-graph-safe per-block epoch (shared by all LL/LL128 kernels).
+// Entry: tid 0 reads this block's epoch cell (all cells hold the same value),
+// derives the next flag on-device, and broadcasts it via the caller-provided
+// shared slot. Returns the flag for this launch.
+//
+// BLOCK-COOPERATIVE: contains __syncthreads() (the shared-slot store by tid 0
+// must be published before the other threads read the returned flag). ALL
+// threads in the block must call this from uniform control flow -- every DDA
+// LL/LL128 kernel does, unconditionally at entry (the only earlier `return` is
+// keyed on blockIdx, so a block exits whole, never partially). Not host-callable;
+// use the pure ddaLLEpochFlag/ddaLLEpochBank for the arithmetic in host code.
+__device__ __forceinline__ uint32_t ddaLLEpochBegin(const uint32_t* __restrict__ epochDev, int flatBlockId,
+                                                    uint32_t& s_flag) {
+  if (threadIdx.x == 0) {
+    s_flag = ddaLLEpochFlag(epochDev[flatBlockId]);
+  }
+  __syncthreads();
+  return s_flag;
+}
+
+// Exit: tid 0 restamps every epoch cell this block strides over to `flag`.
+// `total` == gridDim.x * gridDim.y. Unlike ddaLLEpochBegin this needs NO barrier
+// -- nothing is broadcast back to the block, and the next launch on the stream is
+// serialized after this one -- so it is safe under thread-0 divergence.
+__device__ __forceinline__ void ddaLLEpochEnd(uint32_t* __restrict__ epochDev, int flatBlockId, int total, int epochLen,
+                                              uint32_t flag) {
+  if (threadIdx.x == 0) {
+    ddaLLEpochRestamp(epochDev, flatBlockId, total, epochLen, flag);
+  }
+}
+
 } // namespace meta::comms

@@ -4,13 +4,15 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#pragma once
+#ifndef RCCL_TEST_DDA_FABRIC_TEST_HELPERS_HPP
+#define RCCL_TEST_DDA_FABRIC_TEST_HELPERS_HPP
 
 #include <cstring>
 
 #include "comm.h"
 #include "dda_init_detail.h"
 #include "fabric_gpu_barrier.h"
+#include "gtest/gtest.h"
 
 namespace RcclUnitTesting
 {
@@ -57,4 +59,16 @@ struct DdaFabricMockComm
     ncclComm* get() { return &comm; }
 };
 
+// Shared fixture for DDA fabric host tests: a mock comm plus dummy user-buffer
+// pointers (every fabric eligibility predicate ignores the buffer pointers).
+class DdaFabricFixture : public ::testing::Test
+{
+protected:
+    DdaFabricMockComm mockComm_;
+    void*             sendbuff_{reinterpret_cast<void*>(0x1000)};
+    void*             recvbuff_{reinterpret_cast<void*>(0x2000)};
+};
+
 } // namespace RcclUnitTesting
+
+#endif // RCCL_TEST_DDA_FABRIC_TEST_HELPERS_HPP

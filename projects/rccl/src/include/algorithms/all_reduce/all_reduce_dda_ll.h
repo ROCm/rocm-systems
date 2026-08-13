@@ -73,14 +73,8 @@ __launch_bounds__(512)
   const int flatBlockId = blockIdx.x;
   const int total = gridDim.x;
   __shared__ uint32_t s_flag;
-  if (threadIdx.x == 0) {
-    uint32_t f = epochDev[flatBlockId] + 1u;
-    if (f == 0u) f = 2u;                   // skip 0 sentinel; keep bank parity
-    s_flag = f;
-  }
-  __syncthreads();
-  const uint32_t flag = s_flag;
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  const uint32_t flag = ddaLLEpochBegin(epochDev, flatBlockId, s_flag);
+  const size_t bankOffsetPkts = (size_t)ddaLLEpochBank(flag) * (size_t)nRanks * slot;
 
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
   const size_t stride = (size_t)gridDim.x * blockDim.x;
@@ -120,11 +114,7 @@ __launch_bounds__(512)
     out[2 * pk + 1] = acc1;
   }
 
-  if (threadIdx.x == 0) {
-    for (int e = flatBlockId; e < epochLen; e += total) {
-      epochDev[e] = flag;
-    }
-  }
+  ddaLLEpochEnd(epochDev, flatBlockId, total, epochLen, flag);
 }
 
 } // namespace meta::comms

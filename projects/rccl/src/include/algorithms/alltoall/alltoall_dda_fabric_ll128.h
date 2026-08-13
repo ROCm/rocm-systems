@@ -72,7 +72,7 @@ __launch_bounds__(1024)
   const int total = gridDim.x * gridDim.y;
   __shared__ uint32_t s_flag;
   const uint32_t flag = ddaLLEpochBegin(epochDev, flatBlockId, s_flag);
-  const size_t bankOffsetLines = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  const size_t bankOffsetLines = (size_t)ddaLLEpochBank(flag) * (size_t)nRanks * slot;
 
   // This block's line range [lnBegin, lnEnd); [0, numLines) when nChunks == 1.
   const size_t lnPerChunk = (numLines + (size_t)nChunks - 1) / (size_t)nChunks;

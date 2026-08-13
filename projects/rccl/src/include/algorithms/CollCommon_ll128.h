@@ -19,8 +19,9 @@
  *
  * HIP-graph safety: the flag/bank are derived on-device from the per-block
  * epoch array (comm->ddaLLEpochDev), never passed from the host, so nothing is
- * baked into a captured graph. See ddaLLEpochBegin / ddaLLEpochEnd below and
- * commit 6820b6f4a9 ("Make DDA LL kernels HIP graph-capture safe").
+ * baked into a captured graph. See ddaLLEpochBegin / ddaLLEpochEnd in
+ * algorithms/CollCommon.h and commit 6820b6f4a9 ("Make DDA LL kernels HIP
+ * graph-capture safe").
  *
  * See LICENSE.txt for license information.
  ************************************************************************/
@@ -81,32 +82,9 @@ __device__ __forceinline__ uint64_t ddaLL128AddWord(uint64_t a, uint64_t b) {
   return ((uint64_t)hi << 32) | (uint64_t)lo;
 }
 
-// ---- HIP-graph-safe per-block epoch (shared by all LL/LL128 kernels) ----
-// Entry: tid 0 reads this block's epoch cell (all cells hold the same value),
-// derives the next flag on-device, and broadcasts it via the caller-provided
-// shared slot. flag 0 is the "cleared scratch" sentinel and is skipped so bank
-// parity (flag & 1) is preserved. Returns the flag for this launch.
-__device__ __forceinline__ uint32_t ddaLLEpochBegin(const uint32_t* __restrict__ epochDev, int flatBlockId,
-                                                    uint32_t& s_flag) {
-  if (threadIdx.x == 0) {
-    uint32_t f = epochDev[flatBlockId] + 1u;
-    if (f == 0u) f = 2u; // skip 0 sentinel; keep bank parity
-    s_flag = f;
-  }
-  __syncthreads();
-  return s_flag;
-}
-
-// Exit: tid 0 advances every epoch cell this block strides over to `flag`, so
-// all cells stay in lock-step even when a later launch uses a different block
-// count. `total` == gridDim.x * gridDim.y.
-__device__ __forceinline__ void ddaLLEpochEnd(uint32_t* __restrict__ epochDev, int flatBlockId, int total, int epochLen,
-                                              uint32_t flag) {
-  if (threadIdx.x == 0) {
-    for (int e = flatBlockId; e < epochLen; e += total) {
-      epochDev[e] = flag;
-    }
-  }
-}
+// ddaLLEpochBegin / ddaLLEpochEnd and the pure epoch arithmetic
+// (ddaLLEpochFlag / ddaLLEpochBank / ddaLLEpochRestamp) now live in
+// algorithms/CollCommon.h so both the LL and LL128 kernels share them; they are
+// visible here transitively via that include.
 
 } // namespace meta::comms

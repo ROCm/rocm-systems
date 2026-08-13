@@ -72,7 +72,7 @@ __launch_bounds__(1024)
   const int total = gridDim.x;
   __shared__ uint32_t s_flag;
   const uint32_t flag = ddaLLEpochBegin(epochDev, flatBlockId, s_flag);
-  const size_t bankOffsetLines = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  const size_t bankOffsetLines = (size_t)ddaLLEpochBank(flag) * (size_t)nRanks * slot;
 
   // 16 lanes cooperate on one 128B line; grid-stride over line-groups.
   const int group = threadIdx.x / kDdaLL128Lanes;
