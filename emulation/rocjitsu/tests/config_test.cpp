@@ -426,7 +426,8 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
                     { "key": "num_wf_slots", "value": "20" },
                     { "key": "sgprs_per_wf", "value": "104" },
                     { "key": "vgprs_per_wf", "value": "256" },
-                    { "key": "lds_size_kb", "value": "64" }
+                    { "key": "lds_size_kb", "value": "64" },
+                    { "key": "functional_quantum", "value": "7" }
                   ]
                 }]
               },
@@ -471,6 +472,7 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
   EXPECT_EQ(xcd->num_shader_engines(), 2u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 3u);
   EXPECT_EQ(xcd->shader_engine(1)->num_compute_units(), 3u);
+  EXPECT_EQ(xcd->shader_engine(0)->compute_unit(0)->config().functional_quantum, 7u);
 }
 
 TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {

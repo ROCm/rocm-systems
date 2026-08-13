@@ -439,6 +439,8 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       cc.sgprs_per_wf = config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch));
       cc.vgprs_per_wf = config_u32(cfg, "vgprs_per_wf", default_vgprs_per_wf(arch));
       cc.lds_size_kb = config_u32(cfg, "lds_size_kb", 160);
+      cc.functional_quantum =
+          config_u32(cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum);
       return amdgpu::ComputeUnitCore::create(n, cc, mem, nullptr, mode);
     };
   }
