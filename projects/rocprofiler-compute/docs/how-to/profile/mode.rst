@@ -168,7 +168,7 @@ The following sample command profiles the ``vcopy`` workload.
       INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.257594 140315166887680 simple_timer.cpp:55] [rocprofv3] output generation ::     0.106959 sec
       INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.257624 140315166887680 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.110297 sec
       INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
-      INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/116379_native_counter_collection.csv
+      INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/116379_native_counter_collection.csv.gz
       INFO    |-> [rocprofiler-sdk] vcopy testing on GCD 0
       INFO    |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
    WARNING PC sampling data collection skipped as --pc-sampling is not specified.
@@ -322,10 +322,10 @@ Examples:
     │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
     │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
     ├── profiling_config.yaml
-    ├── results_pmc_perf_0.csv
-    ├── results_pmc_perf_1.csv
-    ├── results_pmc_perf_2.csv
-    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv
+    ├── results_pmc_perf_0.csv.gz
+    ├── results_pmc_perf_1.csv.gz
+    ├── results_pmc_perf_2.csv.gz
+    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv.gz
     ├── roofline.csv
     └── sysinfo.csv
 
@@ -370,10 +370,10 @@ details on when the final ``pmc_perf.csv`` is created.
     │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
     │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
     ├── profiling_config.yaml
-    ├── results_pmc_perf_0.csv
-    ├── results_pmc_perf_1.csv
-    ├── results_pmc_perf_2.csv
-    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv
+    ├── results_pmc_perf_0.csv.gz
+    ├── results_pmc_perf_1.csv.gz
+    ├── results_pmc_perf_2.csv.gz
+    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv.gz
     ├── roofline.csv
     └── sysinfo.csv
 
@@ -386,7 +386,7 @@ Raw performance counter data produced by the underlying
 :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend is written in ``rocpd``
 (SQLite) format:
 
-* The rocpd database files are converted to CSV files (``results_pmc_perf_0.csv``, ``results_pmc_perf_SQ_*.csv``, etc.) for each profiling run, after which the database files are removed.
+* The rocpd database files are converted to gzip-compressed CSV files (``results_pmc_perf_0.csv.gz``, ``results_pmc_perf_SQ_*.csv.gz``, etc.) for each profiling run, after which the database files are removed.
 * These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
 * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
 

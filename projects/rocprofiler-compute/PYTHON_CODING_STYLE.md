@@ -6,6 +6,7 @@ This document outlines coding conventions and best practices for Python developm
 
 - [Function Length](#function-length)
 - [Naming Conventions](#naming-conventions)
+- [Python 3.8 Compatible Syntax](#python-38-compatible-syntax)
 - [I/O and Computation Separation](#io-and-computation-separation)
 - [File I/O Encoding](#file-io-encoding)
 - [Nested Functions](#nested-functions)
@@ -118,6 +119,54 @@ def resolve_library_path(library_path: Optional[str]) -> Optional[str]:
     # ... 50+ lines of logic including version parsing, comparison,
     # and selection all in one function.
     # This makes the function hard to test and understand.
+```
+
+## Python 3.8 Compatible Syntax
+
+Profile mode runs on Python 3.8, so every module must parse and execute there.
+`from __future__ import annotations` makes newer syntax appear to work by
+deferring annotation evaluation, which hides 3.8 breakage until a runtime that
+actually evaluates the annotation reaches it. Write the 3.8 form directly
+instead, so the syntax a module uses is the syntax it supports.
+
+### Rules
+
+- Never add `from __future__ import annotations`, or any other `__future__` import.
+- Use `typing.List`, `typing.Dict`, `typing.Tuple`, and `typing.Set` for annotations, not the builtin generics `list[...]`, `dict[...]`, `tuple[...]`, `set[...]`.
+- Use `typing.Optional[X]` and `typing.Union[X, Y]`, not `X | None` or `X | Y`.
+- Do not use 3.9+ library additions such as `dict` merge with `|`, `str.removeprefix`, or `str.removesuffix`.
+
+### Example
+
+**Good:** Annotations a 3.8 interpreter evaluates without help
+
+```python
+from pathlib import Path
+from typing import List, Optional
+
+
+def find_csvs(directory: Path, pattern: str) -> List[Path]:
+    ...
+
+
+def resolve_csv(path: Optional[Path]) -> Path:
+    ...
+```
+
+**Bad:** Builtin generics propped up by a `__future__` import
+
+```python
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def find_csvs(directory: Path, pattern: str) -> list[Path]:
+    ...
+
+
+def resolve_csv(path: Path | None) -> Path:
+    ...
 ```
 
 ## I/O and Computation Separation
@@ -730,8 +779,6 @@ Can be used standalone or imported by the master workflow.
 Usage:
     python hash_manager.py --compute-all <configs_dir>
 """
-
-from __future__ import annotations
 
 import argparse
 import hashlib

@@ -15,7 +15,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema
+from utils import csv_compression, file_io, parser, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
@@ -27,7 +27,7 @@ from utils.logger import (
 from utils.metrics.expression import build_metric_value_string
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
-    is_workload_empty,
+    validate_workload,
 )
 from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
@@ -332,7 +332,7 @@ class OmniAnalyze_Base:
                 profiling_config.get("iteration_multiplexing"),
                 self.pc_sampling_only(),
             ]):
-                is_workload_empty(dir_info[0])
+                validate_workload(dir_info[0])
 
         # Ensure analysis output does not overwrite existing files
         if args.output_name:
@@ -380,32 +380,41 @@ class OmniAnalyze_Base:
         )
 
         rows_written = 0
-        with open(output_file, "w", newline="", encoding="utf-8") as outfile:
+        with csv_compression.open_csv_write(output_file) as outfile:
             writer = None
             for file in result_files:
-                with open(file, newline="", encoding="utf-8") as infile:
-                    reader = csv.reader(infile)
-                    header = next(reader, None)
-                    if header is None:
-                        console_warning(f"Skipping empty {file}")
-                        continue
-                    if "Counter_Name" not in header:
-                        output_file.unlink(missing_ok=True)
-                        console_error(
-                            f"{file} is not in the supported rocpd format. "
-                            "Please re-profile this workload with a current "
-                            "release."
-                        )
-                    # Write header only once
-                    if writer is None:
-                        writer = csv.writer(outfile)
-                        writer.writerow(header)
-                    for row in reader:
-                        writer.writerow(row)
-                        rows_written += 1
+                # Only the read can fail on compression; output_file is plain.
+                try:
+                    with csv_compression.open_csv_read(file) as infile:
+                        reader = csv.reader(infile)
+                        header = next(reader, None)
+                        if header is None:
+                            console_warning(f"Skipping empty {file}")
+                            continue
+                        if "Counter_Name" not in header:
+                            output_file.unlink(missing_ok=True)
+                            console_error(
+                                f"{file} is not in the supported rocpd format. "
+                                "Please re-profile this workload with a current "
+                                "release."
+                            )
+                        if writer is None:
+                            writer = csv.writer(outfile)
+                            writer.writerow(header)
+                        for row in reader:
+                            writer.writerow(row)
+                            rows_written += 1
+                except csv_compression.CORRUPT_CSV_ERRORS as e:
+                    # Drop the partial pmc_perf.csv built from earlier files.
+                    output_file.unlink(missing_ok=True)
+                    console_error(
+                        f"{file} is truncated or corrupt: {e}\n"
+                        "A profile run killed mid-write leaves this behind; "
+                        "re-run 'rocprof-compute profile' to regenerate the "
+                        "workload."
+                    )
 
-        # A header-only pmc_perf.csv would be reused by later analyze runs and
-        # misread as valid, so refuse to leave one behind.
+        # A header-only pmc_perf.csv would be reused by later analyze runs.
         if rows_written == 0:
             output_file.unlink(missing_ok=True)
             console_error(
@@ -422,7 +431,7 @@ class OmniAnalyze_Base:
             workload_dir: Path to the workload directory
         """
         pmc_perf = workload_dir / "pmc_perf.csv"
-        result_files = list(workload_dir.glob("results_*.csv"))
+        result_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
 
         if pmc_perf.exists() and pmc_perf.stat().st_size > 0:
             console_debug(f"Using existing {pmc_perf}")

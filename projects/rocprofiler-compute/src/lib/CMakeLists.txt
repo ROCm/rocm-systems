@@ -36,6 +36,12 @@ endif()
 find_package(rocprofiler-sdk REQUIRED CONFIG)
 find_package(amd_comgr REQUIRED CONFIG)
 
+# pkg-config zlib: find_package(ZLIB) can pick up ROCm headers without libz.
+pkg_check_modules(zlib REQUIRED IMPORTED_TARGET zlib)
+if(NOT TARGET ZLIB::ZLIB)
+    add_library(ZLIB::ZLIB ALIAS PkgConfig::zlib)
+endif()
+
 add_subdirectory(external)
 add_subdirectory(utils)
 add_subdirectory(pc_sampling_collector)

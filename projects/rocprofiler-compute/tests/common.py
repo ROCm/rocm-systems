@@ -20,6 +20,9 @@ SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+# Imported after sys.path is extended, since it lives under src/.
+from utils import csv_compression  # noqa: E402
+
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
     "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
@@ -56,9 +59,13 @@ def check_resource_allocation():
 
 
 def check_file_pattern(pattern, file_path):
-    """Check if the given pattern exists in the file"""
+    """Check if the given pattern exists in the file.
+
+    Opened through the compression boundary so a compressed results file is
+    searched by its contents, the same as a plain one.
+    """
     content = ""
-    with open(file_path) as f:
+    with csv_compression.open_csv_read(file_path) as f:
         content = f.read()
     return len(re.findall(pattern, content)) != 0
 
@@ -159,13 +166,16 @@ def check_csv_files(output_dir, num_devices, num_kernels):
     """
     files_in_workload = os.listdir(output_dir)
 
+    # results_*.csv is written compressed, so accept either form. read_csv
+    # infers gzip from the .gz suffix.
+    def is_csv(name):
+        return name.endswith(".csv") or name.endswith(".csv.gz")
+
     # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv)
     has_separate = any(
-        f.startswith("pmc_perf_") and f.endswith(".csv") for f in files_in_workload
+        f.startswith("pmc_perf_") and is_csv(f) for f in files_in_workload
     )
-    has_results = any(
-        f.startswith("results_") and f.endswith(".csv") for f in files_in_workload
-    )
+    has_results = any(f.startswith("results_") and is_csv(f) for f in files_in_workload)
 
     assert has_separate or has_results, (
         "Expected pmc_perf_*.csv or results_*.csv from profile mode"
@@ -174,7 +184,7 @@ def check_csv_files(output_dir, num_devices, num_kernels):
     # Validate row counts for PMC files (but don't add to return dict)
     for file in files_in_workload:
         is_pmc = file.startswith("pmc_perf_") or file.startswith("results_")
-        if is_pmc and file.endswith(".csv"):
+        if is_pmc and is_csv(file):
             df = pd.read_csv(output_dir + "/" + file)
             err_msg = (
                 f"PMC file {file} has insufficient rows: "
@@ -203,11 +213,11 @@ def check_non_pmc_files(output_dir, num_devices, num_kernels):
 
     # Load non-PMC files into return dict
     for file in files_in_workload:
-        if file.endswith(".csv"):
-            # Skip PMC files (already validated above)
-            if file.startswith("pmc_perf_") or file.startswith("results_"):
-                continue
+        # Skip PMC files (already validated above), compressed or not
+        if file.startswith("pmc_perf_") or file.startswith("results_"):
+            continue
 
+        if file.endswith(".csv"):
             # Load other CSV files
             file_dict[file] = pd.read_csv(output_dir + "/" + file)
             if "roofline" in file:

@@ -9,6 +9,7 @@ path: reading and writing CSV rows, dropping columns, and assigning group ids.
 """
 
 import csv
+import gzip
 import tempfile
 from pathlib import Path
 
@@ -226,3 +227,56 @@ def test_group_id_assigner_reuses_ids_for_repeated_keys():
     assert assigner.apply({"name": "a"})["group_id"] == 0
     # A missing column contributes None rather than raising.
     assert assigner.apply({})["group_id"] == 2
+
+
+# =============================================================================
+# Compression
+#
+# The helpers open through csv_compression, so a .gz name compresses on write
+# and either form reads back the same rows.
+# =============================================================================
+
+
+def test_write_csv_from_dicts_compresses_gz_name(tmp_path, sample_csv_data):
+    path = tmp_path / "out.csv.gz"
+
+    csv_ops.write_csv_from_dicts(str(path), sample_csv_data)
+
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        assert list(csv.DictReader(f)) == sample_csv_data
+
+
+def test_read_csv_as_dicts_reads_compressed(tmp_path, sample_csv_data):
+    path = tmp_path / "in.csv.gz"
+    csv_ops.write_csv_from_dicts(str(path), sample_csv_data)
+
+    rows, fieldnames = csv_ops.read_csv_as_dicts(str(path))
+
+    assert rows == sample_csv_data
+    assert fieldnames == ["name", "age", "city"]
+
+
+def test_iter_csv_dicts_reads_compressed(tmp_path, sample_csv_data):
+    path = tmp_path / "in.csv.gz"
+    csv_ops.write_csv_from_dicts(str(path), sample_csv_data)
+
+    assert list(csv_ops.iter_csv_dicts(str(path))) == sample_csv_data
+
+
+def test_stream_csv_to_file_across_compressed_and_plain(tmp_path):
+    """A compressed source streams to either form of destination, and the
+    destination name alone decides whether the output is compressed."""
+    src = tmp_path / "in.csv.gz"
+    with gzip.open(src, "wt", newline="", encoding="utf-8") as f:
+        f.write("a,b\n1,2\n3,4\n")
+    compressed_dest = tmp_path / "out.csv.gz"
+    plain_dest = tmp_path / "out.csv"
+
+    assert csv_ops.stream_csv_to_file(str(src), str(compressed_dest)) == 2
+    assert csv_ops.stream_csv_to_file(str(src), str(plain_dest)) == 2
+
+    assert plain_dest.read_text() == "a,b\n1,2\n3,4\n"
+    # Compression is the only difference: the two destinations hold the same
+    # bytes once the container is stripped.
+    with gzip.open(compressed_dest, "rb") as f:
+        assert f.read() == plain_dest.read_bytes()
