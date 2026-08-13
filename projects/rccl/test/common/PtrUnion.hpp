@@ -46,6 +46,11 @@ namespace RcclUnitTesting
   // covered (fp8 via dedicated byte-based kernels). Kept as a hook for future gating.
   bool UtDeviceDtypeSupported(ncclDataType_t const dataType);
 
+  // Minimum element count for the device-data path to engage. Below this, host prep is
+  // cheap relative to per-sub-case overhead (fork/comm-init/launch), so the device path
+  // gives no speedup and stays off. Default 1Mi; override with UT_DEVICE_DATA_MIN_ELEMS.
+  size_t UtDeviceDataMinElements();
+
   // PtrUnion encapsulates a pointer of all the different supported datatypes
   // NOTE: Currently half-precision float tests are unsupported due to half
   //       being supported on GPU only and not host

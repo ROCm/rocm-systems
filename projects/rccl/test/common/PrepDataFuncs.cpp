@@ -109,6 +109,7 @@ namespace RcclUnitTesting
     // bias / constant-input variants keep the host reference path.
     if (UtDeviceDataEnabled() && isAllReduce
         && UtDeviceDtypeSupported(collArgs.dataType)
+        && collArgs.numInputElements >= UtDeviceDataMinElements()
         && collArgs.options.scalarMode < 0
         && !collArgs.options.useBias
         && collArgs.options.inputConstantValue < 0)
@@ -406,7 +407,8 @@ namespace RcclUnitTesting
     // no H2D copy). AllToAll is a pure permutation, so expected block `rank` is this
     // rank's slice of source rank `rank`'s pattern: FillPatternDevice with the source
     // rank and a start index of globalRank*elemsPerBlock reproduces it exactly.
-    if (UtDeviceDataEnabled() && UtDeviceDtypeSupported(collArgs.dataType))
+    if (UtDeviceDataEnabled() && UtDeviceDtypeSupported(collArgs.dataType)
+        && collArgs.numInputElements >= UtDeviceDataMinElements())
     {
       size_t const elemsPerBlock = collArgs.numInputElements / collArgs.totalRanks;
       CHECK_CALL(collArgs.outputGpu.ClearGpuMem(numOutputBytes));

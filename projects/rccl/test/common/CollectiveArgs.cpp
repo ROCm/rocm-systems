@@ -124,6 +124,11 @@ namespace RcclUnitTesting
 
   ErrCode CollectiveArgs::PrepareData(CollFuncPtr const prepareDataFunc)
   {
+    // Reset per call: buffers are reused across sub-cases (AllocateMem is not re-run for
+    // each), so a prior device sub-case must not leave this true for a later host-path
+    // sub-case (which would validate against a stale expectedGpu). Device prep funcs set
+    // it true only when they actually build expectedGpu.
+    this->expectedOnDevice = false;
     CollFuncPtr prepFunc = (prepareDataFunc == nullptr ? DefaultPrepareDataFunc : prepareDataFunc);
     return prepFunc(*this);
   }

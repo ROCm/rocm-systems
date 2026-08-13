@@ -274,6 +274,18 @@ namespace RcclUnitTesting
     return true;
   }
 
+  size_t UtDeviceDataMinElements()
+  {
+    static long long cached = -1;
+    if (cached < 0)
+    {
+      char const* e = getenv("UT_DEVICE_DATA_MIN_ELEMS");
+      long long v = e ? atoll(e) : 0;
+      cached = (v > 0) ? v : (1LL << 20);  // default 1Mi elements
+    }
+    return (size_t)cached;
+  }
+
   ErrCode PtrUnion::FillPattern(ncclDataType_t const dataType,
                                 size_t         const numElements,
                                 int            const globalRank,
