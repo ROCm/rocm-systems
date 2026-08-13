@@ -15,14 +15,17 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
@@ -1397,7 +1400,7 @@ TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) 
 
 TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
   ForceScalarOverride force_scalar(true);
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   Wave32PluginFixture f;
   auto *plugin = f.attach_ordering_plugin();
   auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1410,7 +1413,7 @@ TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
   f.cu->write_vgpr(vb + kSrc, 0, 0xAABB00FFu);
   f.cu->write_vgpr(vb + kDst, 0, 0xAAAA5555u);
 
-  gfx1250::Vop1VopDpp16MachineInst raw{};
+  cdna5::Vop1VopDpp16MachineInst raw{};
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
@@ -1419,7 +1422,7 @@ TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
   raw.bound_ctrl = 1;
   raw.bank_mask = 0xF;
   raw.row_mask = 0xF;
-  gfx1250::VNotB16Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::VNotB16Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
 
   plugin->events.clear();
   inst.execute_impl(*wf);
@@ -1434,6 +1437,7 @@ TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
 
 TEST(ExecutionPluginTest, Rdna4DppTrue16SourceReportsOpSelHalf) {
   ForceScalarOverride force_scalar(true);
+  ScopedIsaExecutionBackend execution_backend_scope{&rdna4::execution_backend()};
   Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA4);
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu.get();
@@ -1498,6 +1502,7 @@ TEST(ExecutionPluginTest, Dpp64BitSourceSimdStagesBothPhysicalDwords) {
     return;
   }
   ForceScalarOverride force_simd(false);
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
   PluginFixture f(/*num_wf_slots=*/1);
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
@@ -1531,6 +1536,7 @@ TEST(ExecutionPluginTest, Dpp64BitSourceSimdStagesBothPhysicalDwords) {
 
 TEST(ExecutionPluginTest, DppInstructionReuseRestagesOriginalSource) {
   ForceScalarOverride force_scalar(true);
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
   PluginFixture f(/*num_wf_slots=*/1);
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1562,6 +1568,7 @@ TEST(ExecutionPluginTest, DppInstructionReuseRestagesOriginalSource) {
 
 TEST(ExecutionPluginTest, Sdwa64BitDestinationWritesLegalConversionResult) {
   ForceScalarOverride force_scalar(true);
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna3::execution_backend()};
   PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna3");
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
@@ -1605,6 +1612,7 @@ TEST(ExecutionPluginTest, Sdwa64BitDestinationWritesLegalConversionResult) {
 
 TEST(ExecutionPluginTest, SdwaInstructionReuseRestagesOriginalSource) {
   ForceScalarOverride force_scalar(true);
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
   PluginFixture f(/*num_wf_slots=*/1);
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);

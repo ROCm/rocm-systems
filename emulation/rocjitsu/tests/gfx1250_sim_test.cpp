@@ -8,18 +8,18 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/config/config_loader.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/sop2.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vds.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vglobal.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vimage.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop2.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop3.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/sop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vds.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vglobal.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vimage.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -163,7 +163,7 @@ struct Gfx1250Sim {
   // Direct-construction tests intentionally bypass Decoder. Select the same
   // immutable backend that a full gfx1250 decoder would inject while building
   // their generated instruction and operand objects.
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   config::LoadedConfig loaded;
   SoC *soc = nullptr;
   amdgpu::GpuMemory *memory = nullptr;
@@ -1422,7 +1422,7 @@ TEST(Gfx1250ExecutionTest, TargetProvidesImmutableExecutionBackend) {
   const IsaTargetDescriptor *target = default_isa_target_registry().find("gfx1250");
   ASSERT_NE(target, nullptr);
   EXPECT_TRUE(target->supports_execution);
-  EXPECT_TRUE(gfx1250::Operand::full_execution_backend_complete());
+  EXPECT_TRUE(cdna5::Operand::full_execution_backend_complete());
 }
 
 TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
@@ -1450,7 +1450,7 @@ TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
   wf->set_vcc(0x5a5a5a5au);
   const std::array<uint32_t, 2> null_sdst_words = {
       0xd6fc7c00u, 0x040a0301u}; // v_div_scale_f32 v0, null, v1, v1, v2
-  gfx1250::VDivScaleF32Vop3SdstEnc null_sdst(null_sdst_words.data());
+  cdna5::VDivScaleF32Vop3SdstEnc null_sdst(null_sdst_words.data());
   null_sdst.execute_impl(*wf);
   EXPECT_EQ(wf->vcc(), 0x5a5a5a5au);
   EXPECT_EQ(read_vgpr(0), 0x5f800000u); // 2^64
@@ -1460,7 +1460,7 @@ TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
   wf->set_vcc(0xa5a5a5a5u);
   const std::array<uint32_t, 2> normal_null_sdst_words = {
       0xd6fc7c09u, 0x040c0e07u}; // v_div_scale_f32 v9, null, s7, s7, v3
-  gfx1250::VDivScaleF32Vop3SdstEnc normal_null_sdst(normal_null_sdst_words.data());
+  cdna5::VDivScaleF32Vop3SdstEnc normal_null_sdst(normal_null_sdst_words.data());
   normal_null_sdst.execute_impl(*wf);
   EXPECT_EQ(wf->vcc(), 0xa5a5a5a5u);
   EXPECT_EQ(read_vgpr(9), kTwoTo8);
@@ -1470,7 +1470,7 @@ TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
   wf->set_vcc(0);
   const std::array<uint32_t, 2> vcc_sdst_words = {
       0xd6fc6a03u, 0x04160904u}; // v_div_scale_f32 v3, vcc_lo, v4, v4, v5
-  gfx1250::VDivScaleF32Vop3SdstEnc vcc_sdst(vcc_sdst_words.data());
+  cdna5::VDivScaleF32Vop3SdstEnc vcc_sdst(vcc_sdst_words.data());
   vcc_sdst.execute_impl(*wf);
   EXPECT_EQ(wf->vcc(), 1u);
   EXPECT_EQ(read_vgpr(3), 0x5f800000u);
@@ -1481,7 +1481,7 @@ TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
   wf->set_vcc(0x12345678u);
   const std::array<uint32_t, 2> sgpr_sdst_words = {
       0xd6fc0206u, 0x04220f07u}; // v_div_scale_f32 v6, s2, v7, v7, v8
-  gfx1250::VDivScaleF32Vop3SdstEnc sgpr_sdst(sgpr_sdst_words.data());
+  cdna5::VDivScaleF32Vop3SdstEnc sgpr_sdst(sgpr_sdst_words.data());
   sgpr_sdst.execute_impl(*wf);
   EXPECT_EQ(wf->vcc(), 0x12345678u);
   EXPECT_EQ(read_wave_sgpr(*cu, *wf, 2), 0x12345679u);
@@ -1502,7 +1502,7 @@ TEST(Gfx1250ExecutionTest, VMovB16HighVdstMergesIntoLowPhysicalVgpr) {
   cu->write_vgpr(vgpr_base + 129, kLane, 0xDEADBEEFu);
 
   const std::array<uint32_t, 1> words = {0x7F023880u}; // v_mov_b16_e32 v1.h, 0
-  gfx1250::VMovB16Vop1 high_half_mov(words.data());
+  cdna5::VMovB16Vop1 high_half_mov(words.data());
   high_half_mov.execute_impl(*wf);
 
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0x00005555u);
@@ -1523,7 +1523,7 @@ TEST(Gfx1250ExecutionTest, VNotB16HighVdstMergesIntoLowPhysicalVgpr) {
   cu->write_vgpr(vgpr_base + 129, kLane, 0xDEADBEEFu);
 
   const std::array<uint32_t, 1> words = {0x7F02D300u}; // v_not_b16_e32 v1.h, v0.l
-  gfx1250::VNotB16Vop1 high_half_not(words.data());
+  cdna5::VNotB16Vop1 high_half_not(words.data());
   high_half_not.execute_impl(*wf);
 
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0xFF005555u);
@@ -1545,7 +1545,7 @@ TEST(Gfx1250ExecutionTest, VAddF16HighVdstMergesIntoLowPhysicalVgpr) {
   cu->write_vgpr(vgpr_base + 129, kLane, 0xDEADBEEFu);
 
   const std::array<uint32_t, 1> words = {0x65020500u}; // v_add_f16_e32 v1.h, v0.l, v2.l
-  gfx1250::VAddF16Vop2 high_half_add(words.data());
+  cdna5::VAddF16Vop2 high_half_add(words.data());
   high_half_add.execute_impl(*wf);
 
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0x40005555u);
@@ -1624,7 +1624,7 @@ TEST(Gfx1250ExecutionTest, VFmacF16Vop3HighVdstUsesHighHalfAddend) {
       0xD5364001u, // v_fmac_f16 v1.h, v0.l, v2.l
       0x02020500u,
   };
-  gfx1250::VFmacF16Vop3 high_half_fmac(words.data());
+  cdna5::VFmacF16Vop3 high_half_fmac(words.data());
   high_half_fmac.execute_impl(*wf);
 
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0x42003C00u);
@@ -1645,7 +1645,7 @@ TEST(Gfx1250ExecutionTest, VFmacF16Vop2HighVdstUsesHighHalfAddend) {
   cu->write_vgpr(vgpr_base + 129, kLane, 0x3C003C00u);
 
   const std::array<uint32_t, 1> words = {0x6D020500u}; // v_fmac_f16_e32 v1.h, v0.l, v2.l
-  gfx1250::VFmacF16Vop2 high_half_fmac(words.data());
+  cdna5::VFmacF16Vop2 high_half_fmac(words.data());
   high_half_fmac.execute_impl(*wf);
 
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0x42003C00u);
@@ -1669,7 +1669,7 @@ TEST(Gfx1250ExecutionTest, VMadU32LiteralTimesScalarAddsVector) {
       0x041006FFu,
       0x00000048u,
   };
-  gfx1250::VMadU32Vop3 mad(words.data());
+  cdna5::VMadU32Vop3 mad(words.data());
   mad.execute_impl(*wf);
 
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, kLane), 0x6Cu);
@@ -1684,7 +1684,7 @@ TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics)
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  ASSERT_TRUE(gfx1250::Operand::full_execution_backend_complete());
+  ASSERT_TRUE(cdna5::Operand::full_execution_backend_complete());
   amdgpu::RegisterAccess regs(*wf);
 
   struct LiteralCase {
@@ -1700,14 +1700,14 @@ TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics)
   for (const auto &[literal, signed_value] : cases) {
     SCOPED_TRACE(::testing::Message() << "literal=" << literal);
 
-    const auto signed_mad_base = gfx1250::build_vop3(
-        gfx1250::kVMadNcI64I32Vop3, {.vdst = 4, .src0 = 129, .src1 = 129, .src2 = 255});
+    const auto signed_mad_base = cdna5::build_vop3(
+        cdna5::kVMadNcI64I32Vop3, {.vdst = 4, .src0 = 129, .src1 = 129, .src2 = 255});
     const std::array signed_mad_words{signed_mad_base[0], signed_mad_base[1], literal};
     std::unique_ptr<Instruction> signed_mad_decoded(decoder->decode(signed_mad_words.data()));
     ASSERT_NE(signed_mad_decoded, nullptr);
     EXPECT_EQ(signed_mad_decoded->mnemonic(), "v_mad_nc_i64_i32");
     EXPECT_EQ(signed_mad_decoded->size(), 12);
-    auto *signed_mad = dynamic_cast<gfx1250::VMadNcI64I32Vop3 *>(signed_mad_decoded.get());
+    auto *signed_mad = dynamic_cast<cdna5::VMadNcI64I32Vop3 *>(signed_mad_decoded.get());
     ASSERT_NE(signed_mad, nullptr);
 
     const Operand *signed_addend = signed_mad->src_operand(2);
@@ -1719,12 +1719,12 @@ TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics)
     signed_mad->execute_impl(*wf);
     EXPECT_EQ(regs.read_lane64(*signed_mad->dst_operand(0), 0), signed_value + 1u);
 
-    const auto unsigned_mad_base = gfx1250::build_vop3(
-        gfx1250::kVMadNcU64U32Vop3, {.vdst = 6, .src0 = 129, .src1 = 129, .src2 = 255});
+    const auto unsigned_mad_base = cdna5::build_vop3(
+        cdna5::kVMadNcU64U32Vop3, {.vdst = 6, .src0 = 129, .src1 = 129, .src2 = 255});
     const std::array unsigned_mad_words{unsigned_mad_base[0], unsigned_mad_base[1], literal};
     std::unique_ptr<Instruction> unsigned_mad_decoded(decoder->decode(unsigned_mad_words.data()));
     ASSERT_NE(unsigned_mad_decoded, nullptr);
-    auto *unsigned_mad = dynamic_cast<gfx1250::VMadNcU64U32Vop3 *>(unsigned_mad_decoded.get());
+    auto *unsigned_mad = dynamic_cast<cdna5::VMadNcU64U32Vop3 *>(unsigned_mad_decoded.get());
     ASSERT_NE(unsigned_mad, nullptr);
 
     const Operand *unsigned_addend = unsigned_mad->src_operand(2);
@@ -1736,13 +1736,13 @@ TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics)
               static_cast<uint64_t>(literal) + 1u);
 
     const auto scalar_base =
-        gfx1250::build_sop2(gfx1250::kSAshrI64Sop2, {.ssrc0 = 255, .ssrc1 = 128, .sdst = 0});
+        cdna5::build_sop2(cdna5::kSAshrI64Sop2, {.ssrc0 = 255, .ssrc1 = 128, .sdst = 0});
     const std::array scalar_words{scalar_base[0], literal};
     std::unique_ptr<Instruction> scalar_decoded(decoder->decode(scalar_words.data()));
     ASSERT_NE(scalar_decoded, nullptr);
     EXPECT_EQ(scalar_decoded->mnemonic(), "s_ashr_i64");
     EXPECT_EQ(scalar_decoded->size(), 8);
-    auto *scalar = dynamic_cast<gfx1250::SAshrI64Sop2 *>(scalar_decoded.get());
+    auto *scalar = dynamic_cast<cdna5::SAshrI64Sop2 *>(scalar_decoded.get());
     ASSERT_NE(scalar, nullptr);
 
     const Operand *scalar_value = scalar->src_operand(0);
@@ -1753,11 +1753,11 @@ TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics)
     EXPECT_EQ(regs.read_scalar64(*scalar->dst_operand(0)), signed_value);
 
     const auto b64_base =
-        gfx1250::build_sop2(gfx1250::kSAndB64Sop2, {.ssrc0 = 255, .ssrc1 = 193, .sdst = 2});
+        cdna5::build_sop2(cdna5::kSAndB64Sop2, {.ssrc0 = 255, .ssrc1 = 193, .sdst = 2});
     const std::array b64_words{b64_base[0], literal};
     std::unique_ptr<Instruction> b64_decoded(decoder->decode(b64_words.data()));
     ASSERT_NE(b64_decoded, nullptr);
-    auto *b64 = dynamic_cast<gfx1250::SAndB64Sop2 *>(b64_decoded.get());
+    auto *b64 = dynamic_cast<cdna5::SAndB64Sop2 *>(b64_decoded.get());
     ASSERT_NE(b64, nullptr);
 
     const Operand *b64_value = b64->src_operand(0);
@@ -1790,14 +1790,14 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
     ASSERT_NE(decoder, nullptr);
     const auto compare_base =
-        gfx1250::build_vop3(gfx1250::kVCmpLtI64Vop3, {.vdst = 0, .src0 = 255, .src1 = 256});
+        cdna5::build_vop3(cdna5::kVCmpLtI64Vop3, {.vdst = 0, .src0 = 255, .src1 = 256});
     const std::array compare_words{compare_base[0], compare_base[1], 0xffffffffu};
     std::unique_ptr<Instruction> compare(decoder->decode(compare_words.data()));
     ASSERT_NE(compare, nullptr);
     EXPECT_EQ(compare->mnemonic(), "v_cmp_lt_i64");
     EXPECT_EQ(compare->size(), 12);
 
-    auto *typed_compare = dynamic_cast<gfx1250::VCmpLtI64Vop3 *>(compare.get());
+    auto *typed_compare = dynamic_cast<cdna5::VCmpLtI64Vop3 *>(compare.get());
     ASSERT_NE(typed_compare, nullptr);
     if (!force_scalar) {
       EXPECT_TRUE(amdgpu::try_execute_vopc64_vop3_int_simd<int64_t>(
@@ -1822,19 +1822,19 @@ TEST(Gfx1250LiteralOperandTest, WidenedMaskLiteralsPreserveEffectiveOperandSize)
     std::array<uint32_t, 2> encoding;
   };
   constexpr std::array test_cases{
-      TestCase{"v_cndmask_b32", gfx1250::build_vop3(gfx1250::kVCndmaskB32Vop3,
-                                                    {.src0 = 128, .src1 = 128, .src2 = 255})},
-      TestCase{"v_cndmask_b16", gfx1250::build_vop3(gfx1250::kVCndmaskB16Vop3,
-                                                    {.src0 = 128, .src1 = 128, .src2 = 255})},
+      TestCase{"v_cndmask_b32",
+               cdna5::build_vop3(cdna5::kVCndmaskB32Vop3, {.src0 = 128, .src1 = 128, .src2 = 255})},
+      TestCase{"v_cndmask_b16",
+               cdna5::build_vop3(cdna5::kVCndmaskB16Vop3, {.src0 = 128, .src1 = 128, .src2 = 255})},
       TestCase{"v_add_co_ci_u32",
-               gfx1250::build_vop3_sdst_enc(gfx1250::kVAddCoCiU32Vop3SdstEnc,
-                                            {.src0 = 128, .src1 = 128, .src2 = 255})},
+               cdna5::build_vop3_sdst_enc(cdna5::kVAddCoCiU32Vop3SdstEnc,
+                                          {.src0 = 128, .src1 = 128, .src2 = 255})},
       TestCase{"v_sub_co_ci_u32",
-               gfx1250::build_vop3_sdst_enc(gfx1250::kVSubCoCiU32Vop3SdstEnc,
-                                            {.src0 = 128, .src1 = 128, .src2 = 255})},
+               cdna5::build_vop3_sdst_enc(cdna5::kVSubCoCiU32Vop3SdstEnc,
+                                          {.src0 = 128, .src1 = 128, .src2 = 255})},
       TestCase{"v_subrev_co_ci_u32",
-               gfx1250::build_vop3_sdst_enc(gfx1250::kVSubrevCoCiU32Vop3SdstEnc,
-                                            {.src0 = 128, .src1 = 128, .src2 = 255})},
+               cdna5::build_vop3_sdst_enc(cdna5::kVSubrevCoCiU32Vop3SdstEnc,
+                                          {.src0 = 128, .src1 = 128, .src2 = 255})},
   };
   constexpr uint32_t kLiteral = 0xffffffffu;
 
@@ -1867,15 +1867,15 @@ TEST(Gfx1250LiteralOperandTest, PkF32LiteralReplicatesAndUsesAvailableSimdPath) 
     constexpr uint32_t literal = 0x3f800000u;
     constexpr uint64_t replicated =
         (static_cast<uint64_t>(literal) << 32) | static_cast<uint64_t>(literal);
-    const auto add_base = gfx1250::build_vop3p(
-        gfx1250::kVPkAddF32Vop3p, {.vdst = 0, .src0 = 255, .src1 = 128, .opsel_hi = 3});
+    const auto add_base = cdna5::build_vop3p(cdna5::kVPkAddF32Vop3p,
+                                             {.vdst = 0, .src0 = 255, .src1 = 128, .opsel_hi = 3});
     const std::array add_words{add_base[0], add_base[1], literal};
 
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> add(decoder->decode(add_words.data()));
     ASSERT_NE(add, nullptr);
-    auto *typed_add = dynamic_cast<gfx1250::VPkAddF32Vop3p *>(add.get());
+    auto *typed_add = dynamic_cast<cdna5::VPkAddF32Vop3p *>(add.get());
     ASSERT_NE(typed_add, nullptr);
 
     Gfx1250Sim sim;
@@ -1929,13 +1929,13 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
     float expected_hi;
   };
   constexpr std::array test_cases{
-      TestCase{Operation::Add, gfx1250::kVPkAddF32Vop3p, 0, 7.0f, 8.0f},
-      TestCase{Operation::Add, gfx1250::kVPkAddF32Vop3p, 1, 5.0f, 6.0f},
-      TestCase{Operation::Mul, gfx1250::kVPkMulF32Vop3p, 0, 10.0f, 12.0f},
-      TestCase{Operation::Mul, gfx1250::kVPkMulF32Vop3p, 1, 6.0f, 8.0f},
-      TestCase{Operation::Fma, gfx1250::kVPkFmaF32Vop3p, 0, 17.0f, 20.0f},
-      TestCase{Operation::Fma, gfx1250::kVPkFmaF32Vop3p, 1, 13.0f, 16.0f},
-      TestCase{Operation::Fma, gfx1250::kVPkFmaF32Vop3p, 2, 17.0f, 26.0f},
+      TestCase{Operation::Add, cdna5::kVPkAddF32Vop3p, 0, 7.0f, 8.0f},
+      TestCase{Operation::Add, cdna5::kVPkAddF32Vop3p, 1, 5.0f, 6.0f},
+      TestCase{Operation::Mul, cdna5::kVPkMulF32Vop3p, 0, 10.0f, 12.0f},
+      TestCase{Operation::Mul, cdna5::kVPkMulF32Vop3p, 1, 6.0f, 8.0f},
+      TestCase{Operation::Fma, cdna5::kVPkFmaF32Vop3p, 0, 17.0f, 20.0f},
+      TestCase{Operation::Fma, cdna5::kVPkFmaF32Vop3p, 1, 13.0f, 16.0f},
+      TestCase{Operation::Fma, cdna5::kVPkFmaF32Vop3p, 2, 17.0f, 26.0f},
   };
   constexpr uint32_t kLiteral = 0x40000000u; // 2.0f
   constexpr uint64_t kReplicatedLiteral = (static_cast<uint64_t>(kLiteral) << 32) | kLiteral;
@@ -1943,7 +1943,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
   for (const TestCase &test_case : test_cases) {
     SCOPED_TRACE(static_cast<uint32_t>(test_case.operation));
     SCOPED_TRACE(test_case.literal_source);
-    gfx1250::Vop3pBuilderFields fields;
+    cdna5::Vop3pBuilderFields fields;
     fields.vdst = 6;
     fields.src0 = 256;
     fields.src1 = 258;
@@ -1956,7 +1956,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
     else
       fields.src2 = 255;
 
-    auto base = gfx1250::build_vop3p(test_case.opcode, fields);
+    auto base = cdna5::build_vop3p(test_case.opcode, fields);
     if (test_case.operation == Operation::Fma)
       base[0] |= uint32_t{1} << 14; // pad_14 is the src2 high-half selector.
     const std::array words{base[0], base[1], kLiteral};
@@ -1984,17 +1984,17 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
 
     bool accepted = false;
     if (test_case.operation == Operation::Add) {
-      auto *typed = dynamic_cast<gfx1250::VPkAddF32Vop3p *>(instruction.get());
+      auto *typed = dynamic_cast<cdna5::VPkAddF32Vop3p *>(instruction.get());
       ASSERT_NE(typed, nullptr);
       accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 3u,
                                                               [](auto a, auto b) { return a + b; });
     } else if (test_case.operation == Operation::Mul) {
-      auto *typed = dynamic_cast<gfx1250::VPkMulF32Vop3p *>(instruction.get());
+      auto *typed = dynamic_cast<cdna5::VPkMulF32Vop3p *>(instruction.get());
       ASSERT_NE(typed, nullptr);
       accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 3u,
                                                               [](auto a, auto b) { return a * b; });
     } else {
-      auto *typed = dynamic_cast<gfx1250::VPkFmaF32Vop3p *>(instruction.get());
+      auto *typed = dynamic_cast<cdna5::VPkFmaF32Vop3p *>(instruction.get());
       ASSERT_NE(typed, nullptr);
       accepted = amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
           *typed, *wf, 0u, 3u, 1u, [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); });
@@ -2015,14 +2015,14 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorFallsBack
   ForceScalarGuard force_scalar_guard;
   util::set_force_scalar_for_testing(false);
   constexpr uint32_t kLiteral = 0x40000000u; // 2.0f
-  const auto base = gfx1250::build_vop3p(gfx1250::kVPkAddF32Vop3p,
-                                         {.vdst = 4, .src0 = 255, .src1 = 258, .opsel_hi = 2});
+  const auto base = cdna5::build_vop3p(cdna5::kVPkAddF32Vop3p,
+                                       {.vdst = 4, .src0 = 255, .src1 = 258, .opsel_hi = 2});
   const std::array words{base[0], base[1], kLiteral};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
   ASSERT_NE(instruction, nullptr);
-  auto *typed = dynamic_cast<gfx1250::VPkAddF32Vop3p *>(instruction.get());
+  auto *typed = dynamic_cast<cdna5::VPkAddF32Vop3p *>(instruction.get());
   ASSERT_NE(typed, nullptr);
 
   Gfx1250Sim sim;
@@ -2048,8 +2048,8 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
     const char *name;
   };
   constexpr std::array test_cases{
-      TestCase{gfx1250::kVPkAddF32Vop3p, "add"},
-      TestCase{gfx1250::kVPkMulF32Vop3p, "mul"},
+      TestCase{cdna5::kVPkAddF32Vop3p, "add"},
+      TestCase{cdna5::kVPkMulF32Vop3p, "mul"},
   };
   constexpr uint32_t kExec = 0xa5a5a5a5u;
   constexpr uint32_t kDstLoSeed = 0xdeadbeefu;
@@ -2063,7 +2063,7 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
       SCOPED_TRACE(force_scalar ? "scalar" : "simd");
       util::set_force_scalar_for_testing(force_scalar);
 
-      const auto words = gfx1250::build_vop3p(
+      const auto words = cdna5::build_vop3p(
           test_case.opcode,
           {.vdst = 4, .neg_hi = 2, .src0 = 256, .src1 = 258, .opsel_hi = 3, .neg = 1});
       auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
@@ -2089,13 +2089,13 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
 
       if (!force_scalar) {
         bool accepted = false;
-        if (test_case.opcode == gfx1250::kVPkAddF32Vop3p) {
-          auto *typed = dynamic_cast<gfx1250::VPkAddF32Vop3p *>(instruction.get());
+        if (test_case.opcode == cdna5::kVPkAddF32Vop3p) {
+          auto *typed = dynamic_cast<cdna5::VPkAddF32Vop3p *>(instruction.get());
           ASSERT_NE(typed, nullptr);
           accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(
               *typed, *wf, 0u, 3u, [](auto a, auto b) { return a + b; });
         } else {
-          auto *typed = dynamic_cast<gfx1250::VPkMulF32Vop3p *>(instruction.get());
+          auto *typed = dynamic_cast<cdna5::VPkMulF32Vop3p *>(instruction.get());
           ASSERT_NE(typed, nullptr);
           accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(
               *typed, *wf, 0u, 3u, [](auto a, auto b) { return a * b; });
@@ -2121,9 +2121,9 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
           const float b_lo = lane_value + 0.75f;
           const float b_hi = lane_value * 1.5f;
           const float expected_lo =
-              test_case.opcode == gfx1250::kVPkAddF32Vop3p ? -a_lo + b_lo : -a_lo * b_lo;
+              test_case.opcode == cdna5::kVPkAddF32Vop3p ? -a_lo + b_lo : -a_lo * b_lo;
           const float expected_hi =
-              test_case.opcode == gfx1250::kVPkAddF32Vop3p ? a_hi - b_hi : a_hi * -b_hi;
+              test_case.opcode == cdna5::kVPkAddF32Vop3p ? a_hi - b_hi : a_hi * -b_hi;
           EXPECT_EQ(result[lane * 2], std::bit_cast<uint32_t>(expected_lo));
           EXPECT_EQ(result[lane * 2 + 1], std::bit_cast<uint32_t>(expected_hi));
         }
@@ -2164,15 +2164,15 @@ TEST(Gfx1250ExecutionTest, PkF32EveryNondefaultSelectorGateFallsBackToScalar) {
     std::array<uint32_t, 64> fallback_result{};
     const auto run_case = [&](bool force_scalar, std::array<uint32_t, 64> &result) {
       util::set_force_scalar_for_testing(force_scalar);
-      gfx1250::Vop3pBuilderFields fields;
+      cdna5::Vop3pBuilderFields fields;
       fields.vdst = 6;
       fields.opsel = static_cast<uint8_t>(test_case.op_sel);
       fields.src0 = 256;
       fields.src1 = 258;
       fields.src2 = 260;
       fields.opsel_hi = static_cast<uint8_t>(test_case.op_sel_hi);
-      auto words = gfx1250::build_vop3p(
-          test_case.ternary ? gfx1250::kVPkFmaF32Vop3p : gfx1250::kVPkAddF32Vop3p, fields);
+      auto words = cdna5::build_vop3p(
+          test_case.ternary ? cdna5::kVPkFmaF32Vop3p : cdna5::kVPkAddF32Vop3p, fields);
       if (test_case.op_sel_hi_2 != 0u)
         words[0] |= uint32_t{1} << 14;
       auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
@@ -2200,13 +2200,13 @@ TEST(Gfx1250ExecutionTest, PkF32EveryNondefaultSelectorGateFallsBackToScalar) {
 
       if (!force_scalar) {
         if (test_case.ternary) {
-          auto *typed = dynamic_cast<gfx1250::VPkFmaF32Vop3p *>(instruction.get());
+          auto *typed = dynamic_cast<cdna5::VPkFmaF32Vop3p *>(instruction.get());
           ASSERT_NE(typed, nullptr);
           EXPECT_FALSE(amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
               *typed, *wf, test_case.op_sel, test_case.op_sel_hi, test_case.op_sel_hi_2,
               [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }));
         } else {
-          auto *typed = dynamic_cast<gfx1250::VPkAddF32Vop3p *>(instruction.get());
+          auto *typed = dynamic_cast<cdna5::VPkAddF32Vop3p *>(instruction.get());
           ASSERT_NE(typed, nullptr);
           EXPECT_FALSE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(
               *typed, *wf, test_case.op_sel, test_case.op_sel_hi,
@@ -2242,15 +2242,15 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
 
   const auto run_case = [&](bool force_scalar, std::array<uint32_t, 64> &result) {
     util::set_force_scalar_for_testing(force_scalar);
-    auto words = gfx1250::build_vop3p(
-        gfx1250::kVPkFmaF32Vop3p,
+    auto words = cdna5::build_vop3p(
+        cdna5::kVPkFmaF32Vop3p,
         {.vdst = 6, .neg_hi = 4, .src0 = 256, .src1 = 258, .src2 = 260, .opsel_hi = 3, .neg = 2});
     words[0] |= uint32_t{1} << 14; // pad_14 is the src2 high-half selector.
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
     ASSERT_NE(instruction, nullptr);
-    auto *typed = dynamic_cast<gfx1250::VPkFmaF32Vop3p *>(instruction.get());
+    auto *typed = dynamic_cast<cdna5::VPkFmaF32Vop3p *>(instruction.get());
     ASSERT_NE(typed, nullptr);
 
     Gfx1250Sim sim;
@@ -2309,12 +2309,12 @@ TEST(Gfx1250DecodeTest, Vop3pRejectsLiteral64SelectorInEverySourcePosition) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
 
-  for (const gfx1250::Vop3pBuilderFields fields : {
-           gfx1250::Vop3pBuilderFields{.src0 = 254},
-           gfx1250::Vop3pBuilderFields{.src1 = 254},
-           gfx1250::Vop3pBuilderFields{.src2 = 254},
+  for (const cdna5::Vop3pBuilderFields fields : {
+           cdna5::Vop3pBuilderFields{.src0 = 254},
+           cdna5::Vop3pBuilderFields{.src1 = 254},
+           cdna5::Vop3pBuilderFields{.src2 = 254},
        }) {
-    const auto words = gfx1250::build_vop3p(gfx1250::kVPkFmaF32Vop3p, fields);
+    const auto words = cdna5::build_vop3p(cdna5::kVPkFmaF32Vop3p, fields);
     EXPECT_THROW(static_cast<void>(decoder->decode(words.data())), util::InvalidInst);
   }
 }
@@ -2323,8 +2323,8 @@ TEST(Gfx1250DecodeTest, BinaryVop3pIgnoresLiteral64SelectorInUnusedSrc2) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
 
-  for (const uint32_t opcode : {gfx1250::kVPkAddF32Vop3p, gfx1250::kVPkMulF32Vop3p}) {
-    const auto words = gfx1250::build_vop3p(opcode, {.src0 = 128, .src1 = 129, .src2 = 254});
+  for (const uint32_t opcode : {cdna5::kVPkAddF32Vop3p, cdna5::kVPkMulF32Vop3p}) {
+    const auto words = cdna5::build_vop3p(opcode, {.src0 = 128, .src1 = 129, .src2 = 254});
     std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
     ASSERT_NE(instruction, nullptr);
     EXPECT_EQ(instruction->size(), 8);
@@ -2350,7 +2350,7 @@ TEST(Gfx1250ExecutionTest, VCmpGtU32Wave32ExplicitSdstPreservesHighSgpr) {
       0xD44C0002u, // v_cmp_gt_u32_e64 s2, 4, v4
       0x02020884u,
   };
-  gfx1250::VCmpGtU32Vop3 cmp(words.data());
+  cdna5::VCmpGtU32Vop3 cmp(words.data());
   cmp.execute_impl(*wf);
 
   EXPECT_EQ(read_wave_sgpr(*cu, *wf, 2), 0x1u);
@@ -3442,7 +3442,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {
   }
 
   const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
-  gfx1250::TensorLoadToLdsVimage load_inst(load_words.data());
+  cdna5::TensorLoadToLdsVimage load_inst(load_words.data());
   load_inst.execute_impl(*wf);
   for (uint32_t i = 0; i < kElements; ++i)
     EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * 4), 0x11000000u + i * 0x101u);
@@ -3451,7 +3451,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {
     cu->lds().write32(wf->lds_base() + i * 4, 0x22000000u + i * 0x303u);
 
   const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x7c7c0c08u};
-  gfx1250::TensorStoreFromLdsVimage store_inst(store_words.data());
+  cdna5::TensorStoreFromLdsVimage store_inst(store_words.data());
   store_inst.execute_impl(*wf);
   for (uint32_t i = 0; i < kElements; ++i) {
     const uint32_t actual = read_global_u32(*sim.memory, kStoreGlobal + i * 4);
@@ -3627,7 +3627,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaLoadAppliesLdsPadding) {
   cu->lds().write32(wf->lds_base() + 4 * 4, kSentinel);
 
   const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
-  gfx1250::TensorLoadToLdsVimage load_inst(load_words.data());
+  cdna5::TensorLoadToLdsVimage load_inst(load_words.data());
   load_inst.execute_impl(*wf);
 
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0 * 4), 0x33000000u);
@@ -3663,7 +3663,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaByteLoadUsesDwordPaddingUnits) {
     cu->lds().write8(wf->lds_base() + i, kSentinel);
 
   const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
-  gfx1250::TensorLoadToLdsVimage load_inst(load_words.data());
+  cdna5::TensorLoadToLdsVimage load_inst(load_words.data());
   load_inst.execute_impl(*wf);
 
   EXPECT_EQ(cu->lds().read8(wf->lds_base() + 63), 63u);
@@ -3693,7 +3693,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaPaddedStoreIsRejected) {
   write_wave_sgpr(*cu, *wf, 19, 0);
 
   const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x7c7c0c00u};
-  gfx1250::TensorStoreFromLdsVimage store_inst(store_words.data());
+  cdna5::TensorStoreFromLdsVimage store_inst(store_words.data());
   EXPECT_THROW(store_inst.execute_impl(*wf), util::UnimplementedInst);
 }
 
@@ -3726,7 +3726,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateCopiesMultipleTiles) {
     cu->lds().write32(wf->lds_base() + i * 4, kSentinel);
 
   const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
-  gfx1250::TensorLoadToLdsVimage load_inst(load_words.data());
+  cdna5::TensorLoadToLdsVimage load_inst(load_words.data());
   load_inst.execute_impl(*wf);
 
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0 * 4), 0x44000000u);
@@ -3763,7 +3763,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaAtomicBarrierArrivesAfterCopy) {
   cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, 0);
 
   const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
-  gfx1250::TensorLoadToLdsVimage load_inst(load_words.data());
+  cdna5::TensorLoadToLdsVimage load_inst(load_words.data());
   load_inst.execute_impl(*wf);
 
   EXPECT_TRUE(wf->wait_counters().empty());
@@ -3881,7 +3881,7 @@ TEST(Gfx1250ExecutionTest, DsAtomicAsyncBarrierArriveFlipsRawBarrierPhase) {
   cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, amdgpu::lds_barrier_cell_init_state(1));
 
   const std::array<uint32_t, 2> words = {0xd9580000u, 0x00000000u};
-  auto *arrive_inst = new gfx1250::DsAtomicAsyncBarrierArriveB64Vds(words.data());
+  auto *arrive_inst = new cdna5::DsAtomicAsyncBarrierArriveB64Vds(words.data());
   arrive_inst->execute_impl(*wf);
   amdgpu::LocalMemPipeline local_pipeline;
   local_pipeline.issue(arrive_inst, *wf);
@@ -3905,7 +3905,7 @@ TEST(Gfx1250ExecutionTest, LocalMemPipelineUsesInjectedBarrierDecrementPayload) 
   cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, amdgpu::lds_barrier_cell_init_state(2));
 
   const std::array<uint32_t, 2> words = {0xd9580000u, 0x00000000u};
-  auto *arrive_inst = new gfx1250::DsAtomicAsyncBarrierArriveB64Vds(words.data());
+  auto *arrive_inst = new cdna5::DsAtomicAsyncBarrierArriveB64Vds(words.data());
   arrive_inst->execute_impl(*wf);
 
   auto *state = arrive_inst->data_as<amdgpu::VectorMemState>();
@@ -4013,7 +4013,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaDenseDescriptorCopiesDenseRows) {
     cu->lds().write32(wf->lds_base() + i * 4, kSentinel);
 
   const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x18140c00u};
-  gfx1250::TensorLoadToLdsVimage load_inst(load_words.data());
+  cdna5::TensorLoadToLdsVimage load_inst(load_words.data());
   load_inst.execute_impl(*wf);
 
   for (uint32_t row_idx = 0; row_idx < kTileDim1RowCount; ++row_idx) {
@@ -4030,7 +4030,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaDenseDescriptorCopiesDenseRows) {
     cu->lds().write32(wf->lds_base() + i * 4, 0x77000000u + i);
 
   const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x18140c08u};
-  gfx1250::TensorStoreFromLdsVimage store_inst(store_words.data());
+  cdna5::TensorStoreFromLdsVimage store_inst(store_words.data());
   store_inst.execute_impl(*wf);
 
   for (uint32_t row = 0; row < kRows; ++row) {
@@ -4085,7 +4085,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaGatherSupportsI32Indices) {
     cu->lds().write32(wf->lds_base() + i * 4, kSentinel);
 
   const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x18140c00u};
-  gfx1250::TensorLoadToLdsVimage load_inst(load_words.data());
+  cdna5::TensorLoadToLdsVimage load_inst(load_words.data());
   load_inst.execute_impl(*wf);
 
   for (uint32_t row_idx = 0; row_idx < kIndices.size(); ++row_idx) {
@@ -4138,7 +4138,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaGatherSupportsI16Indices) {
     cu->lds().write32(wf->lds_base() + i * 4, kSentinel);
 
   const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x18140c00u};
-  gfx1250::TensorLoadToLdsVimage load_inst(load_words.data());
+  cdna5::TensorLoadToLdsVimage load_inst(load_words.data());
   load_inst.execute_impl(*wf);
 
   for (uint32_t row_idx = 0; row_idx < kIndices.size(); ++row_idx) {
@@ -4198,6 +4198,90 @@ TEST(Gfx1250DecodeTest, Vop3LiteralConsumesThreeDwords) {
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_and_or_b32");
   EXPECT_EQ(inst->size(), sizeof(words));
+}
+
+TEST(Gfx1250DecodeTest, Vop3RejectsLiteral64Selector) {
+  const uint32_t words[] = {
+      0xD5D50000u, // v_sqrt_f16 v0, reserved literal64 selector
+      0x000000FEu,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop1RejectsUnsupportedLiteral32WithoutExtensionWord) {
+  const auto words = cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 255});
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral32WithoutExtensionWord) {
+  const auto words = cdna5::build_vop2(cdna5::kVFmamkF64Vop2, {.src0 = 255});
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral64WithoutExtensionWords) {
+  const auto words = cdna5::build_vop2(cdna5::kVFmamkF32Vop2, {.src0 = 254});
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, SaluRejectsMixedLiteralWidths) {
+  const uint32_t words[] = {
+      0xBF5DFFFEu, // s_cmp_neq_f16 literal64, literal32
+      0x00000000u,
+      0x00000000u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, SendmsgRtnSelectorsAreNotLiterals) {
+  const uint32_t words[] = {
+      0xBE804CFFu, // s_sendmsg_rtn_b32 s0, 255
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "s_sendmsg_rtn_b32");
+  EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->src_operand(0)->name(), "255");
+}
+
+TEST(Gfx1250DecodeTest, VopdRejectsLiteral64Selector) {
+  const uint32_t words[] = {
+      0xCA52FFFFu,
+      0xFFFFFCFEu,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vop3RejectsDppWithLiteral) {
+  const uint32_t words[] = {
+      0xD6290B00u, // v_min3_num_f32 with src0:DPP and src2:literal
+      0x83FF00FAu,
+      0x00001500u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
 }
 
 TEST(Gfx1250DecodeTest, Vop3SdstLiteralConsumesThreeDwords) {
@@ -4431,14 +4515,14 @@ TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources
 
   constexpr uint16_t kVgprEncoding = 256;
   constexpr auto scalar_prefix =
-      gfx1250::build_vop3p(0x35, {.src0 = 0, .src1 = 1, .src2 = kVgprEncoding});
+      cdna5::build_vop3p(0x35, {.src0 = 0, .src1 = 1, .src2 = kVgprEncoding});
   constexpr auto inline_prefix =
-      gfx1250::build_vop3p(0x35, {.src0 = 128, .src1 = 128, .src2 = kVgprEncoding});
-  constexpr auto scalar_matrix = gfx1250::build_vop3p(
-      gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+      cdna5::build_vop3p(0x35, {.src0 = 128, .src1 = 128, .src2 = kVgprEncoding});
+  constexpr auto scalar_matrix = cdna5::build_vop3p(
+      cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
       {.vdst = 32, .src0 = kVgprEncoding, .src1 = kVgprEncoding + 16, .src2 = kVgprEncoding + 32});
-  constexpr auto inline_matrix = gfx1250::build_vop3p(
-      gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+  constexpr auto inline_matrix = cdna5::build_vop3p(
+      cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
       {.vdst = 40, .src0 = kVgprEncoding, .src1 = kVgprEncoding + 16, .src2 = kVgprEncoding + 40});
   const std::array<uint32_t, 4> scalar_words = {scalar_prefix[0], scalar_prefix[1],
                                                 scalar_matrix[0], scalar_matrix[1]};
@@ -4534,6 +4618,30 @@ TEST(Gfx1250DecodeTest, Vopd3ConsumesThreeDwords) {
   EXPECT_EQ(inst->size(), sizeof(words));
   EXPECT_NE(inst->disassemble().find("v_dual_lshlrev_b32"), std::string::npos);
   EXPECT_NE(inst->disassemble().find("v_dual_lshrrev_b32"), std::string::npos);
+}
+
+TEST(Gfx1250DecodeTest, Vopd3RejectsSrcX0Literal32Selector) {
+  const uint32_t words[] = {
+      0xCF4550FFu,
+      0x00000086u,
+      0x0A000001u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
+}
+
+TEST(Gfx1250DecodeTest, Vopd3RejectsSrcY0Literal32Selector) {
+  const uint32_t words[] = {
+      0xCF455083u,
+      0x000000FFu,
+      0x0A000001u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words)), util::InvalidInst);
 }
 
 TEST(Gfx1250DecodeTest, VopdLiteralConsumesThreeDwords) {
@@ -5111,9 +5219,9 @@ TEST(Gfx1250SimulationTest, SAddPcI64SkipsRelativeToNextPc) {
 }
 
 TEST(Gfx1250SimulationTest, SAddPcI64NegativeLiteralJumpsBackwardFromNextPc) {
-  const auto initial_branch = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 2});
-  const auto set_result = gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 130, .sdst = 4});
-  const auto add_pc = gfx1250::build_sop1(gfx1250::kSAddPcI64Sop1, {.ssrc0 = 255});
+  const auto initial_branch = cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 2});
+  const auto set_result = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 130, .sdst = 4});
+  const auto add_pc = cdna5::build_sop1(cdna5::kSAddPcI64Sop1, {.ssrc0 = 255});
   const std::array code{
       initial_branch[0], // Branch forward to s_add_pc_i64.
       set_result[0],     // Backward-jump target: s_mov_b32 s4, 2.
@@ -5129,8 +5237,8 @@ TEST(Gfx1250SimulationTest, SAddPcI64NegativeLiteralJumpsBackwardFromNextPc) {
 }
 
 TEST(Gfx1250SimulationTest, SAddPcI64WrapsAtUnsignedBoundaries) {
-  const auto add_one = gfx1250::build_sop1(gfx1250::kSAddPcI64Sop1, {.ssrc0 = 129});
-  const auto add_minus_one = gfx1250::build_sop1(gfx1250::kSAddPcI64Sop1, {.ssrc0 = 193});
+  const auto add_one = cdna5::build_sop1(cdna5::kSAddPcI64Sop1, {.ssrc0 = 129});
+  const auto add_minus_one = cdna5::build_sop1(cdna5::kSAddPcI64Sop1, {.ssrc0 = 193});
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
@@ -5401,10 +5509,10 @@ TEST(Gfx1250SimulationTest, VgprMsbRolesSelectHighVgprBanks) {
   cu.write_vgpr(vb + 2 * 256 + 3, kLane, 0x22222222u);
   cu.write_vgpr(vb + 3 * 256 + 4, kLane, 0x33333333u);
 
-  gfx1250::Operand src0(32, gfx1250::OperandType::OPR_SRC, 256 + 2);
-  gfx1250::Operand src1(32, gfx1250::OperandType::OPR_VGPR, 3);
-  gfx1250::Operand src2(32, gfx1250::OperandType::OPR_SRC_VGPR, 256 + 4);
-  gfx1250::Operand dst(32, gfx1250::OperandType::OPR_VGPR, 5);
+  cdna5::Operand src0(32, cdna5::OperandType::OPR_SRC, 256 + 2);
+  cdna5::Operand src1(32, cdna5::OperandType::OPR_VGPR, 3);
+  cdna5::Operand src2(32, cdna5::OperandType::OPR_SRC_VGPR, 256 + 4);
+  cdna5::Operand dst(32, cdna5::OperandType::OPR_VGPR, 5);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
@@ -5435,7 +5543,7 @@ TEST(Gfx1250SimulationTest, VMovDppReadsSelectedHighVgprBank) {
   const uint32_t vb = wf->vgpr_alloc().base;
   auto &cu = *sim.cu();
 
-  gfx1250::Vop1VopDpp16MachineInst raw{};
+  cdna5::Vop1VopDpp16MachineInst raw{};
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
@@ -5454,7 +5562,7 @@ TEST(Gfx1250SimulationTest, VMovDppReadsSelectedHighVgprBank) {
       cu.write_vgpr(vb + kHighBank + kDst, lane, 0u);
     }
 
-    gfx1250::VMovB32Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+    cdna5::VMovB32Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
     inst.execute_impl(*wf);
 
     const uint32_t dst_bank = (mode >> 6) & 0x3u;
@@ -5486,7 +5594,7 @@ TEST(Gfx1250SimulationTest, VMovDpp8ReadsSelectedHighVgprBank) {
     cu.write_vgpr(vb + kHighBank + kSrc, lane, kHighValueBase + lane);
   }
 
-  gfx1250::Vop1VopDpp8MachineInst raw{};
+  cdna5::Vop1VopDpp8MachineInst raw{};
   raw.src0 = amdgpu::SRC_DPP8_FI_1;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
@@ -5499,7 +5607,7 @@ TEST(Gfx1250SimulationTest, VMovDpp8ReadsSelectedHighVgprBank) {
   raw.lane_sel_6 = 7;
   raw.lane_sel_7 = 6;
 
-  gfx1250::VMovB32Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::VMovB32Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
@@ -5529,7 +5637,7 @@ TEST(Gfx1250SimulationTest, VMovDppPreservesMaskedHighDestinationLanes) {
     cu.write_vgpr(vb + kDst, lane, kLowDstBase + lane);
   }
 
-  gfx1250::Vop1VopDpp16MachineInst raw{};
+  cdna5::Vop1VopDpp16MachineInst raw{};
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
@@ -5538,7 +5646,7 @@ TEST(Gfx1250SimulationTest, VMovDppPreservesMaskedHighDestinationLanes) {
   raw.bank_mask = 0xF;
   raw.row_mask = 0x1; // Only lanes 0-15 may be updated.
 
-  gfx1250::VMovB32Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::VMovB32Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -5576,7 +5684,7 @@ TEST(Gfx1250SimulationTest, VAddDppReadsHighBanksAndPreservesMaskedHighDst) {
     cu.write_vgpr(vb + kDst, lane, kLowDstBase + lane);
   }
 
-  gfx1250::Vop2VopDpp16MachineInst raw{};
+  cdna5::Vop2VopDpp16MachineInst raw{};
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc0;
   raw.vsrc1 = kSrc1;
@@ -5586,7 +5694,7 @@ TEST(Gfx1250SimulationTest, VAddDppReadsHighBanksAndPreservesMaskedHighDst) {
   raw.bank_mask = 0xF;
   raw.row_mask = 0x1;
 
-  gfx1250::VAddNcU32Vop2 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::VAddNcU32Vop2 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -5624,7 +5732,7 @@ TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
     cu.write_vgpr(vb + kDst + 1, lane, kLowDstHiBase + lane);
   }
 
-  gfx1250::Vop1VopDpp16MachineInst raw{};
+  cdna5::Vop1VopDpp16MachineInst raw{};
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
@@ -5633,7 +5741,7 @@ TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
   raw.bank_mask = 0xF;
   raw.row_mask = 0x1;
 
-  gfx1250::VCvtF64I32Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::VCvtF64I32Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -5674,7 +5782,7 @@ TEST(Gfx1250SimulationTest, VAddF32Vop3DppPreservesMaskedHighDestinationLanes) {
     cu.write_vgpr(vb + kDst, lane, kLowDstBase + lane);
   }
 
-  gfx1250::Vop3VopDpp16MachineInst raw{};
+  cdna5::Vop3VopDpp16MachineInst raw{};
   raw.vdst = kDst;
   raw.src0 = amdgpu::SRC_DPP;
   raw.src1 = 256 + kSrc1;
@@ -5684,7 +5792,7 @@ TEST(Gfx1250SimulationTest, VAddF32Vop3DppPreservesMaskedHighDestinationLanes) {
   raw.bank_mask = 0xF;
   raw.row_mask = 0x1;
 
-  gfx1250::VAddF32Vop3 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::VAddF32Vop3 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -5719,7 +5827,7 @@ TEST(Gfx1250SimulationTest, VMovDppComposesVgprMsbWithGprIdx) {
     cu.write_vgpr(vb + kHighBank + kGprIdxOffset + kSrc, lane, kExpectedBase + lane);
   }
 
-  gfx1250::Vop1VopDpp16MachineInst raw{};
+  cdna5::Vop1VopDpp16MachineInst raw{};
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
@@ -5728,7 +5836,7 @@ TEST(Gfx1250SimulationTest, VMovDppComposesVgprMsbWithGprIdx) {
   raw.bank_mask = 0xF;
   raw.row_mask = 0xF;
 
-  gfx1250::VMovB32Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::VMovB32Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
@@ -5751,8 +5859,8 @@ TEST(Gfx1250SimulationTest, PackedTrue16SourcesHonorGprIdx) {
   cu.write_vgpr(vb + 2, kLane, 0xAAAA1111u);
   cu.write_vgpr(vb + 18, kLane, 0xBBBB2222u);
 
-  gfx1250::Operand lo(16, gfx1250::OperandType::OPR_VGPR, 2, true);
-  gfx1250::Operand hi(16, gfx1250::OperandType::OPR_VGPR, 128 + 2, true);
+  cdna5::Operand lo(16, cdna5::OperandType::OPR_VGPR, 2, true);
+  cdna5::Operand hi(16, cdna5::OperandType::OPR_VGPR, 128 + 2, true);
   EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(lo, kLane), 0x2222u);
   EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(hi, kLane), 0xBBBBu);
 }
@@ -5783,10 +5891,10 @@ TEST(Gfx1250SimulationTest, PackedTrue16InstructionComposesHighBanksWithGprIdx) 
   cu.write_vgpr(vb + kBankStride + kGprIdxOffset + kSrc, 0, 0xABCD1234u);
   cu.write_vgpr(vb + kBankStride + kGprIdxOffset + kDst, 0, 0xEEEE1111u);
 
-  gfx1250::Vop1MachineInst raw{};
+  cdna5::Vop1MachineInst raw{};
   raw.src0 = 256 + 128 + kSrc; // High half of the encoded VGPR source.
   raw.vdst = kDst;
-  gfx1250::VMovB16Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::VMovB16Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kGprIdxOffset + kDst, 0), 0xEEEEABCDu);
@@ -5820,11 +5928,11 @@ TEST(Gfx1250SimulationTest, DsPermuteUsesIndependentHighOperandBanks) {
     cu.write_vgpr(vb + kDst, lane, kLowAlias);
   }
 
-  gfx1250::VdsMachineInst raw{};
+  cdna5::VdsMachineInst raw{};
   raw.addr = kAddr;
   raw.data0 = kData;
   raw.vdst = kDst;
-  gfx1250::DsPermuteB32Vds inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::DsPermuteB32Vds inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -5863,13 +5971,13 @@ TEST(Gfx1250SimulationTest, DsStore2addrUsesSrc2HighBank) {
   cu.write_vgpr(vb + kData0, 0, 0xDEADBEEFu);
   cu.write_vgpr(vb + kData1, 0, 0xDEADBEEFu);
 
-  gfx1250::VdsMachineInst raw{};
+  cdna5::VdsMachineInst raw{};
   raw.addr = kAddr;
   raw.data0 = kData0;
   raw.data1 = kData1;
   raw.offset0 = 1;
   raw.offset1 = 2;
-  gfx1250::DsStore2addrB32Vds inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::DsStore2addrB32Vds inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   auto *state = inst.data_as<amdgpu::VectorMemState>();
@@ -5911,7 +6019,7 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrB64ExchangesBothAddresses) {
   cu.lds().write64(wf->lds_base() + kAddress + 8, kOld0);
   cu.lds().write64(wf->lds_base() + kAddress + 24, kOld1);
 
-  gfx1250::VdsMachineInst raw{};
+  cdna5::VdsMachineInst raw{};
   raw.addr = kAddr;
   raw.data0 = kData0;
   raw.data1 = kData1;
@@ -5919,7 +6027,7 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrB64ExchangesBothAddresses) {
   raw.offset0 = 1;
   raw.offset1 = 3;
   auto *inst =
-      new gfx1250::DsStorexchg2addrRtnB64Vds(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+      new cdna5::DsStorexchg2addrRtnB64Vds(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst->execute_impl(*wf);
 
   auto *state = inst->data_as<amdgpu::VectorMemState>();
@@ -5986,15 +6094,15 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrStride64B32UsesScaledOffsetsForActiv
   cu.lds().write32(lane2_addr0, kLane2Old0);
   cu.lds().write32(lane2_addr1, kLane2Old1);
 
-  gfx1250::VdsMachineInst raw{};
+  cdna5::VdsMachineInst raw{};
   raw.addr = kAddr;
   raw.data0 = kData0;
   raw.data1 = kData1;
   raw.vdst = kDst;
   raw.offset0 = 1;
   raw.offset1 = 3;
-  auto *inst = new gfx1250::DsStorexchg2addrStride64RtnB32Vds(
-      reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  auto *inst = new cdna5::DsStorexchg2addrStride64RtnB32Vds(
+      reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst->execute_impl(*wf);
 
   auto *state = inst->data_as<amdgpu::VectorMemState>();
@@ -6042,13 +6150,13 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrSameAddressAppliesBothExchangesInOrd
   cu.write_vgpr(vb + kData1, 0, kNew1);
   cu.lds().write32(wf->lds_base() + kAddress, kOld);
 
-  gfx1250::VdsMachineInst raw{};
+  cdna5::VdsMachineInst raw{};
   raw.addr = kAddr;
   raw.data0 = kData0;
   raw.data1 = kData1;
   raw.vdst = kDst;
   auto *inst =
-      new gfx1250::DsStorexchg2addrRtnB32Vds(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+      new cdna5::DsStorexchg2addrRtnB32Vds(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst->execute_impl(*wf);
 
   amdgpu::LocalMemPipeline local_pipeline;
@@ -6075,10 +6183,10 @@ TEST(Gfx1250SimulationTest, DsTransposeLoadUsesHighDestinationBank) {
   sim.cu()->write_vgpr(vb + kAddr, 0, 0u);
   wf->set_vgpr_msb_mode(kDstBank << 6);
 
-  gfx1250::VdsMachineInst raw{};
+  cdna5::VdsMachineInst raw{};
   raw.addr = kAddr;
   raw.vdst = kDst;
-  gfx1250::DsLoadTr4B64Vds inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::DsLoadTr4B64Vds inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   auto *state = inst.data_as<amdgpu::VectorMemState>();
@@ -6105,12 +6213,12 @@ TEST(Gfx1250SimulationTest, Vop2FmamkUsesSrc2HighBank) {
   cu.write_vgpr(vb + kAddend, 0, std::bit_cast<uint32_t>(100.0f));
   cu.write_vgpr(vb + kSrc2Bank * kBankStride + kAddend, 0, std::bit_cast<uint32_t>(4.0f));
 
-  gfx1250::Vop2InstLiteralMachineInst raw{};
+  cdna5::Vop2InstLiteralMachineInst raw{};
   raw.src0 = 242; // Inline 1.0f.
   raw.vsrc1 = kAddend;
   raw.vdst = kDst;
   raw.simm32 = std::bit_cast<uint32_t>(2.0f);
-  gfx1250::VFmamkF32Vop2 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::VFmamkF32Vop2 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   EXPECT_EQ(cu.read_vgpr(vb + kDst, 0), std::bit_cast<uint32_t>(6.0f));
@@ -6171,10 +6279,10 @@ TEST(Gfx1250SimulationTest, VSwapUsesIndependentSourceAndDestinationBanks) {
   cu.write_vgpr(vb + kBankStride + kSrc, 0, kHighSrc);
   cu.write_vgpr(vb + kDst, 0, kOldDst);
 
-  gfx1250::Vop1MachineInst raw{};
+  cdna5::Vop1MachineInst raw{};
   raw.src0 = 256 + kSrc;
   raw.vdst = kDst;
-  gfx1250::VSwapB32Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::VSwapB32Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   EXPECT_EQ(cu.read_vgpr(vb + kDst, 0), kHighSrc);
@@ -6207,11 +6315,11 @@ TEST(Gfx1250SimulationTest, AsyncToLdsUsesDstAndSrc0HighBanks) {
   cu.write_vgpr(vb + kDstBank * kBankStride + kLdsAddr, 0, kLdsOffset);
   cu.write_vgpr(vb + kLdsAddr, 0, 0x80u);
 
-  gfx1250::VglobalMachineInst raw{};
+  cdna5::VglobalMachineInst raw{};
   raw.saddr = 124; // null
   raw.vaddr = kVaddr;
   raw.vdst = kLdsAddr;
-  gfx1250::GlobalLoadAsyncToLdsB8Vglobal inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::GlobalLoadAsyncToLdsB8Vglobal inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
   auto *state = inst.data_as<amdgpu::VectorMemState>();
@@ -6238,9 +6346,9 @@ TEST(Gfx1250SimulationTest, AddtidStoresUseSrc1HighBank) {
   cu.write_vgpr(vb + kData, 0, 0xDEADBEEFu);
   cu.write_vgpr(vb + kSrc1Bank * kBankStride + kData, 0, kExpected);
 
-  gfx1250::VdsMachineInst ds_raw{};
+  cdna5::VdsMachineInst ds_raw{};
   ds_raw.data0 = kData;
-  gfx1250::DsStoreAddtidB32Vds ds_inst(reinterpret_cast<const gfx1250::MachineInst *>(&ds_raw));
+  cdna5::DsStoreAddtidB32Vds ds_inst(reinterpret_cast<const cdna5::MachineInst *>(&ds_raw));
   ds_inst.execute_impl(*wf);
   auto *ds_state = ds_inst.data_as<amdgpu::VectorMemState>();
   ASSERT_NE(ds_state, nullptr);
@@ -6250,11 +6358,11 @@ TEST(Gfx1250SimulationTest, AddtidStoresUseSrc1HighBank) {
 
   write_wave_sgpr(cu, *wf, 0, 0u);
   write_wave_sgpr(cu, *wf, 1, 0u);
-  gfx1250::VglobalMachineInst global_raw{};
+  cdna5::VglobalMachineInst global_raw{};
   global_raw.saddr = 0;
   global_raw.vsrc = kData;
-  gfx1250::GlobalStoreAddtidB32Vglobal global_inst(
-      reinterpret_cast<const gfx1250::MachineInst *>(&global_raw));
+  cdna5::GlobalStoreAddtidB32Vglobal global_inst(
+      reinterpret_cast<const cdna5::MachineInst *>(&global_raw));
   global_inst.execute_impl(*wf);
   auto *global_state = global_inst.data_as<amdgpu::VectorMemState>();
   ASSERT_NE(global_state, nullptr);
