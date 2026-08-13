@@ -4,12 +4,12 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Consistency tests for rcclGetCollImplInfo (AllReduce + AllGather).
+// Consistency tests for rcclGetCollImplInfo (AllReduce + AllGather + ReduceScatter).
 //
-// rcclGetCollImplInfo is the *reporting* path: it routes AR/AG through
-// rcclSelectAllReduce/rcclSelectAllGather with query=true. Live dispatch routes
-// the same functions with query=false and logs which backend it selected. These
-// tests treat the dispatch log as ground truth: for each message size we run the
+// rcclGetCollImplInfo is the *reporting* path: it routes AR/AG/RS through
+// rcclSelectAllReduce/rcclSelectAllGather/rcclSelectReduceScatter with query=true.
+// Live dispatch routes the same functions with query=false and logs which backend
+// it selected. These tests treat the dispatch log as ground truth: for each size we run the
 // real collective, parse what the library logged as *selected* (algo / protocol),
 // then call rcclGetCollImplInfo for the same operands and assert the *reported*
 // algo/proto/channels agree. No assumption is made about which backend runs at a
@@ -100,7 +100,7 @@ namespace RcclUnitTesting
 
     // Decode the single selection recorded in a fresh per-size log. Addon-backend
     // lines take precedence over the native-kernel tuning line (addon backends
-    // bypass or override the kernel plan). `func` is "AllReduce" / "AllGather".
+    // bypass or override the kernel plan). `func` is "AllReduce" / "AllGather" / "ReduceScatter".
     SelectedImpl ParseSelected(const std::string& log, const std::string& func)
     {
       SelectedImpl kernel;    // from enqueue.cc tuning line
@@ -149,6 +149,29 @@ namespace RcclUnitTesting
             if (pp != std::string::npos) proto = atoi(line.c_str() + pp + 6);
             if (cp != std::string::npos) chans = atoi(line.c_str() + cp + 9);
             addon = {true, "Hier", proto >= 0, ProtoIdToName(proto), chans >= 0, chans};
+          }
+        }
+
+        if (func == "ReduceScatter")
+        {
+          // RS DDA fabric lines carry the protocol; Direct RS reports SIMPLE. These
+          // refine the canonical "impl selected" line's protocol (channels unset:
+          // RS DDA has no Blocks helper and Direct's p2pnChannels aren't logged).
+          if (line.find("DDA fabric LL128") != std::string::npos)
+          {
+            addon = {true, "DDA", true, "LL128", false, 0};
+          }
+          else if (line.find("DDA fabric LL path") != std::string::npos)
+          {
+            addon = {true, "DDA", true, "LL", false, 0};
+          }
+          else if (line.find("DDA fabric (VMM)") != std::string::npos)
+          {
+            addon = {true, "DDA", false, "", false, 0};  // "VMM" is not an NCCL proto string
+          }
+          else if (line.find("RCCL DIRECT REDUCE-SCATTER") != std::string::npos)
+          {
+            addon = {true, "Direct", true, "SIMPLE", false, 0};
           }
         }
 
@@ -253,6 +276,8 @@ namespace RcclUnitTesting
         HIPCALL(hipSetDevice(i));
         if (coll == ncclFuncAllReduce)
           NCCLCHECK(ncclAllReduce(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
+        else if (coll == ncclFuncReduceScatter)
+          NCCLCHECK(ncclReduceScatter(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
         else
           NCCLCHECK(ncclAllGather(sbuf[i], rbuf[i], count, dt, comms[i], streams[i]));
       }
@@ -266,7 +291,7 @@ namespace RcclUnitTesting
       std::string  log = ReadFile(path);
       SelectedImpl sel = ParseSelected(log, funcStr);
 
-      const size_t bytes = count * (coll == ncclFuncAllGather ? nRanks : 1) *
+      const size_t bytes = count * ((coll == ncclFuncAllGather || coll == ncclFuncReduceScatter) ? nRanks : 1) *
                            (dt == ncclFloat32 ? 4 : 2);
       SCOPED_TRACE(std::string(funcStr) + " count=" + std::to_string(count) + " (~" +
                    std::to_string(bytes) + "B) dtype=" + (dt == ncclFloat32 ? "f32" : "bf16"));
@@ -371,7 +396,10 @@ namespace RcclUnitTesting
       // For the -R 2 sweep, buffers are cuMem-allocated and registered as symmetric
       // windows (RAII); kept alive for the whole sweep. Released before comm destroy.
       std::vector<RCCLTestHelpers::SymBuf> symSend, symRecv;
-      const size_t recvBytes = hiBytes;
+      // AllReduce: send == recv == total. AllGather: send == total/nRanks, recv == total.
+      // ReduceScatter is the inverse of AllGather: send == total, recv == total/nRanks.
+      const size_t recvBytes =
+        (coll == ncclFuncReduceScatter) ? (hiBytes + nRanks - 1) / nRanks : hiBytes;
       const size_t sendBytes =
         (coll == ncclFuncAllGather) ? (hiBytes + nRanks - 1) / nRanks : hiBytes;
 
@@ -468,7 +496,8 @@ namespace RcclUnitTesting
       for (ncclDataType_t dt : dtypes)
       {
         const size_t elemSize = (dt == ncclFloat32 ? 4 : 2);
-        const size_t denom = elemSize * (coll == ncclFuncAllGather ? (size_t)nRanks : 1);
+        const size_t denom =
+          elemSize * ((coll == ncclFuncAllGather || coll == ncclFuncReduceScatter) ? (size_t)nRanks : 1);
         for (size_t bytes = loBytes; bytes <= hiBytes; bytes <<= 1)
         {
           const size_t count = bytes / denom;
@@ -479,6 +508,8 @@ namespace RcclUnitTesting
             HIPCALL(hipSetDevice(i));
             if (coll == ncclFuncAllReduce)
               NCCLCHECK(ncclAllReduce(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
+            else if (coll == ncclFuncReduceScatter)
+              NCCLCHECK(ncclReduceScatter(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
             else
               NCCLCHECK(ncclAllGather(sbuf[i], rbuf[i], count, dt, comms[i], streams[i]));
           }
@@ -496,8 +527,9 @@ namespace RcclUnitTesting
       for (ncclDataType_t dt : dtypes)
       {
         const size_t elemSize = (dt == ncclFloat32 ? 4 : 2);
-        // For AllGather the swept total is divided among ranks; AllReduce uses it whole.
-        const size_t denom = elemSize * (coll == ncclFuncAllGather ? (size_t)nRanks : 1);
+        // For AllGather/ReduceScatter the swept total is divided among ranks; AllReduce uses it whole.
+        const size_t denom =
+          elemSize * ((coll == ncclFuncAllGather || coll == ncclFuncReduceScatter) ? (size_t)nRanks : 1);
         for (size_t bytes = loBytes; bytes <= hiBytes; bytes <<= 1)
         {
           const size_t count = bytes / denom;
@@ -606,6 +638,34 @@ namespace RcclUnitTesting
       mode.checkSymk   = true;
       mode.expectNoSym = true;
       RunSweep("AllGather", ncclFuncAllGather, kLoBytes, kHiBytes, mode);
+    });
+  }
+
+  TEST(CollImplInfo, ReduceScatterMatchesDispatchLog)
+  {
+    RUN_ISOLATED_TEST("ReduceScatterMatchesDispatchLog", []() {
+      RunSweep("ReduceScatter", ncclFuncReduceScatter, kLoBytes, kHiBytes);
+    });
+  }
+
+  TEST(CollImplInfo, ReduceScatterSymmetricMatchesDispatchLog)
+  {
+    RUN_ISOLATED_TEST("ReduceScatterSymmetricMatchesDispatchLog", []() {
+      SweepMode mode;
+      mode.registerSym = true;
+      mode.checkSymk   = true;
+      RunSweep("ReduceScatter", ncclFuncReduceScatter, kLoBytes, kHiBytes, mode);
+    });
+  }
+
+  TEST(CollImplInfo, ReduceScatterSymkNotReportedWhenCuMemDisabled)
+  {
+    RUN_ISOLATED_TEST("ReduceScatterSymkNotReportedWhenCuMemDisabled", []() {
+      SweepMode mode;
+      mode.cumemOff    = true;
+      mode.checkSymk   = true;
+      mode.expectNoSym = true;
+      RunSweep("ReduceScatter", ncclFuncReduceScatter, kLoBytes, kHiBytes, mode);
     });
   }
 }  // namespace RcclUnitTesting

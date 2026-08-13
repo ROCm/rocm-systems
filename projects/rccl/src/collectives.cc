@@ -767,58 +767,38 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   // Reset value forcing direct reduce scatter algorithm
   comm->enableDirectReduceScatter = 0;
 
-  // Skip DDA IPC and Direct RS if the symmetric path will handle this op, so they don't collide and deadlock.
-  // Symmetric reduce-scatter implements sum and avg (ncclDevSumPostDiv), refer ncclSymkImplemented
-  bool symEligible =
-    (op == ncclSum || op == ncclAvg) &&
-    isSymmetricKernelRequested(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
-                               datatype, recvcount, sendbuff, recvbuff);
+  // Select once in rccl_wrap.cc; the same function backs rcclGetCollImplInfo.
+  struct rcclCollDecision decision;
+  NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, /*query=*/false, &decision));
 
-  // The deadlock the symEligible guard prevents is cross-rank dispatch
-  // divergence: the symmetric kernel uses an N-way LSA barrier, so if any rank
-  // runs a different RS kernel it never arrives and all symmetric-path ranks
-  // hang. The gfx1250 DDA *fabric* path (barrier / LL / LL128) is dispatched
-  // purely from cross-rank-identical comm state + call args, so every rank makes
-  // the same choice and cannot diverge. We therefore let it win over symmetric
-  // in its (small/mid) size range; sizes it declines still fall through to the
-  // symmetric path (re-selected in ncclMakeSymmetricTaskList). The IPC / Direct
-  // RS paths keep the strict !symEligible guard below.
-  const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
-  if ((!symEligible || ddaFabricArch) && rcclDdaEnabled(comm, nRanks * recvcount * ncclTypeSize(datatype), 8388608)) {
-    if (ddaFabricArch) {
-      const size_t rsShardBytes = recvcount * ncclTypeSize(datatype);
-      // Small-shard fast lane: LL protocol (no GPU barrier).
-      if (rcclParamDdaLL() && rsShardBytes <= (size_t)rcclParamDdaLLThreshold() &&
-          ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
-        INFO(NCCL_COLL,
-             "ReduceScatter: taking DDA fabric LL path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
-             comm->nRanks, comm->nNodes, recvcount, (int)datatype, rsShardBytes);
-        NCCLCHECK(ncclReduceScatterDdaFabricLL(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
-        return ncclSuccess;
-      }
-      // Mid-shard fast lane: LL128 protocol (128B lines, no GPU barrier).
-      if (rcclParamDdaLL128() && rsShardBytes <= (size_t)rcclParamDdaLL128Threshold() &&
-          ncclReduceScatterDdaFabricLL128Eligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
-        INFO(NCCL_COLL,
-             "ReduceScatter: taking DDA fabric LL128 path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
-             comm->nRanks, comm->nNodes, recvcount, (int)datatype, rsShardBytes);
-        NCCLCHECK(ncclReduceScatterDdaFabricLL128(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
-        return ncclSuccess;
-      }
-      if (ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
-        INFO(NCCL_COLL,
-             "ReduceScatter: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
-             comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
-        NCCLCHECK(ncclReduceScatterDdaFabric(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
-        return ncclSuccess;
-      }
-    } else if (ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
-      NCCLCHECK(ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
-      return ncclSuccess;
-    }
+  // Canonical line for addon backends; native kernels report via the enqueue tuning line.
+  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
+    const char* an = nullptr;
+    rcclGetAlgoName(decision.algo, &an);
+    INFO(NCCL_COLL, "ReduceScatter impl selected: algo %s", an ? an : "?");
   }
 
-  if (!symEligible && rcclUseReduceScatterDirect(comm, msgSize)) {
+  switch (decision.algo) {
+  case RCCL_DDA_FABRIC_LL:
+    INFO(NCCL_COLL, "ReduceScatter: taking DDA fabric LL path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
+    NCCLCHECK(ncclReduceScatterDdaFabricLL(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_FABRIC_LL128:
+    INFO(NCCL_COLL,
+         "ReduceScatter: taking DDA fabric LL128 path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
+    NCCLCHECK(ncclReduceScatterDdaFabricLL128(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_FABRIC_VMM:
+    INFO(NCCL_COLL, "ReduceScatter: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
+    NCCLCHECK(ncclReduceScatterDdaFabric(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_IPC:
+    NCCLCHECK(ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DIRECT_REDUCESCATTER: {
     INFO(NCCL_TUNING,
          "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p "
          "sendbuff=%p recvbuff=%p",
@@ -842,6 +822,11 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
       NCCLCHECK(ncclRecv((void*)((char*)tempbuff + peer * offset), recvcount, datatype, peer, comm, stream));
     }
     NCCLCHECK(ncclGroupEnd());
+    // Falls through to the native kernel which finishes the local reduce.
+    break;
+  }
+  default: // RCCL_SYMMETRIC / native go through the standard enqueue path.
+    break;
   }
 
   return ncclEnqueueCheck(&info);

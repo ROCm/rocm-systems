@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include "ce_coll.h"
 #include "dda_all_reduce.h"
 #include "dda_all_gather.h"
+#include "dda_reduce_scatter.h"
 #include "group.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
@@ -470,6 +471,15 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
     return ncclSuccess;
   }
 
+  if (coll == ncclFuncReduceScatter) {
+    struct rcclCollDecision decision;
+    NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*query=*/true, &decision));
+    *algo = decision.algo;
+    *protocol = decision.protocol;
+    *maxChannels = decision.nMaxChannels;
+    return ncclSuccess;
+  }
+
   // Other collectives: fall back to the size/algo query until they are migrated
   // onto rcclSelectXxx().
   return rcclGetAlgoInfo(comm, coll, count, dataType, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, algo,
@@ -547,6 +557,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
       break;
     case rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER:
       *algoName = "Hier";
+      break;
+    case rcclAddonAlgos_t::RCCL_DIRECT_REDUCESCATTER:
+      *algoName = "Direct";
       break;
 #ifdef ENABLE_WARP_SPEED
     case rcclAddonAlgos_t::RCCL_WARP_SPEED:
@@ -1063,6 +1076,104 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // Report the traffic-packed channel count the kernel actually runs on, not the
     // tuning cap (task.nMaxChannels), matching the enqueue.cc channel{Lo..Hi} log.
     int packed = rcclKernelPackedChannels(comm, ncclFuncAllGather, sendcount, datatype, task.protocol,
+                                          task.nMaxChannels);
+#ifdef ENABLE_WARP_SPEED
+    // WarpSpeed reports as RING* with channels scaled by nWarps, matching rcclGetAlgoInfo.
+    decision->nMaxChannels = task.useWarpSpeed ? task.nMaxChannels / task.nWarps : packed;
+    decision->algo = task.useWarpSpeed ? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
+#else
+    decision->nMaxChannels = packed;
+    decision->algo = task.algorithm;
+#endif
+  }
+  return ncclSuccess;
+}
+
+// See the header comment. Consolidates the backend picking formerly inlined in
+// ncclReduceScatter_impl(); the outcome for any given operands is identical.
+ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
+                                     ncclDataType_t datatype, ncclRedOp_t op, bool query,
+                                     struct rcclCollDecision* decision) {
+  memset(decision, 0, sizeof(*decision));
+  decision->algo = NCCL_ALGO_RING;
+  decision->protocol = NCCL_PROTO_SIMPLE;
+  decision->nMaxChannels = 0;
+
+  const size_t typeSize = ncclTypeSize(datatype);
+  const size_t totalBytes = (size_t)comm->nRanks * recvcount * typeSize;
+  const size_t rsShardBytes = recvcount * typeSize;
+
+  // (1) Symmetric eligibility (sum/avg). Reported last but gates DDA IPC / Direct here.
+  const bool symEligible =
+    (op == ncclSum || op == ncclAvg) &&
+    isSymmetricKernelRequested(comm, ncclFuncReduceScatter,
+                               (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum, datatype, recvcount,
+                               sendbuff, recvbuff);
+
+  // (2) DDA fast paths. gfx1250 fabric may win over symmetric (cross-rank identical
+  // state); IPC keeps the strict !symEligible guard. No Blocks helpers -> nMaxChannels 0.
+  const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
+  if ((!symEligible || ddaFabricArch) && rcclDdaEnabled(comm, totalBytes, 8388608)) {
+    if (ddaFabricArch) {
+      if (rcclParamDdaLL() && rsShardBytes <= (size_t)rcclParamDdaLLThreshold() &&
+          ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+        decision->algo = RCCL_DDA_FABRIC_LL;
+        decision->protocol = NCCL_PROTO_LL;
+        return ncclSuccess;
+      }
+      if (rcclParamDdaLL128() && rsShardBytes <= (size_t)rcclParamDdaLL128Threshold() &&
+          ncclReduceScatterDdaFabricLL128Eligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+        decision->algo = RCCL_DDA_FABRIC_LL128;
+        decision->protocol = NCCL_PROTO_LL128;
+        return ncclSuccess;
+      }
+      if (ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+        decision->algo = RCCL_DDA_FABRIC_VMM;
+        return ncclSuccess;
+      }
+    } else if (ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+      decision->algo = RCCL_DDA_IPC;
+      return ncclSuccess;
+    }
+  }
+
+  // (3) Direct ReduceScatter (per-peer Send/Recv, native kernel finishes the reduce).
+  size_t directMsgSize = totalBytes;
+  if (!symEligible && rcclUseReduceScatterDirect(comm, directMsgSize)) {
+    decision->algo = RCCL_DIRECT_REDUCESCATTER;
+    decision->protocol = NCCL_PROTO_SIMPLE;
+    decision->nMaxChannels = comm->p2pnChannels;
+    return ncclSuccess;
+  }
+
+  // (4) Symmetric kernel. Live path dispatches symk via the downstream extraction.
+  if (symEligible) {
+    decision->algo = RCCL_SYMMETRIC;
+    if (query) {
+      int a, p, ch;
+      if (rcclSymkQuery(comm, ncclFuncReduceScatter, recvcount, datatype, op, &a, &p, &ch)) {
+        decision->protocol = p;
+        decision->nMaxChannels = ch;
+      }
+    }
+    return ncclSuccess;
+  }
+
+  // (5) Standard ring/pat kernel. Only the query needs algo/proto/channels filled;
+  // the live path recomputes these in taskAppend().
+  decision->algo = NCCL_ALGO_RING;
+  decision->protocol = NCCL_PROTO_SIMPLE;
+  if (query) {
+    struct ncclTaskColl task;
+    memset(&task, 0, sizeof(task));
+    task.func = ncclFuncReduceScatter;
+    task.count = recvcount;
+    task.datatype = datatype;
+    NCCLCHECK(getAlgoInfo(comm, &task, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, /*simInfo=*/nullptr));
+    decision->protocol = task.protocol;
+    // Report the traffic-packed channel count the kernel actually runs on, not the
+    // tuning cap (task.nMaxChannels), matching the enqueue.cc channel{Lo..Hi} log.
+    int packed = rcclKernelPackedChannels(comm, ncclFuncReduceScatter, recvcount, datatype, task.protocol,
                                           task.nMaxChannels);
 #ifdef ENABLE_WARP_SPEED
     // WarpSpeed reports as RING* with channels scaled by nWarps, matching rcclGetAlgoInfo.
