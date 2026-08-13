@@ -3656,7 +3656,7 @@ class CodeGenerator:
     def _cdna5_swmmac_has_modifiers(self, inst: Instruction) -> bool:
         return self.isa_spec.arch_name == 'cdna5' and inst.name.startswith('V_SWMMAC_')
 
-    def _gfx1250_matrix_fmt_operand_size_expr(
+    def _cdna5_matrix_fmt_operand_size_expr(
         self, shape: tuple[int, int, int] | None, opnd_name: str
     ) -> str | None:
         if shape is None or opnd_name not in ('src0', 'src1'):
@@ -7462,7 +7462,7 @@ class CodeGenerator:
                             enc.enc_name, opnd, inst_sem
                         )
                         if opnd_size_expr is None:
-                            opnd_size_expr = self._gfx1250_matrix_fmt_operand_size_expr(
+                            opnd_size_expr = self._cdna5_matrix_fmt_operand_size_expr(
                                 gfx1250_f8f6f4_shape, opnd.name
                             )
                         if opnd_size_expr is None:
