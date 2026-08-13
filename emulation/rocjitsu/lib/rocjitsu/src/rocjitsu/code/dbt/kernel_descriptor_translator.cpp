@@ -11,8 +11,8 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -77,7 +77,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return supports_wave_size<rdna4::Isa>(wf);
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return supports_wave_size<gfx1250::Isa>(wf);
+    return supports_wave_size<cdna5::Isa>(wf);
   default:
     return false;
   }
@@ -104,7 +104,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::Isa::WF_SIZE;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::Isa::WF_SIZE;
+    return cdna5::Isa::WF_SIZE;
   default:
     return 64;
   }
@@ -134,7 +134,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     // gfx1250 extends each encoded VGPR operand with dynamic high-bank bits.
     // Descriptor validation must allow the complete addressable register
     // range even though its inherited RDNA base describes one 256-VGPR bank.
-    return gfx1250::Isa::MAX_ADDRESSABLE_VGPRS_PER_WF;
+    return cdna5::Isa::MAX_ADDRESSABLE_VGPRS_PER_WF;
   default:
     return 0;
   }
@@ -161,7 +161,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return HasAccVgpr<rdna4::Isa>;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return HasAccVgpr<gfx1250::Isa>;
+    return HasAccVgpr<cdna5::Isa>;
   default:
     return false;
   }
