@@ -1,0 +1,19 @@
+{
+    "jobs": [
+        {
+            "pmc": [
+                "SQ_WAVES"
+            ]
+        },
+        {
+            "pmc": [
+                "GRBM_COUNT"
+            ]
+        },
+        {
+            "pmc": [
+                "GRBM_GUI_ACTIVE"
+            ]
+        }
+    ]
+}

@@ -71,7 +71,7 @@ list:
 ```cmake
 rj_add_isa_target_registry(
     model_isa_registry
-    PROVIDERS rocjitsu_isa_gfx1250_model
+    PROVIDERS rocjitsu_isa_cdna5_model
 )
 ```
 

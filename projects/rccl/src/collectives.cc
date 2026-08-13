@@ -12,13 +12,16 @@
 #include "nccl.h"
 #include "api_trace.h"
 #include "nvtx_payload_schemas.h"
-#include "device/hierarchical_ag_shuffle.h"
+#include "device/hierarchical_shuffle.h"
 #include "dda_all_reduce.h"
 #include "dda_reduce_scatter.h"
 #include "dda_all_gather.h"
 #include "dda_alltoall.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
+#include "ce_coll.h"
+#include "alltoallv_meta.h"
+#include "strongstream.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -34,6 +37,8 @@ const char* ncclFuncToString(ncclFunc_t fn) {
     return "AllReduce";
   case ncclFuncAlltoAll:
     return "AlltoAll";
+  case ncclFuncAlltoAllv:
+    return "AlltoAllv";
   case ncclFuncBroadcast:
     return "Broadcast";
   case ncclFuncGather:
@@ -279,7 +284,7 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   int nNodes = interComm->nRanks; // Number of nodes
   size_t typeSize = ncclTypeSize(datatype);
 
-  void* tempBuffer = comm->hierarchicalAGTempBuffer;
+  void* tempBuffer = comm->hierarchicalTempBuffer;
   const void* interSendBuff = sendbuff;
   size_t rankOffset = sendcount * typeSize;
   if (sendbuff == ((char*)recvbuff) + comm->rank * rankOffset) {
@@ -331,12 +336,11 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
     NCCLCHECK(ncclEnqueueCheck(&infoIntraAG));
   }
 
-  // Step 3: Shuffle tempBuffer to recvbuff
+  // Step 3: Shuffle tempBuffer (local-rank-major) -> recvbuff (node-major).
   size_t totalAGBytes = (size_t)nNodes * localRanks * rankOffset;
   int numBlocks = hierarchicalShuffleNumBlocks(totalAGBytes);
-  int threadsPerBlock = 1024;
-  hierarchicalAGShuffle<<<numBlocks, threadsPerBlock, 0, stream>>>((const char*)tempBuffer, (char*)recvbuff, rankOffset,
-                                                                   nNodes, localRanks);
+  hierarchicalShuffle<<<numBlocks, HIERARCHICAL_SHUFFLE_THREADS, 0, stream>>>((const char*)tempBuffer, (char*)recvbuff,
+                                                                              rankOffset, nNodes, localRanks);
   CUDACHECK(hipGetLastError());
 
   return ncclSuccess;
@@ -533,14 +537,20 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
   std::vector<size_t> sendcounts1(nRanks);
   std::vector<size_t> recvcounts1(nRanks);
 
-  std::vector<size_t> sizes(4 * nRanks); // 4 for sdispl, rdispl, scount, rcount
-#ifdef ENABLE_ROCSHMEM
+  std::vector<size_t> sizes(4 * nRanks); // [sendSizes, sendDispls, recvSizes, recvDispls] (bytes).
+  std::vector<size_t> gatheredSizes(4 * nRanks * nRanks);
+
   for (int i = 0; i < nRanks; i++) {
     sdispls1[i] = sdispls[i] * ncclTypeSize(datatype);
     rdispls1[i] = rdispls[i] * ncclTypeSize(datatype);
     sendcounts1[i] = sendcounts[i] * ncclTypeSize(datatype);
     recvcounts1[i] = recvcounts[i] * ncclTypeSize(datatype);
+    sizes[i] = sendcounts1[i];
+    sizes[nRanks + i] = sdispls1[i];
+    sizes[2 * nRanks + i] = recvcounts1[i];
+    sizes[3 * nRanks + i] = rdispls1[i];
   }
+#ifdef ENABLE_ROCSHMEM
 
   size_t count = sdispls1[nRanks - 1] + sendcounts1[nRanks - 1];
 
@@ -548,13 +558,6 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
     INFO(
       NCCL_INIT,
       "GDA alltoallv is supported for up to 128MB message size; Use ROCSHMEM_HEAP_SIZE=3GB for GDA support till 512MB");
-
-    for (int i = 0; i < nRanks; i++) {
-      sizes[i] = sendcounts1[i];
-      sizes[nRanks + i] = sdispls1[i];
-      sizes[2 * nRanks + i] = recvcounts1[i];
-      sizes[3 * nRanks + i] = rdispls1[i];
-    }
     count = count / ncclTypeSize(datatype);
 
     // use CU for copy-in/copy-out for small <= 128KB sizes
@@ -590,18 +593,55 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
     return ret;
   }
 #endif
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  NCCLCHECK(ncclDevrFindWindow(comm, sendbuff, &sendWin));
+  NCCLCHECK(ncclDevrFindWindow(comm, recvbuff, &recvWin));
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+  bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+  struct ncclCudaGraph ceGraph;
+  NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+  bool ceCapturing = ncclCudaGraphValid(ceGraph);
 
-  Recorder::instance().skip(true);
-  NCCLCHECK(ncclGroupStart());
-  for (int r = 0; r < nRanks; r++) {
-    NCCLCHECK(ncclSend(((char*)sendbuff) + sdispls[r] * ncclTypeSize(datatype), sendcounts[r], datatype, r, comm,
-                       stream));
-    NCCLCHECK(ncclRecv(((char*)recvbuff) + rdispls[r] * ncclTypeSize(datatype), recvcounts[r], datatype, r, comm,
-                       stream));
+  // CE AlltoAllv is single-node only (ncclCeAlltoAllvEligible requires nNodes==1).
+  // Multi-node jobs (e.g. 18x4) use the send/recv fallback below for cross-node traffic.
+  if (ncclCeAlltoAllvEligible(comm, datatype, winRegType, hasSysmemSegment, ceCapturing)) {
+    const size_t nLocal = 4 * (size_t)nRanks;
+    const size_t nGather = nLocal * (size_t)nRanks;
+
+    CUDACHECK(cudaMemcpyAsync(comm->localSizes, sizes.data(), nLocal * sizeof(size_t), cudaMemcpyHostToDevice, stream));
+    NCCLCHECK(ncclGroupStart());
+    for (int r = 0; r < nRanks; r++) {
+      void* recvPtr = (void*)((char*)comm->gatheredSizes + (size_t)r * nLocal * sizeof(size_t));
+      NCCLCHECK(ncclSend(comm->localSizes, nLocal, ncclUint64, r, comm, stream));
+      NCCLCHECK(ncclRecv(recvPtr, nLocal, ncclUint64, r, comm, stream));
+    }
+    NCCLCHECK(ncclGroupEnd());
+    CUDACHECK(cudaMemcpyAsync(gatheredSizes.data(), comm->gatheredSizes, nGather * sizeof(size_t),
+                              cudaMemcpyDeviceToHost, stream));
+    CUDACHECK(cudaStreamSynchronize(stream));
+
+    struct ncclInfo info = {
+      ncclFuncAlltoAllv,   "AlltoAllv",         sendbuff, recvbuff, 0, datatype, ncclSum, 0, comm, stream,
+      ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS, nullptr
+    };
+    info.sizes = gatheredSizes.data();
+
+    return ncclEnqueueCheck(&info);
+  } else {
+    Recorder::instance().skip(true);
+    NCCLCHECK(ncclGroupStart());
+    for (int r = 0; r < nRanks; r++) {
+      NCCLCHECK(ncclSend(((char*)sendbuff) + sdispls[r] * ncclTypeSize(datatype), sendcounts[r], datatype, r, comm,
+                         stream));
+      NCCLCHECK(ncclRecv(((char*)recvbuff) + rdispls[r] * ncclTypeSize(datatype), recvcounts[r], datatype, r, comm,
+                         stream));
+    }
+    NCCLCHECK(ncclGroupEnd());
+    Recorder::instance().skip(false);
+    return ncclSuccess;
   }
-  NCCLCHECK(ncclGroupEnd());
-  Recorder::instance().skip(false);
-  return ncclSuccess;
 }
 
 NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -772,6 +812,141 @@ ncclResult_t ncclReduce_impl(const void* sendbuff, void* recvbuff, size_t count,
   return ncclEnqueueCheck(&info);
 }
 
+// Direct ReduceScatter: two-phase pipeline
+//   Phase 1: stage every peer's slice into comm->tempBuff via a single
+//            useDirect=true ncclEnqueueCheck. taskAppend fans this out into
+//            per-peer Send/Recv P2P tasks.
+//   Phase 2: dispatch the local reduce kernel via a second
+//            ncclEnqueueCheck under enableDirectReduceScatter=1. The kernel
+//            reads all N peer slices from tempBuff and writes the reduced
+//            result to recvbuff.
+static ncclResult_t rcclDirectReduceScatter(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                            ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
+                                            cudaStream_t stream, int chunkSteps, int sliceSteps) {
+  if (recvcount == 0) return ncclSuccess;
+  void* tempbuff = comm->tempBuff;
+
+  ncclResult_t ret = ncclSuccess;
+
+  struct ncclInfo infoP2P = {ncclFuncReduceScatter,
+                             "ReduceScatter",
+                             sendbuff,
+                             tempbuff,
+                             recvcount,
+                             datatype,
+                             op,
+                             0,
+                             comm,
+                             stream,
+                             chunkSteps,
+                             sliceSteps,
+                             nullptr};
+  infoP2P.useDirect = true;
+
+  struct ncclInfo info = {ncclFuncReduceScatter,
+                          "ReduceScatter",
+                          sendbuff,
+                          recvbuff,
+                          recvcount,
+                          datatype,
+                          op,
+                          0,
+                          comm,
+                          stream,
+                          chunkSteps,
+                          sliceSteps,
+                          nullptr};
+
+  comm->enableDirectReduceScatter = 1;
+  NCCLCHECKGOTO(ncclEnqueueCheck(&infoP2P), ret, cleanup);
+  NCCLCHECKGOTO(ncclEnqueueCheck(&info), ret, cleanup);
+
+cleanup:
+  comm->enableDirectReduceScatter = 0;
+  return ret;
+}
+
+static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                                       ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
+                                                       cudaStream_t stream) {
+  if (recvcount == 0) return ncclSuccess;
+  ncclComm* intraComm = comm->hierarchicalIntraComm;
+  ncclComm* interComm = comm->hierarchicalInterComm;
+  int localRanks = intraComm->nRanks;
+  int nNodes = interComm->nRanks;
+  size_t typeSize = ncclTypeSize(datatype);
+  size_t rankOffset = recvcount * typeSize;
+
+  void* tempBuf = comm->hierarchicalTempBuffer;
+  size_t intraOutCount = recvcount * nNodes; // per-rank intra-RS output
+  void* intraOut = (char*)tempBuf + (size_t)intraComm->rank * intraOutCount * typeSize;
+
+  // Step 1: Pre-shuffle sendbuff (node-major) -> tempBuf (local-rank-major).
+  size_t totalBytes = (size_t)nNodes * localRanks * rankOffset;
+  int numBlocks = hierarchicalShuffleNumBlocks(totalBytes);
+  hierarchicalShuffle<<<numBlocks, HIERARCHICAL_SHUFFLE_THREADS, 0, stream>>>((const char*)sendbuff, (char*)tempBuf,
+                                                                              rankOffset, localRanks, nNodes);
+  CUDACHECK(hipGetLastError());
+
+  // Step 2: Intra-node ReduceScatter, in-place inside tempBuf.
+  struct ncclInfo infoIntraRS = {ncclFuncReduceScatter,
+                                 "HierarchicalReduceScatter-Intra",
+                                 tempBuf,
+                                 intraOut,
+                                 intraOutCount,
+                                 datatype,
+                                 op,
+                                 0,
+                                 intraComm,
+                                 stream,
+                                 REDUCESCATTER_CHUNKSTEPS,
+                                 intraComm->rcclUseOneSlice ? REDUCESCATTER_SLICESTEPS_SINGLE_NODE :
+                                                              REDUCESCATTER_SLICESTEPS,
+                                 nullptr};
+  NCCLCHECK(ncclEnqueueCheck(&infoIntraRS));
+
+  // Step 3: Inter-node ReduceScatter  intraOut -> recvbuff.
+  size_t interMsgSize = recvcount * typeSize * (size_t)nNodes;
+  if (rcclUseReduceScatterDirect(interComm, interMsgSize)) {
+    NCCLCHECK(rcclDirectReduceScatter(intraOut, recvbuff, recvcount, datatype, op, interComm, stream,
+                                      REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS));
+  } else {
+    struct ncclInfo infoInterRS = {ncclFuncReduceScatter,
+                                   "HierarchicalReduceScatter-Inter",
+                                   intraOut,
+                                   recvbuff,
+                                   recvcount,
+                                   datatype,
+                                   op,
+                                   0,
+                                   interComm,
+                                   stream,
+                                   REDUCESCATTER_CHUNKSTEPS,
+                                   REDUCESCATTER_SLICESTEPS,
+                                   nullptr};
+    NCCLCHECK(ncclEnqueueCheck(&infoInterRS));
+  }
+
+  return ncclSuccess;
+}
+
+enum rcclReduceScatterAlgo {
+  RCCL_RS_RING,
+  RCCL_RS_DIRECT,
+  RCCL_RS_HIERARCHICAL
+};
+
+static rcclReduceScatterAlgo rcclSelectReduceScatterAlgo(struct ncclComm* comm, size_t msgSize, ncclRedOp_t op) {
+  // Only sum is supported for hierarchical reduce scatter
+  if (ncclGroupDepth == 0 && op == ncclSum && rcclUseHierarchicalReduceScatter(comm, msgSize)) {
+    return RCCL_RS_HIERARCHICAL;
+  }
+  if (ncclGroupDepth == 0 && rcclUseReduceScatterDirect(comm, msgSize)) {
+    return RCCL_RS_DIRECT;
+  }
+  return RCCL_RS_RING;
+}
+
 NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff, size_t recvcount,
          ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
@@ -859,33 +1034,20 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     }
   }
 
-  if (!symEligible && rcclUseReduceScatterDirect(comm, msgSize)) {
+  rcclReduceScatterAlgo algo = symEligible ? RCCL_RS_RING : rcclSelectReduceScatterAlgo(comm, msgSize, op);
+  switch (algo) {
+  case RCCL_RS_HIERARCHICAL:
+    return ncclHierarchicalReduceScatter_Impl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+  case RCCL_RS_DIRECT:
     INFO(NCCL_TUNING,
          "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p "
          "sendbuff=%p recvbuff=%p",
          recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
-
-    // Temporary Buffer to store data from each rank
-    void* tempbuff = comm->tempBuff;
-
-    // Use Direct Reduce Scatter Algorithm
-    comm->enableDirectReduceScatter = 1;
-
-    if (recvcount == 0) return ncclSuccess;
-
-    // Calculate offset into buffers
-    size_t offset = recvcount * ncclTypeSize(datatype);
-
-    NCCLCHECK(ncclGroupStart());
-    for (int i = 0; i < nRanks; i++) {
-      int peer = (comm->rank + i) % nRanks;
-      NCCLCHECK(ncclSend((void*)((char*)sendbuff + peer * offset), recvcount, datatype, peer, comm, stream));
-      NCCLCHECK(ncclRecv((void*)((char*)tempbuff + peer * offset), recvcount, datatype, peer, comm, stream));
-    }
-    NCCLCHECK(ncclGroupEnd());
+    return rcclDirectReduceScatter(sendbuff, recvbuff, recvcount, datatype, op, comm, stream, chunkSteps, sliceSteps);
+  case RCCL_RS_RING:
+  default:
+    return ncclEnqueueCheck(&info);
   }
-
-  return ncclEnqueueCheck(&info);
 }
 
 NCCL_API(ncclResult_t, ncclScatter, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -977,6 +1139,7 @@ ncclResult_t ncclPutSignal_impl(const void* localbuff, size_t count, ncclDataTyp
                           1,
                           1,
                           nullptr, /* chunkSteps, sliceSteps, acc */
+                          nullptr,
                           false, /* useDirect */
                           peerWinOffset,
                           peerWin,
@@ -1006,6 +1169,7 @@ ncclResult_t ncclSignal_impl(int peer, int sigIdx, int ctx, unsigned int flags, 
                           1,
                           1,
                           nullptr, /* chunkSteps, sliceSteps, acc */
+                          nullptr,
                           false, /* useDirect */
                           0,
                           NULL,
@@ -1035,6 +1199,7 @@ ncclResult_t ncclWaitSignal_impl(int nDesc, ncclWaitSignalDesc_t* signalDescs, n
                           1,
                           1,
                           nullptr, /* chunkSteps, sliceSteps, acc */
+                          nullptr,
                           false, /* useDirect */
                           0,
                           NULL,
