@@ -38,7 +38,7 @@ def _f8_bools(input_type: str) -> tuple[str, str]:
     )
 
 
-def _gfx1250_wmma_spec(
+def _cdna5_wmma_spec(
     result_type: str, input_type: str, M: int, N: int, K: int
 ) -> str | None:
     """Specialized gfx1250 (wave32) dense-WMMA kernel name for a given shape,
@@ -523,7 +523,7 @@ def gen_mfma(
             else:
                 # Dense WMMA: a specialized wave32 kernel where one exists, else
                 # the generic exec_wmma_* runtime path.
-                spec = _gfx1250_wmma_spec(result_type, input_type, M, N, K)
+                spec = _cdna5_wmma_spec(result_type, input_type, M, N, K)
                 if spec is not None:
                     if result_type in ('F32', 'BF16F32'):
                         L.append(
