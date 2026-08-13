@@ -3828,7 +3828,7 @@ class CodeGenerator:
                 '  return cdna5_scaled_wmma_is_f4_32x16x128(inst) ? 512 : 256;\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scaled_wmma_src0_size_bits(const MachineInst *inst) {\n'
+                'int cdna5_scaled_wmma_src0_size_bits(const MachineInst *inst) {\n'
                 '  const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);\n'
                 '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
                 '    return 512;\n'
@@ -3933,7 +3933,7 @@ class CodeGenerator:
                         Vop3p::ExtensionDecodePolicy::Skip),
                   vdst(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->vdst),
-                  src0(gfx1250_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
+                  src0(cdna5_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src0),
                   src1(gfx1250_scaled_wmma_src1_size_bits(inst), OperandType::OPR_SRC_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src1),
