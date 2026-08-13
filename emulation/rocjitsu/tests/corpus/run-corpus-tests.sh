@@ -11,15 +11,18 @@
 #
 # Options:
 #   --workers N              Pytest-xdist workers (default: 8)
-#   --llama-build-workers N  Llama CMake workers (default: 16)
+#   --llama-build-workers N  Override llama CMake workers
 #   --soft-timeout N         First-run timeout per test (default: 30)
 #   --hard-timeout N         Failed-test rerun timeout (default: 60)
 #   --rerun-failed           Rerun only tests that failed the first pass
 #   --warn-perf              Warn about tests close to the soft timeout
 #
 # Environment variables:
-#   ROCM_PATH            Required ROCm installation root
-#   ROCJITSU_SOURCE_DIR  Required rocjitsu source directory
+#   ROCM_PATH                  Required ROCm installation root
+#   ROCJITSU_SOURCE_DIR        Required rocjitsu source directory
+#   LLAMA_CORPUS_BUILD_WORKERS Optional llama CMake worker override. When
+#                              unset, the llama pytest harness uses the pytest
+#                              worker count.
 #
 # Outputs:
 #   .pytest-artifacts/<target>/           Corpus harness logs and artifacts
@@ -32,7 +35,7 @@ set -euo pipefail
 : "${ROCJITSU_SOURCE_DIR:?ROCJITSU_SOURCE_DIR must be set}"
 
 worker_count=8
-llama_build_workers=16
+llama_build_workers=
 soft_timeout_seconds=30
 hard_timeout_seconds=60
 rerun_failed=false
@@ -105,7 +108,6 @@ for target in "${targets[@]}"; do
   junit_xml="${junit_dir}/${name}.xml"
 
   pytest_cmd=(
-    env "LLAMA_CORPUS_BUILD_WORKERS=${llama_build_workers}"
     rocjitsu --config "${rocjitsu_config_path}" -- pytest tests/test_corpus.py
     --target "${name}"
     --suite iree,kernels,cts,llama
@@ -119,6 +121,14 @@ for target in "${targets[@]}"; do
     -o "timeout_func_only=true"
     -o "junit_duration_report=call"
   )
+
+  # Override the llama corpus's default build worker count.
+  if [[ -n "${llama_build_workers}" ]]; then
+    pytest_cmd=(
+      env "LLAMA_CORPUS_BUILD_WORKERS=${llama_build_workers}"
+      "${pytest_cmd[@]}"
+    )
+  fi
 
   # Only the soft-timeout run is configured to output a JUnit XML report.
   first_run_status=0
