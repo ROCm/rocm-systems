@@ -12,6 +12,8 @@ add_executable(
     test_sdk_callbacks.cpp
     test_environ_cache.h
     test_environ_cache.cpp
+    test_counters_writer.h
+    test_counters_writer.cpp
     mocks.h
     mocks.cpp
     main.cpp

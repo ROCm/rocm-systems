@@ -16,7 +16,7 @@ from typing import Any, Optional, Union, cast
 
 import config
 import utils.utils_profile_csv as csv_ops
-from utils import rocpd_data
+from utils import csv_compression, rocpd_data
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
@@ -283,7 +283,9 @@ def run_prof(
     ):
         for db_name in db_paths:
             pid = db_name.stem.split("_")[0]
-            native_counter_csv = out_pmc_1 / f"{pid}_native_counter_collection.csv"
+            native_counter_csv = csv_compression.resolve_csv(
+                out_pmc_1 / f"{pid}_native_counter_collection.csv"
+            )
             if not native_counter_csv.is_file():
                 console_debug(
                     f"No native counter CSV for pid {pid}; "
@@ -296,7 +298,9 @@ def run_prof(
             )
             console_debug(f"Updated rocpd db {db_name} with native tool counters.")
     # Write results_fbase.csv
-    counter_csv = out_pmc_1 / f"{fbase}_counter_collection.csv"
+    counter_csv = csv_compression.compressed_name(
+        out_pmc_1 / f"{fbase}_counter_collection.csv"
+    )
     rocpd_data.convert_dbs_to_csv(
         [str(p) for p in db_paths],
         str(counter_csv),
@@ -325,7 +329,9 @@ def run_prof(
 
     # The counter CSV has one row per dispatch per counter, so it is streamed
     # rather than held in memory. PID only groups dispatches; drop it from output.
-    results_csv = Path(workload_dir) / f"results_{fbase}.csv"
+    results_csv = csv_compression.compressed_name(
+        Path(workload_dir) / f"results_{fbase}.csv"
+    )
 
     # Subprocess succeeded but may have dispatched zero GPU kernels,
     # in which case the CSV is missing or has no data rows.
@@ -488,7 +494,9 @@ def save_ml_api_trace_inputs(
     src_dir = Path(workload_dir) / "out" / "pmc_1"
     # Only one pair expected
     src_marker = src_dir / f"{fbase}_marker_api_trace.csv"
-    dst_counter = Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv"
+    dst_counter = csv_compression.compressed_name(
+        Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv"
+    )
     dst_marker = Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv"
     # These files are expected to exist.
     shutil.copyfile(src_counter, dst_counter)
