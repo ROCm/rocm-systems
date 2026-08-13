@@ -661,6 +661,10 @@ void ReduceProcessMaxIterTimes(double* iterTimes, const double* allProcessTimes,
   }
 }
 
+// Explicit instantiations so other TUs (e.g. gin_sdma_devtime.h via alltoall.cu)
+// can call Allreduce through the common.h declaration.
+template void Allreduce<double>(struct threadArgs* args, double* value, int average);
+template void Allreduce<long long>(struct threadArgs* args, long long* value, int average);
 testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, int64_t *wrongElts) {
   int nranks = args->nProcs*args->nGpus*args->nThreads;
   size_t count = args->expectedBytes/wordSize(type);
@@ -1080,6 +1084,12 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   if (deviceOnly) {
     // The reported metric is the in-kernel wall_clock64 device latency
     // (per iteration, max across ranks), measured by the collective's hook.
+    // Note: the datacheck loop below re-inits buffers and re-runs the PRODUCTION
+    // kernel via startColl before CheckData, so it validates the production path,
+    // not the timed kernel (whose output is overwritten first). This is by design:
+    // the *TimedKernel bodies call the same __device__ collective functions as the
+    // production kernels, so collective correctness is covered; only the timing-only
+    // loop/skip/stamp wrapper around them is not exercised by datacheck.
     double deviceDeltaSec = 0.0;
     TESTCHECK(args->collTest->deviceTime(args, type, op, root, in_place, &deviceDeltaSec));
     deltaSec = deviceDeltaSec;

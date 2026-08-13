@@ -489,6 +489,12 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
   static const int loopEnv = gin_devtime::envInt("NCCL_GIN_ANVIL_A2A_DEVTIME_LOOP", 10);  // rocSHMEM default
   static const int skipEnv = gin_devtime::envInt("NCCL_GIN_ANVIL_A2A_DEVTIME_SKIP", 10);  // rocSHMEM default
 
+  // Only the GIN (deviceImpl 3) and Hybrid (deviceImpl 4) tiers provision the GIN
+  // signals/barriers the timed bodies rely on. The Nvl LSA impls (-D1/-D2) only
+  // provision the LSA barrier, so running the GIN timed kernel there would fault
+  // on an out-of-range signal index or wait forever -- skip them.
+  if (deviceImpl != 3 && deviceImpl != 4) return testSuccess;
+
   const size_t count = args->nbytes / wordSize(type);
   if (count == 0 || loopEnv < 1) return testSuccess;
   const size_t perPeerBytes = count * wordSize(type);
@@ -498,7 +504,10 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
   // counts for very large chunks (bounded runtime; per-call copy dominates) via
   // NCCL_GIN_ANVIL_A2A_DEVTIME_AUTOREDUCE=1.
   static const int autoReduce = gin_devtime::envInt("NCCL_GIN_ANVIL_A2A_DEVTIME_AUTOREDUCE", 0);
-  int loop = loopEnv, skip = skipEnv;
+  // Clamp skip to >= 0: the timed kernel only stamps start_time[] at i == skip, so
+  // a negative skip would leave start_time[] as uninitialized cudaMalloc memory and
+  // measure() would reduce mx - mn over garbage (reported as the mode-2 metric).
+  int loop = loopEnv, skip = skipEnv < 0 ? 0 : skipEnv;
   if (autoReduce) {
     if (perPeerBytes >= (size_t)64 * 1024 * 1024) { loop = loop < 2 ? loop : 2; skip = skip < 1 ? skip : 1; }
     else if (perPeerBytes >= (size_t)8 * 1024 * 1024) { loop = loop < 4 ? loop : 4; skip = skip < 2 ? skip : 2; }

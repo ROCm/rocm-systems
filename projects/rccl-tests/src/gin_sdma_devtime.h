@@ -66,23 +66,34 @@ static inline testResult_t measure(struct threadArgs* args, int gridCtas, int lo
   const int rate = wallClockRateKhz();
   double localMaxUs = 0.0;
 
+  std::vector<long long*> d_start(args->nGpus, nullptr);
+  std::vector<long long*> d_end(args->nGpus, nullptr);
+
   Barrier(args);
+
+  // Pass 1: allocate stamps and launch the timed kernel on EVERY local GPU before
+  // synchronizing any of them. The collective bodies do an all-ranks device barrier
+  // and each local GPU is its own rank under -g N, so all local GPUs must be
+  // in-flight concurrently -- synchronizing GPU i before launching GPU i+1 would
+  // block GPU 0 at the barrier waiting for GPUs that were never launched (deadlock).
+  // This mirrors the launch-then-complete split in startColl()/completeColl().
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
+    CUDACHECK(cudaMalloc(&d_start[i], (size_t)gridCtas * sizeof(long long)));
+    CUDACHECK(cudaMalloc(&d_end[i], (size_t)gridCtas * sizeof(long long)));
+    launch(i, d_start[i], d_end[i]);
+  }
 
-    long long* d_start = nullptr;
-    long long* d_end = nullptr;
-    CUDACHECK(cudaMalloc(&d_start, (size_t)gridCtas * sizeof(long long)));
-    CUDACHECK(cudaMalloc(&d_end, (size_t)gridCtas * sizeof(long long)));
-
-    launch(i, d_start, d_end);
+  // Pass 2: synchronize each GPU, copy stamps back, reduce the grid busy window.
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
     CUDACHECK(cudaStreamSynchronize(args->streams[i]));
 
     std::vector<long long> h_start(gridCtas), h_end(gridCtas);
-    CUDACHECK(cudaMemcpy(h_start.data(), d_start, (size_t)gridCtas * sizeof(long long), cudaMemcpyDeviceToHost));
-    CUDACHECK(cudaMemcpy(h_end.data(), d_end, (size_t)gridCtas * sizeof(long long), cudaMemcpyDeviceToHost));
-    CUDACHECK(cudaFree(d_start));
-    CUDACHECK(cudaFree(d_end));
+    CUDACHECK(cudaMemcpy(h_start.data(), d_start[i], (size_t)gridCtas * sizeof(long long), cudaMemcpyDeviceToHost));
+    CUDACHECK(cudaMemcpy(h_end.data(), d_end[i], (size_t)gridCtas * sizeof(long long), cudaMemcpyDeviceToHost));
+    CUDACHECK(cudaFree(d_start[i]));
+    CUDACHECK(cudaFree(d_end[i]));
 
     long long mn = h_start[0], mx = h_end[0];
     for (int c = 1; c < gridCtas; c++) {
@@ -95,10 +106,15 @@ static inline testResult_t measure(struct threadArgs* args, int gridCtas, int lo
   }
   Barrier(args);
 
+  // Combine across threads AND ranks through the harness helper. A direct
+  // MPI_Allreduce on MPI_COMM_WORLD here would be wrong under -t N>1: MPI is
+  // initialized MPI_THREAD_SINGLE, and all N BenchTime threads would issue
+  // concurrent collectives on the same communicator (can hang). Allreduce()
+  // accumulates across the process's threads, has only the last thread touch MPI,
+  // and broadcasts the reduced value back -- which also fixes localMaxUs (per-GPU
+  // max on this thread) not being combined across threads.
   double devUs = localMaxUs;
-#ifdef MPI_SUPPORT
-  MPI_Allreduce(MPI_IN_PLACE, &devUs, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-#endif
+  Allreduce(args, &devUs, /*max*/3);
   *outUs = devUs;
   return testSuccess;
 }
