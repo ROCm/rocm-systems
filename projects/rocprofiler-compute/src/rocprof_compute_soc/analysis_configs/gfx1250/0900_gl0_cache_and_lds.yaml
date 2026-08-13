@@ -299,9 +299,9 @@ Panel Config:
           max: MAX(TX_VMW_GL1_REQ_READ_sum / $denom)
           unit: (Count + $normUnit)
         GL0-GL1 Read Bandwidth:
-          avg: AVG((TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN((TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX((TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG((TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          min: MIN((TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          max: MAX((TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL0-GL1 Write Requests:
           avg: AVG(TX_VMW_GL1_REQ_WRITE_sum / $denom)
@@ -309,9 +309,9 @@ Panel Config:
           max: MAX(TX_VMW_GL1_REQ_WRITE_sum / $denom)
           unit: (Count + $normUnit)
         GL0-GL1 Write Bandwidth:
-          avg: AVG((TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN((TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX((TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG((TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          min: MIN((TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          max: MAX((TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL0-GL1 Atomic Requests - With Return:
           avg: AVG(TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum / $denom)

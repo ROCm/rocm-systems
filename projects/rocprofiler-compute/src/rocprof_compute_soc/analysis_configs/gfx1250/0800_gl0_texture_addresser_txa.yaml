@@ -301,54 +301,54 @@ Panel Config:
         unit: Unit
       metric:
         LDS Bandwidth - Load:
-          avg: AVG(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          min: MIN(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         LDS Bandwidth - Store:
-          avg: AVG(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          min: MIN(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         LDS Bandwidth - Atomics:
-          avg: AVG(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          min: MIN(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         Async Load Bandwidth:
-          avg: AVG(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          min: MIN(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         Async Store Bandwidth:
-          avg: AVG(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          min: MIN(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         TDM Load Bandwidth:
-          avg: AVG(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          min: MIN(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         TDM Store Bandwidth:
-          avg: AVG(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          min: MIN(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL0 Load Bandwidth:
-          avg: AVG(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          min: MIN(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL0 Store Bandwidth:
-          avg: AVG(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          min: MIN(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL0 Atomics Bandwidth:
-          avg: AVG(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          min: MIN(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
 
   metrics_description:

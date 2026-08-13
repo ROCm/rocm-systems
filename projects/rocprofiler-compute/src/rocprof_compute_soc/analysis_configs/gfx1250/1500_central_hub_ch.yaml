@@ -178,14 +178,14 @@ Panel Config:
         unit: Unit
       metric:
         CHC Bandwidth - Read:
-          avg: AVG((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          min: MIN((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          max: MAX((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         CHC Bandwidth - Write:
-          avg: AVG(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
+          min: MIN(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
+          max: MAX(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         CHC-GL2 Latency - Read:
           avg: AVG(CHC_GL2_REQ_READ_LEVEL_sum / CHC_REQ_READ_sum)

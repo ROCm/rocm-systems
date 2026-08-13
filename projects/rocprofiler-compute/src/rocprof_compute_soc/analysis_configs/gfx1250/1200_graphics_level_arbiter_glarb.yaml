@@ -127,14 +127,14 @@ Panel Config:
         unit: Unit
       metric:
         GLARBC Request Bandwidth - Read:
-          avg: AVG((GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN((GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX((GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG((GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          min: MIN((GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          max: MAX((GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GLARBC Request Bandwidth - Write:
-          avg: AVG((GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN((GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX((GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: AVG((GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          min: MIN((GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
+          max: MAX((GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GLARBC-Client Write ACKs:
           avg: AVG(GLARBC_GLARB_RET_ACK_sum / $denom)

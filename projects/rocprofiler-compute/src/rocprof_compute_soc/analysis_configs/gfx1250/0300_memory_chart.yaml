@@ -41,7 +41,7 @@ Panel Config:
           value: AVG(100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         ICache-GL1 Read Bandwidth:
-          value: AVG(SQC_TC_INST_REQ_sum * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(SQC_TC_INST_REQ_sum * 128 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         ICache-GL1 Request Latency:
           value: AVG(SUM(SQC_ICACHE_TC_INFLIGHT_LEVEL_ACCUM) / SQC_TC_INST_REQ_sum)
@@ -74,10 +74,10 @@ Panel Config:
           value: AVG(100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Dcache Request Bandwidth:
-          value: AVG(SQC_SMEM_LOAD_DWORDS_sum * 4 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(SQC_SMEM_LOAD_DWORDS_sum * 4 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         Dcache-GL1 Read Bandwidth:
-          value: AVG(SQC_TC_DATA_READ_REQ_sum * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(SQC_TC_DATA_READ_REQ_sum * 128 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         Dcache-GL1 Request Latency:
           value: AVG(SUM(SQC_DCACHE_TC_INFLIGHT_LEVEL_ACCUM) / SQC_TC_DATA_READ_REQ_sum)
@@ -163,25 +163,25 @@ Panel Config:
           value: AVG(100 * TX_VMW_LDS_ADDR_CONFLICT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Load Bandwidth:
-          value: AVG(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         LDS Store Bandwidth:
-          value: AVG(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         LDS Atomic Bandwidth:
-          value: AVG(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         Async Load Bandwidth:
-          value: AVG(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         Async Store Bandwidth:
-          value: AVG(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         TDM Load Bandwidth:
-          value: AVG(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         TDM Store Bandwidth:
-          value: AVG(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         TDM Load Requests:
           value: AVG(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum / $denom)
@@ -207,13 +207,13 @@ Panel Config:
           value: AVG(TX_VMW_GL1_REQ_WRITE_sum / $denom)
           unit: (Requests + $normUnit)
         GL0-GL1 Read Bandwidth:
-          value: AVG((TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG((TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL0-GL1 Write Bandwidth:
-          value: AVG((TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG((TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL0-GL1 Atomic Bandwidth:
-          value: AVG((TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG((TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) * 128 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL0-GL1 Read Latency:
           value: AVG(TX_VMW_GL1_READ_LATENCY_sum / TX_VMW_GL1_REQ_READ_sum)
@@ -264,19 +264,19 @@ Panel Config:
           value: AVG(100 * GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum)
           unit: Percent
         GL1-GLARB Read Bandwidth:
-          value: AVG((GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG((GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL1-GLARB Write Bandwidth:
-          value: AVG(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GLARB-GL2 Read Bandwidth:
-          value: AVG((GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG((GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GLARB-GL2 Write Bandwidth:
-          value: AVG((GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG((GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GLARB-GL2 Atomic Bandwidth:
-          value: AVG((GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum) * 64 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG((GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum) * 64 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
 
   - metric_table:
@@ -297,13 +297,13 @@ Panel Config:
           value: AVG(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
           unit: Percent
         GL2-EA Read Bandwidth:
-          value: AVG(GL2C_EA_RDREQ_DRAM_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(GL2C_EA_RDREQ_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Write Bandwidth:
-          value: AVG(GL2C_EA_WRREQ_DRAM_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(GL2C_EA_WRREQ_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Atomic Bandwidth:
-          value: AVG(GL2C_EA_ATOMIC_DRAM_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(GL2C_EA_ATOMIC_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Read Latency:
           value: AVG(GL2C_EA_RDREQ_LEVEL_sum / GL2C_EA_RDREQ_sum)
@@ -327,28 +327,28 @@ Panel Config:
           value: AVG(100 * GC_EA_SE_BUSY_CYCLE_sum / GC_EA_SE_CYCLE_sum)
           unit: Percent
         DRAM Read Bandwidth:
-          value: AVG(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         DRAM Write Bandwidth:
-          value: AVG(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         IO Read Bandwidth:
-          value: AVG(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         IO Write Bandwidth:
-          value: AVG(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         HDM Read Bandwidth:
-          value: AVG(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         HDM Write Bandwidth:
-          value: AVG(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GMI Read Bandwidth:
-          value: AVG(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GMI Write Bandwidth:
-          value: AVG(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: AVG(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         EA Stall Rate:
           value: AVG(100 * GC_EA_SE_SARB_STALLED_sum / GC_EA_SE_BUSY_CYCLE_sum)
