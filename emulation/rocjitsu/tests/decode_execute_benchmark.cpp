@@ -21,7 +21,7 @@
 #include "util/except.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 
 #include <gtest/gtest.h>
@@ -255,8 +255,8 @@ TEST(DecodeExecuteBenchmark, Rdna4) {
 
 TEST(DecodeExecuteBenchmark, Gfx1250) {
   run_benchmark(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
-                reinterpret_cast<const TestEncEntry *>(gfx1250::test_data::ENCODINGS),
-                gfx1250::test_data::NUM_ENCODINGS);
+                reinterpret_cast<const TestEncEntry *>(cdna5::test_data::ENCODINGS),
+                cdna5::test_data::NUM_ENCODINGS);
 }
 
 } // namespace
