@@ -64,12 +64,12 @@ record_free(void* ptr);
 alloc_map_t
 snap_inventory(hsa_agent_t agent);
 
-// Install inventory wrappers on top of the existing table function pointers.
-void
-update_table(hsa::hsa_core_table_t* table);
+}  // namespace memory_tracker
 
 void
-update_table(hsa::hsa_amd_ext_table_t* table);
-}  // namespace memory_tracker
+memory_tracker_init(hsa::hsa_core_table_t* table, uint64_t lib_instance);
+
+void
+memory_tracker_init(hsa::hsa_amd_ext_table_t* table, uint64_t lib_instance);
 }  // namespace kernel_replay
 }  // namespace rocprofiler

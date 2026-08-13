@@ -1280,8 +1280,8 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->amd_ext_, lib_instance);
-        rocprofiler::kernel_replay::memory_tracker::update_table(hsa_api_table->core_);
-        rocprofiler::kernel_replay::memory_tracker::update_table(hsa_api_table->amd_ext_);
+        rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->core_, lib_instance);
+        rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->amd_ext_, lib_instance);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         if(runtime_pc_sampling_table)
             rocprofiler::pc_sampling::code_object::initialize(hsa_api_table);
