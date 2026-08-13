@@ -3861,7 +3861,7 @@ class CodeGenerator:
                 '                                             : "v_wmma_scale_f32_16x16x128_f8f6f4";\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scale_operand_size_bits(const MachineInst *inst) {\n'
+                'int cdna5_scale_operand_size_bits(const MachineInst *inst) {\n'
                 '  return cdna5_scaled_wmma_is_scale16(inst) ? 64 : 32;\n'
                 '}\n'
                 '\n'
@@ -3980,9 +3980,9 @@ class CodeGenerator:
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src1),
                   src2(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src2),
-                  scale_src0(gfx1250_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+                  scale_src0(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
                              reinterpret_cast<const OpEncoding *>(inst)->src0),
-                  scale_src1(gfx1250_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+                  scale_src1(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
                              reinterpret_cast<const OpEncoding *>(inst)->src1),
                   scale_inst_(*reinterpret_cast<const OpEncoding *>(inst)) {
               raw_words_ = {inst[0], inst[1], inst[2], inst[3]};
