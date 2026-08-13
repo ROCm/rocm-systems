@@ -21,7 +21,6 @@ pytestmark = [pytest.mark.nic, pytest.mark.network]
 def nic_perf_env(rocprof_config) -> dict[str, str]:
     """Environment variables for NIC performance tests."""
     return {
-        "ROCPROFSYS_TRACE_LEGACY": "ON",
         "ROCPROFSYS_USE_PID": "OFF",
         "ROCPROFSYS_LOG_LEVEL": "trace",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",

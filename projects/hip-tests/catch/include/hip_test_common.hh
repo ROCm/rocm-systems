@@ -15,6 +15,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <iomanip>
+#include <sstream>
+#include <string>
 #include <mutex>
 #include <cstdlib>
 #include <thread>
@@ -145,6 +147,32 @@ inline bool isQuickLevel() {
 #define HIP_CHECK_THREAD_FINALIZE()                                                                \
   { TestContext::get().finalizeResults(); }
 
+// Per-thread buffer used by INFO_THREAD
+inline std::string& threadInfoMessageBuffer() {
+  static thread_local std::string buffer;
+  return buffer;
+}
+
+// Thread-safe counterpart of INFO: stashes a diagnostic message that the next
+// CHECK_THREAD attaches to its recorded result.
+#define INFO_THREAD(message)                                                                       \
+  {                                                                                                \
+    std::stringstream threadInfoStream;                                                            \
+    threadInfoStream << message;                                                                   \
+    threadInfoMessageBuffer() = threadInfoStream.str();                                            \
+  }
+
+// Thread-safe counterpart of CHECK
+#define CHECK_THREAD(condition)                                                                    \
+  {                                                                                                \
+    auto localResult = (condition);                                                                \
+    std::string threadCall =                                                                       \
+        threadInfoMessageBuffer().empty() ? std::string(#condition) : threadInfoMessageBuffer();   \
+    HCResult result(__LINE__, __FILE__, hipSuccess, threadCall, localResult);                      \
+    TestContext::get().addResults(result);                                                         \
+    threadInfoMessageBuffer().clear();                                                             \
+  }
+
 // Selects between the thread-safe and the regular check based on a runtime flag.
 #define HIP_CHECK_OPT_THREAD(threadSafe, error)                                                    \
   {                                                                                                \
@@ -259,18 +287,17 @@ inline bool isQuickLevel() {
   }
 
 #if HT_NVIDIA
-#define CTX_CREATE_DEV(deviceId)                                                                   \
+#define CTX_CREATE()                                                                               \
   hipCtx_t context;                                                                                \
-  initHipCtx(&context, deviceId);
-#define CTX_CREATE() CTX_CREATE_DEV(0)
+  initHipCtx(&context);
 #define CTX_DESTROY() HIPCHECK(hipCtxDestroy(context));
 #define ARRAY_DESTROY(array) HIPCHECK(hipArrayDestroy(array));
 #define HIP_TEX_REFERENCE hipTexRef
 #define HIP_ARRAY hipArray_t
-static void initHipCtx(hipCtx_t* pcontext, int deviceId = 0) {
+static void initHipCtx(hipCtx_t* pcontext) {
   HIPCHECK(hipInit(0));
   hipDevice_t device;
-  HIPCHECK(hipDeviceGet(&device, deviceId));
+  HIPCHECK(hipDeviceGet(&device, 0));
   HIPCHECK(hipCtxCreate(pcontext, 0, device));
 }
 
@@ -281,7 +308,6 @@ static void initHipCtx(hipCtx_t* pcontext, int deviceId = 0) {
 #define HIP_TEST_DRIVER_INIT() HIP_CHECK(hipInit(0))
 #else
 #define CTX_CREATE()
-#define CTX_CREATE_DEV(deviceId)
 #define CTX_DESTROY()
 #define ARRAY_DESTROY(array) HIPCHECK(hipFreeArray(array));
 #define HIP_TEX_REFERENCE textureReference*
@@ -800,6 +826,17 @@ class BlockingContext {
 #define CHECK_WARP_MATCH_FUNCTIONS_SUPPORT                                                         \
   if (!HipTest::areWarpMatchFunctionsSupported()) {                                                \
     HIP_SKIP_TEST("warp match functions are not supported on this device.");                       \
+  }
+
+// Call at the start of tests that require cooperative kernel launch support to indicate
+// whether it is supported on the current device.
+#define CHECK_COOPERATIVE_LAUNCH_SUPPORT                                                           \
+  int current_device_ = 0;                                                                         \
+  hipDeviceProp_t device_properties_;                                                              \
+  HIP_CHECK(hipGetDevice(&current_device_));                                                       \
+  HIP_CHECK(hipGetDeviceProperties(&device_properties_, current_device_));                         \
+  if (!device_properties_.cooperativeLaunch) {                                                     \
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);                             \
   }
 
 // Call GENERATE_CAPTURE macro at the start of the test, before using BEGIN/END_CAPTURE.

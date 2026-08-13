@@ -10,6 +10,10 @@ When an I/O operation is submitted to hipFile, the operation can either be compl
 
 The fastpath transfers data between storage and the GPU without the use of a buffer. The fallback method routes the operation through a host-side buffer first before transferring data to the GPU.
 
+.. note::
+
+   The fastpath backend is only supported on ext4 and xfs file systems
+
 At submission time, both the fastpath and fallback backends inspect the I/O and provide an eagerness score. The fastpath backend will return an eagerness score of 100 if it can handle the request. The fallback backend will return an eagerness score of 1 if it can handle the request. In the case where a backend can't handle the request, it will return a score of -1.
 
 hipFile will use the backend with the highest score. In most situations, the fastpath backend will have the highest score.

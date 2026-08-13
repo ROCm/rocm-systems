@@ -168,6 +168,7 @@ declare -A TEST_NUMBERS=(
   ["alltoall_wave"]="151"
   ["fcollect_wave"]="152"
   ["reduce_wave"]="153"
+  ["teamreducescatterwave"]="154"
 )
 
 # Detect which runtime to use
@@ -821,6 +822,9 @@ TestColl() {
     ExecTest  "alltoall_wave"    2       1            $WAVE_SIZE        512
     ExecTest  "fcollect_wave"    2       1            $WAVE_SIZE        32768
     ExecTest  "reduce_wave"      2       1            $WAVE_SIZE        32768
+    ExecTest  "teamreducescatterwave" 2      1            $WAVE_SIZE   32768
+    ExecTest  "teamreducescatterwave" 4      1            $WAVE_SIZE   32768
+    ExecTest  "teamreducescatterwave" 8      1            $WAVE_SIZE   32768
   else echo "Skip:   *_wave (AIROCSHMEM-409: wave tests not supported on RO)"; fi
 }
 
@@ -922,13 +926,12 @@ TestOther() {
   ExecTest  "flood_putnbi"     8       64           1024
   ExecTest  "flood_p"          8       64           1024
 
-  # Temporarily disabled flood_get tests
-  # ExecTest  "flood_get"        2       64           1024
-  # ExecTest  "flood_get"        8       64           1024
-  # ExecTest  "flood_getnbi"     8       64           1024
-  # if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
-  # ExecTest  "flood_g"          8       64           1024
-  # else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
+  ExecTest  "flood_get"        2       64           1024
+  ExecTest  "flood_get"        8       64           1024
+  ExecTest  "flood_getnbi"     8       64           1024
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
+  ExecTest  "flood_g"          8       64           1024
+  else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
 
   ExecTest  "flood_add"        2       64           1024
   ExecTest  "flood_add"        8       64           1024

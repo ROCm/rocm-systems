@@ -342,8 +342,8 @@ template <typename T> static bool validateResult(T* A, T* B, size_t pitch_A) {
  * after releasing the memory should be the same
  *
  */
-template <typename T> static void MemoryAllocDiffSizes(int gpu) {
-  HIP_CHECK(hipSetDevice(gpu));
+template <typename T> static void MemoryAllocDiffSizes(int gpu, bool threadSafe = false) {
+  HIP_CHECK_OPT_THREAD(threadSafe, hipSetDevice(gpu));
   std::vector<size_t> array_size;
   array_size.push_back(SMALLCHUNK_NUMH);
   array_size.push_back(LARGECHUNK_NUMH);
@@ -357,16 +357,18 @@ template <typename T> static void MemoryAllocDiffSizes(int gpu) {
       width = LARGECHUNK_NUMW * sizeof(T);
     }
     for (int i = 0; i < CHUNK_LOOP; i++) {
-      HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d[i]), &pitch_A, width, sizes));
+      HIP_CHECK_OPT_THREAD(threadSafe,
+                           hipMallocPitch(reinterpret_cast<void**>(&A_d[i]), &pitch_A, width,
+                                          sizes));
     }
     for (int i = 0; i < CHUNK_LOOP; i++) {
-      HIP_CHECK(hipFree(A_d[i]));
+      HIP_CHECK_OPT_THREAD(threadSafe, hipFree(A_d[i]));
     }
   }
 }
 
 /*Thread Function */
-static void threadFunc(int gpu) { MemoryAllocDiffSizes<float>(gpu); }
+static void threadFunc(int gpu) { MemoryAllocDiffSizes<float>(gpu, true); }
 
 /*
  * This testcase verifies the basic scenario of
@@ -454,6 +456,7 @@ HIP_TEST_CASE(Unit_hipMallocPitch_MultiThread) {
   for (auto& t : threadlist) {
     t.join();
   }
+  HIP_CHECK_THREAD_FINALIZE();
 }
 
 /*

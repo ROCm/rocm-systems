@@ -90,6 +90,9 @@ device:
   Unit_hipGetDeviceAttribute_hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
     <<: *level_2
     tags: [query]
+  Unit_hipGetDeviceAttribute_hipDeviceAttributeHostAllocDmaBufSupported:
+    <<: *level_2
+    tags: [query]
   Unit_hipGetDeviceCount_NegTst:
     <<: *level_2
     tags: [query]
@@ -170,7 +173,7 @@ device:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows, amd_wsl]
-    tags: [query]
+    tags: [query, multigpu]
   Unit_hipDeviceAPUCheck:
     <<: *level_2
     tags: [query]

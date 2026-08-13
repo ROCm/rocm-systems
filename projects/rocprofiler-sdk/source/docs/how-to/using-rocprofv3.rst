@@ -576,6 +576,49 @@ Here are the contents of ``rocjpeg_api_trace.csv`` file:
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
 
+rocSHMEM trace
+++++++++++++++
+
+`rocSHMEM <https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/>`_ is an intra-kernel networking library that provides GPU-centric networking through an OpenSHMEM-like interface. This option traces the rocSHMEM host-stream API (the ``rocshmem_*_on_stream`` routines that enqueue communication and synchronization operations on a HIP stream).
+
+.. note::
+
+   rocSHMEM tracing requires rocSHMEM to be built with rocprofiler-register support (the ``USE_ROCPROFILER_REGISTER`` build option, enabled by default). See the `rocSHMEM build documentation <https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/build.html>`_ for details.
+
+.. code-block:: shell
+
+    rocprofv3 --rocshmem-trace -- <application_path>
+
+rocSHMEM is emitted directly only to the JSON and ``rocpd`` (default) output formats. CSV, Perfetto (``.pftrace``), and OTF2 output are produced from the rocpd database via ``rocpd convert``. ``--rocshmem-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
+
+.. code-block:: shell
+
+    rocprofv3 --rocshmem-trace -- <application_path>
+    rocpd convert -i out_results.db --output-format csv
+
+The conversion generates a ``rocshmem_api_trace.csv`` file. Here are its contents:
+
+.. csv-table:: rocSHMEM trace
+   :file: /data/rocshmem_api_trace.csv
+   :widths: 10,10,10,10,10,20,20
+   :header-rows: 1
+
+Perfetto will also show rocSHMEM API arguments. Pointers will not be dereferenced and only the address will be displayed.
+
+hipFILE trace
++++++++++++++
+
+`hipFILE <https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile>`_ is a GPU-aware file I/O library for HIP applications. This option traces the hipFILE API.
+
+.. code-block:: shell
+
+    rocprofv3 --hipfile-trace --output-format json rocpd -- <application_path>
+
+The above command stores hipFILE API records in the JSON results file and the rocpd database file.
+
+The hipFILE records include API arguments. Pointers are not dereferenced unless argument
+iteration is configured to do so.
+
 OMPT trace
 ++++++++++
 
@@ -585,7 +628,7 @@ OMPT trace
 
     rocprofv3 --ompt-trace --output-format rocpd -- <application_path>
 
-OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. If ``--ompt-trace`` is used with another ``--output-format``, ``rocprofv3`` warns and adds ``rocpd`` automatically; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
+OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. OMPT records are only captured when ``rocpd`` is among the requested ``--output-format`` values, so a run that requests only the deprecated direct generators contains no OMPT data; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
 
 .. note::
 
@@ -910,7 +953,7 @@ Sample output for the list-avail command:
 
 You can also customize the counters according to the requirement. Such counters are named :ref:`extra-counters`.
 
-For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300-mi200-performance-counters.html>`_.
+For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/reference/gpu-arch/mi300-mi200-performance-counters.html>`_.
 
 .. note::
 
@@ -1802,6 +1845,17 @@ Here are the properties of the JSON output schema:
                - **size** *(integer, required)*: Size of the rocDecode API record.
                - **kind** *(integer, required)*: Kind of the rocDecode API.
                - **operation** *(integer, required)*: Operation of the rocDecode API.
+               - **correlation_id** *(object, required)*: Correlation ID information.
+                  - **internal** *(integer, required)*: Internal correlation ID.
+                  - **external** *(integer, required)*: External correlation ID.
+               - **start_timestamp** *(integer, required)*: Start timestamp.
+               - **end_timestamp** *(integer, required)*: End timestamp.
+               - **thread_id** *(integer, required)*: Thread ID.
+         - **hipfile_api** *(array)*: hipFILE API records.
+            - **Items** *(object)*
+               - **size** *(integer, required)*: Size of the hipFILE API record.
+               - **kind** *(integer, required)*: Kind of the hipFILE API.
+               - **operation** *(integer, required)*: Operation of the hipFILE API.
                - **correlation_id** *(object, required)*: Correlation ID information.
                   - **internal** *(integer, required)*: Internal correlation ID.
                   - **external** *(integer, required)*: External correlation ID.
