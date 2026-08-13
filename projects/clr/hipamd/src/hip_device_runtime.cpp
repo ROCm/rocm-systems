@@ -883,7 +883,9 @@ hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flag
   }
 
   // creates default (null) stream on the initialized device.
-  dev->NullStream();
+  if (dev->NullStream(false) == nullptr) {
+    HIP_RETURN(hipErrorOutOfMemory);
+  };
 
   HIP_RETURN(hipSuccess);
 }

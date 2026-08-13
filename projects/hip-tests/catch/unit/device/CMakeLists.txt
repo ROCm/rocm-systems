@@ -30,6 +30,7 @@ set(TEST_SRC
     hipDeviceReset.cc
     hipDeviceSetGetMemPool.cc
     hipInit.cc
+    hipInitDevice.cc
     hipDriverGetVersion.cc
     hipSetValidDevices.cc
     hipIpcOpenMemHandle.cc

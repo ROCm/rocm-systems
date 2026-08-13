@@ -508,7 +508,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync = 483,
   HIP_API_ID_hipMemGetDefaultMemPool = 484,
   HIP_API_ID_hipDeviceGetLuid = 485,
-  HIP_API_ID_LAST = 485,
+  HIP_API_ID_hipInitDevice = 486,
+  HIP_API_ID_LAST = 486,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -787,6 +788,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipImportExternalMemory: return "hipImportExternalMemory";
     case HIP_API_ID_hipImportExternalSemaphore: return "hipImportExternalSemaphore";
     case HIP_API_ID_hipInit: return "hipInit";
+    case HIP_API_ID_hipInitDevice: return "hipInitDevice";
     case HIP_API_ID_hipIpcCloseMemHandle: return "hipIpcCloseMemHandle";
     case HIP_API_ID_hipIpcGetEventHandle: return "hipIpcGetEventHandle";
     case HIP_API_ID_hipIpcGetMemHandle: return "hipIpcGetMemHandle";
@@ -1266,6 +1268,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipImportExternalMemory", name) == 0) return HIP_API_ID_hipImportExternalMemory;
   if (strcmp("hipImportExternalSemaphore", name) == 0) return HIP_API_ID_hipImportExternalSemaphore;
   if (strcmp("hipInit", name) == 0) return HIP_API_ID_hipInit;
+  if (strcmp("hipInitDevice", name) == 0) return HIP_API_ID_hipInitDevice;
   if (strcmp("hipIpcCloseMemHandle", name) == 0) return HIP_API_ID_hipIpcCloseMemHandle;
   if (strcmp("hipIpcGetEventHandle", name) == 0) return HIP_API_ID_hipIpcGetEventHandle;
   if (strcmp("hipIpcGetMemHandle", name) == 0) return HIP_API_ID_hipIpcGetMemHandle;
@@ -2894,6 +2897,11 @@ typedef struct hip_api_data_s {
     struct {
       unsigned int flags;
     } hipInit;
+    struct {
+      int device;
+      unsigned int deviceFlags;
+      unsigned int flags;
+    } hipInitDevice;
     struct {
       void* devPtr;
     } hipIpcCloseMemHandle;
@@ -5798,6 +5806,12 @@ typedef struct hip_api_data_s {
 #define INIT_hipInit_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipInit.flags = (unsigned int)flags; \
 };
+// hipInitDevice[('int', 'device'), ('unsigned int', 'deviceFlags'), ('unsigned int', 'flags')]
+#define INIT_hipInitDevice_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipInitDevice.device = (int)device; \
+  cb_data.args.hipInitDevice.deviceFlags = (unsigned int)deviceFlags; \
+  cb_data.args.hipInitDevice.flags = (unsigned int)flags; \
+};
 // hipIpcCloseMemHandle[('void*', 'devPtr')]
 #define INIT_hipIpcCloseMemHandle_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipIpcCloseMemHandle.devPtr = (void*)dev_ptr; \
@@ -8348,6 +8362,9 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       break;
 // hipInit[('unsigned int', 'flags')]
     case HIP_API_ID_hipInit:
+      break;
+// hipInitDevice[('int', 'device'), ('unsigned int', 'deviceFlags'), ('unsigned int', 'flags')]
+    case HIP_API_ID_hipInitDevice:
       break;
 // hipIpcCloseMemHandle[('void*', 'devPtr')]
     case HIP_API_ID_hipIpcCloseMemHandle:
@@ -11161,6 +11178,13 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
     case HIP_API_ID_hipInit:
       oss << "hipInit(";
       oss << "flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipInit.flags);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipInitDevice:
+      oss << "hipInitDevice(";
+      oss << "device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipInitDevice.device);
+      oss << ", deviceFlags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipInitDevice.deviceFlags);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipInitDevice.flags);
       oss << ")";
     break;
     case HIP_API_ID_hipIpcCloseMemHandle:

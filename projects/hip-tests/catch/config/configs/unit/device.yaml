@@ -325,6 +325,24 @@ device:
     # (amd_wsl) Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
     tags: [init]
+  Unit_hipInitDevice_Positive_Basic:
+    <<: *level_2
+    tags: [init, smoke]
+  Unit_hipInitDevice_Positive_Flags:
+    <<: *level_2
+    tags: [init, config]
+  Unit_hipInitDevice_Positive_DoesNotChangeCurrentDevice:
+    <<: *level_2
+    tags: [init, multigpu]
+  Unit_hipInitDevice_Negative_InvalidDevice:
+    <<: *level_2
+    tags: [init]
+  Unit_hipInitDevice_Negative_InvalidFlags:
+    <<: *level_2
+    tags: [init]
+  Unit_hipInitDevice_Negative_InvalidDeviceFlags:
+    <<: *level_2
+    tags: [init]
   Unit_hipDriverGetVersion_Positive:
     <<: *level_2
     tags: [init, smoke]
