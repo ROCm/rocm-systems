@@ -3946,7 +3946,7 @@ class CodeGenerator:
         return _ImplOutputs(model=[model], execution=[execution])
 
     @staticmethod
-    def _emit_gfx1250_scaled_wmma_vop3px2_class() -> str:
+    def _emit_cdna5_scaled_wmma_vop3px2_class() -> str:
         return textwrap.dedent('''\
             class VWmmaScaleF32Vop3px2 : public Vop3p {
             public:
@@ -9356,7 +9356,7 @@ class CodeGenerator:
                         h_includes.append(('array', True))
                     cpp_includes.append(('array', True))
                     inst_classes.append(
-                        cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_class())
+                        cgen.Line(self._emit_cdna5_scaled_wmma_vop3px2_class())
                     )
                     scaled_outputs = self._emit_gfx1250_scaled_wmma_vop3px2_impls()
                     class_func_impls.model.extend(
