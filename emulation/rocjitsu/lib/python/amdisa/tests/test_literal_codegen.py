@@ -360,6 +360,8 @@ def test_generated_operand_tracks_literal32_widening_without_literal64_provenanc
     generator = CodeGenerator(
         SimpleNamespace(
             arch_name='rdna4',
+            generated_dir_name='rdna4',
+            cpp_namespace='rdna4',
             opnd_selectors=[],
             operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
             profile=Rdna4Profile(),

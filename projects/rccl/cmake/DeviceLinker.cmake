@@ -522,7 +522,7 @@ add_custom_command(
 )
 
 # ===========================================================================
-# collectives.cc: contains a __global__ kernel launch (hierarchicalAGShuffle)
+# collectives.cc: contains a __global__ kernel launch (hierarchicalShuffle)
 # so it needs full HIP compilation, not --offload-host-only.
 # ===========================================================================
 # Dependency tracking note (CMake >= 3.20 vs < 3.20):

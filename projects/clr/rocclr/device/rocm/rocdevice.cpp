@@ -81,8 +81,8 @@ extern const char* HipExtraSourceCodeNoGWS;
 namespace amd::roc {
 bool roc::Device::isHsaInitialized_ = false;
 bool roc::Device::hostVmemSupported_ = false;
-std::vector<hsa_agent_t> roc::Device::gpu_agents_;
-std::vector<AgentInfo> roc::Device::cpu_agents_;
+std::vector<hsa_agent_t> roc::Device::gpu_agents_ ROCCLR_INIT_PRIORITY(101);
+std::vector<AgentInfo> roc::Device::cpu_agents_ ROCCLR_INIT_PRIORITY(101);
 
 address Device::mg_sync_ = nullptr;
 
@@ -3546,6 +3546,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   auto populateExtras = [&]() {
     QueueExtras extras;
     extras.deviceMemRingBuf = (desc.flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0;
+    extras.largestAqlBarrierBitSlot = std::make_shared<std::atomic<uint64_t>>(kInvalidAqlSlot);
     hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
                            &extras.metadataRingBuffer);
     if (DEBUG_CLR_DIRECT_DOORBELL) {

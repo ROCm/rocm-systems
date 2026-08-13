@@ -21,8 +21,7 @@
 
 """
 run_amdsmi_python_versions_test.py
-==================================
-
+===========================
 The amdsmi loader and wrapper must behave identically across the range of
 CPython versions AMD SMI supports (3.6.8 through the latest release). This
 harness runs the version-independent loader contract tests under each
@@ -48,9 +47,14 @@ PY_INTERFACE = REPO_ROOT / "py-interface"
 TEST_DIR = REPO_ROOT / "tests" / "python"
 
 
+# Highest CPython minor AMD SMI claims support for; keep in sync with the
+# matrix in .github/workflows/amdsmi-python-versions.yml.
+NEWEST_SUPPORTED_MINOR = 14
+
+
 def _discover_default_interpreters() -> list:
     found = []
-    for minor in range(6, 14):
+    for minor in range(6, NEWEST_SUPPORTED_MINOR + 1):
         exe = shutil.which(f"python3.{minor}")
         if exe:
             found.append(exe)
@@ -72,7 +76,13 @@ def _import_smoke(interp: str) -> None:
 
 
 def _run_unit_tests(interp: str) -> None:
-    for test in ("test_abi_compat.py", "test_dual_copy_guard.py"):
+    for test in (
+        "test_abi_compat.py",
+        "test_dual_copy_guard.py",
+        "test_cpack_path_guard.py",
+        "test_upgrade_downgrade_guard.py",
+        "test_packaging_scriptlets.py",
+    ):
         subprocess.run([interp, str(TEST_DIR / test)], check=True)
 
 
@@ -82,7 +92,7 @@ def main() -> int:
         "--interpreters",
         nargs="*",
         default=None,
-        help="Python interpreters to test (default: discovered python3.6..3.13).",
+        help="Python interpreters to test (default: discovered python3.6..3.14).",
     )
     args = parser.parse_args()
     interpreters = args.interpreters or _discover_default_interpreters()

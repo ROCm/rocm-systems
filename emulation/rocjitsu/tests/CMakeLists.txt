@@ -348,6 +348,12 @@ add_test(
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_cli.py -v
 )
+add_test(
+    NAME PretranslateScriptUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLUGIN_LOADER_FIXTURE_DIR
@@ -586,7 +592,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_model_only_test
         PRIVATE
             rocjitsu_dbt_internal
-            rocjitsu_gfx1250_model_registry
+            rocjitsu_cdna5_model_registry
             simdojo_headers
             GTest::gtest_main
     )
@@ -625,11 +631,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         WARNINGS
     )
     rj_add_gtest_tests(gfx1250_b0_to_a0_library_test)
+    # Checked on the translator rather than the hook. The hook used to link the
+    # translator as a static archive and so carried the model code itself; now it
+    # loads a shared object, and the boundary this guards -- model in, execution
+    # out -- belongs to whichever artifact holds that code. Pointed at the hook it
+    # would now pass vacuously, which is the failure mode the required-symbol
+    # check at the end of the script exists to catch.
     add_test(
         NAME Gfx1250B0ToA0Library.SymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:hsa_hotswap_rocjitsu> -P
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0> -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 
@@ -678,7 +690,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_narrow_isa_registry_fixture
         PRIVATE
             rocjitsu_dbt_internal
-            rocjitsu_gfx1250_model_registry
+            rocjitsu_cdna5_model_registry
             simdojo_headers
     )
     rj_configure_target(rocjitsu_narrow_isa_registry_fixture LIB)
@@ -1222,9 +1234,72 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             hsa_hotswap_rocjitsu_unit_test
             probe_relocation_function_table_dispatch_gfx1250
         )
+        # The pre-translated tier is filled by a separate program and read by the
+        # hook. Running the real tool is the only way to test that the two agree
+        # on a key; writing entries through a test seam would exercise the hook's
+        # own derivation twice and prove nothing about the pair.
+        target_compile_definitions(
+            hsa_hotswap_rocjitsu_unit_test
+            PRIVATE RJ_PRETRANSLATE_TOOL="$<TARGET_FILE:rj_pretranslate>"
+        )
+        add_dependencies(hsa_hotswap_rocjitsu_unit_test rj_pretranslate)
     endif()
     rj_configure_target(hsa_hotswap_rocjitsu_unit_test TEST)
     gtest_discover_tests(hsa_hotswap_rocjitsu_unit_test)
+
+    # Compiles the translation store as a plain DBT component rather than
+    # reaching it through a hook, which is how a second consumer would use it.
+    add_executable(
+        translation_store_test
+        dbt/translation_store_test.cpp
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/code/dbt/translation_store.cpp
+    )
+    target_include_directories(
+        translation_store_test
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+    )
+    target_compile_definitions(
+        translation_store_test
+        PRIVATE RJ_TRANSLATION_STORE_TEST_HOOKS
+    )
+    # The store keys entries on this note and disables itself without it.
+    target_link_options(translation_store_test PRIVATE "LINKER:--build-id=sha1")
+    target_link_libraries(
+        translation_store_test
+        PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(translation_store_test TEST)
+    gtest_discover_tests(translation_store_test)
+
+    # One source, two modules differing only in build id -- which is what a
+    # rebuilt translator is. Entries written against one must be invisible to the
+    # other, and no single binary can show that: the store derives identity from
+    # the module containing an address, so two identities need two modules.
+    #
+    # The ids are fixed rather than content-derived so this stays a test of the
+    # store rather than of the linker. Content-derived ids would also differ, but
+    # only incidentally, and would churn whenever either file was touched.
+    foreach(_probe_suffix a b)
+        set(_probe rj_translator_build_probe_${_probe_suffix})
+        add_library(${_probe} MODULE dbt/translator_build_probe.cpp)
+        rj_configure_target(${_probe} TEST)
+        target_compile_definitions(
+            translation_store_test
+            PRIVATE
+                RJ_TRANSLATOR_PROBE_${_probe_suffix}="$<TARGET_FILE:${_probe}>"
+        )
+        add_dependencies(translation_store_test ${_probe})
+    endforeach()
+    target_link_options(
+        rj_translator_build_probe_a
+        PRIVATE "LINKER:--build-id=0xaaaaaaaaaaaaaaaa"
+    )
+    target_link_options(
+        rj_translator_build_probe_b
+        PRIVATE "LINKER:--build-id=0xbbbbbbbbbbbbbbbb"
+    )
 endif()
 
 # A separate loadable module is the only way to observe the force-scalar gate's
