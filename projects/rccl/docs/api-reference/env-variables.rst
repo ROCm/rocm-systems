@@ -196,6 +196,12 @@ in the following table.
 
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
+        | When unset, RCCL auto-selects an interface in this order:
+        | ``ib*`` first; then any interface other than
+        | ``docker*``, ``lo`` and ``virbr*``; then ``docker*``; then
+        | ``lo``; and finally ``virbr*``. Libvirt bridge interfaces
+        | (``virbr*``) are considered last because they relay
+        | host-to-container traffic and cannot reach a remote node.
       - | Interface prefix string or list
         | Multiple prefixes separated by ``,``
         | Prefix with ``^`` for exclusion, ``=`` for exact match

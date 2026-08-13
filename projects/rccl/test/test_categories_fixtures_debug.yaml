@@ -25,6 +25,7 @@ test_categories:
       - "DdaIpcEligibilityTest.*"
       - "DdaFabricEligibilityTest.*"
       - "NetSocketTests.*"
+      - "NetBootstrapInterfaceTest.*"
       - "SocketPollTimeout.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
