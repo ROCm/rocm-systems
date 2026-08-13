@@ -796,6 +796,30 @@ add_test(
         tests/test_utils_profile_csv.py ${WORKING_DIR_OPTION}
 )
 
+# ---------------------------------------
+# Compression boundary for csv artifacts
+# ---------------------------------------
+
+add_test(
+    NAME test_csv_compression
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_csv_compression.xml ${COV_OPTION}
+        tests/test_csv_compression.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# Analyze base unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_analysis_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_analysis_base.xml ${COV_OPTION} tests/test_analysis_base.py
+        ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # Profiler base unit tests
 # -----------------------------------
@@ -877,6 +901,23 @@ if(TARGET test-pc-sampling-collector)
 endif()
 
 # -----------------------------------
+# CSV compression Tests
+# -----------------------------------
+
+if(TARGET test-compression)
+    if(TEST_FROM_INSTALL)
+        set(_compression_test_cmd tests/test-compression)
+    else()
+        set(_compression_test_cmd $<TARGET_FILE:test-compression>)
+    endif()
+    add_test(NAME test-compression COMMAND ${_compression_test_cmd})
+    sanitizer_runtime_env(_san_env OFF)
+    if(_san_env)
+        set_tests_properties(test-compression PROPERTIES ENVIRONMENT "${_san_env}")
+    endif()
+endif()
+
+# -----------------------------------
 # Generate coverage tests
 # -----------------------------------
 
@@ -931,6 +972,8 @@ if(${ENABLE_COVERAGE})
         test_soc_base
         test_tty
         test_utils_profile_csv
+        test_csv_compression
+        test_analysis_base
         test_import_guard
         test_profile_iteration_multiplexing_1
         test_profile_iteration_multiplexing_2
@@ -1372,8 +1415,8 @@ set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 
 # Dependencies
 set(PACKAGE_REQUIRES "rocprofiler" CACHE STRING "Package dependencies")
-set(CPACK_RPM_PACKAGE_REQUIRES ${PACKAGE_REQUIRES})
-set(CPACK_DEBIAN_PACKAGE_DEPENDS ${PACKAGE_REQUIRES})
+set(CPACK_RPM_PACKAGE_REQUIRES "${PACKAGE_REQUIRES}, zlib")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "${PACKAGE_REQUIRES}, zlib1g")
 
 # Handle the project rebranding from omniperf to rocprofiler-compute
 set(OMNIPERF_PACKAGE_NAME "omniperf")

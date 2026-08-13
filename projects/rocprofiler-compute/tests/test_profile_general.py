@@ -18,6 +18,7 @@ import pytest
 import yaml
 from conftest import require_torch, require_triton
 
+from utils import csv_compression
 from utils.utils_common import canonical_config_arch
 
 # Runtime config options
@@ -1367,7 +1368,7 @@ def test_bench_only_basic(binary_handler_profile_rocprof_compute):
     assert not (workload_path / "perfmon").exists()
     assert not (workload_path / "sysinfo.csv").exists()
     assert not (workload_path / "profiling_config.yaml").exists()
-    assert not list(workload_path.glob("results_*.csv"))
+    assert not csv_compression.find_csvs(workload_path, "results_*.csv")
     assert not list(workload_path.glob("pmc_perf_*.csv"))
 
 
@@ -1684,7 +1685,7 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
         f"- '{lds_block}'", f"{workload_dir}/profiling_config.yaml"
     )
     lds_counter = "TX_VMW_LDS_INPUT_ACTIVE" if is_gfx1250_soc() else "SQ_INSTS_LDS"
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
     assert any(common.check_file_pattern(lds_counter, str(f)) for f in results_files)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1710,13 +1711,12 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
         f"- '{instmix_block}'", f"{workload_dir}/profiling_config.yaml"
     )
     assert common.check_file_pattern("- '3'", f"{workload_dir}/profiling_config.yaml")
-    rdna_or_gfx1250 = is_gfx115x_soc() or is_gfx1250_soc()
     instmix_counter = "SQ_INSTS_FLAT" if rdna_or_gfx1250 else "TA_FLAT_WAVEFRONTS"
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
     assert any(
         common.check_file_pattern(instmix_counter, str(f)) for f in results_files
     )
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
     assert any(
         common.check_file_pattern("SQC_TC_DATA_READ_REQ", str(f)) for f in results_files
     )
@@ -1748,7 +1748,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
         lds_sol_counter = "TX_VMW_LDS_INPUT_ACTIVE"
     else:
         lds_sol_counter = "SQ_ACTIVE_INST_LDS"
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
     assert any(
         common.check_file_pattern(lds_sol_counter, str(f)) for f in results_files
     )
@@ -1784,11 +1784,11 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
         "- global_write", f"{workload_dir}/profiling_config.yaml"
     )
     kernel_counter = "SQ_INSTS_FLAT_STORE" if rdna_or_gfx1250 else "TA_FLAT_WAVEFRONTS"
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
     assert any(common.check_file_pattern(kernel_counter, str(f)) for f in results_files)
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
     assert any(common.check_file_pattern("global_write", str(f)) for f in results_files)
-    results_files = Path(workload_dir).glob("results_*.csv")
+    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
     assert not any(
         common.check_file_pattern("global_read", str(f)) for f in results_files
     )
@@ -2481,18 +2481,14 @@ def test_torch_trace_profile(
 
     # 3. Marker/counter CSV pairs exist and counts match
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
-    counter_collection_files = list(
-        Path(workload_dir).glob("**/*counter_collection.csv")
-    )
-    assert len(marker_api_trace_files) == len(counter_collection_files), (
-        "Mismatch in number of marker_api_trace.csv and counter_collection.csv files"
-    )
+    assert marker_api_trace_files, "No marker_api_trace.csv produced"
     for marker_file in marker_api_trace_files:
-        corresponding_counter_file = marker_file.parent / marker_file.name.replace(
-            "marker_api_trace", "counter_collection"
+        corresponding_counter_file = csv_compression.resolve_csv(
+            marker_file.parent
+            / marker_file.name.replace("marker_api_trace", "counter_collection")
         )
-        assert corresponding_counter_file.exists(), (
-            f"counter_collection.csv not found for {marker_file}"
+        assert corresponding_counter_file.is_file(), (
+            f"counter_collection CSV not found for {marker_file}"
         )
         # 4. marker_api_trace CSVs: required columns and non-empty rows
         expected_marker_columns = {
@@ -2529,7 +2525,7 @@ def test_torch_trace_profile(
             "Start_Timestamp",
             "End_Timestamp",
         }
-        with open(corresponding_counter_file, newline="") as f:
+        with csv_compression.open_csv_read(corresponding_counter_file) as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {corresponding_counter_file}"
@@ -2811,13 +2807,13 @@ def test_triton_trace_profile(
     assert returncode == 0, "Profiling the Triton application failed"
 
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
-    counter_collection_files = list(
-        Path(workload_dir).glob("**/*counter_collection.csv")
-    )
     assert marker_api_trace_files, "No marker_api_trace.csv produced"
-    assert len(marker_api_trace_files) == len(counter_collection_files), (
-        "marker_api_trace.csv and counter_collection.csv counts differ"
-    )
+    assert all(
+        csv_compression.resolve_csv(
+            f.parent / f.name.replace("marker_api_trace", "counter_collection")
+        ).is_file()
+        for f in marker_api_trace_files
+    ), "counter_collection CSV missing for a marker_api_trace.csv"
 
     found_triton_marker = False
     for marker_file in marker_api_trace_files:
@@ -2933,13 +2929,13 @@ def test_ml_api_trace_torch_compile_triton(
     assert returncode == 0, "Profiling the torch.compile/Triton workload failed"
 
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
-    counter_collection_files = list(
-        Path(workload_dir).glob("**/*counter_collection.csv")
-    )
     assert marker_api_trace_files, "No marker_api_trace.csv produced"
-    assert len(marker_api_trace_files) == len(counter_collection_files), (
-        "marker_api_trace.csv and counter_collection.csv counts differ"
-    )
+    assert all(
+        csv_compression.resolve_csv(
+            f.parent / f.name.replace("marker_api_trace", "counter_collection")
+        ).is_file()
+        for f in marker_api_trace_files
+    ), "counter_collection CSV missing for a marker_api_trace.csv"
 
     # Discard captured profiling output.
     capsys.readouterr()
@@ -3025,7 +3021,9 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     assert returncode_baseline == 0, "Baseline profiling failed"
 
     # Read baseline timestamps
-    baseline_results_files = list(Path(workload_dir_baseline).glob("results_*.csv"))
+    baseline_results_files = csv_compression.find_csvs(
+        workload_dir_baseline, "results_*.csv"
+    )
     baseline_df = pd.concat(
         [pd.read_csv(f) for f in baseline_results_files], ignore_index=True
     )
@@ -3047,7 +3045,9 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     with_flag_time = time.time() - start_with_flag
     assert returncode_with_flag == 0, "Profiling with torch-trace failed"
     # Read with-flag timestamps
-    with_flag_results_files = list(Path(workload_dir_with_flag).glob("results_*.csv"))
+    with_flag_results_files = csv_compression.find_csvs(
+        workload_dir_with_flag, "results_*.csv"
+    )
     with_flag_df = pd.concat(
         [pd.read_csv(f) for f in with_flag_results_files], ignore_index=True
     )
@@ -3455,7 +3455,7 @@ def test_torch_trace_deep_tensor_wraps_overhead(
             elapsed = time.time() - start
             assert returncode == 0, "torch-trace profiling run failed"
 
-            results_files = list(Path(workload_dir).glob("results_*.csv"))
+            results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
             df = pd.concat([pd.read_csv(f) for f in results_files], ignore_index=True)
             kernel_duration_total = (
                 df["End_Timestamp"].max() - df["Start_Timestamp"].min()

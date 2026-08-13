@@ -3,20 +3,20 @@
 
 """Unit tests for src/rocprof_compute_analyze/analysis_base.py."""
 
+import gzip
+
 import common
 import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from utils import csv_compression
 
 MODULE = "rocprof_compute_analyze.analysis_base"
 
 
 def test_concat_result_csvs_concatenates_rocpd_results(tmp_path, monkeypatch) -> None:
-    """concat_result_csvs vertically concatenates the rocpd long-form
-    results_*.csv files into a single pmc_perf.csv: the shared header is written
-    once and every data row from every results file is preserved.
-    """
+    """Concatenates rocpd long-form results_*.csv into one pmc_perf.csv."""
     common.patch_console(monkeypatch, MODULE, "debug", "warning")
 
     header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
@@ -47,10 +47,6 @@ def test_concat_result_csvs_concatenates_rocpd_results(tmp_path, monkeypatch) ->
 def test_concat_result_csvs_skips_empty_and_errors_when_all_empty(
     tmp_path, monkeypatch
 ) -> None:
-    """A truncated results_*.csv is skipped rather than raising StopIteration,
-    and a workload whose results files are all empty errors out instead of
-    leaving behind a zero-byte pmc_perf.csv for analyze to misread.
-    """
     mocks = common.patch_console(monkeypatch, MODULE, "debug", "warning")
     (tmp_path / "results_pmc_perf_0.csv").write_text("")
     (tmp_path / "results_pmc_perf_1.csv").write_text("")
@@ -70,9 +66,85 @@ def test_concat_result_csvs_skips_empty_and_errors_when_all_empty(
     assert len(skipped) == 2
 
 
+def test_concat_result_csvs_skips_zero_byte_compressed_pass(
+    tmp_path, monkeypatch
+) -> None:
+    common.patch_console(monkeypatch, MODULE, "debug", "warning")
+    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
+    with gzip.open(tmp_path / "results_pmc_perf_0.csv.gz", "wt") as f:
+        f.write(header + "0,kernel_a,SQ_WAVES,10\n")
+    (tmp_path / "results_pmc_perf_1.csv.gz").write_bytes(b"")
+
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    inst.concat_result_csvs(
+        csv_compression.find_csvs(tmp_path, "results_*.csv"), tmp_path / "pmc_perf.csv"
+    )
+
+    assert pd.read_csv(tmp_path / "pmc_perf.csv")["Counter_Value"].tolist() == [10]
+
+
+def test_concat_result_csvs_mixes_compressed_and_plain(tmp_path, monkeypatch) -> None:
+    """Passes are read in whichever form each one takes."""
+    common.patch_console(monkeypatch, MODULE, "debug", "warning")
+
+    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
+    (tmp_path / "results_pmc_perf_0.csv").write_text(
+        header + "0,kernel_a,SQ_WAVES,10\n"
+    )
+    with gzip.open(tmp_path / "results_pmc_perf_1.csv.gz", "wt") as f:
+        f.write(header + "0,kernel_a,SQ_BUSY_CYCLES,30\n")
+
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    inst.concat_result_csvs(
+        csv_compression.find_csvs(tmp_path, "results_*.csv"), tmp_path / "pmc_perf.csv"
+    )
+    merged = pd.read_csv(tmp_path / "pmc_perf.csv")
+
+    assert list(merged.columns) == [
+        "GPU_ID",
+        "Kernel_Name",
+        "Counter_Name",
+        "Counter_Value",
+    ]
+    assert sorted(merged["Counter_Value"].tolist()) == [10, 30]
+
+
+def test_join_workload_csvs_finds_compressed_results(tmp_path, monkeypatch) -> None:
+    """find_csvs matches compressed results_*.csv.gz artifacts."""
+    common.patch_console(monkeypatch, MODULE, "debug", "warning", "log")
+
+    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
+    with gzip.open(tmp_path / "results_pmc_perf_0.csv.gz", "wt") as f:
+        f.write(header + "0,kernel_a,SQ_WAVES,10\n")
+
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    inst.join_workload_csvs(tmp_path)
+
+    assert pd.read_csv(tmp_path / "pmc_perf.csv")["Counter_Value"].tolist() == [10]
+
+
+def test_concat_result_csvs_errors_on_truncated_compressed_results(
+    tmp_path, monkeypatch
+) -> None:
+    """Partial .csv.gz from a killed profile run must not leave pmc_perf.csv behind."""
+    common.patch_console(monkeypatch, MODULE, "debug", "warning")
+    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
+    rows = "".join(f"0,kernel_a,SQ_WAVES,{i}\n" for i in range(2000))
+    whole = gzip.compress((header + rows).encode("utf-8"))
+    (tmp_path / "results_pmc_perf_0.csv.gz").write_bytes(whole[: len(whole) // 2])
+
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    with pytest.raises(SystemExit):
+        inst.concat_result_csvs(
+            csv_compression.find_csvs(tmp_path, "results_*.csv"),
+            tmp_path / "pmc_perf.csv",
+        )
+
+    assert not (tmp_path / "pmc_perf.csv").exists()
+
+
 def test_concat_result_csvs_errors_when_only_headers(tmp_path, monkeypatch) -> None:
-    """Header-only results files carry no counter rows; concat must error rather
-    than leave a header-only pmc_perf.csv that a later analyze run reuses."""
+    """Header-only results files must not leave a reusable pmc_perf.csv behind."""
     common.patch_console(monkeypatch, MODULE, "debug", "warning")
     header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
     (tmp_path / "results_pmc_perf_0.csv").write_text(header)
@@ -88,9 +160,7 @@ def test_concat_result_csvs_errors_when_only_headers(tmp_path, monkeypatch) -> N
 
 
 def test_concat_result_csvs_rejects_wide_legacy_results(tmp_path, monkeypatch) -> None:
-    """Legacy CSV-backend results_*.csv are wide (no Counter_Name column); concat
-    must reject them and tell the user to re-profile rather than build a
-    pmc_perf.csv analyze would misread."""
+    """Wide legacy results_*.csv without Counter_Name are rejected."""
     common.patch_console(monkeypatch, MODULE, "debug", "warning")
     (tmp_path / "results_pmc_perf_0.csv").write_text(
         "GPU_ID,Kernel_Name,Dispatch_ID,SQ_WAVES\n0,kernel_a,0,10\n"
