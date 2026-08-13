@@ -1086,14 +1086,39 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     // (per iteration, max across ranks), measured by the collective's hook.
     // Note: the datacheck loop below re-inits buffers and re-runs the PRODUCTION
     // kernel via startColl before CheckData, so it validates the production path,
-    // not the timed kernel (whose output is overwritten first). This is by design:
-    // the *TimedKernel bodies call the same __device__ collective functions as the
+    // not the timed kernel (whose output is overwritten first). By default the
+    // *TimedKernel bodies call the same __device__ collective functions as the
     // production kernels, so collective correctness is covered; only the timing-only
-    // loop/skip/stamp wrapper around them is not exercised by datacheck.
+    // loop/skip/stamp wrapper around them is not exercised by that datacheck.
     double deviceDeltaSec = 0.0;
     TESTCHECK(args->collTest->deviceTime(args, type, op, root, in_place, &deviceDeltaSec));
     deltaSec = deviceDeltaSec;
     cputimeSec = deviceDeltaSec;
+
+    // Opt-in validation of the TIMED path itself (NCCL_GIN_ANVIL_DEVTIME_CHECK=1).
+    // The hook just ran skip+loop back-to-back collectives into recvbuff; each
+    // iteration is a full deterministic collective over the unchanged sendbuff, so
+    // the final recvbuff equals `expected` from initData. Validate it HERE -- this
+    // is the only point the timed kernel's output is live, before the datacheck
+    // loop below re-inits buffers and overwrites it with the production path. Needs
+    // datacheck on (that is what populates `expected`). Combines wrong-element
+    // counts across threads/ranks so any rank's mismatch fails the run.
+    static const int devTimeCheck = []() {
+      const char* e = getenv("NCCL_GIN_ANVIL_DEVTIME_CHECK");
+      return (e && *e) ? atoi(e) : 0;
+    }();
+    if (devTimeCheck && datacheck) {
+      int64_t timedWrong = 0;
+      TESTCHECK(CheckData(args, type, op, root, in_place, &timedWrong));
+      long long timedWrong1 = timedWrong;
+      Allreduce(args, &timedWrong1, /*sum*/4);
+      if (timedWrong1) {
+        fprintf(stderr, "\nERROR: NCCL_GIN_ANVIL_DEVTIME_CHECK: timed-kernel output datacheck "
+                        "failed with %lld wrong elements (size %ld bytes)\n",
+                        timedWrong1, args->expectedBytes);
+        return testInternalError;
+      }
+    }
   }
 
 #if HIP_VERSION >= 50221310
