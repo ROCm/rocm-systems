@@ -752,7 +752,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   // containing only rejected sync sites remains access-only instrumentation.
   if (effective_options.moi_engine == ConSanMoiEngine::Sampled)
     append_moi_sync_site_dispositions(effective_options, result);
-  if (configure_automatic_moi_persistent_vgprs(effective_options, result, code_object_bytes, arch))
+  if (configure_automatic_moi_persistent_vgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_vgprs(effective_options, result)) {

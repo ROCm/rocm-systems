@@ -1496,6 +1496,7 @@ struct MoiResourcePlanningState {
   BlockOffsetIndex block_index;
   std::vector<MoiKernelResourceContext> contexts;
   std::unordered_map<uint64_t, MoiKernelResourceContext *> context_by_descriptor;
+  mutable std::unordered_map<uint64_t, RegisterSet> dynamic_frame_saves_by_site;
   bool valid = false;
 
   MoiResourcePlanningState(std::span<const uint8_t> input, rj_code_arch_t arch,
@@ -2237,31 +2238,36 @@ find_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
 
 [[nodiscard]] RegisterSet
 dynamic_frame_save_registers_for_site(const MoiResourcePlanningState &state, uint64_t text_offset) {
+  if (const auto cached = state.dynamic_frame_saves_by_site.find(text_offset);
+      cached != state.dynamic_frame_saves_by_site.end()) {
+    return cached->second;
+  }
   RegisterSet saved;
   constexpr uint64_t kMaxDynamicFramePrologueDistance = 16u * 1024u;
   CodeObjectPatcher patcher(state.code_object);
   const std::span<const uint8_t> text = patcher.text_bytes();
-  if (text_offset < sizeof(uint32_t) || text_offset > text.size())
-    return saved;
-  const uint64_t begin = text_offset > kMaxDynamicFramePrologueDistance
-                             ? text_offset - kMaxDynamicFramePrologueDistance
-                             : 0u;
-  for (uint64_t offset = text_offset - sizeof(uint32_t);; offset -= sizeof(uint32_t)) {
-    if (offset + 2u * sizeof(uint32_t) <= text.size()) {
-      uint32_t save_word = 0;
-      uint32_t establish_word = 0;
-      std::memcpy(&save_word, text.data() + offset, sizeof(save_word));
-      std::memcpy(&establish_word, text.data() + offset + sizeof(uint32_t), sizeof(establish_word));
-      if ((save_word & 0xff800000u) == 0xbe800000u && (save_word & 0xffu) == 33u &&
-          establish_word == build_s_mov_b32(/*dst=*/33u, /*src=*/32u, state.arch)) {
-        saved.expand({RegClass::SGPR, static_cast<uint16_t>((save_word >> 16u) & 0x7fu), 1u});
-        break;
+  if (text_offset >= sizeof(uint32_t) && text_offset <= text.size()) {
+    const uint64_t begin = text_offset > kMaxDynamicFramePrologueDistance
+                               ? text_offset - kMaxDynamicFramePrologueDistance
+                               : 0u;
+    for (uint64_t offset = text_offset - sizeof(uint32_t);; offset -= sizeof(uint32_t)) {
+      if (offset + 2u * sizeof(uint32_t) <= text.size()) {
+        uint32_t save_word = 0;
+        uint32_t establish_word = 0;
+        std::memcpy(&save_word, text.data() + offset, sizeof(save_word));
+        std::memcpy(&establish_word, text.data() + offset + sizeof(uint32_t),
+                    sizeof(establish_word));
+        if ((save_word & 0xff800000u) == 0xbe800000u && (save_word & 0xffu) == 33u &&
+            establish_word == build_s_mov_b32(/*dst=*/33u, /*src=*/32u, state.arch)) {
+          saved.expand({RegClass::SGPR, static_cast<uint16_t>((save_word >> 16u) & 0x7fu), 1u});
+          break;
+        }
       }
+      if (offset < begin + sizeof(uint32_t))
+        break;
     }
-    if (offset < begin + sizeof(uint32_t))
-      break;
   }
-  return saved;
+  return state.dynamic_frame_saves_by_site.emplace(text_offset, std::move(saved)).first->second;
 }
 
 [[nodiscard]] ConSanCandidateResourcePlan
@@ -3178,7 +3184,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       !options.automatic_moi_partial_exec_save_sgprs || !options.moi_exec_save_sgpr)
     return false;
 
-  MoiResourcePlanningState state(bytes, arch, options, result);
+  const MoiResourcePlanningState &state = planning_state;
   if (!state.valid)
     return false;
 
@@ -3788,7 +3794,7 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
   // five-register window is dead throughout all LDS/synchronization sites.
   // Prove one common window with the existing CFG liveness before falling
   // back to an unsupported resource result.
-  MoiResourcePlanningState state(bytes, arch, options, result);
+  const MoiResourcePlanningState &state = planning_state;
   std::unordered_map<const BasicBlock *, std::vector<const MoiKernelResourceContext *>>
       contexts_by_block;
   contexts_by_block.reserve(state.blocks.size());
@@ -3798,19 +3804,16 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
   }
   RegisterSet unavailable;
   bool saw_site = false;
-  const bool has_dynamic_stack_owner =
-      std::ranges::any_of(result.kernels, [](const ConSanKernelInfo &kernel) {
-        return kernel.uses_dynamic_stack.value_or(false);
-      });
+  std::unordered_set<uint64_t> included_site_offsets;
+  included_site_offsets.reserve(result.moi_candidates.size() + result.resource_plans.size() +
+                                result.site_dispositions.size() + result.kernels.size());
   const auto include_site = [&](uint64_t text_offset) {
+    if (!included_site_offsets.insert(text_offset).second)
+      return;
     BasicBlock *block = block_for_offset(state.block_index, text_offset);
     const Instruction *instruction = instruction_at(block, text_offset);
     if (block == nullptr || instruction == nullptr)
       return;
-    if (has_dynamic_stack_owner) {
-      const RegisterSet frame_saves = dynamic_frame_save_registers_for_site(state, text_offset);
-      unavailable |= frame_saves;
-    }
     const auto owners = contexts_by_block.find(block);
     if (owners == contexts_by_block.end())
       return;
@@ -4651,10 +4654,11 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   return false;
 }
 
-[[nodiscard]] bool configure_automatic_moi_persistent_vgprs(ConSanOptions &options,
-                                                            ConSanResult &result,
-                                                            std::span<const uint8_t> bytes,
-                                                            rj_code_arch_t arch) {
+[[nodiscard]] bool
+configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &result,
+                                         const MoiResourcePlanningState &planning_state) {
+  const std::span<const uint8_t> bytes = planning_state.bytes;
+  const rj_code_arch_t arch = planning_state.arch;
   const bool has_supported_sampled_sync =
       options.moi_engine == ConSanMoiEngine::Sampled &&
       std::ranges::any_of(result.resource_plans,
@@ -4890,7 +4894,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
     }
     if (options.moi_engine == ConSanMoiEngine::RecordReplay && !options.force_private_epoch) {
       const uint16_t scalar_count = static_cast<uint16_t>(named_persistent_count);
-      MoiResourcePlanningState scalar_state(bytes, arch, options, result);
+      const MoiResourcePlanningState &scalar_state = planning_state;
       const std::vector<uint64_t> scalar_owners = moi_scalar_owner_descriptors(result);
       const auto resolved_contexts = resolve_moi_scalar_owner_contexts(scalar_state, scalar_owners);
       const std::vector<const MoiKernelResourceContext *> scalar_contexts =
@@ -5266,7 +5270,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
       // is a code-object-wide representation, not a component-local shortcut.
       const uint16_t scalar_count = static_cast<uint16_t>(named_persistent_count);
       const std::vector<uint64_t> scalar_owners = moi_scalar_owner_descriptors(result);
-      MoiResourcePlanningState state(bytes, arch, options, result);
+      const MoiResourcePlanningState &state = planning_state;
       const auto resolved_contexts = resolve_moi_scalar_owner_contexts(state, scalar_owners);
       if (!resolved_contexts) {
         scalar_persistence_failure = "could not resolve every scalar-state owner descriptor";
@@ -5521,7 +5525,7 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
       return false;
     }
     const uint16_t scalar_count = static_cast<uint16_t>(named_persistent_count);
-    MoiResourcePlanningState scalar_state(bytes, arch, options, result);
+    const MoiResourcePlanningState &scalar_state = planning_state;
     const std::vector<uint64_t> scalar_owners = moi_scalar_owner_descriptors(result);
     const auto resolved_contexts = resolve_moi_scalar_owner_contexts(scalar_state, scalar_owners);
     if (!resolved_contexts) {
