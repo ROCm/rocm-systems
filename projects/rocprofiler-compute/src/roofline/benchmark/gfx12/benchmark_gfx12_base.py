@@ -97,12 +97,22 @@ class Bench_gfx12(benchmark_base.Bench_base):
         self.hbm_bw_src = """
         extern "C" __global__ void HBM_bw(__uint128_t *src, long numSteps)
         {
-            const unsigned int gid = blockDim.x * blockIdx.x + threadIdx.x;
-            __uint128_t tmp = 0;
-            for (long i = 0; i < numSteps; ++i)
-                tmp += src[gid + i * blockDim.x * gridDim.x];
-            if (tmp == (__uint128_t)-1)
-                src[gid] = tmp;
+            unsigned long offset = (unsigned long)blockIdx.x * blockDim.x
+                                   + threadIdx.x;
+            const unsigned long stride = (unsigned long)gridDim.x * blockDim.x;
+            __uint128_t v = 0;
+
+            #pragma unroll 1
+            for (long step = 0; step < numSteps; step++)
+            {
+                #pragma unroll
+                for (int i = 0; i < 16; i++)
+                {
+                    v |= __builtin_nontemporal_load(&src[offset]);
+                    offset += stride;
+                }
+            }
+            if (v == 0) src[0] = v;
         }
         """
 
