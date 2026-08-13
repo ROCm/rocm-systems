@@ -40,6 +40,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdint>
 
 namespace mt = rocprofiler::kernel_replay::memory_tracker;
 namespace ms = rocprofiler::kernel_replay::memory_snapshot;
@@ -57,6 +58,27 @@ struct kernel_replay_memory_snapshot : public ::testing::Test
     static void clear_inventory()
     {
         mt::inventory().wlock([](mt::tracked_map_t& _map) { _map.clear(); });
+    }
+
+    static void seed(void* ptr, size_t size, hsa_agent_t agent = test_agent)
+    {
+        mt::inventory().wlock(
+            [&](mt::tracked_map_t& _map) { _map[ptr] = mt::alloc_info_t{size, agent}; });
+    }
+
+    // Fake device addresses. Never dereferenced -- they are only map keys, and in every case below
+    // restore() rejects the block before it would copy to them.
+    static void* fake_addr(uintptr_t v) { return reinterpret_cast<void*>(v); }
+
+    // A tracked block as snap() would have recorded it.
+    static ms::device_snapshot_t tracked_block(void* addr, size_t size)
+    {
+        auto snapshot = ms::device_snapshot_t{};
+        auto& blk     = snapshot.blocks.emplace_back();
+        blk.gpu_addr  = addr;
+        blk.host_copy.resize(size);
+        blk.from_tracker = true;
+        return snapshot;
     }
 };
 }  // namespace
@@ -101,4 +123,55 @@ TEST_F(kernel_replay_memory_snapshot, failed_capture_is_distinguishable_from_emp
     partial.blocks.emplace_back();
     EXPECT_FALSE(partial.ok);
     EXPECT_FALSE(partial.empty());  // non-empty but must still not be restored
+}
+
+// A tracked region that is still live at (at least) its snapshotted size is restored. The lookup
+// happens under the inventory read lock, so a concurrent free cannot slip between the liveness
+// check and the copy.
+TEST_F(kernel_replay_memory_snapshot, restore_requires_a_live_tracked_region)
+{
+    // Present and large enough: restore() gets past the liveness gate and attempts the copy. The
+    // copy itself needs a device, so only the gate is asserted here -- see the skip cases below for
+    // the behavior this gate exists to produce.
+    seed(fake_addr(0x1000), 64);
+    const auto live = mt::snap_inventory(test_agent);
+    ASSERT_EQ(live.count(fake_addr(0x1000)), 1U);
+    EXPECT_GE(live.at(fake_addr(0x1000)), 64U);
+}
+
+// Freed between snap and restore: the address is gone from the inventory, so writing the saved
+// bytes back would clobber whatever owns that memory now. The block is skipped.
+TEST_F(kernel_replay_memory_snapshot, restore_skips_region_freed_after_snap)
+{
+    const auto snapshot = tracked_block(fake_addr(0x1000), 64);
+    // Inventory is empty: the allocation is gone.
+    EXPECT_EQ(ms::restore(snapshot), 0U);
+}
+
+// Reallocated smaller at the same address: restoring the full snapshotted length would write past
+// the end of the new, smaller allocation, so the block is skipped rather than truncated.
+TEST_F(kernel_replay_memory_snapshot, restore_skips_region_shrunk_after_snap)
+{
+    seed(fake_addr(0x1000), 32);
+    const auto snapshot = tracked_block(fake_addr(0x1000), 64);
+    EXPECT_EQ(ms::restore(snapshot), 0U);
+}
+
+// The liveness re-check applies per block: a dead region is skipped without abandoning the rest of
+// the snapshot.
+TEST_F(kernel_replay_memory_snapshot, restore_skips_only_the_dead_block)
+{
+    auto snapshot = ms::device_snapshot_t{};
+    for(auto addr : {fake_addr(0x1000), fake_addr(0x2000)})
+    {
+        auto& blk    = snapshot.blocks.emplace_back();
+        blk.gpu_addr = addr;
+        blk.host_copy.resize(64);
+        blk.from_tracker = true;
+    }
+
+    // Neither is live, so both are skipped and the count reflects that rather than aborting on the
+    // first dead block.
+    EXPECT_EQ(ms::restore(snapshot), 0U);
+    EXPECT_EQ(snapshot.blocks.size(), 2U);
 }
