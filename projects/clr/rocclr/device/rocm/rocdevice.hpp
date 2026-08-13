@@ -601,6 +601,8 @@ class Device : public NullDevice {
     //! Cached hardware doorbell (UC MMIO), only set when DEBUG_CLR_DIRECT_DOORBELL is enabled.
     volatile uint64_t* doorbellPtr = nullptr;
     bool deviceMemRingBuf = false;
+    //! Largest barrier-bit slot shared by every VirtualGPU using this physical queue.
+    std::shared_ptr<std::atomic<uint64_t>> largestAqlBarrierBitSlot;
   };
 
   //! Acquire HSA queue. This method can create a new HSA queue or

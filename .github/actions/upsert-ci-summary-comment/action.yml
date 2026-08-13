@@ -1,0 +1,75 @@
+name: 'Upsert rocprofiler-systems CI summary comment'
+description: >-
+  Create or update the sticky PR comment that reports rocprofiler-systems CI
+  results, replacing its build-summary and sanitizer-summary sections with
+  the given files' contents. Shared by the final results publish step and by
+  the run-start step that posts an "in progress" placeholder.
+
+inputs:
+  build-content-file:
+    description: 'Path to a Markdown file for the build-summary section'
+    required: true
+  sanitizer-content-file:
+    description: 'Path to a Markdown file for the sanitizer-summary section'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Upsert sticky comment
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+      env:
+        BUILD_CONTENT_FILE: ${{ inputs.build-content-file }}
+        SANITIZER_CONTENT_FILE: ${{ inputs.sanitizer-content-file }}
+      with:
+        script: |
+          const fs = require('fs');
+          const marker = '<!-- rocprofiler-systems-ci-summary -->';
+          const start = '<!-- rocprofiler-systems-build-summary:start -->';
+          const end = '<!-- rocprofiler-systems-build-summary:end -->';
+          const sanitizerStart = '<!-- rocprofiler-systems-sanitizer-summary:start -->';
+          const sanitizerEnd = '<!-- rocprofiler-systems-sanitizer-summary:end -->';
+
+          const buildContent = fs.readFileSync(process.env.BUILD_CONTENT_FILE, 'utf8').trim();
+          const sanitizerContent = fs.readFileSync(process.env.SANITIZER_CONTENT_FILE, 'utf8').trim();
+          const buildSection = `${start}\n${buildContent}\n${end}`;
+          const sanitizerSection = `${sanitizerStart}\n${sanitizerContent}\n${sanitizerEnd}`;
+
+          function replaceSection(body, sectionStart, sectionEnd, replacement) {
+            const begin = body.indexOf(sectionStart);
+            const finish = body.indexOf(sectionEnd);
+            if (begin !== -1 && finish !== -1 && finish > begin) {
+              return `${body.slice(0, begin)}${replacement}${body.slice(finish + sectionEnd.length)}`;
+            }
+            return `${body.trim()}\n\n${replacement}`;
+          }
+
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            owner,
+            repo,
+            issue_number,
+            per_page: 100,
+          });
+          const comment = comments.find((item) =>
+            item.user.type === 'Bot' && item.body && item.body.includes(marker)
+          );
+
+          if (comment) {
+            let body = replaceSection(comment.body, start, end, buildSection);
+            body = replaceSection(body, sanitizerStart, sanitizerEnd, sanitizerSection);
+            await github.rest.issues.updateComment({
+              owner,
+              repo,
+              comment_id: comment.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body: `${marker}\n# rocprofiler-systems CI Summary\n\n${buildSection}\n\n${sanitizerSection}`,
+            });
+          }
