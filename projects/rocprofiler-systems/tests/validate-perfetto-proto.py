@@ -57,10 +57,10 @@ def resolve_trace_processor_shell(bin_path=None):
     return None
 
 
-def _construct_trace_processor(inp, bin_path, load_timeout, max_tries, retry_wait):
+def _construct_trace_processor(inp, bin_path, load_timeout, max_retries, retry_wait):
     """Construct a TraceProcessor, retrying transient startup failures."""
 
-    for attempt in range(max_tries + 1):
+    for attempt in range(max_retries + 1):
         # Not verbose: the shell would inherit this process's stderr and, if it
         # outlives a failed attempt, hold that pipe open until the caller's
         # timeout. Perfetto reports the shell's output in the exception since 0.11.
@@ -74,7 +74,7 @@ def _construct_trace_processor(inp, bin_path, load_timeout, max_tries, retry_wai
         try:
             return TraceProcessor(trace=inp, config=config)
         except Exception as ex:
-            if attempt >= max_tries:
+            if attempt >= max_retries:
                 raise
 
             wait = retry_wait * (attempt + 1)
@@ -85,7 +85,7 @@ def _construct_trace_processor(inp, bin_path, load_timeout, max_tries, retry_wai
             time.sleep(wait)
 
 
-def load_trace(inp, max_tries=1, retry_wait=1, bin_path=None):
+def load_trace(inp, max_retries=1, retry_wait=1, bin_path=None):
     """Occasionally connecting to the trace processor fails with HTTP errors
     so this function tries to reduce spurious test failures"""
 
@@ -94,7 +94,7 @@ def load_trace(inp, max_tries=1, retry_wait=1, bin_path=None):
     if bin_path is not None:
         try:
             return _construct_trace_processor(
-                inp, bin_path, LOCAL_LOAD_TIMEOUT, max_tries, retry_wait
+                inp, bin_path, LOCAL_LOAD_TIMEOUT, max_retries, retry_wait
             )
         except Exception as ex:
             sys.stderr.write(f"{ex}\n")
@@ -110,7 +110,7 @@ def load_trace(inp, max_tries=1, retry_wait=1, bin_path=None):
             )
 
     return _construct_trace_processor(
-        inp, None, DOWNLOAD_LOAD_TIMEOUT, max_tries, retry_wait
+        inp, None, DOWNLOAD_LOAD_TIMEOUT, max_retries, retry_wait
     )
 
 

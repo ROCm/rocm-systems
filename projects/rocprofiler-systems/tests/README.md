@@ -82,5 +82,5 @@ export ROCPROFSYS_TRACE_PROC_SHELL=/tmp/$USER/trace_processor_shell
 
 Configure with `-DROCPROFSYS_TRACE_PROCESSOR_SHELL=<path>` to stage an existing binary,
 `-DROCPROFSYS_DOWNLOAD_TRACE_PROCESSOR_SHELL=OFF` to skip the download, or
-`-DROCPROFSYS_TRACE_PROCESSOR_SHELL_URL` and `-DROCPROFSYS_TRACE_PROCESSOR_SHELL_SHA256` to fetch
-a different build.
+`-DROCPROFSYS_TRACE_PROCESSOR_SHELL_URL=<url>` and
+`-DROCPROFSYS_TRACE_PROCESSOR_SHELL_SHA256=<sha256>` to fetch a different build.

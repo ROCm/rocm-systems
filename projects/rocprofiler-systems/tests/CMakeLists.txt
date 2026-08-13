@@ -46,7 +46,7 @@ rocprofiler_systems_add_cache_option(
 )
 
 set(_trace_processor_shell
-    ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/trace_processor_shell
+    "${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/trace_processor_shell"
 )
 set(_trace_processor_shell_permissions
     OWNER_READ
@@ -61,24 +61,24 @@ set(_trace_processor_shell_permissions
 # the pinned binary is x86-64; other architectures need their own URL and checksum
 set(_download_trace_processor_shell ${ROCPROFSYS_DOWNLOAD_TRACE_PROCESSOR_SHELL})
 if(
-    ROCPROFSYS_TRACE_PROCESSOR_SHELL_URL MATCHES "linux-amd64"
+    "${ROCPROFSYS_TRACE_PROCESSOR_SHELL_URL}" MATCHES "linux-amd64"
     AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"
 )
     set(_download_trace_processor_shell OFF)
 endif()
 
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests)
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests")
 
 if(ROCPROFSYS_TRACE_PROCESSOR_SHELL)
-    if(EXISTS ${ROCPROFSYS_TRACE_PROCESSOR_SHELL})
+    if(EXISTS "${ROCPROFSYS_TRACE_PROCESSOR_SHELL}")
         file(
-            COPY_FILE ${ROCPROFSYS_TRACE_PROCESSOR_SHELL}
-            ${_trace_processor_shell}
+            COPY_FILE "${ROCPROFSYS_TRACE_PROCESSOR_SHELL}"
+            "${_trace_processor_shell}"
             ONLY_IF_DIFFERENT
         )
         file(
             CHMOD
-            ${_trace_processor_shell}
+            "${_trace_processor_shell}"
             PERMISSIONS ${_trace_processor_shell_permissions}
         )
     else()
@@ -89,21 +89,21 @@ if(ROCPROFSYS_TRACE_PROCESSOR_SHELL)
     endif()
 elseif(_download_trace_processor_shell)
     # a previously staged binary is reused only when its contents still match
-    if(EXISTS ${_trace_processor_shell})
-        file(SHA256 ${_trace_processor_shell} _sha256)
+    if(EXISTS "${_trace_processor_shell}")
+        file(SHA256 "${_trace_processor_shell}" _sha256)
         if(NOT "${_sha256}" STREQUAL "${ROCPROFSYS_TRACE_PROCESSOR_SHELL_SHA256}")
-            file(REMOVE ${_trace_processor_shell})
+            file(REMOVE "${_trace_processor_shell}")
         endif()
     endif()
 
-    if(NOT EXISTS ${_trace_processor_shell})
+    if(NOT EXISTS "${_trace_processor_shell}")
         rocprofiler_systems_message(
             STATUS
             "Downloading ${ROCPROFSYS_TRACE_PROCESSOR_SHELL_URL}"
         )
         file(
-            DOWNLOAD ${ROCPROFSYS_TRACE_PROCESSOR_SHELL_URL}
-            ${_trace_processor_shell}.tmp
+            DOWNLOAD "${ROCPROFSYS_TRACE_PROCESSOR_SHELL_URL}"
+            "${_trace_processor_shell}.tmp"
             STATUS _download_status
             TLS_VERIFY ON
             INACTIVITY_TIMEOUT 10
@@ -116,12 +116,12 @@ elseif(_download_trace_processor_shell)
         if(NOT _download_code EQUAL 0)
             set(_download_error "${_download_message}")
         else()
-            file(SHA256 ${_trace_processor_shell}.tmp _sha256)
+            file(SHA256 "${_trace_processor_shell}.tmp" _sha256)
             if("${_sha256}" STREQUAL "${ROCPROFSYS_TRACE_PROCESSOR_SHELL_SHA256}")
-                file(RENAME ${_trace_processor_shell}.tmp ${_trace_processor_shell})
+                file(RENAME "${_trace_processor_shell}.tmp" "${_trace_processor_shell}")
                 file(
                     CHMOD
-                    ${_trace_processor_shell}
+                    "${_trace_processor_shell}"
                     PERMISSIONS ${_trace_processor_shell_permissions}
                 )
             else()
@@ -132,7 +132,7 @@ elseif(_download_trace_processor_shell)
         endif()
 
         if(_download_error)
-            file(REMOVE ${_trace_processor_shell}.tmp)
+            file(REMOVE "${_trace_processor_shell}.tmp")
             rocprofiler_systems_message(
                 WARNING
                 "Could not stage a trace_processor_shell from ${ROCPROFSYS_TRACE_PROCESSOR_SHELL_URL} (${_download_error}). Perfetto validation will download one on demand, which is slower and can fail on hosts without network access."
