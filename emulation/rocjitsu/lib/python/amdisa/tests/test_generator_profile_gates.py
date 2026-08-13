@@ -38,7 +38,7 @@ from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
     CdnaProfile,
-    Gfx1250Profile,
+    Cdna5Profile,
     Rdna1Profile,
     Rdna2Profile,
     Rdna3_5Profile,
@@ -93,13 +93,13 @@ def execute_shared_path(amdgpu_generated_root: Path) -> Path:
 
 @pytest.fixture
 def gfx1250_generated_root(amdgpu_generated_root: Path) -> Path:
-    profile = Gfx1250Profile()
+    profile = Cdna5Profile()
     assert profile.generated_arch_name is not None
     return amdgpu_generated_root / _generated_dir_name(profile.generated_arch_name)
 
 
 def _generated_dir_name(arch_name: str) -> str:
-    profile = Gfx1250Profile()
+    profile = Cdna5Profile()
     if arch_name == profile.generated_arch_name:
         assert profile.generated_dir_name is not None
         return profile.generated_dir_name
@@ -117,7 +117,7 @@ def _profile_for_arch(arch_name: str):
         'rdna3': Rdna3Profile,
         'rdna3_5': Rdna3_5Profile,
         'rdna4': Rdna4Profile,
-        'cdna5': Gfx1250Profile,
+        'cdna5': Cdna5Profile,
     }
     return profile_types[arch_name]()
 
@@ -201,8 +201,8 @@ def test_gfx1250_profile_scopes_special_ds_semantics() -> None:
         )
         return derive_all_semantics(spec)
 
-    gfx1250 = semantics_for(Gfx1250Profile())
-    assert Gfx1250Profile().ds_addtid_uses_m0_byte_base
+    gfx1250 = semantics_for(Cdna5Profile())
+    assert Cdna5Profile().ds_addtid_uses_m0_byte_base
     assert gfx1250['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write_addtid'
     for name in names[1:]:
         assert gfx1250[name].semantic_class == 'ds_atomic2'
@@ -388,7 +388,7 @@ def test_parser_separates_logical_arch_directory_and_cpp_namespace():
         ('rdna3', Rdna3Profile),
         ('rdna3_5', Rdna3_5Profile),
         ('rdna4', Rdna4Profile),
-        ('gfx1250', Gfx1250Profile),
+        ('gfx1250', Cdna5Profile),
     ],
 )
 def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
@@ -1362,7 +1362,7 @@ def test_div_scale_uses_signed_tiny_exponent_threshold():
 
 
 def test_gfx1250_profile_enables_generator_backed_quirks():
-    profile = Gfx1250Profile()
+    profile = Cdna5Profile()
 
     assert profile.uses_packed_16bit_e32_source_selectors
     assert profile.uses_true16_vop3_opsel
@@ -1422,7 +1422,7 @@ def test_rdna4_profile_enables_gfx12_true16_and_mode_hwregs_only():
 
 def test_gfx1250_vop3_compare_sdst_uses_wave32_mask_size():
     codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(profile=Gfx1250Profile())
+    codegen.isa_spec = SimpleNamespace(profile=Cdna5Profile())
     sem = SimpleNamespace(semantic_class='vector_cmp')
 
     dst = SimpleNamespace(is_output=True, name='vdst', operand_type='OPR_SREG')
@@ -1438,7 +1438,7 @@ def test_gfx1250_vop3_compare_sdst_uses_wave32_mask_size():
 
 def test_gfx1250_vop3_cndmask_selector_uses_wave32_mask_size():
     codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(profile=Gfx1250Profile())
+    codegen.isa_spec = SimpleNamespace(profile=Cdna5Profile())
     sem = SimpleNamespace(semantic_class='vector_cndmask')
 
     selector = SimpleNamespace(is_output=False, name='src2', operand_type='OPR_SREG')
@@ -1450,7 +1450,7 @@ def test_gfx1250_vop3_cndmask_selector_uses_wave32_mask_size():
 
 def test_gfx1250_vop3_carry_operands_use_wave32_mask_size():
     codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(profile=Gfx1250Profile())
+    codegen.isa_spec = SimpleNamespace(profile=Cdna5Profile())
     sem = SimpleNamespace(semantic_class='vector_add_co')
 
     carry_out = SimpleNamespace(is_output=True, name='sdst', operand_type='OPR_SREG')
@@ -1466,7 +1466,7 @@ def test_gfx1250_vop3_carry_operands_use_wave32_mask_size():
 @pytest.mark.parametrize('semantic_class', ['vector_div_scale', 'vector_mad_64_32'])
 def test_gfx1250_vop3_auxiliary_mask_outputs_use_wave32_size(semantic_class):
     codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(profile=Gfx1250Profile())
+    codegen.isa_spec = SimpleNamespace(profile=Cdna5Profile())
     sem = SimpleNamespace(semantic_class=semantic_class)
 
     mask_out = SimpleNamespace(is_output=True, name='sdst', operand_type='OPR_SREG')
@@ -1482,7 +1482,7 @@ def test_ds_swizzle_generator_uses_addr_source_for_ds_and_vds():
         codegen = object.__new__(CodeGenerator)
         codegen.isa_spec = SimpleNamespace(
             arch_name='cdna5',
-            profile=Gfx1250Profile(),
+            profile=Cdna5Profile(),
             inst_encodings=[],
             encoding_map={},
         )
@@ -1512,7 +1512,7 @@ def test_ds_swizzle_generator_uses_addr_source_for_ds_and_vds():
 
 def test_packed_16bit_source_gate_is_limited_to_e32_16bit_sources():
     codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(profile=Gfx1250Profile())
+    codegen.isa_spec = SimpleNamespace(profile=Cdna5Profile())
 
     packed_src = SimpleNamespace(
         is_input=True, is_output=False, size=16, operand_type='OPR_SRC'
@@ -3345,7 +3345,7 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
-        profile=Gfx1250Profile(),
+        profile=Cdna5Profile(),
     )
 
     assert codegen._supports_gfx1250_scaled_wmma_vop3px2()
@@ -3589,7 +3589,7 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
         arch_name='cdna5',
         generated_dir_name='cdna5',
         cpp_namespace='cdna5',
-        profile=Gfx1250Profile(),
+        profile=Cdna5Profile(),
         operand_types={'OPR_SRC_SIMPLE'},
     )
     codegen.out_path = str(tmp_path)
@@ -3732,7 +3732,7 @@ def test_gfx1250_vopd_uses_plain_src_when_simple_src_operand_is_absent(tmp_path)
         arch_name='cdna5',
         generated_dir_name='cdna5',
         cpp_namespace='cdna5',
-        profile=Gfx1250Profile(),
+        profile=Cdna5Profile(),
         operand_types={'OPR_SRC'},
     )
     codegen.out_path = str(tmp_path)
@@ -3784,7 +3784,7 @@ def test_gfx1250_ds_atomic_routes_data_through_vgpr_resolver():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
-        profile=Gfx1250Profile(),
+        profile=Cdna5Profile(),
     )
 
     expr = codegen._vgpr_base_expr('data0', role='Src1')
@@ -3812,7 +3812,7 @@ def test_gfx1250_flat_cmpswap_payload_width_is_independent_of_element_width():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
-        profile=Gfx1250Profile(),
+        profile=Cdna5Profile(),
     )
 
     b32 = SimpleNamespace(
@@ -3843,7 +3843,7 @@ def test_gfx1250_flat_u64_atomic_payload_width_uses_two_dwords():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
-        profile=Gfx1250Profile(),
+        profile=Cdna5Profile(),
     )
 
     u64 = SimpleNamespace(
@@ -3862,7 +3862,7 @@ def test_gfx1250_cluster_load_generators_force_request_l1_bypass():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
-        profile=Gfx1250Profile(),
+        profile=Cdna5Profile(),
     )
 
     cluster = SimpleNamespace(
@@ -3908,7 +3908,7 @@ def test_gfx1250_buffer_cmpswap_payload_width_is_independent_of_element_width():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
-        profile=Gfx1250Profile(),
+        profile=Cdna5Profile(),
     )
 
     b64 = SimpleNamespace(
@@ -3928,7 +3928,7 @@ def test_gfx1250_buffer_u64_atomic_payload_width_uses_two_dwords():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
-        profile=Gfx1250Profile(),
+        profile=Cdna5Profile(),
     )
 
     u64 = SimpleNamespace(
