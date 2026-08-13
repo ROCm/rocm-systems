@@ -1118,7 +1118,7 @@ class TestDeriveVectorUnary:
             enc_field_names={'opsel'},
             encoding_map=None,
             enc_name='',
-            arch_name='gfx1250',
+            arch_name='cdna5',
         )
 
         cpp = gen_cvt_fp8(ctx)
@@ -1445,7 +1445,7 @@ class TestDeriveVectorUnary:
             ['src0', 'src1'],
             sem.semantic_class,
             sem.operation,
-            arch_name='gfx1250',
+            arch_name='cdna5',
         )
         assert 'util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl())' in cpp
 
