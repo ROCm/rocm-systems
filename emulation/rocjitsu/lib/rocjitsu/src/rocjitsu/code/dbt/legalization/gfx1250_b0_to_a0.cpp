@@ -10,10 +10,10 @@
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <array>
@@ -231,9 +231,9 @@ void gfx1250_b0_to_a0_append_wmma_completion_wait_if_needed(
 
 bool gfx1250_b0_to_a0_is_deferred_family(std::string_view mnemonic) {
   // s_sleep and s_sleep_var are deliberately absent. They behave identically on
-  // A0 and B0: the only sleep-family A0 erratum is DEGFXMI400-12268, which is
-  // specific to s_monitor_sleep('forever') with MWAIT=0. Copying a plain sleep
-  // through is the correct translation, not an unimplemented one, so reporting
+  // A0 and B0. Only s_monitor_sleep('forever') with MWAIT=0 requires an A0
+  // translation. Copying a plain sleep through is the correct translation, not
+  // an unimplemented one, so reporting
   // it said nothing and buried the reports that do name a real gap -- one RCCL
   // all_reduce run emitted 104,831 of them.
   return mnemonic == "s_get_barrier_state" || mnemonic == "s_monitor_sleep";
