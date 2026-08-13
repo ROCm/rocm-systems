@@ -59,6 +59,20 @@ downstream consumer of the library.
 
 - `libprofiler-hub.so` no longer exports the bundled `sqlite3_*` symbols (sealed via
   hidden visibility + `--exclude-libs`), preventing collisions with other SQLite versions.
+- The bundled SQLite3 is now compiled from a pre-generated amalgamation committed at
+  `external/sqlite3/`, instead of being generated at configure time by cloning
+  `sqlite/sqlite` and running `./configure --disable-tcl && make sqlite3.c`.
+  Configuring profiler-hub therefore no longer requires `tclsh`, `make`, `autoconf`
+  or any network access. The SQLite version (3.45.3), compile definitions and symbol
+  sealing are unchanged. See `external/sqlite3/README.md` for how to update it.
+- New cache vars `SQLITE3_AMALGAMATION_DIR` (build against an amalgamation held
+  elsewhere), `SQLITE3_AMALGAMATION_VERSION`, and `SQLITE3_AMALGAMATION_SHA256_C` /
+  `SQLITE3_AMALGAMATION_SHA256_H` (configure-time integrity check; set either to an
+  empty string to skip it).
+
+### Removed
+
+- Cache vars `SQLITE3_GIT_URL` and `SQLITE3_GIT_TAG`. Nothing is cloned any more.
 
 ## [0.1.0] - 2026-05-05
 
