@@ -76,7 +76,9 @@ correlation_id::sub_ref_count()
 {
     if(m_ref_count == 0)
     {
-        ROCP_CI_LOG(WARNING) << fmt::format(
+        // Below-zero is a real bug pre-finalization, but once finalize starts the retirement sweep
+        // races in-flight decrements (benign teardown), so only treat it as CI-fatal before then.
+        ROCP_CI_LOG_IF(WARNING, registration::get_fini_status() == 0) << fmt::format(
             "attempt to decrement correlation id {} reference count but reference count is zero",
             internal);
         return 0;
@@ -86,7 +88,10 @@ correlation_id::sub_ref_count()
 
     if(registration::get_fini_status() > 0) return 0;
 
-    ROCP_CI_LOG_IF(WARNING, _ret == 0) << fmt::format("correlation id underflow on {}", internal);
+    // Same finalization race as the zero-check above: a concurrent decrement can slip between that
+    // check and this fetch_sub during the retirement sweep, so only flag underflow before finalize.
+    ROCP_CI_LOG_IF(WARNING, _ret == 0 && registration::get_fini_status() == 0)
+        << fmt::format("correlation id underflow on {}", internal);
 
     if(_ret == 1)
     {
