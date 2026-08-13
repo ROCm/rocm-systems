@@ -179,6 +179,53 @@ TEST_F(DdaFabricEligibilityTest, AllGather_ScratchTooSmall)
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
 
+TEST_F(DdaFabricEligibilityTest, ReduceScatter_DerivedScratchAcceptsSmallMessage)
+{
+    // Use derived scratch sizing with default params (8 ranks, 128 MiB threshold, LL+LL128 enabled).
+    constexpr int64_t defaultThreshold = 128 * 1024 * 1024;
+    mockComm_.comm.ddaScratchBytes = nccl_dda_detail::ddaFabricScratchSizing(
+        mockComm_.comm.nRanks, -1, 1, defaultThreshold, 1, 1);
+    EXPECT_TRUE(ncclReduceScatterDdaFabricEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllToAll_DerivedScratchRejectsOversizedMessage)
+{
+    // Use derived scratch with small threshold so LL128 floor dominates.
+    constexpr int64_t smallThreshold = 4 * 1024 * 1024;  // 4 MiB
+    const size_t derivedScratch = nccl_dda_detail::ddaFabricScratchSizing(
+        mockComm_.comm.nRanks, -1, 1, smallThreshold, 0, 1);
+    mockComm_.comm.ddaScratchBytes = derivedScratch;
+    // LL128 floor at 8 ranks = ~8.5 MiB. Large message exceeds derived scratch.
+    const size_t largeCount = 2 * 1024 * 1024;  // 2M elements
+    EXPECT_FALSE(ncclAlltoAllDdaFabricEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, largeCount, ncclFloat32));
+}
+
+// LL128 AllReduce uses compact layout (scratch scales with message size).
+// Small message needs less scratch than the fixed floor.
+TEST_F(DdaFabricEligibilityTest, AllReduce_LL128CompactLayoutSmallMessageFits)
+{
+    // Give scratch smaller than LL128 fixed floor but enough for a small message.
+    // LL128 floor at 8 ranks = 2 * 8 * 4370 * 128 = ~8.5 MiB.
+    // LL128 AR compact: 2 * nRanks * numLines * 128 for the message.
+    // Small message (1024 floats = 4KB) needs much less.
+    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;  // 1 MiB - less than fixed floor
+    EXPECT_TRUE(ncclAllReduceDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1024, ncclFloat32, ncclSum));
+}
+
+// LL128 AllGather uses fixed layout (needs full floor regardless of message size).
+// Same small scratch that works for AR should fail for AG.
+TEST_F(DdaFabricEligibilityTest, AllGather_LL128FixedLayoutNeedsFullFloor)
+{
+    // Same 1 MiB scratch - smaller than the 8.5 MiB LL128 fixed floor.
+    // Even a tiny message should fail because AG needs the full slot array.
+    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;  // 1 MiB
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
 TEST_F(DdaFabricEligibilityTest, AllGather_UnalignedCount)
 {
     EXPECT_FALSE(ncclAllGatherDdaFabricEligible(
