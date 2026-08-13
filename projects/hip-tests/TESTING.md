@@ -136,6 +136,81 @@ Use `isQuickLevel()` inside the test function to trim workload size at `level_0`
 | Flaky and quarantined tracking should keep converging toward owner plus issue plus expiry | Medium | Suppressed failures can age into permanent blind spots | Treat flaky/quarantined cases as unstable signal until each has a tracking issue and removal plan |
 | Sanitizer coverage of device-side paths is inherently partial and is not part of the default per-PR gate | Low | Memory or race issues can escape sanitizer lanes | Use sanitizers as an additional signal, not a replacement for device-executed tests |
 
+## Why we test this way
+
+HIP runtime correctness is validated primarily through device-executed tests because the most important behavior depends on the interaction among public HIP APIs, the runtime, the driver, code-object loading, memory management, streams, graphs, and real GPU hardware. CPU-only unit tests are valuable where logic can be isolated, but they cannot fully validate API contracts that require a HIP context, a device allocation, queue execution, peer topology, images, external handles, or backend-specific runtime behavior.
+
+The current balance therefore emphasizes:
+
+- contract tests for small public-API invariants and coverage drift;
+- functional tests for deeper per-feature behavior;
+- integration-style tests for interop, multi-GPU, multiprocess, HIPRTC, module, loader, and graph scenarios;
+- periodic or on-demand performance and stress testing for costlier signals.
+
+Past regressions and validation gaps have shown that source inspection is not enough for HIP runtime behavior. Tests should probe the installed runtime and hardware path they claim to validate, gate unsupported capabilities explicitly, and preserve failure signal rather than hiding crashes or sticky error leaks.
+
+## Key quality concerns
+
+| Concern | Why it matters | How it is validated today |
+|---|---|---|
+| Public API compatibility | Applications depend on stable return codes, argument validation, and observable API behavior across releases. | Contract tests, functional tests, and coverage drift checks for public HIP APIs. |
+| Device-executed correctness | Many runtime defects only appear when commands execute on real GPU queues and memory. | Functional and integration tests that allocate memory, launch kernels, synchronize streams/graphs, and verify observable results. |
+| Cross-platform and backend behavior | HIP runs across Linux, Windows, WSL, AMD backends, and portability paths; behavior and availability can differ. | Platform/backend guards, explicit capability skips, backend-portability build coverage, Windows/Linux CI, and documented backend differences in tests. |
+| Multi-GPU, IPC, and interop behavior | Peer, IPC, graphics, and external-resource paths often depend on topology or external producers. | Capability-gated multi-GPU, IPC, multiprocess, graphics, and external-resource tests; unsupported paths are skipped or documented. |
+| Performance-sensitive paths | Runtime changes can regress memcpy, memset, stream, event, graph, launch, and memory-pool performance. | Performance tests and scheduled/manual performance review; universal per-PR performance gating is a known gap. |
+| Test signal integrity | Flaky, disabled, crashing, or poorly isolated tests can make CI results misleading. | Skip policy, sticky-error cleanup guidance, one process per case, YAML disabled entries for explicit cases, and known-gap tracking. |
+
+## Release validation
+
+Release validation extends the normal PR and nightly signals with broader hardware, OS, and configuration coverage. Before a release is considered validated for hip-tests, the relevant release branch should have:
+
+- passing required PR and branch CI gates for the HIP runtime test set;
+- successful nightly or multi-architecture validation across the supported AMD GPU architecture set configured for the release;
+- Windows and WSL coverage where those lanes are part of the release criteria;
+- review of known failing, flaky, disabled, or quarantined tests and their tracking issues;
+- performance-regression review for hot paths where benchmark data is available;
+- QA or release-owner sign-off according to the release process for the branch.
+
+This document does not replace release checklists or QA sign-off. It records which hip-tests signals contribute to release confidence and where gaps remain.
+
+## Dependencies and validation handoffs
+
+hip-tests depends on the ROCm/HIP install it is built against, the selected HIP backend, the GPU driver and hardware topology, CMake/Catch2 test discovery, generated YAML tags, HIPRTC, module/library loading support, and optional OS or graphics facilities for interop paths.
+
+Validation ownership changes hands at several boundaries:
+
+- TheRock or rocm-systems build workflows prove that packages and test binaries can be built for the selected configuration.
+- hip-tests owns runtime API, compiler-facing runtime test paths, HIPRTC, module/library loader, and harness behavior under `projects/hip-tests`.
+- External producers and environment setup, such as graphics contexts, Vulkan/OpenGL resources, Windows facilities, or multi-node infrastructure, are owned by the corresponding platform or integration workflows.
+- Performance baselines and regression triage are owned by the performance-tracking process that consumes `catch/performance/` results.
+
+When a test depends on a capability outside hip-tests ownership, it should probe for that capability and skip or document the unsupported path rather than failing ambiguously.
+
+## How this document will be used
+
+`TESTING.md` is a living strategy artifact. It is used for:
+
+- PR review discussions about what validation is expected;
+- regression analysis when a defect escapes existing tests;
+- release-readiness and known-gap review;
+- onboarding engineers and contributors to the hip-tests validation model;
+- planning CI, coverage, flaky-test, and automation improvements;
+- future automation or AI-assisted validation feedback.
+
+The value of this document depends on accuracy. If a workflow is manual, partial, or aspirational, it should be described that way rather than implied as an enforced gate.
+
+## For new contributors
+
+When adding or modifying HIP runtime behavior:
+
+1. Identify whether the behavior can be validated without GPU hardware. If yes, add or update the closest unit-style test. If no, add a device-executed contract, functional, integration, or performance test as appropriate.
+2. For public API changes, add or update a contract test for the small portable invariant and a functional test for the changed behavior.
+3. For bug fixes, add a regression test that would fail without the fix whenever practical.
+4. Use capability checks and `HIP_SKIP_TEST` for unsupported devices, platforms, or runtime paths.
+5. Clear sticky HIP errors after intentional negative checks.
+6. Run the focused label or executable for the area you changed, plus any relevant static config or coverage checks.
+7. Update this document when the testing strategy, gate ownership, supported configuration, or known-gap status changes.
+
 ## Owners and review cadence
 
 Keep this document updated in the same PR as any change that alters the testing strategy, such as a new tier, a new cadence, or a new required check. When a test layer or CI gate is added, add its row to the tables above and note its cadence in the relevant section.
