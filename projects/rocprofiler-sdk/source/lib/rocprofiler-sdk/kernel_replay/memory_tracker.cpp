@@ -172,27 +172,39 @@ snap_inventory(hsa_agent_t agent)
     return out;
 }
 
-void
-update_table(hsa::hsa_core_table_t* table)
-{
-    if(!table) return;
 
-    next_memory_allocate          = table->hsa_memory_allocate_fn;
-    next_memory_free              = table->hsa_memory_free_fn;
-    table->hsa_memory_allocate_fn = memory_allocate_wrapper;
-    table->hsa_memory_free_fn     = memory_free_wrapper;
-}
-
-void
-update_table(hsa::hsa_amd_ext_table_t* table)
-{
-    if(!table) return;
-
-    next_pool_allocate                     = table->hsa_amd_memory_pool_allocate_fn;
-    next_pool_free                         = table->hsa_amd_memory_pool_free_fn;
-    table->hsa_amd_memory_pool_allocate_fn = pool_allocate_wrapper;
-    table->hsa_amd_memory_pool_free_fn     = pool_free_wrapper;
-}
 }  // namespace memory_tracker
+
+void
+memory_tracker_init(hsa::hsa_core_table_t* table, uint64_t lib_instance)
+{
+    if(!table) return;
+
+    // Install only for the first library instance. A later instance would capture our own wrapper
+    // as next_memory_allocate and recurse. (Keying on lib_instance matches the copy/update_table
+    // convention -- see scratch_memory.cpp.)
+    if(lib_instance > 0) return;
+
+    memory_tracker::next_memory_allocate = table->hsa_memory_allocate_fn;
+    memory_tracker::next_memory_free     = table->hsa_memory_free_fn;
+    table->hsa_memory_allocate_fn        = memory_tracker::memory_allocate_wrapper;
+    table->hsa_memory_free_fn            = memory_tracker::memory_free_wrapper;
+}
+
+void
+memory_tracker_init(hsa::hsa_amd_ext_table_t* table, uint64_t lib_instance)
+{
+    if(!table) return;
+
+    // Install only for the first library instance. A later instance would capture our own wrapper
+    // as next_pool_allocate and recurse. (Keying on lib_instance matches the copy/update_table
+    // convention -- see scratch_memory.cpp.)
+    if(lib_instance > 0) return;
+
+    memory_tracker::next_pool_allocate     = table->hsa_amd_memory_pool_allocate_fn;
+    memory_tracker::next_pool_free         = table->hsa_amd_memory_pool_free_fn;
+    table->hsa_amd_memory_pool_allocate_fn = memory_tracker::pool_allocate_wrapper;
+    table->hsa_amd_memory_pool_free_fn     = memory_tracker::pool_free_wrapper;
+}
 }  // namespace kernel_replay
 }  // namespace rocprofiler
