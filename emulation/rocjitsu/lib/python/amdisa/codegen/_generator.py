@@ -314,6 +314,16 @@ class CodeGenerator:
         # instruction classes have been generated.
         self._split_execution_classes: list[str] = []
 
+    @property
+    def generated_dir_name(self) -> str:
+        """Filesystem directory for this ISA's generated and handwritten files."""
+        return self.isa_spec.generated_dir_name
+
+    @property
+    def cpp_namespace(self) -> str:
+        """C++ namespace for this ISA's generated declarations."""
+        return self.isa_spec.cpp_namespace
+
     def _split_execute_expr(self, class_name: str) -> str:
         """Return the model constructor expression for one split instruction."""
         if not self.isa_spec.profile.split_execution_sources:
@@ -538,7 +548,7 @@ class CodeGenerator:
         ``kSGetPcB64``) is emitted only when all instances of that mnemonic in
         this ISA use the same raw opcode.
         """
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         mnemonic_values: dict[str, list[int]] = defaultdict(list)
         concrete: list[tuple[str, int]] = []
         seen: dict[str, int] = {}
@@ -604,7 +614,7 @@ class CodeGenerator:
             ]
         )
 
-        arch_out_path = os.path.join(self.out_path, arch)
+        arch_out_path = os.path.join(self.out_path, self.generated_dir_name)
         os.makedirs(arch_out_path, exist_ok=True)
         with open(os.path.join(arch_out_path, 'opcodes.h'), 'w') as f:
             f.write('\n'.join(lines))
@@ -663,7 +673,7 @@ class CodeGenerator:
         structure: callers should describe only operands and modifiers, while
         the generator remains responsible for the binary layout.
         """
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         body: list[str] = [
             CppFile._prologue_comment(),
             f'#ifndef ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_BUILDERS_H_',
@@ -783,7 +793,7 @@ class CodeGenerator:
             ]
         )
 
-        arch_out_path = os.path.join(self.out_path, arch)
+        arch_out_path = os.path.join(self.out_path, self.generated_dir_name)
         os.makedirs(arch_out_path, exist_ok=True)
         with open(os.path.join(arch_out_path, 'builders.h'), 'w') as f:
             f.write('\n'.join(body))
@@ -1248,9 +1258,9 @@ class CodeGenerator:
         if not self.isa_spec.profile.split_execution_sources:
             return
 
-        arch = self.isa_spec.arch_name
-        generated_arch = self.config.generated_include(arch)
-        handwritten_arch = self.config.handwritten_include(arch)
+        arch = self.cpp_namespace
+        generated_arch = self.config.generated_include(self.generated_dir_name)
+        handwritten_arch = self.config.handwritten_include(self.generated_dir_name)
         execution_ids = ''.join(
             f'  {class_name},\n' for class_name in self._split_execution_classes
         )
@@ -1325,7 +1335,7 @@ class CodeGenerator:
             }} // namespace {arch}
             }} // namespace rocjitsu
             ''')
-        arch_dir = os.path.join(self.out_path, arch)
+        arch_dir = os.path.join(self.out_path, self.generated_dir_name)
         os.makedirs(arch_dir, exist_ok=True)
         with open(os.path.join(arch_dir, 'execution_backend.h'), 'w') as f:
             f.write(header)
@@ -1346,7 +1356,8 @@ class CodeGenerator:
         if not self._supports_generated_vopd():
             return
 
-        arch = self.isa_spec.arch_name
+        logical_arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         vopd_encoding_prefixes = self.isa_spec.profile.vopd_encoding_prefixes
         vopd_prefixes = [
             prefix for prefix in vopd_encoding_prefixes if not prefix.is_vopd3
@@ -1355,7 +1366,9 @@ class CodeGenerator:
             prefix for prefix in vopd_encoding_prefixes if prefix.is_vopd3
         ]
         if len(vopd_prefixes) != 1 or len(vopd3_prefixes) > 1:
-            raise ValueError(f'{arch} has invalid VOPD encoding prefix metadata')
+            raise ValueError(
+                f'{logical_arch} has invalid VOPD encoding prefix metadata'
+            )
         vopd_prefix = vopd_prefixes[0]
         vopd3_prefix = vopd3_prefixes[0] if vopd3_prefixes else None
         has_vopd3 = vopd3_prefix is not None
@@ -1373,7 +1386,9 @@ class CodeGenerator:
 
         vopd_slot_ops = self.isa_spec.profile.vopd_slot_ops
         if not vopd_slot_ops:
-            raise ValueError(f'{arch} has VOPD enabled without a slot opcode table')
+            raise ValueError(
+                f'{logical_arch} has VOPD enabled without a slot opcode table'
+            )
         vopd_slot_op_names = {op.enum_name for op in vopd_slot_ops}
 
         def has_op(enum_name: str) -> bool:
@@ -1411,7 +1426,7 @@ class CodeGenerator:
             unknown_opcodes = opcodes.difference(op.opcode for op in vopd_slot_ops)
             if unknown_opcodes:
                 raise ValueError(
-                    f'{arch} {name} references unknown VOPD opcodes: '
+                    f'{logical_arch} {name} references unknown VOPD opcodes: '
                     f'{sorted(unknown_opcodes)}'
                 )
             mask = sum(1 << opcode for opcode in opcodes)
@@ -1959,7 +1974,7 @@ class CodeGenerator:
             vopd_execute_slot_cases, vopd3_execute_slot_cases
         )
         vopd_impl_includes = textwrap.dedent('''\
-            #include "@GENERATED_BASE@/@ARCH@/vopd.h"
+            #include "@GENERATED_ARCH@/vopd.h"
             #include "util/except.h"
             #include "rocjitsu/vm/amdgpu/wavefront.h"
             #include <algorithm>
@@ -1970,16 +1985,17 @@ class CodeGenerator:
             ''')
         if self.isa_spec.profile.split_execution_sources:
             vopd_impl_includes = textwrap.dedent('''\
-                #include "@GENERATED_BASE@/@ARCH@/vopd.h"
-                #include "@GENERATED_BASE@/@ARCH@/execution_backend.h"
+                #include "@GENERATED_ARCH@/vopd.h"
+                #include "@GENERATED_ARCH@/execution_backend.h"
                 #include "util/except.h"
                 #include <format>
                 #include <string>
                 ''')
         vopd_impl_includes = vopd_impl_includes.replace(
-            '@GENERATED_BASE@', self.config.generated_include_base
-        ).replace('@ARCH@', arch)
-        out_dir = os.path.join(self.out_path, arch)
+            '@GENERATED_ARCH@',
+            self.config.generated_include(self.generated_dir_name),
+        )
+        out_dir = os.path.join(self.out_path, self.generated_dir_name)
         os.makedirs(out_dir, exist_ok=True)
         guard = f'ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_VOPD_H_'
 
@@ -1994,8 +2010,8 @@ class CodeGenerator:
             #ifndef @GUARD@
             #define @GUARD@
 
-            #include "@GENERATED_BASE@/@ARCH@/encodings.h"
-            #include "@GENERATED_BASE@/@ARCH@/operand.h"
+            #include "@GENERATED_ARCH@/encodings.h"
+            #include "@GENERATED_ARCH@/operand.h"
             #include <cstdint>
             #include <string>
 
@@ -2063,7 +2079,10 @@ class CodeGenerator:
             ''')
             .lstrip()
             .replace('@ARCH@', arch)
-            .replace('@GENERATED_BASE@', self.config.generated_include_base)
+            .replace(
+                '@GENERATED_ARCH@',
+                self.config.generated_include(self.generated_dir_name),
+            )
             .replace('@GUARD@', guard)
             .replace('@VOPD3_FORMAT_ENUM@', ', Vopd3' if has_vopd3 else '')
             .replace('@VOPD3_HEADER_DECLS@', vopd3_header_decls)
@@ -2356,7 +2375,7 @@ class CodeGenerator:
                 '//\n'
                 '// AUTO-GENERATED by the amdisa codegen pipeline. DO NOT EDIT.\n'
                 '// See lib/python/amdisa/README.md for regeneration instructions.\n\n'
-                f'#include "{self.config.generated_include(arch, "vopd.h")}"\n'
+                f'#include "{self.config.generated_include(self.generated_dir_name, "vopd.h")}"\n'
                 '#include "util/except.h"\n'
                 '#include "rocjitsu/vm/amdgpu/register_access.h"\n'
                 '#include "rocjitsu/vm/amdgpu/wavefront.h"\n'
@@ -2446,7 +2465,8 @@ class CodeGenerator:
             includes,
             [],
             enc_structs,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
+            generated_dir_name=self.generated_dir_name,
         )
         cpp_file.gen_code()
 
@@ -3040,12 +3060,12 @@ class CodeGenerator:
             True,
             [
                 (
-                    self.config.handwritten_include(self.isa_spec.arch_name, 'isa.h'),
+                    self.config.handwritten_include(self.generated_dir_name, 'isa.h'),
                     False,
                 ),
                 (
                     self.config.generated_include(
-                        self.isa_spec.arch_name, 'machine_insts.h'
+                        self.generated_dir_name, 'machine_insts.h'
                     ),
                     False,
                 ),
@@ -3058,8 +3078,9 @@ class CodeGenerator:
             ],
             [],
             enc_classes,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
             True,
+            generated_dir_name=self.generated_dir_name,
         )
         needs_flat_mnemonic = any(
             self.isa_spec.profile.mnemonic_rule(enc.enc_name).use_flat_mnemonic
@@ -3082,7 +3103,7 @@ class CodeGenerator:
 
         _enc_cpp_includes = [
             (
-                self.config.generated_include(self.isa_spec.arch_name, 'encodings.h'),
+                self.config.generated_include(self.generated_dir_name, 'encodings.h'),
                 False,
             ),
             ('cstring', True),
@@ -3103,7 +3124,8 @@ class CodeGenerator:
             _enc_cpp_includes,
             [],
             class_func_impls,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
+            generated_dir_name=self.generated_dir_name,
         )
         class_def_file.gen_code()
         class_impl_file.gen_code()
@@ -8934,7 +8956,7 @@ class CodeGenerator:
                 cpp_includes = [
                     (
                         self.config.generated_include(
-                            self.isa_spec.arch_name,
+                            self.generated_dir_name,
                             f'{enc.fmt_enc_name.lower()}.h',
                         ),
                         False,
@@ -8963,7 +8985,7 @@ class CodeGenerator:
                         [
                             (
                                 self.config.handwritten_include(
-                                    self.isa_spec.arch_name, 'addr_calc.h'
+                                    self.generated_dir_name, 'addr_calc.h'
                                 ),
                                 False,
                             ),
@@ -9002,7 +9024,7 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             self.config.handwritten_include(
-                                self.isa_spec.arch_name, 'mma_exec.h'
+                                self.generated_dir_name, 'mma_exec.h'
                             ),
                             False,
                         )
@@ -9120,19 +9142,19 @@ class CodeGenerator:
                 h_includes = [
                     (
                         self.config.generated_include(
-                            self.isa_spec.arch_name, 'encodings.h'
+                            self.generated_dir_name, 'encodings.h'
                         ),
                         False,
                     ),
                     (
                         self.config.handwritten_include(
-                            self.isa_spec.arch_name, 'isa.h'
+                            self.generated_dir_name, 'isa.h'
                         ),
                         False,
                     ),
                     (
                         self.config.generated_include(
-                            self.isa_spec.arch_name, 'operand.h'
+                            self.generated_dir_name, 'operand.h'
                         ),
                         False,
                     ),
@@ -9168,8 +9190,9 @@ class CodeGenerator:
                     h_includes,
                     [],
                     inst_classes,
-                    self.isa_spec.arch_name,
+                    self.cpp_namespace,
                     True,
+                    generated_dir_name=self.generated_dir_name,
                 )
                 # No local f16 helpers needed - using util::f16_to_f32 etc.
                 # from data_types.h (included via cpp_includes when has_sem).
@@ -9269,7 +9292,7 @@ class CodeGenerator:
                         cpp_includes[0],
                         (
                             self.config.generated_include(
-                                self.isa_spec.arch_name,
+                                self.generated_dir_name,
                                 'execution_backend.h',
                             ),
                             False,
@@ -9311,9 +9334,9 @@ class CodeGenerator:
         # encoding instruction headers. Only primary (non-alt) encodings
         # that have instructions generate their own files; alt encoding
         # instructions are merged into their parent's file.
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         guard = f'ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_INSTS_H_'
-        inc_base = self.config.generated_include(arch)
+        inc_base = self.config.generated_include(self.generated_dir_name)
         insts_h_lines = [
             CppFile._prologue_comment(),
             f'#ifndef {guard}\n#define {guard}\n\n',
@@ -9329,7 +9352,7 @@ class CodeGenerator:
         if self._supports_generated_vopd():
             insts_h_lines.append(f'#include "{inc_base}/vopd.h"\n')
         insts_h_lines.append(f'\n#endif // {guard}\n')
-        insts_h_path = os.path.join(self.out_path, arch, 'insts.h')
+        insts_h_path = os.path.join(self.out_path, self.generated_dir_name, 'insts.h')
         with open(insts_h_path, 'w') as f:
             f.write(''.join(insts_h_lines))
 
@@ -9391,7 +9414,7 @@ class CodeGenerator:
     ) -> None:
         """Write one model or execution implementation file set."""
         max_bytes = self.isa_spec.profile.source_split_max_bytes.get(enc_name.upper())
-        arch_dir = os.path.join(self.out_path, self.isa_spec.arch_name)
+        arch_dir = os.path.join(self.out_path, self.generated_dir_name)
         if os.path.isdir(arch_dir):
             self._remove_generated_source_split_files(
                 arch_dir, base_name, source_impl_units
@@ -9411,7 +9434,8 @@ class CodeGenerator:
                 cpp_includes,
                 [],
                 class_func_impls,
-                self.isa_spec.arch_name,
+                self.cpp_namespace,
+                generated_dir_name=self.generated_dir_name,
             ).gen_code()
             return
 
@@ -9474,7 +9498,8 @@ class CodeGenerator:
                 cpp_includes,
                 [],
                 chunk,
-                self.isa_spec.arch_name,
+                self.cpp_namespace,
+                generated_dir_name=self.generated_dir_name,
             ).gen_code()
 
     @staticmethod
@@ -10321,7 +10346,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             [],
             [],
             code_lines,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
+            generated_dir_name=self.generated_dir_name,
         )
         opnd_type_def_file.gen_code()
 
@@ -10351,7 +10377,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
     def gen_operand(self) -> None:
         """Generate the ISA-specific Operand class with name resolution."""
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         scalar_null_precedes_m0 = self.isa_spec.profile.scalar_null_precedes_m0
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
@@ -11736,8 +11762,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         ).append(resolve_code)
 
         operand_header_includes = [
-            (self.config.handwritten_include(arch, 'isa.h'), False),
-            (self.config.generated_include(arch, 'operand_types.h'), False),
+            (self.config.handwritten_include(self.generated_dir_name, 'isa.h'), False),
+            (
+                self.config.generated_include(
+                    self.generated_dir_name, 'operand_types.h'
+                ),
+                False,
+            ),
             ('rocjitsu/isa/operand.h', False),
             ('string', True),
         ]
@@ -11752,6 +11783,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             [],
             class_def,
             arch,
+            generated_dir_name=self.generated_dir_name,
         )
         header_file.gen_code()
         if self.isa_spec.profile.split_execution_sources:
@@ -11760,7 +11792,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 self.out_path,
                 False,
                 [
-                    (self.config.generated_include(arch, 'operand.h'), False),
+                    (
+                        self.config.generated_include(
+                            self.generated_dir_name, 'operand.h'
+                        ),
+                        False,
+                    ),
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h', False),
                     ('format', True),
                     ('optional', True),
@@ -11770,13 +11807,19 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 [],
                 class_impl.model,
                 arch,
+                generated_dir_name=self.generated_dir_name,
             ).gen_code()
             CppFile(
                 'operand_exec',
                 self.out_path,
                 False,
                 [
-                    (self.config.generated_include(arch, 'operand.h'), False),
+                    (
+                        self.config.generated_include(
+                            self.generated_dir_name, 'operand.h'
+                        ),
+                        False,
+                    ),
                     ('rocjitsu/isa/isa_operand_simd_inl.h', False),
                     ('rocjitsu/vm/amdgpu/compute_unit.h', False),
                     ('rocjitsu/vm/amdgpu/operand_execution_access.h', False),
@@ -11791,6 +11834,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 [],
                 class_impl.execution,
                 arch,
+                generated_dir_name=self.generated_dir_name,
             ).gen_code()
         else:
             CppFile(
@@ -11798,7 +11842,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 self.out_path,
                 False,
                 [
-                    (self.config.generated_include(arch, 'operand.h'), False),
+                    (
+                        self.config.generated_include(
+                            self.generated_dir_name, 'operand.h'
+                        ),
+                        False,
+                    ),
                     ('rocjitsu/isa/isa_operand_simd_inl.h', False),
                     ('rocjitsu/vm/amdgpu/compute_unit.h', False),
                     ('rocjitsu/vm/amdgpu/register_access.h', False),
@@ -11812,6 +11861,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 [],
                 class_impl.model,
                 arch,
+                generated_dir_name=self.generated_dir_name,
             ).gen_code()
 
     def gen_decoder(self) -> None:
@@ -12163,7 +12213,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             [
                 (
                     self.config.generated_include(
-                        self.isa_spec.arch_name, 'machine_insts.h'
+                        self.generated_dir_name, 'machine_insts.h'
                     ),
                     False,
                 ),
@@ -12172,8 +12222,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             ],
             ['Instruction'],
             class_def,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
             True,
+            generated_dir_name=self.generated_dir_name,
         )
         class_impl_file = CppFile(
             'decoder',
@@ -12181,12 +12232,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             False,
             [
                 (
-                    self.config.generated_include(self.isa_spec.arch_name, 'decoder.h'),
+                    self.config.generated_include(self.generated_dir_name, 'decoder.h'),
                     False,
                 ),
                 ('util/except.h', False),
                 (
-                    self.config.generated_include(self.isa_spec.arch_name, 'insts.h'),
+                    self.config.generated_include(self.generated_dir_name, 'insts.h'),
                     False,
                 ),
                 ('bit', True),
@@ -12194,7 +12245,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             ],
             [],
             class_impl,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
+            generated_dir_name=self.generated_dir_name,
         )
         class_def_file.gen_code()
         class_impl_file.gen_code()
@@ -12252,7 +12304,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'  {{"{inst.mnemonic}", {{0x{w0:08X}U, 0x{w1:08X}U}}}},'
                 )
 
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         ns = arch
         guard = f'ROCJITSU_ISA_AMDGPU_{arch.upper()}_TEST_ENCODINGS_H_'
         lines = CppFile._prologue_comment().splitlines()
@@ -12284,7 +12336,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         lines.append('')
 
         out_path = os.path.join(
-            self.out_path, self.isa_spec.arch_name, 'test_encodings.h'
+            self.out_path, self.generated_dir_name, 'test_encodings.h'
         )
         with open(out_path, 'w') as f:
             f.write('\n'.join(lines))
@@ -12302,18 +12354,19 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             True,
             [
                 (
-                    self.config.generated_include(self.isa_spec.arch_name, 'decoder.h'),
+                    self.config.generated_include(self.generated_dir_name, 'decoder.h'),
                     False,
                 ),
                 (
                     self.config.generated_include(
-                        self.isa_spec.arch_name, 'operand_types.h'
+                        self.generated_dir_name, 'operand_types.h'
                     ),
                     False,
                 ),
             ],
             [],
             isa_struct,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
+            generated_dir_name=self.generated_dir_name,
         )
         isa_struct_file.gen_code()

@@ -344,7 +344,15 @@ class Parser:
         arch_family = arch_parts[1].lower()
         arch_version = arch_parts[2].replace('.', '_')
         arch_name = profile.generated_arch_name or f'{arch_family}{arch_version}'
-        self.isa_spec = IsaSpec(arch_name, version, profile)
+        generated_dir_name = profile.generated_dir_name or arch_name
+        cpp_namespace = profile.cpp_namespace or arch_name
+        self.isa_spec = IsaSpec(
+            arch_name,
+            version,
+            profile,
+            generated_dir_name,
+            cpp_namespace,
+        )
 
         self.encodings_node = xs.get_node(isa_node, xs.ENCODINGS)
         self.insts_node = xs.get_node(isa_node, xs.INSTS)
