@@ -19,35 +19,8 @@
 namespace RcclUnitTesting
 {
 
-// Mirrors collectives.cc rcclDdaEnabled() for unit tests only.
-constexpr size_t kDdaAlltoAllGfx942ThresholdBytes = 4194304;
-constexpr size_t kDdaAlltoAllGfx950ThresholdBytes = 4194304;
-constexpr size_t kDdaAlltoAllGfx1250ThresholdBytes = 4194304;
-
-inline bool testRcclDdaEnabled(
-    const ncclComm* comm,
-    size_t totalBytes,
-    size_t gfx942Default,
-    size_t gfx950Default = 0,
-    size_t gfx1250Default = 0) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
-    return false;
-  }
-  size_t threshold;
-  if (IsArchMatch(comm->archName, "gfx1250")) {
-    threshold = gfx1250Default ? gfx1250Default : static_cast<size_t>(rcclParamDdaThreshold());
-  } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
-    if (comm->nRanks < 8) return false;
-    if (IsArchMatch(comm->archName, "gfx942")) {
-      threshold = gfx942Default;
-    } else {
-      threshold = gfx950Default ? gfx950Default : static_cast<size_t>(rcclParamDdaThreshold());
-    }
-  } else {
-    return false;
-  }
-  return threshold > 0 && totalBytes <= threshold;
-}
+// Use the production rcclDdaEnabled() from rccl_common.h directly.
+// Threshold constants kDdaAlltoAllGfx{942,950,1250}ThresholdBytes are also in rccl_common.h.
 
 inline size_t testAlltoAllTotalBytes(size_t count, int nRanks, ncclDataType_t datatype) {
   return static_cast<size_t>(nRanks) * count * static_cast<size_t>(ncclTypeSize(datatype));
@@ -57,7 +30,7 @@ inline bool testRcclDdaAlltoAllThresholdEnabled(
     const ncclComm* comm,
     size_t count,
     ncclDataType_t datatype) {
-  return testRcclDdaEnabled(
+  return rcclDdaEnabled(
       comm,
       testAlltoAllTotalBytes(count, comm->nRanks, datatype),
       kDdaAlltoAllGfx942ThresholdBytes,
@@ -92,7 +65,7 @@ struct DdaAlltoAllMockComm
 
 // Largest float32 per-rank count whose 8-rank AlltoAll totals exactly 4 MiB.
 constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
-    kDdaAlltoAllGfx950ThresholdBytes /
+    kDdaAlltoAllGfx942ThresholdBytes /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
 
 } // namespace RcclUnitTesting

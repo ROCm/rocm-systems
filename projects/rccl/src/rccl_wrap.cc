@@ -524,6 +524,27 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
   return ncclSuccess;
 }
 
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default,
+                    size_t gfx950Default, size_t gfx1250Default) {
+  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
+    return false;
+  }
+  size_t threshold;
+  if (IsArchMatch(comm->archName, "gfx1250")) {
+    threshold = gfx1250Default ? gfx1250Default : static_cast<size_t>(rcclParamDdaThreshold());
+  } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
+    if (comm->nRanks < 8) return false;
+    if (IsArchMatch(comm->archName, "gfx942")) {
+      threshold = gfx942Default;
+    } else {
+      threshold = gfx950Default ? gfx950Default : static_cast<size_t>(rcclParamDdaThreshold());
+    }
+  } else {
+    return false;
+  }
+  return threshold > 0 && totalBytes <= threshold;
+}
+
 bool rcclUseAlltoAllGda(struct ncclComm* comm) {
 #ifdef ENABLE_ROCSHMEM
   if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks / comm->nNodes == 8) &&

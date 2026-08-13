@@ -190,28 +190,7 @@ RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));       // 32 KiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
 
-// Returns true when the DDA fast path should be attempted for a collective
-// with the given total byte count. Per-arch defaults cap the threshold; when 0,
-// gfx950/gfx1250 fall back to the user-configurable rcclParamDdaThreshold().
-// All other architectures return false.
-static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default,
-                           size_t gfx950Default = 0, size_t gfx1250Default = 0) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) return false;
-  size_t threshold;
-  if (IsArchMatch(comm->archName, "gfx1250")) {
-    threshold = gfx1250Default ? gfx1250Default : (size_t)rcclParamDdaThreshold();
-  } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
-    if (comm->nRanks < 8) return false;
-    if (IsArchMatch(comm->archName, "gfx942")) {
-      threshold = gfx942Default;
-    } else {
-      threshold = gfx950Default ? gfx950Default : (size_t)rcclParamDdaThreshold();
-    }
-  } else {
-    return false;
-  }
-  return threshold > 0 && totalBytes <= threshold;
-}
+// rcclDdaEnabled() is now in rccl_wrap.cc (declared in rccl_common.h)
 
 // Decides whether ncclAllReduce_impl takes the DDA path for this call. Kept as a small named helper
 // (rather than an inline expression) so the dispatch decision is reachable from host unit tests; the
@@ -470,7 +449,9 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     }
 #endif // ENABLE_ROCSHMEM
     // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
-    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), 4194304, 4194304, 4194304)) {
+    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype),
+                       kDdaAlltoAllGfx942ThresholdBytes, kDdaAlltoAllGfx950ThresholdBytes,
+                       kDdaAlltoAllGfx1250ThresholdBytes)) {
       if (IsArchMatch(comm->archName, "gfx1250")) {
         const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
         // Small-chunk fast lane: LL protocol (no GPU barrier).
