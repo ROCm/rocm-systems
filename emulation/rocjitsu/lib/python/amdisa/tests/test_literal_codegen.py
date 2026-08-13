@@ -151,7 +151,7 @@ def test_vop3p_literal64_rejection_uses_complete_encoding_capability():
 
 
 def test_gfx1250_packed_f32_reader_has_no_unreachable_literal64_branch():
-    source = CodeGenerator._emit_gfx1250_matrix_fmt_helpers().execution[0]
+    source = CodeGenerator._emit_cdna5_matrix_fmt_helpers().execution[0]
 
     reader_start = source.index('PkF32Words read_pk_f32_words')
     reader_end = source.index('\n}', reader_start)
