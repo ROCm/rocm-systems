@@ -46,42 +46,42 @@ Panel Config:
         unit: Unit
       metric:
         DRAM Bandwidth - Read:
-          avg: SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         DRAM Bandwidth - Write:
-          avg: SUM(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         IO Bandwidth - Read:
-          avg: SUM(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         IO Bandwidth - Write:
-          avg: SUM(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         HDM Bandwidth - Read:
-          avg: SUM(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         HDM Bandwidth - Write:
-          avg: SUM(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GMI Bandwidth - Read:
-          avg: SUM(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GMI Bandwidth - Write:
-          avg: SUM(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s

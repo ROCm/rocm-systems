@@ -32,7 +32,7 @@ Panel Config:
       metric:
         # Utilization: TX_VMW_VMW_BUSY_sum is summed across all GL0 cache units (one per WGP).
         Utilization:
-          avg: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM((GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          avg: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
           min: 100 * MIN(TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
           max: 100 * MAX(TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
           unit: Percent
@@ -299,7 +299,7 @@ Panel Config:
           max: MAX(TX_VMW_GL1_REQ_READ_sum / $denom)
           unit: (Count + $normUnit)
         GL0-GL1 Read Bandwidth:
-          avg: SUM((TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -309,7 +309,7 @@ Panel Config:
           max: MAX(TX_VMW_GL1_REQ_WRITE_sum / $denom)
           unit: (Count + $normUnit)
         GL0-GL1 Write Bandwidth:
-          avg: SUM((TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s

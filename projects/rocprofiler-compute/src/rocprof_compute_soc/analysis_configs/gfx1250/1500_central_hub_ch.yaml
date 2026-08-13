@@ -178,12 +178,12 @@ Panel Config:
         unit: Unit
       metric:
         CHC Bandwidth - Read:
-          avg: SUM((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         CHC Bandwidth - Write:
-          avg: SUM(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(CHC_REQ_WRITE_32B_DATA_BEATS_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(CHC_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s

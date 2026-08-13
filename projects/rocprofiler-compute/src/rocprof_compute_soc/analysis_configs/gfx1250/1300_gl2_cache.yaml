@@ -121,7 +121,7 @@ Panel Config:
         unit: Unit
       metric:
         GL2 Cache Hit Rate:
-          avg: 100 * SUM(GL2C_HIT_sum) / SUM((GL2C_HIT_sum + GL2C_MISS_sum))
+          avg: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
           min: 100 * MIN(GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
           max: 100 * MAX(GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
           unit: Percent
@@ -249,17 +249,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2-EA HBM Bandwidth - Read:
-          avg: SUM(GL2C_EA_RDREQ_DRAM_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_RDREQ_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_RDREQ_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA HBM Bandwidth - Write:
-          avg: SUM(GL2C_EA_WRREQ_DRAM_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_WRREQ_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_WRREQ_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA HBM Bandwidth - Atomic:
-          avg: SUM(GL2C_EA_ATOMIC_DRAM_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_ATOMIC_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_ATOMIC_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_ATOMIC_DRAM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -275,17 +275,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2-EA Host CPU Bandwidth - Read:
-          avg: SUM(GL2C_EA_RDREQ_CPU_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_RDREQ_CPU_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_RDREQ_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_RDREQ_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Host CPU Bandwidth - Write:
-          avg: SUM(GL2C_EA_WRREQ_CPU_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_WRREQ_CPU_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_WRREQ_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_WRREQ_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Host CPU Bandwidth - Atomic:
-          avg: SUM(GL2C_EA_ATOMIC_CPU_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_ATOMIC_CPU_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_ATOMIC_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_ATOMIC_CPU_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -301,17 +301,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2-EA PCIE Bandwidth - Read:
-          avg: SUM(GL2C_EA_RDREQ_PCIE_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_RDREQ_PCIE_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_RDREQ_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_RDREQ_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA PCIE Bandwidth - Write:
-          avg: SUM(GL2C_EA_WRREQ_PCIE_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_WRREQ_PCIE_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_WRREQ_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_WRREQ_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA PCIE Bandwidth - Atomic:
-          avg: SUM(GL2C_EA_ATOMIC_PCIE_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_ATOMIC_PCIE_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_ATOMIC_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_ATOMIC_PCIE_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -327,17 +327,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2-EA Remote Node Bandwidth - Read:
-          avg: SUM(GL2C_EA_RDREQ_RM_NODE_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_RDREQ_RM_NODE_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_RDREQ_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_RDREQ_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Remote Node Bandwidth - Write:
-          avg: SUM(GL2C_EA_WRREQ_RM_NODE_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_WRREQ_RM_NODE_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_WRREQ_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_WRREQ_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Remote Node Bandwidth - Atomic:
-          avg: SUM(GL2C_EA_ATOMIC_RM_NODE_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_ATOMIC_RM_NODE_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_ATOMIC_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_ATOMIC_RM_NODE_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -353,17 +353,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2-EA Remote Memory Bandwidth - Read:
-          avg: SUM(GL2C_EA_RDREQ_RM_MEM_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_RDREQ_RM_MEM_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_RDREQ_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_RDREQ_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Remote Memory Bandwidth - Write:
-          avg: SUM(GL2C_EA_WRREQ_RM_MEM_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_WRREQ_RM_MEM_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_WRREQ_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_WRREQ_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL2-EA Remote Memory Bandwidth - Atomic:
-          avg: SUM(GL2C_EA_ATOMIC_RM_MEM_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL2C_EA_ATOMIC_RM_MEM_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL2C_EA_ATOMIC_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL2C_EA_ATOMIC_RM_MEM_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s

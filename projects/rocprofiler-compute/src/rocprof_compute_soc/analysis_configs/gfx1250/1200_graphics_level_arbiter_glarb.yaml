@@ -127,12 +127,12 @@ Panel Config:
         unit: Unit
       metric:
         GLARBC Request Bandwidth - Read:
-          avg: SUM((GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GLARBC Request Bandwidth - Write:
-          avg: SUM((GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -152,12 +152,12 @@ Panel Config:
         unit: Unit
       metric:
         GLARBC-GL2 Read Latency:
-          avg: SUM(GLARBC_GL2_REQ_READ_LEVEL_sum) / SUM((GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum))
+          avg: SUM(GLARBC_GL2_REQ_READ_LEVEL_sum) / SUM(GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum)
           min: MIN(GLARBC_GL2_REQ_READ_LEVEL_sum / (GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum))
           max: MAX(GLARBC_GL2_REQ_READ_LEVEL_sum / (GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum))
           unit: Cycles
         GLARBC-GL2 Write Latency:
-          avg: SUM(GLARBC_GL2_REQ_WRITE_LEVEL_sum) / SUM((GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum))
+          avg: SUM(GLARBC_GL2_REQ_WRITE_LEVEL_sum) / SUM(GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum)
           min: MIN(GLARBC_GL2_REQ_WRITE_LEVEL_sum / (GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum))
           max: MAX(GLARBC_GL2_REQ_WRITE_LEVEL_sum / (GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum))
           unit: Cycles

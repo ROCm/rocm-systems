@@ -117,12 +117,12 @@ Panel Config:
         unit: Unit
       metric:
         GL1C Request Bandwidth - Read:
-          avg: SUM((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum * 128 + GL1C_REQ_READ_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum * 128 + GL1C_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum * 128 + GL1C_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum * 128 + GL1C_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL1C Request Bandwidth - Write:
-          avg: SUM((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum * 128 + GL1C_REQ_WRITE_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum * 128 + GL1C_REQ_WRITE_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum * 128 + GL1C_REQ_WRITE_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum * 128 + GL1C_REQ_WRITE_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -152,7 +152,7 @@ Panel Config:
           max: MAX(GL1C_REQ_MULTICAST_256B_sum / $denom)
           unit: (Count + $normUnit)
         GL1C Request Bandwidth - Multicast:
-          avg: SUM((GL1C_REQ_MULTICAST_128B_sum * 128 + GL1C_REQ_MULTICAST_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(GL1C_REQ_MULTICAST_128B_sum * 128 + GL1C_REQ_MULTICAST_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((GL1C_REQ_MULTICAST_128B_sum * 128 + GL1C_REQ_MULTICAST_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((GL1C_REQ_MULTICAST_128B_sum * 128 + GL1C_REQ_MULTICAST_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
@@ -253,12 +253,12 @@ Panel Config:
           max: MAX(GL1C_GL2_REQ_WRITE_LEVEL_sum / GL1C_GL2_REQ_WRITE_sum)
           unit: Cycles
         GL1C-GLARB Read Bandwidth:
-          avg: SUM((GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256)) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           max: MAX((GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL1C-GLARB Write Bandwidth:
-          avg: SUM(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: 32 * SUM(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
           max: MAX(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
           unit: GB/s

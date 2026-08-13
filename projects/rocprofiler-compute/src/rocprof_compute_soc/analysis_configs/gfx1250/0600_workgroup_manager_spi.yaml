@@ -15,7 +15,7 @@ Panel Config:
         unit: Unit
       metric:
         SPI Utilization:
-          avg: 100 * SUM(SPI_BUSY_sum) / SUM((GRBM_GUI_ACTIVE_sum * $SE_NUM))
+          avg: 100 * SUM(SPI_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $SE_NUM)
           min: 100 * MIN(SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $SE_NUM))
           max: 100 * MAX(SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $SE_NUM))
           unit: Percent
