@@ -822,7 +822,7 @@ TEST(SpecialEffectAnalysis, CmpxWritesVccAndExecOnCdna) {
 }
 
 TEST(SpecialEffectAnalysis, CmpxWritesExecOnlyOnGfx1250) {
-  const auto built = gfx1250::build_vopc(gfx1250::kVCmpxEqF32Vopc, {.src0 = 256, .vsrc1 = 1});
+  const auto built = cdna5::build_vopc(cdna5::kVCmpxEqF32Vopc, {.src0 = 256, .vsrc1 = 1});
   const std::array<uint32_t, 2> words{built[0], 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
@@ -916,7 +916,7 @@ TEST(SpecialEffectAnalysis, Vop2CarryCdnaAddcUsesAndDefsVcc) {
 
 TEST(SpecialEffectAnalysis, Vop2CarryGfx1250AddCoCiUsesAndDefsVcc) {
   const auto built =
-      gfx1250::build_vop2(gfx1250::kVAddCoCiU32Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 2});
+      cdna5::build_vop2(cdna5::kVAddCoCiU32Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 2});
   const std::array<uint32_t, 2> words{built[0], 0u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
@@ -1012,8 +1012,7 @@ TEST(SpecialEffectAnalysis, SetGprIdxIdxReadsAndWritesM0) {
 // register class nor an ordinary register ref, so it contributes nothing to
 // defs/uses.
 TEST(SpecialEffectAnalysis, MemoryPseudoOperandProducesNoSpecialEffect) {
-  const auto words =
-      gfx1250::build_vbuffer(gfx1250::kBufferLoadB32Vbuffer, {.vdata = 1, .rsrc = 0});
+  const auto words = cdna5::build_vbuffer(cdna5::kBufferLoadB32Vbuffer, {.vdata = 1, .rsrc = 0});
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
