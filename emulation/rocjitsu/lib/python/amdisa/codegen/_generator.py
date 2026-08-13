@@ -3853,7 +3853,7 @@ class CodeGenerator:
                 '  return reinterpret_cast<const Vop3pMachineInst *>(inst + 2)->op == 0x88;\n'
                 '}\n'
                 '\n'
-                'const char *gfx1250_scaled_wmma_mnemonic(const MachineInst *inst) {\n'
+                'const char *cdna5_scaled_wmma_mnemonic(const MachineInst *inst) {\n'
                 '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
                 '    return cdna5_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_32x16x128_f4"\n'
                 '                                               : "v_wmma_scale_f32_32x16x128_f4";\n'
@@ -3969,7 +3969,7 @@ class CodeGenerator:
         exec_fn = self._split_execute_expr('VWmmaScaleF32Vop3px2')
         model = textwrap.dedent('''\
             VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
-                : Vop3p(gfx1250_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
+                : Vop3p(cdna5_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
                         @EXEC_FN@, LiteralSupport::Both, 3,
                         Vop3p::ExtensionDecodePolicy::Skip),
                   vdst(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
