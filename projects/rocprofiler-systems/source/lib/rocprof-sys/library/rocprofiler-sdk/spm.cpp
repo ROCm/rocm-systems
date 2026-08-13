@@ -231,14 +231,15 @@ constexpr auto invalid_context_handle = 0UL;
 
 /// One requested SPM counter, resolved against an agent.
 ///
-/// `id` is the base counter id that `rocprofiler_spm_create_counter_config()`
-/// requires. `name_entries` holds one entry per dimension instance, each keyed by
-/// its own instance id, used to resolve samples back to pmc_info/track names. The
-/// two id spaces are distinct: do not derive one from the other.
+/// `base_counter_id` is the base counter id that
+/// `rocprofiler_spm_create_counter_config()` requires. `name_entries` holds one entry
+/// per dimension instance, each keyed by its own instance id, used to resolve samples
+/// back to pmc_info/track names. The two id spaces are distinct: do not derive one
+/// from the other.
 struct resolved_counter
 {
-    rocprofiler_counter_id_t                                    id           = {};
-    std::vector<trace_cache::info::gpu_perf_counter_name_entry> name_entries = {};
+    rocprofiler_counter_id_t                                    base_counter_id = {};
+    std::vector<trace_cache::info::gpu_perf_counter_name_entry> name_entries    = {};
 };
 
 using spm_available_config_vec_t = std::vector<rocprofiler_spm_available_configuration_t>;
@@ -258,8 +259,8 @@ enum class spm_status
 
 struct counter_query_result
 {
-    spm_status             status   = spm_status::failed;
-    resolved_counter_vec_t counters = {};
+    spm_status             status            = spm_status::failed;
+    resolved_counter_vec_t resolved_counters = {};
 };
 
 struct agent_config_result
@@ -268,10 +269,12 @@ struct agent_config_result
     rocprofiler_counter_config_id_t config = {};
 };
 
+/// Flattened per-agent aggregate of `resolved_counter_vec_t`, consumed by SDK
+/// counter config creation and the metadata registry.
 struct counter_config_data
 {
-    spm_counter_id_vec_t                                        counter_ids  = {};
-    std::vector<trace_cache::info::gpu_perf_counter_name_entry> name_entries = {};
+    spm_counter_id_vec_t                                        base_counter_ids = {};
+    std::vector<trace_cache::info::gpu_perf_counter_name_entry> name_entries     = {};
 };
 
 void
@@ -347,7 +350,7 @@ counter_config_data
 make_counter_config_data(resolved_counter_vec_t& counters)
 {
     auto config_data = counter_config_data{};
-    config_data.counter_ids.reserve(counters.size());
+    config_data.base_counter_ids.reserve(counters.size());
 
     const auto name_entry_count =
         std::accumulate(counters.begin(), counters.end(), std::size_t{ 0 },
@@ -358,7 +361,7 @@ make_counter_config_data(resolved_counter_vec_t& counters)
 
     for(auto& counter : counters)
     {
-        config_data.counter_ids.emplace_back(counter.id);
+        config_data.base_counter_ids.emplace_back(counter.base_counter_id);
         config_data.name_entries.insert(
             config_data.name_entries.end(),
             std::make_move_iterator(counter.name_entries.begin()),
@@ -422,7 +425,8 @@ query_supported_spm_counters(rocprofiler_agent_id_t                 agent_id,
         if(requested_names.count(name) > 0)
         {
             auto name_entries = spm_counter_name_entries(details, device_id);
-            counters.push_back({ counter, std::move(name_entries) });
+            counters.push_back(
+                { .base_counter_id = counter, .name_entries = std::move(name_entries) });
             matched.emplace(std::move(name));
         }
     }
@@ -446,7 +450,7 @@ query_supported_spm_counters(rocprofiler_agent_id_t                 agent_id,
 std::optional<rocprofiler_counter_config_id_t>
 create_sdk_spm_counter_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id,
                               const configuration&  requested_config,
-                              spm_counter_id_vec_t& counters)
+                              spm_counter_id_vec_t& base_counter_ids)
 {
     auto param = rocprofiler_spm_parameters_t{
         sizeof(rocprofiler_spm_parameters_t),
@@ -457,11 +461,11 @@ create_sdk_spm_counter_config(rocprofiler_agent_id_t agent_id, std::uint64_t dev
     auto config = rocprofiler_counter_config_id_t{};
 
     LOG_DEBUG("Creating SPM counter config for device {} (agent {}) with {} counters",
-              device_id, agent_id.handle, counters.size());
+              device_id, agent_id.handle, base_counter_ids.size());
 
-    auto status =
-        rocprofiler_spm_create_counter_config(agent_id, counters.data(), counters.size(),
-                                              params.data(), params.size(), &config);
+    auto status = rocprofiler_spm_create_counter_config(
+        agent_id, base_counter_ids.data(), base_counter_ids.size(), params.data(),
+        params.size(), &config);
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
         log_sdk_status_failure(
@@ -480,8 +484,9 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id
                         const requested_counter_vec_t& requested)
 {
     const auto requested_names = detail::requested_counter_names(requested);
-    auto counters = query_supported_spm_counters(agent_id, requested_names, device_id);
-    if(counters.status != spm_status::success) return { counters.status, {} };
+    auto       counter_query =
+        query_supported_spm_counters(agent_id, requested_names, device_id);
+    if(counter_query.status != spm_status::success) return { counter_query.status, {} };
 
     if(!sample_interval_supported(agent_id, requested_config))
     {
@@ -491,9 +496,9 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id
         return { spm_status::failed, {} };
     }
 
-    auto config_data = make_counter_config_data(counters.counters);
+    auto config_data = make_counter_config_data(counter_query.resolved_counters);
     auto config = create_sdk_spm_counter_config(agent_id, device_id, requested_config,
-                                                config_data.counter_ids);
+                                                config_data.base_counter_ids);
     if(config)
     {
         trace_cache::get_metadata_registry().set_spm_counter_names(
