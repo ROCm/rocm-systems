@@ -1,6 +1,6 @@
 .. meta::
   :description: A high-level overview of ROCprofiler-SDK architecture, profiling services, and the rocprofv3 command-line tool
-  :keywords: ROCprofiler-SDK overview, rocprofv3, profiling services, SPM, ATT, PC sampling, counter collection, API tracing, GPU profiling
+  :keywords: ROCprofiler-SDK overview, rocprofv3, profiling services, ATT, PC sampling, counter collection, SPM, API tracing, GPU profiling
 
 .. _rocprofiler-sdk-at-a-glance:
 
@@ -30,85 +30,7 @@ Multiple tools can run simultaneously, each with its own context. ROCprofiler-SD
 Advanced profiling features
 ============================
 
-SPM, ATT, and PC sampling provide hardware-level observability beyond standard counter collection and API tracing.
-
-.. _glance-spm:
-
-Streaming Performance Monitoring (SPM)
-----------------------------------------
-
-SPM is a hardware capability on AMD Radeon™ and Instinct™ GPUs that streams counter values continuously into a memory ring buffer at a configurable hardware interval, independent of kernel dispatch boundaries. It is an experimental API in ROCprofiler-SDK, exposed via ``rocprofiler-sdk/experimental/spm.h``. Structs and enums are tagged ``ROCPROFILER_SDK_EXPERIMENTAL``. The top-level ``rocprofiler-sdk/spm.h`` reincludes the experimental header and emits a deprecation warning directing users to the experimental path.
-
-How SPM differs from other counter services
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-ROCprofiler-SDK provides three hardware counter collection mechanisms. The right choice depends on the granularity and timing requirements of your use case:
-
-.. list-table::
-   :header-rows: 1
-
-   * - Property
-     - Dispatch PMC
-     - Device counter collection
-     - SPM
-   * - Granularity
-     - One accumulated value per kernel
-     - Accumulated over a configurable epoch
-     - One value per hardware sampling interval
-   * - Timing
-     - Bounded to dispatch start/end
-     - User-controlled flush
-     - Continuous, independent of dispatches
-   * - Kernel serialization required
-     - Yes
-     - No
-     - No
-   * - Concurrent workload support
-     - No
-     - Partial
-     - Yes
-   * - Use case
-     - Identify expensive kernels; measure peak utilization
-     - GPU-wide utilization over a time window
-     - Time-series monitoring, DCGM-style telemetry, overlapping kernels
-
-SPM captures how hardware resources are utilized over time. This is distinct from PC sampling, which reconstructs an execution histogram from program counter snapshots, and from ATT counter streaming (``--att-perfcounters``), which embeds SQ-block counter values into the thread trace ring buffer and requires ATT to be active. SPM operates as an independent hardware path.
-
-.. _glance-spm-cli:
-
-CLI options
-^^^^^^^^^^^^
-
-Use these options to enable and configure SPM collection with ``rocprofv3``, or query SPM support per agent with ``rocprofv3-avail``.
-
-+--------------------+----------------------------------+----------------------------------------------------------+-----------------------------------------------------------------------------------------------+
-| Tool               | Option                           | Description                                              | Example                                                                                       |
-+====================+==================================+==========================================================+===============================================================================================+
-| ``rocprofv3``      | ``--spm-beta-enabled``           | Required to enable SPM collection                        | ``rocprofv3 --spm-beta-enabled --spm SQ_WAVES -- ./my_app``                                   |
-|                    |                                  |                                                          |                                                                                               |
-+                    +----------------------------------+----------------------------------------------------------+-----------------------------------------------------------------------------------------------+
-|                    | ``--spm <COUNTERS>``             | Counters to collect; all must fit in a single            | ``rocprofv3 --spm-beta-enabled --spm SQ_WAVES,SQ_BUSY_CYCLES -- ./my_app``                    |
-|                    |                                  | hardware pass                                            |                                                                                               |
-+                    +----------------------------------+----------------------------------------------------------+-----------------------------------------------------------------------------------------------+
-|                    | ``--spm-sample-interval <N>``    | Sampling interval in ``sclk_cycles``                     | ``rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval 500 -- ./my_app``         |
-|                    |                                  |                                                          |                                                                                               |
-+                    +----------------------------------+----------------------------------------------------------+-----------------------------------------------------------------------------------------------+
-|                    | ``--spm-sample-interval-unit``   | Interval unit; currently accepts ``sclk_cycles`` only    | ``rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --       |
-|                    | ``<UNIT>``                       |                                                          | ./my_app``                                                                                    |
-+--------------------+----------------------------------+----------------------------------------------------------+-----------------------------------------------------------------------------------------------+
-| ``rocprofv3-avail``| ``list --spm``                   | Lists SPM-capable counters per agent                     | ``rocprofv3-avail list --spm``                                                                |
-+                    +----------------------------------+----------------------------------------------------------+-----------------------------------------------------------------------------------------------+
-|                    | ``list --spm-config``            | Lists agents with SPM configuration support,             | ``rocprofv3-avail list --spm-config``                                                         |
-|                    |                                  | including minimum and maximum sampling intervals         |                                                                                               |
-+--------------------+----------------------------------+----------------------------------------------------------+-----------------------------------------------------------------------------------------------+
-
-``rocprofv3-avail`` is a companion tool that queries which counters support SPM, and which agents support SPM configuration, without collecting a trace. See :ref:`using-rocprofv3-avail` for full usage details.
-
-Counter listing output includes an SPM column (Supported / Not Supported) alongside each counter's name, description, and dimensions.
-
-SPM records are written to all output backends: JSON, CSV, rocpd (SQLite3), and stats. Each ``rocprofiler_spm_counter_record_t`` includes a ``ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END`` flag that marks dispatch-boundary sentinel records, which carry no counter data.
-
-For full usage details, see :ref:`using-spm`.
+ATT, PC sampling, and SPM provide hardware-level observability beyond standard counter collection and API tracing.
 
 .. _glance-att:
 
@@ -116,6 +38,8 @@ Advanced Thread Trace (ATT)
 -----------------------------
 
 ATT records the complete instruction-level execution history of GPU wavefronts on targeted compute units. It is exposed via ``rocprofiler-sdk/experimental/thread_trace.h`` and delivers raw SQTT (Shader Queue Thread Trace) data. The ``rocprof-trace-decoder`` library decodes this data for visualization in :doc:`ROCprof Compute Viewer <rocprof-compute-viewer:index>` (RCV).
+
+.. _glance-att-comparison:
 
 How ATT differs from counter-based services
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -159,57 +83,14 @@ Raw ``.att`` files are decoded by the ``rocprof-trace-decoder`` library into ``u
 CLI options
 ^^^^^^^^^^^^
 
-The following options control ATT collection. Use them to filter kernels, embed SQ-block counter values in the trace, and set the number of dispatches to trace.
-
-.. list-table::
-   :header-rows: 1
-
-   * - Option
-     - Description
-     - Example
-   * - ``--att``
-     - Enables Advanced Thread Trace
-     - ``rocprofv3 --att -- ./my_app``
-   * - ``--att-perfcounter-ctrl <N>``
-     - PMU counter polling during trace (gfx9 only)
-     - ``rocprofv3 --att --att-perfcounter-ctrl 3 -- ./my_app``
-   * - ``--att-perfcounters <COUNTERS>``
-     - Embeds SQ-block counter values in the trace ring buffer
-     - ``rocprofv3 --att --att-perfcounters SQ_INST_LEVEL_LDS -- ./my_app``
-   * - ``--kernel-include-regex <RE>``
-     - Filters kernels to trace by name regex
-     - ``rocprofv3 --att --kernel-include-regex my_kernel -- ./my_app``
-   * - ``--kernel-iteration-range <R>``
-     - Traces specific dispatch iterations
-     - ``rocprofv3 --att --kernel-iteration-range 1:5 -- ./my_app``
-   * - ``--att-consecutive-kernels <N>``
-     - Number of consecutive kernels to trace (default 0)
-     - ``rocprofv3 --att --att-consecutive-kernels 2 -- ./my_app``
-
-**Example usage**
-
-The following examples combine the options above into complete, runnable commands.
-
-.. code-block:: bash
-
-   # Basic ATT collection
-   rocprofv3 --att -- ./my_app
-
-   # ATT with PMU counter streaming (gfx9 only) and kernel filter
-   rocprofv3 --att \
-     --att-perfcounter-ctrl 3 \
-     --att-perfcounters SQ_INST_LEVEL_LDS \
-     --kernel-include-regex my_kernel \
-     -- ./my_app
-
-The output is written to ``ui_output_agent_*/dispatch_*/`` directories of JSON and CSV files. Open the decoded directory in :doc:`ROCprof Compute Viewer <rocprof-compute-viewer:index>` (RCV) for interactive visualization.
+Use ``--att`` to enable Advanced Thread Trace. Additional options control kernel filtering, dispatch count, and SQ-block counter streaming (``--att-perfcounters``, gfx9 only). For the full parameter reference and runnable examples, see :ref:`thread-trace-parameters`.
 
 .. _glance-att-hw:
 
 Hardware support
 ^^^^^^^^^^^^^^^^^
 
-ATT support varies by GPU architecture: CDNA2/CDNA3/CDNA4 (MI200/MI300/MI350 series) have full support for both instruction trace and perfmon streaming, while RDNA2-4 (gfx10-12) are trace-only and don't support ``--att-perfcounters``. For the full per-architecture matrix, see :ref:`Supported devices <thread-trace-supported-devices>`.
+ATT support varies by GPU architecture: AMD Instinct MI200/MI300/MI350 series (CDNA2/CDNA3/CDNA4) have full support for both instruction trace and perfmon streaming, while RDNA2-4 (gfx10-12) are trace-only and don't support ``--att-perfcounters``. For the full per-architecture matrix, see :ref:`Supported devices <thread-trace-supported-devices>`.
 
 ATT is limited to one compute unit per shader engine. For production workloads, use ``--kernel-include-regex`` to limit tracing to the target kernel and collect from the minimum number of shader engines needed.
 
@@ -229,6 +110,8 @@ PC sampling periodically captures the program counter, execution state, and hard
 .. warning::
 
   PC sampling carries a risk of hardware freeze that requires a cold restart.
+
+.. _glance-pc-sampling-methods:
 
 Sampling methods
 ^^^^^^^^^^^^^^^^^
@@ -264,51 +147,9 @@ STOCHASTIC sampling probes waves actively running on the GPU and records whether
 CLI options
 ^^^^^^^^^^^^
 
-Use the following options to enable and configure PC sampling with ``rocprofv3``, or query supported configurations per agent with ``rocprofv3-avail``.
+Use ``--pc-sampling-beta-enabled``, ``--pc-sampling-method``, ``--pc-sampling-unit``, and ``--pc-sampling-interval`` to enable and configure PC sampling with ``rocprofv3``. For the full option reference, see `PC sampling <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick-reference/rocprofv3-cli-options.html#pc-sampling>`_ in the CLI options reference.
 
-+---------------------+------------------------------------+--------------------------------------------------------------+--------------------------------------------------------------------------------------------------+
-| Tool                | Option                             | Description                                                  | Example                                                                                          |
-+=====================+====================================+==============================================================+==================================================================================================+
-| ``rocprofv3``       | ``--pc-sampling-beta-enabled``     | Required to enable PC sampling; also sets                    | ``rocprofv3 --pc-sampling-beta-enabled -- ./my_app``                                             |
-|                     |                                    | ``ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1``                   |                                                                                                  |
-+                     +------------------------------------+--------------------------------------------------------------+--------------------------------------------------------------------------------------------------+
-|                     | ``--pc-sampling-method <METHOD>``  | Sampling method: ``stochastic`` (default on gfx942+) or      | ``rocprofv3 --pc-sampling-beta-enabled --pc-sampling-method host_trap -- ./my_app``              |
-|                     |                                    | ``host_trap`` (MI200+)                                       |                                                                                                  |
-+                     +------------------------------------+--------------------------------------------------------------+--------------------------------------------------------------------------------------------------+
-|                     | ``--pc-sampling-unit <UNIT>``      | Interval unit: ``time`` (microseconds, for host_trap) or     | ``rocprofv3 --pc-sampling-beta-enabled --pc-sampling-unit cycles -- ./my_app``                   |
-|                     |                                    | ``cycles`` (for stochastic on gfx942)                        |                                                                                                  |
-+                     +------------------------------------+--------------------------------------------------------------+--------------------------------------------------------------------------------------------------+
-|                     | ``--pc-sampling-interval <N>``     | Numeric sampling interval in ``time`` or ``cycles``          | ``rocprofv3 --pc-sampling-beta-enabled --pc-sampling-interval 500 -- ./my_app``                  |
-|                     |                                    |                                                              |                                                                                                  |
-+---------------------+------------------------------------+--------------------------------------------------------------+--------------------------------------------------------------------------------------------------+
-| ``rocprofv3-avail`` | ``list --pc-sampling``             | Lists PC sampling configurations (methods, units, interval   | ``rocprofv3-avail list --pc-sampling``                                                           |
-|                     |                                    | ranges) supported per agent                                  |                                                                                                  |
-+                     +------------------------------------+--------------------------------------------------------------+--------------------------------------------------------------------------------------------------+
-|                     | ``info --pc-sampling``             | Shows detailed PC sampling configuration info per agent      | ``rocprofv3-avail info --pc-sampling``                                                           |
-+---------------------+------------------------------------+--------------------------------------------------------------+--------------------------------------------------------------------------------------------------+
-
-
-``rocprofv3-avail`` is a companion tool that queries which PC sampling configurations (methods, units, and interval ranges) each agent supports, without collecting a trace. See :ref:`using-rocprofv3-avail` for full usage details.
-
-**Example usage**
-
-The following examples combine the options above into complete, runnable commands.
-
-.. code-block:: bash
-
-   # stochastic sampling — recommended on gfx942+
-   rocprofv3 --pc-sampling-beta-enabled \
-     --pc-sampling-method stochastic \
-     --pc-sampling-unit time \
-     --pc-sampling-interval 1000 \
-     -- ./my_app
-
-   # host-trap sampling — MI200+
-   rocprofv3 --pc-sampling-beta-enabled \
-     --pc-sampling-method host_trap \
-     --pc-sampling-unit time \
-     --pc-sampling-interval 1000 \
-     -- ./my_app
+Use ``rocprofv3-avail list --pc-sampling`` or ``info --pc-sampling`` to query which PC sampling configurations (methods, units, and interval ranges) each agent supports, without collecting a trace. See :ref:`using-rocprofv3-avail` for full usage details.
 
 .. _glance-pc-sampling-hw:
 
@@ -322,6 +163,63 @@ Stochastic PC sampling requires AMD Instinct MI300-series (gfx942) or later; hos
    PC sampling is disabled by default and requires ``ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1``. This beta feature carries a risk of hardware freeze requiring a cold restart. Stochastic PC sampling is recommended over host-trap starting with gfx942.
 
 For full usage details, see :ref:`using-pc-sampling` and :ref:`pc-sampling`.
+
+.. _glance-spm:
+
+Streaming Performance Monitoring (SPM)
+----------------------------------------
+
+SPM is a hardware capability on AMD Radeon™ and Instinct™ GPUs that streams counter values continuously into a memory ring buffer at a configurable hardware interval, independent of kernel dispatch boundaries. It is an experimental API in ROCprofiler-SDK, exposed via ``rocprofiler-sdk/experimental/spm.h``. Structs and enums are tagged ``ROCPROFILER_SDK_EXPERIMENTAL``. The top-level ``rocprofiler-sdk/spm.h`` reincludes the experimental header and emits a deprecation warning directing users to the experimental path.
+
+.. _glance-spm-comparison:
+
+How SPM differs from other counter services
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ROCprofiler-SDK provides three hardware counter collection mechanisms. The right choice depends on the granularity and timing requirements of your use case:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Property
+     - Dispatch PMC
+     - Device counter collection
+     - SPM
+   * - Granularity
+     - One accumulated value per kernel
+     - Accumulated over a configurable epoch
+     - One value per hardware sampling interval
+   * - Timing
+     - Bounded to dispatch start/end
+     - User-controlled flush
+     - Continuous, independent of dispatches
+   * - Kernel serialization required
+     - Yes
+     - No
+     - No
+   * - Concurrent workload support
+     - No
+     - Partial
+     - Yes
+   * - Use case
+     - Identify expensive kernels; measure peak utilization
+     - GPU-wide utilization over a time window
+     - Time-series monitoring, DCGM-style telemetry, overlapping kernels
+
+SPM captures how hardware resources are utilized over time. This is distinct from PC sampling, which reconstructs an execution histogram from program counter snapshots, and from ATT counter streaming (``--att-perfcounters``), which embeds SQ-block counter values into the thread trace ring buffer and requires ATT to be active. SPM operates as an independent hardware path.
+
+.. _glance-spm-cli:
+
+CLI options
+^^^^^^^^^^^^
+
+Use ``--spm-beta-enabled`` and ``--spm <COUNTERS>`` to enable and configure SPM collection with ``rocprofv3``, or ``rocprofv3-avail list --spm`` / ``list --spm-config`` to query SPM support per agent. For the full option reference, see :ref:`spm-cli-options`.
+
+Counter listing output includes an SPM column (Supported / Not Supported) alongside each counter's name, description, and dimensions.
+
+SPM records are written to all output backends: JSON, CSV, rocpd (SQLite3), and stats. Each ``rocprofiler_spm_counter_record_t`` includes a ``ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END`` flag that marks dispatch-boundary sentinel records, which carry no counter data.
+
+For full usage details, see :ref:`using-spm`.
 
 .. _glance-hardware:
 
@@ -385,29 +283,7 @@ The following tables summarize the key ``rocprofv3`` options by category. For th
 Tracing
 ^^^^^^^^
 
-Use these options to collect API and activity traces from the GPU runtime.
-
-.. list-table::
-   :header-rows: 1
-
-   * - Option
-     - Description
-     - Example
-   * - ``--sys-trace``
-     - Full system trace: HIP, HSA, ROCTx, memory, scratch, kernel dispatch, RCCL
-     - ``rocprofv3 --sys-trace -- ./my_app``
-   * - ``--hip-trace``
-     - HIP runtime and compiler API tracing
-     - ``rocprofv3 --hip-trace -- ./my_app``
-   * - ``--hsa-trace``
-     - HSA API tracing (core, AMD ext, image, finalizer)
-     - ``rocprofv3 --hsa-trace -- ./my_app``
-   * - ``--kernel-trace``
-     - Kernel dispatch records only
-     - ``rocprofv3 --kernel-trace -- ./my_app``
-   * - ``--rccl-trace``
-     - RCCL collective communication tracing
-     - ``rocprofv3 --rccl-trace -- ./my_app``
+Use these options to collect API and activity traces from the GPU runtime: ``--sys-trace`` (full system trace), ``--hip-trace``, ``--hsa-trace``, ``--kernel-trace``, and ``--rccl-trace``. For full descriptions and usage, see `Aggregate tracing <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick-reference/rocprofv3-cli-options.html#aggregate-tracing>`_ and `Basic tracing <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick-reference/rocprofv3-cli-options.html#basic-tracing>`_ in the CLI options reference.
 
 .. _glance-counter-collection:
 
@@ -416,20 +292,7 @@ Counter collection
 
 Use ``--pmc`` to collect hardware performance counters. Specify multiple ``--pmc`` flags to collect more counters across multiple passes.
 
-.. list-table::
-   :header-rows: 1
-
-   * - Option
-     - Description
-     - Example
-   * - ``--pmc``
-     - Hardware counter collection; multiple flags trigger multiple passes
-     - ``rocprofv3 --pmc SQ_WAVES,SQ_INSTS_VALU -- ./my_app``
-
-SPM (beta)
-^^^^^^^^^^^
-
-For SPM CLI options, see :ref:`SPM CLI options <glance-spm-cli>`.
+For the full option description and usage, see `Counter collection <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick-reference/rocprofv3-cli-options.html#counter-collection>`_ in the CLI options reference.
 
 PC sampling (beta)
 ^^^^^^^^^^^^^^^^^^^
@@ -441,41 +304,17 @@ Thread Trace (ATT)
 
 For ATT CLI options, see :ref:`ATT CLI options <glance-att-cli>`.
 
+SPM (beta)
+^^^^^^^^^^^
+
+For SPM CLI options, see :ref:`SPM CLI options <glance-spm-cli>`.
+
 .. _glance-process-attachment-cli:
 
 Process attachment
 ^^^^^^^^^^^^^^^^^^^
 
-Process attachment lets you begin profiling an already-running process, instead of launching it under ``rocprofv3`` from the start.
-
-.. list-table::
-   :header-rows: 1
-
-   * - Option
-     - Description
-     - Example
-   * - ``-p <PID>``
-     - Attach to a running process; requires ``ROCP_TOOL_ATTACH=1`` at process start
-     - ``rocprofv3 -p $(pidof my_training_job) --hip-trace``
-
-**Example usage**
-
-The following example shows how to enable attachment on a running process, then attach ``rocprofv3`` with different profiling services from another terminal.
-
-.. code-block:: bash
-
-   # Step 1: start the target with attach support enabled
-   ROCP_TOOL_ATTACH=1 ./my_training_job
-
-   # Step 2: attach from another terminal
-   rocprofv3 -p $(pidof my_training_job) --hip-trace
-   rocprofv3 -p $(pidof my_training_job) --pmc SQ_WAVES,SQ_INSTS_VALU
-   rocprofv3 -p $(pidof my_training_job) --att
-   rocprofv3 -p $(pidof my_training_job) --spm-beta-enabled --spm SQ_WAVES
-
-.. note::
-
-   When reattaching to a previously profiled process, the requested profiling services (tracing, PC sampling, ATT, counter collection) must match the original configuration; ``rocprofv3`` raises a ``RuntimeError`` if they differ. Attaching also requires ptrace permissions (same user or ``CAP_SYS_PTRACE``).
+Process attachment lets you begin profiling an already-running process, instead of launching it under ``rocprofv3`` from the start, using ``-p``/``--pid``/``--attach``. For the full option description, see `Dynamic process attachment <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick-reference/rocprofv3-cli-options.html#dynamic-process-attachment>`_ in the CLI options reference; for prerequisites and a full walkthrough, see :ref:`rocprofv3-process-attachment`.
 
 .. _glance-output-format-cli:
 
@@ -484,18 +323,7 @@ Output format options
 
 The ``--output-format`` option lets you specify one or more output formats in a single run. The default output format is rocpd (SQLite3).
 
-.. list-table::
-   :header-rows: 1
-
-   * - Option
-     - Description
-     - Example
-   * - ``--output-format <FORMAT...>``
-     - One or more output formats: ``csv``, ``json``, ``pftrace``, ``otf2``, or ``rocpd`` (default)
-     - ``rocprofv3 --output-format csv json pftrace otf2 -- ./my_app``
-   * - ``--output-file <NAME>``
-     - Base filename for output artifacts (default: ``%hostname%/%pid%``)
-     - ``rocprofv3 --output-file my_run --hip-trace -- ./my_app``
+For the full description of ``--output-format``, ``--output-file``, and related I/O options, see `I/O options <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick-reference/rocprofv3-cli-options.html#io-options>`_ in the CLI options reference.
 
 Supported output formats
 -------------------------
@@ -530,4 +358,4 @@ The following table describes the supported output formats, their file extension
      - Open Trace Format 2 for HPC trace analysis
      - Vampir, Score-P, Cube
 
-For comprehensive documentation, see :ref:`using-rocprofv3`.
+For comprehensive documentation, see :ref:`using-rocpd-output-format`.

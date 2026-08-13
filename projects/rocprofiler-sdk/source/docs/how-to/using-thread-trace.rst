@@ -17,7 +17,9 @@ Thread trace features include:
 * Exact thread or wave execution path
 * Wave scheduling and stall timing analysis
 * Instruction and source level hotspots
-* Extremely fast and granular counter collection (AMD Instinct)
+* Extremely fast and granular counter collection (AMD Instinct™)
+
+For a comparison of ATT against dispatch PMC and PC sampling — granularity, output size, and when to use each — see :ref:`How ATT differs from counter-based services <glance-att-comparison>` in the SDK overview.
 
 .. _thread-trace-supported-devices:
 
@@ -30,26 +32,41 @@ ATT support varies by GPU architecture. Full support includes both instruction t
    :header-rows: 1
 
    * - Architecture
+     - GPU family
      - Support
      - Notes
-   * - CDNA4 (MI350 series)
+   * - CDNA4
+     - AMD Instinct MI350 series
      - Full
      - gfx950
-   * - CDNA3 (MI300 series)
+   * - CDNA3
+     - AMD Instinct MI300 series
      - Full
      - gfx942
-   * - CDNA2 (MI200 series)
+   * - CDNA2
+     - AMD Instinct MI200 series
      - Full
      - gfx90a
-   * - RDNA2 / gfx10
+   * - RDNA2
+     - AMD Radeon™
      - Trace-only
-     - No perfmon streaming
-   * - RDNA3 / gfx11
+     - gfx1030
+   * - RDNA3
+     - AMD Radeon (discrete)
      - Trace-only
-     - No perfmon streaming
-   * - RDNA4 / gfx12
+     - gfx1100, gfx1101, gfx1102
+   * - RDNA3.5
+     - AMD Ryzen™ AI (APU)
      - Trace-only
-     - No perfmon streaming
+     - gfx1150, gfx1151, gfx1152, gfx1153; strongest validation on gfx1151 and gfx1153
+   * - RDNA4
+     - AMD Radeon
+     - Trace-only
+     - gfx1200, gfx1201
+
+.. note::
+
+   MI100 (gfx908) is expected to work but hasn't been formally validated for ATT, so it isn't listed above.
 
 Thread trace profiling is performed in the following steps:
 
