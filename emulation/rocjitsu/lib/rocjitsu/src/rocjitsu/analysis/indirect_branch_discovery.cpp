@@ -2901,6 +2901,8 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
 
   std::array<std::vector<IndexedLaneRead>, REGISTER_SET_MAX_SGPRS> reads_by_sgpr;
   std::unordered_map<uint32_t, std::vector<IndexedLaneWrite>> writes_by_lane;
+  static_assert(std::numeric_limits<decltype(VgprLane::lane)>::max() < (1u << 8u),
+                "lane_key packs the lane index into the low eight bits");
   const auto lane_key = [](VgprLane lane) {
     return (static_cast<uint32_t>(lane.vgpr) << 8u) | lane.lane;
   };
@@ -2909,6 +2911,8 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
     if (!transfer)
       continue;
     if (transfer->kind == FixedLaneTransfer::Kind::Read) {
+      // SGPRs outside the tracked write mask cannot be proven preserved. Drop
+      // those reads conservatively instead of indexing them as valid restores.
       if (transfer->sgpr < REGISTER_SET_MAX_SGPRS)
         reads_by_sgpr[transfer->sgpr].push_back({.index = index, .lane = transfer->lane});
       continue;

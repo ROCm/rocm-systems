@@ -1683,6 +1683,22 @@ private:
 
 class KernelPrivateDispatchRegistry {
 public:
+  struct DispatchRequirements {
+    uint32_t required_private_bytes = 0;
+    uint32_t dynamic_private_addend = 0;
+    uint32_t required_group_bytes = 0;
+
+    [[nodiscard]] bool has_segment_requirement() const {
+      return required_private_bytes != 0u || dynamic_private_addend != 0u ||
+             required_group_bytes != 0u;
+    }
+  };
+
+  struct DispatchSummary {
+    uint64_t packet_count = 0;
+    uint64_t instrumented_packet_count = 0;
+  };
+
   static KernelPrivateDispatchRegistry &instance() {
     // The HSA runtime may call OnUnload from a shared-library finalizer after
     // ordinary function-local statics have already been destroyed. Keep the
@@ -1779,38 +1795,26 @@ public:
           std::max(bound->required_group_bytes, pending->required_group_bytes);
       bound->records_moi_site |= pending->records_moi_site;
     }
-    log_message(kLogInfo,
-                "ConSan dispatch-segment binding executable=%llu symbol=%llu kernel_object=0x%llx "
-                "private_bytes=%u dynamic_private_addend=%u group_bytes=%u",
-                static_cast<unsigned long long>(executable.handle),
-                static_cast<unsigned long long>(symbol.handle),
-                static_cast<unsigned long long>(kernel_object), pending->required_private_bytes,
-                pending->dynamic_private_addend, pending->required_group_bytes);
+    if (pending->required_private_bytes != 0u || pending->dynamic_private_addend != 0u ||
+        pending->required_group_bytes != 0u) {
+      log_message(
+          kLogInfo,
+          "ConSan dispatch-segment binding executable=%llu symbol=%llu kernel_object=0x%llx "
+          "private_bytes=%u dynamic_private_addend=%u group_bytes=%u",
+          static_cast<unsigned long long>(executable.handle),
+          static_cast<unsigned long long>(symbol.handle),
+          static_cast<unsigned long long>(kernel_object), pending->required_private_bytes,
+          pending->dynamic_private_addend, pending->required_group_bytes);
+    }
   }
 
   [[nodiscard]] std::optional<uint32_t> required_for_symbol(hsa_executable_symbol_t symbol) const {
     std::lock_guard lock(mutex_);
     const auto bound = std::ranges::find_if(
         bound_, [&](const Bound &candidate) { return candidate.symbol == symbol.handle; });
-    return bound == bound_.end() ? std::nullopt
-                                 : std::optional<uint32_t>(bound->required_private_bytes);
-  }
-
-  [[nodiscard]] std::optional<uint32_t> required_for_kernel_object(uint64_t kernel_object) const {
-    std::lock_guard lock(mutex_);
-    const auto bound = std::ranges::find_if(
-        bound_, [&](const Bound &candidate) { return candidate.kernel_object == kernel_object; });
-    return bound == bound_.end() ? std::nullopt
-                                 : std::optional<uint32_t>(bound->required_private_bytes);
-  }
-
-  [[nodiscard]] std::optional<uint32_t>
-  dynamic_private_addend_for_kernel_object(uint64_t kernel_object) const {
-    std::lock_guard lock(mutex_);
-    const auto bound = std::ranges::find_if(
-        bound_, [&](const Bound &candidate) { return candidate.kernel_object == kernel_object; });
-    return bound == bound_.end() ? std::nullopt
-                                 : std::optional<uint32_t>(bound->dynamic_private_addend);
+    return bound == bound_.end() || bound->required_private_bytes == 0u
+               ? std::nullopt
+               : std::optional<uint32_t>(bound->required_private_bytes);
   }
 
   [[nodiscard]] std::optional<uint32_t>
@@ -1818,38 +1822,42 @@ public:
     std::lock_guard lock(mutex_);
     const auto bound = std::ranges::find_if(
         bound_, [&](const Bound &candidate) { return candidate.symbol == symbol.handle; });
-    return bound == bound_.end() ? std::nullopt
-                                 : std::optional<uint32_t>(bound->required_group_bytes);
+    return bound == bound_.end() || bound->required_group_bytes == 0u
+               ? std::nullopt
+               : std::optional<uint32_t>(bound->required_group_bytes);
   }
 
-  [[nodiscard]] std::optional<uint32_t>
-  required_group_for_kernel_object(uint64_t kernel_object) const {
+  [[nodiscard]] DispatchRequirements note_and_query_dispatch(uint64_t kernel_object) {
     std::lock_guard lock(mutex_);
+    if (dispatch_packet_count_ != std::numeric_limits<uint64_t>::max())
+      ++dispatch_packet_count_;
     const auto bound = std::ranges::find_if(
         bound_, [&](const Bound &candidate) { return candidate.kernel_object == kernel_object; });
-    return bound == bound_.end() ? std::nullopt
-                                 : std::optional<uint32_t>(bound->required_group_bytes);
-  }
-
-  void note_dispatch_for_kernel_object(uint64_t kernel_object) {
-    std::lock_guard lock(mutex_);
-    if (std::ranges::none_of(bound_, [&](const Bound &candidate) {
-          return candidate.kernel_object == kernel_object && candidate.records_moi_site;
-        }))
-      return;
-    if (instrumented_dispatch_count_ != std::numeric_limits<uint64_t>::max())
+    if (bound == bound_.end())
+      return {};
+    if (bound->records_moi_site &&
+        instrumented_dispatch_count_ != std::numeric_limits<uint64_t>::max())
       ++instrumented_dispatch_count_;
+    return {
+        .required_private_bytes = bound->required_private_bytes,
+        .dynamic_private_addend = bound->dynamic_private_addend,
+        .required_group_bytes = bound->required_group_bytes,
+    };
   }
 
-  [[nodiscard]] uint64_t instrumented_dispatch_count() const {
+  [[nodiscard]] DispatchSummary dispatch_summary() const {
     std::lock_guard lock(mutex_);
-    return instrumented_dispatch_count_;
+    return {
+        .packet_count = dispatch_packet_count_,
+        .instrumented_packet_count = instrumented_dispatch_count_,
+    };
   }
 
   void clear() {
     std::lock_guard lock(mutex_);
     pending_.clear();
     bound_.clear();
+    dispatch_packet_count_ = 0;
     instrumented_dispatch_count_ = 0;
   }
 
@@ -1880,6 +1888,7 @@ private:
   mutable std::mutex mutex_;
   std::vector<Pending> pending_;
   std::vector<Bound> bound_;
+  uint64_t dispatch_packet_count_ = 0;
   uint64_t instrumented_dispatch_count_ = 0;
 };
 
@@ -1903,6 +1912,10 @@ hsa_status_t HSA_API rj_dbi_executable_get_symbol_by_name(hsa_executable_t execu
                                                           const char *symbol_name,
                                                           const hsa_agent_t *agent,
                                                           hsa_executable_symbol_t *symbol);
+hsa_status_t HSA_API rj_dbi_executable_iterate_agent_symbols(
+    hsa_executable_t executable, hsa_agent_t agent,
+    hsa_status_t (*callback)(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, void *),
+    void *data);
 hsa_status_t HSA_API rj_dbi_executable_symbol_get_info(hsa_executable_symbol_t symbol,
                                                        hsa_executable_symbol_info_t attribute,
                                                        void *value);
@@ -1946,6 +1959,7 @@ public:
     original_load_agent_code_object_ = core_->hsa_executable_load_agent_code_object_fn;
     original_executable_destroy_ = core_->hsa_executable_destroy_fn;
     original_get_symbol_by_name_ = core_->hsa_executable_get_symbol_by_name_fn;
+    original_iterate_agent_symbols_ = core_->hsa_executable_iterate_agent_symbols_fn;
     original_symbol_get_info_ = core_->hsa_executable_symbol_get_info_fn;
     original_queue_create_ = core_->hsa_queue_create_fn;
     intercept_dispatch_segments_ =
@@ -1966,7 +1980,8 @@ public:
         original_get_major_extension_table_ == nullptr ||
         original_load_agent_code_object_ == nullptr || original_executable_destroy_ == nullptr ||
         (intercept_dispatch_segments_ &&
-         (original_get_symbol_by_name_ == nullptr || original_symbol_get_info_ == nullptr)) ||
+         (original_get_symbol_by_name_ == nullptr || original_iterate_agent_symbols_ == nullptr ||
+          original_symbol_get_info_ == nullptr)) ||
         (require_dispatch_packets && !intercept_dispatch_packets_)) {
       std::fprintf(stderr, "[rocjitsu-dbi-hooks] HSA API table lacks a required DBI entry\n");
       clear_unlocked();
@@ -1983,6 +1998,7 @@ public:
     core_->hsa_executable_destroy_fn = rj_dbi_executable_destroy;
     if (intercept_dispatch_segments_) {
       core_->hsa_executable_get_symbol_by_name_fn = rj_dbi_executable_get_symbol_by_name;
+      core_->hsa_executable_iterate_agent_symbols_fn = rj_dbi_executable_iterate_agent_symbols;
       core_->hsa_executable_symbol_get_info_fn = rj_dbi_executable_symbol_get_info;
     }
     if (intercept_dispatch_packets_) {
@@ -2126,6 +2142,8 @@ public:
         core_->hsa_executable_destroy_fn = original_executable_destroy_;
       if (core_->hsa_executable_get_symbol_by_name_fn == rj_dbi_executable_get_symbol_by_name)
         core_->hsa_executable_get_symbol_by_name_fn = original_get_symbol_by_name_;
+      if (core_->hsa_executable_iterate_agent_symbols_fn == rj_dbi_executable_iterate_agent_symbols)
+        core_->hsa_executable_iterate_agent_symbols_fn = original_iterate_agent_symbols_;
       if (core_->hsa_executable_symbol_get_info_fn == rj_dbi_executable_symbol_get_info)
         core_->hsa_executable_symbol_get_info_fn = original_symbol_get_info_;
       if (core_->hsa_queue_create_fn == rj_dbi_queue_create)
@@ -2149,8 +2167,8 @@ public:
     const bool moi_forbid_overflow = moi_forbid_overflow_;
     const uint32_t moi_runtime_sample_stride = moi_runtime_sample_stride_;
     const uint32_t moi_runtime_sample_offset = moi_runtime_sample_offset_;
-    const uint64_t instrumented_dispatch_count =
-        KernelPrivateDispatchRegistry::instance().instrumented_dispatch_count();
+    const KernelPrivateDispatchRegistry::DispatchSummary dispatch_summary =
+        KernelPrivateDispatchRegistry::instance().dispatch_summary();
     const rocjitsu::ConSanMoiEngine moi_engine =
         config_ ? config_->moi_engine : rocjitsu::ConSanMoiEngine::RecordReplay;
     const bool fault_require_exactly_one = config_ && config_->fault_require_exactly_one;
@@ -2423,21 +2441,30 @@ public:
         std::_Exit(90);
     }
     if (required_records_missing) {
-      if (instrumented_dispatch_count == 0u) {
+      if (dispatch_summary.packet_count == 0u) {
         std::fprintf(stderr,
                      "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_RECORDS requested, but %llu auto "
-                     "MOI report buffer(s) contained zero visible records and no instrumented "
-                     "kernel dispatch packet was observed\n",
+                     "MOI report buffer(s) contained zero visible records and no kernel dispatch "
+                     "packet was observed\n",
                      static_cast<unsigned long long>(moi_report_summary.buffer_count));
+      } else if (dispatch_summary.instrumented_packet_count == 0u) {
+        std::fprintf(stderr,
+                     "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_RECORDS requested, but %llu auto "
+                     "MOI report buffer(s) contained zero visible records; none of %llu observed "
+                     "kernel dispatch packet(s) was attributed to a bound MOI-instrumented "
+                     "kernel object\n",
+                     static_cast<unsigned long long>(moi_report_summary.buffer_count),
+                     static_cast<unsigned long long>(dispatch_summary.packet_count));
       } else if (moi_runtime_sample_stride > 1u) {
         std::fprintf(stderr,
                      "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_RECORDS requested, but %llu auto "
                      "MOI report buffer(s) contained zero visible records after %llu "
-                     "instrumented dispatch packet(s); runtime sampling selected no workgroups "
-                     "(stride=%u offset=%u). Set RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1 for "
-                     "deterministic dense capture\n",
+                     "instrumented dispatch packet(s); runtime sampling may have selected no "
+                     "workgroups, or selected workgroups may not have executed an instrumented "
+                     "site (stride=%u offset=%u). Set RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1 to "
+                     "distinguish sampling gaps from dense-path gaps\n",
                      static_cast<unsigned long long>(moi_report_summary.buffer_count),
-                     static_cast<unsigned long long>(instrumented_dispatch_count),
+                     static_cast<unsigned long long>(dispatch_summary.instrumented_packet_count),
                      moi_runtime_sample_stride, moi_runtime_sample_offset);
       } else {
         std::fprintf(stderr,
@@ -2446,7 +2473,7 @@ public:
                      "instrumented dispatch packet(s); the dense record path produced no "
                      "evidence\n",
                      static_cast<unsigned long long>(moi_report_summary.buffer_count),
-                     static_cast<unsigned long long>(instrumented_dispatch_count));
+                     static_cast<unsigned long long>(dispatch_summary.instrumented_packet_count));
       }
       std::fflush(stderr);
       std::_Exit(86);
@@ -2590,6 +2617,11 @@ public:
     return original_get_symbol_by_name_;
   }
 
+  [[nodiscard]] decltype(hsa_executable_iterate_agent_symbols) *iterate_agent_symbols() const {
+    std::lock_guard lock(mutex_);
+    return original_iterate_agent_symbols_;
+  }
+
   [[nodiscard]] decltype(hsa_executable_symbol_get_info) *symbol_get_info() const {
     std::lock_guard lock(mutex_);
     return original_symbol_get_info_;
@@ -2629,6 +2661,8 @@ private:
                       sizeof(CoreApiTable::hsa_executable_destroy_fn),
                   offsetof(CoreApiTable, hsa_executable_get_symbol_by_name_fn) +
                       sizeof(CoreApiTable::hsa_executable_get_symbol_by_name_fn),
+                  offsetof(CoreApiTable, hsa_executable_iterate_agent_symbols_fn) +
+                      sizeof(CoreApiTable::hsa_executable_iterate_agent_symbols_fn),
                   offsetof(CoreApiTable, hsa_executable_symbol_get_info_fn) +
                       sizeof(CoreApiTable::hsa_executable_symbol_get_info_fn)});
     if (table->core_->version.minor_id < required_size) {
@@ -2664,6 +2698,7 @@ private:
     original_load_agent_code_object_ = nullptr;
     original_executable_destroy_ = nullptr;
     original_get_symbol_by_name_ = nullptr;
+    original_iterate_agent_symbols_ = nullptr;
     original_symbol_get_info_ = nullptr;
     original_queue_create_ = nullptr;
     intercept_dispatch_segments_ = false;
@@ -2695,6 +2730,7 @@ private:
   decltype(hsa_executable_load_agent_code_object) *original_load_agent_code_object_ = nullptr;
   decltype(hsa_executable_destroy) *original_executable_destroy_ = nullptr;
   decltype(hsa_executable_get_symbol_by_name) *original_get_symbol_by_name_ = nullptr;
+  decltype(hsa_executable_iterate_agent_symbols) *original_iterate_agent_symbols_ = nullptr;
   decltype(hsa_executable_symbol_get_info) *original_symbol_get_info_ = nullptr;
   decltype(hsa_queue_create) *original_queue_create_ = nullptr;
   bool intercept_dispatch_segments_ = false;
@@ -2960,13 +2996,9 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
         (type == HSA_PACKET_TYPE_VENDOR_SPECIFIC || type == HSA_PACKET_TYPE_INVALID);
     if (type != HSA_PACKET_TYPE_KERNEL_DISPATCH && !is_extended_dispatch)
       continue;
-    auto &registry = KernelPrivateDispatchRegistry::instance();
-    registry.note_dispatch_for_kernel_object(packet->kernel_object);
-    const auto required_private = registry.required_for_kernel_object(packet->kernel_object);
-    const auto dynamic_private_addend =
-        registry.dynamic_private_addend_for_kernel_object(packet->kernel_object);
-    const auto required_group = registry.required_group_for_kernel_object(packet->kernel_object);
-    if (required_private || dynamic_private_addend || required_group) {
+    const KernelPrivateDispatchRegistry::DispatchRequirements requirements =
+        KernelPrivateDispatchRegistry::instance().note_and_query_dispatch(packet->kernel_object);
+    if (requirements.has_segment_requirement()) {
       if (is_extended_dispatch) {
         log_message(kLogInfo,
                     "ConSan extended dispatch geometry kernel_object=0x%llx "
@@ -2990,19 +3022,18 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
       }
     }
     const uint32_t runtime_private_bytes = packet->private_segment_size;
-    uint32_t target_private_bytes = required_private
-                                        ? std::max(runtime_private_bytes, *required_private)
-                                        : runtime_private_bytes;
-    if (dynamic_private_addend && *dynamic_private_addend != 0) {
+    uint32_t target_private_bytes =
+        std::max(runtime_private_bytes, requirements.required_private_bytes);
+    if (requirements.dynamic_private_addend != 0u) {
       const uint64_t dynamic_target = static_cast<uint64_t>(runtime_private_bytes) +
-                                      static_cast<uint64_t>(*dynamic_private_addend);
+                                      static_cast<uint64_t>(requirements.dynamic_private_addend);
       if (dynamic_target > std::numeric_limits<uint32_t>::max()) {
         target_private_bytes = std::numeric_limits<uint32_t>::max();
         log_message(kLogInfo,
                     "ConSan dispatch-private saturated kernel_object=0x%llx "
                     "runtime_bytes=%u dynamic_addend=%u",
                     static_cast<unsigned long long>(packet->kernel_object), runtime_private_bytes,
-                    *dynamic_private_addend);
+                    requirements.dynamic_private_addend);
       } else {
         target_private_bytes =
             std::max(target_private_bytes, static_cast<uint32_t>(dynamic_target));
@@ -3015,11 +3046,11 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
                   packet->private_segment_size, target_private_bytes);
       packet->private_segment_size = target_private_bytes;
     }
-    if (required_group && *required_group > packet->group_segment_size) {
+    if (requirements.required_group_bytes > packet->group_segment_size) {
       log_message(kLogInfo, "ConSan dispatch-group grow kernel_object=0x%llx group_bytes=%u->%u",
                   static_cast<unsigned long long>(packet->kernel_object),
-                  packet->group_segment_size, *required_group);
-      packet->group_segment_size = *required_group;
+                  packet->group_segment_size, requirements.required_group_bytes);
+      packet->group_segment_size = requirements.required_group_bytes;
     }
   }
   writer(rewritten.data(), packet_count);
@@ -3046,6 +3077,54 @@ hsa_status_t HSA_API rj_dbi_queue_create(hsa_agent_t agent, uint32_t size, hsa_q
     *queue = nullptr;
   }
   return register_status;
+}
+
+[[nodiscard]] std::optional<std::string>
+query_dbi_executable_symbol_name(hsa_executable_symbol_t symbol) {
+  auto *original = layer().symbol_get_info();
+  if (original == nullptr)
+    return std::nullopt;
+  uint32_t name_length = 0;
+  if (original(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &name_length) !=
+          HSA_STATUS_SUCCESS ||
+      name_length == 0u) {
+    return std::nullopt;
+  }
+  std::string name(name_length, '\0');
+  if (original(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name.data()) != HSA_STATUS_SUCCESS)
+    return std::nullopt;
+  return name;
+}
+
+struct DbiIterateAgentSymbolsData {
+  hsa_status_t (*callback)(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t,
+                           void *) = nullptr;
+  void *data = nullptr;
+};
+
+hsa_status_t HSA_API rj_dbi_iterate_agent_symbols_callback(hsa_executable_t executable,
+                                                           hsa_agent_t agent,
+                                                           hsa_executable_symbol_t symbol,
+                                                           void *data) {
+  auto *wrapped = static_cast<DbiIterateAgentSymbolsData *>(data);
+  if (const auto name = query_dbi_executable_symbol_name(symbol)) {
+    KernelPrivateDispatchRegistry::instance().bind_symbol(executable, *name, symbol,
+                                                          layer().symbol_get_info());
+  }
+  return wrapped->callback(executable, agent, symbol, wrapped->data);
+}
+
+hsa_status_t HSA_API rj_dbi_executable_iterate_agent_symbols(
+    hsa_executable_t executable, hsa_agent_t agent,
+    hsa_status_t (*callback)(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, void *),
+    void *data) {
+  auto *original = layer().iterate_agent_symbols();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR;
+  if (callback == nullptr)
+    return original(executable, agent, callback, data);
+  DbiIterateAgentSymbolsData wrapped{callback, data};
+  return original(executable, agent, rj_dbi_iterate_agent_symbols_callback, &wrapped);
 }
 
 hsa_status_t HSA_API rj_dbi_executable_get_symbol_by_name(hsa_executable_t executable,

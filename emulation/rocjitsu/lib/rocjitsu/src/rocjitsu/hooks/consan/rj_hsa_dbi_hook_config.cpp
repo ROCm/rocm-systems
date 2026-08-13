@@ -594,17 +594,6 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
           warn_ignored_env(name, "only applies to RJ_CONSAN_MODE=sampled");
       }
     }
-    if (config.moi_engine != rocjitsu::ConSanMoiEngine::Sampled &&
-        config.moi_engine != rocjitsu::ConSanMoiEngine::RecordReplay) {
-      constexpr const char *kRuntimeSampledKnobs[] = {
-          "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
-          "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
-      };
-      for (const char *name : kRuntimeSampledKnobs) {
-        if (env_has_value(name))
-          warn_ignored_env(name, "only applies to sampled or record-replay MOI modes");
-      }
-    }
     if (config.moi_engine != rocjitsu::ConSanMoiEngine::RecordReplay &&
         (env_has_value("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS") ||
          env_has_value("RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT"))) {
