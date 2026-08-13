@@ -22,9 +22,23 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import contextlib
 import os
 import argparse
+import socket
 import sys
+
+
+def process_filename():
+    """Path of the list-avail output file, or None when writing to stdout."""
+    if not os.environ.get("ROCPROF_OUTPUT_LIST_AVAIL_FILE"):
+        return None
+
+    file_path = os.environ.get("ROCPROF_OUTPUT_PATH", os.getcwd())
+    filename = os.environ.get(
+        "ROCPROF_OUTPUT_FILE_NAME", socket.gethostname() + "/" + str(os.getpid())
+    )
+    return os.path.join(file_path, filename + "_list_avail.txt")
 
 
 def format_help(formatter, w=120, h=40):
@@ -603,8 +617,20 @@ def main(argv=None):
     )
     args = parse_arguments(argv)
     if args.command:
+        output_file = process_filename()
+        output_stream = None
+        if output_file is not None:
+            try:
+                os.makedirs(os.path.dirname(output_file) or ".", exist_ok=True)
+                output_stream = open(output_file, "w")
+            except OSError as error:
+                avail.fatal_error(f"Unable to write list-avail output: {error}")
         try:
-            args.func(args)
+            if output_stream is None:
+                args.func(args)
+            else:
+                with output_stream, contextlib.redirect_stdout(output_stream):
+                    args.func(args)
         except (AttributeError, OSError) as error:
             avail.fatal_error(f"Unable to load rocprofv3-avail library: {error}")
 
