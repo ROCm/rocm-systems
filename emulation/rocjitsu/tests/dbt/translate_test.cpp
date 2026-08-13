@@ -15,6 +15,7 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/code/dbt/binary_translator_internal.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
@@ -1019,6 +1020,87 @@ TEST(CodeObjectPatcher, ResolvesAllocatedDataPayloadsAndEndpoints) {
       << "source text takes precedence over a data section ending at the same address";
 }
 
+class RewriteDischargeBoundTestInstruction final : public Instruction {
+public:
+  explicit RewriteDischargeBoundTestInstruction(size_t word_count)
+      : Instruction("bounded_decode_test", nullptr) {
+    size_ = static_cast<int>(word_count * sizeof(uint32_t));
+  }
+};
+
+class RewriteDischargeBoundTestDecoder final : public Decoder {
+public:
+  RewriteDischargeBoundTestDecoder(size_t max_instruction_words, size_t decoded_words)
+      : max_instruction_words_(max_instruction_words), decoded_words_(decoded_words) {}
+
+  std::size_t max_instruction_words() const override { return max_instruction_words_; }
+
+  Instruction *decode(const rj_code_binary_inst_t *words) override {
+    ++decode_calls;
+    observed_words.assign(words, words + max_instruction_words_);
+    return new RewriteDischargeBoundTestInstruction(decoded_words_);
+  }
+
+  size_t decode_calls = 0;
+  std::vector<uint32_t> observed_words;
+
+private:
+  size_t max_instruction_words_;
+  size_t decoded_words_;
+};
+
+TEST(BinaryTranslatorInternal, RewriteDischargeDecodeRejectsWidthBeyondDecoderMaximum) {
+  RewriteDischargeBoundTestDecoder decoder(/*max_instruction_words=*/2, /*decoded_words=*/3);
+  internal::RewriteDischargeInstructionDecoder bounded_decoder(decoder);
+  constexpr std::array<uint32_t, 3> words = {0x11111111u, 0x22222222u, 0x33333333u};
+  const auto bytes =
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words));
+  std::unique_ptr<Instruction> instruction;
+
+  EXPECT_EQ(bounded_decoder.decode(bytes, /*source_offset=*/20, instruction),
+            internal::RewriteDischargeDecodeStatus::TruncatedInstruction);
+  ASSERT_NE(instruction, nullptr);
+  EXPECT_EQ(instruction->src_loc(), 20u);
+  EXPECT_EQ(decoder.decode_calls, 1u);
+  EXPECT_EQ(decoder.observed_words, (std::vector<uint32_t>{0x11111111u, 0x22222222u}));
+}
+
+TEST(BinaryTranslatorInternal, RewriteDischargeDecodeRejectsZeroBoundWithoutDecoding) {
+  RewriteDischargeBoundTestDecoder decoder(/*max_instruction_words=*/0, /*decoded_words=*/1);
+  internal::RewriteDischargeInstructionDecoder bounded_decoder(decoder);
+  constexpr std::array<uint32_t, 1> words = {0x11111111u};
+  const auto bytes =
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words));
+  std::unique_ptr<Instruction> instruction =
+      std::make_unique<RewriteDischargeBoundTestInstruction>(1);
+
+  EXPECT_FALSE(bounded_decoder.has_valid_lookahead_bound());
+  EXPECT_EQ(bounded_decoder.decode(bytes, /*source_offset=*/0, instruction),
+            internal::RewriteDischargeDecodeStatus::InvalidLookaheadBound);
+  EXPECT_EQ(instruction, nullptr);
+  EXPECT_EQ(decoder.decode_calls, 0u);
+}
+
+TEST(BinaryTranslatorInternal, RewriteDischargeDecodeClearsUnusedWordsAcrossCalls) {
+  RewriteDischargeBoundTestDecoder decoder(/*max_instruction_words=*/2, /*decoded_words=*/1);
+  internal::RewriteDischargeInstructionDecoder bounded_decoder(decoder);
+  constexpr std::array<uint32_t, 2> full_words = {0x11111111u, 0x22222222u};
+  const auto full_bytes = std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(full_words.data()), sizeof(full_words));
+  std::unique_ptr<Instruction> instruction;
+
+  ASSERT_EQ(bounded_decoder.decode(full_bytes, /*source_offset=*/0, instruction),
+            internal::RewriteDischargeDecodeStatus::Success);
+  ASSERT_EQ(decoder.observed_words, (std::vector<uint32_t>{0x11111111u, 0x22222222u}));
+
+  constexpr std::array<uint32_t, 1> short_words = {0x33333333u};
+  const auto short_bytes = std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(short_words.data()), sizeof(short_words));
+  EXPECT_EQ(bounded_decoder.decode(short_bytes, /*source_offset=*/4, instruction),
+            internal::RewriteDischargeDecodeStatus::Success);
+  EXPECT_EQ(decoder.observed_words, (std::vector<uint32_t>{0x33333333u, 0u}));
+}
+
 TEST(BinaryTranslatorE2E, RewriteDischargeRejectsIdentityOutputWithResidualTrigger) {
   auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
   write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
@@ -1133,8 +1215,8 @@ TEST(BinaryTranslatorE2E, RewriteDischargeRejectsResidualFlatScratchBaseSelector
 
 TEST(BinaryTranslatorE2E, Gfx1250TranslationIgnoresUnreferencedVisibleTextSymbols) {
   constexpr auto clear_m0 = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 125});
-  constexpr auto cluster = cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal,
-                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr auto cluster =
+      cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal, {.saddr = 124, .vdst = 8, .vaddr = 12});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   const std::vector<uint32_t> words = {clear_m0[0], cluster[0], cluster[1], cluster[2],
                                        kGfx1250SEndpgm};
@@ -1191,8 +1273,8 @@ TEST(BinaryTranslatorE2E, Gfx1250TranslationIgnoresUnreferencedVisibleTextSymbol
 
 TEST(BinaryTranslatorE2E, Gfx1250TranslationIgnoresUnreferencedSymbolInsideInstruction) {
   constexpr auto clear_m0 = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 125});
-  constexpr auto cluster = cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal,
-                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr auto cluster =
+      cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal, {.saddr = 124, .vdst = 8, .vaddr = 12});
   constexpr auto source_clause = cdna5::build_sopp(cdna5::kSClauseSopp, {.simm16 = 4});
   constexpr auto target_nop = cdna5::build_sopp(cdna5::kSNopSopp, {.simm16 = 0});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
@@ -1246,8 +1328,8 @@ TEST(BinaryTranslatorE2E, Gfx1250TranslationIgnoresUnreferencedSymbolInsideInstr
 
 TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresUnreferencedLocalTextLabel) {
   constexpr auto clear_m0 = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 125});
-  constexpr auto cluster = cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal,
-                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr auto cluster =
+      cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal, {.saddr = 124, .vdst = 8, .vaddr = 12});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   const std::vector<uint32_t> words = {clear_m0[0], cluster[0], cluster[1], cluster[2],
                                        kGfx1250SEndpgm};
@@ -1382,8 +1464,8 @@ TEST(BinaryTranslatorE2E, PreservesEtRelNotypeAbs64EntryPolicy) {
   rela.r_offset = 0;
   rela_it->sh_info = static_cast<uint32_t>(data_it - shdrs.begin());
 
-  constexpr auto compound = cdna5::build_vop3p(
-      cdna5::kVWmmaF3216x16x128F8f6f4Vop3p, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
+  constexpr auto compound = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+                                               {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
   write_bytes_for_test(image, text_it->sh_offset, compound.data(), sizeof(compound));
   write_elf_struct_for_test(image, 0, ehdr);
   write_bytes_for_test(image, symtab_it->sh_offset, symbols.data(),
@@ -1470,8 +1552,8 @@ TEST(BinaryTranslatorE2E, ExplicitTargetNonAbs64FunctionReferenceCreatesTextEntr
   ASSERT_NE(symtab_it, shdrs.end());
   ASSERT_NE(rela_it, shdrs.end());
 
-  constexpr auto compound = cdna5::build_vop3p(
-      cdna5::kVWmmaF3216x16x128F8f6f4Vop3p, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
+  constexpr auto compound = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+                                               {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
   static_assert(compound.size() == 2);
   write_bytes_for_test(image, text_it->sh_offset, compound.data(), sizeof(compound));
   auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab_it->sh_offset,
@@ -1505,8 +1587,8 @@ TEST(BinaryTranslatorE2E, ExplicitTargetNonAbs64FunctionReferenceCreatesTextEntr
 }
 
 TEST(BinaryTranslatorE2E, RejectsDynamicNoneBeforeResolvingSymbolMetadata) {
-  constexpr auto compound = cdna5::build_vop3p(
-      cdna5::kVWmmaF3216x16x128F8f6f4Vop3p, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
+  constexpr auto compound = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+                                               {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
   static_assert(compound.size() == 2);
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = make_minimal_amdgpu_elf_with_two_kernel_descriptors(
@@ -1645,8 +1727,8 @@ TEST(BinaryTranslatorE2E, IgnoresTargetlessShtRelNoneLikeRocr) {
 }
 
 TEST(BinaryTranslatorE2E, IgnoresExplicitTargetNoneRelocationToTextSymbol) {
-  constexpr auto compound = cdna5::build_vop3p(
-      cdna5::kVWmmaF3216x16x128F8f6f4Vop3p, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
+  constexpr auto compound = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+                                               {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
   static_assert(compound.size() == 2);
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = make_minimal_amdgpu_elf_with_two_kernel_descriptors(
@@ -1767,8 +1849,8 @@ TEST(BinaryTranslatorE2E, RewriteDischargeDoesNotPromoteRelocationBackedNonEntry
     ASSERT_NE(text_it, shdrs.end());
     ASSERT_NE(symtab_it, shdrs.end());
 
-    constexpr auto compound = cdna5::build_vop3(cdna5::kVAddF32Vop3,
-                                                  {.vdst = 8, .src0 = 256, .src1 = 257, .src2 = 0});
+    constexpr auto compound =
+        cdna5::build_vop3(cdna5::kVAddF32Vop3, {.vdst = 8, .src0 = 256, .src1 = 257, .src2 = 0});
     static_assert(compound.size() == 2);
     write_bytes_for_test(image, text_it->sh_offset, compound.data(), sizeof(compound));
     auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab_it->sh_offset,
@@ -1991,8 +2073,8 @@ TEST(BinaryTranslatorE2E, TranslationFailsClosedOnMalformedAllocatedRelocation) 
 
 TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresUnreferencedVisibleSymbolMetadata) {
   constexpr auto clear_m0 = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 125});
-  constexpr auto cluster = cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal,
-                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr auto cluster =
+      cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal, {.saddr = 124, .vdst = 8, .vaddr = 12});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr std::array<int64_t, 2> target_deltas = {
       static_cast<int64_t>(sizeof(uint32_t)),
@@ -2169,8 +2251,8 @@ TEST(BinaryTranslatorE2E, TranslationRejectsMalformedNameOnSoleExecutableSection
 
 TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresUnreferencedVisibleTextSymbolEntry) {
   constexpr auto clear_m0 = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 125});
-  constexpr auto cluster = cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal,
-                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr auto cluster =
+      cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal, {.saddr = 124, .vdst = 8, .vaddr = 12});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
 
   for (const uint8_t symbol_type : {kElfSymbolTypeFunc, kElfSymbolTypeNone}) {
@@ -2218,8 +2300,8 @@ TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresUnreferencedVisibleTextSymbolEn
 
 TEST(BinaryTranslatorE2E, RewriteDischargeDoesNotCreditPredecessorAcrossRelativeEntry) {
   constexpr auto clear_m0 = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 125});
-  constexpr auto cluster = cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal,
-                                                  {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr auto cluster =
+      cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal, {.saddr = 124, .vdst = 8, .vaddr = 12});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = make_minimal_amdgpu_elf_with_two_kernel_descriptors(
       {clear_m0[0], cluster[0], cluster[1], cluster[2], kGfx1250SEndpgm});
@@ -2946,6 +3028,52 @@ TEST(CodeObjectPatcher, DetectsRelocationsWithinText) {
   EXPECT_TRUE(text_patcher.has_relocations_within_text());
 }
 
+TEST(AmdGpuElf, ClassifiesRocrRelocationSectionModesAndActions) {
+  Elf64_Ehdr dynamic_header{};
+  dynamic_header.e_type = ET_DYN;
+  std::array<Elf64_Shdr, 3> sections{};
+  sections[1].sh_type = SHT_PROGBITS;
+  sections[1].sh_flags = SHF_ALLOC;
+  sections[2].sh_type = SHT_NULL;
+  Elf64_Shdr relocations{};
+  relocations.sh_type = SHT_RELA;
+  Elf64_Sym function{};
+  function.st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+  constexpr uint64_t abs64_info = (uint64_t{1} << 32) | R_AMDGPU_ABS64;
+
+  const auto expect_actions = [&](RocrRelocationSectionMode expected_mode,
+                                  RocrNoneRelocationAction expected_none,
+                                  TextSymbolRelocationAction expected_abs64) {
+    const auto mode = classify_rocr_relocation_section(dynamic_header, sections, relocations);
+    EXPECT_EQ(mode, expected_mode);
+    EXPECT_EQ(classify_rocr_none_relocation(mode, R_AMDGPU_NONE), expected_none);
+    EXPECT_EQ(classify_text_symbol_relocation(mode, abs64_info,
+                                              /*has_explicit_addend=*/true, /*addend=*/0, function),
+              expected_abs64);
+  };
+
+  relocations.sh_info = SHN_UNDEF;
+  expect_actions(RocrRelocationSectionMode::Dynamic, RocrNoneRelocationAction::Rejected,
+                 TextSymbolRelocationAction::RequiresExecutableEntry);
+
+  relocations.sh_info = 1;
+  expect_actions(RocrRelocationSectionMode::ExplicitTarget, RocrNoneRelocationAction::Ignored,
+                 TextSymbolRelocationAction::RequiresExecutableEntry);
+
+  relocations.sh_info = 2;
+  expect_actions(RocrRelocationSectionMode::Malformed, RocrNoneRelocationAction::Rejected,
+                 TextSymbolRelocationAction::Unsupported);
+
+  relocations.sh_info = static_cast<uint32_t>(sections.size());
+  expect_actions(RocrRelocationSectionMode::Malformed, RocrNoneRelocationAction::Rejected,
+                 TextSymbolRelocationAction::Unsupported);
+
+  dynamic_header.e_type = ET_REL;
+  relocations.sh_info = SHN_UNDEF;
+  expect_actions(RocrRelocationSectionMode::NotApplicable, RocrNoneRelocationAction::Ignored,
+                 TextSymbolRelocationAction::RequiresExecutableEntry);
+}
+
 TEST(CodeObjectPatcher, RejectsDynamicNoneBeforeInspectingPlaceOrSymbolMetadata) {
   const auto mutate_relocation = [](std::vector<uint8_t> image, auto mutate) {
     const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
@@ -2968,6 +3096,15 @@ TEST(CodeObjectPatcher, RejectsDynamicNoneBeforeInspectingPlaceOrSymbolMetadata)
     ASSERT_TRUE(object.is_valid());
     CodeObjectPatcher patcher(object);
     EXPECT_TRUE(patcher.has_rocr_rejected_none_relocation());
+  };
+  const auto expect_malformed = [](std::string_view name, const std::vector<uint8_t> &image) {
+    SCOPED_TRACE(name);
+    AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    CodeObjectPatcher patcher(object);
+    EXPECT_TRUE(patcher.has_malformed_rocr_relocation_section());
+    EXPECT_FALSE(patcher.has_rocr_rejected_none_relocation())
+        << "malformed section metadata owns the loader rejection before record dispatch";
   };
 
   expect_rejected("text symbol", make_amdgpu_elf_with_symbol_relocation(
@@ -3000,16 +3137,16 @@ TEST(CodeObjectPatcher, RejectsDynamicNoneBeforeInspectingPlaceOrSymbolMetadata)
                     relocation.r_info = R_AMDGPU_NONE;
                     relocation.r_addend = 91;
                   }));
-  expect_rejected("out-of-range explicit target",
-                  mutate_relocation(base, [](auto &shdrs, size_t rela_index, auto &) {
-                    shdrs[rela_index].sh_info = static_cast<uint32_t>(shdrs.size());
-                  }));
-  expect_rejected("explicit target naming SHT_NULL",
-                  mutate_relocation(base, [](auto &shdrs, size_t rela_index, auto &) {
-                    constexpr uint32_t target_index = 2;
-                    shdrs[target_index].sh_type = SHT_NULL;
-                    shdrs[rela_index].sh_info = target_index;
-                  }));
+  expect_malformed("out-of-range explicit target",
+                   mutate_relocation(base, [](auto &shdrs, size_t rela_index, auto &) {
+                     shdrs[rela_index].sh_info = static_cast<uint32_t>(shdrs.size());
+                   }));
+  expect_malformed("explicit target naming SHT_NULL",
+                   mutate_relocation(base, [](auto &shdrs, size_t rela_index, auto &) {
+                     constexpr uint32_t target_index = 2;
+                     shdrs[target_index].sh_type = SHT_NULL;
+                     shdrs[rela_index].sh_info = target_index;
+                   }));
 
   auto rel_image = mutate_relocation(base, [](auto &shdrs, size_t rela_index, auto &relocation) {
     const Elf64_Rel rel{.r_offset = relocation.r_offset, .r_info = relocation.r_info};
@@ -3133,6 +3270,31 @@ TEST(CodeObjectPatcher, ClassifiesTextSymbolRelocationCompatibility) {
         << "a relocation that does not consume the symbol value cannot follow relocated .text";
   }
 
+  auto null_target = make_amdgpu_elf_with_symbol_relocation(
+      kElfSymbolTypeFunc, /*defined_in_text=*/true, /*addend=*/0, R_AMDGPU_ABS64);
+  const auto null_target_ehdr = read_elf_struct_for_test<Elf64_Ehdr>(null_target, 0);
+  auto null_target_shdrs = read_elf_array_for_test<Elf64_Shdr>(
+      null_target, null_target_ehdr.e_shoff, null_target_ehdr.e_shnum);
+  const auto null_target_data = std::ranges::find_if(null_target_shdrs, [](const auto &section) {
+    return (section.sh_flags & SHF_ALLOC) != 0 && (section.sh_flags & SHF_EXECINSTR) == 0;
+  });
+  const auto null_target_rela = std::ranges::find_if(
+      null_target_shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_RELA; });
+  ASSERT_NE(null_target_data, null_target_shdrs.end());
+  ASSERT_NE(null_target_rela, null_target_shdrs.end());
+  null_target_data->sh_type = SHT_NULL;
+  null_target_rela->sh_info = static_cast<uint32_t>(null_target_data - null_target_shdrs.begin());
+  write_bytes_for_test(null_target, null_target_ehdr.e_shoff, null_target_shdrs.data(),
+                       null_target_shdrs.size() * sizeof(Elf64_Shdr));
+
+  AmdGpuCodeObject null_target_co(null_target.data(), null_target.size());
+  ASSERT_TRUE(null_target_co.is_valid());
+  CodeObjectPatcher null_target_patcher(null_target_co);
+  EXPECT_TRUE(null_target_patcher.has_malformed_rocr_relocation_section())
+      << "ROCr cannot parse a nonzero SHT_NULL section before relocation dispatch";
+  EXPECT_FALSE(null_target_patcher.has_unsupported_relocation_to_text())
+      << "malformed section metadata is not an established .text reference";
+
   auto relative_image = make_amdgpu_elf_with_symbol_relocation(
       kElfSymbolTypeFunc, /*defined_in_text=*/true, /*addend=*/0, R_AMDGPU_RELATIVE64);
   AmdGpuCodeObject relative_co(relative_image.data(), relative_image.size());
@@ -3175,6 +3337,106 @@ TEST(CodeObjectPatcher, ClassifiesTextSymbolRelocationCompatibility) {
   CodeObjectPatcher rel_patcher(rel_co);
   EXPECT_TRUE(rel_patcher.has_unsupported_relocation_to_text())
       << "REL keeps an implicit addend that generic text-symbol remapping cannot inspect";
+}
+
+TEST(BinaryTranslatorE2E, RejectsMalformedRelocationWithNonzeroNullTarget) {
+  auto image = make_amdgpu_elf_with_symbol_relocation(kElfSymbolTypeFunc, /*defined_in_text=*/true,
+                                                      /*addend=*/0, R_AMDGPU_ABS64);
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  const auto data_it = std::ranges::find_if(shdrs, [](const auto &section) {
+    return (section.sh_flags & SHF_ALLOC) != 0 && (section.sh_flags & SHF_EXECINSTR) == 0;
+  });
+  const auto rela_it = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_RELA; });
+  ASSERT_NE(data_it, shdrs.end());
+  ASSERT_NE(rela_it, shdrs.end());
+  data_it->sh_type = SHT_NULL;
+  rela_it->sh_info = static_cast<uint32_t>(data_it - shdrs.begin());
+  write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslatorOptions options;
+  options.input_revision = ProcessorRevision::Gfx1250B0;
+  options.output_revision = ProcessorRevision::Gfx1250A0;
+  options.verify_rewrite_discharge = true;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::Legalization,
+                                   "malformed ROCr relocation-section metadata"));
+}
+
+TEST(CodeObjectPatcher, RejectsLoaderInvalidRocrRelocationsWithoutTextMap) {
+  const auto expect_rejected = [](std::string_view name, auto mutate_sections) {
+    SCOPED_TRACE(name);
+    auto image = make_amdgpu_elf_with_symbol_relocation(
+        kElfSymbolTypeFunc, /*defined_in_text=*/true, /*addend=*/0, R_AMDGPU_ABS64);
+    const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+    const auto rela_it = std::ranges::find_if(
+        shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_RELA; });
+    ASSERT_NE(rela_it, shdrs.end());
+    mutate_sections(shdrs, *rela_it);
+    auto relocation = read_elf_struct_for_test<Elf64_Rela>(image, rela_it->sh_offset);
+    relocation.r_offset = std::numeric_limits<uint64_t>::max();
+    write_elf_struct_for_test(image, rela_it->sh_offset, relocation);
+    rela_it->sh_link = static_cast<uint32_t>(shdrs.size());
+    write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+    AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    CodeObjectPatcher patcher(object);
+    EXPECT_TRUE(patcher.has_malformed_rocr_relocation_section());
+    EXPECT_FALSE(patcher.has_rocr_rejected_none_relocation())
+        << "malformed section metadata owns the loader rejection before record dispatch";
+    EXPECT_FALSE(patcher.has_unsupported_relocation_to_text());
+
+    std::vector<uint8_t> replacement(patcher.text_bytes().begin(), patcher.text_bytes().end());
+    replacement.resize(replacement.size() + sizeof(uint32_t));
+    EXPECT_FALSE(patcher.replace_text(replacement));
+    EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), image));
+  };
+
+  expect_rejected("out-of-range sh_info", [](auto &sections, Elf64_Shdr &relocations) {
+    relocations.sh_info = static_cast<uint32_t>(sections.size());
+  });
+  expect_rejected("nonzero SHT_NULL sh_info", [](auto &sections, Elf64_Shdr &relocations) {
+    constexpr uint32_t target_index = 2;
+    ASSERT_LT(target_index, sections.size());
+    sections[target_index].sh_type = SHT_NULL;
+    relocations.sh_info = target_index;
+  });
+  auto dynamic_none = make_amdgpu_elf_with_symbol_relocation(
+      kElfSymbolTypeFunc, /*defined_in_text=*/true, /*addend=*/0, R_AMDGPU_NONE);
+  AmdGpuCodeObject dynamic_none_object(dynamic_none.data(), dynamic_none.size());
+  ASSERT_TRUE(dynamic_none_object.is_valid());
+  CodeObjectPatcher dynamic_none_patcher(dynamic_none_object);
+  EXPECT_FALSE(dynamic_none_patcher.has_malformed_rocr_relocation_section());
+  EXPECT_TRUE(dynamic_none_patcher.has_rocr_rejected_none_relocation());
+  std::vector<uint8_t> dynamic_none_replacement(dynamic_none_patcher.text_bytes().begin(),
+                                                dynamic_none_patcher.text_bytes().end());
+  dynamic_none_replacement.resize(dynamic_none_replacement.size() + sizeof(uint32_t));
+  EXPECT_FALSE(dynamic_none_patcher.replace_text(dynamic_none_replacement));
+  EXPECT_TRUE(std::ranges::equal(dynamic_none_patcher.image_bytes(), dynamic_none));
+}
+
+TEST(CodeObjectPatcher, AllowsAppendOnlyGrowthWithoutTextMapForMappingIncompatibleReference) {
+  auto image = make_amdgpu_elf_with_symbol_relocation(kElfSymbolTypeFunc, /*defined_in_text=*/true,
+                                                      /*addend=*/4, R_AMDGPU_ABS64);
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  CodeObjectPatcher patcher(object);
+  ASSERT_FALSE(patcher.has_malformed_rocr_relocation_section());
+  ASSERT_FALSE(patcher.has_rocr_rejected_none_relocation());
+  ASSERT_TRUE(patcher.has_unsupported_relocation_to_text());
+
+  std::vector<uint8_t> replacement(patcher.text_bytes().begin(), patcher.text_bytes().end());
+  replacement.resize(replacement.size() + sizeof(uint32_t));
+  EXPECT_TRUE(patcher.replace_text(replacement));
 }
 
 TEST(CodeObjectPatcher, RelocatesReferencedTextSymbolWithExactOffsetMap) {

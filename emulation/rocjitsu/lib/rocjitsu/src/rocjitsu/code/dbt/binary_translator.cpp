@@ -38,7 +38,6 @@
 #include "util/except.h"
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <cstring>
 #include <deque>
@@ -451,6 +450,7 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
     return TranslationDiagnostic{.severity = DiagnosticSeverity::Error,
                                  .kind = kind,
                                  .guest_offset = std::nullopt,
+                                 .output_offset = std::nullopt,
                                  .mnemonic = {},
                                  .message = std::move(message),
                                  .required_work = {}};
@@ -484,6 +484,7 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
           .severity = DiagnosticSeverity::Warning,
           .kind = DiagnosticKind::DataOnly,
           .guest_offset = std::nullopt,
+          .output_offset = std::nullopt,
           .mnemonic = {},
           .message = "code object has no executable sections, segments, or callable symbols; "
                      "leaving unchanged",
@@ -648,11 +649,14 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
     const Elf64_Shdr &relocs = shdrs[relocation_section_index];
     if (relocs.sh_type != SHT_RELA)
       continue;
-    if (relocs.sh_info != SHN_UNDEF) {
+    const RocrRelocationSectionMode section_mode =
+        classify_rocr_relocation_section(ehdr, shdrs, relocs);
+    if (section_mode == RocrRelocationSectionMode::Malformed)
+      return std::nullopt;
+    if (section_mode != RocrRelocationSectionMode::Dynamic && relocs.sh_info != SHN_UNDEF) {
       if (relocs.sh_info >= shdrs.size())
         return std::nullopt;
-      if (shdrs[relocs.sh_info].sh_type != SHT_NULL &&
-          (shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) == 0) {
+      if ((shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) == 0) {
         continue;
       }
     }
@@ -670,7 +674,7 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
       const uint32_t relocation_type = elf_reloc_type(relocation.r_info);
       const uint32_t symbol_index = elf_reloc_sym(relocation.r_info);
       const RocrNoneRelocationAction none_action =
-          classify_rocr_none_relocation(ehdr, shdrs, relocs, relocation.r_info);
+          classify_rocr_none_relocation(section_mode, relocation.r_info);
       if (none_action == RocrNoneRelocationAction::Rejected)
         return std::nullopt;
       if (none_action == RocrNoneRelocationAction::Ignored)
@@ -678,7 +682,7 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
       if (!elf_relocation_place_is_allocated(ehdr, shdrs, relocs, relocation.r_offset))
         continue;
 
-      const bool rocr_dynamic = is_et_dyn_rocr_dynamic_relocation_section(ehdr, relocs);
+      const bool rocr_dynamic = section_mode == RocrRelocationSectionMode::Dynamic;
       const bool may_require_text_symbol_classification =
           symbol_index != 0 &&
           (!rocr_dynamic || rocr_dynamic_relocation_uses_symbol_value(relocation_type));
@@ -699,7 +703,7 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
         std::memcpy(&symbol, image.data() + symtab.sh_offset + symbol_index * sizeof(Elf64_Sym),
                     sizeof(symbol));
         if (symbol.st_shndx == *text_index &&
-            classify_text_symbol_relocation(ehdr, relocs, relocation.r_info,
+            classify_text_symbol_relocation(section_mode, relocation.r_info,
                                             /*has_explicit_addend=*/true, relocation.r_addend,
                                             symbol) ==
                 TextSymbolRelocationAction::RequiresExecutableEntry) {
@@ -1931,6 +1935,33 @@ struct ScopeTransaction {
 
 namespace internal {
 
+RewriteDischargeInstructionDecoder::RewriteDischargeInstructionDecoder(Decoder &decoder)
+    : decoder_(decoder), lookahead_words_(decoder.max_instruction_words()) {}
+
+RewriteDischargeDecodeStatus
+RewriteDischargeInstructionDecoder::decode(std::span<const uint8_t> remaining_bytes,
+                                           uint64_t source_offset,
+                                           std::unique_ptr<Instruction> &instruction) {
+  instruction.reset();
+  if (lookahead_words_.empty())
+    return RewriteDischargeDecodeStatus::InvalidLookaheadBound;
+
+  std::ranges::fill(lookahead_words_, 0u);
+  const size_t remaining_words = remaining_bytes.size() / sizeof(uint32_t);
+  const size_t copied_words = std::min(remaining_words, lookahead_words_.size());
+  std::memcpy(lookahead_words_.data(), remaining_bytes.data(), copied_words * sizeof(uint32_t));
+  instruction.reset(decoder_.decode(lookahead_words_.data(), source_offset));
+  if (instruction == nullptr || instruction->size() <= 0 ||
+      instruction->size() % static_cast<int>(sizeof(uint32_t)) != 0) {
+    return RewriteDischargeDecodeStatus::InvalidInstructionSize;
+  }
+
+  const size_t decoded_words = static_cast<size_t>(instruction->size()) / sizeof(uint32_t);
+  if (decoded_words > lookahead_words_.size() || decoded_words > remaining_words)
+    return RewriteDischargeDecodeStatus::TruncatedInstruction;
+  return RewriteDischargeDecodeStatus::Success;
+}
+
 /// @brief Prove that every external entry into an incomplete-consumer scope is
 ///        an entry-state root that cannot carry an original `.text` pointer.
 ///
@@ -2127,6 +2158,13 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     // tensor, cluster-load, and IU8-WMMA sequence checks.
     std::vector<TranslationDiagnostic> streaming_diagnostics;
     const size_t instruction_word_count = text->size() / sizeof(uint32_t);
+    internal::RewriteDischargeInstructionDecoder instruction_decoder(*decoder);
+    if (!instruction_decoder.has_valid_lookahead_bound()) {
+      append_rewrite_discharge_error(
+          result.diagnostics,
+          "rewrite-discharge verification decoder reported an invalid lookahead bound");
+      return;
+    }
     size_t instruction_word_index = 0;
     uint64_t instruction_offset = 0;
     size_t next_block_leader = 0;
@@ -2152,18 +2190,16 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
         ++next_block_leader;
       }
 
-      // Generated AMDGPU decoders accept only a raw pointer. Decode from a
-      // bounded, zero-padded lookahead so a truncated multiword prefix cannot
-      // read beyond the executable section. gfx1250 VOP3PX2 is the current
-      // maximum-width encoding at four DWORDs.
-      constexpr size_t kMaxDecodedInstructionWords = 4;
-      std::array<uint32_t, kMaxDecodedInstructionWords> decode_words{};
-      const size_t remaining_words = instruction_word_count - instruction_word_index;
-      const size_t lookahead_words = std::min(remaining_words, decode_words.size());
-      std::memcpy(decode_words.data(), text_bytes.data() + instruction_offset,
-                  lookahead_words * sizeof(uint32_t));
-      std::unique_ptr<Instruction> inst(decoder->decode(decode_words.data(), instruction_offset));
-      if (inst->size() <= 0 || inst->size() % static_cast<int>(sizeof(uint32_t)) != 0) {
+      std::unique_ptr<Instruction> inst;
+      const auto decode_status = instruction_decoder.decode(text_bytes.subspan(instruction_offset),
+                                                            instruction_offset, inst);
+      if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidLookaheadBound) {
+        append_rewrite_discharge_error(
+            result.diagnostics,
+            "rewrite-discharge verification decoder reported an invalid lookahead bound");
+        return;
+      }
+      if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidInstructionSize) {
         append_rewrite_discharge_error(
             result.diagnostics,
             "rewrite-discharge verification decoded an invalid instruction size in final output",
@@ -2172,7 +2208,7 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
       }
       const size_t instruction_size = static_cast<size_t>(inst->size());
       const size_t decoded_words = instruction_size / sizeof(uint32_t);
-      if (decoded_words > decode_words.size() || decoded_words > remaining_words) {
+      if (decode_status == internal::RewriteDischargeDecodeStatus::TruncatedInstruction) {
         append_rewrite_discharge_error(
             result.diagnostics,
             "rewrite-discharge verification found a truncated instruction in final output",
@@ -2305,10 +2341,17 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
   CodeObjectPatcher patcher(obj);
 
-  // ROCr materializes target-less SHT_RELA sections as dynamic relocations and
-  // rejects R_AMDGPU_NONE there. Reject by record identity before place, symbol,
-  // executable-entry, or even data-only handling so unusable metadata cannot
-  // change the result.
+  // Reject relocation-section metadata ROCr cannot materialize before examining
+  // individual records. ROCr then processes target-less SHT_RELA sections as
+  // dynamic relocations and rejects R_AMDGPU_NONE there; reject that form by
+  // record identity before place, symbol, executable-entry, or data-only handling.
+  if (patcher.has_malformed_rocr_relocation_section()) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "code object has malformed ROCr relocation-section metadata; a nonzero "
+                 "SHT_NULL or out-of-range sh_info cannot identify a relocation target");
+    return leave_unchanged();
+  }
+
   if (patcher.has_rocr_rejected_none_relocation()) {
     append_error(result.diagnostics, DiagnosticKind::Legalization,
                  "code object has R_AMDGPU_NONE outside a valid explicit-target relocation "

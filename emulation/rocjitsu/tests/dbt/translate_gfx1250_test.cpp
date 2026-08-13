@@ -8557,8 +8557,7 @@ TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
   EXPECT_EQ(no_success_rule_keys, expected_no_success_rule_keys);
   const std::vector<uint32_t> expected_block_context_rule_keys = {
       (static_cast<uint32_t>(cdna5::encoding::kVop3p) << 16) | cdna5::kVWmmaI3216x16x64Iu8Vop3p,
-      (static_cast<uint32_t>(cdna5::encoding::kVop3p) << 16) |
-          cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
+      (static_cast<uint32_t>(cdna5::encoding::kVop3p) << 16) | cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
       (static_cast<uint32_t>(cdna5::encoding::kVimage) << 16) | cdna5::kTensorLoadToLdsVimage,
       (static_cast<uint32_t>(cdna5::encoding::kVglobal) << 16) | cdna5::kClusterLoadB32Vglobal,
       (static_cast<uint32_t>(cdna5::encoding::kVglobal) << 16) | cdna5::kClusterLoadB64Vglobal,
@@ -8613,10 +8612,8 @@ TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
                                                  rocjitsu::ProcessorRevision::Unspecified,
                                                  rocjitsu::ProcessorRevision::Unspecified);
   EXPECT_FALSE(legacy_translator.supports_rewrite_discharge());
-  constexpr auto selector_230 =
-      cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 230, .sdst = 10});
-  constexpr auto selector_231 =
-      cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 231, .sdst = 10});
+  constexpr auto selector_230 = cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 230, .sdst = 10});
+  constexpr auto selector_231 = cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 231, .sdst = 10});
   const auto low = rocjitsu::decode_one(selector_230[0], ROCJITSU_CODE_ARCH_GFX1250);
   const auto high = rocjitsu::decode_one(selector_231[0], ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(low, nullptr);
@@ -8644,7 +8641,7 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
 
   add_sample(cdna5::build_sopp(cdna5::kSClauseSopp, {.simm16 = 4}));
   add_sample(cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
-                                  {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
+                                {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
 
   constexpr auto regular_scale =
       cdna5::build_vop3p(0x35, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 0});
@@ -8652,14 +8649,14 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
       cdna5::build_vop3p(0x3a, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 0});
   constexpr auto scale_body =
       cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
-                           {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48});
+                         {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48});
   add_compound_sample(regular_scale, scale_body);
   add_compound_sample(scale16, scale_body);
 
   add_sample(cdna5::build_vop3p(cdna5::kVWmmaI3216x16x64Iu8Vop3p,
-                                  {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
+                                {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
   add_sample(cdna5::build_vop3p(cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
-                                  {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
+                                {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
 
   for (const uint16_t opcode : {
            cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
@@ -8679,17 +8676,16 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
   }
   add_sample(
       cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
-                           {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 40, .src2 = 256 + 64}));
+                         {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 40, .src2 = 256 + 64}));
 
-  add_sample(cdna5::build_vimage(
-      cdna5::kTensorLoadToLdsVimage,
-      {.vaddr4 = 124, .vaddr0 = 8, .vaddr1 = 0, .vaddr2 = 124, .vaddr3 = 124}));
   add_sample(
-      cdna5::build_vop3(cdna5::kVCvtF32Fp8Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22}));
+      cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
+                          {.vaddr4 = 124, .vaddr0 = 8, .vaddr1 = 0, .vaddr2 = 124, .vaddr3 = 124}));
+  add_sample(cdna5::build_vop3(cdna5::kVCvtF32Fp8Vop3, {.vdst = 30, .clamp = 1, .src0 = 256 + 22}));
   add_sample(cdna5::build_vop3(cdna5::kVCvtPkFp8F32Vop3,
-                                 {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2}));
+                               {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2}));
   add_sample(cdna5::build_vop3(cdna5::kVCvtSrFp8F32Vop3,
-                                 {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2}));
+                               {.vdst = 30, .clamp = 1, .src0 = 256 + 22, .src1 = 256 + 2}));
 
   constexpr cdna5::VdsBuilderFields ds2_fields{
       .offset0 = 3, .offset1 = 5, .addr = 20, .data0 = 30, .data1 = 40, .vdst = 50};
@@ -8710,9 +8706,9 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
     add_sample(cdna5::build_vds(opcode, ds2_fields));
   }
   add_sample(cdna5::build_vds(cdna5::kDsStoreAddtidB32Vds,
-                                {.offset0 = 0x34, .offset1 = 0x12, .data0 = 16}));
-  add_sample(cdna5::build_vds(cdna5::kDsLoadAddtidB32Vds,
-                                {.offset0 = 0x34, .offset1 = 0x12, .vdst = 8}));
+                              {.offset0 = 0x34, .offset1 = 0x12, .data0 = 16}));
+  add_sample(
+      cdna5::build_vds(cdna5::kDsLoadAddtidB32Vds, {.offset0 = 0x34, .offset1 = 0x12, .vdst = 8}));
 
   for (const uint16_t opcode : {
            cdna5::kClusterLoadB32Vglobal,

@@ -114,11 +114,19 @@ public:
   /// genuinely unsupported inputs.
   [[nodiscard]] bool has_relocations_within_text() const;
 
+  /// @brief True if ROCr cannot resolve an ET_DYN SHT_RELA section target.
+  ///
+  /// @details ROCr accepts section zero as the target-less dynamic form and a
+  /// valid non-null section as an explicit target. A nonzero SHT_NULL target or
+  /// an out-of-range sh_info fails before relocation records are dispatched.
+  [[nodiscard]] bool has_malformed_rocr_relocation_section() const;
+
   /// @brief True if ROCr rejects an R_AMDGPU_NONE record before DBT can rewrite the image.
   ///
   /// @details Target-less SHT_RELA sections in ET_DYN code objects are processed as
   /// dynamic relocations, where ROCr has no R_AMDGPU_NONE case. Detect those records by
   /// section mode and type alone, before consulting their place or symbol metadata.
+  /// Malformed section metadata is owned by has_malformed_rocr_relocation_section().
   [[nodiscard]] bool has_rocr_rejected_none_relocation() const;
 
   /// @brief True if any relocation references .text in a form DBT cannot remap.

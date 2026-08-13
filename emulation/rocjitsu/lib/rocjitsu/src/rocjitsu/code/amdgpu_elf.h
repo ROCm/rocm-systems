@@ -189,8 +189,8 @@ inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 13;
 inline constexpr uint8_t kElfSymbolBindLocal = 0;
 inline constexpr uint8_t kElfSymbolBindGlobal = 1;
 inline constexpr uint8_t kElfSymbolBindWeak = 2;
-inline constexpr uint8_t kElfSymbolVisibilityHidden = 2;   // STV_HIDDEN
-inline constexpr uint8_t kElfSymbolVisibilityInternal = 1; // STV_INTERNAL
+inline constexpr uint8_t kElfSymbolVisibilityHidden = 2;     // STV_HIDDEN
+inline constexpr uint8_t kElfSymbolVisibilityInternal = 1;   // STV_INTERNAL
 inline constexpr uint8_t kElfSymbolTypeNone = 0;             // STT_NOTYPE
 inline constexpr uint8_t kElfSymbolTypeObject = 1;           // STT_OBJECT
 inline constexpr uint8_t kElfSymbolTypeFunc = 2;             // STT_FUNC
@@ -381,10 +381,32 @@ inline constexpr bool elf_symbol_is_executable_entry(uint8_t symbol_type) {
   return symbol_type == kElfSymbolTypeFunc;
 }
 
-/// @brief Whether this supported ET_DYN section uses ROCr's dynamic relocation policy.
-inline constexpr bool is_et_dyn_rocr_dynamic_relocation_section(const Elf64_Ehdr &ehdr,
-                                                                const Elf64_Shdr &relocs) {
-  return ehdr.e_type == ET_DYN && relocs.sh_type == SHT_RELA && relocs.sh_info == SHN_UNDEF;
+/// @brief How ROCr dispatches one relocation section in a modern code object.
+enum class RocrRelocationSectionMode : uint8_t {
+  NotApplicable,
+  Dynamic,
+  ExplicitTarget,
+  Malformed,
+};
+
+/// @brief Classify the relocation section using ROCr's targetSection() decision.
+///
+/// @details ROCr materializes SHT_RELA sections, resolves sh_info to a section pointer, and uses
+/// dynamic relocation processing when that pointer is null. Only section zero safely represents
+/// that null target: ROCr skips index zero during its later section passes, but dereferences every
+/// nonzero section entry before relocation dispatch. A valid non-null section selects the
+/// explicit/static path; a nonzero SHT_NULL entry or out-of-range index is malformed. Other ELF
+/// and relocation-section forms retain their existing non-ROCr handling.
+inline constexpr RocrRelocationSectionMode
+classify_rocr_relocation_section(const Elf64_Ehdr &ehdr, std::span<const Elf64_Shdr> shdrs,
+                                 const Elf64_Shdr &relocs) {
+  if (ehdr.e_type != ET_DYN || relocs.sh_type != SHT_RELA)
+    return RocrRelocationSectionMode::NotApplicable;
+  if (relocs.sh_info == SHN_UNDEF)
+    return RocrRelocationSectionMode::Dynamic;
+  if (relocs.sh_info >= shdrs.size() || shdrs[relocs.sh_info].sh_type == SHT_NULL)
+    return RocrRelocationSectionMode::Malformed;
+  return RocrRelocationSectionMode::ExplicitTarget;
 }
 
 /// @brief ROCr's handling of an R_AMDGPU_NONE record before place or symbol lookup.
@@ -394,23 +416,12 @@ enum class RocrNoneRelocationAction : uint8_t {
   Rejected,
 };
 
-/// @brief Classify R_AMDGPU_NONE using the relocation section shape ROCr materializes.
-///
-/// @details ROCr only materializes SHT_RELA relocation sections. In modern ET_DYN code
-/// objects it skips sections with a valid explicit target, but sends target-less sections
-/// through dynamic relocation processing, whose type switch rejects R_AMDGPU_NONE. A
-/// nonzero sh_info that is out of range or names SHT_NULL does not prove that ROCr will see
-/// an explicit target, so keep that malformed shape fail-closed as well. This classification
-/// deliberately does not inspect r_offset, sh_link, the symbol index, or the addend.
+/// @brief Classify R_AMDGPU_NONE from the shared ROCr relocation-section mode.
 inline constexpr RocrNoneRelocationAction
-classify_rocr_none_relocation(const Elf64_Ehdr &ehdr, std::span<const Elf64_Shdr> shdrs,
-                              const Elf64_Shdr &relocs, uint64_t relocation_info) {
+classify_rocr_none_relocation(RocrRelocationSectionMode mode, uint64_t relocation_info) {
   if (elf_reloc_type(relocation_info) != R_AMDGPU_NONE)
     return RocrNoneRelocationAction::NotNone;
-  if (ehdr.e_type != ET_DYN || relocs.sh_type != SHT_RELA)
-    return RocrNoneRelocationAction::Ignored;
-  if (relocs.sh_info == SHN_UNDEF || relocs.sh_info >= shdrs.size() ||
-      shdrs[relocs.sh_info].sh_type == SHT_NULL) {
+  if (mode == RocrRelocationSectionMode::Dynamic || mode == RocrRelocationSectionMode::Malformed) {
     return RocrNoneRelocationAction::Rejected;
   }
   return RocrNoneRelocationAction::Ignored;
@@ -433,11 +444,12 @@ enum class TextSymbolRelocationAction : uint8_t {
 /// sections retain the broader pre-existing policy that any ordinary zero-addend RELA reference
 /// follows the symbol value.
 inline constexpr TextSymbolRelocationAction
-classify_text_symbol_relocation(const Elf64_Ehdr &ehdr, const Elf64_Shdr &relocs,
-                                uint64_t relocation_info, bool has_explicit_addend, int64_t addend,
-                                const Elf64_Sym &symbol) {
+classify_text_symbol_relocation(RocrRelocationSectionMode mode, uint64_t relocation_info,
+                                bool has_explicit_addend, int64_t addend, const Elf64_Sym &symbol) {
   const uint32_t relocation_type = elf_reloc_type(relocation_info);
-  const bool rocr_dynamic = is_et_dyn_rocr_dynamic_relocation_section(ehdr, relocs);
+  if (mode == RocrRelocationSectionMode::Malformed)
+    return TextSymbolRelocationAction::Unsupported;
+  const bool rocr_dynamic = mode == RocrRelocationSectionMode::Dynamic;
   if (relocation_type == R_AMDGPU_NONE) {
     return rocr_dynamic ? TextSymbolRelocationAction::Unsupported
                         : TextSymbolRelocationAction::Ignored;
@@ -480,10 +492,16 @@ classify_text_symbol_relocation(const Elf64_Ehdr &ehdr, const Elf64_Shdr &relocs
                                                             std::span<const Elf64_Shdr> shdrs,
                                                             const Elf64_Shdr &relocs,
                                                             uint64_t relocation_offset) {
-  if (relocs.sh_info != SHN_UNDEF) {
+  const RocrRelocationSectionMode mode = classify_rocr_relocation_section(ehdr, shdrs, relocs);
+  if (mode == RocrRelocationSectionMode::Malformed)
+    return false;
+  if (mode == RocrRelocationSectionMode::ExplicitTarget) {
+    return (shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) != 0;
+  }
+  if (mode == RocrRelocationSectionMode::NotApplicable && relocs.sh_info != SHN_UNDEF) {
     return relocs.sh_info < shdrs.size() && (shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) != 0;
   }
-  if (ehdr.e_type != ET_DYN)
+  if (mode == RocrRelocationSectionMode::NotApplicable && ehdr.e_type != ET_DYN)
     return false;
   for (const Elf64_Shdr &section : shdrs) {
     if ((section.sh_flags & SHF_ALLOC) != 0 && relocation_offset >= section.sh_addr &&
