@@ -60,7 +60,7 @@ int cdna5_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {
   return static_cast<int>((dim * k * cdna5_matrix_fmt_element_bits(fmt)) / 32);
 }
 
-bool gfx1250_scaled_wmma_is_scale16(const MachineInst *inst) {
+bool cdna5_scaled_wmma_is_scale16(const MachineInst *inst) {
   return reinterpret_cast<const Vop3pMachineInst *>(inst)->op == 0x3a;
 }
 
@@ -70,14 +70,14 @@ bool gfx1250_scaled_wmma_is_f4_32x16x128(const MachineInst *inst) {
 
 const char *gfx1250_scaled_wmma_mnemonic(const MachineInst *inst) {
   if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))
-    return gfx1250_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_32x16x128_f4"
-                                                : "v_wmma_scale_f32_32x16x128_f4";
-  return gfx1250_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_16x16x128_f8f6f4"
-                                              : "v_wmma_scale_f32_16x16x128_f8f6f4";
+    return cdna5_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_32x16x128_f4"
+                                              : "v_wmma_scale_f32_32x16x128_f4";
+  return cdna5_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_16x16x128_f8f6f4"
+                                            : "v_wmma_scale_f32_16x16x128_f8f6f4";
 }
 
 int gfx1250_scale_operand_size_bits(const MachineInst *inst) {
-  return gfx1250_scaled_wmma_is_scale16(inst) ? 64 : 32;
+  return cdna5_scaled_wmma_is_scale16(inst) ? 64 : 32;
 }
 
 int gfx1250_scaled_wmma_dst_size_bits(const MachineInst *inst) {
