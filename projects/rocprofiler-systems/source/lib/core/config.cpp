@@ -1350,34 +1350,38 @@ configure_settings(bool _init)
     // The PAPI net component reads /proc/net/dev and does not use perf_event.
     // Bypass the perf_event_paranoid gate when all PAPI events use the net:::
     // prefix so NIC profiling works without requiring perf_event_paranoid <= 2.
-    auto _papi_events_vec = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
-    bool _all_net_events =
-        !_papi_events_vec.empty() &&
-        std::all_of(_papi_events_vec.begin(), _papi_events_vec.end(),
-                    [](const std::string& _e) { return _e.starts_with("net:::"); });
-
-    if(_paranoid > 2 && !_has_cap_sys_admin && !_all_net_events)
+    const bool restrict_papi_events = _paranoid > 2 && !_has_cap_sys_admin;
+    if(restrict_papi_events)
     {
-        LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
-                    "Disabling PAPI (requires a value <= 2)",
-                    _paranoid);
-        LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
-                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2");
-        trait::runtime_enabled<comp::papi_config>::set(false);
-        trait::runtime_enabled<comp::papi_common<void>>::set(false);
-        trait::runtime_enabled<comp::papi_array_t>::set(false);
-        trait::runtime_enabled<comp::papi_vector>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
-        _config->get_papi_events() = std::string{};
-    }
-    else if(_paranoid > 2 && !_has_cap_sys_admin && _all_net_events)
-    {
-        LOG_INFO("perf_event_paranoid={} but all PAPI events use the net component "
-                 "(reads /proc/net/dev, no perf_event required). "
-                 "Proceeding with NIC profiling.",
-                 _paranoid);
+        const auto papi_events                = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
+        const bool all_events_network_related = std::ranges::all_of(papi_events,
+            [](const std::string& _e) { return _e.starts_with("net:::"); });
+        if(!all_events_network_related)
+        {
+            LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
+                        "Disabling PAPI (requires a value <= 2)",
+                        _paranoid);
+            LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
+                        "/proc/sys/kernel/perf_event_paranoid' where N is <= 2");
+            trait::runtime_enabled<comp::papi_config>::set(false);
+            trait::runtime_enabled<comp::papi_common<void>>::set(false);
+            trait::runtime_enabled<comp::papi_array_t>::set(false);
+            trait::runtime_enabled<comp::papi_vector>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
+            _config->get_papi_events() = std::string{};
+        }
+        else
+        {
+            if(!papi_events.empty())
+            {
+                LOG_INFO("perf_event_paranoid={} but all PAPI events use the net component "
+                        "(reads /proc/net/dev, no perf_event required). "
+                        "Proceeding with NIC profiling.",
+                        _paranoid);
+            }
+        }
     }
     else
     {
