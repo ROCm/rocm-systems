@@ -48,7 +48,7 @@ __device__ void GDAContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(dest, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy<MemcpyKind::Put>(remote, reinterpret_cast<void *>(&value), sizeof(T), local_pe);
     return;
   }
@@ -71,7 +71,7 @@ __device__ T GDAContext::g(const T *source, int pe) {
   int local_pe{-1};
   char *remote{nullptr};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
-      (remote = ipc_peer_ptr(source, local_pe)) != nullptr) {
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
     ipcImpl_.ipcCopy<MemcpyKind::Get>(&ret, remote, sizeof(T), local_pe);
     return ret;
   }
