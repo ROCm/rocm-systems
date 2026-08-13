@@ -34,7 +34,7 @@ bool IsHtoHMemcpy(void* dst, const void* src);
 
 hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& launch_params,
                                      void** kernelParams, void** extra, int deviceId,
-                                     uint32_t params);
+                                     uint32_t params, uint32_t* coopMaxGridBlocks = nullptr);
 
 hipError_t ihipResolveGraphClusterDimensions(hipFunction_t f, int deviceId, dim3 gridDim,
                                              dim3* clusterDim);

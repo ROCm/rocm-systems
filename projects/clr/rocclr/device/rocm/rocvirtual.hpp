@@ -979,6 +979,14 @@ class VirtualGPU : public device::VirtualDevice {
   void OptimizeStreamOrderingBarrier(uint16_t& header,
                                      const AqlSlotReservation& reservation) const;
 
+  //! Occupancy decision for a coop grid. Hold the coop queue's blit lock.
+  enum class CoopAdmit {
+    kAdmit,      //!< fits alongside the in-flight grids
+    kWait,       //!< does not fit, but could pair with *wait_on once others retire
+    kSerialize   //!< nothing resident can share with it; waiting would only serialize
+  };
+  CoopAdmit coopAdmitCheck(double grid_fraction, ProfilingSignal** wait_on);
+
   //! Record a final packet header in the shared HW-queue barrier state.
   void RecordAqlPacketHeader(const AqlSlotReservation& reservation, size_t packet_offset,
                              uint16_t header);
@@ -1115,6 +1123,8 @@ class VirtualGPU : public device::VirtualDevice {
   std::shared_ptr<std::atomic<uint64_t>> largest_aql_barrier_bit_slot_;
   //! Final AQL slot submitted by this stream, or kInvalidAqlSlot before its first packet.
   uint64_t last_aql_packet_slot_ = kInvalidAqlSlot;
+  //! In-flight coop grids as (retained completion signal, occupancy fraction).
+  std::vector<std::pair<ProfilingSignal*, double>> coop_inflight_;
   alignas(64) hsa_barrier_and_packet_t barrier_packet_ {};
   alignas(64) hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 
