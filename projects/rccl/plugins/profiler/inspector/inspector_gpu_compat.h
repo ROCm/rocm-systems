@@ -22,6 +22,9 @@ typedef hipError_t  CUresult;
 typedef hipDevice_t CUdevice;
 typedef hipUUID     CUuuid;
 
+// Both spellings are needed: the sources compare runtime-API results against
+// cudaSuccess and driver-API results against CUDA_SUCCESS, which are distinct
+// enumerators of distinct types under CUDA. HIP returns hipError_t from both.
 constexpr hipError_t cudaSuccess  = hipSuccess;
 constexpr hipError_t CUDA_SUCCESS = hipSuccess;
 

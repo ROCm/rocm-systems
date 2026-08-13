@@ -69,7 +69,7 @@ target_compile_definitions(rccl-profiler-inspector PRIVATE
     NCCL_INSPECTOR_ENABLE_WARN=$<BOOL:${NCCL_INSPECTOR_ENABLE_WARN}>
 )
 
-target_compile_features(rccl-profiler-inspector PRIVATE cxx_std_14)
+target_compile_features(rccl-profiler-inspector PRIVATE cxx_std_17)
 
 target_compile_options(rccl-profiler-inspector PRIVATE -Wall -Wextra)
 

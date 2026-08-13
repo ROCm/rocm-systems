@@ -113,10 +113,17 @@ communicator:
 .. code-block:: json
 
     {
-      "header": { "id": "0x7f8c496ae9f661", "rank": 2, "n_ranks": 8, "nnodes": 1 },
+      "header": {
+        "id": "0x7f8c496ae9f661",
+        "comm_name": "DP Group 0",
+        "rank": 2,
+        "n_ranks": 8,
+        "nnodes": 1
+      },
       "metadata": {
         "inspector_output_format_version": "v4.0",
-        "rec_mechanism": "profiler_plugin",
+        "git_rev": "9019a1912-dirty",
+        "rec_mechanism": "nccl_profiler_interface",
         "dump_timestamp_us": 1748030377748202,
         "hostname": "example-hostname",
         "pid": 1639453
@@ -126,10 +133,95 @@ communicator:
         "coll_sn": 1407,
         "coll_msg_size_bytes": 17179869184,
         "coll_exec_time_us": 61974,
+        "coll_timing_source": "kernel_gpu",
         "coll_algobw_gbs": 277.210914,
         "coll_busbw_gbs": 485.119099
       }
     }
+
+The ``header`` object identifies the communicator the record belongs to, and
+the ``metadata`` object identifies the process and the moment the record was
+written:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Field**
+      - **Description**
+
+    * - ``id``
+      - Communicator hash, unique per communicator.
+
+    * - ``comm_name``
+      - Application-assigned communicator name, or ``unknown`` if unset.
+
+    * - ``rank``, ``n_ranks``
+      - This process's rank within the communicator, and the communicator size.
+
+    * - ``nnodes``
+      - Number of nodes spanned by the communicator. ``1`` means the
+        communicator is intra-node.
+
+    * - ``inspector_output_format_version``
+      - Schema version of the record, so consumers can detect format changes.
+
+    * - ``git_rev``
+      - Git revision the Inspector plugin was built from.
+
+    * - ``rec_mechanism``
+      - How the data was recorded. Currently always
+        ``nccl_profiler_interface``.
+
+    * - ``dump_timestamp_us``
+      - Wall-clock time the record was written, in microseconds since the
+        epoch.
+
+    * - ``hostname``, ``pid``
+      - Host and process that produced the record, for correlating records
+        across ranks.
+
+A ``coll_perf`` object describes one completed collective. Point-to-point
+records use a ``p2p_perf`` object with the same fields under a ``p2p_``
+prefix, plus ``p2p_peer``:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Field**
+      - **Description**
+
+    * - ``coll`` / ``p2p``
+      - Operation name, for example ``AllReduce``, ``Send``, or ``Recv``.
+
+    * - ``coll_sn`` / ``p2p_sn``
+      - Sequence number of the operation on this communicator, counting from
+        the first operation recorded. Use it to order records and to spot
+        gaps where operations were filtered out.
+
+    * - ``p2p_peer``
+      - Rank this operation exchanged data with. Point-to-point records only.
+
+    * - ``coll_msg_size_bytes`` / ``p2p_msg_size_bytes``
+      - Message size of the operation, in bytes.
+
+    * - ``coll_exec_time_us`` / ``p2p_exec_time_us``
+      - Execution time of the operation, in microseconds.
+
+    * - ``coll_timing_source`` / ``p2p_timing_source``
+      - Where the time came from: ``kernel_gpu`` for GPU kernel timing, or
+        ``kernel_cpu`` / ``collective_cpu`` for CPU-measured fallbacks. Only
+        ``kernel_gpu`` events are kept unless
+        ``NCCL_INSPECTOR_REQUIRE_KERNEL_TIMING=0``.
+
+    * - ``coll_algobw_gbs`` / ``p2p_algobw_gbs``
+      - Algorithm bandwidth in GB/s: message size divided by execution time.
+
+    * - ``coll_busbw_gbs`` / ``p2p_busbw_gbs``
+      - Bus bandwidth in GB/s: algorithm bandwidth scaled by the operation's
+        communication pattern, so it can be compared against the hardware
+        peak.
 
 Setting ``NCCL_INSPECTOR_DUMP_VERBOSE=1`` adds ``event_trace_sn`` and
 ``event_trace_ts`` blocks with the per-channel kernel sequence numbers and
