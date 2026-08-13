@@ -1058,26 +1058,36 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
 #endif
     if (!plan->kernelSpecialized) {
       int kernelIndex = ncclGetKernelIndex(comm);
-      if (IsArchMatch(comm->archName, "gfx1250") && task->protocol == NCCL_PROTO_LL) {
-        if (getenv("RCCL_UNROLL_FACTOR") != nullptr) {
-          if (kernelIndex == NCCL_UNROLL_32) {
-            static bool warnedLlUnroll32 = false;
-            if (!warnedLlUnroll32) {
-              WARN("RCCL_UNROLL_FACTOR=5 (unroll 32) may cause issues with LL protocol on gfx1250; "
-                   "consider RCCL_UNROLL_FACTOR=3 (unroll 8) for LL protocol collectives.");
-              warnedLlUnroll32 = true;
+      if (IsArchMatch(comm->archName, "gfx1250")) {
+        const bool fp8Datatype =
+            task->datatype == ncclFloat8e4m3 || task->datatype == ncclFloat8e5m2;
+        const bool needsUnroll8 = task->protocol == NCCL_PROTO_LL || fp8Datatype;
+        if (needsUnroll8) {
+          if (getenv("RCCL_UNROLL_FACTOR") != nullptr) {
+            if (kernelIndex == NCCL_UNROLL_32) {
+              static bool warnedGfx1250Unroll32 = false;
+              if (!warnedGfx1250Unroll32) {
+                WARN("RCCL_UNROLL_FACTOR=5 (unroll 32) may cause issues with LL protocol or FP8 datatypes on "
+                     "gfx1250; consider RCCL_UNROLL_FACTOR=3 (unroll 8).");
+                warnedGfx1250Unroll32 = true;
+              }
             }
-          }
-        } else if (ncclDevFuncUnrollGenerated[NCCL_UNROLL_8]) {
-          if (kernelIndex != NCCL_UNROLL_8) {
-            static bool loggedLlUnrollClamp = false;
-            if (!loggedLlUnrollClamp) {
-              INFO(NCCL_INIT, "Using unroll 8 for LL protocol on gfx1250 (default unroll %d)",
-                   (int)(pow(2.0, (double)kernelIndex)));
-              loggedLlUnrollClamp = true;
+          } else if (ncclDevFuncUnrollGenerated[NCCL_UNROLL_8]) {
+            if (kernelIndex != NCCL_UNROLL_8) {
+              static bool loggedGfx1250UnrollClamp = false;
+              if (!loggedGfx1250UnrollClamp) {
+                if (fp8Datatype) {
+                  INFO(NCCL_INIT, "Using unroll 8 for FP8 datatypes on gfx1250 (default unroll %d)",
+                       (int)(pow(2.0, (double)kernelIndex)));
+                } else {
+                  INFO(NCCL_INIT, "Using unroll 8 for LL protocol on gfx1250 (default unroll %d)",
+                       (int)(pow(2.0, (double)kernelIndex)));
+                }
+                loggedGfx1250UnrollClamp = true;
+              }
             }
+            kernelIndex = NCCL_UNROLL_8;
           }
-          kernelIndex = NCCL_UNROLL_8;
         }
       }
       plan->kernelFn = ncclKerns[kernelIndex].kernelFn;

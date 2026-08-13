@@ -22,6 +22,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -36,18 +37,40 @@ GENERATE_PY = os.path.join(HERE, "generate.py")
 ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32|AllReduce RING LL128 Sum f32|SendRecv"
 
 
-def _generate(tmpdir, ifc="OFF"):
+def _generate(tmpdir, ifc="OFF", local_gpu_only="OFF", only_funcs=ONLY_FUNCS, gfx_name=None):
     """Run generate.py into tmpdir and return the device_table.h contents."""
+    env = os.environ.copy()
+    if gfx_name is not None:
+        rocm = os.path.join(tmpdir, "rocm")
+        bin_dir = os.path.join(rocm, "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        rocminfo = os.path.join(bin_dir, "rocminfo")
+        with open(rocminfo, "w") as f:
+            f.write(
+                textwrap.dedent(
+                    f"""\
+                    #!/bin/sh
+                    echo "Name:                    {gfx_name}"
+                    echo "Compute Unit:            304"
+                    """
+                )
+            )
+        os.chmod(rocminfo, 0o755)
+        env["ROCM_PATH"] = rocm
+        gensrc = os.path.join(tmpdir, "gensrc")
+    else:
+        gensrc = tmpdir
+
     # argv: gensrc, IFC, (unused), local_gpu_only, rocshmem, ONLY_FUNCS
-    # local_gpu_only=OFF avoids needing rocminfo/a local GPU.
     subprocess.run(
-        [sys.executable, GENERATE_PY, tmpdir, ifc, "OFF", "OFF", "OFF", ONLY_FUNCS],
+        [sys.executable, GENERATE_PY, gensrc, ifc, "OFF", local_gpu_only, "OFF", only_funcs],
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
-    with open(os.path.join(tmpdir, "device_table.h")) as f:
-        return f.read()
+    with open(os.path.join(gensrc, "device_table.h")) as f:
+        return f.read(), gensrc
 
 
 class DeviceTableGenerationTest(unittest.TestCase):
@@ -56,7 +79,7 @@ class DeviceTableGenerationTest(unittest.TestCase):
         if not os.path.exists(GENERATE_PY):
             raise unittest.SkipTest("generate.py not found next to test")
         cls._dir = tempfile.mkdtemp(prefix="rccl_devtable_")
-        cls.header = _generate(cls._dir)
+        cls.header, cls._gensrc = _generate(cls._dir)
 
     def test_forward_declarations_are_plain(self):
         # noinline is applied only by DEFINE_ncclDevFunc (common.h), gated on
@@ -131,7 +154,7 @@ class DeviceTableGenerationTest(unittest.TestCase):
 
     def test_specialized_shards_do_not_omit(self):
         # Specialized shards no longer #define RCCL_DEVICE_TABLE_OMIT.
-        spec_dir = os.path.join(self._dir, "specialized")
+        spec_dir = os.path.join(self._gensrc, "specialized")
         self.assertTrue(os.path.isdir(spec_dir))
         for name in os.listdir(spec_dir):
             with open(os.path.join(spec_dir, name)) as f:
@@ -141,8 +164,45 @@ class DeviceTableGenerationTest(unittest.TestCase):
         # Don't break the legacy indirect-function-call path: with IFC on, the
         # table is still emitted and the pure-RDC dispatcher is not.
         with tempfile.TemporaryDirectory(prefix="rccl_devtable_ifc_") as d:
-            header = _generate(d, ifc="ON")
+            header, _ = _generate(d, ifc="ON")
         self.assertIn("static __device__ ncclDevFuncPtr_t const ncclDevFuncTable_", header)
+
+
+class Gfx1250Fp8UnrollGenerationTest(unittest.TestCase):
+    """FP8 kernels on gfx1250 local builds must be generated only at unroll 8."""
+
+    FP8_ONLY_FUNCS = "AllReduce RING SIMPLE Sum f8e4m3|AllReduce RING SIMPLE Sum f8e5m2"
+    F32_ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32"
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(GENERATE_PY):
+            raise unittest.SkipTest("generate.py not found next to test")
+
+    def _specialized_unrolls(self, only_funcs):
+        with tempfile.TemporaryDirectory(prefix="rccl_fp8_unroll_") as tmpdir:
+            _, gensrc = _generate(
+                tmpdir,
+                local_gpu_only="ON",
+                only_funcs=only_funcs,
+                gfx_name="gfx1250",
+            )
+            spec_dir = os.path.join(gensrc, "specialized")
+            return sorted(os.listdir(spec_dir))
+
+    def test_fp8_kernels_generated_only_at_unroll_8(self):
+        names = self._specialized_unrolls(self.FP8_ONLY_FUNCS)
+        fp8_names = [n for n in names if "f8e4m3" in n or "f8e5m2" in n]
+        self.assertTrue(fp8_names, "expected FP8 specialized kernels to be generated")
+        for name in fp8_names:
+            self.assertRegex(name, r"_8\.cpp$", msg=name)
+            self.assertNotRegex(name, r"_(16|32)\.cpp$", msg=name)
+
+    def test_non_fp8_kernels_keep_gfx1250_unroll_set(self):
+        names = self._specialized_unrolls(self.F32_ONLY_FUNCS)
+        f32_names = [n for n in names if "f32" in n]
+        unrolls = sorted({re.search(r"_(\d+)\.cpp$", n).group(1) for n in f32_names})
+        self.assertEqual(["16", "32", "8"], unrolls)
 
 
 if __name__ == "__main__":

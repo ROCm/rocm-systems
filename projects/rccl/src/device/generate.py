@@ -213,9 +213,13 @@ class Fn:
   def __iter__(self):
     return iter((self.coll, self.algo, self.proto, self.redop, self.ty, self.acc, self.pipeline, self.unroll, self.reg))
 
+local_gfx_name = None
+
 def calc_unroll_and_pipeline_for_local_arch():
+  global local_gfx_name
 
   if not is_local_arch_only:
+    local_gfx_name = None
     return (all_unrolls, all_pipelines)
 
   rocminfo_path = os.environ.get('ROCM_PATH') + "/bin/rocminfo"
@@ -245,6 +249,7 @@ def calc_unroll_and_pipeline_for_local_arch():
   # Homogeneous system is required to build for only 1 variant of unroll factor (except for gfx950 and gfx1250)
   if len(gfx_targets) == 1:
     gfx_name, cu_count = gfx_targets[0]
+    local_gfx_name = gfx_name
     if "gfx950" == gfx_name:
       return (["1", "2"], ["0"])  # Disable pipelining for gfx950
     elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
@@ -256,6 +261,7 @@ def calc_unroll_and_pipeline_for_local_arch():
     else:
       return (["4"], all_pipelines)
   else:
+    local_gfx_name = None
     return (all_unrolls, all_pipelines)
 
 # if building for local arch only, we only need to build for 1 variant of unroll for most gfx targets,
@@ -282,6 +288,9 @@ def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
       pipeline not in local_pipeline or
       unroll not in local_unroll or
       reg not in reg_values_of(coll, proto)):
+    return False
+  # FP8 kernels on gfx1250 must use unroll 8 for correct launch.
+  if local_gfx_name == "gfx1250" and ty in ("f8e4m3", "f8e5m2") and unroll != "8":
     return False
   return True
 
