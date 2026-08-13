@@ -881,6 +881,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     struct ncclTaskColl task;
     memset(&task, 0, sizeof(task));
     task.func = ncclFuncAllReduce;
+    task.sendbuff = sendbuff;
+    task.recvbuff = recvbuff;
     task.count = count;
     task.datatype = datatype;
     NCCLCHECK(getAlgoInfo(comm, &task, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, /*simInfo=*/nullptr));
