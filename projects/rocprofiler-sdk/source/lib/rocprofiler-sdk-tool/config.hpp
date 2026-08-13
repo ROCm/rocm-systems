@@ -155,6 +155,11 @@ struct config : output_config
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
 
+    // Route counter collection through in-process kernel replay: collect every --pmc counter group
+    // in a single application run by replaying each dispatch once per group (device-memory
+    // snapshot/restore between passes). The pass count is the number of counter groups.
+    bool kernel_replay = get_env("ROCPROF_KERNEL_REPLAY", false);
+
     int         mpi_size              = get_mpi_size();
     int         mpi_rank              = get_mpi_rank();
     std::string mpi_rank_env_variable = get_env(mpi_rank_env_var_name, "");
@@ -340,6 +345,8 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(pc_sampling_interval);
     CFG_SERIALIZE_MEMBER(pc_sampling_method_value);
     CFG_SERIALIZE_MEMBER(pc_sampling_unit_value);
+
+    CFG_SERIALIZE_MEMBER(kernel_replay);
 
     CFG_SERIALIZE_MEMBER(advanced_thread_trace);
     CFG_SERIALIZE_MEMBER(att_no_intercept);

@@ -32,6 +32,9 @@
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/kernel_replay.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
@@ -104,6 +107,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CORE_RANGE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_GRAPH)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCSHMEM_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIPFILE_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(KERNEL_REPLAY)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -165,6 +169,12 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
     {
         RETURN_STATUS_ON_FAIL(rocprofiler::context::add_domain_op(
             ctx->callback_tracer->domains, kind, operations[i]));
+    }
+
+    if(kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY)
+    {
+        rocprofiler::kernel_replay::memory_tracker::set_tracking_enabled(true);
+        rocprofiler::kernel_replay::set_replay_service_configured(true);
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
@@ -265,6 +275,11 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
         {
             val = rocprofiler::kernel_dispatch::name_by_id(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY:
+        {
+            val = rocprofiler::kernel_replay::name_by_id(operation);
             break;
         }
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
@@ -431,6 +446,11 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
         {
             ops = rocprofiler::kernel_dispatch::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY:
+        {
+            ops = rocprofiler::kernel_replay::get_ids();
             break;
         }
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
@@ -659,6 +679,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
         case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
+        case ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY:
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
         case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
