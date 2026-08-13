@@ -25,6 +25,14 @@ from utils.utils_counter_defs import SUPPORTED_DENOM, UNIT_COUNTER
 class TestMetricEvaluator:
     """Tests for utils.metrics.metric_evaluator."""
 
+    def test_eval_expression_cannot_reach_builtins(self):
+        """Builtins are suppressed at the eval site."""
+        evaluator = MetricEvaluator(pd.DataFrame(), {}, {})
+        with patch("utils.metrics.metric_evaluator.console_warning") as mock_warning:
+            result = evaluator.eval_expression("__import__('os')")
+        assert result == "N/A"
+        assert mock_warning.called
+
     def test_eval_expression_returns_na_when_eval_returns_none(self):
         """eval_expression returns 'N/A' when the evaluated expression yields None."""
         metric_evaluator = MetricEvaluator({}, {}, {})

@@ -4,11 +4,13 @@
 """Unit tests for utils/metrics/expression.py."""
 
 import ast
+from unittest.mock import patch
 
 import pytest
 
 from utils.metrics.expression import (
     CodeTransformer,
+    InvalidExpressionError,
     build_eval_string,
     gen_counter_list,
     update_denominator_string,
@@ -33,15 +35,11 @@ class TestExpression:
         assert update_denominator_string("", "per_wave") == ""
 
     def test_visit_call_raises_for_unknown_function(self):
-        """CodeTransformer.visit_Call raises for unknown function names."""
+        """CodeTransformer rejects unsupported function calls."""
+        tree = ast.parse("UNKNOWN_FUNC(5)")
         transformer = CodeTransformer()
-        unknown_call = ast.Call(
-            func=ast.Name(id="ammolite__UNKNOWN", ctx=ast.Load()),
-            args=[ast.Constant(value=5)],
-            keywords=[],
-        )
-        with pytest.raises(Exception, match="Unknown call"):
-            transformer.visit_Call(unknown_call)
+        with pytest.raises(InvalidExpressionError, match="Unsupported call"):
+            transformer.visit(tree)
 
     def test_visit_call_translates_supported_function_to_helper_name(self):
         """CodeTransformer.visit_Call rewrites MIN to the to_min helper name."""
@@ -125,3 +123,56 @@ class TestExpression:
         Regression for .capitalize() mangling "GB/s" into "Gb/s".
         """
         assert update_normal_unit_string(equation, normal_unit) == expected
+
+    @pytest.mark.parametrize(
+        "formula",
+        [
+            (
+                "100 * SUM(SQ_ACTIVE_INST_SCA)"
+                " / SUM(ammolite__GRBM_GUI_ACTIVE_PER_XCD"
+                " * ammolite__cu_per_gpu)"
+            ),
+            (
+                "TCC_EA_RDREQ_LEVEL_31 / TCC_EA_RDREQ_31"
+                " if (TCC_EA_RDREQ_31 != 0) else TCC_EA_RDREQ_31"
+            ),
+            "ROUND(AVG(4 * SQ_BUSY_CU_CYCLES), 0)",
+        ],
+    )
+    def test_code_transformer_accepts_legitimate_formulas(
+        self,
+        formula: str,
+    ) -> None:
+        """CodeTransformer.generic_visit passes for real metric formulas."""
+        tree = ast.parse(formula)
+        transformer = CodeTransformer()
+        transformer.visit(tree)
+
+    @pytest.mark.parametrize(
+        "formula, blocked_node",
+        [
+            ('"".__class__', "Attribute"),
+            ("(lambda: 1)()", "Lambda"),
+            ("[x for x in (1,)]", "ListComp"),
+            ("(x for x in (1,))", "GeneratorExp"),
+            ("{x: 1 for x in (1,)}", "DictComp"),
+            ("{x for x in (1,)}", "SetComp"),
+        ],
+    )
+    def test_code_transformer_rejects_unsafe_node_types(
+        self,
+        formula: str,
+        blocked_node: str,
+    ) -> None:
+        """CodeTransformer.generic_visit raises for disallowed AST node types."""
+        tree = ast.parse(formula)
+        transformer = CodeTransformer()
+        with pytest.raises(InvalidExpressionError, match=blocked_node):
+            transformer.visit(tree)
+
+    def test_build_eval_string_warns_on_unsafe_formula(self) -> None:
+        """build_eval_string warns and returns empty for unsafe formulas."""
+        with patch("utils.metrics.expression.console_warning") as mock_warning:
+            result = build_eval_string('"".__class__')
+        assert result == ""
+        assert mock_warning.called
