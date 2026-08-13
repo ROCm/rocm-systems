@@ -80,7 +80,7 @@ int cdna5_scale_operand_size_bits(const MachineInst *inst) {
   return cdna5_scaled_wmma_is_scale16(inst) ? 64 : 32;
 }
 
-int gfx1250_scaled_wmma_dst_size_bits(const MachineInst *inst) {
+int cdna5_scaled_wmma_dst_size_bits(const MachineInst *inst) {
   return cdna5_scaled_wmma_is_f4_32x16x128(inst) ? 512 : 256;
 }
 
@@ -3167,13 +3167,13 @@ VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
     : Vop3p(cdna5_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
             selected_exec_fn(InstructionExecutionId::VWmmaScaleF32Vop3px2), LiteralSupport::Both, 3,
             Vop3p::ExtensionDecodePolicy::Skip),
-      vdst(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
+      vdst(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
            reinterpret_cast<const OpEncoding *>(inst + 2)->vdst),
       src0(gfx1250_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
            reinterpret_cast<const OpEncoding *>(inst + 2)->src0),
       src1(gfx1250_scaled_wmma_src1_size_bits(inst), OperandType::OPR_SRC_VGPR,
            reinterpret_cast<const OpEncoding *>(inst + 2)->src1),
-      src2(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
+      src2(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
            reinterpret_cast<const OpEncoding *>(inst + 2)->src2),
       scale_src0(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
                  reinterpret_cast<const OpEncoding *>(inst)->src0),
