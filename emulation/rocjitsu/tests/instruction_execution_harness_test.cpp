@@ -1841,7 +1841,7 @@ TEST(Gfx1250True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
     cu->write_vgpr(vb + 0, 0, pack16(0x0000u, 0x0040u)); // +0h, mask=+0
     cu->write_vgpr(vb + 0, 1, pack16(0x7C01u, 0x0002u)); // sNaN, mask=qNaN
 
-    constexpr auto words = encode_vop3(/*op=*/253, /*vdst=*/0, /*src0=*/256, /*src1=*/256,
+    constexpr auto words = encode_vop3(/*op=*/253, /*vdst=*/126, /*src0=*/256, /*src1=*/256,
                                        /*src2=*/0, /*abs=*/0, /*opsel=*/0x2);
     std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
     ASSERT_NE(inst, nullptr);
@@ -2153,7 +2153,7 @@ TEST(Rdna4True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
     cu->write_vgpr(vb + 0, 0, pack16(0x0000u, 0x0040u)); // +0h, mask=+0
     cu->write_vgpr(vb + 0, 1, pack16(0x7C01u, 0x0002u)); // sNaN, mask=qNaN
 
-    constexpr auto words = encode_vop3(/*op=*/253, /*vdst=*/0, /*src0=*/256, /*src1=*/256,
+    constexpr auto words = encode_vop3(/*op=*/253, /*vdst=*/126, /*src0=*/256, /*src1=*/256,
                                        /*src2=*/0, /*abs=*/0, /*opsel=*/0x2);
     std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
     ASSERT_NE(inst, nullptr);
