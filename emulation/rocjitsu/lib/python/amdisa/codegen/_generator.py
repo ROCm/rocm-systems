@@ -3653,7 +3653,7 @@ class CodeGenerator:
             return None
         return tuple(int(x) for x in m.groups())
 
-    def _gfx1250_swmmac_has_modifiers(self, inst: Instruction) -> bool:
+    def _cdna5_swmmac_has_modifiers(self, inst: Instruction) -> bool:
         return self.isa_spec.arch_name == 'cdna5' and inst.name.startswith('V_SWMMAC_')
 
     def _gfx1250_matrix_fmt_operand_size_expr(
@@ -7453,7 +7453,7 @@ class CodeGenerator:
                     # src0/src1 operand sizes from the instruction shape.
                     gfx1250_f8f6f4_shape = self._cdna5_f8f6f4_wmma_shape(inst)
                     cdna4_f8f6f4_shape = self._cdna4_f8f6f4_mfma_shape(inst)
-                    gfx1250_swmmac_has_modifiers = self._gfx1250_swmmac_has_modifiers(
+                    gfx1250_swmmac_has_modifiers = self._cdna5_swmmac_has_modifiers(
                         inst
                     )
                     operand_size_exprs: dict[str, str] = {}
