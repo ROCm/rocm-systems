@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 606 | 606 | 0 |
-| **total** | **606** | **606** | **0** |
+| `contract` | 608 | 608 | 0 |
+| **total** | **608** | **608** | **0** |
 
 ## Tier: `contract`
 
@@ -172,13 +172,15 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_DeviceIdentity_HipDeviceGetLuid_Default_AcceptedOrUnsupported` | hipDeviceGetLuid | a well-formed query returns hipSuccess or the documented hipErrorNotSupported |
 | `Contract_DeviceIdentity_HipDeviceGetLuid_NullArgs_AreRejected` | hipDeviceGetLuid | a null luid or node-mask out-pointer is rejected with a non-success status |
 
-### `device_lifecycle` (5 cases)
+### `device_lifecycle` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_DeviceLifecycle_HipDevicePrimaryCtxReset_Default_LeavesDeviceUsable` | hipDevicePrimaryCtxReset | after resetting the primary context the device still serves fresh allocations |
 | `Contract_DeviceLifecycle_HipDevicePrimaryCtxSetFlags_Default_IsAcceptedOrInUse` | hipDevicePrimaryCtxSetFlags | setting primary-context flags is accepted or reports context-already-in-use |
 | `Contract_DeviceLifecycle_HipDeviceSetSharedMemConfig_Default_RoundTripsCurrentConfig` | hipDeviceSetSharedMemConfig | setting back the currently-reported shared-mem config is accepted or unsupported |
+| `Contract_DeviceLifecycle_HipInitDevice_Default_AcceptsVisibleDevice` | hipInitDevice | initializing a visible device with no flags is accepted or reported unsupported |
+| `Contract_DeviceLifecycle_HipInitDevice_InvalidDevice_IsRejected` | hipInitDevice | an out-of-range device ordinal is rejected with a defined error |
 | `Contract_DeviceLifecycle_HipSetDeviceFlags_Default_AcceptsCurrentFlags` | hipSetDeviceFlags | writing back the currently-active device flags is accepted or reported not-settable |
 | `Contract_DeviceLifecycle_HipSetValidDevices_Default_AcceptsFullDeviceList` | hipSetValidDevices | presenting the full set of visible device ordinals is accepted or reported unsupported |
 
