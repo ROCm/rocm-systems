@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Build probe for the roctx_recordfn CMake build.
+"""Build probe for the torch_trace_collector CMake build.
 
 Prints the Python/torch metadata and source fingerprint that CMake needs to
 tag and configure the extension.
@@ -31,7 +31,7 @@ def main() -> int:
         import torch
         import torch.utils.cpp_extension as ext
     except Exception as exc:  # noqa: BLE001
-        sys.stderr.write(f"roctx_recordfn probe: torch not importable: {exc}\n")
+        sys.stderr.write(f"torch_trace_collector probe: torch not importable: {exc}\n")
         return 3
 
     # Reuse the loader's fingerprint helper. parents[3] is the repo `src` dir

@@ -12,7 +12,7 @@
 #include <memory>
 #include <vector>
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 // Per-thread marker state. guards holds one slot per push_user_scope frame,
@@ -50,4 +50,4 @@ inline std::size_t push_with_prefix_dedup(const std::vector<StackEntry>& chain)
     return pushed;
 }
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail

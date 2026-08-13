@@ -49,7 +49,7 @@ def test_compute_tag_is_stable_across_calls():
 
 def test_source_fingerprint_changes_when_inputs_change(tmp_path, monkeypatch):
     """A single-byte edit to any input changes the fingerprint."""
-    cpp = tmp_path / "roctx_recordfn.cpp"
+    cpp = tmp_path / "torch_trace_collector.cpp"
     cmake = tmp_path / "CMakeLists.txt"
     cpp.write_text("// fingerprint test source\n")
     cmake.write_text("# fingerprint test buildfile\n")
@@ -145,7 +145,7 @@ def test_probe_output_matches_cmake_field_order():
 # ---------------------------------------------------------------------------
 
 
-def roctx_recordfn_module_sources():
+def torch_trace_collector_module_sources():
     """The module's C++ source and header files, from the fingerprint inputs."""
     return sorted(
         p for p in inject_roctx_loader._FINGERPRINT_INPUTS if p.suffix in (".cpp", ".h")
@@ -165,7 +165,7 @@ def cmake_declared_sources():
 
     # Longest extension first, and a trailing non-word guard, so ".hpp" is not
     # truncated to ".h" by the alternation.
-    header_block = re.search(r"set\(_rcfn_headers(.*?)\)", text, re.DOTALL)
+    header_block = re.search(r"set\(_ttc_headers(.*?)\)", text, re.DOTALL)
     if header_block:
         names.update(re.findall(r"[\w.-]+\.(?:hpp|hxx|h)(?!\w)", header_block.group(1)))
 
@@ -196,9 +196,9 @@ def test_fingerprint_inputs_cover_every_build_input():
         assert required in input_names, f"{required} is not a fingerprint input"
 
 
-def test_roctx_recordfn_source_avoids_torch_umbrella_headers():
+def test_torch_trace_collector_source_avoids_torch_umbrella_headers():
     """No module source may include ``<torch/{extension,all,torch}.h>``."""
-    sources = roctx_recordfn_module_sources()
+    sources = torch_trace_collector_module_sources()
     assert sources, f"no C++ sources under {inject_roctx_loader._SO_SOURCE_DIR}"
 
     forbidden = (
@@ -218,9 +218,11 @@ def test_roctx_recordfn_source_avoids_torch_umbrella_headers():
             assert directive not in active_src, f"{path.name} must not include {header}"
 
 
-def test_roctx_recordfn_source_uses_narrow_includes():
+def test_torch_trace_collector_source_uses_narrow_includes():
     """The module includes the required narrow PyTorch headers."""
-    combined = "\n".join(path.read_text() for path in roctx_recordfn_module_sources())
+    combined = "\n".join(
+        path.read_text() for path in torch_trace_collector_module_sources()
+    )
 
     required = (
         "#include <ATen/record_function.h>",
@@ -266,7 +268,7 @@ def test_loader_and_cmake_agree_on_artifact_filename_shape():
     import inspect
 
     src = inspect.getsource(inject_roctx_loader._try_jit)
-    assert 'f"roctx_recordfn-{tag}.so"' in src, (
+    assert 'f"torch_trace_collector-{tag}.so"' in src, (
         "artifact filename has changed; update this test accordingly"
     )
 
@@ -313,10 +315,10 @@ def test_force_python_fallback_returns_none():
 
 def test_install_cached_so_overwrites_stale_artifact(tmp_path):
     """``_install_cached_so`` overwrites an existing cached ``.so``."""
-    src = tmp_path / "build" / "roctx_recordfn.so"
+    src = tmp_path / "build" / "torch_trace_collector.so"
     src.parent.mkdir()
     src.write_bytes(b"new content")
-    cached = tmp_path / "cache" / "roctx_recordfn-tag.so"
+    cached = tmp_path / "cache" / "torch_trace_collector-tag.so"
     cached.parent.mkdir()
     cached.write_bytes(b"STALE content -- must be overwritten")
 
@@ -329,7 +331,7 @@ def test_install_cached_so_overwrites_stale_artifact(tmp_path):
 def test_install_cached_so_is_a_noop_when_src_missing(tmp_path):
     """``_install_cached_so`` is a no-op when the source ``.so`` is missing."""
     src = tmp_path / "build" / "does_not_exist.so"
-    cached = tmp_path / "cache" / "roctx_recordfn-tag.so"
+    cached = tmp_path / "cache" / "torch_trace_collector-tag.so"
     cached.parent.mkdir()
     cached.write_bytes(b"good content")
 
@@ -414,7 +416,7 @@ def test_try_jit_returns_cache_hit_without_invoking_cmake(monkeypatch, tmp_path)
     """An on-disk cached ``.so`` is loaded directly, no cmake invocation."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     cache_dir = inject_roctx_loader._jit_cache_dir()
-    cached_so = cache_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
+    cached_so = cache_dir / f"torch_trace_collector-{_FAKE_TAG}.so"
     cached_so.write_bytes(b"stub-so")
 
     sentinel = object()
@@ -436,7 +438,7 @@ def test_try_jit_force_rebuild_bypasses_cache(monkeypatch, tmp_path):
     """``force_rebuild=True`` ignores the cache and reaches the build path."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     cache_dir = inject_roctx_loader._jit_cache_dir()
-    cached_so = cache_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
+    cached_so = cache_dir / f"torch_trace_collector-{_FAKE_TAG}.so"
     cached_so.write_bytes(b"stale")
 
     def must_not_import(_n, _p):
@@ -468,10 +470,10 @@ class _StubCompleted:
 
 def _set_so_inputs_present(monkeypatch, tmp_path):
     """Point the loader at synthetic source files."""
-    src_dir = tmp_path / "roctx_recordfn"
+    src_dir = tmp_path / "torch_trace_collector"
     src_dir.mkdir(parents=True, exist_ok=True)
-    cpp = src_dir / "roctx_recordfn.cpp"
-    module_cpp = src_dir / "roctx_recordfn_module.cpp"
+    cpp = src_dir / "torch_trace_collector.cpp"
+    module_cpp = src_dir / "torch_trace_collector_module.cpp"
     cml = src_dir / "CMakeLists.txt"
     cpp.write_text("// stub\n")
     module_cpp.write_text("// stub\n")
@@ -546,7 +548,7 @@ def test_try_jit_passes_runtime_python_to_cmake(monkeypatch, tmp_path):
     monkeypatch.setattr(inject_roctx_loader.subprocess, "run", fake_run)
     cache_dir = inject_roctx_loader._jit_cache_dir()
     build_dir = cache_dir / f"cmake-build-{_FAKE_TAG}"
-    produced = build_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
+    produced = build_dir / f"torch_trace_collector-{_FAKE_TAG}.so"
     produced.parent.mkdir(parents=True, exist_ok=True)
     produced.write_bytes(b"stub-so")
     monkeypatch.setattr(
@@ -646,7 +648,7 @@ def test_try_jit_cleans_build_dir_on_success(monkeypatch, tmp_path):
 
     cache_dir = inject_roctx_loader._jit_cache_dir()
     build_dir = cache_dir / f"cmake-build-{_FAKE_TAG}"
-    produced = build_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
+    produced = build_dir / f"torch_trace_collector-{_FAKE_TAG}.so"
     produced.parent.mkdir(parents=True, exist_ok=True)
     produced.write_bytes(b"stub-so")
     leftover = build_dir / "CMakeFiles"
@@ -664,7 +666,7 @@ def test_try_jit_cleans_build_dir_on_success(monkeypatch, tmp_path):
     assert not build_dir.exists(), (
         "build dir must be removed on success to bound cache disk usage"
     )
-    cached_so = cache_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
+    cached_so = cache_dir / f"torch_trace_collector-{_FAKE_TAG}.so"
     assert cached_so.exists() and cached_so.read_bytes() == b"stub-so", (
         "produced .so must have been copied to the cache before cleanup"
     )
@@ -749,7 +751,7 @@ def test_explain_cmake_failure_never_recommends_installing_ninja():
 
 
 def test_rebuild_env_var_clears_failure_marker(monkeypatch, tmp_path):
-    """``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` clears any cached failure marker."""
+    """``ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1`` clears any cached failure marker."""
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
@@ -995,7 +997,7 @@ def test_load_result_returns_python_tier_failure_trail(monkeypatch):
     result = inject_roctx_loader.load()
     assert result.tier is None
     joined = " ".join(msg for _, msg in result.diagnostics).lower()
-    assert "python-only injector" in joined or "no roctx_recordfn" in joined, (
+    assert "python-only injector" in joined or "no torch_trace_collector" in joined, (
         f"terminal-fallback line missing from trail: "
         f"{[(lvl, msg) for lvl, msg in result.diagnostics]!r}"
     )

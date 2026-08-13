@@ -36,7 +36,7 @@ def _report_recordfn_callback_errors() -> None:
 
     console_warning(
         "ml api trace",
-        f"roctx_recordfn observed {callback_errors} swallowed callback "
+        f"torch_trace_collector observed {callback_errors} swallowed callback "
         "exception(s) during the workload; some ROCTX markers may be missing "
         f"or misattributed. Stats: {dict(stats)}",
     )

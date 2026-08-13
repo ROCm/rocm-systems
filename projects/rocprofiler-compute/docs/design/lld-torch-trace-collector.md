@@ -1,4 +1,4 @@
-# roctx_recordfn: native RecordFunction tier
+# torch_trace_collector: native RecordFunction tier
 
 ## Motivation
 
@@ -26,7 +26,7 @@ Python-pushed structural scopes across to autograd worker threads.
 
 ## Overview
 
-`roctx_recordfn` is a C++ pybind11 extension. It registers a global PyTorch
+`torch_trace_collector` is a C++ pybind11 extension. It registers a global PyTorch
 `RecordFunction` callback that brackets every operator with a ROCTX range, and
 exposes a small Python API for lifecycle control and structural markers. This
 document specifies the module internals.
@@ -208,7 +208,7 @@ stack and emitting through the same encoder.
 ```mermaid
 flowchart LR
     op[ATen op] --> brg[record_function_bridge.h<br/>operator callback]
-    py[Python] --> mod[roctx_recordfn_module.cpp<br/>pybind entry points]
+    py[Python] --> mod[torch_trace_collector_module.cpp<br/>pybind entry points]
     mod --> brg
     mod --> us[user_scope.h<br/>user scopes, TLS chain]
     brg --> st[marker_stack.h<br/>snapshot_store.h<br/>frames, fwd-to-bwd lookup]

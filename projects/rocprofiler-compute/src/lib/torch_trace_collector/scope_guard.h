@@ -5,7 +5,7 @@
 
 #include <utility>
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 // Runs an action when it leaves scope unless dismiss() is called first. The
@@ -51,4 +51,4 @@ ScopeGuard<Fn> make_scope_guard(Fn fn)
     return ScopeGuard<Fn>(std::move(fn));
 }
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail

@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 // Percent-encoding of the two characters that would otherwise collide with the
@@ -77,4 +77,4 @@ inline std::string build_marker_string(const std::vector<StackEntry>& stack)
     return out;
 }
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail

@@ -6,11 +6,11 @@
 #include <string>
 #include <vector>
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 // Start and stop recording of the emitted wire strings.
 void                     start_capture();
 std::vector<std::string> stop_capture();
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace roctx_recordfn::detail
+namespace torch_trace_collector::detail
 {
 
 // Buffer of emitted wire strings for the test capture hook.
@@ -53,4 +53,4 @@ private:
 
 inline CaptureBuffer g_capture;
 
-}  // namespace roctx_recordfn::detail
+}  // namespace torch_trace_collector::detail
