@@ -193,7 +193,9 @@ Panel Config:
     #   Achieved Int4 WMMA throughput.
 
     HBM Bandwidth: >-
-      Total HBM bandwidth.
+      Total HBM bandwidth. The peak empirically measured bandwidth reflects
+      peak single-direction (read-only) bandwidth, so write-heavy or mixed
+      kernels fall below it.
     GL2 Cache Bandwidth: >-
       GL2 Cache bandwidth.
 
