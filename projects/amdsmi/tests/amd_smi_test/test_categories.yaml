@@ -122,10 +122,27 @@ exclude_gpu:
       - "full"
       - "ex_gpu_gfx90a"
 
-  # gfx94X (MI300, gfx_target_version 90400-90402): volt-curve read.
+  # gfx94X (MI300, gfx_target_version 90400-90402).
+  #   - TestVoltCurvRead: gfx94X (90400-90402) filter in amdsmitst.exclude.
+  #   - The remaining entries are the `virtualization` (SRIOV/VF) block plus
+  #     TestPerfLevelReadWrite / TestPerfDeterminism. TheRock's gfx94X-dcgpu
+  #     test lane runs on SR-IOV MI300X (MI300X_HW_SRIOV_CVS_1VF), where these
+  #     return AMDSMI_STATUS_NO_PERM. detect_asic_filter.sh applies the
+  #     virtualization set via runtime SRIOV detection; the ctest label path
+  #     can only key on GPU arch, so they are folded into the gfx94X block here.
+  #     NOTE: this intentionally diverges from amdsmitst.exclude, which keeps the
+  #     virtualization excludes in a separate runtime-detected block.
   exclude_gpu_gfx94X:
     test_patterns:
       - "GpuFunctionalReadOnly.TestVoltCurvRead"
+      - "GpuFunctionalReadOnly.TestOverdriveRead"
+      - "GpuFunctionalReadOnly.TestGPUBusyRead"
+      - "GpuFunctionalReadWrite.FanReadWrite"
+      - "GpuFunctionalReadWrite.TestOverdriveReadWrite"
+      - "GpuFunctionalReadWrite.TestPowerReadWrite"
+      - "GpuFunctionalReadWrite.TestPowerCapReadWrite"
+      - "GpuFunctionalReadWrite.TestPerfLevelReadWrite"
+      - "GpuFunctionalReadWrite.TestPerfDeterminism"
     labels:
       - "standard"
       - "comprehensive"
