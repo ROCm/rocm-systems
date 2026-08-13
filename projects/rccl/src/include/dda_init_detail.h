@@ -114,12 +114,6 @@ inline int ddaFabricMaxNBlocksForScratch() {
 
 constexpr int kDdaLLAgMaxBlocksPerPeer = 8;
 
-// The LL AllReduce tier is intentionally narrow (tiny messages, latency-bound),
-// so it caps its grid at kDdaFabricLLArMaxBlocks instead of the 256-wide limit
-// used by LL128/Simple. AR uses the shared ddaLLEpochDev counter (same as AG/RS)
-// so that bank = flag & 1 is consistent across all LL operation types.
-constexpr int kDdaFabricLLArMaxBlocks = 24;
-
 // Number of device epoch cells for the LL collectives. it is sized for the larger of the two
 // max(AG total blocks, AR total blocks).
 inline size_t ddaLLEpochCount(int nRanks, int arMaxBlocks) {

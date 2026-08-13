@@ -19,7 +19,6 @@
 #include "algorithms/all_reduce/all_reduce_dda_ll_twoshot.h"
 #include "checks.h"
 #include "comm.h"
-#include "dda_init_detail.h" // nccl_dda_detail::kDdaFabricLLArMaxBlocks
 #include "debug.h"
 #include "fabric_gpu_barrier.h" // meta::comms::kDdaMaxNranks
 #include "param.h"
@@ -97,7 +96,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   const size_t nPk = bytes >> 3; // 8 payload bytes per packet (for logging)
 
   const unsigned threads = 256;
-  int nBlocksMax = std::min(comm->ddaFabricMaxBlocks, nccl_dda_detail::kDdaFabricLLArMaxBlocks);
+  int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
@@ -151,7 +150,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
   const size_t nPk = (bytes >> 3 ) / (size_t)nRanks; // 8 payload bytes per packet
 
   const unsigned threads = 256;
-  int nBlocksMax = std::min(comm->ddaFabricMaxBlocks, nccl_dda_detail::kDdaFabricLLArMaxBlocks);
+  int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
