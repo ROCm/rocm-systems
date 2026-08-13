@@ -1418,20 +1418,6 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t agent, hsa_amd_memory
     ASSERT_EQ(perm2, HSA_ACCESS_PERMISSION_NONE);
   }
 
-  // debugging
-  {
-    char buffer[256];
-    FILE *fp = fopen("/proc/self/maps", "r");
-    if (fp == NULL) {
-      perror("Error opening /proc/self/maps");
-      return;
-    }
-    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
-        printf("%s", buffer);
-    }
-    fclose(fp);
-  }
-
   // Write to addr1
   int* data1 = reinterpret_cast<int*>(addr1);
   for (int i = 0; i < kMemoryAllocSize; ++i) {
