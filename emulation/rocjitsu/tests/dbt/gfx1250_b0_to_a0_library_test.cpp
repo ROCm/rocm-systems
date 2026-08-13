@@ -6,9 +6,9 @@
 
 #include "rocjitsu/code/dbt/gfx1250_b0_to_a0_diagnostics.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
 #include "support/gfx1250_test_code_object.h"
 
 #include <gtest/gtest.h>
