@@ -1895,8 +1895,9 @@ packed binary blob of architecture-specific hardware state. The blob layout is
 self-describing through two metadata tables:
 
 - ``rocpd_info_blob_schema``: Describes the overall layout (name
-  ``pc_sample_extdata_hosttrap`` or ``pc_sample_extdata_stochastic`` depending on the
-  sampling method, total byte size, byte order ``little``, alignment ``1``).
+  ``pc_sample_extdata_hosttrap`` for host-trap, or ``pc_sample_extdata_stochastic``
+  with an optional ``_gfx12`` or ``_gfx1250`` suffix for stochastic sampling,
+  total byte size, byte order ``little``, alignment ``1``).
 - ``rocpd_info_blob_field``: One row per field with name, byte offset, size, and
   data type. Consumers can decode the binary without hard-coding struct offsets.
 
@@ -1930,8 +1931,13 @@ additional column per blob field, including ``hw_id_chiplet``,
 ``hw_id_queue_id``, ``hw_id_microengine_id``, ``wave_in_group``,
 ``workgroup_id_x``, ``workgroup_id_y``, ``workgroup_id_z``,
 ``dual_issue_valu``, and the ``arb_state_issue_*`` and ``arb_state_stall_*``
-fields recorded by the gfx9 blob (which omits the ``*_lds_direct`` and
-``*_brmsg`` arbiter variants that appear in the SDK JSON). It additionally
+fields. GFX12 adds the ``*_lds_direct`` and ``*_brmsg`` arbiter variants and,
+when supplied by the sample, the ``memory_counter_load``, ``memory_counter_store``,
+``memory_counter_bvh``, ``memory_counter_sample``, ``memory_counter_ds``, and
+``memory_counter_km`` fields. GFX1250 additionally exposes
+``sampling_lock_error``, ``memory_counter_async``, ``memory_counter_tensor``, and
+``memory_counter_xnack``. Architecture-specific or unavailable memory-counter fields
+are NULL for rows whose blob schema does not contain them. The view additionally
 exposes the disassembled ``instruction`` and
 ``instruction_comment`` text for the sampled program counter and the
 human-readable ``inst_type_name`` and ``stall_reason_name`` columns.

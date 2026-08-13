@@ -62,7 +62,7 @@ _HW_ID_FIELDS = [
     "microengine_id",
 ]
 
-# Arbiter pipes tracked by the gfx9 stochastic snapshot.
+# Arbiter pipes tracked by every stochastic snapshot.
 _ARB_PIPES = [
     "valu",
     "matrix",
@@ -74,6 +74,17 @@ _ARB_PIPES = [
     "misc",
 ]
 
+_GFX12_ARB_PIPES = ["lds_direct", "brmsg"]
+_GFX12_MEMORY_COUNTER_FIELDS = [
+    "load",
+    "store",
+    "bvh",
+    "sample",
+    "ds",
+    "km",
+]
+_GFX1250_MEMORY_COUNTER_FIELDS = ["async", "tensor", "xnack"]
+
 
 def _hw_id_value(hw_id, name):
     # The SDK serializes hw_id.workgroup_id with a trailing space in its JSON key
@@ -83,7 +94,22 @@ def _hw_id_value(hw_id, name):
     return hw_id[name]
 
 
-def _field_pairs(record, stochastic):
+def _dispatch_gfx_versions(json_data):
+    tool = _tool(json_data)
+    agent_gfx_versions = {
+        agent["id"]["handle"]: agent["gfx_target_version"]
+        for agent in tool["agents"]
+        if agent["type"] == 2
+    }
+    return {
+        dispatch["dispatch_info"]["dispatch_id"]: agent_gfx_versions[
+            dispatch["dispatch_info"]["agent_id"]["handle"]
+        ]
+        for dispatch in tool["buffer_records"].get("kernel_dispatch", [])
+    }
+
+
+def _field_pairs(record, stochastic, gfx_target_version=0):
     """Yield (decoded_view_column, expected_json_value, is_name_string) tuples."""
     hw = record["hw_id"]
     wg = record["wrkgrp_id"]
@@ -124,6 +150,34 @@ def _field_pairs(record, stochastic):
             pairs.append(
                 ("arb_state_stall_" + pipe, snapshot["arb_state_stall_" + pipe], False)
             )
+        gfx_major = (gfx_target_version // 10000) % 100
+        gfx_minor = (gfx_target_version // 100) % 100
+        if gfx_major == 12:
+            for pipe in _GFX12_ARB_PIPES:
+                issue_key = "arb_state_issue_" + pipe
+                stall_key = "arb_state_stall_" + pipe
+                pairs.append((issue_key, snapshot[issue_key], False))
+                pairs.append((stall_key, snapshot[stall_key], False))
+
+        if gfx_major == 12 and gfx_minor == 5:
+            pairs.append(("sampling_lock_error", snapshot["lck_err"], False))
+
+        flags = record.get("flags", {})
+        has_memory_counter = bool(flags.get("has_mem_cnt", False))
+        if has_memory_counter:
+            memory_counters = record["memory_counters"]
+            counter_fields = list(_GFX12_MEMORY_COUNTER_FIELDS)
+            if gfx_major == 12 and gfx_minor == 5:
+                counter_fields += _GFX1250_MEMORY_COUNTER_FIELDS
+            for name in counter_fields:
+                json_name = name + "_cnt"
+                pairs.append(
+                    (
+                        "memory_counter_" + name,
+                        memory_counters[json_name],
+                        False,
+                    )
+                )
     return pairs
 
 
@@ -211,6 +265,7 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
     # order); counts are asserted equal first.
     total_records = 0
     total_field_checks = 0
+    dispatch_gfx_versions = _dispatch_gfx_versions(json_data)
     for method_key, stochastic in (
         ("pc_sample_stochastic", True),
         ("pc_sample_host_trap", False),
@@ -228,7 +283,12 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
         # be silently skipped by the per-row comparison below.  The mapped column
         # set depends only on the method, so probing the first record is sufficient.
         expected_columns = [
-            column for column, _, _ in _field_pairs(records[0]["record"], stochastic)
+            column
+            for column, _, _ in _field_pairs(
+                records[0]["record"],
+                stochastic,
+                dispatch_gfx_versions.get(records[0]["record"]["dispatch_id"], 0),
+            )
         ]
         present = set(rows[0].keys())
         missing = [column for column in expected_columns if column not in present]
@@ -238,7 +298,10 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
         )
         for index, (sample, row) in enumerate(zip(records, rows)):
             record = sample["record"]
-            for column, expected, is_name in _field_pairs(record, stochastic):
+            gfx_target_version = dispatch_gfx_versions.get(record["dispatch_id"], 0)
+            for column, expected, is_name in _field_pairs(
+                record, stochastic, gfx_target_version
+            ):
                 actual = row[column]
                 if is_name:
                     assert str(actual) == str(
@@ -293,8 +356,16 @@ def test_rocpd_method_identity(rocpd_connection, json_data, expected_method):
             "SELECT DISTINCT name FROM rocpd_info_blob_schema"
         ).fetchall()
     }
-    assert _METHOD_SCHEMA[expected_method] in registered_schemas
-    assert _METHOD_SCHEMA[other_method] not in registered_schemas
+    expected_schema = _METHOD_SCHEMA[expected_method]
+    other_schema = _METHOD_SCHEMA[other_method]
+    assert any(
+        schema == expected_schema or schema.startswith(expected_schema + "_")
+        for schema in registered_schemas
+    )
+    assert not any(
+        schema == other_schema or schema.startswith(other_schema + "_")
+        for schema in registered_schemas
+    )
 
     total = _count_rows(conn, "rocpd_gpu_pc_sample")
     assert total > 0
@@ -389,6 +460,37 @@ def test_rocpd_stochastic_columns_populated(rocpd_connection):
         "OR hw_id_simd_id > 3 OR hw_id_shader_array_id > 1"
     ).fetchone()[0]
     assert invalid == 0
+
+
+def test_rocpd_memory_counter_nullability(rocpd_connection, json_data):
+    conn = rocpd_connection
+    columns = {
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(rocpd_gpu_pc_sample_decoded)"
+        ).fetchall()
+    }
+    assert "has_memory_counter" not in columns
+
+    counter_columns = {
+        "memory_counter_" + name
+        for name in _GFX12_MEMORY_COUNTER_FIELDS + _GFX1250_MEMORY_COUNTER_FIELDS
+    }.intersection(columns)
+    if not counter_columns:
+        return
+
+    records = _json_records(json_data, "pc_sample_stochastic")
+    rows = _decoded_rows(conn, True)
+    assert len(records) == len(rows)
+    for index, (sample, row) in enumerate(zip(records, rows)):
+        flags = sample["record"].get("flags", {})
+        if flags.get("has_mem_cnt", False):
+            continue
+        for column in counter_columns:
+            assert row[column] is None, (
+                f"pc_sample_stochastic[{index}].{column}: "
+                f"expected NULL for unavailable memory counters, got {row[column]!r}"
+            )
 
 
 def test_rocpd_on_demand_disassembly(rocpd_connection):
