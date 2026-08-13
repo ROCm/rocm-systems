@@ -224,6 +224,37 @@ def test_each_pass_collects_distinct_batch(json_data, expected_passes, common_co
         )
 
 
+def test_repeated_counters_agree_across_passes(json_data):
+    # Metric 7: any counter collected in more than one pass must agree across them.
+    #
+    # A generalisation of the shared-counter check. It is inert for a --pmc layout where
+    # every group has a distinct unique counter, which is the layout used here, and it is
+    # what makes a deliberate witness counter useful: placing one counter in two groups
+    # gives it a second observation to be compared against, which is the only way a
+    # per-pass counter's value can be validated at all. Adopting such a layout also needs
+    # test_each_pass_collects_distinct_batch relaxed, since that check requires as many
+    # distinct unique counters as there are passes.
+    table = _records_by_dispatch(_sdk(json_data))
+    disagreements = []
+    for dispatch_id, entry in table.items():
+        observations = collections.defaultdict(list)
+        for batch in entry["passes"].values():
+            for name, value in batch.items():
+                observations[name].append(value)
+        for name, values in observations.items():
+            if len(values) < 2:
+                continue
+            if not _approx_equal(min(values), max(values)):
+                disagreements.append(
+                    f"dispatch {dispatch_id} ({entry['kernel']}) {name}: "
+                    f"{[round(v, 2) for v in values]}"
+                )
+    assert not disagreements, (
+        "counters collected in more than one pass disagree beyond "
+        f"{COUNTER_TOLERANCE:.0%}: " + "; ".join(disagreements[:6])
+    )
+
+
 def test_no_duplicate_pass_records(json_data):
     # Metric 5: exactly one counter record per (dispatch, replay_pass).
     #
