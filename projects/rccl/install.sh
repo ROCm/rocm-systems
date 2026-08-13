@@ -30,6 +30,7 @@ num_parallel_jobs=$(nproc)
 openmp_test_enabled=false
 enable_mpi_tests=false
 kernel_resource_use=false
+kernel_compile_timing=false
 roctx_enabled=true
 run_tests=false
 run_tests_all=false
@@ -73,6 +74,7 @@ function display_help()
     echo "    -i|--install               Install RCCL library (see --prefix argument below)"
     echo "    -j|--jobs                  Specify how many parallel compilation jobs to run ($num_parallel_jobs by default)"
     echo "       --kernel-resource-use   Dump GPU kernel resource usage (e.g., VGPRs, scratch, spill) at link stage"
+    echo "       --kernel-compile-timing Log per-kernel device compile times; after build, list kernels >30s"
     echo "    -l|--local_gpu_only        Only compile for local GPU architecture"
     echo "       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)"
     echo "       --no_clean              Don't delete files if they already exist"
@@ -98,6 +100,7 @@ function display_help()
     echo "    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)"
     echo "    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)"
     echo "    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)"
+    echo "    -DDEVICE_KERNEL_COMPILE_TIMING=ON     Log per-kernel RCCLDEV compile times to CSV (default: OFF)"
     echo ""
     echo "  Environment variables:"
     echo "    ONLY_FUNCS                 Build only specified collective functions (debug builds only)."
@@ -108,6 +111,10 @@ function display_help()
     echo "                                          AlltoAllPivot, SendRecv, AlltoAllGda, AlltoAllvGda"
     echo "                               Advanced: Specify algo, protocol, redop, and type per collective."
     echo "                                 ONLY_FUNCS=\"AllReduce RING SIMPLE Sum f32|SendRecv\""
+    echo "    RCCL_DEVICE_UNROLL_MAP     Per-kernel codegen unroll overrides (local-GPU builds)."
+    echo "                               Format: 'Coll Algo Proto RedOp Ty [Acc Pipeline] [FromUnroll] -> ToUnroll'"
+    echo "                               Omit FromUnroll to replace the arch default (32 on gfx1250 SIMPLE)."
+    echo "                               Example: RCCL_DEVICE_UNROLL_MAP=\"AllReduce RING SIMPLE MinMax u8 -> 8\""
     echo "    ROCSHMEM_INSTALL_DIR       Path to a pre-built rocSHMEM installation (skips building from source)"
 }
 
@@ -118,7 +125,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-compile-timing,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -154,6 +161,7 @@ while true; do
     -i | --install)                  install_library=true;                                                                             shift ;;
     -j | --jobs)                     num_parallel_jobs=${2};                                                                           shift 2 ;;
          --kernel-resource-use)      kernel_resource_use=true;                                                                         shift ;;
+         --kernel-compile-timing)    kernel_compile_timing=true;                                                                       shift ;;
     -l | --local_gpu_only)           build_local_gpu_only=true;                                                                        shift ;;
          --log-trace)                log_trace=true;                                                                                   shift ;;
          --ninja)                    use_ninja=true;                                                                                   shift ;;
@@ -359,6 +367,10 @@ if [[ "${kernel_resource_use}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DREPORT_KERNEL_RESOURCE_USE=ON"
 fi
 
+if [[ "${kernel_compile_timing}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DDEVICE_KERNEL_COMPILE_TIMING=ON"
+fi
+
 # Enable trace debug level
 if [[ "${log_trace}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DTRACE=ON"
@@ -500,6 +512,28 @@ else
     ${build_system} -j ${num_parallel_jobs}
 fi
 check_exit_code "$?"
+
+if [[ "${kernel_compile_timing}" == true ]]; then
+    timing_log="device_kernel_compile_times.csv"
+    timing_threshold_s=30
+    if [[ -f "${timing_log}" ]]; then
+        echo "Device kernel compile timings: ${PWD}/${timing_log}"
+        slow_kernels=$(
+            tail -n +2 "${timing_log}" \
+                | awk -F, -v threshold="${timing_threshold_s}" \
+                    '$1 == "compile" && $7 + 0 > threshold { print }' \
+                | sort -t, -k7 -rn
+        )
+        if [[ -n "${slow_kernels}" ]]; then
+            slow_count=$(echo "${slow_kernels}" | wc -l)
+            echo "Kernels taking longer than ${timing_threshold_s}s (${slow_count} total):"
+            echo "${slow_kernels}" \
+                | awk -F, '{printf "  %.3fs total (compile %.3fs)  %s\n", $7, $4, $3}'
+        else
+            echo "No kernels took longer than ${timing_threshold_s}s to compile."
+        fi
+    fi
+fi
 
 # Initiate package build (`make package` or `ninja package`), if enabled
 if [[ "${build_package}" == true ]]; then

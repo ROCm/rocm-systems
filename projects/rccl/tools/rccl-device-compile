@@ -20,6 +20,10 @@ Link mode (--link):
     5. Optionally compiles --rocshmem-bitcode=<path>.bc to a device object
     6. Links all objects + dispatcher (+ optional rocSHMEM object) into device.elf via ld.lld
 
+Timing (--timing-log=<path> or env RCCL_DEVICE_COMPILE_TIMING_LOG):
+    Appends one CSV row per --compile or --link invocation with wall-clock
+    seconds for each pipeline step. Safe for parallel builds (file locking).
+
 Tool discovery:
     amdclang++, ld.lld are found relative to --clang=<path> or by searching
     PATH and the directory containing the system C++ compiler.
@@ -28,12 +32,15 @@ Tool discovery:
 """
 
 import argparse
+import csv
+import fcntl
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import time
 
 
 # ---------------------------------------------------------------------------
@@ -439,19 +446,81 @@ def discover_tools(clang_path):
 # Run subprocess with error handling
 # ---------------------------------------------------------------------------
 
-def run(cmd, description=""):
-    """Run a command, raising on failure with the full command for diagnosis."""
+def run_timed(cmd, description=""):
+    """Run a command and return (elapsed_seconds, exit_code)."""
+    t0 = time.monotonic()
     try:
         subprocess.check_call(cmd)
+        return time.monotonic() - t0, 0
     except subprocess.CalledProcessError as e:
         label = f" ({description})" if description else ""
         print(f"ERROR{label}: command failed with exit code {e.returncode}:",
               file=sys.stderr)
         print(f"  {' '.join(cmd)}", file=sys.stderr)
-        sys.exit(e.returncode)
+        return time.monotonic() - t0, e.returncode
     except FileNotFoundError:
         print(f"ERROR: executable not found: {cmd[0]}", file=sys.stderr)
-        sys.exit(1)
+        return time.monotonic() - t0, 1
+
+
+def run(cmd, description=""):
+    """Run a command, raising on failure with the full command for diagnosis."""
+    _, rc = run_timed(cmd, description)
+    if rc != 0:
+        sys.exit(rc)
+
+
+# ---------------------------------------------------------------------------
+# Per-kernel compile timing log
+# ---------------------------------------------------------------------------
+
+_TIMING_LOG_HEADER = (
+    'mode', 'arch', 'kernel', 'compile_s', 'extract_s', 'assemble_s', 'total_s',
+    'status',
+)
+
+
+def resolve_timing_log(args):
+    """Return the timing log path from --timing-log or RCCL_DEVICE_COMPILE_TIMING_LOG."""
+    if getattr(args, 'timing_log', None):
+        return args.timing_log
+    return os.environ.get('RCCL_DEVICE_COMPILE_TIMING_LOG') or None
+
+
+def append_timing_log(path, row):
+    """Append one CSV row to path, creating the file/header if needed."""
+    log_dir = os.path.dirname(path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+
+    with open(path, 'a', newline='') as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            write_header = (
+                not os.path.exists(path) or os.path.getsize(path) == 0
+            )
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow(_TIMING_LOG_HEADER)
+            writer.writerow(row)
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+def log_timing(path, mode, arch, kernel, compile_s, extract_s, assemble_s,
+               total_s, status):
+    if not path:
+        return
+    append_timing_log(path, [
+        mode,
+        arch,
+        kernel,
+        f'{compile_s:.3f}',
+        f'{extract_s:.3f}',
+        f'{assemble_s:.3f}',
+        f'{total_s:.3f}',
+        status,
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -465,6 +534,11 @@ def do_compile(args, forwarded_flags):
     source = args.source
     output = args.output
     keep_temps = args.keep_temps
+    timing_log = resolve_timing_log(args)
+    kernel_name = os.path.basename(source)
+    compile_s = extract_s = assemble_s = 0.0
+    status = 'ok'
+    t_total = time.monotonic()
 
     base = os.path.splitext(output)[0]
     json_out = base + '.resources.json'
@@ -492,15 +566,21 @@ def do_compile(args, forwarded_flags):
         ] + forwarded_flags + [
             '-S', '-o', asm_file, source,
         ]
-        run(compile_cmd, f"compile {os.path.basename(source)}")
+        compile_s, rc = run_timed(compile_cmd, f"compile {os.path.basename(source)}")
+        if rc != 0:
+            status = f'compile_failed:{rc}'
+            sys.exit(rc)
 
         # Step 2: Extract device function (inline)
+        t0 = time.monotonic()
         with open(asm_file) as f:
             asm_lines = f.readlines()
 
         try:
             extracted_lines, resources = extract_device_function(asm_lines)
         except RuntimeError as e:
+            extract_s = time.monotonic() - t0
+            status = 'extract_failed'
             print(f"ERROR: extraction failed for {source}: {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -511,6 +591,7 @@ def do_compile(args, forwarded_flags):
 
         with open(json_out, 'w') as f:
             json.dump(resources, f, indent=2)
+        extract_s = time.monotonic() - t0
 
         # Step 3: Assemble to object
         assemble_cmd = [
@@ -520,9 +601,16 @@ def do_compile(args, forwarded_flags):
             f'-mcpu={arch}',
             '-c', '-o', output, ext_file,
         ]
-        run(assemble_cmd, f"assemble {os.path.basename(source)}")
+        assemble_s, rc = run_timed(assemble_cmd, f"assemble {os.path.basename(source)}")
+        if rc != 0:
+            status = f'assemble_failed:{rc}'
+            sys.exit(rc)
 
     finally:
+        log_timing(
+            timing_log, 'compile', arch, kernel_name,
+            compile_s, extract_s, assemble_s, time.monotonic() - t_total, status,
+        )
         if not keep_temps:
             for f in cleanup:
                 try:
@@ -546,6 +634,11 @@ def do_link(args, forwarded_flags):
     dispatcher = args.dispatcher
     keep_temps = args.keep_temps
     rocshmem_bitcode = getattr(args, 'rocshmem_bitcode', None)
+    timing_log = resolve_timing_log(args)
+    kernel_name = os.path.basename(output)
+    compile_s = extract_s = assemble_s = 0.0
+    status = 'ok'
+    t_total = time.monotonic()
 
     if not dispatcher:
         raise SystemExit("ERROR: --link requires --dispatcher=<source>")
@@ -596,9 +689,13 @@ def do_link(args, forwarded_flags):
         ] + forwarded_flags + [
             '-S', '-o', disp_asm, dispatcher,
         ]
-        run(disp_compile_cmd, f"compile dispatcher for {arch}")
+        compile_s, rc = run_timed(disp_compile_cmd, f"compile dispatcher for {arch}")
+        if rc != 0:
+            status = f'dispatcher_compile_failed:{rc}'
+            sys.exit(rc)
 
         # Step 3: Patch dispatcher with aggregated resources
+        t0 = time.monotonic()
         with open(disp_asm) as f:
             disp_lines = f.readlines()
         patched_lines = patch_dispatcher(disp_lines, max_res)
@@ -613,13 +710,15 @@ def do_link(args, forwarded_flags):
             f'-mcpu={arch}',
             '-c', '-o', disp_obj, disp_patched,
         ]
-        run(disp_assemble_cmd, f"assemble dispatcher for {arch}")
+        disp_assemble_s, rc = run_timed(
+            disp_assemble_cmd, f"assemble dispatcher for {arch}")
+        if rc != 0:
+            extract_s = time.monotonic() - t0
+            status = f'dispatcher_assemble_failed:{rc}'
+            sys.exit(rc)
 
         # Step 5: Compile rocSHMEM device bitcode to an amdgcn object (if provided).
-        # rocSHMEM device API symbols (rocshmem::*_wg, rocshmem_n_pes, …) have
-        # hidden visibility and cannot be imported from a shared lib — they must
-        # be statically present in the device ELF.  The bitcode path is supplied
-        # by CMake via --rocshmem-bitcode when ENABLE_ROCSHMEM is on.
+        rocshmem_s = 0.0
         if rocshmem_bitcode:
             if not os.path.exists(rocshmem_bitcode):
                 print(f"  rocSHMEM: no device bitcode for {arch} ({rocshmem_bitcode}), skipping",
@@ -633,7 +732,13 @@ def do_link(args, forwarded_flags):
                     '-c', '-x', 'ir',
                     '-o', rocshmem_obj, rocshmem_bitcode,
                 ]
-                run(bc_compile_cmd, f"compile rocSHMEM device bitcode for {arch}")
+                rocshmem_s, rc = run_timed(
+                    bc_compile_cmd, f"compile rocSHMEM device bitcode for {arch}")
+                if rc != 0:
+                    extract_s = time.monotonic() - t0
+                    status = f'rocshmem_compile_failed:{rc}'
+                    sys.exit(rc)
+        extract_s = time.monotonic() - t0 + disp_assemble_s + rocshmem_s
 
         # Step 6: Link all objects + dispatcher into device.elf
         # Use a response file for potentially long object lists
@@ -650,7 +755,10 @@ def do_link(args, forwarded_flags):
             '-o', output,
             f'@{rsp_path}',
         ]
-        run(link_cmd, f"link device.elf for {arch}")
+        assemble_s, rc = run_timed(link_cmd, f"link device.elf for {arch}")
+        if rc != 0:
+            status = f'link_failed:{rc}'
+            sys.exit(rc)
 
         if not keep_temps:
             try:
@@ -659,6 +767,10 @@ def do_link(args, forwarded_flags):
                 pass
 
     finally:
+        log_timing(
+            timing_log, 'link', arch, kernel_name,
+            compile_s, extract_s, assemble_s, time.monotonic() - t_total, status,
+        )
         if not keep_temps:
             for f in cleanup:
                 try:
@@ -708,6 +820,11 @@ def parse_compiler_flags(argv):
         elif arg == '-o' and i + 1 < len(argv):
             our_args.extend(['-o', argv[i + 1]])
             i += 1
+        elif arg.startswith('--timing-log='):
+            our_args.append(arg)
+        elif arg == '--timing-log' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
         # Forwarded compiler flags
         elif arg.startswith('-D') or arg.startswith('-I') or arg.startswith('-isystem'):
             forwarded.append(arg)
@@ -753,6 +870,7 @@ def main():
     parser.add_argument('--rocshmem-bitcode', default=None, dest='rocshmem_bitcode')
     parser.add_argument('-o', '--output', required=False)
     parser.add_argument('--keep-temps', action='store_true')
+    parser.add_argument('--timing-log', default=None, dest='timing_log')
     parser.add_argument('--version', action='store_true')
 
     args = parser.parse_args(raw_args)

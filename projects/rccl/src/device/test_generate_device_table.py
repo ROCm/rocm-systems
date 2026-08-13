@@ -205,5 +205,60 @@ class Gfx1250Fp8UnrollGenerationTest(unittest.TestCase):
         self.assertEqual(["16", "32", "8"], unrolls)
 
 
+class UnrollOverrideMapTest(unittest.TestCase):
+    MINMAX_U8 = "AllReduce TREE SIMPLE MinMax u8"
+    MINMAX_U8_ONLY = MINMAX_U8 + "|AllReduce TREE SIMPLE MinMax i8"
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(GENERATE_PY):
+            raise unittest.SkipTest("generate.py not found next to test")
+
+    def _specialized(self, only_funcs, env=None):
+        with tempfile.TemporaryDirectory(prefix="rccl_unroll_map_") as tmpdir:
+            run_env = os.environ.copy()
+            if env:
+                run_env.update(env)
+            rocm = os.path.join(tmpdir, "rocm")
+            bin_dir = os.path.join(rocm, "bin")
+            os.makedirs(bin_dir, exist_ok=True)
+            rocminfo = os.path.join(bin_dir, "rocminfo")
+            with open(rocminfo, "w") as f:
+                f.write(
+                    textwrap.dedent(
+                        """\
+                        #!/bin/sh
+                        echo "Name:                    gfx1250"
+                        echo "Compute Unit:            304"
+                        """
+                    )
+                )
+            os.chmod(rocminfo, 0o755)
+            run_env["ROCM_PATH"] = rocm
+            gensrc = os.path.join(tmpdir, "gensrc")
+            subprocess.run(
+                [sys.executable, GENERATE_PY, gensrc, "OFF", "OFF", "ON", "OFF", only_funcs],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=run_env,
+            )
+            return sorted(os.listdir(os.path.join(gensrc, "specialized")))
+
+    def test_builtin_default_override_replaces_unroll_32_with_8(self):
+        names = self._specialized(self.MINMAX_U8_ONLY)
+        u8 = [n for n in names if "minmax_u8_1_0_" in n]
+        self.assertTrue(any(n.endswith("_8.cpp") for n in u8))
+        self.assertFalse(any(n.endswith("_32.cpp") for n in u8))
+
+    def test_env_specific_from_to_override(self):
+        env = {"RCCL_DEVICE_UNROLL_MAP": "AllReduce RING SIMPLE Sum f32 1 0 32 -> 4"}
+        names = self._specialized("AllReduce RING SIMPLE Sum f32", env=env)
+        f32 = [n for n in names if "sum_f32_1_0_" in n]
+        self.assertTrue(any(n.endswith("_4.cpp") for n in f32))
+        self.assertFalse(any(n.endswith("_32.cpp") for n in f32))
+        self.assertTrue(any(n.endswith("_8.cpp") for n in f32))
+
+
 if __name__ == "__main__":
     unittest.main()

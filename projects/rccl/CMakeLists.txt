@@ -103,6 +103,7 @@ option(INSTALL_DEPENDENCIES                    "Force install dependencies"     
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
+option(DEVICE_KERNEL_COMPILE_TIMING            "Log per-kernel RCCLDEV compile times to CSV"   OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(QP_TRACKING                             "Enable per-device QP tracking"                 OFF)
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)

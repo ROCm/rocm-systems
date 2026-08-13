@@ -37,6 +37,25 @@ def reg_values_of(coll, proto):
     return ["1", "2"]
   return ["0"]
 
+# Maps functions to the chosen representative for the equivalence class it
+# belongs to. For instance (sum, signed int) maps to (sum, unsigned int).
+def equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
+  if coll in ("AllReduce", "Reduce", "ReduceScatter"):
+    # map signed integer sum/prod to unsigned
+    if redop in ("Sum","Prod","PreMulSum","SumPostDiv") and ty[0]=="i":
+      ty = "u"+ty[1:]
+    # map signed integer min/max to unsigned for non-NVLS
+    elif redop=="MinMax" and ty[0]=="i" and ("NVLS" not in algo):
+      ty = "u"+ty[1:]
+    # map pipelined to non-pipelined for LL/LL128 to avoid extra device codegen
+    if (pipeline != "0" and proto != "SIMPLE"):
+      pipeline = "0"
+
+  return (coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
+
+def kernel_identity(coll, algo, proto, redop, ty, acc, pipeline):
+  return (coll, algo, proto, redop, ty, acc, pipeline)
+
 ################################################################################
 # The first command line argument is the path to the directory to generate and
 # populate.
@@ -271,6 +290,152 @@ local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()
 # rocSHMEM/GDA-based collectives: only generated when ENABLE_ROCSHMEM build is requested
 gda_colls = {"AlltoAllGda", "AlltoAllvGda"}
 
+# Per-kernel device codegen unroll overrides for the local GPU build.
+# Each identity below expands to two rules: default-unroll/32->8 and 16->8.
+# from_unroll=None means "replace the architecture/runtime default unroll (32 on
+# gfx1250 SIMPLE). Also set RCCL_DEVICE_UNROLL_MAP at build time; see install.sh.
+#
+# Identities capped at unroll 8: kernels whose gfx1250 compile time exceeded 45s
+# (see --kernel-compile-timing in install.sh).
+_BUILTIN_UNROLL_OVERRIDE_IDENTITIES = [
+  ("AllReduce", "TREE", "SIMPLE", "MinMax", "f16", "1", "0"),
+  ("AllReduce", "TREE", "SIMPLE", "MinMax", "f16", "0", "0"),
+  ("AllReduce", "RING", "SIMPLE", "MinMax", "f16", "1", "0"),
+  ("AllReduce", "RING", "SIMPLE", "MinMax", "u8", "1", "0"),
+  ("AllReduce", "TREE", "SIMPLE", "SumPostDiv", "u8", "1", "0"),
+  ("AllReduce", "TREE", "SIMPLE", "MinMax", "u8", "1", "0"),
+  ("AllReduce", "TREE", "SIMPLE", "Prod", "u8", "1", "0"),
+  ("AllReduce", "TREE", "SIMPLE", "PreMulSum", "bf16", "0", "1"),
+  ("AllReduce", "TREE", "SIMPLE", "PreMulSum", "u8", "1", "0"),
+  ("AllReduce", "TREE", "SIMPLE", "Sum", "u8", "1", "0"),
+  ("AllReduce", "TREE", "SIMPLE", "MinMax", "bf16", "0", "1"),
+  ("AllReduce", "TREE", "SIMPLE", "MinMax", "bf16", "1", "1"),
+  ("AllReduce", "TREE", "SIMPLE", "Prod", "bf16", "0", "1"),
+  ("AllReduce", "TREE", "SIMPLE", "Sum", "bf16", "0", "1"),
+  ("AllReduce", "TREE", "SIMPLE", "SumPostDiv", "u8", "0", "0"),
+  ("AllReduce", "TREE", "SIMPLE", "PreMulSum", "bf16", "1", "1"),
+  ("AllReduce", "RING", "SIMPLE", "SumPostDiv", "u8", "1", "0"),
+]
+
+_BUILTIN_UNROLL_OVERRIDE_RULES = [
+  rule
+  for coll, algo, proto, redop, ty, acc, pipeline in _BUILTIN_UNROLL_OVERRIDE_IDENTITIES
+  for rule in (
+    (coll, algo, proto, redop, ty, acc, pipeline, None, "8"),
+    (coll, algo, proto, redop, ty, acc, pipeline, "16", "8"),
+  )
+]
+
+_unroll_override_table = None
+
+def arch_default_unroll(proto, ty):
+  """Runtime default unroll for this arch/protocol/type (see commSetUnrollFactor)."""
+  if local_gfx_name == "gfx1250":
+    if proto == "LL" or ty in ("f8e4m3", "f8e5m2"):
+      return "8"
+    return "32"
+  if local_gfx_name == "gfx950":
+    return "1"
+  if local_gfx_name == "gfx908" or local_gfx_name == "gfx942":
+    return "2"
+  if len(local_unroll) == 1:
+    return local_unroll[0]
+  return None
+
+def _parse_unroll_map_env(env_value):
+  """Parse RCCL_DEVICE_UNROLL_MAP entries.
+
+  Formats (multiple entries separated by '|'):
+    Coll Algo Proto RedOp Ty Acc Pipeline -> ToUnroll
+    Coll Algo Proto RedOp Ty Acc Pipeline FromUnroll -> ToUnroll
+  Acc and Pipeline may be omitted (default acc=1, pipeline=0).
+  Arrow may be '->' or '='.
+  """
+  rules = []
+  for entry in env_value.split("|"):
+    entry = entry.strip()
+    if not entry:
+      continue
+    if "->" in entry:
+      left, to_unroll = entry.split("->", 1)
+    elif "=" in entry:
+      left, to_unroll = entry.split("=", 1)
+    else:
+      raise ValueError(
+        "RCCL_DEVICE_UNROLL_MAP entry must contain '->' or '=': %r" % entry)
+    to_unroll = to_unroll.strip()
+    parts = left.split()
+    if len(parts) == 5:
+      coll, algo, proto, redop, ty = parts
+      acc, pipeline = "1", "0"
+      from_unroll = None
+    elif len(parts) == 6:
+      coll, algo, proto, redop, ty, from_unroll = parts
+      acc, pipeline = "1", "0"
+    elif len(parts) == 7:
+      coll, algo, proto, redop, ty, acc, pipeline = parts
+      from_unroll = None
+    elif len(parts) == 8:
+      coll, algo, proto, redop, ty, acc, pipeline, from_unroll = parts
+    else:
+      raise ValueError(
+        "RCCL_DEVICE_UNROLL_MAP entry needs 5, 6, 7, or 8 fields before '->': %r"
+        % entry)
+    if to_unroll not in all_unrolls:
+      raise ValueError("Unknown unroll %r in RCCL_DEVICE_UNROLL_MAP entry: %r"
+                       % (to_unroll, entry))
+    if from_unroll is not None and from_unroll not in all_unrolls:
+      raise ValueError("Unknown source unroll %r in RCCL_DEVICE_UNROLL_MAP entry: %r"
+                       % (from_unroll, entry))
+    rules.append((coll, algo, proto, redop, ty, acc, pipeline, from_unroll, to_unroll))
+  return rules
+
+def _init_unroll_override_table():
+  global _unroll_override_table
+  table = {}
+  rules = list(_BUILTIN_UNROLL_OVERRIDE_RULES)
+  env_map = os.environ.get("RCCL_DEVICE_UNROLL_MAP", "")
+  if env_map:
+    rules.extend(_parse_unroll_map_env(env_map))
+  for coll, algo, proto, redop, ty, acc, pipeline, from_unroll, to_unroll in rules:
+    key = kernel_identity(coll, algo, proto, redop, ty, acc, pipeline)
+    table.setdefault(key, []).append((from_unroll, to_unroll))
+  _unroll_override_table = table
+
+def _unroll_overrides_for(coll, algo, proto, redop, ty, acc, pipeline):
+  if _unroll_override_table is None:
+    _init_unroll_override_table()
+  keys = [kernel_identity(coll, algo, proto, redop, ty, acc, pipeline)]
+  eq_key = equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, "1", "0")[:7]
+  if eq_key not in keys:
+    keys.append(eq_key)
+  rules = []
+  for key in keys:
+    rules.extend(_unroll_override_table.get(key, []))
+  return rules
+
+def maybe_remap_unroll(coll, algo, proto, redop, ty, acc, pipeline, unroll):
+  rules = _unroll_overrides_for(coll, algo, proto, redop, ty, acc, pipeline)
+  if not rules:
+    return unroll
+  for from_unroll, to_unroll in rules:
+    source_unroll = from_unroll if from_unroll is not None else arch_default_unroll(proto, ty)
+    if source_unroll is None:
+      continue
+    if unroll == source_unroll:
+      return to_unroll
+    if unroll == to_unroll and source_unroll != to_unroll:
+      return None
+  return unroll
+
+def yield_func_row(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
+  if not func_validate(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
+    return
+  remapped = maybe_remap_unroll(coll, algo, proto, redop, ty, acc, pipeline, unroll)
+  if remapped is None:
+    return
+  yield (coll, algo, proto, redop, ty, acc, pipeline, remapped, reg)
+
 # Helper function to check if the conditions for the collective is being met
 def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
   if redop == "SumPostDiv" and ty[0] not in ("i","u"):
@@ -336,8 +501,7 @@ def func_filter(function_params, current_idx, item_list=None):
         item_list.pop()
   else:
     coll, algo, proto, redop, ty, acc, pipeline, unroll, reg = item_list
-    if func_validate(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
-      yield(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
+    yield from yield_func_row(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
 
 
 # Parse ONLY_FUNCS input and feed it to func_filter
@@ -356,22 +520,6 @@ def parse_input(func_pattern):
     # Filter functions/kernels based on input
     yield from func_filter(function_params, 0)
 
-# Maps functions to the chosen representative for the equivalence class it
-# belongs to. For instance (sum, signed int) maps to (sum, unsigned int).
-def equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
-  if coll in ("AllReduce", "Reduce", "ReduceScatter"):
-    # map signed integer sum/prod to unsigned
-    if redop in ("Sum","Prod","PreMulSum","SumPostDiv") and ty[0]=="i":
-      ty = "u"+ty[1:]
-    # map signed integer min/max to unsigned for non-NVLS
-    elif redop=="MinMax" and ty[0]=="i" and ("NVLS" not in algo):
-      ty = "u"+ty[1:]
-    # map pipelined to non-pipelined for LL/LL128 to avoid extra device codegen
-    if (pipeline != "0" and proto != "SIMPLE"):
-      pipeline = "0"
-
-  return (coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
-
 # Order rows are enumerated must match formula of `ncclDevFuncId()`:
 # outermost loop should be for unroll factor; refer to host_table section
 def enumerate_func_rows():
@@ -384,13 +532,13 @@ def enumerate_func_rows():
               for acc in all_accs:
                 for pipeline in local_pipeline:
                   for reg in all_regs:
-                    if func_validate(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
-                      yield (coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
+                    yield from yield_func_row(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
 
 # Sort the hashmap based on custom key <coll> <algo> <proto> <redop> <ty>
 def custom_sort_key(fn: Fn):
+    unroll_order = local_unroll.index(fn.unroll) if fn.unroll in local_unroll else len(local_unroll) + all_unrolls.index(fn.unroll)
     return (
-        local_unroll.index(fn.unroll),
+        unroll_order,
         all_colls.index(fn.coll),
         all_algos.index(fn.algo),
         all_protos.index(fn.proto),
