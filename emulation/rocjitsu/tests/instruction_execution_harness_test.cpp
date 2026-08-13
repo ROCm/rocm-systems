@@ -11,11 +11,12 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
@@ -23,7 +24,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/decoder.h"
@@ -46,7 +46,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/test_encodings.h"
@@ -156,8 +156,8 @@ constexpr HwregArchCase kHwregArchCases[] = {
      rdna3_5::kSSetregImm32B32Sopk},
     {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4::kSGetregB32Sopk, rdna4::kSSetregB32Sopk,
      rdna4::kSSetregImm32B32Sopk},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", gfx1250::kSGetregB32Sopk, gfx1250::kSSetregB32Sopk,
-     gfx1250::kSSetregImm32B32Sopk},
+    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", cdna5::kSGetregB32Sopk, cdna5::kSSetregB32Sopk,
+     cdna5::kSSetregImm32B32Sopk},
 };
 
 struct ForceScalarGuard {
@@ -170,9 +170,9 @@ struct ForceScalarGuard {
 };
 
 class Gfx1250MemoryTestCu
-    : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, gfx1250::Isa> {
+    : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna5::Isa> {
 public:
-  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, gfx1250::Isa>;
+  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna5::Isa>;
 
   Gfx1250MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
                       amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
@@ -474,7 +474,7 @@ TEST(Rdna4ExecMaskTest, Wave32ExecHiRemainsAvailableAsScalarScratch) {
   EXPECT_EQ(wf->exec(), static_cast<uint32_t>(kRawExec));
 }
 TEST(InstructionExecutionHarness, Gfx1250) {
-  RUN_HARNESS(gfx1250, ROCJITSU_CODE_ARCH_GFX1250, "gfx1250");
+  RUN_HARNESS(cdna5, ROCJITSU_CODE_ARCH_GFX1250, "gfx1250");
 }
 
 #undef RUN_HARNESS
@@ -3892,7 +3892,7 @@ TEST(Gfx1250CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
 
   // v_cvt_pk_fp8_f32 v2.l, v5, v6
-  const auto words = encode_vop3(gfx1250::kVCvtPkFp8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
+  const auto words = encode_vop3(cdna5::kVCvtPkFp8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
   std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_fp8_f32");
@@ -3935,7 +3935,7 @@ TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
 
   // v_cvt_pk_bf8_f32 v2.l, v5, v6
-  const auto words = encode_vop3(gfx1250::kVCvtPkBf8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
+  const auto words = encode_vop3(cdna5::kVCvtPkBf8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
   std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_bf8_f32");
@@ -3969,7 +3969,7 @@ TEST(Gfx1250CvtF16Test, SrPackedF16ConsumesAdvancedSeedAndFp16OvflMode) {
   ASSERT_NE(decoder, nullptr);
 
   const auto words =
-      encode_vop3(gfx1250::kVCvtSrPkF16F32Vop3, 2, vgpr_src(5), vgpr_src(6), vgpr_src(7));
+      encode_vop3(cdna5::kVCvtSrPkF16F32Vop3, 2, vgpr_src(5), vgpr_src(6), vgpr_src(7));
   std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_sr_pk_f16_f32");
@@ -4704,10 +4704,10 @@ TEST(Gfx1250CvtFp8Test, F16SourceFp8Bf8ConversionsIgnoreFp16OvflMode) {
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x5A5ABE00u | expected_byte);
   };
 
-  run_packed_case(gfx1250::kVCvtPkFp8F16Vop3, "v_cvt_pk_fp8_f16", f16_fp8_src, 0xA5A5FF7Fu);
-  run_packed_case(gfx1250::kVCvtPkBf8F16Vop3, "v_cvt_pk_bf8_f16", f16_bf8_src, 0xA5A5FC7Cu);
-  run_sr_case(gfx1250::kVCvtSrFp8F16Vop3, "v_cvt_sr_fp8_f16", f16_fp8_src, 0, 0x7Fu);
-  run_sr_case(gfx1250::kVCvtSrBf8F16Vop3, "v_cvt_sr_bf8_f16", f16_bf8_src, 0xFFFFFFFFu, 0x7Cu);
+  run_packed_case(cdna5::kVCvtPkFp8F16Vop3, "v_cvt_pk_fp8_f16", f16_fp8_src, 0xA5A5FF7Fu);
+  run_packed_case(cdna5::kVCvtPkBf8F16Vop3, "v_cvt_pk_bf8_f16", f16_bf8_src, 0xA5A5FC7Cu);
+  run_sr_case(cdna5::kVCvtSrFp8F16Vop3, "v_cvt_sr_fp8_f16", f16_fp8_src, 0, 0x7Fu);
+  run_sr_case(cdna5::kVCvtSrBf8F16Vop3, "v_cvt_sr_bf8_f16", f16_bf8_src, 0xFFFFFFFFu, 0x7Cu);
 
   if (!wf->is_halted())
     wf->halt();

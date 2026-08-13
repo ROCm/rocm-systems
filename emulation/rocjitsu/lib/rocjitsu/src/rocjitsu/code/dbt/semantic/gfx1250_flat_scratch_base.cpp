@@ -8,8 +8,8 @@
 
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
@@ -45,7 +45,7 @@ constexpr uint16_t kMaxOrdinarySgpr = 105;
 /// @brief Complete any producer of the aliased s102:s103 state before reading
 /// the architectural flat-scratch selectors.
 [[nodiscard]] uint32_t flat_scratch_selector_wait() {
-  return gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = 0})[0];
+  return cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = 0})[0];
 }
 
 /// @brief Width of a vector source field wide enough to name a scalar value.
@@ -416,9 +416,9 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
       // the legacy granulated field for it, so raising a requirement here would
       // change nothing. The bound that matters is that the pair stays inside the
       // architecturally addressable range, which the check above enforces.
-      const auto move = gfx1250::build_sop1(gfx1250::kSMovB64Sop1,
-                                            {.ssrc0 = static_cast<uint8_t>(kFlatScratchBaseLo),
-                                             .sdst = static_cast<uint8_t>(*borrowed_pair)});
+      const auto move =
+          cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = static_cast<uint8_t>(kFlatScratchBaseLo),
+                                                  .sdst = static_cast<uint8_t>(*borrowed_pair)});
       // Appended one word at a time rather than as an iterator range: the
       // range form of insert() reduces to a bulk copy whose bounds GCC cannot
       // relate back to a single-element std::array, and it reports the
@@ -455,11 +455,11 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
     std::vector<uint32_t> replacement;
     using Pipeline = HazardTracker::Pipeline;
     HazardTracker hazards;
-    const auto low = gfx1250::build_vop1(
-        gfx1250::kVMovB32Vop1,
-        {.src0 = kFlatScratchBaseLo, .vdst = static_cast<uint8_t>(*staged_vgpr_pair)});
-    const auto high = gfx1250::build_vop1(
-        gfx1250::kVMovB32Vop1,
+    const auto low =
+        cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = kFlatScratchBaseLo,
+                                                .vdst = static_cast<uint8_t>(*staged_vgpr_pair)});
+    const auto high = cdna5::build_vop1(
+        cdna5::kVMovB32Vop1,
         {.src0 = kFlatScratchBaseHi, .vdst = static_cast<uint8_t>(*staged_vgpr_pair + 1)});
     replacement.push_back(flat_scratch_selector_wait());
     hazards.emit_raw(replacement, low[0]);
