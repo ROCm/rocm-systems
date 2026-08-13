@@ -69,26 +69,20 @@ public:
   /// @returns Instruction count.
   uint32_t num_instructions() const { return num_instructions_; }
 
-  /// @brief Whether the block ends with a terminator instruction or compiler stub.
+  /// @brief Whether the block ends with an explicit or implicit terminator.
   /// @retval true The last instruction is a branch/program terminator, or the
-  /// block is an exact gfx1250 clang unreachable-stub body followed by padding.
+  /// block represents undecodable source code assumed to be unreachable.
   /// @retval false The block falls through to the next.
   bool has_terminator() const { return has_terminator_; }
 
-  /// @brief Whether sequential execution would enter undecodable source bytes.
+  /// @brief Whether undecodable source bytes supply this block's implicit terminator.
   ///
-  /// @details Large code objects may place padding or opaque data between
-  /// functions in `.text`. Fallthrough into an undecodable gap cannot be safely
-  /// relocated and must make translation fail closed. The only exception is a
-  /// recognized gfx1250 clang unreachable-stub body followed by zero padding.
-  bool falls_through_to_undecodable_text() const { return falls_through_to_undecodable_text_; }
-
-  /// @brief Whether zero padding supplies this block's implicit terminator.
-  ///
-  /// @details The recognized gfx1250 clang unreachable stub has no architectural
-  /// terminator. Its following zero-filled alignment hole establishes a CFG
-  /// boundary that relocation must materialize as an s_endpgm in target text.
+  /// @details An opaque block is assumed unreachable by the source program.
+  /// Relocation materializes that assumption as an s_endpgm in target text.
   bool has_implicit_terminator() const { return has_implicit_terminator_; }
+
+  /// @brief Raw source words represented by an implicit opaque terminator.
+  [[nodiscard]] std::span<const uint32_t> opaque_words() const { return opaque_words_; }
 
   /// @brief Last instruction in the block, or nullptr for an empty block.
   [[nodiscard]] const Instruction *terminator() const;
@@ -167,7 +161,7 @@ public:
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
-  [[nodiscard]] bool is_gfx1250_clang_unreachable_stub() const;
+  void make_opaque_terminator(std::span<const uint32_t> words);
   void add_successor(BasicBlock &successor);
   /// Remove one proven-dead edge while preserving the inverse predecessor list.
   [[nodiscard]] bool remove_successor(BasicBlock &successor);
@@ -178,8 +172,8 @@ private:
   uint32_t size_ = 0;
   uint32_t num_instructions_ = 0;
   bool has_terminator_ = false;
-  bool falls_through_to_undecodable_text_ = false;
   bool has_implicit_terminator_ = false;
+  std::vector<uint32_t> opaque_words_;
   InstructionList instructions_;
   std::vector<std::unique_ptr<Instruction>> storage_;
   std::vector<BasicBlock *> successors_;

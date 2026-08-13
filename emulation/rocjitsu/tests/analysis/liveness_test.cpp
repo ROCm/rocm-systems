@@ -506,32 +506,25 @@ TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
   EXPECT_TRUE(has_predecessor(*blocks[0], blocks[0].get()));
 }
 
-TEST(CfgAnalysis, Gfx1250ClassifiesImplicitUnreachableStubTerminator) {
+TEST(CfgAnalysis, UndecodableRangesBecomeImplicitTerminators) {
   struct Case {
     const char *name;
     std::vector<uint32_t> words;
-    bool has_terminator;
-    bool has_implicit_terminator;
-    bool falls_through_to_undecodable_text;
+    size_t expected_blocks;
+    size_t implicit_block;
   };
   const std::array cases = {
-      Case{"clang unreachable stub", {0xb9800641u, 1u, 0}, true, true, false},
-      Case{"clang unreachable stub with prefetch",
+      Case{"setup followed by opaque word", {0xb9800641u, 1u, 0}, 2, 1},
+      Case{"setup sequence followed by opaque word",
            {0xee174000u, 0x00040000u, 0, 0x7e000000u, 0xb9800641u, 1u, 0},
-           true,
-           true,
-           false},
-      Case{"section-final clang unreachable stub", {0xb9800641u, 1u}, true, true, false},
-      Case{"ordinary fallthrough",
+           2,
+           1},
+      Case{"opaque section", {0}, 1, 0},
+      Case{"ordinary fallthrough into opaque word",
            {build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), 0},
-           false,
-           false,
-           true},
-      Case{"architectural terminator",
-           {build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), 0},
-           true,
-           false,
-           false},
+           2,
+           1},
+      Case{"architectural terminator", {build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), 0}, 2, 1},
   };
 
   for (const auto &test_case : cases) {
@@ -541,11 +534,11 @@ TEST(CfgAnalysis, Gfx1250ClassifiesImplicitUnreachableStubTerminator) {
     ASSERT_NE(decoder, nullptr);
     auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
 
-    ASSERT_EQ(blocks.size(), 1u);
-    EXPECT_EQ(blocks[0]->has_terminator(), test_case.has_terminator);
-    EXPECT_EQ(blocks[0]->has_implicit_terminator(), test_case.has_implicit_terminator);
-    EXPECT_EQ(blocks[0]->falls_through_to_undecodable_text(),
-              test_case.falls_through_to_undecodable_text);
+    ASSERT_EQ(blocks.size(), test_case.expected_blocks);
+    EXPECT_TRUE(blocks[test_case.implicit_block]->has_terminator());
+    EXPECT_TRUE(blocks[test_case.implicit_block]->has_implicit_terminator());
+    ASSERT_FALSE(blocks[test_case.implicit_block]->opaque_words().empty());
+    EXPECT_EQ(blocks[test_case.implicit_block]->opaque_words().front(), 0u);
   }
 }
 
