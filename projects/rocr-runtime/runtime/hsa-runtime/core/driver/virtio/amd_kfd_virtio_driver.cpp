@@ -70,6 +70,22 @@ __forceinline uint64_t drm_perm(hsa_access_permission_t perm) {
   }
 }
 
+__forceinline HSA_QUEUE_PRIORITY HsaInternalToKfdPriority(
+    HSA::hsa_amd_queue_priority_internal_t priority) {
+  switch (priority) {
+  case HSA::HSA_AMD_QUEUE_PRIORITY_LOW:
+    return HSA_QUEUE_PRIORITY_MINIMUM;
+  case HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL:
+    return HSA_QUEUE_PRIORITY_NORMAL;
+  case HSA::HSA_AMD_QUEUE_PRIORITY_HIGH:
+    return HSA_QUEUE_PRIORITY_HIGH;
+  case HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM:
+    return HSA_QUEUE_PRIORITY_MAXIMUM;
+  default:
+    return HSA_QUEUE_PRIORITY_NORMAL;
+  }
+}
+
 KfdVirtioDriver::KfdVirtioDriver(std::string devnode_name)
     : core::Driver(core::DriverType::KFD_VIRTIO, std::move(devnode_name)) {}
 
@@ -195,7 +211,17 @@ hsa_status_t KfdVirtioDriver::GetDeviceHandle(uint32_t node_id, void** device_ha
 }
 
 hsa_status_t KfdVirtioDriver::GetDeviceFd(uint32_t node_id, int *fd) const {
-  return HSA_STATUS_ERROR;
+  assert(fd != nullptr);
+
+  amdgpu_device_handle device_handle;
+  if (GetDeviceHandle(node_id, reinterpret_cast<void**>(&device_handle)) != HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  const int device_fd = vamdgpu_device_get_fd(device_handle);
+  if (device_fd < 0) return HSA_STATUS_ERROR;
+
+  *fd = device_fd;
+  return HSA_STATUS_SUCCESS;
 }
 
 
@@ -437,9 +463,13 @@ hsa_status_t KfdVirtioDriver::MakeMemoryUnresident(const void* mem) const {
 hsa_status_t KfdVirtioDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                           HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
                                           void* queue_addr, uint64_t queue_size_bytes,
-                                          HsaEvent* event, HsaQueueResource& queue_resource) const {
-  if (vhsaKmtCreateQueueExt(node_id, type, queue_pct, priority, sdma_engine_id, queue_addr,
-                            queue_size_bytes, event, &queue_resource) != HSAKMT_STATUS_SUCCESS)
+                                          uint64_t queue_metadata_size_bytes, HsaEvent* event,
+                                          HsaQueueResource& queue_resource) const {
+  HSA_QUEUE_PRIORITY kfd_priority = HsaInternalToKfdPriority(priority);
+
+  if (vhsaKmtCreateQueueV2(node_id, type, queue_pct, kfd_priority, sdma_engine_id, queue_addr,
+                           queue_size_bytes, queue_metadata_size_bytes, event,
+                           &queue_resource) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   return HSA_STATUS_SUCCESS;
@@ -454,17 +484,29 @@ hsa_status_t KfdVirtioDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
 hsa_status_t KfdVirtioDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_percentage,
                                           HSA::hsa_amd_queue_priority_internal_t priority, void* queue_mem,
                                           uint64_t queue_size, HsaEvent* event) const {
-  return HSA_STATUS_ERROR;
+  HSA_QUEUE_PRIORITY kfd_priority = HsaInternalToKfdPriority(priority);
+
+  if (vhsaKmtUpdateQueue(queue_id, queue_percentage, kfd_priority, queue_mem, queue_size, event) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdVirtioDriver::SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t num_cu_mask,
                                              uint32_t* cu_mask) const {
-  return HSA_STATUS_ERROR;
+  if (vhsaKmtSetQueueCUMask(queue_id, num_cu_mask, cu_mask) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdVirtioDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_GWS,
                                             uint32_t* GWS) const {
-  return HSA_STATUS_ERROR;
+  if (vhsaKmtAllocQueueGWS(queue_id, num_GWS, GWS) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdVirtioDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
@@ -583,17 +625,33 @@ hsa_status_t KfdVirtioDriver::GetTileConfig(uint32_t node_id, HsaGpuTileConfig* 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::SPMAcquire(uint32_t node_id) const { return HSA_STATUS_ERROR; }
+hsa_status_t KfdVirtioDriver::SPMAcquire(uint32_t node_id) const {
+  if (vhsaKmtSPMAcquire(node_id) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
-hsa_status_t KfdVirtioDriver::SPMRelease(uint32_t node_id) const { return HSA_STATUS_ERROR; }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::SPMRelease(uint32_t node_id) const {
+  if (vhsaKmtSPMRelease(node_id) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
+}
 
 hsa_status_t KfdVirtioDriver::SPMSetDestBuffer(uint32_t node_id, uint32_t size, uint32_t* timeout,
                                                uint32_t* size_copied, void* dest,
                                                bool* is_data_loss) const {
-  return HSA_STATUS_ERROR;
+  if (vhsaKmtSPMSetDestBuffer(node_id, size, timeout, size_copied, dest, is_data_loss) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::OpenSMI(uint32_t node_id, int* fd) const { return HSA_STATUS_ERROR; }
+hsa_status_t KfdVirtioDriver::OpenSMI(uint32_t node_id, int* fd) const {
+  if (vhsaKmtOpenSMI(node_id, fd) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
+}
 
 hsa_status_t KfdVirtioDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const {
   assert(frequency != nullptr);
@@ -622,7 +680,7 @@ hsa_status_t KfdVirtioDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** 
 
   HsaQueueInfo queue_info = {};
 
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetQueueInfo(queue_id, &queue_info));
+  HSAKMT_STATUS status = vhsaKmtGetQueueInfo(queue_id, &queue_info);
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
