@@ -429,10 +429,12 @@ ncclResult_t IbCastGinIbProxyCreateContext(void* collComm, ncclGinConfig_v13_t* 
   NCCLCHECKGOTO(ncclIbMalloc((void**)&handles, NCCL_NET_HANDLE_MAXSIZE * cComm->nranks), ret, end);
   handle = handles + NCCL_NET_HANDLE_MAXSIZE * cComm->rank;
 
+  NCCLCHECKGOTO(netIbCast.listen(cComm->ctx, cComm->dev, handle, &lComm), ret, end);
+
   // Mark communicator as RMA communicator: 1QP, Flush enabled, no CTS offload.
+  // Must be set after listen() which memsets the handle, but before allGather().
   ((struct ncclIbHandle*)handle)->isRMA = true;
 
-  NCCLCHECKGOTO(netIbCast.listen(cComm->ctx, cComm->dev, handle, &lComm), ret, end);
   NCCLCHECKGOTO(cComm->allGather(cComm, handle, handles, NCCL_NET_HANDLE_MAXSIZE), ret, end);
 
   for (int c = 0; c < config->nContexts; c++) {
