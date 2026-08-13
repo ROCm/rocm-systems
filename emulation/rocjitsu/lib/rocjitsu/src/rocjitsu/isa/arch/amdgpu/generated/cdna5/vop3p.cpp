@@ -14,7 +14,7 @@ namespace cdna5 {
 
 namespace {
 
-const char *gfx1250_matrix_fmt_name(uint32_t fmt) {
+const char *cdna5_matrix_fmt_name(uint32_t fmt) {
   switch (fmt) {
   case 0:
     return "MATRIX_FMT_FP8";
@@ -1684,9 +1684,9 @@ VWmmaF3216x16x128F8f6f4Vop3p::VWmmaF3216x16x128F8f6f4Vop3p(const MachineInst *in
 
 void VWmmaF3216x16x128F8f6f4Vop3p::build_modifiers(std::string &out) const {
   out += " matrix_a_fmt:";
-  out += gfx1250_matrix_fmt_name(inst_.opsel);
+  out += cdna5_matrix_fmt_name(inst_.opsel);
   out += " matrix_b_fmt:";
-  out += gfx1250_matrix_fmt_name((inst_.pad_14 << 2) | inst_.opsel_hi);
+  out += cdna5_matrix_fmt_name((inst_.pad_14 << 2) | inst_.opsel_hi);
 }
 
 VPkMinimum3F16Vop3p::VPkMinimum3F16Vop3p(const MachineInst *inst)
@@ -3206,11 +3206,11 @@ void VWmmaScaleF32Vop3px2::build_modifiers(std::string &out) const {
     const uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;
     if (matrix_a_fmt != 0) {
       out += " matrix_a_fmt:";
-      out += gfx1250_matrix_fmt_name(matrix_a_fmt);
+      out += cdna5_matrix_fmt_name(matrix_a_fmt);
     }
     if (matrix_b_fmt != 0) {
       out += " matrix_b_fmt:";
-      out += gfx1250_matrix_fmt_name(matrix_b_fmt);
+      out += cdna5_matrix_fmt_name(matrix_b_fmt);
     }
   }
   if (scale_inst_.opsel & 0x1u)
