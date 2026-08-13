@@ -585,13 +585,24 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       warn_ignored_env("RJ_CONSAN_SC_REPORT_MODE", "only applies to RJ_CONSAN_MODE=supercollider");
     if (config.moi_engine != rocjitsu::ConSanMoiEngine::Sampled) {
       constexpr const char *kSampledOnlyKnobs[] = {
-          "RJ_CONSAN_MOI_SAMPLE_STRIDE",         "RJ_CONSAN_MOI_SAMPLE_OFFSET",
-          "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
+          "RJ_CONSAN_MOI_SAMPLE_STRIDE",
+          "RJ_CONSAN_MOI_SAMPLE_OFFSET",
           "RJ_CONSAN_MOI_SAMPLED_CHECK",
       };
       for (const char *name : kSampledOnlyKnobs) {
         if (env_has_value(name))
           warn_ignored_env(name, "only applies to RJ_CONSAN_MODE=sampled");
+      }
+    }
+    if (config.moi_engine != rocjitsu::ConSanMoiEngine::Sampled &&
+        config.moi_engine != rocjitsu::ConSanMoiEngine::RecordReplay) {
+      constexpr const char *kRuntimeSampledKnobs[] = {
+          "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
+          "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
+      };
+      for (const char *name : kRuntimeSampledKnobs) {
+        if (env_has_value(name))
+          warn_ignored_env(name, "only applies to sampled or record-replay MOI modes");
       }
     }
     if (config.moi_engine != rocjitsu::ConSanMoiEngine::RecordReplay &&

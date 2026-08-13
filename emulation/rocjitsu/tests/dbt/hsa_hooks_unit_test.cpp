@@ -2137,6 +2137,26 @@ TEST(HsaHooksUnitTest, ConSanAcceptsBoundaryProcessMemoryLimits) {
   }
 }
 
+TEST(HsaHooksUnitTest, ConSanAcceptsRecordReplayRuntimeSamplingOverride) {
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  reset_code_object_observations();
+
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(
+      log.find("moi_runtime_sample_stride=1 moi_runtime_sample_stride_source=expert-override"),
+      std::string::npos)
+      << log;
+  EXPECT_EQ(log.find("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE is ignored"), std::string::npos) << log;
+}
+
 TEST(HsaHooksUnitTest, ConSanWarnsWhenTransformLimitCannotAdmitAnyNonemptyObject) {
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
@@ -7128,6 +7148,74 @@ TEST(HsaHooksUnitTest, ConSanDynamicStackDispatchAddsMaximumFrameAboveRuntimePri
   ASSERT_EQ(g_last_intercept_written_packets.size(), 1u);
   EXPECT_EQ(g_last_intercept_written_packets.front().private_segment_size, 1056u);
   EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticReportsRuntimeSampledDispatch) {
+  reset_code_object_observations();
+  reset_queue_fakes();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  g_transform_override_result.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  g_transform_override_result.modified = true;
+  g_transform_override_result.final_validation_passed = true;
+  g_transform_override_result.elf_bytes = {0x7f, 'E', 'L', 'F', 's', 'a', 'm', 'p'};
+  g_transform_override_result.kernels.emplace_back();
+  auto &kernel = g_transform_override_result.kernels.back();
+  kernel.name = "oversized_kernel";
+  kernel.descriptor_file_offset = 64u;
+
+  rocjitsu::ConSanPatchInfo patch;
+  patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
+  patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
+  patch.owner_descriptor_file_offsets = {kernel.descriptor_file_offset};
+  g_transform_override_result.patches.push_back(patch);
+
+  ASSERT_EXIT(
+      ([] {
+        FakeApiTable api;
+        api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+        api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
+        InstalledDbiHook hook(api);
+        if (!hook.installed())
+          std::_Exit(1);
+
+        constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+        hsa_code_object_reader_t reader{};
+        if (api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader) != HSA_STATUS_SUCCESS)
+          std::_Exit(2);
+        if (api.core.hsa_executable_load_agent_code_object_fn(
+                kFakeExecutable, kGuestAgent, reader, nullptr, nullptr) != HSA_STATUS_SUCCESS)
+          std::_Exit(3);
+
+        hsa_queue_t *queue = nullptr;
+        if (api.core.hsa_queue_create_fn(kGuestAgent, 2, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0,
+                                         0, &queue) != HSA_STATUS_SUCCESS)
+          std::_Exit(4);
+        g_fake_symbol_kernel_object = 0x12345678u;
+        hsa_executable_symbol_t symbol{};
+        if (api.core.hsa_executable_get_symbol_by_name_fn(kFakeExecutable,
+                                                          g_fake_symbol_name.c_str(), &kGuestAgent,
+                                                          &symbol) != HSA_STATUS_SUCCESS)
+          std::_Exit(5);
+
+        hsa_kernel_dispatch_packet_t dispatch{};
+        dispatch.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+        dispatch.kernel_object = g_fake_symbol_kernel_object;
+        dispatch.workgroup_size_x = 64u;
+        dispatch.workgroup_size_y = 1u;
+        dispatch.workgroup_size_z = 1u;
+        dispatch.grid_size_x = 64u;
+        dispatch.grid_size_y = 1u;
+        dispatch.grid_size_z = 1u;
+        g_fake_intercept_handler(&dispatch, 1u, 0u, g_fake_intercept_user_data,
+                                 fake_intercept_packet_writer);
+      }()),
+      testing::ExitedWithCode(86),
+      "zero visible records after 1 instrumented dispatch packet.*runtime sampling selected no "
+      "workgroups.*stride=65536 offset=0");
 }
 
 TEST(HsaHooksUnitTest, MultiProducerDoorbellRewritesEarlierPublishedPacket) {
