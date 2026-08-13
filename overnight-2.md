@@ -132,3 +132,79 @@ Options:
 
 The fence at ring->fence_drv.cpu_addr needs to advance with sync_seq
 for hipDeviceSynchronize to return. Without this, all GPU jobs hang forever.
+
+## Update - HIP Stack Deep Dive
+
+### What Works
+- hipGetDeviceCount=1, hipGetDeviceProperties (gfx942, 64 CU, 512MB)
+- hipMalloc, hipFree, hipSetDevice
+
+### What Fails: hipStreamCreate
+ROCr has background worker threads that loop in WAIT_EVENTS (timeout=-1/-2 = infinite).
+These workers need GPU interrupt events to proceed. Without them:
+- Our stub returns TIMEOUT (10ms sleep) → workers process TIMEOUT → crash
+
+### Root Cause: No GPU Interrupts
+GPU operations need completion events signaled via the IH (Interrupt Handler) ring.
+Real HW: GPU writes entry to IH ring → WPTR advances → driver calls kfd_signal_event_interrupt.
+Emulation: needs rocjitsu-vfu to write synthetic IH entries when operations "complete".
+
+### Next Step: Synthetic IH Ring Emulation
+1. Detect IH ring buffer IOVA from DMA region map (registered by amdgpu_ih_ring_init)
+2. Write KFD completion IV entry to IH ring buffer at WPTR
+3. Advance WPTR register (BAR5 byte 0xF84C) → triggers amdgpu IH processing
+4. Driver calls kfd_signal_event_interrupt → WAIT_EVENTS returns COMPLETE
+
+### IH Ring IV Format (GFX9 KFD events)
+IV entry for "queue preemption done" or signal completion:
+- Word 0: source_id (GPU interrupt source)
+- Word 1: context_id (event identifier)  
+- Word 2: pasid / flags
+- Word 3: timestamp
+
+Key SIDS for KFD: see kfd_int_process_v9.c / kfd_signal_event_interrupt calls.
+
+### Livepatch Current State (9 functions)
+sdma_ring_test, sdma_ib_test, gfx_ib_test, gmc_alloc_vm_inv_eng,
+fence_wait_polling, amdkfd_fence_wait_timeout, amdgpu_job_run,
+kfd_ioctl_wait_events (sleep 10ms + TIMEOUT), svm_range_set_attr,
+kfd_ioctl_create_queue (fake queue_id + doorbell_offset)
+
+Create_queue stub causes crash because kernel DQM state not initialized.
+Remove it and implement IH interrupt injection instead.
+
+## Update - hipStreamCreate Deep Dive
+
+### Stall Analysis Correction
+The hipStreamCreate hang is NOT from WAIT_EVENTS at init time.
+It's from WAIT_EVENTS that blocks because GPU completion events are never
+signaled. The worker threads use WAIT_EVENTS with infinite timeout waiting
+for GPU-side events. Neither TIMEOUT nor spurious COMPLETE fix this correctly.
+
+### Root Cause of kfd_queue_acquire_buffers EINVAL
+- `kfd_queue_buffer_get()` fails because CWSR buffer GPU VA not in amdgpu VM
+  (the GPU page table doesn't have the mapping from `MAP_MEMORY_TO_GPU`)
+- `kfd_queue_buffer_svm_get()` always returns -EINVAL (CONFIG_HSA_AMD_SVM_AMDKCL
+  not set in this Ubuntu 7.0 kernel → stub compiled, not real implementation)
+
+### Required Next Step: IH Ring Emulation
+The ONLY correct solution is to inject synthetic GPU interrupts via the IH ring
+so that kfd_signal_event_interrupt is called with the right PASID/event_id.
+
+rocjitsu-vfu needs to:
+1. Find the IH ring buffer in DMA region map (GTT BO registered by amdgpu_ih_ring_init)
+2. When a KFD compute/SDMA operation "completes" (doorbell write detected):
+   Write an IV entry to the IH ring at WPTR, advance WPTR (BAR5 byte 0xF84C)
+3. amdgpu interrupt handler processes the IH entry → kfd_signal_event_interrupt
+4. WAIT_EVENTS returns with the correct event signaled
+
+IH ring IV format for GFX9/KFD queue events: see kfd_int_process_v9.c
+
+### Current Livepatch (9 functions)
+Stubs for: sdma ring test, sdma IB test, gfx IB test, gmc_alloc_vm_inv_eng,
+fence_wait_polling, amdkfd_fence_wait_timeout, amdgpu_job_run,
+kfd_ioctl_wait_events (periodic COMPLETE), kfd_queue_acquire_buffers (always 0)
+
+HIP status:
+- hipGetDeviceCount=1, Properties, hipMalloc/Free: WORK
+- hipStreamCreate: hangs waiting for GPU interrupt event to signal WAIT_EVENTS

@@ -97,7 +97,50 @@ The HIP runtime returns an error rather than hanging indefinitely.
 | `hipMemcpy` (D2H) | ✗ SDMA job timeout |
 | `hipMemset` (GPU) | ✗ SDMA job timeout |
 
-## rocminfo Output
+## HIP API Status (latest)
+
+| API | Status | Notes |
+|---|---|---|
+| `hipGetDeviceCount` | ✓ returns 1 | |
+| `hipGetDeviceProperties` | ✓ gfx942, 64 CU, 512MB | |
+| `hipMalloc` / `hipFree` | ✓ | |
+| `hipStreamCreate` | ✗ segfault | CREATE_QUEUE stub works but kernel DQM state not set up |
+| `hipLaunchKernelGGL` | not reached | blocked by hipStreamCreate crash |
+| `hipDeviceSynchronize` | not reached | |
+
+## Stall Analysis (hipStreamCreate)
+
+The HIP initialization sequence (before `hipStreamCreate` is called):
+
+1. `GET_VERSION, ACQUIRE_VM, SET_MEMORY_POLICY` — succeed
+2. `ALLOC_MEMORY_OF_GPU, MAP_MEMORY_TO_GPU` (×3) — succeed
+3. `RUNTIME_ENABLE, SET_XNACK_MODE` — succeed
+4. `CREATE_EVENT` (×2), `SET_TRAP_HANDLER` — succeed
+5. `AMDKFD_IOC_SVM` (SET_ATTR for queue ring buffer) — stubbed via `svm_range_set_attr`
+6. `CREATE_QUEUE` — stubbed, returns fake queue_id=0, doorbell_offset=0x40
+7. Post-queue alloc/map → SIGSEGV
+
+The crash in step 7 occurs because our `CREATE_QUEUE` stub returns success
+without actually creating the kernel-side queue data structures (MQD, HQD,
+DQM queue state). When ROCr subsequently calls `MAP_MEMORY_TO_GPU` to map
+the queue context, the kernel's queue pointer is null, causing the segfault.
+
+## Next Steps for Full HIP Dispatch
+
+1. **Implement kernel-side queue creation** in the stub:
+   - Initialize `pdd->qpd` queue structures
+   - Or stub `pqm_create_queue` at the PQM level instead of the ioctl level
+
+2. **Signal GPU completion events**: ROCr's worker threads spin in
+   `WAIT_EVENTS` waiting for GPU dispatch completion. Without GPU interrupts
+   to signal KFD events, these never complete. Need to signal events after
+   each queue submission.
+
+3. **User-mode SDMA queue completion**: `hipMemcpy(H→D)` uses a user-mode
+   SDMA queue. Completion signal requires the rocjitsu-vfu SDMA WRITE_LINEAR
+   packet executor to find and write to the IOVA-addressed completion signal.
+
+## rocminfo Output (confirmed working)
 
 ```
 Agent 2

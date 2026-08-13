@@ -520,53 +520,71 @@ void VfioDeviceHost::fence_service_loop() {
     if (bar5 && bar5[kScratchIdx] == kTestInit)
       bar5[kScratchIdx] = kTestDone;
 
-    // SDMA0 doorbell polling: detect ring commits and trigger wb scan.
+    // SDMA0 kernel-mode doorbell polling (BAR2 64-bit index 0x100).
+    // Detects when the kernel SDMA0 GFX ring commits a new wptr.
     if (bar2) {
       uint64_t wptr_now = bar2[kSdma0DbIdx];
       if (wptr_now != sdma0_wptr_prev) {
         sdma0_wptr_prev = wptr_now;
-        if (wptr_now != ~0ULL && wptr_now != 0) {
-          std::fprintf(stderr,
-                       "[vfio-host] SDMA0 doorbell: wptr 0x%llx\n",
-                       (unsigned long long)wptr_now);
+        if (wptr_now != ~0ULL && wptr_now != 0)
           sdma_needs_scan_.store(true, std::memory_order_relaxed);
-        }
       }
     }
 
-    // GTT sentinel scan: on every SDMA doorbell change, check whether the
-    // SDMA writeback buffer contains 0xCAFEDEAD (ring test sentinel).
-    // We do this by checking only on doorbell transitions; the scan of all
-    // DMA memory is too slow (it blocks DMA_MAP processing).  Instead we
-    // store a "needs_wb_scan" flag that the doorbell handler sets.
-    if (sdma_needs_scan_.load(std::memory_order_relaxed)) {
+    // GTT sentinel scan: triggered on SDMA doorbell change or every 100 iterations
+    // (~50ms) to catch user-mode queue completions.
+    // Scans the first 4096 dwords of each DMA region for:
+    //   1. 0xCAFEDEAD → 0xDEADBEEF  (kernel ring test sentinel)
+    //   2. SDMA WRITE_LINEAR packets (op=0x2A) → execute them
+    if (sdma_needs_scan_.load(std::memory_order_relaxed) || (iteration % 100) == 0) {
       sdma_needs_scan_.store(false, std::memory_order_relaxed);
-      // Scan only the first kWbScanDwords of each DMA region.
-      static constexpr size_t kWbScanDwords = 4096;
+      static constexpr size_t kScanDwords = 4096;
+      // SDMA WRITE_LINEAR header: op=0x2A (bits 7:0), subop=0x00 (bits 15:8)
+      static constexpr uint32_t kSdmaWriteLinearHdr = 0x0000002AU;
       std::vector<DmaEntry> snap;
       {
         std::lock_guard<std::mutex> lk(dma_mutex_);
         snap = dma_regions_;
-        std::fprintf(stderr, "[vfio-host] SDMA wb scan: %zu regions\n",
-                     snap.size());
       }
-      uint32_t hits = 0;
       for (const auto &e : snap) {
         if (e.length < 4 || !e.vaddr) continue;
         auto *words = static_cast<volatile uint32_t *>(e.vaddr);
-        size_t nw = std::min(e.length / 4, kWbScanDwords);
-        std::fprintf(stderr, "[vfio-host] scan region iova=0x%llx len=0x%llx nw=%zu\n",
-                     (unsigned long long)e.iova, (unsigned long long)e.length, nw);
+        size_t nw = std::min(e.length / 4, kScanDwords);
         for (size_t j = 0; j < nw; ++j) {
+          // Kernel ring test: CAFEDEAD → DEADBEEF
           if (words[j] == kTestInit) {
             words[j] = kTestDone;
-            ++hits;
-            std::fprintf(stderr,
-                         "[vfio-host] patched CAFEDEAD at region+0x%zx\n", j * 4);
+            continue;
+          }
+          // SDMA WRITE_LINEAR packet: 5 dwords
+          // [0]=hdr [1]=dst_lo [2]=dst_hi [3]=count-1 [4]=data
+          if (words[j] == kSdmaWriteLinearHdr && j + 4 < nw) {
+            uint32_t dst_lo   = words[j + 1];
+            uint32_t dst_hi   = words[j + 2];
+            uint32_t count_m1 = words[j + 3] & 0x3FFFF;
+            uint32_t data     = words[j + 4];
+            uint64_t dst_iova = (static_cast<uint64_t>(dst_hi) << 32) | dst_lo;
+            // Only execute if dst is a known DMA region and count is small.
+            // Large copies (H→D) are not executed (no real data movement).
+            // Small writes (completion signals, ≤4 dwords) are executed.
+            if (count_m1 <= 3 && dst_iova != 0) {
+              for (uint32_t d = 0; d <= count_m1; ++d) {
+                uint64_t tgt = dst_iova + d * 4;
+                void *dst_hva = nullptr;
+                for (const auto &r : snap)
+                  if (tgt >= r.iova && tgt + 4 <= r.iova + r.length) {
+                    dst_hva = static_cast<uint8_t *>(r.vaddr) + (tgt - r.iova);
+                    break;
+                  }
+                if (dst_hva)
+                  *static_cast<volatile uint32_t *>(dst_hva) = data;
+              }
+              // Mark packet as consumed: zero the header so we don't re-execute.
+              words[j] = 0;
+            }
           }
         }
       }
-      std::fprintf(stderr, "[vfio-host] SDMA wb scan: %u hits\n", hits);
     }
 
     struct timespec ts{0, 500000};  // 0.5 ms per iteration (faster for SDMA)
