@@ -3,19 +3,18 @@
 
 """Resolve and load the ``torch_trace_collector`` pybind11 extension.
 
-The loader first looks for a prebuilt ``.so`` under the install
-prefix, then falls back to a cached cmake build under
-``~/.cache/rocprofiler-compute/``. Cache entries are keyed by the
-Python and torch versions in use and a fingerprint of the C++
-inputs. Set ``ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1`` to force a fresh
-build.
+The loader first looks for a prebuilt ``.so`` under the install prefix, then
+builds the extension from the source tree, using the user cache as the build
+directory when the source tree is read-only. Artifacts are named by the Python
+and torch versions in use and a fingerprint of the C++ inputs. Set
+``ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1`` to discard the build directory and
+build again.
 """
 
 import hashlib
 import importlib.util
 import os
 import shutil
-import subprocess
 import sys
 import types
 from dataclasses import dataclass
@@ -25,15 +24,16 @@ from typing import Optional
 _THIS_DIR = Path(__file__).resolve().parent
 # parents[2] resolves to <repo>/src in dev and <install>/libexec/<project>
 # in installed layouts; both host the torch_trace_collector sources at lib/.
-_SO_SOURCE_DIR = _THIS_DIR.parents[2] / "lib" / "torch_trace_collector"
+_NATIVE_TOOL_ROOT = _THIS_DIR.parents[2]
+_SO_SOURCE_DIR = _NATIVE_TOOL_ROOT / "lib" / "torch_trace_collector"
 _SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
 
 _INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
 
 TIER_PREBUILT = "prebuilt"
-TIER_JIT = "jit"
+TIER_RUNTIME_BUILD = "runtime-build"
 
-C_TIER_NAMES = frozenset((TIER_PREBUILT, TIER_JIT))
+C_TIER_NAMES = frozenset((TIER_PREBUILT, TIER_RUNTIME_BUILD))
 
 
 def _fingerprint_input_paths() -> tuple[Path, ...]:
@@ -171,7 +171,7 @@ def _try_prebuilt(
     return None
 
 
-def _jit_cache_dir(diagnostics: Optional[_Diagnostics] = None) -> Optional[Path]:
+def _user_cache_dir(diagnostics: Optional[_Diagnostics] = None) -> Optional[Path]:
     base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
     d = Path(base) / "rocprofiler-compute" / "torch_trace_collector"
     try:
@@ -179,7 +179,7 @@ def _jit_cache_dir(diagnostics: Optional[_Diagnostics] = None) -> Optional[Path]
     except OSError as e:
         _safe_log(
             "log",
-            f"jit cache dir unavailable ({d}): {type(e).__name__}: {e}",
+            f"user cache directory unavailable ({d}): {type(e).__name__}: {e}",
             diagnostics,
         )
         return None
@@ -192,20 +192,18 @@ _PREBUILT_HINT = (
 )
 
 
-def _explain_cmake_failure(
-    phase: str, err: Exception, stderr_tail: str
-) -> tuple[str, str]:
-    """Classify a cmake-tier failure into ``(reason, hint)``."""
-    text = (str(err) + "\n" + (stderr_tail or "")).lower()
+def _explain_cmake_failure(err: Exception) -> tuple[str, str]:
+    """Classify a cmake failure into ``(reason, hint)``."""
+    text = str(err).lower()
     if "could not find torch" in text or "torch_dir" in text:
         return (
-            f"cmake {phase}: libtorch package not visible to cmake",
+            "libtorch package not visible to cmake",
             "ensure the running interpreter's torch wheel is fully "
             "installed; alternatively, " + _PREBUILT_HINT,
         )
     if "rocprofiler-sdk-roctx" in text or "roctx.h" in text:
         return (
-            f"cmake {phase}: rocprofiler-sdk-roctx headers/library not found",
+            "rocprofiler-sdk-roctx headers/library not found",
             "set ROCM_PATH to your ROCm install root (default: "
             "/opt/rocm); alternatively, " + _PREBUILT_HINT,
         )
@@ -219,117 +217,25 @@ def _explain_cmake_failure(
         )
     ):
         return (
-            f"cmake {phase}: host C++ compiler not found or non-functional",
+            "host C++ compiler not found or non-functional",
             "ensure a working g++ or clang is on PATH; alternatively, "
             + _PREBUILT_HINT,
         )
     return (
-        f"cmake {phase} failed",
+        "cmake build failed",
         "see the cmake stderr above; if the failure is environmental, "
         + _PREBUILT_HINT,
     )
 
 
 def _log_cmake_failure(
-    phase: str,
     err: Exception,
-    stderr_tail: str,
     diagnostics: Optional[_Diagnostics] = None,
 ) -> None:
-    """Log a classified cmake failure, including a stderr tail."""
-    reason, hint = _explain_cmake_failure(phase, err, stderr_tail or "")
-    _safe_log("log", f"cmake build failed: {reason}: {err}", diagnostics)
-    if stderr_tail:
-        tail = "\n".join(stderr_tail.strip().splitlines()[-12:])
-        if tail:
-            _safe_log("log", f"cmake stderr (tail):\n{tail}", diagnostics)
+    """Log a classified cmake failure."""
+    reason, hint = _explain_cmake_failure(err)
+    _safe_log("log", f"{reason}: {err}", diagnostics)
     _safe_log("log", f"to enable the C++ tier, {hint}", diagnostics)
-
-
-def _jit_failure_marker(
-    tag: str,
-    diagnostics: Optional[_Diagnostics] = None,
-) -> Optional[Path]:
-    """Return the failure-marker path for ``tag``, or ``None`` if no cache dir."""
-    cache_dir = _jit_cache_dir(diagnostics)
-    if cache_dir is None:
-        return None
-    return cache_dir / f"torch_trace_collector-{tag}.build-failed"
-
-
-def _record_jit_failure(
-    tag: str,
-    err: Exception,
-    reason: str = TIER_JIT,
-    stderr: str = "",
-    diagnostics: Optional[_Diagnostics] = None,
-) -> None:
-    """Write a failure marker for the JIT tier."""
-    try:
-        marker = _jit_failure_marker(tag, diagnostics)
-        if marker is None:
-            return
-        payload = f"{reason}: {type(err).__name__}: {err}\n"
-        if stderr:
-            tail = "\n".join(stderr.strip().splitlines()[-20:])
-            if tail:
-                payload += f"--- stderr tail ---\n{tail}\n"
-        marker.write_text(payload)
-    except Exception as exc:
-        _safe_log(
-            "log",
-            f"jit failure-marker write skipped ({tag}): {type(exc).__name__}: {exc}",
-            diagnostics,
-        )
-
-
-def _previous_jit_failure(
-    tag: str,
-    diagnostics: Optional[_Diagnostics] = None,
-) -> Optional[str]:
-    """Return the recorded failure summary for ``tag``, if any."""
-    try:
-        marker = _jit_failure_marker(tag, diagnostics)
-        if marker is not None and marker.exists():
-            return marker.read_text().strip() or None
-    except Exception as exc:
-        _safe_log(
-            "log",
-            f"jit failure-marker read skipped ({tag}): {type(exc).__name__}: {exc}",
-            diagnostics,
-        )
-    return None
-
-
-def _clear_jit_failure(tag: str) -> None:
-    """Remove the failure marker for ``tag``."""
-    marker = _jit_failure_marker(tag)
-    if marker is None:
-        return
-    try:
-        marker.unlink()
-    except FileNotFoundError:
-        pass
-    except Exception:
-        pass
-
-
-def _install_cached_so(
-    src_so: Path,
-    cached_so: Path,
-    diagnostics: Optional[_Diagnostics] = None,
-) -> None:
-    """Copy ``src_so`` onto ``cached_so`` for the next-run cache hit."""
-    if not src_so.exists():
-        return
-    try:
-        shutil.copy2(src_so, cached_so)
-    except Exception as exc:
-        _safe_log(
-            "log",
-            f"jit cache install skipped ({cached_so}): {type(exc).__name__}: {exc}",
-            diagnostics,
-        )
 
 
 def _cmake_executable() -> Optional[str]:
@@ -337,133 +243,107 @@ def _cmake_executable() -> Optional[str]:
     return shutil.which(os.environ.get("CMAKE", "cmake"))
 
 
-def _try_jit(
+def _is_writable(path: Path) -> bool:
+    """Whether ``path`` is writable, or its parent when ``path`` does not exist."""
+    target = path if path.exists() else path.parent
+    return os.access(target, os.W_OK)
+
+
+def _runtime_build_path(
+    source_build_path: Path,
+    diagnostics: Optional[_Diagnostics] = None,
+) -> Optional[Path]:
+    """Return ``source_build_path`` when it is writable, otherwise a directory of
+    the same name under the user cache.
+    """
+    if _is_writable(source_build_path):
+        return source_build_path
+    cache_dir = _user_cache_dir(diagnostics)
+    if cache_dir is None:
+        return None
+    _safe_log(
+        "log",
+        f"{source_build_path} is not writable; building under {cache_dir}",
+        diagnostics,
+    )
+    return cache_dir / source_build_path.name
+
+
+def _try_runtime_build(
     tag: str,
     *,
     force_rebuild: bool = False,
     diagnostics: Optional[_Diagnostics] = None,
 ) -> Optional[types.ModuleType]:
-    """Return the cached or freshly cmake-built ``torch_trace_collector`` module."""
-    cache_dir = _jit_cache_dir(diagnostics)
-    if cache_dir is None:
-        return None
-    cached_so = cache_dir / f"torch_trace_collector-{tag}.so"
-
-    if not force_rebuild and cached_so.exists():
-        try:
-            mod = _import_module_from_path("torch_trace_collector", cached_so)
-            _safe_log("log", f"loaded JIT-cached .so: {cached_so}", diagnostics)
-            return mod
-        except Exception as e:
-            _safe_log(
-                "warning",
-                f"JIT-cached .so at {cached_so} failed to load: {e}",
-                diagnostics,
-            )
-            try:
-                cached_so.unlink()
-            except Exception:
-                pass
-
+    """Build the extension from the source tree and import the result."""
     missing_inputs = [p.name for p in _FINGERPRINT_INPUTS if not p.exists()]
     if missing_inputs:
         _safe_log(
             "log",
             f"build inputs missing under {_SO_SOURCE_DIR} "
-            f"({', '.join(missing_inputs)}); skipping cmake tier",
+            f"({', '.join(missing_inputs)}); skipping the runtime build",
             diagnostics,
         )
         return None
 
     cmake_exe = _cmake_executable()
     if cmake_exe is None:
-        _safe_log("log", "cmake not on PATH; skipping cmake tier", diagnostics)
+        _safe_log("log", "cmake not on PATH; skipping the runtime build", diagnostics)
         return None
 
-    prior = _previous_jit_failure(tag, diagnostics)
-    if prior is not None:
+    try:
+        from utils.native_tool_finder import NativeToolFinder
+    except Exception as e:
         _safe_log(
             "log",
-            f"skipping cmake build (prior failure cached for tag {tag}): {prior}",
+            f"native tool finder unavailable; skipping the runtime build: {e}",
             diagnostics,
         )
         return None
 
-    build_dir = cache_dir / f"cmake-build-{tag}"
-    try:
-        build_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        _log_cmake_failure("setup", e, "", diagnostics)
-        _record_jit_failure(tag, e, diagnostics=diagnostics)
+    source_build_path = (
+        _NATIVE_TOOL_ROOT
+        / NativeToolFinder.sources_dir_name
+        / NativeToolFinder.sources_build_subdir_name
+    )
+    build_path = _runtime_build_path(source_build_path, diagnostics)
+    if build_path is None:
         return None
 
-    configure_argv = [
-        cmake_exe,
-        "-S",
-        str(_SO_SOURCE_DIR),
-        "-B",
-        str(build_dir),
-        f"-DTORCH_TRACE_PYTHON={sys.executable}",
-        "-DCMAKE_BUILD_TYPE=Release",
-    ]
-    try:
-        configure = subprocess.run(
-            configure_argv,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as e:
-        _log_cmake_failure("invoke", e, "", diagnostics)
-        _record_jit_failure(tag, e, diagnostics=diagnostics)
-        return None
+    if force_rebuild:
+        shutil.rmtree(build_path, ignore_errors=True)
 
-    if configure.returncode != 0:
-        err = RuntimeError(f"cmake configure exited with rc={configure.returncode}")
-        _log_cmake_failure("configure", err, configure.stderr, diagnostics)
-        _record_jit_failure(tag, err, stderr=configure.stderr, diagnostics=diagnostics)
-        return None
+    finder = NativeToolFinder(
+        _NATIVE_TOOL_ROOT,
+        artifact_name=f"torch_trace_collector-{tag}.so",
+        build_target=f"torch_trace_collector-{tag}",
+        build_path=build_path,
+        configure_options=(
+            f"-DTORCH_TRACE_PYTHON={sys.executable}",
+            "-DBUILD_TORCH_TRACE_COLLECTOR=ON",
+            "-DCMAKE_BUILD_TYPE=Release",
+        ),
+        cmake_executable=cmake_exe,
+        search_installed=not force_rebuild,
+    )
 
     try:
-        build = subprocess.run(
-            [cmake_exe, "--build", str(build_dir), "-j"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as e:
-        _log_cmake_failure("invoke", e, "", diagnostics)
-        _record_jit_failure(tag, e, diagnostics=diagnostics)
-        return None
-
-    if build.returncode != 0:
-        err = RuntimeError(f"cmake --build exited with rc={build.returncode}")
-        _log_cmake_failure("build", err, build.stderr, diagnostics)
-        _record_jit_failure(tag, err, stderr=build.stderr, diagnostics=diagnostics)
-        return None
-
-    produced = build_dir / f"torch_trace_collector-{tag}.so"
-    if not produced.is_file():
-        err = RuntimeError(
-            f"cmake build succeeded but expected .so missing at {produced}"
-        )
-        _log_cmake_failure("missing-output", err, "", diagnostics)
-        _record_jit_failure(tag, err, diagnostics=diagnostics)
-        return None
-
-    _install_cached_so(produced, cached_so, diagnostics)
-
-    try:
-        mod = _import_module_from_path("torch_trace_collector", cached_so)
+        so_path = finder.get_artifact_path()
     except Exception as e:
-        _log_cmake_failure("load", e, "", diagnostics)
-        _record_jit_failure(tag, e, diagnostics=diagnostics)
+        _log_cmake_failure(e, diagnostics)
         return None
 
-    _clear_jit_failure(tag)
-    shutil.rmtree(build_dir, ignore_errors=True)
+    try:
+        mod = _import_module_from_path("torch_trace_collector", so_path)
+    except Exception as e:
+        _safe_log(
+            "warning",
+            f"built .so at {so_path} failed to load: {e}",
+            diagnostics,
+        )
+        return None
 
-    _safe_log("log", f"cmake-built torch_trace_collector.so for {tag}", diagnostics)
+    _safe_log("log", f"built and loaded .so: {so_path}", diagnostics)
     return mod
 
 
@@ -487,18 +367,17 @@ def load(force_python_fallback: bool = False) -> LoadResult:
     if os.environ.get(_REBUILD_ENV_VAR) == "1":
         _safe_log(
             "warning",
-            f"{_REBUILD_ENV_VAR}=1: bypassing prebuilt and JIT cache, "
-            f"forcing fresh build for tag {tag}",
+            f"{_REBUILD_ENV_VAR}=1: discarding the build directory and "
+            f"building again for tag {tag}",
             diagnostics,
         )
-        _clear_jit_failure(tag)
-        mod = _try_jit(tag, force_rebuild=True, diagnostics=diagnostics)
-        tier = TIER_JIT if mod is not None else None
+        mod = _try_runtime_build(tag, force_rebuild=True, diagnostics=diagnostics)
+        tier = TIER_RUNTIME_BUILD if mod is not None else None
         return LoadResult(mod, tier, diagnostics)
 
     for tier_name, step in (
         (TIER_PREBUILT, _try_prebuilt),
-        (TIER_JIT, _try_jit),
+        (TIER_RUNTIME_BUILD, _try_runtime_build),
     ):
         mod = step(tag, diagnostics=diagnostics)
         if mod is not None:

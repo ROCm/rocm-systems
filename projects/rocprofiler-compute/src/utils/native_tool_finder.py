@@ -8,6 +8,10 @@ from utils.utils_common import capture_subprocess_output
 
 
 class NativeToolFinder:
+    """Locate an artifact of the native tool project, building it from the source
+    tree when no installed copy is present.
+    """
+
     sources_dir_name = "lib"
     sources_build_subdir_name = "_build"
     sources_bin_subdir_name = "lib"
@@ -19,27 +23,49 @@ class NativeToolFinder:
         lib_name,
     ])
 
-    def __init__(self, root_path: Path) -> None:
-        console_debug("Searching for native collector.")
+    def __init__(
+        self,
+        root_path: Path,
+        *,
+        artifact_name: str = lib_name,
+        build_target: str | None = None,
+        build_path: Path | None = None,
+        configure_options: tuple[str, ...] = (),
+        cmake_executable: str = "cmake",
+        search_installed: bool = True,
+    ) -> None:
+        console_debug(f"Searching for {artifact_name}.")
         console_debug(f"ROCm Compute root directory: {root_path}")
 
         self.root_path = root_path
-        pass
+        self.artifact_name = artifact_name
+        self.build_target = build_target
+        self.sources_path = root_path / self.sources_dir_name
+        self.build_path = (
+            self.sources_path / self.sources_build_subdir_name
+            if build_path is None
+            else build_path
+        )
+        self.configure_options = tuple(configure_options)
+        self.cmake_executable = cmake_executable
+        self.search_installed = search_installed
 
-    def get_collector_library_path(self) -> Path:
-        collector_path = self.__find_installed_collector()
-        if not collector_path:
-            collector_path = self.__build_collector()
-        if not collector_path:
-            raise RuntimeError("Failed to find or build collector")
-        console_log(f"Using native collector: {collector_path}")
-        return collector_path
+    def get_artifact_path(self) -> Path:
+        artifact_path = (
+            self.__find_installed_artifact() if self.search_installed else None
+        )
+        if not artifact_path:
+            artifact_path = self.__build_artifact()
+        if not artifact_path:
+            raise RuntimeError(f"Failed to find or build {self.artifact_name}")
+        console_log(f"Using {self.artifact_name}: {artifact_path}")
+        return artifact_path
 
-    def __find_installed_collector(self) -> Path | None:
+    def __find_installed_artifact(self) -> Path | None:
         rocm_root_path = self.__get_installed_rocm_root_path()
         # lib* glob pattern is used to handle CMAKE_INSTALL_LIBDIR variations
-        pattern = f"lib*/rocprofiler-compute/{self.lib_name}"
-        console_debug(f"Searching {rocm_root_path} by {pattern} for native collector")
+        pattern = f"lib*/rocprofiler-compute/{self.artifact_name}"
+        console_debug(f"Searching {rocm_root_path} for {pattern}")
         return self.__find_file_by_glob_pattern(rocm_root_path, pattern)
 
     def __get_installed_rocm_root_path(self) -> Path:
@@ -52,37 +78,48 @@ class NativeToolFinder:
         match = next(base_path.glob(pattern), None)
         return Path(match) if match is not None else None
 
-    def __build_collector(self) -> Path | None:
-        self._generate_cmake(self.root_path)
-        self._build_cmake(self.root_path)
-        return self.__find_built_collector()
+    def __build_artifact(self) -> Path | None:
+        self._generate_cmake()
+        self._build_cmake()
+        return self.__find_built_artifact()
 
-    def __find_built_collector(self) -> Path | None:
-        pattern = self.lib_relative_path
-        console_log(f"Searching {self.root_path} by {pattern} for native collector")
-        return self.__find_file_by_glob_pattern(self.root_path, pattern)
-
-    def _generate_cmake(self, src_path: Path) -> None:
-        generate_command = (
-            "cmake "
-            f"-S {src_path}/{self.sources_dir_name} "
-            f"-B {src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name}"
+    def __find_built_artifact(self) -> Path | None:
+        artifact_path = (
+            self.build_path / self.sources_bin_subdir_name / self.artifact_name
         )
-        console_log(f"Generating native tool project using command: {generate_command}")
-        self.__execute_command(generate_command)
+        console_debug(f"Built artifact expected at {artifact_path}")
+        return artifact_path if artifact_path.is_file() else None
 
-    def _build_cmake(self, src_path: Path) -> None:
-        build_command = (
-            "cmake --build "
-            f"{src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name} "
-            "--parallel"
+    def _generate_cmake(self) -> None:
+        command = [
+            self.cmake_executable,
+            "-S",
+            str(self.sources_path),
+            "-B",
+            str(self.build_path),
+            *self.configure_options,
+        ]
+        console_log(
+            f"Generating native tool project using command: {shlex.join(command)}"
         )
-        console_log(f"Building native tool using command: {build_command}")
-        self.__execute_command(build_command)
+        self.__execute_command(command)
 
-    def __execute_command(self, command: str) -> None:
+    def _build_cmake(self) -> None:
+        command = [self.cmake_executable, "--build", str(self.build_path), "--parallel"]
+        if self.build_target is not None:
+            command += ["--target", self.build_target]
+        console_log(f"Building native tool using command: {shlex.join(command)}")
+        self.__execute_command(command)
+
+    def __execute_command(self, command: list[str]) -> None:
         # Output is logged when enable_logging=False is not provided
-        success, _ = capture_subprocess_output(shlex.split(command))
+        success, output = capture_subprocess_output(command)
         if not success:
-            msg = f"Failed to execute command: {command}"
-            raise RuntimeError(msg)
+            msg = f"Failed to execute command: {shlex.join(command)}"
+            tail = self.__output_tail(output)
+            raise RuntimeError(f"{msg}\n{tail}" if tail else msg)
+
+    @staticmethod
+    def __output_tail(output: str, max_lines: int = 20) -> str:
+        lines = output.strip().splitlines()
+        return "\n".join(lines[-max_lines:])

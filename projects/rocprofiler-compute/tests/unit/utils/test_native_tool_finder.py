@@ -14,19 +14,19 @@ class TestNativeToolFinder:
         self,
     ) -> None:
         with pytest.raises(RuntimeError):
-            NativeToolFinder(Path("incorrect_src")).get_collector_library_path()
+            NativeToolFinder(Path("incorrect_src")).get_artifact_path()
 
     def test_when_run_from_install_dir__finds_prebuilt_native_collector(
         self, rocm_install_dir: tuple[Path, Path]
     ) -> None:
         root_path, installed_lib_path = rocm_install_dir
-        lib_path = NativeToolFinder(root_path).get_collector_library_path()
+        lib_path = NativeToolFinder(root_path).get_artifact_path()
         assert lib_path == installed_lib_path
 
     def test_when_run_from_source_dir__builds_and_returns_collector(self, sources_dir):
         root_path, built_lib_path = sources_dir
 
-        def mock_build_collector(_: Path) -> None:
+        def mock_build_collector() -> None:
             self.__create_file(built_lib_path)
 
         with patch.object(NativeToolFinder, "_generate_cmake", return_value=None):
@@ -35,7 +35,7 @@ class TestNativeToolFinder:
                 "_build_cmake",
                 side_effect=mock_build_collector,
             ):
-                lib_path = NativeToolFinder(root_path).get_collector_library_path()
+                lib_path = NativeToolFinder(root_path).get_artifact_path()
         assert lib_path == built_lib_path
 
     def test_when_run_from_source_dir_and_collector_not_found_after_build__throws(
@@ -46,7 +46,7 @@ class TestNativeToolFinder:
         with patch.object(NativeToolFinder, "_generate_cmake", return_value=None):
             with patch.object(NativeToolFinder, "_build_cmake", return_value=None):
                 with pytest.raises(RuntimeError):
-                    NativeToolFinder(root_path).get_collector_library_path()
+                    NativeToolFinder(root_path).get_artifact_path()
 
     def test_when_run_from_source_dir_and_generation_fails__throws(
         self, sources_dir: tuple[Path, Path]
@@ -54,8 +54,141 @@ class TestNativeToolFinder:
         root_path, _ = sources_dir
         lib_path = None
         with pytest.raises(RuntimeError):
-            lib_path = NativeToolFinder(root_path).get_collector_library_path()
+            lib_path = NativeToolFinder(root_path).get_artifact_path()
         assert lib_path == None
+
+    def test_when_installed_search_is_disabled__builds_instead(
+        self, rocm_install_dir: tuple[Path, Path]
+    ) -> None:
+        root_path, installed_lib_path = rocm_install_dir
+        built_lib_path = root_path / NativeToolFinder.lib_relative_path
+        self.__create_file(built_lib_path)
+
+        def mock_build_collector() -> None:
+            pass
+
+        with patch.object(NativeToolFinder, "_generate_cmake", return_value=None):
+            with patch.object(
+                NativeToolFinder,
+                "_build_cmake",
+                side_effect=mock_build_collector,
+            ):
+                lib_path = NativeToolFinder(
+                    root_path, search_installed=False
+                ).get_artifact_path()
+        assert lib_path == built_lib_path
+        assert lib_path != installed_lib_path
+
+    def test_when_a_named_artifact_is_requested__finds_it_in_the_install_dir(
+        self, tmp_path: Path
+    ) -> None:
+        artifact_name = "torch_trace_collector-py3.12_torch2.9_src000000000000.so"
+        rocm_path = tmp_path / "opt" / "rocm"
+        root_path = rocm_path / "libexec" / "rocprofiler-compute"
+        root_path.mkdir(parents=True, exist_ok=True)
+        artifact_path = rocm_path / "lib" / "rocprofiler-compute" / artifact_name
+        self.__create_file(artifact_path)
+
+        finder = NativeToolFinder(root_path, artifact_name=artifact_name)
+        assert finder.get_artifact_path() == artifact_path
+
+    def test_when_a_named_artifact_is_built__is_found_under_the_build_path(
+        self, tmp_path: Path
+    ) -> None:
+        artifact_name = "torch_trace_collector-py3.12_torch2.9_src000000000000.so"
+        root_path = tmp_path / "src"
+        build_path = tmp_path / "cache" / "_build"
+        artifact_path = (
+            build_path / NativeToolFinder.sources_bin_subdir_name / artifact_name
+        )
+        self.__create_file(artifact_path)
+
+        with patch.object(NativeToolFinder, "_generate_cmake", return_value=None):
+            with patch.object(NativeToolFinder, "_build_cmake", return_value=None):
+                finder = NativeToolFinder(
+                    root_path,
+                    artifact_name=artifact_name,
+                    build_path=build_path,
+                )
+                assert finder.get_artifact_path() == artifact_path
+
+    def test_cmake_commands_carry_the_configure_options_and_target(
+        self, tmp_path: Path
+    ) -> None:
+        build_path = tmp_path / "_build"
+        finder = NativeToolFinder(
+            tmp_path / "src",
+            artifact_name="torch_trace_collector-tag.so",
+            build_target="torch_trace_collector-tag",
+            build_path=build_path,
+            configure_options=("-DTORCH_TRACE_PYTHON=/usr/bin/python3",),
+            cmake_executable="/fake/cmake",
+        )
+
+        with patch(
+            "utils.native_tool_finder.capture_subprocess_output",
+            return_value=(True, ""),
+        ) as execute:
+            finder._generate_cmake()
+            finder._build_cmake()
+
+        generate_command, build_command = [
+            call.args[0] for call in execute.call_args_list
+        ]
+        assert generate_command == [
+            "/fake/cmake",
+            "-S",
+            str(tmp_path / "src" / NativeToolFinder.sources_dir_name),
+            "-B",
+            str(build_path),
+            "-DTORCH_TRACE_PYTHON=/usr/bin/python3",
+        ]
+        assert build_command[:3] == ["/fake/cmake", "--build", str(build_path)]
+        assert build_command[-2:] == ["--target", "torch_trace_collector-tag"]
+
+    def test_the_collector_build_command_carries_no_target(
+        self, tmp_path: Path
+    ) -> None:
+        finder = NativeToolFinder(tmp_path / "src")
+        with patch(
+            "utils.native_tool_finder.capture_subprocess_output",
+            return_value=(True, ""),
+        ) as execute:
+            finder._build_cmake()
+        assert "--target" not in execute.call_args.args[0]
+
+    def test_when_a_command_fails__the_error_carries_the_output(
+        self, tmp_path: Path
+    ) -> None:
+        finder = NativeToolFinder(tmp_path / "src")
+        with patch(
+            "utils.native_tool_finder.capture_subprocess_output",
+            return_value=(False, "CMake Error: Could not find Torch\n"),
+        ):
+            with pytest.raises(RuntimeError, match="Could not find Torch"):
+                finder._generate_cmake()
+
+    def test_importing_the_finder_does_not_import_torch(self) -> None:
+        """The profile path imports this module, which must stay free of torch."""
+        import os
+        import subprocess
+        import sys
+
+        import utils.native_tool_finder as finder_module
+
+        src_root = Path(finder_module.__file__).resolve().parents[1]
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys\nimport utils.native_tool_finder\n"
+                "assert 'torch' not in sys.modules, 'torch imported'\n",
+            ],
+            env={**os.environ, "PYTHONPATH": str(src_root)},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
 
     @pytest.fixture(params=["lib", "lib32", "lib64"])
     def rocm_install_dir(

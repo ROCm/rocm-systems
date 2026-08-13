@@ -566,7 +566,7 @@ class RocProfCompute_Base:
             ):
                 compute_root_path = Path(__file__).resolve().parents[1]
                 native_tool_finder = NativeToolFinder(compute_root_path)
-                return str(native_tool_finder.get_collector_library_path())
+                return str(native_tool_finder.get_artifact_path())
             return None
         except Exception:
             console_error(
