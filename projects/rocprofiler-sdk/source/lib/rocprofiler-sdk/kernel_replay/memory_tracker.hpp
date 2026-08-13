@@ -22,11 +22,13 @@
 
 #pragma once
 
+#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <hsa/hsa.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -42,8 +44,17 @@ namespace kernel_replay
 // cost a single relaxed atomic load on top of the chained call.
 namespace memory_tracker
 {
+// Per-allocation record: byte size plus the agent that owns the memory. The agent is used to scope
+// snapshots so a replay only saves/restores its own agent's device memory.
+struct alloc_info_t
+{
+    size_t      size  = 0;
+    hsa_agent_t agent = {.handle = 0};
+};
+
 // ptr -> allocation size in bytes.
-using alloc_map_t = std::unordered_map<void*, size_t>;
+using alloc_map_t   = std::unordered_map<void*, size_t>;
+using tracked_map_t = std::unordered_map<void*, alloc_info_t>;
 
 // Enable/disable inventory population. Disabled by default until a replay context is configured.
 bool
@@ -64,6 +75,13 @@ record_free(void* ptr);
 alloc_map_t
 snap_inventory(hsa_agent_t agent);
 
+// The Synchronized allocation inventory. Exposed so restore() can look up a block and copy it under
+// the read lock, which blocks a concurrent free for the copy. Callers reachable during finalization
+// must first gate on registration::get_fini_status(): the alloc/free wrappers outlive this static,
+// so touching it after teardown locks a freed mutex. (restore() only runs during active replay, so
+// it is safe without the guard.)
+rocprofiler::common::Synchronized<tracked_map_t>&
+inventory();
 }  // namespace memory_tracker
 
 void

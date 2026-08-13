@@ -33,6 +33,7 @@
 
 #include <cstdint>
 #include <new>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -126,11 +127,13 @@ snap(hsa_agent_t agent)
     // allocation failure under memory pressure (resize throws bad_alloc) or a failed DMA copy.
     // Either leaves the snapshot incomplete, so the caller must decline replay rather than restore
     // partial state.
-    auto capture = [&](void* gpu_addr, size_t size, std::string_view what) -> bool {
+    auto capture =
+        [&](void* gpu_addr, size_t size, std::string_view what, bool from_tracker) -> bool {
         if(size == 0) return true;
 
         mem_block_t blk;
-        blk.gpu_addr = gpu_addr;
+        blk.gpu_addr     = gpu_addr;
+        blk.from_tracker = from_tracker;
         try
         {
             blk.host_copy.resize(size);
@@ -160,7 +163,7 @@ snap(hsa_agent_t agent)
 
     for(const auto& [ptr, size] : inventory)
     {
-        if(!capture(ptr, size, "region"))
+        if(!capture(ptr, size, "region", /*from_tracker=*/true))
         {
             out.ok = false;
             return out;
@@ -172,7 +175,7 @@ snap(hsa_agent_t agent)
     // per-block host->device copy as tracked allocations (see restore()).
     for(const auto& var : discover_module_variables(agent))
     {
-        if(!capture(var.gpu_addr, var.size, "module variable"))
+        if(!capture(var.gpu_addr, var.size, "module variable", /*from_tracker=*/false))
         {
             out.ok = false;
             return out;
@@ -192,7 +195,38 @@ restore(const device_snapshot_t& snapshot)
     size_t ok = 0;
     for(const auto& blk : snapshot.blocks)
     {
-        if(dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size()) != HSA_STATUS_SUCCESS)
+        hsa_status_t status = HSA_STATUS_SUCCESS;
+
+        if(blk.from_tracker)
+        {
+            // Copy under the read lock so a concurrent free cannot race the check and the write.
+            // returns nullopt when the region is no longer a live allocation of at least its
+            // size, meaning it was freed or reallocated after snap. Skip it.
+            const auto st = memory_tracker::inventory().rlock(
+                [&](const memory_tracker::tracked_map_t& map) -> std::optional<hsa_status_t> {
+                    auto itr = map.find(blk.gpu_addr);
+                    if(itr == map.end() || itr->second.size < blk.host_copy.size())
+                        return std::nullopt;
+                    return dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
+                });
+
+            if(!st)
+            {
+                ROCP_WARNING << fmt::format(
+                    "kernel-replay restore: skipping region {} ({}B) that is no longer live",
+                    blk.gpu_addr,
+                    blk.host_copy.size());
+                continue;
+            }
+            status = *st;
+        }
+        else
+        {
+            // Module variable: lives in the loaded executable, always present, so restore directly.
+            status = dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
+        }
+
+        if(status != HSA_STATUS_SUCCESS)
         {
             ROCP_WARNING << fmt::format(
                 "kernel-replay restore: host->device copy failed for region {} ({}B)",

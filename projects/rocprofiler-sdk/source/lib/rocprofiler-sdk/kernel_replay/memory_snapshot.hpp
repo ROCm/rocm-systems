@@ -44,6 +44,10 @@ struct mem_block_t
 {
     void*             gpu_addr = nullptr;  // live device allocation base pointer
     std::vector<char> host_copy;           // pre-kernel contents held in host memory
+    // true  = from the allocation tracker; re-check liveness before restoring (it can be freed).
+    // false = module-scope variable in a loaded executable; always live, so restore
+    // unconditionally.
+    bool from_tracker = false;
 };
 
 // A captured set of device allocations (host-side copies) for a single agent.

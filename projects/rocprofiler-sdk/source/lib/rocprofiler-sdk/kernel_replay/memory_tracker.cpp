@@ -44,19 +44,10 @@ namespace
 std::atomic<bool>&
 tracking_flag()
 {
-    static auto*& _v = common::static_object<std::atomic<bool>>::construct(false);
+    static auto*& _v = rocprofiler::common::static_object<std::atomic<bool>>::construct(false);
     return *_v;
 }
-
-// Per-allocation record: byte size plus the agent that owns the memory. The agent is used to scope
-// snapshots so a replay only saves/restores its own agent's device memory.
-struct alloc_info_t
-{
-    size_t      size  = 0;
-    hsa_agent_t agent = {.handle = 0};
-};
-
-using tracked_map_t = std::unordered_map<void*, alloc_info_t>;
+}  // namespace
 
 // Tracked allocations. The map and its lock are bundled in a Synchronized wrapper so every access
 // goes through rlock/wlock (no bare mutex to mismanage).
@@ -72,6 +63,8 @@ inventory()
     return *_v;
 }
 
+namespace
+{
 // Saved "next" function pointers (the already-installed wrappers) we chain through. Types are taken
 // from the HSA table members so signatures match exactly.
 decltype(AmdExtTable{}.hsa_amd_memory_pool_allocate_fn) next_pool_allocate   = nullptr;
@@ -171,7 +164,6 @@ snap_inventory(hsa_agent_t agent)
     });
     return out;
 }
-
 
 }  // namespace memory_tracker
 
