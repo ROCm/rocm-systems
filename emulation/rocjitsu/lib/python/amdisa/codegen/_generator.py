@@ -7453,9 +7453,7 @@ class CodeGenerator:
                     # src0/src1 operand sizes from the instruction shape.
                     cdna5_f8f6f4_shape = self._cdna5_f8f6f4_wmma_shape(inst)
                     cdna4_f8f6f4_shape = self._cdna4_f8f6f4_mfma_shape(inst)
-                    gfx1250_swmmac_has_modifiers = self._cdna5_swmmac_has_modifiers(
-                        inst
-                    )
+                    cdna5_swmmac_has_modifiers = self._cdna5_swmmac_has_modifiers(inst)
                     operand_size_exprs: dict[str, str] = {}
                     for opnd in inst.operands:
                         opnd_size_expr = self._operand_size_override(
@@ -7790,7 +7788,7 @@ class CodeGenerator:
                                 'void implicit_uses(RegisterSet &uses) const override'
                             )
                         )
-                    if cdna5_f8f6f4_shape is not None or gfx1250_swmmac_has_modifiers:
+                    if cdna5_f8f6f4_shape is not None or cdna5_swmmac_has_modifiers:
                         public_members.append(
                             cgen.Statement(
                                 'void build_modifiers(std::string &out) const override'
@@ -8990,7 +8988,7 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                    elif gfx1250_swmmac_has_modifiers:
+                    elif cdna5_swmmac_has_modifiers:
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
