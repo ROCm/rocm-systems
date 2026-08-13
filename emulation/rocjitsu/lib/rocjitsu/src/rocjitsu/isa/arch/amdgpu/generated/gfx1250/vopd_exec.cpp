@@ -18,32 +18,32 @@ namespace rocjitsu {
 namespace gfx1250 {
 
 namespace {
-constexpr uint16_t kVopdFmacF32 = 0;
-constexpr uint16_t kVopdFmaakF32 = 1;
-constexpr uint16_t kVopdFmamkF32 = 2;
-constexpr uint16_t kVopdMulF32 = 3;
-constexpr uint16_t kVopdAddF32 = 4;
-constexpr uint16_t kVopdSubF32 = 5;
-constexpr uint16_t kVopdSubrevF32 = 6;
-constexpr uint16_t kVopdMulDx9ZeroF32 = 7;
-constexpr uint16_t kVopdMovB32 = 8;
-constexpr uint16_t kVopdCndmaskB32 = 9;
-constexpr uint16_t kVopdMaxNumF32 = 10;
-constexpr uint16_t kVopdMinNumF32 = 11;
-constexpr uint16_t kVopdAddNcU32 = 16;
-constexpr uint16_t kVopdLshlrevB32 = 17;
-constexpr uint16_t kVopdBitop2B32 = 18;
-constexpr uint16_t kVopdFmaF32 = 19;
-constexpr uint16_t kVopdSubNcU32 = 20;
-constexpr uint16_t kVopdLshrrevB32 = 21;
-constexpr uint16_t kVopdAshrrevI32 = 22;
-constexpr uint16_t kVopdMaxI32 = 23;
-constexpr uint16_t kVopdMinI32 = 24;
-constexpr uint16_t kVopdFmaF64 = 32;
-constexpr uint16_t kVopdAddF64 = 33;
-constexpr uint16_t kVopdMulF64 = 34;
-constexpr uint16_t kVopdMaxNumF64 = 35;
-constexpr uint16_t kVopdMinNumF64 = 36;
+[[maybe_unused]] constexpr uint16_t kVopdFmacF32 = 0;
+[[maybe_unused]] constexpr uint16_t kVopdFmaakF32 = 1;
+[[maybe_unused]] constexpr uint16_t kVopdFmamkF32 = 2;
+[[maybe_unused]] constexpr uint16_t kVopdMulF32 = 3;
+[[maybe_unused]] constexpr uint16_t kVopdAddF32 = 4;
+[[maybe_unused]] constexpr uint16_t kVopdSubF32 = 5;
+[[maybe_unused]] constexpr uint16_t kVopdSubrevF32 = 6;
+[[maybe_unused]] constexpr uint16_t kVopdMulDx9ZeroF32 = 7;
+[[maybe_unused]] constexpr uint16_t kVopdMovB32 = 8;
+[[maybe_unused]] constexpr uint16_t kVopdCndmaskB32 = 9;
+[[maybe_unused]] constexpr uint16_t kVopdMaxNumF32 = 10;
+[[maybe_unused]] constexpr uint16_t kVopdMinNumF32 = 11;
+[[maybe_unused]] constexpr uint16_t kVopdAddNcU32 = 16;
+[[maybe_unused]] constexpr uint16_t kVopdLshlrevB32 = 17;
+[[maybe_unused]] constexpr uint16_t kVopdBitop2B32 = 18;
+[[maybe_unused]] constexpr uint16_t kVopdFmaF32 = 19;
+[[maybe_unused]] constexpr uint16_t kVopdSubNcU32 = 20;
+[[maybe_unused]] constexpr uint16_t kVopdLshrrevB32 = 21;
+[[maybe_unused]] constexpr uint16_t kVopdAshrrevI32 = 22;
+[[maybe_unused]] constexpr uint16_t kVopdMaxI32 = 23;
+[[maybe_unused]] constexpr uint16_t kVopdMinI32 = 24;
+[[maybe_unused]] constexpr uint16_t kVopdFmaF64 = 32;
+[[maybe_unused]] constexpr uint16_t kVopdAddF64 = 33;
+[[maybe_unused]] constexpr uint16_t kVopdMulF64 = 34;
+[[maybe_unused]] constexpr uint16_t kVopdMaxNumF64 = 35;
+[[maybe_unused]] constexpr uint16_t kVopdMinNumF64 = 36;
 } // namespace
 
 bool Vopd::uses_src_neg_modifier(uint16_t op) {

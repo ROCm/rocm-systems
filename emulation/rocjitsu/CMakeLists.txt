@@ -428,14 +428,31 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # The translator ships alongside the hook: both must resolve to the SAME
+    # shared object, or the cache identity they derive from it would differ and
+    # neither could read what the other wrote.
     install(
-        TARGETS hsa_hotswap_rocjitsu
+        TARGETS hsa_hotswap_rocjitsu rocjitsu_gfx1250_b0_to_a0
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    # rj_pretranslate ships because the tier it fills is only worth having if an
+    # image build or a post-install step can fill it.
+    install(
+        TARGETS rocjitsu_bin rj_pretranslate
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+    # And the wrapper ships with it. rj_pretranslate takes standalone code
+    # objects; the script is the only piece that knows how to find them inside
+    # fat binaries, offload bundles and KPACK archives, and the tool's own help
+    # text points at it. Installing one without the other leaves that pointer
+    # dangling and the deployed workflow with no entry point.
+    install(
+        PROGRAMS scripts/rocjitsu-pretranslate.py
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
 endif()
 
 # Config files and schemas: share/rocjitsu/

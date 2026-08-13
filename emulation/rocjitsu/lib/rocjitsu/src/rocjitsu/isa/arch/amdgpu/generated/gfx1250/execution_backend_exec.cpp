@@ -22,7 +22,9 @@ template <typename Derived> void execute_with_backend(Instruction &instruction, 
   static_cast<Derived &>(instruction).execute_impl(*static_cast<Isa::Context *>(context));
 }
 
-constexpr std::array<Instruction::ExecuteFn, 1613> kInstructionCallbacks{{
+constexpr size_t kInstructionCallbackCount = static_cast<size_t>(InstructionExecutionId::Count);
+using InstructionCallbackTable = std::array<Instruction::ExecuteFn, kInstructionCallbackCount>;
+constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<Vopd>,
     &execute_with_backend<SMovB32Sop1>,
     &execute_with_backend<SMovB64Sop1>,
