@@ -110,13 +110,13 @@ Panel Config:
           peak: $max_sclk * $cu_per_gpu * 131072 / 1000
           pct_of_peak: true
         Active WGPs:
-          value: AVG((SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
+          value: AVG(SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum)
           unit: WGPs/cycle
           peak: $cu_per_gpu
           pct_of_peak: true
           coll_level: SQG_LEVEL_WGP_ACTIVE
         IPC:
-          value: AVG(((SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          value: AVG((SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SQ_BUSY_CYCLES_sum)
           unit: Instr/cycle
           peak: 5
           pct_of_peak: true
@@ -136,14 +136,14 @@ Panel Config:
           peak: $max_sclk * $cu_per_gpu * 256 / 1000
           pct_of_peak: true
         LDS Bank Conflicts/Access:
-          value: AVG(((TX_VMW_LDS_BANK_CONFLICT_sum / (TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum)) if ((TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum) != 0) else None))
+          value: AVG(TX_VMW_LDS_BANK_CONFLICT_sum / (TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum))
           unit: Conflicts/access
           peak: 64
           pct_of_peak: true
         # === Cache Hierarchy: GL0 (L0) -> GL1 (L1) -> GL2 (L2) ===
         # GL0: Vector L0 Cache (per CU)
         GL0 Hit Rate:
-          value: ROUND((AVG((((TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / TX_VMW_REQ_sum) if (TX_VMW_REQ_sum != 0) else None)) * 100), 0)
+          value: ROUND(AVG((TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / TX_VMW_REQ_sum) * 100, 0)
           unit: Pct
           peak: 100
           pct_of_peak: false
@@ -154,13 +154,13 @@ Panel Config:
           pct_of_peak: true
         # GL1: Level-1 Graphics Buffer (Arbiter + 12 channels/SE)
         GL1A Busy Rate:
-          value: ROUND((AVG((GL1A_BUSY_sum / GL1A_CYCLE_sum) if (GL1A_CYCLE_sum != 0) else None)) * 100, 0)
+          value: ROUND(AVG(GL1A_BUSY_sum / GL1A_CYCLE_sum) * 100, 0)
           unit: Pct
           peak: 100
           pct_of_peak: false
         # GL2: Level-2 Graphics Cache (Last-level cache on AID)
         GL2 Cache Hit Rate:
-          value: AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None))
+          value: AVG(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
           unit: pct
           peak: 100
           pct_of_peak: false
@@ -180,17 +180,17 @@ Panel Config:
           peak: $hbmBandwidth
           pct_of_peak: true
         GL2 to DRAM Read Latency:
-          value: AVG(((GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum / GC_EA_SE_DRAM_RD_CMD_POP_sum) if (GC_EA_SE_DRAM_RD_CMD_POP_sum != 0) else None))
+          value: AVG(GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum / GC_EA_SE_DRAM_RD_CMD_POP_sum)
           unit: Cycles
           peak: None
           pct_of_peak: false
         GL2 to DRAM Write Latency:
-          value: AVG(((GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum / GC_EA_SE_DRAM_WR_CMD_POP_sum) if (GC_EA_SE_DRAM_WR_CMD_POP_sum != 0) else None))
+          value: AVG(GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum / GC_EA_SE_DRAM_WR_CMD_POP_sum)
           unit: Cycles
           peak: None
           pct_of_peak: false
         Scalar Data Cache Hit Rate:
-          value: AVG((((100 * SQC_DCACHE_HITS_sum) / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None))
+          value: AVG(100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
           unit: pct
           peak: 100
           pct_of_peak: false
@@ -210,7 +210,7 @@ Panel Config:
           peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
           pct_of_peak: true
         Instruction Cache Fetch Latency:
-          value: AVG((SUM(SQ_IFETCH_LEVEL_ACCUM) / SQC_IFETCH_REQ_sum) if (SQC_IFETCH_REQ_sum != 0) else None)
+          value: AVG(SUM(SQ_IFETCH_LEVEL_ACCUM) / SQC_IFETCH_REQ_sum)
           unit: Cycles
           peak: None
           pct_of_peak: false

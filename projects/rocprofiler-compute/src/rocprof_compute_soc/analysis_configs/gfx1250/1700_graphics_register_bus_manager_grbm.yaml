@@ -37,44 +37,44 @@ Panel Config:
         # 17.1.1) eliminates cross-pass variance; residual <1% overshoot is
         # hardware OR-gate measurement noise, not a software artifact.
         CP Utilization:
-          avg: AVG((100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN(100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: AVG(100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          min: MIN100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum
+          max: MAX(100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)
           unit: Percent
         SPI Utilization:
-          avg: AVG((100 * GRBM_SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * GRBM_SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * GRBM_SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: AVG(100 * GRBM_SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          min: MIN(100 * GRBM_SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          max: MAX(100 * GRBM_SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum)
           unit: Percent
         UTCL1 Utilization:
-          avg: AVG((100 * GRBM_UTCL1_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * GRBM_UTCL1_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * GRBM_UTCL1_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: AVG(100 * GRBM_UTCL1_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          min: MIN(100 * GRBM_UTCL1_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          max: MAX(100 * GRBM_UTCL1_BUSY_sum / GRBM_GUI_ACTIVE_sum)
           unit: Percent
         UTCL2 Utilization:
-          avg: AVG((100 * GRBM_UTCL2_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * GRBM_UTCL2_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * GRBM_UTCL2_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: AVG(100 * GRBM_UTCL2_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          min: MIN(100 * GRBM_UTCL2_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          max: MAX(100 * GRBM_UTCL2_BUSY_sum / GRBM_GUI_ACTIVE_sum)
           unit: Percent
         GL1 Utilization:
-          avg: AVG((100 * GRBM_GL1CC_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * GRBM_GL1CC_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * GRBM_GL1CC_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: AVG(100 * GRBM_GL1CC_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          min: MIN(100 * GRBM_GL1CC_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          max: MAX(100 * GRBM_GL1CC_BUSY_sum / GRBM_GUI_ACTIVE_sum)
           unit: Percent
         GLARB Utilization:
-          avg: AVG((100 * GRBM_GLARB_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * GRBM_GLARB_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * GRBM_GLARB_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: AVG(100 * GRBM_GLARB_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          min: MIN(100 * GRBM_GLARB_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          max: MAX(100 * GRBM_GLARB_BUSY_sum / GRBM_GUI_ACTIVE_sum)
           unit: Percent
         SDMA Utilization:
-          avg: AVG((100 * GRBM_SDMA_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * GRBM_SDMA_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * GRBM_SDMA_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: AVG(100 * GRBM_SDMA_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          min: MIN(100 * GRBM_SDMA_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          max: MAX(100 * GRBM_SDMA_BUSY_sum / GRBM_GUI_ACTIVE_sum)
           unit: Percent
         CH Utilization:
-          avg: AVG((100 * GRBM_CH_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * GRBM_CH_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * GRBM_CH_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: AVG(100 * GRBM_CH_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          min: MIN(100 * GRBM_CH_BUSY_sum / GRBM_GUI_ACTIVE_sum)
+          max: MAX(100 * GRBM_CH_BUSY_sum / GRBM_GUI_ACTIVE_sum)
           unit: Percent
 
   metrics_description:

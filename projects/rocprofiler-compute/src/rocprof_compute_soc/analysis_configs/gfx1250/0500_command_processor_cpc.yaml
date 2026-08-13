@@ -27,34 +27,34 @@ Panel Config:
         unit: Unit
       metric:
         CPC Utilization:
-          avg: AVG((100 * CPC_CPC_STAT_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
-          min: MIN((100 * CPC_CPC_STAT_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
-          max: MAX((100 * CPC_CPC_STAT_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          avg: AVG(100 * CPC_CPC_STAT_BUSY_sum / CPC_ALWAYS_COUNT_sum)
+          min: MIN(100 * CPC_CPC_STAT_BUSY_sum / CPC_ALWAYS_COUNT_sum)
+          max: MAX(100 * CPC_CPC_STAT_BUSY_sum / CPC_ALWAYS_COUNT_sum)
           unit: Percent
         CPC Micro-Engine Busy Dispatching Workgroups:
-          avg: AVG((100 * CPC_ME1_DC0_SPI_BUSY_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
-          min: MIN((100 * CPC_ME1_DC0_SPI_BUSY_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
-          max: MAX((100 * CPC_ME1_DC0_SPI_BUSY_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          avg: AVG(100 * CPC_ME1_DC0_SPI_BUSY_sum / CPC_CPC_STAT_BUSY_sum)
+          min: MIN(100 * CPC_ME1_DC0_SPI_BUSY_sum / CPC_CPC_STAT_BUSY_sum)
+          max: MAX(100 * CPC_ME1_DC0_SPI_BUSY_sum / CPC_CPC_STAT_BUSY_sum)
           unit: Percent
         CPC ADC Pipe0 Busy Dispatching Workgroups:
-          avg: AVG((100 * CPC_DISPATCH_ACTIVE_EN0_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
-          min: MIN((100 * CPC_DISPATCH_ACTIVE_EN0_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
-          max: MAX((100 * CPC_DISPATCH_ACTIVE_EN0_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          avg: AVG(100 * CPC_DISPATCH_ACTIVE_EN0_sum / CPC_CPC_STAT_BUSY_sum)
+          min: MIN(100 * CPC_DISPATCH_ACTIVE_EN0_sum / CPC_CPC_STAT_BUSY_sum)
+          max: MAX(100 * CPC_DISPATCH_ACTIVE_EN0_sum / CPC_CPC_STAT_BUSY_sum)
           unit: Percent
         CPC ADC Pipe1 Busy Dispatching Workgroups:
-          avg: AVG((100 * CPC_DISPATCH_ACTIVE_EN1_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
-          min: MIN((100 * CPC_DISPATCH_ACTIVE_EN1_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
-          max: MAX((100 * CPC_DISPATCH_ACTIVE_EN1_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          avg: AVG(100 * CPC_DISPATCH_ACTIVE_EN1_sum / CPC_CPC_STAT_BUSY_sum)
+          min: MIN(100 * CPC_DISPATCH_ACTIVE_EN1_sum / CPC_CPC_STAT_BUSY_sum)
+          max: MAX(100 * CPC_DISPATCH_ACTIVE_EN1_sum / CPC_CPC_STAT_BUSY_sum)
           unit: Percent
         CPC ADC Pipe2 Busy Dispatching Workgroups:
-          avg: AVG((100 * CPC_DISPATCH_ACTIVE_EN2_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
-          min: MIN((100 * CPC_DISPATCH_ACTIVE_EN2_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
-          max: MAX((100 * CPC_DISPATCH_ACTIVE_EN2_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          avg: AVG(100 * CPC_DISPATCH_ACTIVE_EN2_sum / CPC_CPC_STAT_BUSY_sum)
+          min: MIN(100 * CPC_DISPATCH_ACTIVE_EN2_sum / CPC_CPC_STAT_BUSY_sum)
+          max: MAX(100 * CPC_DISPATCH_ACTIVE_EN2_sum / CPC_CPC_STAT_BUSY_sum)
           unit: Percent
         CPC ADC Pipe3 Busy Dispatching Workgroups:
-          avg: AVG((100 * CPC_DISPATCH_ACTIVE_EN3_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
-          min: MIN((100 * CPC_DISPATCH_ACTIVE_EN3_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
-          max: MAX((100 * CPC_DISPATCH_ACTIVE_EN3_sum / CPC_CPC_STAT_BUSY_sum) if (CPC_CPC_STAT_BUSY_sum != 0) else None)
+          avg: AVG(100 * CPC_DISPATCH_ACTIVE_EN3_sum / CPC_CPC_STAT_BUSY_sum)
+          min: MIN(100 * CPC_DISPATCH_ACTIVE_EN3_sum / CPC_CPC_STAT_BUSY_sum)
+          max: MAX(100 * CPC_DISPATCH_ACTIVE_EN3_sum / CPC_CPC_STAT_BUSY_sum)
           unit: Percent
 
   metrics_description:

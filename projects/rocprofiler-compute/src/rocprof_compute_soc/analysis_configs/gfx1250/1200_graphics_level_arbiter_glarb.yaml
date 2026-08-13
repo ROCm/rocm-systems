@@ -30,19 +30,19 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          avg: AVG((100 * GLARBA_BUSY_sum / GLARBA_CYCLE_sum) if (GLARBA_CYCLE_sum != 0) else None)
-          min: MIN((100 * GLARBA_BUSY_sum / GLARBA_CYCLE_sum) if (GLARBA_CYCLE_sum != 0) else None)
-          max: MAX((100 * GLARBA_BUSY_sum / GLARBA_CYCLE_sum) if (GLARBA_CYCLE_sum != 0) else None)
+          avg: AVG(100 * GLARBA_BUSY_sum / GLARBA_CYCLE_sum)
+          min: MIN(100 * GLARBA_BUSY_sum / GLARBA_CYCLE_sum)
+          max: MAX(100 * GLARBA_BUSY_sum / GLARBA_CYCLE_sum)
           unit: Percent
         GLARBA Request Bus Utilization:
-          avg: AVG((100 * GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum) if (GLARBA_CYCLE_sum != 0) else None)
-          min: MIN((100 * GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum) if (GLARBA_CYCLE_sum != 0) else None)
-          max: MAX((100 * GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum) if (GLARBA_CYCLE_sum != 0) else None)
+          avg: AVG(100 * GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum)
+          min: MIN(100 * GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum)
+          max: MAX(100 * GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum)
           unit: Percent
         GLARBA Return Bus Utilization:
-          avg: AVG((100 * GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum) if (GLARBA_CYCLE_sum != 0) else None)
-          min: MIN((100 * GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum) if (GLARBA_CYCLE_sum != 0) else None)
-          max: MAX((100 * GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum) if (GLARBA_CYCLE_sum != 0) else None)
+          avg: AVG(100 * GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum)
+          min: MIN(100 * GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum)
+          max: MAX(100 * GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum)
           unit: Percent
         GLARBA Requests:
           avg: AVG(GLARBA_ARB_REQUESTS_sum / $denom)
@@ -50,9 +50,9 @@ Panel Config:
           max: MAX(GLARBA_ARB_REQUESTS_sum / $denom)
           unit: (Count + $normUnit)
         GLARBA Request Latency:
-          avg: AVG((GLARBA_REQ_INFLIGHT_LEVEL_sum / GLARBA_ARB_REQUESTS_sum) if (GLARBA_ARB_REQUESTS_sum != 0) else None)
-          min: MIN((GLARBA_REQ_INFLIGHT_LEVEL_sum / GLARBA_ARB_REQUESTS_sum) if (GLARBA_ARB_REQUESTS_sum != 0) else None)
-          max: MAX((GLARBA_REQ_INFLIGHT_LEVEL_sum / GLARBA_ARB_REQUESTS_sum) if (GLARBA_ARB_REQUESTS_sum != 0) else None)
+          avg: AVG(GLARBA_REQ_INFLIGHT_LEVEL_sum / GLARBA_ARB_REQUESTS_sum)
+          min: MIN(GLARBA_REQ_INFLIGHT_LEVEL_sum / GLARBA_ARB_REQUESTS_sum)
+          max: MAX(GLARBA_REQ_INFLIGHT_LEVEL_sum / GLARBA_ARB_REQUESTS_sum)
           unit: Cycles
 
   - metric_table:
@@ -66,19 +66,19 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          avg: AVG((100 * GLARBC_BUSY_sum / GLARBC_CYCLE_sum) if (GLARBC_CYCLE_sum != 0) else None)
-          min: MIN((100 * GLARBC_BUSY_sum / GLARBC_CYCLE_sum) if (GLARBC_CYCLE_sum != 0) else None)
-          max: MAX((100 * GLARBC_BUSY_sum / GLARBC_CYCLE_sum) if (GLARBC_CYCLE_sum != 0) else None)
+          avg: AVG(100 * GLARBC_BUSY_sum / GLARBC_CYCLE_sum)
+          min: MIN(100 * GLARBC_BUSY_sum / GLARBC_CYCLE_sum)
+          max: MAX(100 * GLARBC_BUSY_sum / GLARBC_CYCLE_sum)
           unit: Percent
         GLARBC Return Arbitration Latency:
-          avg: AVG((GLARBC_ARB_RET_LEVEL_sum / GLARBC_REQ_sum) if (GLARBC_REQ_sum != 0) else None)
-          min: MIN((GLARBC_ARB_RET_LEVEL_sum / GLARBC_REQ_sum) if (GLARBC_REQ_sum != 0) else None)
-          max: MAX((GLARBC_ARB_RET_LEVEL_sum / GLARBC_REQ_sum) if (GLARBC_REQ_sum != 0) else None)
+          avg: AVG(GLARBC_ARB_RET_LEVEL_sum / GLARBC_REQ_sum)
+          min: MIN(GLARBC_ARB_RET_LEVEL_sum / GLARBC_REQ_sum)
+          max: MAX(GLARBC_ARB_RET_LEVEL_sum / GLARBC_REQ_sum)
           unit: Cycles
         GLARBC Buffer Full Stall:
-          avg: AVG((100 * GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum) if (GLARBC_BUSY_sum != 0) else None)
-          min: MIN((100 * GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum) if (GLARBC_BUSY_sum != 0) else None)
-          max: MAX((100 * GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum) if (GLARBC_BUSY_sum != 0) else None)
+          avg: AVG(100 * GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum)
+          min: MIN(100 * GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum)
+          max: MAX(100 * GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -152,14 +152,14 @@ Panel Config:
         unit: Unit
       metric:
         GLARBC-GL2 Read Latency:
-          avg: AVG((GLARBC_GL2_REQ_READ_LEVEL_sum / (GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum)) if ((GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum) != 0) else None)
-          min: MIN((GLARBC_GL2_REQ_READ_LEVEL_sum / (GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum)) if ((GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum) != 0) else None)
-          max: MAX((GLARBC_GL2_REQ_READ_LEVEL_sum / (GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum)) if ((GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum) != 0) else None)
+          avg: AVG(GLARBC_GL2_REQ_READ_LEVEL_sum / (GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum))
+          min: MIN(GLARBC_GL2_REQ_READ_LEVEL_sum / (GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum))
+          max: MAX(GLARBC_GL2_REQ_READ_LEVEL_sum / (GLARBC_REQ_READ_sum + GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_NOP_RTN0_sum))
           unit: Cycles
         GLARBC-GL2 Write Latency:
-          avg: AVG((GLARBC_GL2_REQ_WRITE_LEVEL_sum / (GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum)) if ((GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum) != 0) else None)
-          min: MIN((GLARBC_GL2_REQ_WRITE_LEVEL_sum / (GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum)) if ((GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum) != 0) else None)
-          max: MAX((GLARBC_GL2_REQ_WRITE_LEVEL_sum / (GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum)) if ((GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum) != 0) else None)
+          avg: AVG(GLARBC_GL2_REQ_WRITE_LEVEL_sum / (GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum))
+          min: MIN(GLARBC_GL2_REQ_WRITE_LEVEL_sum / (GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum))
+          max: MAX(GLARBC_GL2_REQ_WRITE_LEVEL_sum / (GLARBC_REQ_WRITE_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum + GLARBC_REQ_NOP_ACK_sum))
           unit: Cycles
         GLARBC-GL2 Write ACKs:
           avg: AVG(GLARBC_GL2_RET_ACK_sum / $denom)

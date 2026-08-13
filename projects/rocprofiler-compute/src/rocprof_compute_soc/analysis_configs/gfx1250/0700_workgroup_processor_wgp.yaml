@@ -15,9 +15,9 @@ Panel Config:
         unit: Unit
       metric:
         WGP Utilization:
-          avg: AVG((100 * SQG_BUSY_CYCLES_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQG_BUSY_CYCLES_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQG_BUSY_CYCLES_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQG_BUSY_CYCLES_sum / SQG_CYCLES_sum)
+          min: MIN(100 * SQG_BUSY_CYCLES_sum / SQG_CYCLES_sum)
+          max: MAX(100 * SQG_BUSY_CYCLES_sum / SQG_CYCLES_sum)
           unit: Percent
         Wall Clock:
           avg: AVG(SQG_REFCLKS_sum)
@@ -25,9 +25,9 @@ Panel Config:
           max: MAX(SQG_REFCLKS_sum)
           unit: Cycles
         Active WGPs:
-          avg: AVG((SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
-          min: MIN((SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
-          max: MAX((SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum) if (SQG_CYCLES_sum != 0) else None)
+          avg: AVG(SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum)
+          min: MIN(SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum)
+          max: MAX(SQG_LEVEL_WGP_ACTIVE_sum / SQG_CYCLES_sum)
           unit: Count
 
   - metric_table:
@@ -107,9 +107,9 @@ Panel Config:
         unit: Unit
       metric:
         Wave Life:
-          avg: AVG((SQG_WAVE_CYCLES_sum / SQG_WAVES_sum) if (SQG_WAVES_sum != 0) else None)
-          min: MIN((SQG_WAVE_CYCLES_sum / SQG_WAVES_sum) if (SQG_WAVES_sum != 0) else None)
-          max: MAX((SQG_WAVE_CYCLES_sum / SQG_WAVES_sum) if (SQG_WAVES_sum != 0) else None)
+          avg: AVG(SQG_WAVE_CYCLES_sum / SQG_WAVES_sum)
+          min: MIN(SQG_WAVE_CYCLES_sum / SQG_WAVES_sum)
+          max: MAX(SQG_WAVE_CYCLES_sum / SQG_WAVES_sum)
           unit: Cycles
   - metric_table:
       id: 705
@@ -458,9 +458,9 @@ Panel Config:
         unit: Unit
       metric:
         TDM Issue Stall Rate:
-          avg: AVG((100 * SQ_INST_ISSUE_TDM_STALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_ISSUE_TDM_STALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_ISSUE_TDM_STALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_INST_ISSUE_TDM_STALL_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_INST_ISSUE_TDM_STALL_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_INST_ISSUE_TDM_STALL_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
 
   - metric_table:
@@ -474,24 +474,24 @@ Panel Config:
         unit: Unit
       metric:
         Pipeline Utilization - CMACC:
-          avg: AVG((100 * SQ_INST_CYCLES_VALU_CORE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VALU_CORE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VALU_CORE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_INST_CYCLES_VALU_CORE_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_INST_CYCLES_VALU_CORE_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_INST_CYCLES_VALU_CORE_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Pipeline Utilization - SMACC:
-          avg: AVG((100 * SQ_INST_CYCLES_VALU_SIDE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VALU_SIDE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VALU_SIDE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_INST_CYCLES_VALU_SIDE_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_INST_CYCLES_VALU_SIDE_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_INST_CYCLES_VALU_SIDE_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Pipeline Utilization - Double Precision:
-          avg: AVG((100 * SQ_INST_CYCLES_VALU_DP_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VALU_DP_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VALU_DP_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_INST_CYCLES_VALU_DP_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_INST_CYCLES_VALU_DP_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_INST_CYCLES_VALU_DP_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Pipeline Utilization - XDL:
-          avg: AVG((100 * SQ_INST_CYCLES_VALU_WMMA_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VALU_WMMA_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VALU_WMMA_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_INST_CYCLES_VALU_WMMA_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_INST_CYCLES_VALU_WMMA_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_INST_CYCLES_VALU_WMMA_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
 
   - metric_table:
@@ -505,9 +505,9 @@ Panel Config:
         unit: Unit
       metric:
         LDS Access Latency:
-          avg: AVG((SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum) if (SQ_INSTS_LDS_sum != 0) else None)
-          min: MIN((SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum) if (SQ_INSTS_LDS_sum != 0) else None)
-          max: MAX((SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum) if (SQ_INSTS_LDS_sum != 0) else None)
+          avg: AVG(SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum)
+          min: MIN(SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum)
+          max: MAX(SQ_INST_LEVEL_LDS_ACCUM_sum / SQ_INSTS_LDS_sum)
           unit: Cycles
   - metric_table:
       id: 714
@@ -520,50 +520,50 @@ Panel Config:
         unit: Unit
       metric:
         WGP-GL0 Request Bus Util:
-          avg: AVG((100 * SQ_INST_CYCLES_TEX_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_TEX_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_TEX_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_INST_CYCLES_TEX_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_INST_CYCLES_TEX_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_INST_CYCLES_TEX_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         WGP-GL0 LDS Request Bus Util:
-          avg: AVG((100 * SQ_INST_CYCLES_LDS_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_LDS_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_LDS_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_INST_CYCLES_LDS_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_INST_CYCLES_LDS_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_INST_CYCLES_LDS_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         WGP-GL0 VMEM Request Bus Util:
-          avg: AVG((100 * SQ_INST_CYCLES_VMEM_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VMEM_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VMEM_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_INST_CYCLES_VMEM_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_INST_CYCLES_VMEM_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_INST_CYCLES_VMEM_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         WGP-GL0 VMEM Read Request Bus Util:
-          avg: AVG((100 * SQ_INST_CYCLES_VMEM_LOAD_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VMEM_LOAD_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VMEM_LOAD_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_INST_CYCLES_VMEM_LOAD_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_INST_CYCLES_VMEM_LOAD_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_INST_CYCLES_VMEM_LOAD_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         WGP-GL0 VMEM Write Request Bus Util:
-          avg: AVG((100 * SQ_INST_CYCLES_VMEM_STORE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_INST_CYCLES_VMEM_STORE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_INST_CYCLES_VMEM_STORE_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_INST_CYCLES_VMEM_STORE_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_INST_CYCLES_VMEM_STORE_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_INST_CYCLES_VMEM_STORE_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         # Metrics 104-107: Dual-port Row0/Row1 bus utilization and stall rates
         Bus Utilization - Row0:
-          avg: AVG((100 * SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_VMEM_REQ_ROW0_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Bus Stall Rate - Row0:
-          avg: AVG((100 * SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_VMEM_REQ_ROW0_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Bus Utilization - Row1:
-          avg: AVG((100 * SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_VMEM_REQ_ROW1_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Bus Stall Rate - Row1:
-          avg: AVG((100 * SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
 
   - metric_table:
@@ -577,9 +577,9 @@ Panel Config:
         unit: Unit
       metric:
         TXD Data Bus Utilization:
-          avg: AVG((100 * SP_VGPR_TDLDS_DATA_WR_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SP_VGPR_TDLDS_DATA_WR_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SP_VGPR_TDLDS_DATA_WR_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SP_VGPR_TDLDS_DATA_WR_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SP_VGPR_TDLDS_DATA_WR_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SP_VGPR_TDLDS_DATA_WR_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
 
   - metric_table:
@@ -593,9 +593,9 @@ Panel Config:
         unit: Unit
       metric:
         Icache Hit Rate:
-          avg: AVG((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
-          min: MIN((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
-          max: MAX((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
+          avg: AVG(100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
+          min: MIN(100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
+          max: MAX(100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
           unit: Percent
   - metric_table:
       id: 717
@@ -608,9 +608,9 @@ Panel Config:
         unit: Unit
       metric:
         Dcache Hit Rate:
-          avg: AVG((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
-          min: MIN((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
-          max: MAX((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
+          avg: AVG(100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum)
+          min: MIN(100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum)
+          max: MAX(100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum)
           unit: Percent
         Dcache Request Bandwidth:
           avg: AVG(SQC_SMEM_LOAD_DWORDS_sum * 4 / $denom)
@@ -628,9 +628,9 @@ Panel Config:
         unit: Unit
       metric:
         Interface Stall Rate:
-          avg: AVG((100 * SQC_TC_STALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQC_TC_STALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQC_TC_STALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          avg: AVG(100 * SQC_TC_STALL_sum / SQ_BUSY_CYCLES_sum)
+          min: MIN(100 * SQC_TC_STALL_sum / SQ_BUSY_CYCLES_sum)
+          max: MAX(100 * SQC_TC_STALL_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
 
   metrics_description:

@@ -29,22 +29,22 @@ Panel Config:
           value: AVG(SQC_ICACHE_REQ_sum / $denom)
           unit: (Requests + $normUnit)
         ICache Utilization:
-          value: AVG((100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          value: AVG(100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         ICache Hit Rate:
-          value: AVG((100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
+          value: AVG(100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum)
           unit: Percent
         ICache Latency:
-          value: AVG((SUM(SQC_ICACHE_INFLIGHT_LEVEL_ACCUM) / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
+          value: AVG(SUM(SQC_ICACHE_INFLIGHT_LEVEL_ACCUM) / SQC_ICACHE_REQ_sum)
           unit: Cycles
         ICache Request Stall Rate:
-          value: AVG((100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          value: AVG(100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         ICache-GL1 Read Bandwidth:
           value: AVG(SQC_TC_INST_REQ_sum * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
           unit: GB/s
         ICache-GL1 Request Latency:
-          value: AVG((SUM(SQC_ICACHE_TC_INFLIGHT_LEVEL_ACCUM) / SQC_TC_INST_REQ_sum) if (SQC_TC_INST_REQ_sum != 0) else None)
+          value: AVG(SUM(SQC_ICACHE_TC_INFLIGHT_LEVEL_ACCUM) / SQC_TC_INST_REQ_sum)
           unit: Cycles
 
   - metric_table:
@@ -62,16 +62,16 @@ Panel Config:
           value: AVG(SQC_DCACHE_REQ_sum / $denom)
           unit: (Requests + $normUnit)
         Dcache Utilization:
-          value: AVG((100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          value: AVG(100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Dcache Hit Rate:
-          value: AVG((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
+          value: AVG(100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum)
           unit: Percent
         Dcache Latency:
-          value: AVG((SUM(SQC_DCACHE_INFLIGHT_LEVEL_ACCUM) / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
+          value: AVG(SUM(SQC_DCACHE_INFLIGHT_LEVEL_ACCUM) / SQC_DCACHE_REQ_sum)
           unit: Cycles
         Dcache Request Stall Rate:
-          value: AVG((100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          value: AVG(100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum)
           unit: Percent
         Dcache Request Bandwidth:
           value: AVG(SQC_SMEM_LOAD_DWORDS_sum * 4 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
@@ -80,7 +80,7 @@ Panel Config:
           value: AVG(SQC_TC_DATA_READ_REQ_sum * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
           unit: GB/s
         Dcache-GL1 Request Latency:
-          value: AVG((SUM(SQC_DCACHE_TC_INFLIGHT_LEVEL_ACCUM) / SQC_TC_DATA_READ_REQ_sum) if (SQC_TC_DATA_READ_REQ_sum != 0) else None)
+          value: AVG(SUM(SQC_DCACHE_TC_INFLIGHT_LEVEL_ACCUM) / SQC_TC_DATA_READ_REQ_sum)
           unit: Cycles
 
   - metric_table:
@@ -98,7 +98,7 @@ Panel Config:
         # WGP). Use GRBM_GUI_ACTIVE * cu_per_gpu as the timebase (same as panel 9.01);
         # TX_VMW_GATE_EN1_sum is not comparable and produces >100% artifacts.
         GL0 Utilization:
-          value: AVG((100 * TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          value: AVG(100 * TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
           unit: Percent
         GL0 Total Requests:
           value: AVG(TX_VMW_REQ_sum / $denom)
@@ -113,10 +113,10 @@ Panel Config:
           value: AVG(TX_VMW_VEC32_REQ_ATOMIC_sum / $denom)
           unit: (Requests + $normUnit)
         GL0 Hit Rate:
-          value: AVG((100 * (1 - TX_VMW_REQ_MISS_sum / TX_VMW_REQ_sum)) if (TX_VMW_REQ_sum != 0) else None)
+          value: 100 * AVG(1 - TX_VMW_REQ_MISS_sum / TX_VMW_REQ_sum)
           unit: Percent
         GL0 Request Latency:
-          value: AVG((TX_VMW_VMW_LATENCY_sum / TX_VMW_REQ_sum) if (TX_VMW_REQ_sum != 0) else None)
+          value: AVG(TX_VMW_VMW_LATENCY_sum / TX_VMW_REQ_sum)
           unit: Cycles
 
   - metric_table:
@@ -146,21 +146,21 @@ Panel Config:
           value: AVG(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
           unit: (Wavefronts + $normUnit)
         LDS Utilization:
-          value: AVG((100 * TX_VMW_LDS_INPUT_ACTIVE_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          value: AVG(100 * TX_VMW_LDS_INPUT_ACTIVE_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         # LDS Utilization (Load/Store): guard with TX_VMW_LDS_INPUT_ACTIVE_sum > 0 so kernels
         # without user LDS (e.g. vcopy) do not produce spurious ratios from internal counters.
         LDS Utilization - Load:
-          value: AVG((100 * TX_VMW_LDS_ACTIVE_LOAD_CNT_sum / TX_VMW_VMW_BUSY_sum) if ((TX_VMW_VMW_BUSY_sum != 0) & (TX_VMW_LDS_INPUT_ACTIVE_sum > 0)) else None)
+          value: AVG(100 * TX_VMW_LDS_ACTIVE_LOAD_CNT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Utilization - Store:
-          value: AVG((100 * TX_VMW_LDS_ACTIVE_STORE_CNT_sum / TX_VMW_VMW_BUSY_sum) if ((TX_VMW_VMW_BUSY_sum != 0) & (TX_VMW_LDS_INPUT_ACTIVE_sum > 0)) else None)
+          value: AVG(100 * TX_VMW_LDS_ACTIVE_STORE_CNT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Bank Conflict Stall Rate:
-          value: AVG((100 * TX_VMW_LDS_BANK_CONFLICT_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          value: AVG(100 * TX_VMW_LDS_BANK_CONFLICT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Address Conflict Stall Rate:
-          value: AVG((100 * TX_VMW_LDS_ADDR_CONFLICT_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          value: AVG(100 * TX_VMW_LDS_ADDR_CONFLICT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Load Bandwidth:
           value: AVG(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
@@ -216,22 +216,22 @@ Panel Config:
           value: AVG((TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
           unit: GB/s
         GL0-GL1 Read Latency:
-          value: AVG((TX_VMW_GL1_READ_LATENCY_sum / TX_VMW_GL1_REQ_READ_sum) if (TX_VMW_GL1_REQ_READ_sum != 0) else None)
+          value: AVG(TX_VMW_GL1_READ_LATENCY_sum / TX_VMW_GL1_REQ_READ_sum)
           unit: Cycles
         GL0-GL1 Write Latency:
-          value: AVG((TX_VMW_GL1_WRITE_LATENCY_sum / TX_VMW_GL1_REQ_WRITE_sum) if (TX_VMW_GL1_REQ_WRITE_sum != 0) else None)
+          value: AVG(TX_VMW_GL1_WRITE_LATENCY_sum / TX_VMW_GL1_REQ_WRITE_sum)
           unit: Cycles
         GL0-GL1 Request Stall Rate:
-          value: AVG((100 * TX_VMW_GL1_VMW_BACK_PRESSURE_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          value: AVG(100 * TX_VMW_GL1_VMW_BACK_PRESSURE_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         GL1A Utilization:
-          value: AVG((100 * GL1A_BUSY_sum / GL1A_CYCLE_sum) if (GL1A_CYCLE_sum != 0) else None)
+          value: AVG(100 * GL1A_BUSY_sum / GL1A_CYCLE_sum)
           unit: Percent
         GL1C Utilization:
-          value: AVG((100 * GL1C_BUSY_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
+          value: AVG(100 * GL1C_BUSY_sum / GL1C_CYCLE_sum)
           unit: Percent
         GL1C Buffer Full Stall:
-          value: AVG((100 * GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum) if (GL1C_BUSY_sum != 0) else None)
+          value: AVG(100 * GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -246,22 +246,22 @@ Panel Config:
         unit: Unit
       metric:
         GLARBA Utilization:
-          value: AVG((100 * GLARBA_BUSY_sum / GLARBA_CYCLE_sum) if (GLARBA_CYCLE_sum != 0) else None)
+          value: AVG(100 * GLARBA_BUSY_sum / GLARBA_CYCLE_sum)
           unit: Percent
         GLARBA Request Path Utilization:
-          value: AVG((100 * GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum) if (GLARBA_CYCLE_sum != 0) else None)
+          value: AVG(100 * GLARBA_REQ_PATH_BUSY_sum / GLARBA_CYCLE_sum)
           unit: Percent
         GLARBA Return Path Utilization:
-          value: AVG((100 * GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum) if (GLARBA_CYCLE_sum != 0) else None)
+          value: AVG(100 * GLARBA_RET_PATH_BUSY_sum / GLARBA_CYCLE_sum)
           unit: Percent
         GLARBA Request Latency:
-          value: AVG((GLARBA_REQ_INFLIGHT_LEVEL_sum / GLARBA_ARB_REQUESTS_sum) if (GLARBA_ARB_REQUESTS_sum != 0) else None)
+          value: AVG(GLARBA_REQ_INFLIGHT_LEVEL_sum / GLARBA_ARB_REQUESTS_sum)
           unit: Cycles
         GLARBC Utilization:
-          value: AVG((100 * GLARBC_BUSY_sum / GLARBC_CYCLE_sum) if (GLARBC_CYCLE_sum != 0) else None)
+          value: AVG(100 * GLARBC_BUSY_sum / GLARBC_CYCLE_sum)
           unit: Percent
         GLARBC Buffer Full Stall:
-          value: AVG((100 * GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum) if (GLARBC_BUSY_sum != 0) else None)
+          value: AVG(100 * GLARBC_STALL_BUFFER_FULL_sum / GLARBC_BUSY_sum)
           unit: Percent
         GL1-GLARB Read Bandwidth:
           value: AVG((GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
@@ -291,10 +291,10 @@ Panel Config:
         unit: Unit
       metric:
         GL2A Utilization:
-          value: AVG((100 * GL2A_BUSY_sum / GL2A_CYCLE_sum) if (GL2A_CYCLE_sum != 0) else None)
+          value: AVG(100 * GL2A_BUSY_sum / GL2A_CYCLE_sum)
           unit: Percent
         GL2C Hit Rate:
-          value: AVG((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
+          value: AVG(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
           unit: Percent
         GL2-EA Read Bandwidth:
           value: AVG(GL2C_EA_RDREQ_DRAM_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
@@ -306,10 +306,10 @@ Panel Config:
           value: AVG(GL2C_EA_ATOMIC_DRAM_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
           unit: GB/s
         GL2-EA Read Latency:
-          value: AVG((GL2C_EA_RDREQ_LEVEL_sum / GL2C_EA_RDREQ_sum) if (GL2C_EA_RDREQ_sum != 0) else None)
+          value: AVG(GL2C_EA_RDREQ_LEVEL_sum / GL2C_EA_RDREQ_sum)
           unit: Cycles
         GL2-EA Write Latency:
-          value: AVG((GL2C_EA_WRREQ_LEVEL_sum / GL2C_EA_WRREQ_sum) if (GL2C_EA_WRREQ_sum != 0) else None)
+          value: AVG(GL2C_EA_WRREQ_LEVEL_sum / GL2C_EA_WRREQ_sum)
           unit: Cycles
 
   - metric_table:
@@ -324,7 +324,7 @@ Panel Config:
         unit: Unit
       metric:
         EA Utilization:
-          value: AVG((100 * GC_EA_SE_BUSY_CYCLE_sum / GC_EA_SE_CYCLE_sum) if (GC_EA_SE_CYCLE_sum != 0) else None)
+          value: AVG(100 * GC_EA_SE_BUSY_CYCLE_sum / GC_EA_SE_CYCLE_sum)
           unit: Percent
         DRAM Read Bandwidth:
           value: AVG(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
@@ -351,7 +351,7 @@ Panel Config:
           value: AVG(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
           unit: GB/s
         EA Stall Rate:
-          value: AVG((100 * GC_EA_SE_SARB_STALLED_sum / GC_EA_SE_BUSY_CYCLE_sum) if (GC_EA_SE_BUSY_CYCLE_sum != 0) else None)
+          value: AVG(100 * GC_EA_SE_SARB_STALLED_sum / GC_EA_SE_BUSY_CYCLE_sum)
           unit: Percent
 
   metrics_description:
