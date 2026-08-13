@@ -446,6 +446,9 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
     case hipDeviceAttributeDmaBufSupported:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().dmabufSupported_);
       break;
+    case hipDeviceAttributeHostAllocDmaBufSupported:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().hostAllocDmabufSupported_);
+      break;
     case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
       *pi = static_cast<int>(
           g_devices[device]->devices()[0]->info().gpuDirectRdmaWithHipVmmSupported_);
