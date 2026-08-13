@@ -14,10 +14,11 @@
 
 #include <vector>
 
-// One cluster of two blocks: rank 0 sums both blocks' contributions after the
-// cluster-wide wait, so a broken barrier leaves it reading stale data.
+// One cluster of two blocks: every rank consumes the element its peer in the
+// other block published before arriving, so a broken barrier leaves it reading
+// stale data.
 static __global__ void CLUSTER_DIMS(2, 1, 1)
-    cluster_split_barrier_kernel(int* data, int* result) {
+    cluster_split_barrier_kernel(int* data, int* out) {
   namespace cg = cooperative_groups;
   cg::cluster_group cluster = cg::this_cluster();
 
@@ -27,16 +28,11 @@ static __global__ void CLUSTER_DIMS(2, 1, 1)
   data[rank] = static_cast<int>(rank) + 1;  // publish before arrive
 
   auto tok = cluster.barrier_arrive();
-  // Thread-local gap work.
-  volatile int spin = 0;
-  for (int k = 0; k < 4; ++k) spin += k;
+  const int local = static_cast<int>(rank) * 2;  // independent gap work
   cluster.barrier_wait(std::move(tok));
 
-  if (rank == 0) {
-    int sum = 0;
-    for (unsigned i = 0; i < n; i++) sum += data[i];
-    *result = sum;
-  }
+  // Half a cluster away, so the peer is always in the other workgroup.
+  out[rank] = data[(rank + n / 2) % n] + local;
 }
 
 HIP_TEST_CASE(Unit_cluster_split_barrier) {
@@ -49,24 +45,27 @@ HIP_TEST_CASE(Unit_cluster_split_barrier) {
   constexpr unsigned blocks = 2, threads = 64;
   constexpr unsigned total = blocks * threads;
 
-  int *d_data, *d_result;
+  int *d_data, *d_out;
   HIP_CHECK(hipMalloc(&d_data, sizeof(int) * total));
-  HIP_CHECK(hipMalloc(&d_result, sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_out, sizeof(int) * total));
   HIP_CHECK(hipMemset(d_data, 0, sizeof(int) * total));
-  HIP_CHECK(hipMemset(d_result, 0, sizeof(int)));
+  HIP_CHECK(hipMemset(d_out, 0, sizeof(int) * total));
 
   // grid dims == cluster dims => one cluster, so thread_rank indexes data[].
   cluster_split_barrier_kernel<<<dim3(blocks, 1, 1), dim3(threads, 1, 1)>>>(
-      d_data, d_result);
+      d_data, d_out);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
-  int result = 0;
-  HIP_CHECK(hipMemcpy(&result, d_result, sizeof(int), hipMemcpyDeviceToHost));
+  std::vector<int> out(total, 0);
+  HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(int) * total,
+                      hipMemcpyDeviceToHost));
   HIP_CHECK(hipFree(d_data));
-  HIP_CHECK(hipFree(d_result));
+  HIP_CHECK(hipFree(d_out));
 
-  // sum_{i=1..total} i
-  const int expected = static_cast<int>((total * (total + 1)) / 2);
-  REQUIRE(result == expected);
+  for (unsigned i = 0; i < total; i++) {
+    const unsigned peer = (i + total / 2) % total;
+    INFO("rank " << i << " peer " << peer);
+    REQUIRE(out[i] == static_cast<int>(peer) + 1 + 2 * static_cast<int>(i));
+  }
 }
