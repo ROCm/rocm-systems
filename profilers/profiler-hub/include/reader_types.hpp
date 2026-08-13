@@ -24,19 +24,19 @@ using timestamp_t = size_t;
 
 /// Opaque track identifier. Treat as opaque: the only portable operations are equality,
 /// ordering, hashing (so it can key a map), and reading value() — i.e. the public `value`
-/// member — to serialize/reconstruct it. The integer is a ProfilerHub-private DB identity;
-/// do not synthesize or do arithmetic on it. (Spec §3: struct track_id_t{value}.)
-/// DESIGN DECISION (deviation, 2026-07-27): the underlying integer is size_t, not the
-/// spec's uint32_t, so real DB ids cannot truncate and the consumer's SIZE_MAX invalid
-/// sentinel survives round-trips. Deliberately UNLIKE event_id_t/flow_id_t (which fully
-/// hide their value): a track id is a stable DB identity the consumer must serialize, so
-/// the integer stays publicly reachable.
+/// member — to serialize/reconstruct it. The integer is a ProfilerHub-private DB
+/// identity; do not synthesize or do arithmetic on it. (Spec §3: struct
+/// track_id_t{value}.) DESIGN DECISION (deviation, 2026-07-27): the underlying integer is
+/// size_t, not the spec's uint32_t, so real DB ids cannot truncate and the consumer's
+/// SIZE_MAX invalid sentinel survives round-trips. Deliberately UNLIKE
+/// event_id_t/flow_id_t (which fully hide their value): a track id is a stable DB
+/// identity the consumer must serialize, so the integer stays publicly reachable.
 struct track_id_t
 {
     size_t value{};
-    bool operator==(const track_id_t& o) const noexcept { return value == o.value; }
-    bool operator!=(const track_id_t& o) const noexcept { return value != o.value; }
-    bool operator<(const track_id_t& o) const noexcept { return value < o.value; }
+    bool   operator==(const track_id_t& o) const noexcept { return value == o.value; }
+    bool   operator!=(const track_id_t& o) const noexcept { return value != o.value; }
+    bool   operator<(const track_id_t& o) const noexcept { return value < o.value; }
 };
 
 enum class event_kind_t
@@ -119,8 +119,8 @@ struct event_filter_t
 
 struct event_summary_t
 {
-    std::string    name;
-    size_t         count{};
+    std::string name;
+    size_t      count{};
     timestamp_t total_duration{};
     timestamp_t avg_duration{};
     timestamp_t min_duration{};
@@ -551,8 +551,8 @@ struct region_data_t
 
     timestamp_t start_timestamp;  ///< Region start time (nanoseconds)
     timestamp_t end_timestamp;    ///< Region end time (nanoseconds)
-    std::string    name;             ///< Region name (e.g., function name, annotation)
-    std::string    extdata;
+    std::string name;             ///< Region name (e.g., function name, annotation)
+    std::string extdata;
 
     std::vector<arg_data_t> args;  ///< Optional function arguments
 };
@@ -562,7 +562,7 @@ using region_data_list_t = std::vector<region_data_ptr_t>;
 
 struct sample_data_t
 {
-    timestamp_t                timestamp{};  ///< Sample time (nanoseconds)
+    timestamp_t                   timestamp{};  ///< Sample time (nanoseconds)
     std::shared_ptr<track_info_t> track;
     std::string                   extdata;
 };
@@ -583,7 +583,7 @@ using pmc_event_data_list_t = std::vector<pmc_event_data_ptr_t>;
 
 struct kernel_dispatch_data_t
 {
-    size_t         dispatch_id{};      ///< Unique dispatch identifier
+    size_t      dispatch_id{};      ///< Unique dispatch identifier
     timestamp_t start_timestamp{};  ///< Kernel start time (nanoseconds)
     timestamp_t end_timestamp{};    ///< Kernel end time (nanoseconds)
 
@@ -615,8 +615,8 @@ using kernel_dispatch_data_list_t = std::vector<kernel_dispatch_data_ptr_t>;
 
 struct memory_copy_data_t
 {
-    timestamp_t        start_timestamp{};  ///< Copy start time (nanoseconds)
-    timestamp_t        end_timestamp{};    ///< Copy end time (nanoseconds)
+    timestamp_t           start_timestamp{};  ///< Copy start time (nanoseconds)
+    timestamp_t           end_timestamp{};    ///< Copy end time (nanoseconds)
     std::optional<size_t> dst_address;        ///< Destination memory address
     std::optional<size_t> src_address;        ///< Source memory address
     size_t                size;               ///< Transfer size (bytes)
@@ -643,8 +643,8 @@ struct memory_alloc_data_t
 {
     std::string           type;  ///< Allocation type (e.g., "hipMalloc", "hipHostMalloc")
     std::string           level;  ///< Memory level (e.g., "device", "host", "managed")
-    timestamp_t        start_timestamp{};  ///< Allocation start time (nanoseconds)
-    timestamp_t        end_timestamp{};    ///< Allocation end time (nanoseconds)
+    timestamp_t           start_timestamp{};  ///< Allocation start time (nanoseconds)
+    timestamp_t           end_timestamp{};    ///< Allocation end time (nanoseconds)
     std::optional<size_t> address;            ///< Allocated memory address
     size_t                size;               ///< Allocation size (bytes)
     std::string           extdata;
@@ -688,7 +688,7 @@ struct counter_timeline_event_t
     unique_timeline_event_id_t unique_identifier;
 
     timestamp_t timestamp;
-    size_t         value;
+    size_t      value;
 
     track_info_ptr_t track;
 };
@@ -776,12 +776,12 @@ struct event_id_access
  */
 struct event_info_t
 {
-    event_id_t                    id;        ///< Opaque handle this detail describes.
-    std::string                   name;      ///< Type's name field; empty if none.
-    std::string                   category;  ///< Event category display string.
-    timestamp_t                ts{};      ///< Start / only timestamp (nanoseconds).
-    std::optional<timestamp_t> te;        ///< End timestamp; nullopt for point events.
-    std::vector<arg_t>            properties;  ///< All non-header fields, typed.
+    event_id_t                 id;          ///< Opaque handle this detail describes.
+    std::string                name;        ///< Type's name field; empty if none.
+    std::string                category;    ///< Event category display string.
+    timestamp_t                ts{};        ///< Start / only timestamp (nanoseconds).
+    std::optional<timestamp_t> te;          ///< End timestamp; nullopt for point events.
+    std::vector<arg_t>         properties;  ///< All non-header fields, typed.
 };
 
 // --------------------- Track event types (track-scoped queries) ----------
@@ -792,9 +792,9 @@ struct interval_entry_t
                       ///< accessor of interest; a mismatched accessor returns nullopt.
     timestamp_t start{};       ///< Event start (nanoseconds).
     timestamp_t end{};         ///< Event end (nanoseconds).
-    std::string    display_name;  ///< Human-readable label for the bar.
-    std::string    category;      ///< Event category display string (e.g. "rocm_hip_api",
-                           ///< "timer_sampling"); empty when the event carries none.
+    std::string display_name;  ///< Human-readable label for the bar.
+    std::string category;      ///< Event category display string (e.g. "rocm_hip_api",
+                               ///< "timer_sampling"); empty when the event carries none.
     // DESIGN DECISION (gap #2, 2026-07-20): `level` and `parent_id` were one overloaded
     // concept; split per draft principle #4/§5. `lane` is the geometric packing row and
     // is ALWAYS valid; `parent_id` is a true containment edge, populated only on `stack`
@@ -818,9 +818,9 @@ using interval_entry_list_t = std::vector<interval_entry_t>;
 
 struct scalar_sample_t
 {
-    event_id_t     id{};         ///< Opaque handle; pass to get_event_info().
+    event_id_t  id{};         ///< Opaque handle; pass to get_event_info().
     timestamp_t timestamp{};  ///< Sample time (nanoseconds).
-    double         value{};      ///< Counter value (REAL).
+    double      value{};      ///< Counter value (REAL).
 };
 
 using scalar_sample_list_t = std::vector<scalar_sample_t>;
@@ -898,8 +898,8 @@ struct track_stats_t
     std::optional<timestamp_t>
         min_ts;  ///< Earliest start on the track; nullopt if empty.
     std::optional<timestamp_t> max_ts;  ///< Latest end (samples: latest timestamp) on
-                                           ///< the track; nullopt if empty.
-    size_t count{};  ///< Number of events (or samples) on the track.
+                                        ///< the track; nullopt if empty.
+    size_t count{};                     ///< Number of events (or samples) on the track.
 };
 
 }  // namespace profiler_hub::reader_types

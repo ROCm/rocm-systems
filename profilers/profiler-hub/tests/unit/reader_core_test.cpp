@@ -59,9 +59,9 @@ TEST_F(reader_test, get_events_for_track_returns_empty_for_null_track)
 
 // [task 068] DISABLED: renamed get_all_tracks->get_tracks compiles, but the semantics
 // differ — our get_tracks() synthesizes tracks from actual event/sample data, so a track
-// registered with no events is not surfaced (returns 0), whereas develop's get_all_tracks()
-// returned raw registered rocpd_track rows. Semantic collision beyond a mechanical rename;
-// equivalent coverage is a deferred port chunk.
+// registered with no events is not surfaced (returns 0), whereas develop's
+// get_all_tracks() returned raw registered rocpd_track rows. Semantic collision beyond a
+// mechanical rename; equivalent coverage is a deferred port chunk.
 TEST_F(reader_test, DISABLED_get_events_for_track_returns_events_for_registered_track)
 {
     auto writer = make_writer();

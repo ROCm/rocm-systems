@@ -90,7 +90,6 @@ protected:
     std::string m_uuid = "testuuid0000";
 };
 
-
 inline reader_types::event_type_t
 type_of(const reader_types::event_id_t& id)
 {
@@ -142,7 +141,8 @@ find_prop(const reader_types::event_info_t& d, const std::string& key)
 
 // All tracks of a given type.
 inline reader_types::track_info_list_t
-find_tracks(const reader_types::track_info_list_t& tracks, reader_types::track_type_t type)
+find_tracks(const reader_types::track_info_list_t& tracks,
+            reader_types::track_type_t             type)
 {
     reader_types::track_info_list_t out;
     for(const auto& t : tracks)

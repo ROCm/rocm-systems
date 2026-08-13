@@ -298,9 +298,9 @@ struct reader_t
      * arrow-span-latency (dst.start - src.end, clamped at 0) edges, tie-broken by
      * (source, dest) handle order so the kept set is STABLE across pans. 0 = no cap.
      * @return The kept edges. A returned edge still carries NO timestamps — endpoint
-     *         geometry is used internally only to filter and rank; the emitted flow_edge_t
-     * shape (source, dest, flow_id, kind) is unchanged. Every returned edge is a member
-     *         of get_flows({}).
+     *         geometry is used internally only to filter and rank; the emitted
+     * flow_edge_t shape (source, dest, flow_id, kind) is unchanged. Every returned edge
+     * is a member of get_flows({}).
      */
     [[nodiscard]] reader_types::flow_list_t get_flows_in_window(
         const std::vector<reader_types::track_id_t>& tracks,

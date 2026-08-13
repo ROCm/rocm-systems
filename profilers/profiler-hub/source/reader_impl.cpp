@@ -3072,27 +3072,28 @@ reader_t::impl::get_flows_for_chain(const reader_types::flow_id_t& flow_id)
 reader_types::flow_list_t
 reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>& tracks,
                                     const reader_types::time_window_t&           window,
-                                    uint32_t                                     max_edges)
+                                    uint32_t max_edges)
 {
     // The tracks param speaks the opaque track_id_t (task 056 — the 4th/final public
     // track-id consumer to adopt it, completing draft principle #3). Membership is tested
-    // opaque-id-to-opaque-id against track_info_t::id, so no .value unwrap is needed here.
+    // opaque-id-to-opaque-id against track_info_t::id, so no .value unwrap is needed
+    // here.
     auto edges = get_flows({});
     if(edges.empty()) return edges;
 
-    // A flow_edge_t carries no timestamps and no track_id, so this selector cannot post-filter
-    // get_flows({}) the way the adjacency/chain selectors do. Flow endpoints are always
-    // interval events (region/kd/mc/ma), so resolve each endpoint's (start, end) and its
-    // track membership by sweeping the interval tracks once. This goes through
-    // get_interval_track, which already hides the v3-synthesized-vs-v4-column track-id
-    // difference, so both backends yield identical selector semantics.
+    // A flow_edge_t carries no timestamps and no track_id, so this selector cannot
+    // post-filter get_flows({}) the way the adjacency/chain selectors do. Flow endpoints
+    // are always interval events (region/kd/mc/ma), so resolve each endpoint's (start,
+    // end) and its track membership by sweeping the interval tracks once. This goes
+    // through get_interval_track, which already hides the v3-synthesized-vs-v4-column
+    // track-id difference, so both backends yield identical selector semantics.
     struct endpoint_geom
     {
         reader_types::timestamp_t start{};
         reader_types::timestamp_t end{};
-        bool                         seen{ false };
+        bool                      seen{ false };
     };
-    std::unordered_map<reader_types::event_id_t, endpoint_geom>       geom;
+    std::unordered_map<reader_types::event_id_t, endpoint_geom> geom;
     std::unordered_map<reader_types::event_id_t, std::vector<reader_types::track_id_t>>
         on_tracks;
     for(const auto& t : get_tracks())
@@ -3182,15 +3183,16 @@ reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>&
         const auto& gd = geom[e.dest];
         return gd.start > gs.end ? gd.start - gs.end : 0;  // clamp: size_t is unsigned
     };
-    std::sort(filtered.begin(),
-              filtered.end(),
-              [&](const reader_types::flow_edge_t& a, const reader_types::flow_edge_t& b) {
-                  const auto la = latency(a);
-                  const auto lb = latency(b);
-                  if(la != lb) return la > lb;
-                  if(!(a.source == b.source)) return a.source < b.source;
-                  return a.dest < b.dest;
-              });
+    std::sort(
+        filtered.begin(),
+        filtered.end(),
+        [&](const reader_types::flow_edge_t& a, const reader_types::flow_edge_t& b) {
+            const auto la = latency(a);
+            const auto lb = latency(b);
+            if(la != lb) return la > lb;
+            if(!(a.source == b.source)) return a.source < b.source;
+            return a.dest < b.dest;
+        });
     filtered.resize(max_edges);
     return filtered;
 }

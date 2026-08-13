@@ -194,7 +194,9 @@ string(REPLACE "{{uuid}}" "_${_v3p_uuid}" _v3p_data "${_v3p_data}")
 string(REPLACE "{{guid}}" "${_v3p_uuid}" _v3p_data "${_v3p_data}")
 file(WRITE ${_v3p_gen_sql} "${_v3p_schema}\n${_v3p_data}\n")
 
-set(ROCPD_DB_V3_KD_PMC_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_kd_pmc.db)
+set(ROCPD_DB_V3_KD_PMC_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_kd_pmc.db
+)
 add_custom_command(
     OUTPUT ${ROCPD_DB_V3_KD_PMC_PATH}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
@@ -225,7 +227,9 @@ set(_v3s_uuid "00000000000000000000000000730003")
 set(_v3s_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
 )
-set(_v3s_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_track_shapes_data.sql)
+set(_v3s_data_src
+    ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_track_shapes_data.sql
+)
 set(_v3s_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_track_shapes_gen.sql)
 file(READ ${_v3s_schema_src} _v3s_schema)
 file(READ ${_v3s_data_src} _v3s_data)
@@ -282,16 +286,19 @@ string(REPLACE "{{uuid}}" "_${_v4p_uuid}" _v4p_data "${_v4p_data}")
 string(REPLACE "{{guid}}" "${_v4p_uuid}" _v4p_data "${_v4p_data}")
 file(WRITE ${_v4p_gen_sql} "${_v4p_schema}\n${_v4p_data}\n")
 
-set(ROCPD_DB_V4_KD_PMC_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4_kd_pmc.db)
+set(ROCPD_DB_V4_KD_PMC_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4_kd_pmc.db
+)
 add_custom_command(
     OUTPUT ${ROCPD_DB_V4_KD_PMC_PATH}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V4_KD_PMC_PATH}
     COMMAND
         ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_KD_PMC_PATH} ".read ${_v4p_gen_sql}"
-    DEPENDS ${_v4p_gen_sql}
-            ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
-            ${_v4p_data_src}
+    DEPENDS
+        ${_v4p_gen_sql}
+        ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
+        ${_v4p_data_src}
     COMMENT "Generating synthetic v4.0 kernel_dispatch_pmc test fixture"
     VERBATIM
 )
@@ -322,16 +329,20 @@ string(REPLACE "{{uuid}}" "_${_v4c_uuid}" _v4c_data "${_v4c_data}")
 string(REPLACE "{{guid}}" "${_v4c_uuid}" _v4c_data "${_v4c_data}")
 file(WRITE ${_v4c_gen_sql} "${_v4c_schema}\n${_v4c_data}\n")
 
-set(ROCPD_DB_V4_COUNTER_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4_counter.db)
+set(ROCPD_DB_V4_COUNTER_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4_counter.db
+)
 add_custom_command(
     OUTPUT ${ROCPD_DB_V4_COUNTER_PATH}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V4_COUNTER_PATH}
     COMMAND
-        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_COUNTER_PATH} ".read ${_v4c_gen_sql}"
-    DEPENDS ${_v4c_gen_sql}
-            ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
-            ${_v4c_data_src}
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_COUNTER_PATH}
+        ".read ${_v4c_gen_sql}"
+    DEPENDS
+        ${_v4c_gen_sql}
+        ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
+        ${_v4c_data_src}
     COMMENT "Generating synthetic v4.0 counter/scalar test fixture"
     VERBATIM
 )
@@ -353,7 +364,9 @@ target_compile_definitions(
 # scalar/interval path; the presence of rocpd_timestamp makes the reader select the
 # v4 backend.
 set(_v4m_uuid "0000000000000000000000000c020002")
-set(_v4m_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_mem_activity_data.sql)
+set(_v4m_data_src
+    ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_mem_activity_data.sql
+)
 set(_v4m_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v4_mem_activity_gen.sql)
 file(READ ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql _v4m_schema)
 file(READ ${_v4m_data_src} _v4m_data)
@@ -371,10 +384,12 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V4_MEM_ACTIVITY_PATH}
     COMMAND
-        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_MEM_ACTIVITY_PATH} ".read ${_v4m_gen_sql}"
-    DEPENDS ${_v4m_gen_sql}
-            ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
-            ${_v4m_data_src}
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_MEM_ACTIVITY_PATH}
+        ".read ${_v4m_gen_sql}"
+    DEPENDS
+        ${_v4m_gen_sql}
+        ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
+        ${_v4m_data_src}
     COMMENT "Generating synthetic v4.0 memory_activity test fixture"
     VERBATIM
 )
@@ -398,7 +413,9 @@ set(_v3m_uuid "0000000000000000000000000c010001")
 set(_v3m_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
 )
-set(_v3m_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_mem_activity_data.sql)
+set(_v3m_data_src
+    ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_mem_activity_data.sql
+)
 set(_v3m_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_mem_activity_gen.sql)
 file(READ ${_v3m_schema_src} _v3m_schema)
 file(READ ${_v3m_data_src} _v3m_data)
@@ -423,7 +440,8 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_MEM_ACTIVITY_PATH}
     COMMAND
-        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_MEM_ACTIVITY_PATH} ".read ${_v3m_gen_sql}"
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_MEM_ACTIVITY_PATH}
+        ".read ${_v3m_gen_sql}"
     DEPENDS ${_v3m_gen_sql} ${_v3m_schema_src} ${_v3m_data_src}
     COMMENT "Generating synthetic v3 memory_activity test fixture"
     VERBATIM
@@ -451,7 +469,9 @@ set(_v3mw_schema_src
 set(_v3mw_data_src
     ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_mem_activity_window_data.sql
 )
-set(_v3mw_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_mem_activity_window_gen.sql)
+set(_v3mw_gen_sql
+    ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_mem_activity_window_gen.sql
+)
 file(READ ${_v3mw_schema_src} _v3mw_schema)
 file(READ ${_v3mw_data_src} _v3mw_data)
 string(
@@ -486,7 +506,8 @@ add_custom_target(
     DEPENDS ${ROCPD_DB_V3_MEM_ACTIVITY_WINDOW_PATH}
 )
 add_dependencies(
-    profiler-hub_unit_tests profiler-hub_v3_mem_activity_window_fixture
+    profiler-hub_unit_tests
+    profiler-hub_v3_mem_activity_window_fixture
 )
 
 target_compile_definitions(
@@ -510,16 +531,20 @@ string(REPLACE "{{uuid}}" "_${_v4s_uuid}" _v4s_data "${_v4s_data}")
 string(REPLACE "{{guid}}" "${_v4s_uuid}" _v4s_data "${_v4s_data}")
 file(WRITE ${_v4s_gen_sql} "${_v4s_schema}\n${_v4s_data}\n")
 
-set(ROCPD_DB_V4_SUMMARY_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4_summary.db)
+set(ROCPD_DB_V4_SUMMARY_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4_summary.db
+)
 add_custom_command(
     OUTPUT ${ROCPD_DB_V4_SUMMARY_PATH}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V4_SUMMARY_PATH}
     COMMAND
-        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_SUMMARY_PATH} ".read ${_v4s_gen_sql}"
-    DEPENDS ${_v4s_gen_sql}
-            ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
-            ${_v4s_data_src}
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_SUMMARY_PATH}
+        ".read ${_v4s_gen_sql}"
+    DEPENDS
+        ${_v4s_gen_sql}
+        ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
+        ${_v4s_data_src}
     COMMENT "Generating synthetic v4.0 summary test fixture"
     VERBATIM
 )
@@ -560,13 +585,16 @@ string(REPLACE "{{uuid}}" "_${_v3s_uuid}" _v3s_data "${_v3s_data}")
 string(REPLACE "{{guid}}" "${_v3s_uuid}" _v3s_data "${_v3s_data}")
 file(WRITE ${_v3s_gen_sql} "${_v3s_schema}\n${_v3s_data}\n")
 
-set(ROCPD_DB_V3_SUMMARY_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_summary.db)
+set(ROCPD_DB_V3_SUMMARY_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_summary.db
+)
 add_custom_command(
     OUTPUT ${ROCPD_DB_V3_SUMMARY_PATH}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_SUMMARY_PATH}
     COMMAND
-        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_SUMMARY_PATH} ".read ${_v3s_gen_sql}"
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_SUMMARY_PATH}
+        ".read ${_v3s_gen_sql}"
     DEPENDS ${_v3s_gen_sql} ${_v3s_schema_src} ${_v3s_data_src}
     COMMENT "Generating synthetic v3 summary test fixture"
     VERBATIM
@@ -591,7 +619,9 @@ set(_v3mm_uuid "00000000000000000000000000730048")
 set(_v3mm_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
 )
-set(_v3mm_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_missing_meta_data.sql)
+set(_v3mm_data_src
+    ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_missing_meta_data.sql
+)
 set(_v3mm_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_missing_meta_gen.sql)
 file(READ ${_v3mm_schema_src} _v3mm_schema)
 file(READ ${_v3mm_data_src} _v3mm_data)
@@ -608,13 +638,16 @@ string(REPLACE "{{uuid}}" "_${_v3mm_uuid}" _v3mm_data "${_v3mm_data}")
 string(REPLACE "{{guid}}" "${_v3mm_uuid}" _v3mm_data "${_v3mm_data}")
 file(WRITE ${_v3mm_gen_sql} "${_v3mm_schema}\n${_v3mm_data}\n")
 
-set(ROCPD_DB_V3_MISSING_META_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_missing_meta.db)
+set(ROCPD_DB_V3_MISSING_META_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_missing_meta.db
+)
 add_custom_command(
     OUTPUT ${ROCPD_DB_V3_MISSING_META_PATH}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_MISSING_META_PATH}
     COMMAND
-        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_MISSING_META_PATH} ".read ${_v3mm_gen_sql}"
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_MISSING_META_PATH}
+        ".read ${_v3mm_gen_sql}"
     DEPENDS ${_v3mm_gen_sql} ${_v3mm_schema_src} ${_v3mm_data_src}
     COMMENT "Generating synthetic v3 missing-metadata test fixture"
     VERBATIM
@@ -644,16 +677,20 @@ string(REPLACE "{{uuid}}" "_${_v4ap_uuid}" _v4ap_data "${_v4ap_data}")
 string(REPLACE "{{guid}}" "${_v4ap_uuid}" _v4ap_data "${_v4ap_data}")
 file(WRITE ${_v4ap_gen_sql} "${_v4ap_schema}\n${_v4ap_data}\n")
 
-set(ROCPD_DB_V4_AMB_PMC_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4_amb_pmc.db)
+set(ROCPD_DB_V4_AMB_PMC_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4_amb_pmc.db
+)
 add_custom_command(
     OUTPUT ${ROCPD_DB_V4_AMB_PMC_PATH}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V4_AMB_PMC_PATH}
     COMMAND
-        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_AMB_PMC_PATH} ".read ${_v4ap_gen_sql}"
-    DEPENDS ${_v4ap_gen_sql}
-            ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
-            ${_v4ap_data_src}
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_AMB_PMC_PATH}
+        ".read ${_v4ap_gen_sql}"
+    DEPENDS
+        ${_v4ap_gen_sql}
+        ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
+        ${_v4ap_data_src}
     COMMENT "Generating synthetic v4.0 ambiguous-pmc test fixture"
     VERBATIM
 )
@@ -683,16 +720,20 @@ string(REPLACE "{{uuid}}" "_${_v4ac_uuid}" _v4ac_data "${_v4ac_data}")
 string(REPLACE "{{guid}}" "${_v4ac_uuid}" _v4ac_data "${_v4ac_data}")
 file(WRITE ${_v4ac_gen_sql} "${_v4ac_schema}\n${_v4ac_data}\n")
 
-set(ROCPD_DB_V4_AMB_CLS_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4_amb_cls.db)
+set(ROCPD_DB_V4_AMB_CLS_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4_amb_cls.db
+)
 add_custom_command(
     OUTPUT ${ROCPD_DB_V4_AMB_CLS_PATH}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V4_AMB_CLS_PATH}
     COMMAND
-        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_AMB_CLS_PATH} ".read ${_v4ac_gen_sql}"
-    DEPENDS ${_v4ac_gen_sql}
-            ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
-            ${_v4ac_data_src}
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_AMB_CLS_PATH}
+        ".read ${_v4ac_gen_sql}"
+    DEPENDS
+        ${_v4ac_gen_sql}
+        ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4.0_tables.sql
+        ${_v4ac_data_src}
     COMMENT "Generating synthetic v4.0 ambiguous-classification test fixture"
     VERBATIM
 )
@@ -733,13 +774,16 @@ string(REPLACE "{{uuid}}" "_${_v3ap_uuid}" _v3ap_data "${_v3ap_data}")
 string(REPLACE "{{guid}}" "${_v3ap_uuid}" _v3ap_data "${_v3ap_data}")
 file(WRITE ${_v3ap_gen_sql} "${_v3ap_schema}\n${_v3ap_data}\n")
 
-set(ROCPD_DB_V3_AMB_PMC_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_amb_pmc.db)
+set(ROCPD_DB_V3_AMB_PMC_PATH
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v3_amb_pmc.db
+)
 add_custom_command(
     OUTPUT ${ROCPD_DB_V3_AMB_PMC_PATH}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_AMB_PMC_PATH}
     COMMAND
-        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_AMB_PMC_PATH} ".read ${_v3ap_gen_sql}"
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_AMB_PMC_PATH}
+        ".read ${_v3ap_gen_sql}"
     DEPENDS ${_v3ap_gen_sql} ${_v3ap_schema_src} ${_v3ap_data_src}
     COMMENT "Generating synthetic v3 ambiguous-pmc test fixture"
     VERBATIM
@@ -765,7 +809,9 @@ set(_v3da_uuid "00000000000000000000000000d30003")
 set(_v3da_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
 )
-set(_v3da_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_dma_agent_data.sql)
+set(_v3da_data_src
+    ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_dma_agent_data.sql
+)
 set(_v3da_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_dma_agent_gen.sql)
 file(READ ${_v3da_schema_src} _v3da_schema)
 file(READ ${_v3da_data_src} _v3da_data)
@@ -790,7 +836,8 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_DMA_AGENT_PATH}
     COMMAND
-        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_DMA_AGENT_PATH} ".read ${_v3da_gen_sql}"
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_DMA_AGENT_PATH}
+        ".read ${_v3da_gen_sql}"
     DEPENDS ${_v3da_gen_sql} ${_v3da_schema_src} ${_v3da_data_src}
     COMMENT "Generating synthetic v3 dma-by-destination-agent test fixture"
     VERBATIM
@@ -816,7 +863,9 @@ set(_v3bn_uuid "00000000000000000000000000630063")
 set(_v3bn_schema_src
     ${CMAKE_SOURCE_DIR}/source/data_storage/schema/rocpd_tables.sql
 )
-set(_v3bn_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_bracket_name_data.sql)
+set(_v3bn_data_src
+    ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v3_bracket_name_data.sql
+)
 set(_v3bn_gen_sql ${CMAKE_CURRENT_BINARY_DIR}/rocpd_v3_bracket_name_gen.sql)
 file(READ ${_v3bn_schema_src} _v3bn_schema)
 file(READ ${_v3bn_data_src} _v3bn_data)
@@ -841,7 +890,8 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V3_BRACKET_NAME_PATH}
     COMMAND
-        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_BRACKET_NAME_PATH} ".read ${_v3bn_gen_sql}"
+        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V3_BRACKET_NAME_PATH}
+        ".read ${_v3bn_gen_sql}"
     DEPENDS ${_v3bn_gen_sql} ${_v3bn_schema_src} ${_v3bn_data_src}
     COMMENT "Generating synthetic v3 bracket-in-name test fixture"
     VERBATIM
@@ -862,17 +912,16 @@ target_compile_definitions(
 # (bd54a356ac:tests/unit/rocpd_v4.db). Unlike the synthetic fixtures above,
 # this dump carries no {{uuid}}/{{guid}} placeholders -- the literal values
 # are the real capture's identity and are read straight into sqlite3.
-set(_v4rc_data_src ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_realcapture_data.sql)
-
-set(ROCPD_DB_V4_PATH
-    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4.db
+set(_v4rc_data_src
+    ${CMAKE_CURRENT_LIST_DIR}/fixtures/rocpd_v4_realcapture_data.sql
 )
+
+set(ROCPD_DB_V4_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd_v4.db)
 add_custom_command(
     OUTPUT ${ROCPD_DB_V4_PATH}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND ${CMAKE_COMMAND} -E rm -f ${ROCPD_DB_V4_PATH}
-    COMMAND
-        ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_PATH} ".read ${_v4rc_data_src}"
+    COMMAND ${SQLITE3_EXECUTABLE} ${ROCPD_DB_V4_PATH} ".read ${_v4rc_data_src}"
     DEPENDS ${_v4rc_data_src}
     COMMENT "Generating real v4.0 capture test fixture from committed SQL dump"
     VERBATIM

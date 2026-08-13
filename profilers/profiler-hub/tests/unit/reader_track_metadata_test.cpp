@@ -242,7 +242,7 @@ protected:
         m_storage.reset();
     }
 
-    std::string                              m_database_path{ ROCPD_DB_V3_MISSING_META_PATH };
+    std::string m_database_path{ ROCPD_DB_V3_MISSING_META_PATH };
     std::unique_ptr<profiler_hub::storage_t> m_storage;
     std::shared_ptr<profiler_hub::reader_t>  m_reader;
 };

@@ -105,8 +105,8 @@ seed_flow_identity(writer_t& writer)
 }
 
 void
-seed_region(writer_t&                    writer,
-            size_t                       stack_id,
+seed_region(writer_t&                 writer,
+            size_t                    stack_id,
             reader_types::timestamp_t start,
             reader_types::timestamp_t end)
 {
@@ -127,8 +127,8 @@ seed_region(writer_t&                    writer,
 }
 
 void
-seed_kernel_dispatch(writer_t&                    writer,
-                     size_t                       stack_id,
+seed_kernel_dispatch(writer_t&                 writer,
+                     size_t                    stack_id,
                      reader_types::timestamp_t start,
                      reader_types::timestamp_t end)
 {
@@ -153,8 +153,8 @@ seed_kernel_dispatch(writer_t&                    writer,
 }
 
 void
-seed_memory_copy(writer_t&                    writer,
-                 size_t                       stack_id,
+seed_memory_copy(writer_t&                 writer,
+                 size_t                    stack_id,
                  reader_types::timestamp_t start,
                  reader_types::timestamp_t end)
 {
@@ -176,8 +176,8 @@ seed_memory_copy(writer_t&                    writer,
 }
 
 void
-seed_memory_alloc(writer_t&                    writer,
-                  size_t                       stack_id,
+seed_memory_alloc(writer_t&                 writer,
+                  size_t                    stack_id,
                   reader_types::timestamp_t start,
                   reader_types::timestamp_t end)
 {
@@ -567,9 +567,9 @@ TEST_F(reader_v3_flow_order_test, equal_start_region_pair_tie_breaks_by_handle_o
     // Stack 1000 = { region 1, region 2 } BOTH start 5000, parent_stack_id NULL. Neither
     // parent-lineage branch fires and the start-ts branch cannot decide (starts are
     // identical), so direction falls to the deterministic equal-start tie-break:
-    // src = key.first (the lower event_id_t handle), dst = key.second. region 1 (row id 1)
-    // mints a lower handle than region 2, so the single surviving directed edge MUST be
-    // region 1 -> region 2 (never the reverse).
+    // src = key.first (the lower event_id_t handle), dst = key.second. region 1 (row id
+    // 1) mints a lower handle than region 2, so the single surviving directed edge MUST
+    // be region 1 -> region 2 (never the reverse).
     const auto r1 = make_event_id(et::region, 1);
     const auto r2 = make_event_id(et::region, 2);
     ASSERT_TRUE(r1 < r2) << "test premise: lower row id mints the lower handle";
@@ -622,7 +622,8 @@ TEST_F(reader_v3_flow_order_test, window_decimation_tie_breaks_equal_latency_by_
     // A window that admits only these two edges, capped at max_edges = 1, forces the
     // decimation sort to compare two flows with equal latency AND equal source -> the
     // final tie-break `a.dest < b.dest` decides. kd 1's handle < mc 1's handle
-    // (event_type kernel_dispatch < memory_copy), so the survivor MUST be region 3 -> kd 1.
+    // (event_type kernel_dispatch < memory_copy), so the survivor MUST be region 3 ->
+    // kd 1.
     profiler_hub::reader_types::time_window_t win;
     win.start = 6000;
     win.end   = 6600;  // excludes the stack-1000 (5000) and stack-3000 (7000) edges
@@ -784,10 +785,10 @@ protected:
         // from start order so the reader's ORDER BY start is exercised; RegionAlpha
         // is inserted 3rd so it carries region row-id 2 (0-based) while being the
         // start-order front.
-        seed_named_region(*writer, "RegionGamma", 0, 3000, 3500);   // region id 0
-        seed_named_region(*writer, "RegionBeta", 200, 2000, 2500);  // region id 1
-        seed_named_region(*writer, "RegionAlpha", 100, 1000, 5000); // region id 2
-        seed_named_region(*writer, "RegionDelta", 400, 6000, 6500); // region id 3
+        seed_named_region(*writer, "RegionGamma", 0, 3000, 3500);    // region id 0
+        seed_named_region(*writer, "RegionBeta", 200, 2000, 2500);   // region id 1
+        seed_named_region(*writer, "RegionAlpha", 100, 1000, 5000);  // region id 2
+        seed_named_region(*writer, "RegionDelta", 400, 6000, 6500);  // region id 3
 
         // 3 kernel dispatches: Queue-A (1) = kd@1200 + kd@1600, Queue-B (2) = kd@1400.
         // All on stream 1.
@@ -807,10 +808,12 @@ protected:
 
         // 2 discoverable counters. Samples inserted out of timestamp order so the
         // reader's ORDER BY timestamp is exercised.
-        seed_counter(*writer, "GRBM_COUNT", "grbm_track",
+        seed_counter(*writer,
+                     "GRBM_COUNT",
+                     "grbm_track",
                      { { 3000, 30.5 }, { 1000, 10.5 }, { 2000, 20.5 } });
-        seed_counter(*writer, "SQ_WAVES", "sq_waves_track",
-                     { { 500, 5.0 }, { 1500, 15.0 } });
+        seed_counter(
+            *writer, "SQ_WAVES", "sq_waves_track", { { 500, 5.0 }, { 1500, 15.0 } });
 
         writer->flush_in_memory_data_to_disk();
         writer.reset();
@@ -988,10 +991,10 @@ protected:
     // the counter's display name resolves to the PMC name. pmc/track names are
     // string_view — callers must pass string literals (static storage).
     void seed_counter(
-        writer_t&                                                            writer,
-        std::string_view                                                     pmc_name,
-        std::string_view                                                     track_name,
-        const std::vector<std::pair<reader_types::timestamp_t, double>>&     samples) const
+        writer_t&                                                        writer,
+        std::string_view                                                 pmc_name,
+        std::string_view                                                 track_name,
+        const std::vector<std::pair<reader_types::timestamp_t, double>>& samples) const
     {
         writer_types::pmc_info_t pmc_info;
         pmc_info.unique_id.name = pmc_name;
@@ -1559,7 +1562,7 @@ find_folded_arg_on_track(const profiler_hub::reader_t&                       r,
 
 TEST_F(reader_v3_edge_sql_test, get_event_info_folds_args_for_kernel_dispatch)
 {
-    auto                                           tracks = m_reader->get_tracks();
+    auto                                           tracks      = m_reader->get_tracks();
     const profiler_hub::reader_types::arg_value_t* kernel_name = nullptr;
     for(const auto& t :
         find_tracks(tracks, profiler_hub::reader_types::track_type_t::gpu_queue))
@@ -1589,7 +1592,7 @@ TEST_F(reader_v3_edge_sql_test, get_event_info_folds_args_for_memory_copy)
 
 TEST_F(reader_v3_edge_sql_test, get_event_info_folds_args_for_memory_allocate)
 {
-    auto                                           tracks = m_reader->get_tracks();
+    auto                                           tracks      = m_reader->get_tracks();
     const profiler_hub::reader_types::arg_value_t* alloc_bytes = nullptr;
     for(const auto& t :
         find_tracks(tracks, profiler_hub::reader_types::track_type_t::memory))

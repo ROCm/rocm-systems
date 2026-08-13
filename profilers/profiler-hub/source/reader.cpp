@@ -137,7 +137,7 @@ reader_t::get_flows_for_chain(const reader_types::flow_id_t& flow_id) const
 reader_types::flow_list_t
 reader_t::get_flows_in_window(const std::vector<reader_types::track_id_t>& tracks,
                               const reader_types::time_window_t&           window,
-                              uint32_t                                     max_edges) const
+                              uint32_t max_edges) const
 {
     return m_impl->get_flows_in_window(tracks, window, max_edges);
 }
