@@ -1058,6 +1058,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     struct ncclTaskColl task;
     memset(&task, 0, sizeof(task));
     task.func = ncclFuncAllGather;
+    task.sendbuff = sendbuff;
+    task.recvbuff = recvbuff;
     task.count = sendcount;
     task.datatype = datatype;
     NCCLCHECK(getAlgoInfo(comm, &task, 0, 0, 1));
