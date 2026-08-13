@@ -190,11 +190,6 @@ if(USE_GDA)
       ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/ionic/queue_pair_ionic.cpp
     )
   endif()
-  if(GDA_BNXT)
-    list(APPEND BITCODE_SOURCES
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/bnxt/queue_pair_bnxt.cpp
-    )
-  endif()
 endif()
 
 # Build bitcode for each GPU architecture

@@ -27,6 +27,5 @@ target_sources(
   ${PROJECT_NAME}
   PRIVATE
     backend_gda_bnxt.cpp
-    queue_pair_bnxt.cpp
 )
 endif()
