@@ -38,7 +38,7 @@ Panel Config:
         # hardware OR-gate measurement noise, not a software artifact.
         CP Utilization:
           avg: AVG(100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)
-          min: MIN100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum
+          min: MIN(100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)
           max: MAX(100 * GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)
           unit: Percent
         SPI Utilization:
