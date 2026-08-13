@@ -106,7 +106,8 @@ class TraceBuffer : protected TraceBufferBase {
     buffer_list_.push_back(write_buffer);
 
     read_index_ = 0;
-    write_index_ = {0, write_buffer};
+    write_index_.store(0, std::memory_order_relaxed);
+    write_buffer_.store(write_buffer, std::memory_order_relaxed);
 
     AllocateFreeBuffer();
 
@@ -118,7 +119,7 @@ class TraceBuffer : protected TraceBufferBase {
     // Flush the remaining records. After flushing, there should not be any records left in the
     // trace buffer.
     Flush();
-    assert(read_index_ == write_index_.load().index);
+    assert(read_index_ == write_index_.load());
 
     // Acquire both the writer and worker lock as we are accessing shared variables they protect.
     std::unique_lock writer_lock(write_mutex_, std::defer_lock);
@@ -126,7 +127,7 @@ class TraceBuffer : protected TraceBufferBase {
     std::lock(writer_lock, worker_lock);
 
     // Deallocate the buffers.
-    allocator_.deallocate(write_index_.load().buffer, size_);
+    allocator_.deallocate(write_buffer_.load(), size_);
     allocator_.deallocate(free_buffer_, size_);
 
     // Stop the worker thread. The worker thread loop checks the 'worker_thread_' std::optional
@@ -150,13 +151,17 @@ class TraceBuffer : protected TraceBufferBase {
   // buffer in the list. Stop flushing if an incomplete entry is found, it will be flushed with
   // the next invocation after changing its state to 'complete'.
   void Flush() override {
+    // Buffer transitions also hold write_mutex_, so write_buffer_ cannot change between these
+    // loads. Reservations within the current buffer may still advance write_index_; observing an
+    // older index is harmless because a later Flush() will process the remaining entries.
     std::lock_guard lock(write_mutex_);
     auto write_index = write_index_.load(std::memory_order_relaxed);
+    auto* write_buffer = write_buffer_.load(std::memory_order_relaxed);
 
     for (auto it = buffer_list_.begin(); it != buffer_list_.end();) {
       auto end_of_buffer = read_index_ - read_index_ % size_ + size_;
 
-      while (read_index_ < std::min(write_index.index, end_of_buffer)) {
+      while (read_index_ < std::min(write_index, end_of_buffer)) {
         Entry* entry = &(*it)[read_index_ % size_];
 
         // The entry is not yet complete, stop flushing here.
@@ -169,7 +174,7 @@ class TraceBuffer : protected TraceBufferBase {
       }
 
       // The buffer is still in use or the read pointer did not reach the end of the buffer.
-      if (*it == write_index.buffer || read_index_ != end_of_buffer) return;
+      if (*it == write_buffer || read_index_ != end_of_buffer) return;
 
       // All entries in the current buffer are now processed. Destroy the buffer and move onto the
       // next buffer in the list.
@@ -184,12 +189,14 @@ class TraceBuffer : protected TraceBufferBase {
 
  private:
   Entry* GetEntry() {
-    auto current = write_index_.load(std::memory_order_relaxed);
-
     while (true) {
+      // write_index_ is both the reservation counter and the publication token for write_buffer_.
+      // Its acquire-load observes any buffer published by a boundary transition.
+      auto current = write_index_.load(std::memory_order_acquire);
+
       // If the pointer is at the end of the current buffer, switch to the available free buffer and
       // notify the worker thread to allocate a new buffer.
-      if (current.index != 0 && current.index % size_ == 0) {
+      if (current != 0 && current % size_ == 0) {
         std::lock_guard lock(write_mutex_);
 
         // If the worker thread wasn't already started, start it now. This avoids starting a new
@@ -206,29 +213,42 @@ class TraceBuffer : protected TraceBufferBase {
 
         // Re-check the pointer overflow under the writer lock, another thread could have beaten us
         // to it and already bumped the write_index_.
-        current = write_index_.load(std::memory_order_relaxed);
-        if (current.index % size_ == 0) {
+        current = write_index_.load(std::memory_order_acquire);
+        if (current % size_ == 0) {
           std::unique_lock worker_lock(worker_mutex_);
 
           // Wait for the free buffer to become available.
           worker_cond_.wait(worker_lock, [this]() { return free_buffer_ != nullptr; });
 
-          current.buffer = free_buffer_;
-          buffer_list_.push_back(current.buffer);
-          write_index_.store({current.index + 1, current.buffer}, std::memory_order_relaxed);
+          auto* write_buffer = free_buffer_;
+          buffer_list_.push_back(write_buffer);
+
+          // These stores are intentionally not an atomic pair. The release-store of write_index_
+          // publishes the preceding buffer store. A reader that sees the new buffer with an old
+          // index cannot successfully compare-exchange that index; a reader that sees the new
+          // index acquires the published buffer. Thus a successful index compare-exchange
+          // validates the separately loaded buffer.
+          write_buffer_.store(write_buffer, std::memory_order_release);
+          write_index_.store(current + 1, std::memory_order_release);
 
           // Tell the worker thread to allocate a new free buffer.
           free_buffer_ = nullptr;
           worker_cond_.notify_one();
 
           // We successfully allocated a new buffer, return the first element.
-          return &current.buffer[0];
+          return &write_buffer[0];
         }
+
+        continue;
       }
 
-      if (write_index_.compare_exchange_weak(current, {current.index + 1, current.buffer},
-                                             std::memory_order_relaxed))
-        return &current.buffer[current.index % size_];
+      // A boundary transition changes write_buffer_ only after the index reaches a multiple of
+      // size_. Therefore, if the index CAS succeeds, no transition occurred between the two loads
+      // and write_buffer points to the allocation containing the reserved index. If a transition
+      // did occur, the CAS fails and the loop discards the possibly stale pointer.
+      auto* write_buffer = write_buffer_.load(std::memory_order_acquire);
+      if (write_index_.compare_exchange_weak(current, current + 1, std::memory_order_relaxed))
+        return &write_buffer[current % size_];
     }
   }
 
@@ -256,20 +276,19 @@ class TraceBuffer : protected TraceBufferBase {
     }
   }
 
-  // The WriteIndex is used to store both the index and the buffer associated with that index (the
-  // buffer contains the trace buffer records at [index - index % size, index - index % size_t +
-  // size_ - 1]) in a single atomic variable.
-  struct WriteIndex {
-    uint64_t index;
-    Entry* buffer;
-  };
-
   const callback_t flush_callback_;
   const uint64_t size_;
 
-  uint64_t read_index_;                  // The index of the next record to flush.
-  std::atomic<WriteIndex> write_index_;  // The index of the next record that could be written.
-  Entry* free_buffer_{nullptr};          // The next available free buffer.
+  static_assert(std::atomic<uint64_t>::is_always_lock_free);
+  static_assert(std::atomic<Entry*>::is_always_lock_free);
+
+  // These atomics jointly describe the next writable entry but are deliberately not treated as
+  // an independently loadable pair. write_index_ publishes and validates write_buffer_ using the
+  // protocol in GetEntry(); write_mutex_ protects pair snapshots needed by Flush().
+  uint64_t read_index_;                // The index of the next record to flush.
+  std::atomic<uint64_t> write_index_;  // The index of the next record that could be written.
+  std::atomic<Entry*> write_buffer_;   // The buffer containing the next writable record.
+  Entry* free_buffer_{nullptr};        // The next available free buffer.
 
   std::optional<std::thread> worker_thread_;
   std::mutex worker_mutex_;

@@ -32,6 +32,9 @@
 
 struct TraceEntry {
   std::atomic<roctracer::TraceEntryState> valid;
+  std::size_t value;
+
+  explicit TraceEntry(std::size_t value) : valid(roctracer::TRACE_ENTRY_INIT), value(value) {}
 };
 
 TRACE_BUFFER_INSTANTIATE();
@@ -52,17 +55,29 @@ constexpr std::size_t max_num_threads = 50;
 int main() {
   const std::size_t num_threads = std::clamp(num_cpu_cores, min_num_threads, max_num_threads);
   std::vector<std::thread> threads(num_threads);
+  const std::size_t num_entries = num_iterations * num_threads;
+  std::vector<bool> seen(num_entries, false);
 
   std::atomic<size_t> flush_count(0);  // Count the number of times the flush callback is called.
-  roctracer::TraceBuffer<TraceEntry> trace_buffer("Test", 10,
-                                                  [&flush_count](auto* entry) { ++flush_count; });
+  roctracer::TraceBuffer<TraceEntry> trace_buffer("Test", 10, [&](auto* entry) {
+    if (entry->value >= seen.size()) {
+      std::cerr << "out-of-range record value: " << entry->value << std::endl;
+      abort();
+    }
+    if (seen[entry->value]) {
+      std::cerr << "duplicate record value: " << entry->value << std::endl;
+      abort();
+    }
+    seen[entry->value] = true;
+    ++flush_count;
+  });
 
   // Start the worker threads. Each thread will request 'num_iterations' entries from the
   // 'trace_buffer', then exit.
-  for (auto&& thread : threads) {
-    thread = std::thread([&trace_buffer]() {
+  for (std::size_t thread_index = 0; thread_index < threads.size(); ++thread_index) {
+    threads[thread_index] = std::thread([&trace_buffer, thread_index]() {
       for (std::size_t j = 0; j < num_iterations; ++j) {
-        auto& entry = trace_buffer.Emplace();
+        auto& entry = trace_buffer.Emplace(thread_index * num_iterations + j);
         entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
       }
     });
@@ -73,7 +88,8 @@ int main() {
   trace_buffer.Flush();
 
   std::cout << "number of records flushed = " << flush_count << std::endl;
-  if (flush_count != num_iterations * threads.size()) abort();
+  if (flush_count != num_entries || std::find(seen.begin(), seen.end(), false) != seen.end())
+    abort();
 
   return EXIT_SUCCESS;
 }
