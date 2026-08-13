@@ -795,7 +795,7 @@ class TestGfx1250Profile:
     def test_detect_profile_uses_filename_override(self, tmp_path):
         xml = tmp_path / 'amdgpu_isa_gfx1250.xml'
         xml.write_text('<Spec />')
-        assert _detect_profile(str(xml)) == 'gfx1250'
+        assert _detect_profile(str(xml)) == 'cdna5'
 
     def test_test_encoding_uses_primary_decode_key(self):
         generator = object.__new__(CodeGenerator)
