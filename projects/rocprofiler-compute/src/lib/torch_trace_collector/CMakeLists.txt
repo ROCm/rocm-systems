@@ -257,15 +257,13 @@ target_compile_options(
     ${_so_name}
     PRIVATE -fvisibility=hidden -Wno-deprecated-declarations
 )
-set_target_properties(
-    ${_so_name}
-    PROPERTIES PREFIX "" LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-)
+set_target_properties(${_so_name} PROPERTIES PREFIX "")
 
 if(NOT _ttc_standalone)
+    # The loader globs lib*/rocprofiler-compute/ for this artifact.
     install(
         TARGETS ${_so_name}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${CMAKE_PROJECT_NAME} COMPONENT main
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
     )
 endif()
 
