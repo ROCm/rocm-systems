@@ -324,9 +324,55 @@ public:
     }
   }
 
-  Summary summarize_and_clear(CoreApiTable *core) {
-    Summary total;
+  void bind_to_executable(uint64_t reader, uint64_t generation, hsa_executable_t executable) {
     std::lock_guard lock(mutex_);
+    const auto entry =
+        std::find_if(entries_.begin(), entries_.begin() + entry_count_,
+                     [reader, generation](const Entry &candidate) {
+                       return candidate.reader == reader && candidate.generation == generation;
+                     });
+    if (entry == entries_.begin() + entry_count_)
+      return;
+    entry->executable = executable.handle;
+    entry->executable_bound = true;
+  }
+
+  void discard(CoreApiTable *core, uint64_t reader, uint64_t generation) {
+    std::lock_guard lock(mutex_);
+    const auto entry =
+        std::find_if(entries_.begin(), entries_.begin() + entry_count_,
+                     [reader, generation](const Entry &candidate) {
+                       return candidate.reader == reader && candidate.generation == generation;
+                     });
+    if (entry == entries_.begin() + entry_count_)
+      return;
+    const size_t index = static_cast<size_t>(entry - entries_.begin());
+    if (release_entry(core, *entry, /*allow_runtime_reclaimed=*/false))
+      erase_entry(index);
+  }
+
+  void retire(CoreApiTable *core, hsa_executable_t executable) {
+    std::lock_guard lock(mutex_);
+    size_t index = 0;
+    while (index < entry_count_) {
+      Entry &entry = entries_[index];
+      if (!entry.executable_bound || entry.executable != executable.handle) {
+        ++index;
+        continue;
+      }
+      const Summary entry_summary = summarize(core, entry);
+      if (!release_entry(core, entry, /*allow_runtime_reclaimed=*/false)) {
+        ++index;
+        continue;
+      }
+      accumulate_summary(retired_summary_, entry_summary);
+      erase_entry(index);
+    }
+  }
+
+  Summary summarize_and_clear(CoreApiTable *core) {
+    std::lock_guard lock(mutex_);
+    Summary total = retired_summary_;
     total.required_report_bytes = required_report_bytes_;
     total.allocated_report_bytes = successful_allocated_bytes_;
     total.current_live_report_bytes = process_budget_.current_live_bytes;
@@ -335,110 +381,9 @@ public:
     total.capacity_failure_count = capacity_failure_count_;
     for (size_t i = 0; i < entry_count_; ++i) {
       const Summary entry_summary = summarize(core, entries_[i]);
-      total.buffer_count += entry_summary.buffer_count;
-      total.visible_access_record_count += entry_summary.visible_access_record_count;
-      total.visible_barrier_record_count += entry_summary.visible_barrier_record_count;
-      total.visible_atomic_record_count += entry_summary.visible_atomic_record_count;
-      total.visible_fence_record_count += entry_summary.visible_fence_record_count;
-      total.visible_diagnostic_record_count += entry_summary.visible_diagnostic_record_count;
-      total.visible_inline_publication_count += entry_summary.visible_inline_publication_count;
-      total.visible_exact_shadow_entry_count += entry_summary.visible_exact_shadow_entry_count;
-      total.exact_incomplete_snapshot_count += entry_summary.exact_incomplete_snapshot_count;
-      total.exact_changed_snapshot_count += entry_summary.exact_changed_snapshot_count;
-      total.exact_malformed_snapshot_count += entry_summary.exact_malformed_snapshot_count;
-      total.visible_inline_atomic_release_count +=
-          entry_summary.visible_inline_atomic_release_count;
-      total.release_incomplete_snapshot_count += entry_summary.release_incomplete_snapshot_count;
-      total.release_changed_snapshot_count += entry_summary.release_changed_snapshot_count;
-      total.release_overflow_snapshot_count += entry_summary.release_overflow_snapshot_count;
-      total.release_source_incomplete_snapshot_count +=
-          entry_summary.release_source_incomplete_snapshot_count;
-      total.release_malformed_snapshot_count += entry_summary.release_malformed_snapshot_count;
-      total.visible_inline_acquired_token_count +=
-          entry_summary.visible_inline_acquired_token_count;
-      total.token_incomplete_snapshot_count += entry_summary.token_incomplete_snapshot_count;
-      total.token_changed_snapshot_count += entry_summary.token_changed_snapshot_count;
-      total.token_malformed_snapshot_count += entry_summary.token_malformed_snapshot_count;
-      total.inline_undercoverage_count += entry_summary.inline_undercoverage_count;
-      total.inline_overflow_count += entry_summary.inline_overflow_count;
-      total.inline_unsupported_count += entry_summary.inline_unsupported_count;
-      total.inline_malformed_count += entry_summary.inline_malformed_count;
-      total.visible_sampled_watchpoint_count += entry_summary.visible_sampled_watchpoint_count;
-      total.visible_sampled_sync_metadata_count +=
-          entry_summary.visible_sampled_sync_metadata_count;
-      total.dropped_access_record_count += entry_summary.dropped_access_record_count;
-      total.dropped_barrier_record_count += entry_summary.dropped_barrier_record_count;
-      total.dropped_atomic_record_count += entry_summary.dropped_atomic_record_count;
-      total.dropped_fence_record_count += entry_summary.dropped_fence_record_count;
-      total.dropped_diagnostic_record_count += entry_summary.dropped_diagnostic_record_count;
-      total.record_replay_bank_saturation_count +=
-          entry_summary.record_replay_bank_saturation_count;
-      total.record_replay_invalid_site_token_count +=
-          entry_summary.record_replay_invalid_site_token_count;
-      total.replay_conflict_count += entry_summary.replay_conflict_count;
-      total.replay_diagnostic_count += entry_summary.replay_diagnostic_count;
-      total.replay_dropped_access_count += entry_summary.replay_dropped_access_count;
-      total.replay_dropped_barrier_count += entry_summary.replay_dropped_barrier_count;
-      total.replay_unsupported_access_count += entry_summary.replay_unsupported_access_count;
-      total.replay_unsupported_atomic_count += entry_summary.replay_unsupported_atomic_count;
-      total.replay_unsupported_fence_count += entry_summary.replay_unsupported_fence_count;
-      total.replay_metadata_full_count += entry_summary.replay_metadata_full_count;
-      total.replay_diagnostic_capacity_exhausted_count +=
-          entry_summary.replay_diagnostic_capacity_exhausted_count;
-      total.sampled_conflict_count += entry_summary.sampled_conflict_count;
-      total.sampled_immediate_conflict_count += entry_summary.sampled_immediate_conflict_count;
-      total.sampled_claimed_window_count += entry_summary.sampled_claimed_window_count;
-      total.sampled_dropped_window_count += entry_summary.sampled_dropped_window_count;
-      total.sampled_saturated_window_count += entry_summary.sampled_saturated_window_count;
-      total.sampled_stale_snapshot_count += entry_summary.sampled_stale_snapshot_count;
-      total.sampled_incomplete_snapshot_count += entry_summary.sampled_incomplete_snapshot_count;
-      total.sampled_changed_snapshot_count += entry_summary.sampled_changed_snapshot_count;
-      total.sampled_malformed_snapshot_count += entry_summary.sampled_malformed_snapshot_count;
-      total.sampled_patch_mapping_malformed_count +=
-          entry_summary.sampled_patch_mapping_malformed_count;
-      total.sampled_unsupported_sync_count += entry_summary.sampled_unsupported_sync_count;
-      total.sampled_malformed_sync_count += entry_summary.sampled_malformed_sync_count;
-      bool freed = entries_[i].ptr == nullptr;
-      hsa_status_t free_status = HSA_STATUS_SUCCESS;
-      if (!freed && (core == nullptr || core->hsa_memory_free_fn == nullptr)) {
-        // ROCR clears its callable API table before invoking a tool's late
-        // OnUnload callback. Allocations from that runtime are no longer live
-        // at that point, so close the logical budget without pretending that
-        // the unavailable API was called.
-        freed = true;
-        log_message(kLogInfo,
-                    "ConSan MOI auto report cleanup reader=%llu bytes=%zu "
-                    "outcome=runtime-reclaimed api=unavailable",
-                    static_cast<unsigned long long>(entries_[i].reader), entries_[i].size);
-      } else if (!freed) {
-        free_status = core->hsa_memory_free_fn(entries_[i].ptr);
-        // ROCR may invoke the tool's OnUnload callback after runtime shutdown
-        // has already reclaimed its allocation registry. The free then
-        // returns NOT_INITIALIZED (observed live) or INVALID_ALLOCATION even
-        // though no live HSA allocation remains. Treat only those statuses as
-        // successful runtime-owned cleanup; every other failure remains real.
-        freed = free_status == HSA_STATUS_SUCCESS ||
-                free_status == HSA_STATUS_ERROR_INVALID_ALLOCATION ||
-                free_status == HSA_STATUS_ERROR_NOT_INITIALIZED;
-        if (free_status == HSA_STATUS_ERROR_INVALID_ALLOCATION ||
-            free_status == HSA_STATUS_ERROR_NOT_INITIALIZED) {
-          log_message(kLogInfo,
-                      "ConSan MOI auto report cleanup reader=%llu bytes=%zu "
-                      "outcome=runtime-reclaimed status=%d",
-                      static_cast<unsigned long long>(entries_[i].reader), entries_[i].size,
-                      static_cast<int>(free_status));
-        }
-      }
-      if (freed) {
-        (void)rocjitsu::release_consan_moi_auto_report_bytes(process_budget_, entries_[i].size);
-      } else {
-        log_message(kLogInfo,
-                    "ConSan MOI auto report cleanup reader=%llu bytes=%zu outcome=failed "
-                    "status=%d",
-                    static_cast<unsigned long long>(entries_[i].reader), entries_[i].size,
-                    static_cast<int>(free_status));
+      accumulate_summary(total, entry_summary);
+      if (!release_entry(core, entries_[i], /*allow_runtime_reclaimed=*/true))
         ++cleanup_failure_count_;
-      }
       entries_[i] = Entry{};
     }
     entry_count_ = 0;
@@ -449,6 +394,7 @@ public:
     allocation_failure_count_ = 0;
     capacity_failure_count_ = 0;
     cleanup_failure_count_ = 0;
+    retired_summary_ = {};
     process_budget_.peak_live_bytes = process_budget_.current_live_bytes;
     return total;
   }
@@ -497,7 +443,114 @@ private:
     uint32_t compact_token_mapping_count = 0;
     bool compact_token_mapping_malformed = false;
     bool sampled_patch_mapping_malformed = false;
+    uint64_t executable = 0;
+    bool executable_bound = false;
   };
+
+  void erase_entry(size_t index) {
+    for (size_t next = index + 1; next < entry_count_; ++next)
+      entries_[next - 1] = std::move(entries_[next]);
+    entries_[--entry_count_] = {};
+  }
+
+  [[nodiscard]] bool release_entry(CoreApiTable *core, Entry &entry, bool allow_runtime_reclaimed) {
+    bool freed = entry.ptr == nullptr;
+    hsa_status_t free_status = HSA_STATUS_SUCCESS;
+    if (!freed && (core == nullptr || core->hsa_memory_free_fn == nullptr)) {
+      freed = allow_runtime_reclaimed;
+      if (freed) {
+        // ROCR clears its callable API table before invoking a tool's late
+        // OnUnload callback. Allocations from that runtime are no longer live.
+        log_message(kLogInfo,
+                    "ConSan MOI auto report cleanup reader=%llu bytes=%zu "
+                    "outcome=runtime-reclaimed api=unavailable",
+                    static_cast<unsigned long long>(entry.reader), entry.size);
+      }
+    } else if (!freed) {
+      free_status = core->hsa_memory_free_fn(entry.ptr);
+      // ROCR may invoke the tool's OnUnload callback after runtime shutdown
+      // has already reclaimed its allocation registry.
+      freed = free_status == HSA_STATUS_SUCCESS ||
+              free_status == HSA_STATUS_ERROR_INVALID_ALLOCATION ||
+              free_status == HSA_STATUS_ERROR_NOT_INITIALIZED;
+      if (free_status == HSA_STATUS_ERROR_INVALID_ALLOCATION ||
+          free_status == HSA_STATUS_ERROR_NOT_INITIALIZED) {
+        log_message(kLogInfo,
+                    "ConSan MOI auto report cleanup reader=%llu bytes=%zu "
+                    "outcome=runtime-reclaimed status=%d",
+                    static_cast<unsigned long long>(entry.reader), entry.size,
+                    static_cast<int>(free_status));
+      }
+    }
+    if (freed) {
+      (void)rocjitsu::release_consan_moi_auto_report_bytes(process_budget_, entry.size);
+      return true;
+    }
+    log_message(
+        kLogInfo, "ConSan MOI auto report cleanup reader=%llu bytes=%zu outcome=failed status=%d",
+        static_cast<unsigned long long>(entry.reader), entry.size, static_cast<int>(free_status));
+    return false;
+  }
+
+  static void accumulate_summary(Summary &total, const Summary &entry) {
+    total.buffer_count += entry.buffer_count;
+    total.visible_access_record_count += entry.visible_access_record_count;
+    total.visible_barrier_record_count += entry.visible_barrier_record_count;
+    total.visible_atomic_record_count += entry.visible_atomic_record_count;
+    total.visible_fence_record_count += entry.visible_fence_record_count;
+    total.visible_diagnostic_record_count += entry.visible_diagnostic_record_count;
+    total.visible_inline_publication_count += entry.visible_inline_publication_count;
+    total.visible_exact_shadow_entry_count += entry.visible_exact_shadow_entry_count;
+    total.exact_incomplete_snapshot_count += entry.exact_incomplete_snapshot_count;
+    total.exact_changed_snapshot_count += entry.exact_changed_snapshot_count;
+    total.exact_malformed_snapshot_count += entry.exact_malformed_snapshot_count;
+    total.visible_inline_atomic_release_count += entry.visible_inline_atomic_release_count;
+    total.release_incomplete_snapshot_count += entry.release_incomplete_snapshot_count;
+    total.release_changed_snapshot_count += entry.release_changed_snapshot_count;
+    total.release_overflow_snapshot_count += entry.release_overflow_snapshot_count;
+    total.release_source_incomplete_snapshot_count +=
+        entry.release_source_incomplete_snapshot_count;
+    total.release_malformed_snapshot_count += entry.release_malformed_snapshot_count;
+    total.visible_inline_acquired_token_count += entry.visible_inline_acquired_token_count;
+    total.token_incomplete_snapshot_count += entry.token_incomplete_snapshot_count;
+    total.token_changed_snapshot_count += entry.token_changed_snapshot_count;
+    total.token_malformed_snapshot_count += entry.token_malformed_snapshot_count;
+    total.inline_undercoverage_count += entry.inline_undercoverage_count;
+    total.inline_overflow_count += entry.inline_overflow_count;
+    total.inline_unsupported_count += entry.inline_unsupported_count;
+    total.inline_malformed_count += entry.inline_malformed_count;
+    total.visible_sampled_watchpoint_count += entry.visible_sampled_watchpoint_count;
+    total.visible_sampled_sync_metadata_count += entry.visible_sampled_sync_metadata_count;
+    total.dropped_access_record_count += entry.dropped_access_record_count;
+    total.dropped_barrier_record_count += entry.dropped_barrier_record_count;
+    total.dropped_atomic_record_count += entry.dropped_atomic_record_count;
+    total.dropped_fence_record_count += entry.dropped_fence_record_count;
+    total.dropped_diagnostic_record_count += entry.dropped_diagnostic_record_count;
+    total.record_replay_bank_saturation_count += entry.record_replay_bank_saturation_count;
+    total.record_replay_invalid_site_token_count += entry.record_replay_invalid_site_token_count;
+    total.replay_conflict_count += entry.replay_conflict_count;
+    total.replay_diagnostic_count += entry.replay_diagnostic_count;
+    total.replay_dropped_access_count += entry.replay_dropped_access_count;
+    total.replay_dropped_barrier_count += entry.replay_dropped_barrier_count;
+    total.replay_unsupported_access_count += entry.replay_unsupported_access_count;
+    total.replay_unsupported_atomic_count += entry.replay_unsupported_atomic_count;
+    total.replay_unsupported_fence_count += entry.replay_unsupported_fence_count;
+    total.replay_metadata_full_count += entry.replay_metadata_full_count;
+    total.replay_diagnostic_capacity_exhausted_count +=
+        entry.replay_diagnostic_capacity_exhausted_count;
+    total.sampled_conflict_count += entry.sampled_conflict_count;
+    total.sampled_immediate_conflict_count += entry.sampled_immediate_conflict_count;
+    total.sampled_claimed_window_count += entry.sampled_claimed_window_count;
+    total.sampled_dropped_window_count += entry.sampled_dropped_window_count;
+    total.sampled_saturated_window_count += entry.sampled_saturated_window_count;
+    total.sampled_stale_snapshot_count += entry.sampled_stale_snapshot_count;
+    total.sampled_incomplete_snapshot_count += entry.sampled_incomplete_snapshot_count;
+    total.sampled_changed_snapshot_count += entry.sampled_changed_snapshot_count;
+    total.sampled_malformed_snapshot_count += entry.sampled_malformed_snapshot_count;
+    total.sampled_patch_mapping_malformed_count += entry.sampled_patch_mapping_malformed_count;
+    total.sampled_unsupported_sync_count += entry.sampled_unsupported_sync_count;
+    total.sampled_malformed_sync_count += entry.sampled_malformed_sync_count;
+  }
 
   void record_allocation_attempt(uint64_t required_size) {
     std::lock_guard lock(mutex_);
@@ -1679,6 +1732,7 @@ private:
   uint64_t allocation_failure_count_ = 0;
   uint64_t capacity_failure_count_ = 0;
   uint64_t cleanup_failure_count_ = 0;
+  Summary retired_summary_;
   std::atomic<uint64_t> next_generation_{0};
 };
 
@@ -1705,6 +1759,19 @@ bool allocate_auto_moi_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint
 void register_auto_moi_report_metadata(uint64_t reader, uint64_t generation,
                                        const ConSanResult &result) {
   AutoMoiReportBufferRegistry::instance().register_metadata(reader, generation, result);
+}
+
+void bind_auto_moi_report_buffer_to_executable(uint64_t reader, uint64_t generation,
+                                               hsa_executable_t executable) {
+  AutoMoiReportBufferRegistry::instance().bind_to_executable(reader, generation, executable);
+}
+
+void discard_auto_moi_report_buffer(CoreApiTable *core, uint64_t reader, uint64_t generation) {
+  AutoMoiReportBufferRegistry::instance().discard(core, reader, generation);
+}
+
+void retire_auto_moi_report_buffers(CoreApiTable *core, hsa_executable_t executable) {
+  AutoMoiReportBufferRegistry::instance().retire(core, executable);
 }
 
 AutoMoiReportSummary summarize_and_clear_auto_moi_report_buffers(CoreApiTable *core) {

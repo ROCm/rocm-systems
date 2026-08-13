@@ -1501,12 +1501,12 @@ public:
   };
 
   static AutoScReportBufferRegistry &instance() {
-    static AutoScReportBufferRegistry registry;
-    return registry;
+    static auto *registry = new AutoScReportBufferRegistry;
+    return *registry;
   }
 
   [[nodiscard]] bool allocate(CoreApiTable *core, hsa_agent_t agent, uint64_t reader,
-                              uint64_t *address) {
+                              uint64_t *address, uint64_t *registered_generation) {
     std::lock_guard lock(mutex_);
     if (entry_count_ >= entries_.size()) {
       ++allocation_failure_count_;
@@ -1565,8 +1565,11 @@ public:
         return false;
       }
     }
-    entries_[entry_count_++] = Entry{reader, ptr, search.fine_grained};
+    const uint64_t generation = next_generation_.fetch_add(1, std::memory_order_relaxed) + 1u;
+    entries_[entry_count_++] = Entry{reader, generation, ptr, search.fine_grained};
     *address = reinterpret_cast<uint64_t>(ptr);
+    if (registered_generation != nullptr)
+      *registered_generation = generation;
     log_message(kLogInfo,
                 "ConSan SC auto report buffer reader=%llu addr=0x%llx bytes=%zu "
                 "allocation_outcome=allocated fine_grained=%s",
@@ -1575,53 +1578,66 @@ public:
     return true;
   }
 
+  void bind_to_executable(uint64_t reader, uint64_t generation, hsa_executable_t executable) {
+    std::lock_guard lock(mutex_);
+    const auto entry =
+        std::find_if(entries_.begin(), entries_.begin() + entry_count_,
+                     [reader, generation](const Entry &candidate) {
+                       return candidate.reader == reader && candidate.generation == generation;
+                     });
+    if (entry == entries_.begin() + entry_count_)
+      return;
+    entry->executable = executable.handle;
+    entry->executable_bound = true;
+  }
+
+  void discard(CoreApiTable *core, uint64_t reader, uint64_t generation) {
+    std::lock_guard lock(mutex_);
+    const auto entry =
+        std::find_if(entries_.begin(), entries_.begin() + entry_count_,
+                     [reader, generation](const Entry &candidate) {
+                       return candidate.reader == reader && candidate.generation == generation;
+                     });
+    if (entry == entries_.begin() + entry_count_)
+      return;
+    const size_t index = static_cast<size_t>(entry - entries_.begin());
+    if (release_entry(core, *entry, /*allow_runtime_reclaimed=*/false))
+      erase_entry(index);
+  }
+
+  void retire(CoreApiTable *core, hsa_executable_t executable) {
+    std::lock_guard lock(mutex_);
+    size_t index = 0;
+    while (index < entry_count_) {
+      Entry &entry = entries_[index];
+      if (!entry.executable_bound || entry.executable != executable.handle) {
+        ++index;
+        continue;
+      }
+      const Summary entry_summary = summarize_entry(core, entry);
+      if (!release_entry(core, entry, /*allow_runtime_reclaimed=*/false)) {
+        ++index;
+        continue;
+      }
+      accumulate_summary(retired_summary_, entry_summary);
+      erase_entry(index);
+    }
+  }
+
   Summary summarize_and_clear(CoreApiTable *core) {
     std::lock_guard lock(mutex_);
-    Summary summary;
-    summary.buffer_count = entry_count_;
+    Summary summary = retired_summary_;
     summary.allocation_failure_count = allocation_failure_count_;
     for (size_t index = 0; index < entry_count_; ++index) {
       Entry &entry = entries_[index];
-      uint32_t marker = 0;
-      bool readable = false;
-      if (entry.fine_grained) {
-        std::memcpy(&marker, entry.ptr, sizeof(marker));
-        readable = true;
-      } else if (core != nullptr && core->hsa_memory_copy_fn != nullptr) {
-        const hsa_status_t status = core->hsa_memory_copy_fn(&marker, entry.ptr, sizeof(marker));
-        readable = status == HSA_STATUS_SUCCESS;
-      }
-      if (!readable) {
-        ++summary.read_failure_count;
-        log_message(kLogInfo,
-                    "ConSan SC auto report reader=%llu outcome=unreadable mismatch=unknown",
-                    static_cast<unsigned long long>(entry.reader));
-      } else {
-        summary.mismatch_count += marker != 0;
-        log_message(
-            kLogInfo, "ConSan SC auto report reader=%llu outcome=complete marker=%u mismatch=%s",
-            static_cast<unsigned long long>(entry.reader), marker, marker != 0 ? "true" : "false");
-      }
-
-      bool freed = entry.ptr == nullptr;
-      hsa_status_t free_status = HSA_STATUS_SUCCESS;
-      if (!freed && (core == nullptr || core->hsa_memory_free_fn == nullptr)) {
-        freed = true;
-      } else if (!freed) {
-        free_status = core->hsa_memory_free_fn(entry.ptr);
-        freed = free_status == HSA_STATUS_SUCCESS ||
-                free_status == HSA_STATUS_ERROR_INVALID_ALLOCATION ||
-                free_status == HSA_STATUS_ERROR_NOT_INITIALIZED;
-      }
-      if (!freed) {
+      accumulate_summary(summary, summarize_entry(core, entry));
+      if (!release_entry(core, entry, /*allow_runtime_reclaimed=*/true))
         ++summary.cleanup_failure_count;
-        log_message(kLogInfo, "ConSan SC auto report cleanup reader=%llu outcome=failed status=%d",
-                    static_cast<unsigned long long>(entry.reader), static_cast<int>(free_status));
-      }
       entry = {};
     }
     entry_count_ = 0;
     allocation_failure_count_ = 0;
+    retired_summary_ = {};
     return summary;
   }
 
@@ -1635,9 +1651,68 @@ private:
 
   struct Entry {
     uint64_t reader = 0;
+    uint64_t generation = 0;
     void *ptr = nullptr;
     bool fine_grained = false;
+    uint64_t executable = 0;
+    bool executable_bound = false;
   };
+
+  void erase_entry(size_t index) {
+    for (size_t next = index + 1; next < entry_count_; ++next)
+      entries_[next - 1] = entries_[next];
+    entries_[--entry_count_] = {};
+  }
+
+  [[nodiscard]] Summary summarize_entry(CoreApiTable *core, const Entry &entry) const {
+    Summary summary{.buffer_count = 1};
+    uint32_t marker = 0;
+    bool readable = false;
+    if (entry.fine_grained) {
+      std::memcpy(&marker, entry.ptr, sizeof(marker));
+      readable = true;
+    } else if (core != nullptr && core->hsa_memory_copy_fn != nullptr) {
+      const hsa_status_t status = core->hsa_memory_copy_fn(&marker, entry.ptr, sizeof(marker));
+      readable = status == HSA_STATUS_SUCCESS;
+    }
+    if (!readable) {
+      ++summary.read_failure_count;
+      log_message(kLogInfo, "ConSan SC auto report reader=%llu outcome=unreadable mismatch=unknown",
+                  static_cast<unsigned long long>(entry.reader));
+    } else {
+      summary.mismatch_count = marker != 0;
+      log_message(
+          kLogInfo, "ConSan SC auto report reader=%llu outcome=complete marker=%u mismatch=%s",
+          static_cast<unsigned long long>(entry.reader), marker, marker != 0 ? "true" : "false");
+    }
+    return summary;
+  }
+
+  [[nodiscard]] bool release_entry(CoreApiTable *core, const Entry &entry,
+                                   bool allow_runtime_reclaimed) const {
+    bool freed = entry.ptr == nullptr;
+    hsa_status_t free_status = HSA_STATUS_SUCCESS;
+    if (!freed && (core == nullptr || core->hsa_memory_free_fn == nullptr)) {
+      freed = allow_runtime_reclaimed;
+    } else if (!freed) {
+      free_status = core->hsa_memory_free_fn(entry.ptr);
+      freed = free_status == HSA_STATUS_SUCCESS ||
+              free_status == HSA_STATUS_ERROR_INVALID_ALLOCATION ||
+              free_status == HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+    if (!freed) {
+      log_message(kLogInfo, "ConSan SC auto report cleanup reader=%llu outcome=failed status=%d",
+                  static_cast<unsigned long long>(entry.reader), static_cast<int>(free_status));
+    }
+    return freed;
+  }
+
+  static void accumulate_summary(Summary &total, const Summary &entry) {
+    total.buffer_count += entry.buffer_count;
+    total.mismatch_count += entry.mismatch_count;
+    total.read_failure_count += entry.read_failure_count;
+    total.cleanup_failure_count += entry.cleanup_failure_count;
+  }
 
   static hsa_status_t HSA_API select_region(hsa_region_t region, void *data) {
     auto *search = static_cast<RegionSearch *>(data);
@@ -1679,6 +1754,47 @@ private:
   std::array<Entry, 256> entries_{};
   size_t entry_count_ = 0;
   uint64_t allocation_failure_count_ = 0;
+  Summary retired_summary_;
+  std::atomic<uint64_t> next_generation_{0};
+};
+
+class AutoReportLoadGuard {
+public:
+  explicit AutoReportLoadGuard(CoreApiTable *core) : core_(core) {}
+  AutoReportLoadGuard(const AutoReportLoadGuard &) = delete;
+  AutoReportLoadGuard &operator=(const AutoReportLoadGuard &) = delete;
+
+  ~AutoReportLoadGuard() {
+    if (sc_)
+      AutoScReportBufferRegistry::instance().discard(core_, sc_->reader, sc_->generation);
+    if (moi_)
+      discard_auto_moi_report_buffer(core_, moi_->reader, moi_->generation);
+  }
+
+  void note_sc(uint64_t reader, uint64_t generation) { sc_ = Registration{reader, generation}; }
+  void note_moi(uint64_t reader, uint64_t generation) { moi_ = Registration{reader, generation}; }
+
+  void bind_to_executable(hsa_executable_t executable) {
+    if (sc_) {
+      AutoScReportBufferRegistry::instance().bind_to_executable(sc_->reader, sc_->generation,
+                                                                executable);
+      sc_.reset();
+    }
+    if (moi_) {
+      bind_auto_moi_report_buffer_to_executable(moi_->reader, moi_->generation, executable);
+      moi_.reset();
+    }
+  }
+
+private:
+  struct Registration {
+    uint64_t reader = 0;
+    uint64_t generation = 0;
+  };
+
+  CoreApiTable *core_ = nullptr;
+  std::optional<Registration> sc_;
+  std::optional<Registration> moi_;
 };
 
 class KernelPrivateDispatchRegistry {
@@ -2918,8 +3034,11 @@ hsa_status_t HSA_API rj_dbi_executable_destroy(hsa_executable_t executable) {
   if (original == nullptr)
     return HSA_STATUS_ERROR;
   const hsa_status_t status = original(executable);
-  if (status == HSA_STATUS_SUCCESS)
+  if (status == HSA_STATUS_SUCCESS) {
+    AutoScReportBufferRegistry::instance().retire(layer().core_table(), executable);
+    retire_auto_moi_report_buffers(layer().core_table(), executable);
     ReplacementCodeObjectStorageRegistry::instance().remove(executable);
+  }
   return status;
 }
 
@@ -3226,6 +3345,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   observe_process_fault_requirement(config->fault_require_exactly_one);
 
   TransformLoadState transform_state;
+  AutoReportLoadGuard auto_report_guard(layer().core_table());
   auto &replacement_storage = transform_state.replacement_storage;
   auto &patch_result_storage = transform_state.patch_result_storage;
   auto &static_coverage_storage = transform_state.static_coverage_storage;
@@ -3576,8 +3696,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           patch_result_storage = std::move(inventory);
       } else {
         uint64_t auto_report_address = 0;
+        uint64_t auto_report_generation = 0;
         if (!AutoScReportBufferRegistry::instance().allocate(
-                layer().core_table(), agent, code_object_reader.handle, &auto_report_address)) {
+                layer().core_table(), agent, code_object_reader.handle, &auto_report_address,
+                &auto_report_generation)) {
           std::fprintf(stderr, "[rocjitsu-dbi-hooks] ConSan SC automatic non-trapping report "
                                "allocation failed; analysis incomplete, refusing trap fallback\n");
           for (rocjitsu::ConSanSiteDispositionRecord &site : inventory.site_dispositions) {
@@ -3602,6 +3724,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 "supercollider-report-allocation", fault_installation_evidence);
         } else {
           patch_options.report_buffer_address = auto_report_address;
+          auto_report_guard.note_sc(code_object_reader.handle, auto_report_generation);
         }
       }
     }
@@ -3736,6 +3859,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         patch_options.moi_report_layout = report_layout_override;
         patch_options.moi_report_generation = auto_report_generation;
         registered_auto_moi_report_generation = auto_report_generation;
+        auto_report_guard.note_moi(code_object_reader.handle, auto_report_generation);
         patch_options.moi_report_dispatch_id = code_object_reader.handle;
         if (live_fault_transform && planned_report_inventory)
           live_fault_auto_report_capacity_inventory = *planned_report_inventory;
@@ -5111,6 +5235,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     load_status = original_load(executable, agent, code_object_reader, options, loaded_code_object);
   }
   if (load_status == HSA_STATUS_SUCCESS && using_replacement_reader && patch_result_storage) {
+    auto_report_guard.bind_to_executable(executable);
     if (patch_result_storage->applied_fault_mutations != 0u) {
       fault_installation_evidence.mark_installed();
       process_fault_application_reservation.commit_applied_mutation();

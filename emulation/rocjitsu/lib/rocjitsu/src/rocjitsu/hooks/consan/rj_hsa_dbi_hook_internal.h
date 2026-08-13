@@ -946,6 +946,10 @@ allocate_auto_moi_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint64_t 
                                 uint64_t *registered_size, uint64_t *registered_generation);
 void register_auto_moi_report_metadata(uint64_t reader, uint64_t generation,
                                        const ConSanResult &result);
+void bind_auto_moi_report_buffer_to_executable(uint64_t reader, uint64_t generation,
+                                               hsa_executable_t executable);
+void discard_auto_moi_report_buffer(CoreApiTable *core, uint64_t reader, uint64_t generation);
+void retire_auto_moi_report_buffers(CoreApiTable *core, hsa_executable_t executable);
 [[nodiscard]] AutoMoiReportSummary summarize_and_clear_auto_moi_report_buffers(CoreApiTable *core);
 
 using ConSanTransformOverride = ConSanResult (*)(std::span<const uint8_t>, const ConSanOptions &);

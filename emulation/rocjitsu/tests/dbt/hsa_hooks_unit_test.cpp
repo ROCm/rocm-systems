@@ -5160,10 +5160,54 @@ TEST(HsaHooksUnitTest, ConSanScAutoReportUsesMarkerAndCleansUpWithoutTrapFallbac
     EXPECT_FALSE(g_transform_override_sc_report_addresses[0]);
     EXPECT_TRUE(g_transform_override_sc_report_addresses[1]);
     EXPECT_EQ(g_transform_override_fault_mutations, (std::vector<bool>{false, true}));
+    ASSERT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+    EXPECT_TRUE(g_core_memory_allocations.empty());
+    EXPECT_EQ(g_core_memory_free_calls, 1);
   }
   EXPECT_TRUE(g_core_memory_allocations.empty());
   EXPECT_EQ(g_core_memory_free_calls, 1);
   EXPECT_EQ(g_sc_markers_at_free, std::vector<uint32_t>{1});
+}
+
+TEST(HsaHooksUnitTest, ConSanScAutoReportReclaimsEveryExecutableAcrossRegistryChurn) {
+  for (const char *policy : {"default", "strict"}) {
+    SCOPED_TRACE(policy);
+    ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
+    ScopedEnvVar selected_policy("RJ_CONSAN_POLICY", policy);
+    ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", nullptr);
+    ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+    ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
+    ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", nullptr);
+    ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+
+    reset_code_object_observations();
+    reset_core_memory_observations();
+    g_transform_override_result = auto_sc_transform_result();
+    {
+      FakeApiTable api;
+      InstalledDbiHook hook(api);
+      ASSERT_TRUE(hook.installed()) << hook.error();
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      constexpr size_t kLoadCount = 300;
+      for (size_t load = 0; load < kLoadCount; ++load) {
+        const hsa_executable_t executable{1000u + load};
+        ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(executable, kHostAgent, reader,
+                                                                    nullptr, nullptr),
+                  HSA_STATUS_SUCCESS)
+            << load;
+        ASSERT_EQ(g_core_memory_allocations.size(), 1u) << load;
+        ASSERT_EQ(api.core.hsa_executable_destroy_fn(executable), HSA_STATUS_SUCCESS) << load;
+        ASSERT_TRUE(g_core_memory_allocations.empty()) << load;
+      }
+      EXPECT_EQ(g_core_memory_allocate_calls, static_cast<int>(kLoadCount));
+      EXPECT_EQ(g_core_memory_free_calls, static_cast<int>(kLoadCount));
+    }
+    EXPECT_TRUE(g_core_memory_allocations.empty());
+  }
 }
 
 TEST(HsaHooksUnitTest, ConSanScTrapIsExplicitAndAllocationFailureDoesNotFallBack) {
@@ -5324,6 +5368,9 @@ TEST(HsaHooksUnitTest, ConSanAutoReportUsesExactLayoutAcrossTwoLiveCodeObjectsAn
       EXPECT_EQ(g_transform_override_report_layouts[patch_index]->required_bytes,
                 g_core_memory_allocation_sizes[inventory_index / 2u]);
     }
+    ASSERT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+    EXPECT_TRUE(g_core_memory_allocations.empty());
+    EXPECT_EQ(g_core_memory_free_calls, 2);
   }
 
   EXPECT_TRUE(g_core_memory_allocations.empty());
@@ -5333,6 +5380,50 @@ TEST(HsaHooksUnitTest, ConSanAutoReportUsesExactLayoutAcrossTwoLiveCodeObjectsAn
     EXPECT_TRUE(rocjitsu::consan_moi_report_header_is_current(header));
     EXPECT_EQ(header.atomic_record_capacity, rocjitsu::kConSanMoiRecordReplayDynamicEventHeadroom);
     EXPECT_GT(header.diagnostic_capacity, 0u);
+  }
+}
+
+TEST(HsaHooksUnitTest, ConSanMoiAutoReportReclaimsEveryExecutableAcrossProcessBudgetChurn) {
+  for (const char *policy : {"default", "strict"}) {
+    SCOPED_TRACE(policy);
+    ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+    ScopedEnvVar selected_policy("RJ_CONSAN_POLICY", policy);
+    ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
+    ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", nullptr);
+    ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+    ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+
+    reset_code_object_observations();
+    reset_core_memory_observations();
+    g_transform_override_result = auto_report_sampled_transform_result();
+    {
+      FakeApiTable api;
+      InstalledDbiHook hook(api);
+      ASSERT_TRUE(hook.installed()) << hook.error();
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      constexpr size_t kLoadCount = 300;
+      for (size_t load = 0; load < kLoadCount; ++load) {
+        const hsa_executable_t executable{2000u + load};
+        ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(executable, kHostAgent, reader,
+                                                                    nullptr, nullptr),
+                  HSA_STATUS_SUCCESS)
+            << load;
+        ASSERT_EQ(g_core_memory_allocations.size(), 1u) << load;
+        ASSERT_EQ(api.core.hsa_executable_destroy_fn(executable), HSA_STATUS_SUCCESS) << load;
+        ASSERT_TRUE(g_core_memory_allocations.empty()) << load;
+      }
+      EXPECT_EQ(g_core_memory_allocate_calls, static_cast<int>(kLoadCount));
+      EXPECT_EQ(g_core_memory_free_calls, static_cast<int>(kLoadCount));
+    }
+    EXPECT_TRUE(g_core_memory_allocations.empty());
   }
 }
 
