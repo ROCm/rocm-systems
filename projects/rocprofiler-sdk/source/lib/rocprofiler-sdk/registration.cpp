@@ -287,10 +287,12 @@ get_invoked_configures()
     return _v;
 }
 
-auto&
-get_forced_configure()
+auto*
+get_forced_configures()
 {
-    static rocprofiler_configure_func_t _v = nullptr;
+    using configure_func_set_t = std::unordered_set<rocprofiler_configure_func_t>;
+    static auto*& _v =
+        common::static_object<common::Synchronized<configure_func_set_t>>::construct();
     return _v;
 }
 
@@ -423,10 +425,19 @@ find_clients()
         return _sym;
     };
 
-    if(get_forced_configure() && is_unique_configure_func(get_forced_configure()))
+    if(get_forced_configures())
     {
-        ROCP_INFO << "adding forced configure";
-        emplace_client(data, "(forced)", nullptr, get_forced_configure(), nullptr);
+        get_forced_configures()->rlock(
+            [&data, &is_unique_configure_func](const auto& _forced_configures) {
+                for(auto cfg : _forced_configures)
+                {
+                    if(is_unique_configure_func(cfg))
+                    {
+                        ROCP_INFO << "adding forced configure";
+                        emplace_client(data, "(forced)", nullptr, cfg, nullptr);
+                    }
+                }
+            });
     }
 
     auto get_env_libs = []() {
@@ -593,12 +604,20 @@ find_clients()
             }
 
             // skip the configure function that was forced
-            if(_sym == get_forced_configure())
+            if(get_forced_configures())
             {
-                data.front()->name                    = itr;
-                data.front()->dlhandle                = handle;
-                data.front()->internal_client_id.name = "(forced)";
-                continue;
+                const bool _exists =
+                    get_forced_configures()->rlock([&_sym](const auto& _forced_configures) {
+                        return (_forced_configures.find(_sym) != _forced_configures.end());
+                    });
+
+                if(_exists)
+                {
+                    data.front()->name                    = itr;
+                    data.front()->dlhandle                = handle;
+                    data.front()->internal_client_id.name = "(forced)";
+                    continue;
+                }
             }
 
             if(_sym == &rocprofiler_configure && data.size() == 1)
@@ -1159,12 +1178,39 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
 
     ROCP_INFO << "forcing rocprofiler configuration";
 
-    auto& forced_config = rocprofiler::registration::get_forced_configure();
+    auto* forced_configs = rocprofiler::registration::get_forced_configures();
 
-    if(forced_config || rocprofiler::registration::get_init_status() > 0)
+    struct forced_config_info
+    {
+        bool   exists             = false;
+        size_t num_forced_configs = 0;
+    };
+
+    auto _forced_cfg_info = forced_config_info{};
+    if(forced_configs)
+    {
+        _forced_cfg_info = forced_configs->wlock(
+            [](auto& _forced_configures, auto _configure_func) {
+                if(_forced_configures.find(_configure_func) != _forced_configures.end())
+                {
+                    ROCP_INFO << "ignoring duplicate forced configure";
+                    return forced_config_info{true, _forced_configures.size()};
+                }
+                _forced_configures.emplace(_configure_func);
+                return forced_config_info{false, _forced_configures.size()};
+            },
+            configure_func);
+    }
+
+    if(_forced_cfg_info.exists)
+    {
+        ROCP_INFO << "ignoring duplicate forced configure";
+        return ROCPROFILER_STATUS_SUCCESS;
+    }
+
+    if(_forced_cfg_info.num_forced_configs > 1 || rocprofiler::registration::get_init_status() > 0)
     {
         ROCP_INFO << "adding forced configure";
-        forced_config = configure_func;
         {
             using scoped_lock_t = rocprofiler::registration::scoped_lock_t;
 
@@ -1172,7 +1218,7 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
             auto& _client = emplace_client(*rocprofiler::registration::get_clients(),
                                            "(forced...)",
                                            nullptr,
-                                           forced_config,
+                                           configure_func,
                                            nullptr);
 
             rocprofiler::registration::client_initialize(_client);
@@ -1195,13 +1241,11 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     if(rocprofiler::registration::get_init_status() != 0)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
-    // if another tool forced configure, the init status should be 1, but
-    // let's just make sure that the forced configure function is a nullptr
-    if(forced_config) return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
-
+    // ROCPROFILER_REGISTER_FORCE_LOAD=1 forces rocprofiler-register to load rocprofiler-sdk
     rocprofiler::common::set_env("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
+    // make sure this library is the one that rocprofiler-register uses
     rocprofiler::registration::set_rocprofiler_register_library();
-    forced_config = configure_func;
+    // full initialization
     rocprofiler::registration::initialize();
 
     // Trigger re-propagation of all registered API tables via rocprofiler-register.
