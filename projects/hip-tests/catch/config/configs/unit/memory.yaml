@@ -849,6 +849,8 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources:
     <<: *level_2
+    # ROCM-29275
+    disabled: [gfx1250]
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_P2P_Swap:
     <<: *level_2
