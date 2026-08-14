@@ -434,7 +434,17 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
             jpeg_streams_params[j] = std::move(*jpeg_stream_params);
         }
 
-        CHECK_ROCJPEG(jpeg_vaapi_decoder_.SubmitDecodeBatched(jpeg_streams_params.data() + i, current_batch_size, &decode_params[i], current_surface_ids.data() + i));
+        RocJpegStatus rocjpeg_status = jpeg_vaapi_decoder_.SubmitDecodeBatched(jpeg_streams_params.data() + i, current_batch_size, &decode_params[i], current_surface_ids.data() + i);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            // Sync and release surfaces from all previously successful sub-batches to avoid leaking
+            // VA surfaces that are already in-flight on the hardware.
+            for (int j = 0; j < i; j++) {
+                jpeg_vaapi_decoder_.SyncSurface(current_surface_ids[j]);
+                jpeg_vaapi_decoder_.SetSurfaceAsIdle(current_surface_ids[j]);
+            }
+            FunctionExitLog(g_rocjpeg_logger);
+            return rocjpeg_status;
+        }
     }
 
     CHECK_ROCJPEG(FinalizeDecodeBatched(current_surface_ids.data(), jpeg_streams_params.data(), decode_params, destinations, batch_size));
@@ -487,6 +497,12 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_strea
 
         RocJpegStatus rocjpeg_status = jpeg_vaapi_decoder_.SubmitDecodeBatched(jpeg_streams_params.data() + i, current_batch_size, &decode_params[i], surface_ids.data() + i);
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            // Sync and release surfaces from all previously successful sub-batches to avoid leaking
+            // VA surfaces that are already in-flight on the hardware.
+            for (int j = 0; j < i; j++) {
+                jpeg_vaapi_decoder_.SyncSurface(surface_ids[j]);
+                jpeg_vaapi_decoder_.SetSurfaceAsIdle(surface_ids[j]);
+            }
             FunctionExitLog(g_rocjpeg_logger);
             return rocjpeg_status;
         }
