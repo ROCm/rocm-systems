@@ -3420,7 +3420,7 @@ def test_decoder_header_keeps_dispatch_details_private(
         'cdna2',
         'cdna3',
         'cdna4',
-        'gfx1250',
+        'cdna5',
         'rdna1',
         'rdna2',
         'rdna3',
