@@ -836,6 +836,8 @@ memory:
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_2
   Unit_hipMemcpyBatchAsync_Swap:
     <<: *level_2
+    # ROCM-29275
+    disabled: [gfx1250]
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_Multicast:
     <<: *level_2
@@ -850,6 +852,8 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_P2P_Swap:
     <<: *level_2
+    # ROCM-29275
+    disabled: [gfx1250]
     tags: [transfer, multigpu]
   Unit_hipMemcpyBatchAsync_P2P_Multicast:
     <<: *level_2

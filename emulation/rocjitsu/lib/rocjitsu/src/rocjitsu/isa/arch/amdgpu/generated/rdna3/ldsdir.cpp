@@ -5,22 +5,15 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/ldsdir.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
 
 namespace rocjitsu {
 namespace rdna3 {
 
 LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
     : Ldsdir("lds_param_load", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<LdsParamLoadLdsdir>()),
+             selected_exec_fn(InstructionExecutionId::LdsParamLoadLdsdir)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr),
       dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -34,13 +27,9 @@ LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void LdsParamLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_lds_param_load_ldsdir(*this, wf);
-}
-
 LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
     : Ldsdir("lds_direct_load", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<LdsDirectLoadLdsdir>()),
+             selected_exec_fn(InstructionExecutionId::LdsDirectLoadLdsdir)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
@@ -50,10 +39,6 @@ LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-}
-
-void LdsDirectLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_lds_direct_load_ldsdir(*this, wf);
 }
 
 } // namespace rdna3
