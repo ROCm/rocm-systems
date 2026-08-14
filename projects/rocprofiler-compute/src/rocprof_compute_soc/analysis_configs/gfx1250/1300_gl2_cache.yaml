@@ -477,6 +477,15 @@ Panel Config:
     GL2-EA Host CPU Bandwidth - Atomic: >-
       Total host CPU atomic bandwidth between GL2 and EA.
 
+    GL2-EA PCIE Bandwidth - Read: >-
+      Total PCIe read bandwidth between GL2 and EA.
+
+    GL2-EA PCIE Bandwidth - Write: >-
+      Total PCIe write bandwidth between GL2 and EA.
+
+    GL2-EA PCIE Bandwidth - Atomic: >-
+      Total PCIe atomic bandwidth between GL2 and EA.
+
     GL2-EA Remote Node Bandwidth - Read: >-
       Total remote node read bandwidth between GL2 and EA.
 

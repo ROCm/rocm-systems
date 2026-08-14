@@ -210,7 +210,7 @@ Panel Config:
           peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
           pct_of_peak: true
         Instruction Cache Fetch Latency:
-          value: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH_REQ_sum)
+          value: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH_REQS_sum)
           unit: Cycles
           peak: None
           pct_of_peak: false

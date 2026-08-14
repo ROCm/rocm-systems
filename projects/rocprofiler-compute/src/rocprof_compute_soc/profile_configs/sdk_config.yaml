@@ -18453,8 +18453,8 @@ rocprofiler-sdk:
       - gfx1250
       block: GC_UTCL1
       event: 9
-  - name: UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM
-    description: UTCL1 UTCL2 REQS OUTSTANDING ACCUM.
+  - name: UTCL1_UTCL2_REQS_OUTSTANDING
+    description: UTCL1 UTCL2 REQS OUTSTANDING.
     properties: []
     definitions:
     - architectures:
@@ -24706,13 +24706,13 @@ rocprofiler-sdk:
     - architectures:
       - gfx1250
       expression: reduce(SQ_WAIT_SLEEP,sum)
-  - name: UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM_sum
-    description: sum of UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM.
+  - name: UTCL1_UTCL2_REQS_OUTSTANDING_sum
+    description: sum of UTCL1_UTCL2_REQS_OUTSTANDING.
     properties: []
     definitions:
     - architectures:
       - gfx1250
-      expression: reduce(UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM,sum)
+      expression: reduce(UTCL1_UTCL2_REQS_OUTSTANDING,sum)
   fw-restriction-schema-version: 1
   firmware_restrictions:
   - affected_architectures:

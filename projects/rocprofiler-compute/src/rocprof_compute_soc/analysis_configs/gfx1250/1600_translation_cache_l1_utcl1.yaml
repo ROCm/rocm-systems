@@ -53,9 +53,9 @@ Panel Config:
           max: MAX(UTCL1_UTCL2_RET_CNT_sum / $denom)
           unit: (Count + $normUnit)
         UTCL1-UTCL2 Request Latency:
-          avg: SUM(UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM_sum) / SUM(UTCL1_UTCL2_REQS_sum)
-          min: MIN(UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM_sum / UTCL1_UTCL2_REQS_sum)
-          max: MAX(UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM_sum / UTCL1_UTCL2_REQS_sum)
+          avg: SUM(UTCL1_UTCL2_REQS_OUTSTANDING_sum) / SUM(UTCL1_UTCL2_REQS_sum)
+          min: MIN(UTCL1_UTCL2_REQS_OUTSTANDING_sum / UTCL1_UTCL2_REQS_sum)
+          max: MAX(UTCL1_UTCL2_REQS_OUTSTANDING_sum / UTCL1_UTCL2_REQS_sum)
           unit: Cycles
         UTCL1-UTCL2 Request Stall Rate:
           avg: 100 * SUM(UTCL1_STALL_UTCL2_CREDITS_sum) / SUM(UTCL1_XLAT_REQ_BUSY_sum)
