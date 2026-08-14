@@ -164,7 +164,8 @@ uint64_t RdcPerfTimer::MeasureTSCFreqHz() {
   uint64_t tscIntervalTicks = tscTicksEnd - tscTicksBegin;
   return (tscIntervalTicks * 10 + (coarseIntervalNs / 2)) / coarseIntervalNs;
 #elif defined(__powerpc64__)
-  return __ppc_get_timebase_freq() / 100000000;
+  uint64_t freq = __ppc_get_timebase_freq();
+  return (freq * 10 + (kNanosecondsPerSecond / 2)) / kNanosecondsPerSecond;
 #else
 #error "Unsupported architecture"
 #endif
