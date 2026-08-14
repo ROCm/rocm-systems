@@ -1,0 +1,186 @@
+{
+  "schema_version": 2,
+  "target": "gfx1201",
+  "provenance_schema_version": 3,
+  "campaign_protocol": "consan-gfx1201-empirical-v3",
+  "required_runtime_tools": [
+    "amdclang++",
+    "llvm-readelf",
+    "python",
+    "rocminfo"
+  ],
+  "collection_date": "2026-08-02",
+  "source_head": "2a4af5a44ad555d594b45a8d34d45f6983322e64",
+  "hook_sha256": "b72109fb27a9f2edd49dac504e3469b536613dae2b34eb8b5be7961a180a6a6d",
+  "fault_spec_sha256": "ac56252db119e9625fa9d7f90d7014a3c492c082e9e128f175d95dff2addada2",
+  "fault_spec_path": "emulation/rocjitsu/tests/dbi/consan/consan_validation_faults_gfx1201_empirical.json",
+  "required_rounds": 10,
+  "randomization_seed": 20260802,
+  "baseline_drift_limit": 0.05,
+  "bootstrap_resamples": 10000,
+  "minimum_device_timed_aggregate_ms": 250.0,
+  "single_dispatch_timing": {
+    "streamk-arrival": {
+      "maximum_iterations": 1,
+      "minimum_device_timed_aggregate_ms": 0.5,
+      "reason": "Repeated launches exceed ordinary ConSan dynamic-evidence capacity; every row uses a fresh process and one real kernel dispatch."
+    }
+  },
+  "performance_workloads": [
+    "rdna4-matmul-fp8-production",
+    "llama-rdna4-mul-mat-vec-q",
+    "d128-block",
+    "streamk-arrival",
+    "pytorch-rdna4-compiled-softmax"
+  ],
+  "performance_artifacts": [
+    "bd-2wsf-perf-2a4af5a44a-fp8-gpu-final-20260802",
+    "bd-2wsf-perf-2a4af5a44a-llama-gpu-final-20260802",
+    "bd-2wsf-perf-2a4af5a44a-d128-gpu-final-20260802",
+    "bd-2wsf-perf-2a4af5a44a-streamk-gpu-final-20260802-r2",
+    "bd-2wsf-perf-2a4af5a44a-softmax-gpu-final-20260802"
+  ],
+  "workload_identities": {
+    "rdna4-matmul-fp8-production": {
+      "file_labels": [
+        "executable",
+        "project-source",
+        "project-build-script",
+        "workload-source"
+      ],
+      "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
+      "source_heads": {
+        "rdna4_matmul": "03431b8af28be2c3cad828bec77dfe8836d4a555"
+      }
+    },
+    "llama-rdna4-mul-mat-vec-q": {
+      "file_labels": [
+        "executable",
+        "ggml",
+        "ggml-base",
+        "ggml-cpu",
+        "ggml-hip",
+        "case",
+        "workload-source"
+      ],
+      "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
+      "source_heads": {
+        "rocjitsu-test-corpus": "a4c21378d144b4f49a53e6084306c0d3c40240bb"
+      }
+    },
+    "d128-block": {
+      "file_labels": ["executable"],
+      "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
+      "source_heads": {
+        "hip-moi": "72a675dd671d2ef2e8592c858427d8f9a71bb300"
+      }
+    },
+    "streamk-arrival": {
+      "file_labels": ["executable"],
+      "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
+      "source_heads": {
+        "hip-moi": "72a675dd671d2ef2e8592c858427d8f9a71bb300"
+      }
+    },
+    "pytorch-rdna4-compiled-softmax": {
+      "file_labels": ["python", "workload-source"],
+      "required_runtime_libraries": ["hip-runtime", "hsa-runtime"],
+      "source_heads": {}
+    }
+  },
+  "detection_cases": [
+    {
+      "workload": "rdna4-matmul-fp8-production",
+      "fault": "barrier-drop"
+    },
+    {
+      "workload": "llama-rdna4-mul-mat-vec-q",
+      "fault": "barrier-drop"
+    },
+    {
+      "workload": "d128-block",
+      "fault": "barrier-drop"
+    },
+    {
+      "workload": "streamk-arrival",
+      "fault": "atomic-weaken-order"
+    },
+    {
+      "workload": "streamk-arrival",
+      "fault": "atomic-weaken-scope"
+    },
+    {
+      "workload": "pytorch-rdna4-compiled-softmax",
+      "fault": "barrier-drop"
+    }
+  ],
+  "detection_artifacts": [
+    "bd-2wsf-detection-2a4af5a44a-fp8-gpu-final-20260802",
+    "bd-2wsf-detection-2a4af5a44a-llama-gpu-final-20260802",
+    "bd-2wsf-detection-2a4af5a44a-d128-gpu-final-20260802",
+    "bd-2wsf-detection-2a4af5a44a-streamk-order-gpu-final-20260802",
+    "bd-2wsf-detection-2a4af5a44a-streamk-scope-gpu-final-20260802",
+    "bd-2wsf-detection-2a4af5a44a-softmax-gpu-final-20260802"
+  ],
+  "complexity": {
+    "source_tree_sha256": "d4c89bb774b02f0d0aa2f3ffeca934a0fd3bf96dae482db21b532ff256674742",
+    "source_directories": [
+      "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan",
+      "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan"
+    ],
+    "test_directories": [
+      "emulation/rocjitsu/tests",
+      "emulation/rocjitsu/lib/rocjitsu/test"
+    ],
+    "engines": {
+      "supercollider": {
+        "dedicated_files": [
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_supercollider.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_supercollider_common.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_supercollider_flat.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_supercollider_lds.inc"
+        ],
+        "test_pattern": "supercollider|SuperCollider",
+        "runtime_model": "stateless perturbation and read-back; no persistent report allocation in admitted rows",
+        "failure_modes": "FP8 undercoverage; zero diagnoses in all six final fault cases",
+        "risk": "medium: isolated emitters, but large target-specific flat/LDS instruction surface"
+      },
+      "record-replay": {
+        "dedicated_files": [
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_record_atomic.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_record_replay.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_record_replay_types.h.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
+        ],
+        "test_pattern": "record[_-]?replay|RecordReplay",
+        "runtime_model": "bounded device histories, dispatch directory, host replay, saturation and provenance repair",
+        "failure_modes": "FP8 history incomplete; llama transform failure; clean softmax diagnostics",
+        "risk": "high: unique replay ABI and host post-processing with multiple capacity and completeness states"
+      },
+      "sampled": {
+        "dedicated_files": [
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_sampled_access.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_sampled_sync.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
+        ],
+        "test_pattern": "sampled|Sampled",
+        "runtime_model": "bounded sampled watchpoints and causal sync windows with runtime offset/stride selection",
+        "failure_modes": "probabilistic barrier yield; zero diagnoses for both Stream-K atomic weakenings",
+        "risk": "medium-high: broad admission and small reports, but sampling and causal-window state require statistical tests"
+      },
+      "inline-shadow": {
+        "dedicated_files": [
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_inline_atomic.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_inline_model.h.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_inline_shadow_emission.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_shadow_models.h.inc"
+        ],
+        "test_pattern": "inline[_-]?shadow|InlineShadow",
+        "runtime_model": "device-side shadow state, inline atomic protocol, report buffer, and host decoding",
+        "failure_modes": "FP8 access undercoverage; Stream-K access and atomic undercoverage",
+        "risk": "high: largest dedicated emission/model surface and high report memory on small kernels"
+      }
+    }
+  }
+}

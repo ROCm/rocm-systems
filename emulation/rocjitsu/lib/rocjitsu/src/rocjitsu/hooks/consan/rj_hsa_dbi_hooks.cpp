@@ -3977,6 +3977,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
 
     log_message(kLogInfo, "ConSan patch begin reader=%llu bytes=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle), size);
+    const auto patch_begin = std::chrono::steady_clock::now();
     if (!patch_result_storage) {
       if (reusable_moi_inventory) {
         patch_result_storage =
@@ -4014,15 +4015,17 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     install_action = rocjitsu::consan_install_action(patch_result, config->fail_closed);
     replacement_instrumentation_selected =
         install_action == rocjitsu::ConSanInstallAction::LoadReplacement;
-    log_message(kLogInfo,
-                "ConSan patch end reader=%llu visited=%s modified=%s outcome=%s errors=%zu "
-                "warnings=%zu patches=%zu",
-                static_cast<unsigned long long>(code_object_reader.handle),
-                patch_result.visited_code_object ? "true" : "false",
-                patch_result.modified ? "true" : "false",
-                rocjitsu::consan_transform_outcome_name(patch_result.outcome),
-                patch_result.errors.size(), patch_result.warnings.size(),
-                patch_result.patches.size());
+    log_message(
+        kLogInfo,
+        "ConSan patch end reader=%llu visited=%s modified=%s outcome=%s errors=%zu "
+        "warnings=%zu patches=%zu patch_ms=%.3f",
+        static_cast<unsigned long long>(code_object_reader.handle),
+        patch_result.visited_code_object ? "true" : "false",
+        patch_result.modified ? "true" : "false",
+        rocjitsu::consan_transform_outcome_name(patch_result.outcome), patch_result.errors.size(),
+        patch_result.warnings.size(), patch_result.patches.size(),
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - patch_begin)
+            .count());
     if (consan_log_level_enabled(kLogInfo) && patch_result.flat_selection_telemetry) {
       const rocjitsu::ConSanFlatSelectionTelemetry &selection =
           *patch_result.flat_selection_telemetry;

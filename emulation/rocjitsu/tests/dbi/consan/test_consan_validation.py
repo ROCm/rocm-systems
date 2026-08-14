@@ -20,6 +20,7 @@ from unittest import mock
 
 import consan_validation as validation
 import consan_llama_validation as llama_validation
+import consan_rdna4_matmul_validation as rdna4_matmul_validation
 from consan_coverage_gate import _COVERAGE_COUNT_FIELDS
 from consan_validation_test_support import (
     RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT,
@@ -192,6 +193,15 @@ def assert_current_replay_log(test: unittest.TestCase, log_text: str) -> None:
                 "provenance_repaired=",
             ):
                 test.assertIn(field, line)
+
+
+def create_llama_runtime_fixture(build_root: Path, executable_name: str) -> None:
+    executable = build_root / "cases" / "llama.cpp" / executable_name
+    executable.parent.mkdir(parents=True, exist_ok=True)
+    executable.write_bytes(b"executable")
+    for library in validation._llama_runtime_files(build_root).values():
+        library.parent.mkdir(parents=True, exist_ok=True)
+        library.write_bytes(b"library")
 
 
 class ConSanValidationTest(unittest.TestCase):
@@ -1244,13 +1254,13 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_manifest_is_the_complete_north_star_matrix(self) -> None:
         manifest = validation._manifest("gfx1201")
-        self.assertEqual(len(manifest["workloads"]), 19)
+        self.assertEqual(len(manifest["workloads"]), 21)
         self.assertEqual(
             [profile["id"] for profile in manifest["profiles"]],
             list(validation.PROFILE_IDS),
         )
         self.assertEqual(
-            len({workload["id"] for workload in manifest["workloads"]}), 19
+            len({workload["id"] for workload in manifest["workloads"]}), 21
         )
         workloads = {workload["id"]: workload for workload in manifest["workloads"]}
         self.assertEqual(
@@ -1266,6 +1276,16 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             workloads["pytorch-rdna4-split-softmax"]["targets"], ("gfx1201",)
+        )
+        self.assertEqual(
+            workloads["rdna4-matmul-fp16-production"]["targets"], ("gfx1201",)
+        )
+        self.assertEqual(
+            workloads["rdna4-matmul-fp8-production"]["targets"], ("gfx1201",)
+        )
+        self.assertEqual(
+            workloads["rdna4-matmul-fp16-production"]["self_timed_device_minimum_ms"],
+            250.0,
         )
         self.assertEqual(workloads["pytorch-rdna4-llm-topk"]["targets"], ("gfx1201",))
         self.assertEqual(
@@ -1316,17 +1336,17 @@ class ConSanValidationTest(unittest.TestCase):
                 self.assertIn("barrier-drop", workload["fault_families"])
                 self.assertIsNotNone(workload["overhead_filter"])
 
-    def test_gfx1201_status_workload_count_matches_manifest(self) -> None:
+    def test_gfx1201_status_matrix_count_matches_manifest(self) -> None:
         status_path = (
             Path(validation.__file__).resolve().parents[3]
             / "docs/consan/STATUS_RDNA4.md"
         )
         status = status_path.read_text()
-        count = re.search(r"All (\d+) workloads × 4 engines are assessed", status)
-        self.assertIsNotNone(count)
-        self.assertEqual(
-            int(count.group(1)), len(validation._manifest("gfx1201")["workloads"])
-        )
+        matrix = status.split("## Current matrix", 1)[1].split("\n## ", 1)[0]
+        rows = [
+            line for line in matrix.splitlines() if re.match(r"^\| \*\*P[0-9]", line)
+        ]
+        self.assertEqual(len(rows), len(validation._manifest("gfx1201")["workloads"]))
 
     def test_pytorch_manifest_workloads_have_client_runners(self) -> None:
         client_path = Path(validation.__file__).with_name(
@@ -2221,7 +2241,11 @@ class ConSanValidationTest(unittest.TestCase):
             clear=False,
         ):
             environment = validation._clean_environment(
-                "record-replay", workload, Path("/new/hook.so")
+                "record-replay",
+                workload,
+                Path("/new/hook.so"),
+                None,
+                Path("/workspace"),
             )
         self.assertNotIn("RJ_CONSAN_MAX_PATCHES", environment)
         self.assertNotIn("RJ_CONSAN_TMP_VGPR", environment)
@@ -2248,9 +2272,15 @@ class ConSanValidationTest(unittest.TestCase):
             {"HSA_TOOLS_ROCPROFILER_V1_TOOLS": "0"},
             clear=False,
         ):
-            baseline = validation._clean_environment(None, workload, Path("/hook.so"))
+            baseline = validation._clean_environment(
+                None, workload, None, None, Path("/workspace")
+            )
             environment = validation._clean_environment(
-                "record-replay", workload, Path("/hook.so")
+                "record-replay",
+                workload,
+                Path("/hook.so"),
+                None,
+                Path("/workspace"),
             )
         self.assertNotIn("HSA_TOOLS_ROCPROFILER_V1_TOOLS", baseline)
         self.assertEqual(environment["HSA_TOOLS_ROCPROFILER_V1_TOOLS"], "1")
@@ -2276,7 +2306,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_supercollider_does_not_receive_moi_tracking_controls(self) -> None:
         workload = validation.WORKLOAD_BY_ID["streamk-arrival"]
         environment = validation._clean_environment(
-            "supercollider", workload, Path("/hook.so")
+            "supercollider", workload, Path("/hook.so"), None, Path("/workspace")
         )
         self.assertNotIn("RJ_CONSAN_MOI_TRACK_BARRIERS", environment)
         self.assertNotIn("RJ_CONSAN_MOI_TRACK_ATOMICS", environment)
@@ -2287,7 +2317,7 @@ class ConSanValidationTest(unittest.TestCase):
         workload = validation.WORKLOAD_BY_ID["pytorch-scatter-reduce"]
         for profile in ("record-replay", "inline-shadow"):
             environment = validation._clean_environment(
-                profile, workload, Path("/hook.so")
+                profile, workload, Path("/hook.so"), None, Path("/workspace")
             )
             self.assertEqual(environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"], "0")
 
@@ -2295,10 +2325,10 @@ class ConSanValidationTest(unittest.TestCase):
         qwen = validation.WORKLOAD_BY_ID["qwen-prefill"]
         tp1 = validation.WORKLOAD_BY_ID["tp1-prefill"]
         qwen_environment = validation._clean_environment(
-            "sampled", qwen, Path("/hook.so")
+            "sampled", qwen, Path("/hook.so"), None, Path("/workspace")
         )
         tp1_environment = validation._clean_environment(
-            "sampled", tp1, Path("/hook.so")
+            "sampled", tp1, Path("/hook.so"), None, Path("/workspace")
         )
         self.assertEqual(qwen_environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"], "1")
         self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", qwen_environment)
@@ -2483,6 +2513,7 @@ class ConSanValidationTest(unittest.TestCase):
             validation.WORKLOAD_BY_ID["pytorch-torch-mode"],
             hook,
             "gfx1201",
+            Path("/workspace"),
         )
         topk_clean = validation._run_environment(
             "record-replay",
@@ -2490,6 +2521,7 @@ class ConSanValidationTest(unittest.TestCase):
             hook,
             "gfx1201",
             "clean",
+            Path("/workspace"),
         )
 
         self.assertEqual(clean_gate["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
@@ -2501,6 +2533,7 @@ class ConSanValidationTest(unittest.TestCase):
             hook,
             "gfx1201",
             "overhead",
+            Path("/workspace"),
         )
         self.assertEqual(overhead["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
         for profile in ("sampled", "inline-shadow"):
@@ -2511,6 +2544,7 @@ class ConSanValidationTest(unittest.TestCase):
                     hook,
                     "gfx1201",
                     "clean",
+                    Path("/workspace"),
                 )
                 self.assertEqual(other_engine["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
 
@@ -2524,6 +2558,7 @@ class ConSanValidationTest(unittest.TestCase):
                 Path("/workspace/hook.so"),
                 "gfx1201",
                 "fault",
+                Path("/workspace"),
             )
 
     def test_coverage_output_overhead_uses_the_same_diagnostic_contract(
@@ -2552,7 +2587,9 @@ class ConSanValidationTest(unittest.TestCase):
                     validation, "_coverage_summary", return_value={"accepted": True}
                 ) as coverage_summary,
                 mock.patch.object(
-                    validation, "_json_medians", return_value={"topk": 1.0}
+                    validation,
+                    "_json_timing_samples",
+                    return_value={"topk": [1.0]},
                 ),
                 mock.patch.object(validation, "_source_identities", return_value=[]),
             ):
@@ -2716,6 +2753,7 @@ class ConSanValidationTest(unittest.TestCase):
             {"environment": {}},
             {"detector": "not_detected"},
             {},
+            Path("/workspace"),
         )
         self.assertEqual(environment["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
 
@@ -2821,6 +2859,11 @@ class ConSanValidationTest(unittest.TestCase):
                 ),
                 mock.patch.object(
                     validation, "_source_identities", return_value=[source]
+                ),
+                mock.patch.object(
+                    validation,
+                    "_workload_runtime_identity",
+                    return_value={"kind": "pytorch", "python_packages": {}},
                 ),
             ):
                 validation._write_provenance(
@@ -3034,6 +3077,11 @@ class ConSanValidationTest(unittest.TestCase):
                 mock.patch.object(
                     validation, "_source_identities", return_value=[source]
                 ),
+                mock.patch.object(
+                    validation,
+                    "_workload_runtime_identity",
+                    return_value={"kind": "pytorch", "python_packages": {}},
+                ),
             ):
                 validation._write_provenance(
                     root, "gfx1201", workload, provenance.parent
@@ -3087,6 +3135,31 @@ class ConSanValidationTest(unittest.TestCase):
                     "_manifest",
                     return_value={"schema_version": 1, "profiles": ("a", "b")},
                 ),
+                mock.patch.object(
+                    validation,
+                    "_machine_identity",
+                    return_value={"selected_kfd_nodes": ["1"]},
+                ),
+                mock.patch.object(
+                    validation,
+                    "_runtime_tool_identities",
+                    return_value={"rocm-sdk": {"available": True}},
+                ),
+                mock.patch.object(
+                    validation,
+                    "_workload_runtime_identity",
+                    return_value={"kind": "pytorch", "python_packages": {}},
+                ),
+                mock.patch.object(
+                    validation,
+                    "_empirical_observation_snapshot",
+                    side_effect=(
+                        {"schema_version": 1, "captured_at_utc": "first"},
+                        {"schema_version": 1, "captured_at_utc": "second"},
+                        {"schema_version": 1, "captured_at_utc": "third"},
+                        {"schema_version": 1, "captured_at_utc": "fourth"},
+                    ),
+                ),
             ):
                 first = validation._write_provenance(
                     root, "gfx1201", workload, workload_root
@@ -3094,6 +3167,18 @@ class ConSanValidationTest(unittest.TestCase):
                 second = validation._write_provenance(
                     root, "gfx1201", workload, workload_root
                 )
+                original_provenance = first.read_text(encoding="utf-8")
+                old_schema = json.loads(original_provenance)
+                old_schema["provenance_schema_version"] = 1
+                first.write_text(json.dumps(old_schema), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    validation.ValidationError,
+                    "provenance schema changed.*use a new artifact root",
+                ):
+                    validation._write_provenance(
+                        root, "gfx1201", workload, workload_root
+                    )
+                first.write_text(original_provenance, encoding="utf-8")
                 workload_input.write_bytes(b"changed")
                 with self.assertRaisesRegex(
                     validation.ValidationError,
@@ -3102,9 +3187,148 @@ class ConSanValidationTest(unittest.TestCase):
                     validation._write_provenance(
                         root, "gfx1201", workload, workload_root
                     )
+            provenance = json.loads(first.read_text(encoding="utf-8"))
 
         self.assertEqual(first, second)
         self.assertEqual(first, workload_root / "provenance.json")
+        self.assertEqual(
+            provenance["provenance_schema_version"],
+            validation.PROVENANCE_SCHEMA_VERSION,
+        )
+        self.assertEqual(provenance["machine"]["selected_kfd_nodes"], ["1"])
+        self.assertEqual(provenance["workload_runtime"]["kind"], "pytorch")
+        self.assertEqual(provenance["observations"]["captured_at_utc"], "first")
+
+    def test_pytorch_runtime_identity_records_framework_and_generator(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        package_document = {
+            "torch_version": "2.14",
+            "torch_hip_version": "7.15",
+            "torch_file": "/frozen/torch/__init__.py",
+            "triton_version": "3.8",
+            "triton_file": "/frozen/triton/__init__.py",
+            "runtime_libraries": {
+                "hip-runtime": ["/frozen/libamdhip64.so.7"],
+                "hsa-runtime": ["/frozen/libhsa-runtime64.so.1"],
+            },
+        }
+        with (
+            mock.patch.object(
+                validation,
+                "_pytorch_python",
+                return_value=Path("/frozen/python"),
+            ),
+            mock.patch.object(
+                validation,
+                "_command_identity",
+                return_value={
+                    "available": True,
+                    "output": json.dumps(package_document),
+                },
+            ) as command_identity,
+            mock.patch.object(
+                validation,
+                "_runtime_library_records",
+                return_value={
+                    "hip-runtime": {"sha256": "a" * 64},
+                    "hsa-runtime": {"sha256": "b" * 64},
+                },
+            ),
+        ):
+            identity = validation._workload_runtime_identity(
+                Path("/workspace"), "gfx1201", workload
+            )
+        command = command_identity.call_args.args[0]
+        self.assertEqual(command[:2], ["/frozen/python", "-c"])
+        self.assertIn("torch_version", command[2])
+        self.assertIn("triton_version", command[2])
+        self.assertEqual(
+            command_identity.call_args.kwargs["timeout"], validation.TIMEOUT_SECONDS
+        )
+        self.assertEqual(identity["kind"], "pytorch")
+        self.assertTrue(identity["python_packages"]["available"])
+        self.assertEqual(identity["package_document"], package_document)
+        self.assertEqual(
+            set(identity["loaded_runtime_libraries"]),
+            {"hip-runtime", "hsa-runtime"},
+        )
+
+    def test_pytorch_runtime_identity_is_required(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        with (
+            mock.patch.object(
+                validation,
+                "_command_identity",
+                return_value={"available": False, "reason": "timed out"},
+            ),
+            self.assertRaisesRegex(
+                validation.ValidationError,
+                "required PyTorch/Triton runtime identity",
+            ),
+        ):
+            validation._workload_runtime_identity(
+                Path("/workspace"), "gfx1201", workload
+            )
+
+    def test_native_runtime_identity_names_hashed_provenance_files(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["d128-block"]
+        with (
+            mock.patch.object(
+                validation,
+                "_input_files",
+                return_value={"executable": Path("/workspace/d128")},
+            ),
+            mock.patch.object(
+                validation,
+                "_native_runtime_identity",
+                return_value={
+                    "loaded_runtime_libraries": {
+                        "hip-runtime": {"sha256": "a" * 64},
+                        "hsa-runtime": {"sha256": "b" * 64},
+                    }
+                },
+            ),
+        ):
+            identity = validation._workload_runtime_identity(
+                Path("/workspace"), "gfx1201", workload
+            )
+        self.assertEqual(identity["kind"], workload.kind)
+        self.assertEqual(
+            identity["identity_source"], "validated dynamic-loader closure"
+        )
+
+    def test_llama_runtime_identity_matches_dynamic_loader_closure(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with temporary_root() as workspace:
+            build_root = workspace / "frozen-build"
+            create_llama_runtime_fixture(build_root, workload.relative_path)
+            libraries = validation._llama_runtime_files(build_root)
+            ldd_output = "\n".join(
+                f"lib{label}.so.0 => {path} (0x1000)"
+                for label, path in libraries.items()
+            )
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {validation.LLAMA_BUILD_DIR_ENV: str(build_root)},
+                ),
+                mock.patch.object(validation.shutil, "which", return_value="/bin/ldd"),
+                mock.patch.object(
+                    validation.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess(
+                        ["/bin/ldd"], 0, stdout=ldd_output
+                    ),
+                ),
+            ):
+                identity = validation._workload_runtime_identity(
+                    workspace, "gfx1201", workload
+                )
+        self.assertEqual(identity["kind"], "llama")
+        self.assertEqual(set(identity["libraries"]), set(libraries))
+        self.assertEqual(
+            identity["identity_source"], "validated dynamic-loader closure"
+        )
 
     def test_topk_explain_reports_strict_clean_contract(self) -> None:
         audit = validation._explain_contract(
@@ -3336,6 +3560,7 @@ class ConSanValidationTest(unittest.TestCase):
                     validation.WORKLOAD_BY_ID[workload_id],
                     Path("/workspace/hook.so"),
                     target,
+                    Path("/workspace"),
                 )
                 for target, workload_id in (
                     ("gfx942", "qwen-prefill"),
@@ -3347,6 +3572,7 @@ class ConSanValidationTest(unittest.TestCase):
                 validation.WORKLOAD_BY_ID["pytorch-torch-mode"],
                 Path("/workspace/hook.so"),
                 "gfx1250",
+                Path("/workspace"),
             )
         for target, environment in native_cdna.items():
             with self.subTest(target=target):
@@ -3517,6 +3743,7 @@ class ConSanValidationTest(unittest.TestCase):
                     workspace / "rocjitsu-build" / hook_suffix,
                     "gfx1201",
                     workload,
+                    workspace,
                 )
         self.assertTrue(runtime["ok"])
         self.assertEqual(run.call_args.args[0][-1], str(hook.resolve()))
@@ -3628,26 +3855,191 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_llama_rdna4_command_uses_gpu_cpu_oracle_wrapper(self) -> None:
         workload = validation.WORKLOAD_BY_ID["llama-rdna4-rms-norm"]
-        command = validation._workload_command(
-            Path("/workspace"),
-            "gfx1201",
-            workload,
-            "clean",
-            Path("/artifacts/benchmark-0.json"),
-        )
+        with (
+            temporary_root() as workspace,
+            mock.patch.dict(
+                os.environ, {validation.LLAMA_BUILD_DIR_ENV: ""}, clear=False
+            ),
+        ):
+            build_root = (
+                workspace / "rocjitsu-test-corpus-build" / "kernels" / "gfx1201"
+            )
+            create_llama_runtime_fixture(build_root, workload.relative_path)
+            command = validation._workload_command(
+                workspace,
+                "gfx1201",
+                workload,
+                "clean",
+                Path("/artifacts/benchmark-0.json"),
+            )
         self.assertTrue(command[1].endswith("consan_llama_validation.py"))
         self.assertEqual(command[command.index("--workload") + 1], "rms-norm")
         self.assertEqual(
             command[command.index("--executable") + 1],
-            (
-                "/workspace/rocjitsu-test-corpus-build/kernels/gfx1201/"
-                "cases/llama.cpp/llama_cpp_rms_norm"
-            ),
+            str(build_root / "cases" / "llama.cpp" / workload.relative_path),
         )
         self.assertEqual(
             command[command.index("--output-dir") + 1],
             "/artifacts/benchmark-0-llama-work",
         )
+
+    def test_llama_rdna4_overhead_uses_fixed_gpu_event_timing(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with (
+            temporary_root() as workspace,
+            mock.patch.dict(
+                os.environ, {validation.LLAMA_BUILD_DIR_ENV: ""}, clear=False
+            ),
+        ):
+            build_root = (
+                workspace / "rocjitsu-test-corpus-build" / "kernels" / "gfx1201"
+            )
+            create_llama_runtime_fixture(build_root, workload.relative_path)
+            command = validation._workload_command(
+                workspace,
+                "gfx1201",
+                workload,
+                "overhead",
+                Path("/artifacts/benchmark-0.json"),
+                inner_repetitions_override=123,
+            )
+        self.assertEqual(command[command.index("--n-embd") + 1], "1024")
+        self.assertEqual(command[command.index("--benchmark-iterations") + 1], "123")
+        self.assertEqual(
+            command[command.index("--minimum-timed-ms") + 1],
+            str(validation.EMPIRICAL_MINIMUM_TIMED_MS),
+        )
+
+    def test_llama_build_directory_can_be_pinned(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with temporary_root() as root:
+            build_root = root / "frozen-llama-build"
+            create_llama_runtime_fixture(build_root, workload.relative_path)
+            with mock.patch.dict(
+                os.environ,
+                {validation.LLAMA_BUILD_DIR_ENV: str(build_root)},
+            ):
+                command = validation._workload_command(
+                    Path("/workspace"),
+                    "gfx1201",
+                    workload,
+                    "clean",
+                    Path("/artifacts/benchmark-0.json"),
+                )
+        self.assertEqual(
+            command[command.index("--executable") + 1],
+            str(build_root / "cases" / "llama.cpp" / workload.relative_path),
+        )
+
+    def test_configured_llama_build_is_authoritative_and_fail_closed(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with temporary_root() as workspace:
+            fallback = workspace / "rocjitsu-test-corpus-build" / "kernels" / "gfx1201"
+            create_llama_runtime_fixture(fallback, workload.relative_path)
+            configured = workspace / "missing-configured-build"
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {validation.LLAMA_BUILD_DIR_ENV: str(configured)},
+                ),
+                self.assertRaisesRegex(
+                    validation.ValidationError,
+                    validation.LLAMA_BUILD_DIR_ENV,
+                ),
+            ):
+                validation._workload_command(
+                    workspace,
+                    "gfx1201",
+                    workload,
+                    "clean",
+                    Path("/artifacts/benchmark-0.json"),
+                )
+
+    def test_pinned_llama_build_records_and_loads_ggml_libraries(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with temporary_root() as root:
+            build_root = root / "frozen-build"
+            create_llama_runtime_fixture(build_root, workload.relative_path)
+            with mock.patch.dict(
+                os.environ,
+                {
+                    validation.LLAMA_BUILD_DIR_ENV: str(build_root),
+                    "LD_LIBRARY_PATH": "/runtime/lib",
+                },
+            ):
+                inputs = validation._input_files(
+                    Path("/workspace"), "gfx1201", workload
+                )
+                environment = validation._clean_environment(
+                    None,
+                    workload,
+                    Path("/hook.so"),
+                    "gfx1201",
+                    Path("/workspace"),
+                )
+        self.assertEqual(
+            inputs["ggml-hip"],
+            build_root
+            / "third_party"
+            / "llama.cpp"
+            / "ggml"
+            / "src"
+            / "ggml-hip"
+            / "libggml-hip.so",
+        )
+        self.assertEqual(
+            environment["LD_LIBRARY_PATH"].split(os.pathsep),
+            [
+                str(build_root / "third_party/llama.cpp/ggml/src"),
+                str(build_root / "third_party/llama.cpp/ggml/src/ggml-hip"),
+                "/runtime/lib",
+            ],
+        )
+
+    def test_unpinned_llama_build_uses_its_recorded_runtime_libraries(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with (
+            temporary_root() as workspace,
+            mock.patch.dict(
+                os.environ,
+                {validation.LLAMA_BUILD_DIR_ENV: "", "LD_LIBRARY_PATH": "/runtime/lib"},
+                clear=False,
+            ),
+        ):
+            build_root = (
+                workspace / "rocjitsu-test-corpus-build" / "kernels" / "gfx1201"
+            )
+            create_llama_runtime_fixture(build_root, workload.relative_path)
+            environment = validation._clean_environment(
+                None, workload, Path("/hook.so"), "gfx1201", workspace
+            )
+        self.assertEqual(
+            environment["LD_LIBRARY_PATH"].split(os.pathsep),
+            [
+                str(build_root / "third_party/llama.cpp/ggml/src"),
+                str(build_root / "third_party/llama.cpp/ggml/src/ggml-hip"),
+                "/runtime/lib",
+            ],
+        )
+
+    def test_llama_runtime_reports_missing_shared_library_layout(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["llama-rdna4-mul-mat-vec-q"]
+        with temporary_root() as workspace:
+            build_root = workspace / "incomplete-build"
+            executable = build_root / "cases" / "llama.cpp" / workload.relative_path
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"executable")
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {validation.LLAMA_BUILD_DIR_ENV: str(build_root)},
+                ),
+                self.assertRaisesRegex(
+                    validation.ValidationError,
+                    "complete llama build root",
+                ),
+            ):
+                validation._input_files(workspace, "gfx1201", workload)
 
     def test_native_matvec_uses_fault_sensitive_realistic_shape(self) -> None:
         self.assertEqual(llama_validation.WORKLOADS["mul-mat-vec-q"]["n_embd"], 1024)
@@ -3679,6 +4071,21 @@ class ConSanValidationTest(unittest.TestCase):
             path.write_bytes(b"short")
             with self.assertRaises(ValueError):
                 llama_validation._read_f32(path)
+
+    def test_llama_gpu_timing_requires_consistent_native_event_row(self) -> None:
+        aggregate, per_iteration = llama_validation._gpu_timing(
+            "llama_gpu_timing timer=hip-event aggregate_ms=250.0 "
+            "iterations=10000 per_iteration_ms=0.025\n",
+            10000,
+        )
+        self.assertEqual(aggregate, 250.0)
+        self.assertEqual(per_iteration, 0.025)
+        with self.assertRaisesRegex(ValueError, "iteration mismatch"):
+            llama_validation._gpu_timing(
+                "llama_gpu_timing timer=hip-event aggregate_ms=250.0 "
+                "iterations=9999 per_iteration_ms=0.02500250025\n",
+                10000,
+            )
 
     def test_llama_oracle_writes_fault_runner_result(self) -> None:
         with temporary_root() as root:
@@ -3903,6 +4310,139 @@ class ConSanValidationTest(unittest.TestCase):
             {"one-cta": 4.0, "two-cta-cluster": 7.0},
         )
 
+    def test_json_timing_samples_preserve_raw_iterations(self) -> None:
+        document = {
+            "kernel": {
+                "median_ms": 5.0,
+                "samples_ms": [20.0, 4.0, 5.0, 6.0],
+                "device_median_ms": 3.5,
+                "device_samples_ms": [10.0, 3.0, 4.0, 3.0],
+            }
+        }
+        encoded = json.dumps(document)
+        self.assertEqual(
+            validation._json_timing_samples(encoded, "Pytorch"),
+            {
+                "kernel": [20.0, 4.0, 5.0, 6.0],
+                "kernel:device": [10.0, 3.0, 4.0, 3.0],
+            },
+        )
+        self.assertEqual(
+            validation._json_medians(encoded, "Pytorch"),
+            {"kernel": 5.5, "kernel:device": 3.5},
+        )
+
+    def test_warmup_sample_is_discarded_per_process(self) -> None:
+        self.assertEqual(
+            validation._discard_first_sample_per_process(
+                [
+                    {"host": [100.0, 1.0, 2.0]},
+                    {"host": [200.0, 3.0, 4.0]},
+                ]
+            ),
+            [{"host": [1.0, 2.0]}, {"host": [3.0, 4.0]}],
+        )
+        with self.assertRaisesRegex(
+            validation.ValidationError, "fewer than two timing samples"
+        ):
+            validation._discard_first_sample_per_process([{"host": [1.0]}])
+
+    def test_empirical_structural_metrics_retain_cost_and_resource_fields(
+        self,
+    ) -> None:
+        log = "\n".join(
+            (
+                "ConSan waitcheck timing reader=7 elapsed_ms=1.5",
+                "ConSan MOI inventory end reader=7 elapsed_ms=2.5",
+                "ConSan patch begin reader=7 bytes=100",
+                "ConSan MOI resources reader=7 explicit=1 dead=2 "
+                "descriptor_growth=3 spill=4 unsupported=0 "
+                "planned_spill_slot_bytes=16 emitted_spill_patches=1 "
+                "emitted_spill_slot_bytes=16 alternative_attempts=2 "
+                "alternative_selected=1 alternative_rejected=1 "
+                "alternative_superseded=0 alternative_contributed=1 "
+                "alternative_vetoed=0",
+                "ConSan patch end reader=7 visited=true modified=true "
+                "outcome=modified-valid errors=0 warnings=0 patches=8 "
+                "patch_ms=9.5",
+                "ConSan replacement reader=9 original_reader=7 bytes=140",
+                "ConSan MOI report memory required_bytes=10 allocated_bytes=12 "
+                "live_before_cleanup=12 live_after_cleanup=0 peak_live_bytes=12 "
+                "per_buffer_ceiling=99 process_ceiling=100 "
+                "allocation_failures=0 capacity_failures=0 cleanup_failures=0",
+                "ConSan transform admission memory live_bytes=0 "
+                "peak_reserved_bytes=1000 process_ceiling=unlimited",
+                "ConSan patched-image memory live_bytes=140 peak_image_bytes=140 "
+                "process_ceiling=unlimited",
+                "ConSan patched-image growth memory live_bytes=40 "
+                "peak_growth_bytes=40 process_ceiling=unlimited",
+            )
+        )
+        summary = validation._empirical_structural_metrics(log)
+        self.assertTrue(summary["accepted"], summary)
+        self.assertEqual(summary["total_patch_ms"], 9.5)
+        code_object = summary["code_objects"][0]
+        self.assertEqual(code_object["growth_bytes"], 40)
+        self.assertEqual(code_object["growth_ratio"], 1.4)
+        self.assertEqual(code_object["resources"]["descriptor_growth"], 3)
+        self.assertEqual(summary["process_memory"]["report_peak_live_bytes"], 12)
+
+    def test_retained_code_object_inventory_pairs_original_and_patched(self) -> None:
+        with temporary_root() as root:
+            dump = root / "code-objects-0"
+            dump.mkdir()
+            original = dump / "rj-dbi-000001-reader-7-original.hsaco"
+            patched = dump / "rj-dbi-000001-reader-7-patched.hsaco"
+            original.write_bytes(b"a" * 10)
+            patched.write_bytes(b"b" * 15)
+            with mock.patch.object(
+                validation,
+                "_amdgpu_kernel_metadata",
+                side_effect=(
+                    {
+                        "accepted": True,
+                        "kernels": [{"name": "kernel", "vgpr_count": 8}],
+                    },
+                    {
+                        "accepted": True,
+                        "kernels": [{"name": "kernel", "vgpr_count": 12}],
+                    },
+                ),
+            ):
+                inventory = validation._retained_code_object_inventory(root)
+        self.assertEqual(inventory["complete_pairs"], 1)
+        self.assertEqual(inventory["pairs"][0]["growth_bytes"], 5)
+        self.assertEqual(inventory["pairs"][0]["growth_ratio"], 1.5)
+        delta = inventory["pairs"][0]["kernel_metadata_delta"]
+        self.assertTrue(delta["name_sets_match"])
+        self.assertEqual(delta["kernels"]["kernel"]["vgpr_count"], 4)
+
+    def test_amdgpu_metadata_parser_retains_kernel_resource_fields(self) -> None:
+        metadata = validation._parse_amdgpu_kernel_metadata(
+            "\n".join(
+                (
+                    "amdhsa.kernels:",
+                    "  - .args:",
+                    "      - .offset: 0",
+                    "    .group_segment_fixed_size: 4096",
+                    "    .name: kernel_a",
+                    "    .private_segment_fixed_size: 64",
+                    "    .sgpr_count: 24",
+                    "    .vgpr_count: 128",
+                    "    .vgpr_spill_count: 3",
+                    "  - .group_segment_fixed_size: 0",
+                    "    .name: kernel_b",
+                    "    .sgpr_count: 12",
+                    "    .vgpr_count: 8",
+                )
+            )
+        )
+        self.assertEqual(metadata["kernel_count"], 2)
+        self.assertEqual(metadata["kernels"][0]["name"], "kernel_a")
+        self.assertEqual(metadata["kernels"][0]["group_segment_fixed_size"], 4096)
+        self.assertEqual(metadata["kernels"][0]["private_segment_fixed_size"], 64)
+        self.assertEqual(metadata["kernels"][0]["vgpr_spill_count"], 3)
+
     def test_single_qwen_iteration_is_its_median(self) -> None:
         with temporary_root() as root:
             result = root / "benchmark.json"
@@ -3923,6 +4463,33 @@ class ConSanValidationTest(unittest.TestCase):
                 encoding="utf-8",
             )
             self.assertEqual(validation._benchmark_median(result), 12.5)
+
+    def test_qwen_samples_reject_multiple_benchmark_identities(self) -> None:
+        with temporary_root() as root:
+            result = root / "benchmark.json"
+            result.write_text(
+                json.dumps(
+                    {
+                        "benchmarks": [
+                            {
+                                "name": name,
+                                "run_type": "iteration",
+                                "real_time": 1.0,
+                                "time_unit": "ms",
+                            }
+                            for name in (
+                                "BM_main/first/process_time/real_time",
+                                "BM_main/second/process_time/real_time",
+                            )
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                validation.ValidationError, "one Qwen benchmark identity"
+            ):
+                validation._benchmark_samples(result)
 
     def test_explain_expands_commands_and_marks_only_real_tuning(self) -> None:
         audit = validation._explain_contract(
@@ -4118,6 +4685,705 @@ class ConSanValidationTest(unittest.TestCase):
         summary = validation._overhead_summary(results)
         self.assertEqual(summary["paired_baseline_median_ms"], {"a": 3.0, "b": 5.0})
         self.assertEqual(summary["profiles"]["sampled"]["cell_slowdown"], 2.0)
+
+    def test_empirical_round_interpolates_baseline_by_randomized_position(
+        self,
+    ) -> None:
+        def row(profile: str, process_ms: float, workload_ms: float) -> dict:
+            return {
+                "profile": profile,
+                "accepted": True,
+                "elapsed_seconds": [process_ms / 1000.0],
+                "timing_median_ms": {"dispatch": workload_ms},
+            }
+
+        before = row("baseline", 100.0, 2.0)
+        after = row("baseline", 102.0, 2.04)
+        profiles = {
+            "sampled": row("sampled", 202.0, 4.04),
+            "record-replay": row("record-replay", 151.5, 3.03),
+        }
+        summary = validation._empirical_round_summary(
+            3,
+            ["sampled", "record-replay"],
+            before,
+            profiles,
+            after,
+            baseline_drift_limit=0.05,
+        )
+
+        self.assertTrue(summary["fully_accepted"])
+        self.assertEqual(summary["profile_order"], ["sampled", "record-replay"])
+        dispatch = summary["metrics"]["workload:dispatch"]
+        self.assertAlmostEqual(
+            dispatch["profiles"]["sampled"]["interpolated_baseline_ms"],
+            2.0 + (2.04 - 2.0) / 3.0,
+        )
+        self.assertAlmostEqual(
+            dispatch["profiles"]["record-replay"]["interpolated_baseline_ms"],
+            2.0 + 2.0 * (2.04 - 2.0) / 3.0,
+        )
+
+    def test_empirical_round_rejects_symmetric_baseline_drift(self) -> None:
+        before = {
+            "accepted": True,
+            "elapsed_seconds": [0.1],
+            "timing_median_ms": {"dispatch": 10.0},
+        }
+        profile = {
+            "accepted": True,
+            "elapsed_seconds": [0.2],
+            "timing_median_ms": {"dispatch": 20.0},
+        }
+        after = {
+            "accepted": True,
+            "elapsed_seconds": [0.12],
+            "timing_median_ms": {"dispatch": 12.0},
+        }
+        summary = validation._empirical_round_summary(
+            0,
+            ["sampled"],
+            before,
+            {"sampled": profile},
+            after,
+            baseline_drift_limit=0.05,
+        )
+        self.assertFalse(summary["usable"])
+        self.assertIn("baseline drift", "\n".join(summary["reasons"]))
+
+    def test_empirical_round_keeps_metrics_with_stable_bracketing_baselines(
+        self,
+    ) -> None:
+        before = {
+            "accepted": True,
+            "elapsed_seconds": [3.0],
+            "timing_median_ms": {"dispatch": 1.0},
+        }
+        profile = {
+            "accepted": True,
+            "elapsed_seconds": [3.2],
+            "timing_median_ms": {"dispatch": 2.0},
+        }
+        after = {
+            "accepted": True,
+            "elapsed_seconds": [3.3],
+            "timing_median_ms": {"dispatch": 1.02},
+        }
+        summary = validation._empirical_round_summary(
+            0,
+            ["sampled"],
+            before,
+            {"sampled": profile},
+            after,
+            baseline_drift_limit=0.05,
+        )
+        self.assertTrue(summary["usable"])
+        self.assertFalse(summary["fully_accepted"])
+        self.assertFalse(summary["metrics"]["process"]["accepted"])
+        self.assertTrue(summary["metrics"]["workload:dispatch"]["accepted"])
+
+    def test_empirical_round_rejects_metric_schema_mismatch(self) -> None:
+        def row(timing: dict[str, float], returncode: int = 0) -> dict:
+            return {
+                "accepted": returncode == 0,
+                "returncodes": [returncode],
+                "elapsed_seconds": [0.1],
+                "timing_median_ms": timing,
+            }
+
+        summary = validation._empirical_round_summary(
+            0,
+            ["sampled"],
+            row({"host": 1.0, "device": 0.5}),
+            {"sampled": row({"host": 2.0})},
+            row({"host": 1.0, "device": 0.5}),
+            baseline_drift_limit=0.05,
+        )
+        self.assertFalse(summary["usable"])
+        self.assertIn("metric schemas differ", "\n".join(summary["reasons"]))
+
+        timed_out = validation._empirical_round_summary(
+            0,
+            ["sampled"],
+            row({"host": 1.0}),
+            {"sampled": row({"host": 2.0}, returncode=124)},
+            row({"host": 1.0}),
+            baseline_drift_limit=0.05,
+        )
+        self.assertIn("sampled row timed out", timed_out["reasons"])
+
+    def test_empirical_round_combines_disjoint_cold_and_warm_metrics(self) -> None:
+        def row(process_ms: float, dispatch_ms: float) -> dict:
+            return {
+                "accepted": True,
+                "elapsed_seconds": [process_ms / 1000.0],
+                "timing_median_ms": {"dispatch": dispatch_ms},
+            }
+
+        cold = validation._empirical_round_summary(
+            2,
+            ["sampled"],
+            row(100.0, 10.0),
+            {"sampled": row(200.0, 20.0)},
+            row(102.0, 10.2),
+            baseline_drift_limit=0.05,
+            metric_prefix="cold",
+        )
+        warm = validation._empirical_round_summary(
+            2,
+            ["sampled"],
+            row(300.0, 1.0),
+            {"sampled": row(400.0, 2.0)},
+            row(600.0, 1.02),
+            baseline_drift_limit=0.05,
+            include_process_metric=False,
+            metric_prefix="warm",
+        )
+        combined = validation._combine_empirical_round_summaries(
+            2,
+            ["sampled"],
+            {"cold": cold, "warm": warm},
+        )
+
+        self.assertTrue(combined["fully_accepted"])
+        self.assertEqual(
+            set(combined["metrics"]),
+            {"cold:process", "cold:workload:dispatch", "warm:workload:dispatch"},
+        )
+        self.assertEqual(set(combined["schedules"]), {"cold", "warm"})
+
+    def test_empirical_round_rejects_duplicate_schedule_metrics(self) -> None:
+        schedule = {
+            "round": 0,
+            "profile_order": ["sampled"],
+            "rows_accepted": True,
+            "reasons": [],
+            "metrics": {"workload:dispatch": {"accepted": True}},
+        }
+        with self.assertRaisesRegex(
+            validation.ValidationError, "duplicate timing metric"
+        ):
+            validation._combine_empirical_round_summaries(
+                0,
+                ["sampled"],
+                {"first": schedule, "second": schedule},
+            )
+
+    def test_empirical_sample_summary_is_deterministic_and_retains_spread(
+        self,
+    ) -> None:
+        values = [1.0, 2.0, 3.0, 4.0]
+        first = validation._sample_summary(
+            values,
+            bootstrap_resamples=500,
+            bootstrap_seed=17,
+        )
+        second = validation._sample_summary(
+            values,
+            bootstrap_resamples=500,
+            bootstrap_seed=17,
+        )
+        self.assertEqual(first, second)
+        self.assertEqual(first["count"], 4)
+        self.assertEqual(first["median"], 2.5)
+        self.assertEqual(first["q1"], 1.75)
+        self.assertEqual(first["q3"], 3.25)
+        self.assertEqual(first["iqr"], 1.5)
+
+    def test_empirical_warm_protocol_calibrates_aggregate_and_warmup(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+        protocol = validation._empirical_timing_protocol(
+            "gfx1201",
+            workload,
+            {
+                "accepted": True,
+                "timing_median_ms": {
+                    "softmax": 0.06,
+                    "softmax:device": 0.05,
+                },
+            },
+        )
+        self.assertEqual(protocol["kind"], "warm-device-json")
+        self.assertEqual(
+            protocol["calibration_timing_median_ms"], {"softmax:device": 0.05}
+        )
+        self.assertEqual(
+            protocol["calibration_timing_floor_ms"], {"softmax:device": 0.05}
+        )
+        self.assertEqual(workload.device_timing_calibration_iterations, 100)
+        self.assertEqual(workload.device_timing_aggregate_headroom, 1.25)
+        self.assertEqual(protocol["timed_aggregate_headroom"], 1.25)
+        self.assertEqual(protocol["timed_inner_repetitions"], 6250)
+        self.assertEqual(protocol["command_inner_repetitions"], 6251)
+        self.assertTrue(protocol["discard_first_timing_sample"])
+
+        floor_protocol = validation._empirical_timing_protocol(
+            "gfx1201",
+            workload,
+            {
+                "accepted": True,
+                "timing_median_ms": {"softmax:device": 0.05},
+                "timing_samples_ms": {"softmax:device": [0.05, 0.01, 0.02]},
+            },
+        )
+        self.assertEqual(
+            floor_protocol["calibration_timing_floor_ms"],
+            {"softmax:device": 0.01},
+        )
+        self.assertEqual(floor_protocol["timed_inner_repetitions"], 31250)
+
+        gtest_device = validation._empirical_timing_protocol(
+            "gfx1201",
+            validation.WORKLOAD_BY_ID["d128-block"],
+            {
+                "accepted": True,
+                "timing_median_ms": {"target-dispatch:device": 50.0},
+            },
+        )
+        self.assertEqual(gtest_device["kind"], "warm-device-gtest")
+        self.assertEqual(gtest_device["command_inner_repetitions"], 5)
+
+        streamk = validation._empirical_timing_protocol(
+            "gfx1201",
+            validation.WORKLOAD_BY_ID["streamk-arrival"],
+            {
+                "accepted": True,
+                "timing_median_ms": {"target-dispatch:device": 1.0},
+            },
+        )
+        self.assertEqual(streamk["command_inner_repetitions"], 1)
+        self.assertEqual(streamk["minimum_timed_aggregate_ms"], 0.5)
+
+    def test_rdna4_matmul_uses_self_timed_device_protocol(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["rdna4-matmul-fp16-production"]
+        with mock.patch.dict(
+            os.environ,
+            {validation.RDNA4_MATMUL_DIR_ENV: "/project/rdna4_matmul"},
+        ):
+            command = validation._workload_command(
+                Path("/workspace"),
+                "gfx1201",
+                workload,
+                "overhead",
+                Path("/artifacts/benchmark.json"),
+            )
+            inputs = validation._input_files(Path("/workspace"), "gfx1201", workload)
+        self.assertEqual(command[command.index("--repetitions") + 1], "1")
+        self.assertEqual(command[command.index("--minimum-timed-ms") + 1], "250.0")
+        self.assertEqual(command[command.index("--phase") + 1], "warm")
+        self.assertEqual(
+            inputs["executable"],
+            Path("/project/rdna4_matmul/build/rdna4_matmul_production"),
+        )
+        protocol = validation._empirical_timing_protocol(
+            "gfx1201",
+            workload,
+            {
+                "accepted": True,
+                "timing_median_ms": {
+                    "rdna4-matmul-fp16-production-overhead:device": 1.0
+                },
+                "measurement_runs": [
+                    {
+                        "rdna4-matmul-fp16-production-overhead": {
+                            "benchmark_iterations": 256,
+                            "timed_aggregate_ms": 256.0,
+                        }
+                    }
+                ],
+            },
+        )
+        self.assertEqual(protocol["kind"], "warm-device-self-timed")
+        self.assertEqual(protocol["command_inner_repetitions"], 256)
+        self.assertEqual(protocol["minimum_timed_aggregate_ms"], 250.0)
+
+        with mock.patch.dict(
+            os.environ,
+            {validation.RDNA4_MATMUL_DIR_ENV: "/project/rdna4_matmul"},
+        ):
+            fault_command = validation._workload_command(
+                Path("/workspace"),
+                "gfx1201",
+                workload,
+                "fault",
+                Path("/unused"),
+            )
+        self.assertEqual(fault_command[fault_command.index("--phase") + 1], "clean")
+        self.assertEqual(
+            fault_command[fault_command.index("--minimum-timed-ms") + 1], "250.0"
+        )
+
+    def test_rdna4_matmul_parser_requires_exact_variant_evidence(self) -> None:
+        variant = rdna4_matmul_validation.WORKLOADS["fp16-production"]
+        output = "\n".join(
+            (
+                "device 0: AMD Radeon AI PRO R9700, gcnArch=gfx1201, CUs=32",
+                f"{variant} correctness: PASS max_abs=0",
+                f"{variant} 1.013 ms 135.73 TFLOP/s",
+                f"{variant} benchmark_iterations=250 benchmark_aggregate_ms=253.250",
+            )
+        )
+        (
+            architecture,
+            oracle,
+            sampled_oracle,
+            timing,
+            iterations,
+            aggregate_ms,
+            timing_matches,
+        ) = rdna4_matmul_validation._parse_output(
+            output,
+            variant,
+        )
+        self.assertEqual(architecture, "gfx1201")
+        self.assertTrue(oracle)
+        self.assertFalse(sampled_oracle)
+        self.assertEqual(timing, 1.013)
+        self.assertEqual(iterations, 250)
+        self.assertEqual(aggregate_ms, 253.25)
+        self.assertEqual(timing_matches, 1)
+
+    def test_rdna4_matmul_environment_clears_ambient_fixed_iterations(self) -> None:
+        variant = rdna4_matmul_validation.WORKLOADS["fp8-production"]
+        with mock.patch.dict(os.environ, {"BENCH_FIXED_ITERS": "7"}, clear=False):
+            calibrated = rdna4_matmul_validation._environment(
+                variant, 1, "warm", None, 250.0
+            )
+            fixed = rdna4_matmul_validation._environment(variant, 1, "warm", 19, 250.0)
+        self.assertNotIn("BENCH_FIXED_ITERS", calibrated)
+        self.assertEqual(fixed["BENCH_FIXED_ITERS"], "19")
+
+    def test_json_timing_parser_accepts_device_only_measurements(self) -> None:
+        document = {
+            "matmul": {
+                "device_median_ms": 1.0,
+                "device_samples_ms": [1.1, 0.9],
+            }
+        }
+        self.assertEqual(
+            validation._json_timing_samples(json.dumps(document), "RDNA4 matmul"),
+            {"matmul:device": [1.1, 0.9]},
+        )
+
+    def test_gtest_device_timing_requires_consistent_native_event_row(self) -> None:
+        output = (
+            "hip_moi_gpu_timing benchmark=d128-block timer=hip-event "
+            "aggregate_ms=250 iterations=5 per_iteration_ms=50\n"
+        )
+        per_iteration, measurement = validation._gtest_device_measurement(
+            output, "d128-block", 5
+        )
+        self.assertEqual(per_iteration, 50.0)
+        self.assertEqual(measurement["timed_aggregate_ms"], 250.0)
+        self.assertEqual(measurement["timing_source"], "hip-event")
+        with self.assertRaisesRegex(validation.ValidationError, "iteration mismatch"):
+            validation._gtest_device_measurement(output, "d128-block", 6)
+
+    def test_gpu_timing_makes_process_time_secondary(self) -> None:
+        def row(process_ms: float, host_ms: float, device_ms: float) -> dict:
+            return {
+                "accepted": True,
+                "elapsed_seconds": [process_ms / 1000.0],
+                "timing_median_ms": {
+                    "kernel": host_ms,
+                    "kernel:device": device_ms,
+                },
+            }
+
+        cold = validation._empirical_round_summary(
+            0,
+            ["sampled"],
+            row(100.0, 10.0, 1.0),
+            {"sampled": row(900.0, 90.0, 2.0)},
+            row(300.0, 30.0, 1.0),
+            baseline_drift_limit=0.05,
+            metric_prefix="cold",
+            qualifying=False,
+        )
+        warm = validation._empirical_round_summary(
+            0,
+            ["sampled"],
+            row(100.0, 10.0, 1.0),
+            {"sampled": row(900.0, 90.0, 2.0)},
+            row(102.0, 40.0, 1.02),
+            baseline_drift_limit=0.05,
+            include_process_metric=False,
+            device_workload_only=True,
+            metric_prefix="warm",
+        )
+        combined = validation._combine_empirical_round_summaries(
+            0, ["sampled"], {"cold": cold, "warm": warm}
+        )
+        self.assertTrue(combined["fully_accepted"])
+        self.assertFalse(combined["metrics"]["cold:process"]["qualifying"])
+        self.assertNotIn("warm:workload:kernel", combined["metrics"])
+        self.assertTrue(
+            combined["metrics"]["warm:workload:kernel:device"]["qualifying"]
+        )
+
+    def test_empirical_campaign_requires_requested_accepted_rounds(self) -> None:
+        def accepted_round(index: int, slowdown: float) -> dict:
+            return {
+                "round": index,
+                "usable": True,
+                "fully_accepted": True,
+                "metrics": {
+                    "workload:dispatch": {
+                        "accepted": True,
+                        "qualifying": True,
+                        "profiles": {
+                            "sampled": {
+                                "timing_ms": slowdown * 2.0,
+                                "interpolated_baseline_ms": 2.0,
+                                "slowdown": slowdown,
+                            }
+                        },
+                    }
+                },
+            }
+
+        rounds = [accepted_round(0, 2.0), accepted_round(1, 3.0)]
+        incomplete = validation._empirical_campaign_summary(
+            rounds,
+            ("sampled",),
+            required_accepted_rounds=3,
+            bootstrap_resamples=100,
+            bootstrap_seed=9,
+        )
+        complete = validation._empirical_campaign_summary(
+            rounds,
+            ("sampled",),
+            required_accepted_rounds=2,
+            bootstrap_resamples=100,
+            bootstrap_seed=9,
+        )
+        self.assertFalse(incomplete["accepted"])
+        self.assertTrue(complete["accepted"])
+        slowdown = complete["profiles"]["sampled"]["metrics"]["workload:dispatch"][
+            "slowdown"
+        ]
+        self.assertEqual(slowdown["count"], 2)
+        self.assertEqual(slowdown["median"], 2.5)
+
+    def test_empirical_campaign_wires_admission_fixed_warm_and_structural_rows(
+        self,
+    ) -> None:
+        workload = validation.WORKLOAD_BY_ID["rdna4-matmul-fp16-production"]
+        calls = []
+
+        def fake_row(*args, **kwargs):
+            profile = args[3]
+            phase = args[4]
+            row_dir = args[8]
+            row_dir.mkdir(parents=True, exist_ok=True)
+            calls.append(
+                {
+                    "profile": profile,
+                    "phase": phase,
+                    "row_dir": row_dir,
+                    "inner": kwargs.get("inner_repetitions_override"),
+                    "structural": kwargs.get("collect_structural_metrics", False),
+                }
+            )
+            result = {
+                "accepted": True,
+                "returncodes": [0],
+                "elapsed_seconds": [0.1 if profile is None else 0.2],
+                "timing_median_ms": None,
+                "structural_metrics_runs": None,
+            }
+            if phase == "overhead":
+                result["timing_median_ms"] = {"matmul:device": 1.0}
+                result["measurement_runs"] = [
+                    {
+                        "matmul": {
+                            "benchmark_iterations": 250,
+                            "timed_aggregate_ms": 250.0,
+                        }
+                    }
+                ]
+            if profile is not None and kwargs.get("collect_structural_metrics"):
+                result["structural_metrics_runs"] = [
+                    {
+                        "accepted": True,
+                        "total_patch_ms": 3.0,
+                        "code_objects": [{"waitcheck_ms": 1.0, "inventory_ms": 2.0}],
+                    }
+                ]
+            if "admission" in row_dir.parts and profile is not None:
+                result["retained_code_objects"] = {
+                    "complete_pairs": 1,
+                    "metadata_complete_pairs": 1,
+                }
+                if profile == "record-replay":
+                    result["accepted"] = False
+            return result
+
+        with temporary_root() as root:
+            args = validation._parse_args(
+                [
+                    "--target",
+                    "gfx1201",
+                    "study",
+                    "--workload",
+                    workload.id,
+                    "--profile",
+                    "all",
+                    "--rounds",
+                    "1",
+                    "--max-rounds",
+                    "1",
+                    "--bootstrap-resamples",
+                    "10",
+                    "--artifact-root",
+                    str(root / "artifacts"),
+                ]
+            )
+            with (
+                mock.patch.object(
+                    validation, "_workspace_from_environment", return_value=root
+                ),
+                mock.patch.object(validation, "_doctor", return_value={"ok": True}),
+                mock.patch.object(
+                    validation,
+                    "_write_provenance",
+                    return_value=root / "provenance.json",
+                ),
+                mock.patch.object(
+                    validation,
+                    "_run_or_resume_empirical_row",
+                    side_effect=fake_row,
+                ),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(validation._empirical_campaign(args), 0)
+            campaign = json.loads(
+                (
+                    root
+                    / "artifacts"
+                    / workload.id
+                    / "empirical-campaign"
+                    / "campaign.json"
+                ).read_text(encoding="utf-8")
+            )
+        self.assertTrue(campaign["summary"]["accepted"])
+        self.assertEqual(campaign["admission"]["rejected_profiles"], ["record-replay"])
+        self.assertEqual(
+            campaign["timed_profiles"],
+            ["supercollider", "sampled", "inline-shadow"],
+        )
+        record_replay_calls = [
+            call for call in calls if call["profile"] == "record-replay"
+        ]
+        self.assertEqual(len(record_replay_calls), 1)
+        self.assertIn("admission", record_replay_calls[0]["row_dir"].parts)
+        warm_calls = [call for call in calls if "warm" in call["row_dir"].parts]
+        self.assertTrue(warm_calls)
+        self.assertTrue(all(call["inner"] == 250 for call in warm_calls))
+        cold_profile = [
+            call
+            for call in calls
+            if "cold" in call["row_dir"].parts and call["profile"] == "sampled"
+        ]
+        self.assertEqual(len(cold_profile), 1)
+        self.assertTrue(cold_profile[0]["structural"])
+
+    def test_empirical_resume_preserves_interrupted_rows(self) -> None:
+        with temporary_root() as root:
+            row = root / "sampled"
+            row.mkdir()
+            (row / "run-0.log").write_text("partial", encoding="utf-8")
+            occupied = root / "sampled.incomplete-1"
+            occupied.mkdir()
+
+            validation._preserve_incomplete_empirical_row(row)
+
+            preserved = root / "sampled.incomplete-2"
+            self.assertFalse(row.exists())
+            self.assertEqual(
+                (preserved / "run-0.log").read_text(encoding="utf-8"), "partial"
+            )
+            self.assertTrue(occupied.is_dir())
+
+    def test_empirical_resume_rejects_changed_config(self) -> None:
+        with temporary_root() as root:
+            path = root / "config.json"
+            validation._write_or_verify_empirical_config(
+                path, {"schema_version": 1, "rounds": 10}
+            )
+            validation._write_or_verify_empirical_config(
+                path, {"schema_version": 1, "rounds": 10}
+            )
+            with self.assertRaisesRegex(validation.ValidationError, "config conflicts"):
+                validation._write_or_verify_empirical_config(
+                    path, {"schema_version": 1, "rounds": 11}
+                )
+
+    def test_wilson_detection_interval_covers_boundary_counts(self) -> None:
+        none = validation._wilson_detection_interval(0, 10)
+        all_detected = validation._wilson_detection_interval(10, 10)
+        half = validation._wilson_detection_interval(5, 10)
+
+        self.assertEqual(none["lower"], 0.0)
+        self.assertAlmostEqual(none["upper"], 0.2775327998628892)
+        self.assertAlmostEqual(all_detected["lower"], 0.7224672001371107)
+        self.assertEqual(all_detected["upper"], 1.0)
+        self.assertAlmostEqual(half["lower"], 0.236593090512564)
+        self.assertAlmostEqual(half["upper"], 0.7634069094874361)
+
+        with self.assertRaises(validation.ValidationError):
+            validation._wilson_detection_interval(2, 1)
+
+    def test_fault_reach_requires_admission_and_runtime_witness(self) -> None:
+        base = {
+            "mutation": {
+                "accounting_schema_version": 2,
+                "installation_evidence_complete": True,
+                "requested": 1,
+                "planned": 1,
+                "applied": 1,
+                "discarded_applied": 0,
+                "reservation": fault_reservation_evidence(reserved=1),
+            },
+            "sanitizer": {"outcome": "not_detected"},
+            "execution": {
+                "command_ran": True,
+                "completed": True,
+                "health_before": {"healthy": True},
+            },
+        }
+        witness = {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "selected instruction dominates the only kernel exit",
+        }
+        admitted, reached, outcome, reasons = validation._fault_admission_and_reach(
+            base, witness
+        )
+        self.assertTrue(admitted, reasons)
+        self.assertTrue(reached, reasons)
+        self.assertEqual(outcome, "reviewed-unconditional-final-isa")
+
+        timed_out = json.loads(json.dumps(base))
+        timed_out["execution"]["completed"] = False
+        timed_out["execution"]["timed_out"] = True
+        timed_out["execution"]["outcome"] = "timeout"
+        admitted, reached, outcome, reasons = validation._fault_admission_and_reach(
+            timed_out, witness
+        )
+        self.assertTrue(admitted)
+        self.assertFalse(reached)
+        self.assertIsNone(outcome)
+        self.assertIn("lacks a detector/oracle runtime witness", reasons[-1])
+
+        detected_before_completion = json.loads(json.dumps(timed_out))
+        detected_before_completion["sanitizer"]["outcome"] = "detected"
+        detected_before_completion["sanitizer"]["inline_diagnostics"] = 1
+        admitted, reached, outcome, reasons = validation._fault_admission_and_reach(
+            detected_before_completion, None
+        )
+        self.assertTrue(admitted, reasons)
+        self.assertTrue(reached, reasons)
+        self.assertEqual(outcome, "detector-owned-runtime-diagnostic")
 
     def test_inventory_parser_deduplicates_exact_identities(self) -> None:
         output = "\n".join(
@@ -4825,6 +6091,29 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(loaded["id"], "drop")
         self.assertEqual(loaded["site_provenance"]["corpus_commit"], "a" * 40)
 
+        document["faults"][0]["reach_witness"] = {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "selected instruction dominates the launched kernel exit",
+        }
+        with temporary_root() as root:
+            path = root / "faults.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            loaded = validation._load_fault(path, "gfx1201", workload, "drop")
+        self.assertEqual(
+            loaded["reach_witness"]["kind"],
+            "reviewed-unconditional-final-isa",
+        )
+
+        document["faults"][0]["reach_witness"]["kind"] = "runtime-access-counter"
+        with temporary_root() as root:
+            path = root / "faults.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(validation.ValidationError, "reach_witness"):
+                validation._load_fault(path, "gfx1201", workload, "drop")
+        document["faults"][0]["reach_witness"][
+            "kind"
+        ] = "reviewed-unconditional-final-isa"
+
         document["faults"][0]["site_provenance"]["corpus_commit"] = "short"
         with temporary_root() as root:
             path = root / "faults.json"
@@ -4994,6 +6283,7 @@ class ConSanValidationTest(unittest.TestCase):
                 fault,
                 policy,
                 {},
+                Path("/workspace"),
             )
             self.assertEqual(environment["RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE"], "1")
         self.assertEqual(fault["environment"]["RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR"], "54")

@@ -12,9 +12,13 @@ from __future__ import annotations
 import argparse
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
+import platform
+import random
 import re
 import selectors
 import shlex
@@ -38,12 +42,26 @@ from consan_validation_support import (
 )
 
 SCHEMA_VERSION = 2
+EMPIRICAL_CAMPAIGN_SCHEMA_VERSION = 3
+PROVENANCE_SCHEMA_VERSION = 3
 WORKSPACE_ENV = "CONSAN_VALIDATION_WORKSPACE_DIR"
 TARGET_ENV = "CONSAN_VALIDATION_TARGET"
 PYTORCH_PYTHON_ENV = "CONSAN_VALIDATION_PYTORCH_PYTHON"
 SHARKTANK_PYTHON_ENV = "CONSAN_VALIDATION_SHARKTANK_PYTHON"
 TENSILE_PYTHON_ENV = "CONSAN_VALIDATION_TENSILE_PYTHON"
+RDNA4_MATMUL_DIR_ENV = "CONSAN_VALIDATION_RDNA4_MATMUL_DIR"
+LLAMA_BUILD_DIR_ENV = "CONSAN_VALIDATION_LLAMA_BUILD_DIR"
+LLVM_READELF_ENV = "CONSAN_VALIDATION_LLVM_READELF"
+HIP_MOI_GPU_BENCHMARK_ITERATIONS_ENV = "HIP_MOI_TEST_GPU_BENCHMARK_ITERATIONS"
+HIP_MOI_GPU_BENCHMARK_WARMUP_ITERATIONS_ENV = (
+    "HIP_MOI_TEST_GPU_BENCHMARK_WARMUP_ITERATIONS"
+)
 TIMEOUT_SECONDS = 30
+EMPIRICAL_DEFAULT_ROUNDS = 10
+EMPIRICAL_DEFAULT_BOOTSTRAP_RESAMPLES = 10_000
+EMPIRICAL_DEFAULT_BASELINE_DRIFT_LIMIT = 0.05
+EMPIRICAL_MINIMUM_TIMED_MS = 250.0
+EMPIRICAL_MAX_INNER_REPETITIONS = 1_000_000
 PROCESS_OUTPUT_DRAIN_SECONDS = 2
 PROCESS_TERMINATION_GRACE_SECONDS = 5
 NATIVE_CDNA_TARGETS = frozenset(("gfx942", "gfx950"))
@@ -205,6 +223,13 @@ class Workload:
     tensile_expected_numeric_rows: int | None = None
     tensile_streamk_fixed_grid: int | None = None
     tensile_streamk_mode: int | None = None
+    self_timed_device_minimum_ms: float | None = None
+    warm_timing_mode: str | None = None
+    empirical_device_timed_minimum_ms: float | None = None
+    device_timing_max_iterations: int | None = None
+    device_timing_warmup_iterations: int = 5
+    device_timing_calibration_iterations: int | None = None
+    device_timing_aggregate_headroom: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -590,6 +615,7 @@ WORKLOADS = (
         priority="P0",
         corpus="pytorch",
         kind="pytorch",
+        warm_timing_mode="host-json",
         relative_path="consan_pytorch_validation.py",
         clean_filter=None,
         overhead_filter=None,
@@ -641,6 +667,7 @@ WORKLOADS = (
         priority="P1",
         corpus="pytorch",
         kind="pytorch",
+        warm_timing_mode="host-json",
         relative_path="consan_pytorch_validation.py",
         clean_filter=None,
         overhead_filter=None,
@@ -658,6 +685,7 @@ WORKLOADS = (
         priority="P1",
         corpus="pytorch",
         kind="pytorch",
+        warm_timing_mode="host-json",
         relative_path="consan_pytorch_validation.py",
         clean_filter=None,
         overhead_filter=None,
@@ -694,6 +722,7 @@ WORKLOADS = (
         priority="P2",
         corpus="pytorch",
         kind="pytorch",
+        warm_timing_mode="device-json",
         relative_path="consan_pytorch_validation.py",
         clean_filter=None,
         overhead_filter=None,
@@ -704,12 +733,15 @@ WORKLOADS = (
         overhead_processes=1,
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
+        device_timing_calibration_iterations=100,
+        device_timing_aggregate_headroom=1.25,
     ),
     Workload(
         id="pytorch-rdna4-split-softmax",
         priority="P2",
         corpus="pytorch",
         kind="pytorch",
+        warm_timing_mode="host-json",
         relative_path="consan_pytorch_validation.py",
         clean_filter=None,
         overhead_filter=None,
@@ -739,6 +771,44 @@ WORKLOADS = (
         run_timeout_seconds=120,
     ),
     Workload(
+        id="rdna4-matmul-fp16-production",
+        priority="P0",
+        corpus="rdna4-matmul",
+        kind="rdna4-matmul",
+        warm_timing_mode="device-fixed",
+        relative_path="build/rdna4_matmul_production",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop", "lds-wrong-address"),
+        targets=("gfx1201",),
+        run_timeout_seconds=60,
+        self_timed_device_minimum_ms=EMPIRICAL_MINIMUM_TIMED_MS,
+    ),
+    Workload(
+        id="rdna4-matmul-fp8-production",
+        priority="P0",
+        corpus="rdna4-matmul",
+        kind="rdna4-matmul",
+        warm_timing_mode="device-fixed",
+        relative_path="build/rdna4_matmul_production",
+        clean_filter=None,
+        overhead_filter=None,
+        sharktank_workload=None,
+        sharktank_mode=None,
+        tracks_barriers=True,
+        tracks_atomics=False,
+        overhead_processes=1,
+        fault_families=("barrier-drop", "lds-wrong-address"),
+        targets=("gfx1201",),
+        run_timeout_seconds=60,
+        self_timed_device_minimum_ms=EMPIRICAL_MINIMUM_TIMED_MS,
+    ),
+    Workload(
         id="llama-rdna4-mul-mat-vec-q",
         priority="P2",
         corpus="rocjitsu-test-corpus",
@@ -753,6 +823,8 @@ WORKLOADS = (
         overhead_processes=5,
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
+        self_timed_device_minimum_ms=EMPIRICAL_MINIMUM_TIMED_MS,
+        warm_timing_mode="device-fixed",
     ),
     Workload(
         id="llama-rdna4-rms-norm",
@@ -775,6 +847,7 @@ WORKLOADS = (
         priority="P0",
         corpus="iree-test-suites",
         kind="qwen",
+        warm_timing_mode="host-json",
         relative_path="iree-test-suites-build/torch_models/qwen3-600m",
         clean_filter=None,
         overhead_filter=None,
@@ -790,6 +863,7 @@ WORKLOADS = (
         priority="P1",
         corpus="iree-test-suites",
         kind="sharktank",
+        warm_timing_mode="host-json",
         relative_path="iree-test-suites/sharktank_models/llama3.1/test_llama.py",
         clean_filter=None,
         overhead_filter=None,
@@ -805,6 +879,7 @@ WORKLOADS = (
         priority="P1",
         corpus="iree-test-suites",
         kind="sharktank",
+        warm_timing_mode="host-json",
         relative_path="iree-test-suites/sharktank_models/llama3.1/test_llama.py",
         clean_filter=None,
         overhead_filter=None,
@@ -820,6 +895,7 @@ WORKLOADS = (
         priority="P2",
         corpus="iree-test-suites",
         kind="sharktank",
+        warm_timing_mode="host-json",
         relative_path="iree-test-suites/sharktank_models/llama3.1/test_llama.py",
         clean_filter=None,
         overhead_filter=None,
@@ -859,6 +935,7 @@ WORKLOADS = (
         tracks_atomics=False,
         overhead_processes=3,
         fault_families=("barrier-drop",),
+        warm_timing_mode="device-gtest",
     ),
     Workload(
         id="d128-pressure",
@@ -914,6 +991,10 @@ WORKLOADS = (
         tracks_atomics=True,
         overhead_processes=3,
         fault_families=STREAMK_FAULT_FAMILIES,
+        warm_timing_mode="device-gtest",
+        empirical_device_timed_minimum_ms=0.5,
+        device_timing_max_iterations=1,
+        device_timing_warmup_iterations=0,
     ),
     Workload(
         id="tree-atomic-or",
@@ -1041,6 +1122,34 @@ def _validate_coverage_output_contract(workload: Workload) -> None:
 def _validate_workload_manifest() -> None:
     for workload in WORKLOADS:
         _validate_coverage_output_contract(workload)
+        if workload.device_timing_calibration_iterations is not None:
+            if workload.device_timing_calibration_iterations <= 0:
+                raise RuntimeError(
+                    f"{workload.id} device timing calibration count must be positive"
+                )
+            if workload.kind == "pytorch" and (
+                workload.device_timing_calibration_iterations < 2
+            ):
+                raise RuntimeError(
+                    f"{workload.id} device timing calibration needs a retained "
+                    "sample after discarding the compile transient"
+                )
+            if workload.warm_timing_mode not in {
+                "host-json",
+                "device-json",
+                "device-fixed",
+                "device-gtest",
+            }:
+                raise RuntimeError(
+                    f"{workload.id} device timing calibration requires warm timing"
+                )
+        if (
+            not math.isfinite(workload.device_timing_aggregate_headroom)
+            or workload.device_timing_aggregate_headroom < 1.0
+        ):
+            raise RuntimeError(
+                f"{workload.id} device timing aggregate headroom must be at least one"
+            )
         if (
             workload.id in STREAMK_WORKLOAD_IDS
             and workload.fault_families != STREAMK_FAULT_FAMILIES
@@ -1463,6 +1572,13 @@ def _hook_path(workspace: Path) -> Path:
     return candidates[0]
 
 
+def _rdna4_matmul_root(workspace: Path) -> Path:
+    configured = os.environ.get(RDNA4_MATMUL_DIR_ENV)
+    if configured:
+        return Path(os.path.abspath(Path(configured).expanduser()))
+    return workspace / "rdna4_matmul"
+
+
 def _required_paths(
     workspace: Path, workloads: tuple[Workload, ...]
 ) -> dict[str, Path]:
@@ -1479,6 +1595,8 @@ def _required_paths(
         paths["hip-moi"] = workspace / "hip-moi"
     if any(workload.corpus == "rocjitsu-test-corpus" for workload in workloads):
         paths["rocjitsu-test-corpus"] = workspace / "rocjitsu-test-corpus"
+    if any(workload.corpus == "rdna4-matmul" for workload in workloads):
+        paths["rdna4-matmul"] = _rdna4_matmul_root(workspace)
     if any(workload.kind == "tensile" for workload in workloads):
         tensile_paths = resolve_tensile_validation_paths(workspace)
         paths["tensilelite"] = tensile_paths.tensilelite
@@ -1508,7 +1626,11 @@ def _sharktank_python() -> Path:
 
 
 def _pytorch_runtime_probe(
-    python: Path, hook: Path, target: str, workload: Workload
+    python: Path,
+    hook: Path,
+    target: str,
+    workload: Workload,
+    workspace: Path,
 ) -> dict:
     """Proves that PyTorch can dispatch and that its HSA runtime loads ConSan."""
     probe_source = """
@@ -1539,7 +1661,7 @@ print(json.dumps({
 # and process mappings, so skip unrelated runtime shutdown.
 os._exit(0)
 """
-    environment = _clean_environment("supercollider", workload, hook, target)
+    environment = _clean_environment("supercollider", workload, hook, target, workspace)
     # This is a runtime-linkage canary, not a coverage row.  Avoid spending
     # preflight time on PyTorch's large bundled kernel object; the real rows
     # run without this filter and enforce complete coverage independently.
@@ -1602,30 +1724,76 @@ def _tensile_python() -> Path:
     )
 
 
+@dataclass(frozen=True)
+class LlamaRuntime:
+    build_root: Path
+    executable: Path
+    libraries: dict[str, Path]
+
+
+def _llama_runtime_files(build_root: Path) -> dict[str, Path]:
+    source_root = build_root / "third_party" / "llama.cpp" / "ggml" / "src"
+    return {
+        "ggml": source_root / "libggml.so",
+        "ggml-base": source_root / "libggml-base.so",
+        "ggml-cpu": source_root / "libggml-cpu.so",
+        "ggml-hip": source_root / "ggml-hip" / "libggml-hip.so",
+    }
+
+
+def _llama_runtime(workspace: Path, target: str, name: str) -> LlamaRuntime:
+    configured = os.environ.get(LLAMA_BUILD_DIR_ENV)
+    if configured:
+        build_roots = (Path(os.path.abspath(Path(configured).expanduser())),)
+    else:
+        build_roots = (
+            workspace / "rocjitsu-test-corpus-build" / "kernels" / target,
+            workspace
+            / "rocjitsu-test-corpus"
+            / ".pytest-artifacts-rdna4-llama-baseline"
+            / "_suite_shards"
+            / "kernels_shard_0"
+            / "kernels"
+            / target
+            / "build",
+        )
+
+    failures = []
+    for build_root in build_roots:
+        executable = build_root / "cases" / "llama.cpp" / name
+        libraries = _llama_runtime_files(build_root)
+        missing = [
+            path for path in (executable, *libraries.values()) if not path.is_file()
+        ]
+        if not missing:
+            return LlamaRuntime(build_root, executable, libraries)
+        failures.append((build_root, missing))
+
+    details = "; ".join(
+        f"{build_root}: missing {', '.join(str(path) for path in missing)}"
+        for build_root, missing in failures
+    )
+    if configured:
+        raise ValidationError(
+            f"{LLAMA_BUILD_DIR_ENV} must name a complete llama build root; {details}"
+        )
+    raise ValidationError(f"cannot locate a complete llama runtime; checked {details}")
+
+
 def _llama_executable(workspace: Path, target: str, name: str) -> Path:
-    candidates = (
-        workspace
-        / "rocjitsu-test-corpus-build"
-        / "kernels"
-        / target
-        / "cases"
-        / "llama.cpp"
-        / name,
-        workspace
-        / "rocjitsu-test-corpus"
-        / ".pytest-artifacts-rdna4-llama-baseline"
-        / "_suite_shards"
-        / "kernels_shard_0"
-        / "kernels"
-        / target
-        / "build"
-        / "cases"
-        / "llama.cpp"
-        / name,
+    return _llama_runtime(workspace, target, name).executable
+
+
+def _llama_library_environment(
+    runtime: LlamaRuntime, environment: dict[str, str]
+) -> None:
+    library_directories = list(
+        dict.fromkeys(str(path.parent) for path in runtime.libraries.values())
     )
-    return next(
-        (candidate for candidate in candidates if candidate.is_file()), candidates[0]
-    )
+    existing = environment.get("LD_LIBRARY_PATH")
+    if existing:
+        library_directories.append(existing)
+    environment["LD_LIBRARY_PATH"] = os.pathsep.join(library_directories)
 
 
 def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, Path]:
@@ -1655,6 +1823,7 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             if workload.id == "llama-rdna4-mul-mat-vec-q"
             else "rms_norm"
         )
+        runtime = _llama_runtime(workspace, target, workload.relative_path)
         return {
             "python": Path(os.path.abspath(Path(sys.executable).expanduser())),
             "workload-source": Path(__file__).with_name("consan_llama_validation.py"),
@@ -1666,7 +1835,18 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             / "llama.cpp"
             / case
             / "case.json",
-            "executable": _llama_executable(workspace, target, workload.relative_path),
+            "executable": runtime.executable,
+            **runtime.libraries,
+        }
+    if workload.kind == "rdna4-matmul":
+        root = _rdna4_matmul_root(workspace)
+        return {
+            "workload-source": Path(__file__).with_name(
+                "consan_rdna4_matmul_validation.py"
+            ),
+            "project-source": root / "rdna4_matmul.hip",
+            "project-build-script": root / "build_and_test.sh",
+            "executable": root / workload.relative_path,
         }
     if workload.kind == "qwen":
         root = workspace / workload.relative_path
@@ -1760,6 +1940,7 @@ def _doctor(
                 _hook_path(workspace),
                 target,
                 pytorch_workloads[0],
+                workspace,
             )
         else:
             runtimes["pytorch"] = {
@@ -1812,22 +1993,35 @@ def _manifest(target: str) -> dict:
 def _clean_environment(
     profile: str | None,
     workload: Workload,
-    hook: Path,
-    target: str | None = None,
+    hook: Path | None,
+    target: str | None,
+    workspace: Path,
 ) -> dict[str, str]:
     if target is not None:
         workload = _resolved_workload(target, workload)
+    ignored_environment = HSA_TOOL_ENVIRONMENT | {
+        "HIP_TARGET",
+        HIP_MOI_GPU_BENCHMARK_ITERATIONS_ENV,
+        HIP_MOI_GPU_BENCHMARK_WARMUP_ITERATIONS_ENV,
+    }
     environment = {
         key: value
         for key, value in os.environ.items()
         if not key.startswith(CONTROLLED_ENV_PREFIX)
-        and key not in HSA_TOOL_ENVIRONMENT | {"HIP_TARGET"}
+        and key not in ignored_environment
         and not (target in NATIVE_CDNA_TARGETS and key in SOFTWARE_MODEL_ENVIRONMENT)
     }
     if target is not None:
         environment["HIP_TARGET"] = target
+    if workload.kind == "llama":
+        if target is None:
+            raise ValidationError("llama runtime environment requires a target")
+        runtime = _llama_runtime(workspace, target, workload.relative_path)
+        _llama_library_environment(runtime, environment)
     if profile is None:
         return environment
+    if hook is None:
+        raise ValidationError("instrumented runtime environment requires a hook")
     config = PROFILES[profile]
     environment.update(config.environment)
     environment.update(
@@ -1836,7 +2030,7 @@ def _clean_environment(
             "RJ_CONSAN_LOG": "1",
         }
     )
-    if workload.kind in {"pytorch", "llama"}:
+    if workload.kind in {"pytorch", "llama", "rdna4-matmul"}:
         # These clients use a modern HSA runtime which returns after successful
         # rocprofiler registration unless legacy environment tools are
         # explicitly requested. ConSan is currently such a tool.
@@ -1854,10 +2048,11 @@ def _run_environment(
     hook: Path,
     target: str,
     phase: str,
+    workspace: Path,
 ) -> dict[str, str]:
     if phase not in {"clean", "overhead"}:
         raise ValidationError(f"unsupported validation phase: {phase}")
-    environment = _clean_environment(profile, workload, hook, target)
+    environment = _clean_environment(profile, workload, hook, target, workspace)
     if _coverage_contract_for_profile(workload, profile):
         # The contract is a property of this exact workload/profile execution,
         # so both correctness and paired-overhead rows use the same bounded,
@@ -1878,6 +2073,13 @@ def _controlled_environment(environment: dict[str, str]) -> dict[str, str]:
         "PATH",
         "PYTHONPATH",
         "ROCM_PATH",
+        "ROCR_VISIBLE_DEVICES",
+        "HIP_VISIBLE_DEVICES",
+        "CUDA_VISIBLE_DEVICES",
+        "GPU_DEVICE_ORDINAL",
+        "HSA_OVERRIDE_GFX_VERSION",
+        HIP_MOI_GPU_BENCHMARK_ITERATIONS_ENV,
+        HIP_MOI_GPU_BENCHMARK_WARMUP_ITERATIONS_ENV,
     }
     names = {
         key
@@ -1990,7 +2192,11 @@ def _profile_runtime_defaults(
 
 
 def _qwen_command(
-    workspace: Path, target: str, overhead: bool, output: Path
+    workspace: Path,
+    target: str,
+    overhead: bool,
+    output: Path,
+    repetitions_override: int | None = None,
 ) -> list[str]:
     root = workspace / "iree-test-suites-build" / "torch_models" / "qwen3-600m"
     data = root / "hf" / "qwen3-600m"
@@ -2003,7 +2209,7 @@ def _qwen_command(
         f"--input=1x5xi64=@{data / 'inference_input.0.bin'}",
     ]
     if overhead:
-        repetitions = QWEN_OVERHEAD_REPETITIONS.get(target, 10)
+        repetitions = repetitions_override or QWEN_OVERHEAD_REPETITIONS.get(target, 10)
         command.extend(
             [
                 f"--benchmark_repetitions={repetitions}",
@@ -2052,15 +2258,24 @@ def _workload_command(
     workload: Workload,
     phase: str,
     output: Path,
+    inner_repetitions_override: int | None = None,
 ) -> list[str]:
     workload = _resolved_workload(target, workload)
     overhead = phase == "overhead"
     if workload.kind == "qwen":
-        return _qwen_command(workspace, target, overhead, output)
+        return _qwen_command(
+            workspace,
+            target,
+            overhead,
+            output,
+            inner_repetitions_override,
+        )
     if workload.kind == "sharktank":
         # The active architecture campaigns use one end-to-end repetition.
         # Keep both the outer process count and this inner suite count at one.
-        repetitions = _inner_repetitions(target, phase, workload)
+        repetitions = inner_repetitions_override or _inner_repetitions(
+            target, phase, workload
+        )
         return [
             str(_sharktank_python()),
             str(Path(__file__).with_name("consan_sharktank_validation.py")),
@@ -2079,7 +2294,9 @@ def _workload_command(
         # Large rows may declare isolated outer processes because repeated
         # instrumented dispatches accumulate bounded report state. Small rows
         # retain warm in-process timing, and simulator targets stay single-shot.
-        repetitions = _inner_repetitions(target, phase, workload)
+        repetitions = inner_repetitions_override or _inner_repetitions(
+            target, phase, workload
+        )
         return [
             str(_pytorch_python(workspace)),
             str(Path(__file__).with_name(workload.relative_path)),
@@ -2104,6 +2321,8 @@ def _workload_command(
             str(output.parent / "tensile-work"),
             "--repetitions",
             "1",
+            "--minimum-timed-ms",
+            str(EMPIRICAL_MINIMUM_TIMED_MS),
             "--label",
             f"{workload.id}-{phase}",
         ]
@@ -2142,7 +2361,7 @@ def _workload_command(
             if workload.id == "llama-rdna4-mul-mat-vec-q"
             else "rms-norm"
         )
-        return [
+        command = [
             sys.executable,
             str(Path(__file__).with_name("consan_llama_validation.py")),
             "--executable",
@@ -2152,6 +2371,40 @@ def _workload_command(
             "--output-dir",
             str(output.parent / f"{output.stem}-llama-work"),
         ]
+        if overhead and workload.id == "llama-rdna4-mul-mat-vec-q":
+            command.extend(
+                [
+                    "--n-embd",
+                    "1024",
+                    "--benchmark-iterations",
+                    str(inner_repetitions_override or 40_000),
+                    "--benchmark-warmup-iterations",
+                    "5",
+                    "--minimum-timed-ms",
+                    str(workload.self_timed_device_minimum_ms),
+                ]
+            )
+        return command
+    if workload.kind == "rdna4-matmul":
+        command = [
+            sys.executable,
+            str(Path(__file__).with_name("consan_rdna4_matmul_validation.py")),
+            "--executable",
+            str(_rdna4_matmul_root(workspace) / workload.relative_path),
+            "--workload",
+            workload.id.removeprefix("rdna4-matmul-"),
+            "--phase",
+            "clean" if phase in {"clean", "fault"} else "warm",
+            "--repetitions",
+            "1",
+            "--minimum-timed-ms",
+            str(workload.self_timed_device_minimum_ms),
+            "--label",
+            f"{workload.id}-{phase}",
+        ]
+        if inner_repetitions_override is not None:
+            command.extend(["--fixed-iterations", str(inner_repetitions_override)])
+        return command
     executable = workspace / workload.relative_path
     selected_filter = (
         workload.fault_filter or workload.clean_filter
@@ -2171,8 +2424,12 @@ def _write_provenance(
     path = workload_root / "provenance.json"
     hook = _hook_path(workspace)
     files = {"hook": hook, **_input_files(workspace, target, workload)}
+    llvm_readelf = _llvm_readelf()
+    if llvm_readelf is not None and llvm_readelf.is_file():
+        files["llvm-readelf"] = llvm_readelf
     document = {
         "schema_version": SCHEMA_VERSION,
+        "provenance_schema_version": PROVENANCE_SCHEMA_VERSION,
         "target": target,
         "workload": workload.id,
         "files": {
@@ -2185,6 +2442,20 @@ def _write_provenance(
         },
         "sources": _source_identities(workspace, workload),
         "manifest": _manifest(target),
+        "environment_selectors": {
+            name: {"present": name in os.environ, "value": os.environ.get(name)}
+            for name in (
+                "ROCR_VISIBLE_DEVICES",
+                "HIP_VISIBLE_DEVICES",
+                "CUDA_VISIBLE_DEVICES",
+                "GPU_DEVICE_ORDINAL",
+                "HSA_OVERRIDE_GFX_VERSION",
+            )
+        },
+        "machine": _machine_identity(target),
+        "runtime_tools": _runtime_tool_identities(llvm_readelf, hook),
+        "workload_runtime": _workload_runtime_identity(workspace, target, workload),
+        "observations": _empirical_observation_snapshot(),
     }
     normalized_document = json.loads(json.dumps(document))
     if path.exists():
@@ -2194,13 +2465,452 @@ def _write_provenance(
             raise ValidationError(
                 f"cannot read existing provenance {path}: {error}"
             ) from error
-        if existing != normalized_document:
+        existing_schema = existing.get("provenance_schema_version")
+        if existing_schema != PROVENANCE_SCHEMA_VERSION:
+            raise ValidationError(
+                "provenance schema changed "
+                f"from {existing_schema!r} to {PROVENANCE_SCHEMA_VERSION}; "
+                f"use a new artifact root instead of resuming {path}"
+            )
+        stable_existing = {
+            key: value for key, value in existing.items() if key != "observations"
+        }
+        stable_document = {
+            key: value
+            for key, value in normalized_document.items()
+            if key != "observations"
+        }
+        if stable_existing != stable_document:
             raise ValidationError(
                 f"provenance conflicts with existing artifact: {path}"
             )
         return path
     atomic_write_json(path, document)
     return path
+
+
+def _read_identity_file(path: Path) -> dict[str, object]:
+    try:
+        value = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError as error:
+        return {"available": False, "reason": str(error)}
+    return {"available": True, "value": value}
+
+
+def _command_identity(
+    command: list[str],
+    timeout: int = 10,
+    environment: dict[str, str] | None = None,
+) -> dict[str, object]:
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+            env=environment,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {"available": False, "command": command, "reason": str(error)}
+    output = completed.stdout or ""
+    limit = 65536
+    return {
+        "available": completed.returncode == 0,
+        "command": command,
+        "returncode": completed.returncode,
+        "output": output[:limit],
+        "output_sha256": hashlib.sha256(output.encode("utf-8")).hexdigest(),
+        "output_truncated": len(output) > limit,
+    }
+
+
+def _runtime_library_records(paths: dict[str, Path]) -> dict[str, object]:
+    records = {}
+    for label, path in paths.items():
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError as error:
+            raise ValidationError(
+                f"cannot resolve loaded {label} runtime {path}: {error}"
+            ) from error
+        records[label] = {
+            "path": str(path),
+            "resolved_path": str(resolved),
+            "size": resolved.stat().st_size,
+            "sha256": sha256_file(resolved),
+        }
+    return records
+
+
+def _runtime_libraries_from_ldd_output(output: str) -> dict[str, Path]:
+    prefixes = {
+        "hip-runtime": "libamdhip64.so",
+        "hsa-runtime": "libhsa-runtime64.so",
+    }
+    matches: dict[str, set[Path]] = {label: set() for label in prefixes}
+    for line in output.splitlines():
+        match = re.match(r"^\s*(\S+)\s+=>\s+(\S+)", line)
+        if match is None or match.group(2) == "not":
+            continue
+        soname, loaded = match.groups()
+        for label, prefix in prefixes.items():
+            if soname.startswith(prefix):
+                matches[label].add(Path(loaded))
+    ambiguous = {label: paths for label, paths in matches.items() if len(paths) > 1}
+    if ambiguous:
+        raise ValidationError(
+            "dynamic loader reported multiple runtime libraries: "
+            + "; ".join(
+                f"{label}={','.join(sorted(str(path) for path in paths))}"
+                for label, paths in sorted(ambiguous.items())
+            )
+        )
+    return {label: next(iter(paths)) for label, paths in matches.items() if paths}
+
+
+def _native_runtime_identity(
+    executable: Path, environment: dict[str, str]
+) -> dict[str, object]:
+    ldd = shutil.which("ldd")
+    if ldd is None:
+        raise ValidationError("cannot verify native runtime closure: ldd is missing")
+    identity = _command_identity(
+        [ldd, str(executable)], timeout=TIMEOUT_SECONDS, environment=environment
+    )
+    if not identity.get("available"):
+        raise ValidationError(
+            "cannot verify native runtime closure: "
+            + json.dumps(identity, sort_keys=True)
+        )
+    libraries = _runtime_libraries_from_ldd_output(str(identity.get("output", "")))
+    missing = {"hip-runtime", "hsa-runtime"} - set(libraries)
+    if missing:
+        raise ValidationError(
+            "native runtime closure is missing " + ", ".join(sorted(missing))
+        )
+    return {
+        "loader": identity,
+        "loaded_runtime_libraries": _runtime_library_records(libraries),
+    }
+
+
+def _llama_runtime_identity(
+    workspace: Path, target: str, workload: Workload
+) -> dict[str, object]:
+    runtime = _llama_runtime(workspace, target, workload.relative_path)
+    ldd = shutil.which("ldd")
+    if ldd is None:
+        raise ValidationError("cannot verify llama runtime closure: ldd is missing")
+    environment = _clean_environment(None, workload, None, target, workspace)
+    try:
+        completed = subprocess.run(
+            [ldd, str(runtime.executable)],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+            env=environment,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValidationError(
+            f"cannot verify llama runtime closure with ldd: {error}"
+        ) from error
+    output = completed.stdout or ""
+    if completed.returncode != 0:
+        raise ValidationError(
+            "cannot verify llama runtime closure: "
+            f"ldd exited with status {completed.returncode}: {output.strip()}"
+        )
+
+    loaded_paths = []
+    missing_names = []
+    for line in output.splitlines():
+        match = re.match(r"^\s*(\S+)\s+=>\s+(\S+)", line)
+        if match is None or not match.group(1).startswith("libggml"):
+            continue
+        if match.group(2) == "not":
+            missing_names.append(match.group(1))
+            continue
+        loaded_paths.append(Path(match.group(2)))
+    if missing_names:
+        raise ValidationError(
+            "llama runtime closure has unresolved libraries: "
+            + ", ".join(sorted(missing_names))
+        )
+
+    libraries = {}
+    unmatched = list(loaded_paths)
+    for label, expected in runtime.libraries.items():
+        expected_real = expected.resolve(strict=True)
+        match = next(
+            (
+                candidate
+                for candidate in unmatched
+                if candidate.resolve(strict=True) == expected_real
+            ),
+            None,
+        )
+        if match is None:
+            raise ValidationError(
+                "llama loader did not resolve the recorded runtime library "
+                f"{label} from {expected}"
+            )
+        unmatched.remove(match)
+        libraries[label] = {
+            "recorded_path": str(expected),
+            "loader_path": str(match),
+            "resolved_path": str(expected_real),
+        }
+    if unmatched:
+        raise ValidationError(
+            "llama loader resolved unrecorded ggml libraries: "
+            + ", ".join(str(path) for path in unmatched)
+        )
+    return {
+        "kind": workload.kind,
+        "identity_source": "validated dynamic-loader closure",
+        "executable": str(runtime.executable),
+        "libraries": libraries,
+        "loaded_runtime_libraries": _runtime_library_records(
+            _runtime_libraries_from_ldd_output(output)
+        ),
+    }
+
+
+def _workload_runtime_identity(
+    workspace: Path, target: str, workload: Workload
+) -> dict[str, object]:
+    if workload.kind == "llama":
+        return _llama_runtime_identity(workspace, target, workload)
+    if workload.kind in {"gtest", "rdna4-matmul"}:
+        executable = _input_files(workspace, target, workload)["executable"]
+        environment = _clean_environment(None, workload, None, target, workspace)
+        return {
+            "kind": workload.kind,
+            "identity_source": "validated dynamic-loader closure",
+            "executable": str(executable),
+            **_native_runtime_identity(executable, environment),
+        }
+    if workload.kind != "pytorch":
+        return {
+            "kind": workload.kind,
+            "identity_source": "hashed provenance files",
+        }
+    python = _pytorch_python(workspace)
+    script = """
+import json
+import pathlib
+
+import torch
+import triton
+
+torch.ones(1, device="cuda")
+torch.cuda.synchronize()
+mapped = sorted({
+    fields[-1]
+    for line in pathlib.Path("/proc/self/maps").read_text(encoding="utf-8").splitlines()
+    if len(fields := line.split()) >= 6 and fields[-1].startswith("/")
+})
+prefixes = {
+    "hip-runtime": "libamdhip64.so",
+    "hsa-runtime": "libhsa-runtime64.so",
+}
+runtime_libraries = {
+    label: [path for path in mapped if pathlib.Path(path).name.startswith(prefix)]
+    for label, prefix in prefixes.items()
+}
+print(json.dumps({
+    "torch_version": torch.__version__,
+    "torch_hip_version": torch.version.hip,
+    "torch_file": torch.__file__,
+    "triton_version": getattr(triton, "__version__", None),
+    "triton_file": triton.__file__,
+    "runtime_libraries": runtime_libraries,
+}, sort_keys=True))
+"""
+    packages = _command_identity(
+        [str(python), "-c", script],
+        timeout=TIMEOUT_SECONDS,
+        environment=_clean_environment(None, workload, None, target, workspace),
+    )
+    if not packages.get("available"):
+        raise ValidationError(
+            "cannot record required PyTorch/Triton runtime identity: "
+            + json.dumps(packages, sort_keys=True)
+        )
+    try:
+        package_document = json.loads(str(packages.get("output", "")))
+    except json.JSONDecodeError as error:
+        raise ValidationError(
+            "PyTorch/Triton runtime identity did not emit valid JSON"
+        ) from error
+    required = {
+        "torch_version",
+        "torch_hip_version",
+        "torch_file",
+        "triton_version",
+        "triton_file",
+        "runtime_libraries",
+    }
+    if not isinstance(package_document, dict) or any(
+        not package_document.get(name) for name in required
+    ):
+        raise ValidationError(
+            "PyTorch/Triton runtime identity is missing required fields: "
+            + ", ".join(
+                sorted(
+                    required
+                    - set(
+                        package_document if isinstance(package_document, dict) else ()
+                    )
+                )
+            )
+        )
+    runtime_candidates = package_document["runtime_libraries"]
+    if not isinstance(runtime_candidates, dict):
+        raise ValidationError("PyTorch runtime identity has invalid library closure")
+    runtime_paths = {}
+    for label in ("hip-runtime", "hsa-runtime"):
+        candidates = runtime_candidates.get(label)
+        if not isinstance(candidates, list) or len(candidates) != 1:
+            raise ValidationError(
+                f"PyTorch runtime identity needs exactly one loaded {label}: "
+                f"{candidates!r}"
+            )
+        runtime_paths[label] = Path(candidates[0])
+    return {
+        "kind": workload.kind,
+        "identity_source": "framework probe and loaded process mappings",
+        "python_packages": packages,
+        "package_document": package_document,
+        "loaded_runtime_libraries": _runtime_library_records(runtime_paths),
+    }
+
+
+def _gfx_target_version(target: str) -> int | None:
+    match = re.fullmatch(r"gfx([0-9]{2})([0-9])([0-9])", target)
+    if match is None:
+        return None
+    major, minor, stepping = (int(value) for value in match.groups())
+    return major * 10000 + minor * 100 + stepping
+
+
+def _machine_identity(target: str) -> dict[str, object]:
+    topology = {}
+    topology_root = Path("/sys/class/kfd/kfd/topology/nodes")
+    if topology_root.is_dir():
+        for node in sorted(topology_root.iterdir(), key=lambda path: path.name):
+            if not node.is_dir():
+                continue
+            topology[node.name] = {
+                name: _read_identity_file(node / name)
+                for name in ("gpu_id", "name", "properties")
+            }
+    pci_devices = {}
+    for device in sorted(Path("/sys/bus/pci/devices").glob("*")):
+        vendor = _read_identity_file(device / "vendor")
+        if vendor.get("value") != "0x1002":
+            continue
+        pci_devices[device.name] = {
+            name: _read_identity_file(device / name)
+            for name in (
+                "vendor",
+                "device",
+                "subsystem_vendor",
+                "subsystem_device",
+                "revision",
+            )
+        }
+        driver = device / "driver"
+        try:
+            pci_devices[device.name]["driver"] = driver.resolve().name
+        except OSError:
+            pci_devices[device.name]["driver"] = None
+    target_version = _gfx_target_version(target)
+    selected_kfd_nodes = []
+    if target_version is not None:
+        marker = f"gfx_target_version {target_version}"
+        selected_kfd_nodes = [
+            node
+            for node, identity in topology.items()
+            if marker in str(identity["properties"].get("value", "")).splitlines()
+        ]
+    return {
+        "uname": platform.uname()._asdict(),
+        "os_release": _read_identity_file(Path("/etc/os-release")),
+        "kfd_topology": topology,
+        "selected_kfd_nodes": selected_kfd_nodes,
+        "amd_pci_devices": pci_devices,
+        "amdgpu_module_version": _read_identity_file(
+            Path("/sys/module/amdgpu/version")
+        ),
+        "amdgpu_module_source_version": _read_identity_file(
+            Path("/sys/module/amdgpu/srcversion")
+        ),
+    }
+
+
+def _unavailable_command_identity(name: str) -> dict[str, object]:
+    return {"available": False, "command": [name], "reason": "tool is unavailable"}
+
+
+def _empirical_observation_snapshot() -> dict[str, object]:
+    rocm_smi = shutil.which("rocm-smi")
+    amd_smi = shutil.which("amd-smi")
+    return {
+        "schema_version": 1,
+        "captured_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "clocks_temperature_and_utilization": (
+            _command_identity(
+                [
+                    rocm_smi,
+                    "--showtemp",
+                    "--showclocks",
+                    "--showuse",
+                    "--json",
+                ]
+            )
+            if rocm_smi
+            else _unavailable_command_identity("rocm-smi")
+        ),
+        "competing_gpu_processes": (
+            _command_identity([amd_smi, "process", "--json"])
+            if amd_smi
+            else _unavailable_command_identity("amd-smi")
+        ),
+        "firmware": (
+            _command_identity([amd_smi, "firmware", "--json"])
+            if amd_smi
+            else _unavailable_command_identity("amd-smi")
+        ),
+        "amd_smi_metrics": (
+            _command_identity([amd_smi, "metric", "--json"])
+            if amd_smi
+            else _unavailable_command_identity("amd-smi")
+        ),
+    }
+
+
+def _runtime_tool_identities(
+    llvm_readelf: Path | None, hook: Path
+) -> dict[str, object]:
+    commands = {
+        "python": [sys.executable, "--version"],
+        "rocminfo": [shutil.which("rocminfo") or "rocminfo"],
+    }
+    if llvm_readelf is not None:
+        commands["llvm-readelf"] = [str(llvm_readelf), "--version"]
+    commands["hook-linkage"] = [shutil.which("ldd") or "ldd", str(hook)]
+    rocm_sdk = shutil.which("rocm-sdk")
+    if rocm_sdk:
+        commands["rocm-sdk"] = [rocm_sdk, "path", "--root"]
+    amdclang = shutil.which("amdclang++")
+    if amdclang:
+        commands["amdclang++"] = [amdclang, "--version"]
+    return {name: _command_identity(command) for name, command in commands.items()}
 
 
 def _source_identities(workspace: Path, workload: Workload) -> list[dict | None]:
@@ -2216,6 +2926,8 @@ def _source_identities(workspace: Path, workload: Workload) -> list[dict | None]
         roots.append(paths.tensilelite)
     if workload.kind == "llama":
         roots.append(workspace / "rocjitsu-test-corpus")
+    if workload.kind == "rdna4-matmul":
+        roots.append(_rdna4_matmul_root(workspace))
     if workload.kind == "pytorch":
         roots.append(workspace / "pytorch")
     return [git_identity(root) for root in roots]
@@ -3087,31 +3799,43 @@ def _coverage_summary(
     return summary
 
 
-def _benchmark_median(path: Path) -> float:
+def _benchmark_samples(path: Path) -> list[float]:
     document = json.loads(path.read_text(encoding="utf-8"))
     rows = document.get("benchmarks", [])
-    medians = [
+    iterations = [
         row
         for row in rows
-        if row.get("aggregate_name") == "median"
+        if row.get("run_type") == "iteration"
         and str(row.get("name", "")).startswith("BM_main/")
     ]
-    if not medians:
-        medians = [
+    selected = iterations
+    if not selected:
+        selected = [
             row
             for row in rows
-            if row.get("run_type") == "iteration"
-            and row.get("repetitions") == 1
+            if row.get("aggregate_name") == "median"
             and str(row.get("name", "")).startswith("BM_main/")
         ]
-    if len(medians) != 1:
-        raise ValidationError(f"expected one Qwen benchmark median in {path}")
+    if not selected:
+        raise ValidationError(f"expected Qwen benchmark timing rows in {path}")
+    benchmark_names = {str(row.get("name", "")) for row in selected}
+    if len(benchmark_names) != 1:
+        raise ValidationError(
+            f"expected one Qwen benchmark identity in {path}, found "
+            f"{sorted(benchmark_names)}"
+        )
     scale = {"ns": 1e-6, "us": 1e-3, "ms": 1.0, "s": 1e3}
-    row = medians[0]
-    return float(row["real_time"]) * scale[row["time_unit"]]
+    try:
+        return [float(row["real_time"]) * scale[row["time_unit"]] for row in selected]
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValidationError(f"malformed Qwen benchmark timing in {path}") from error
 
 
-def _json_medians(log_text: str, workload_kind: str) -> dict[str, float]:
+def _benchmark_median(path: Path) -> float:
+    return statistics.median(_benchmark_samples(path))
+
+
+def _json_timing_samples(log_text: str, workload_kind: str) -> dict[str, list[float]]:
     documents = []
     for line in log_text.splitlines():
         if line.startswith("{"):
@@ -3122,10 +3846,73 @@ def _json_medians(log_text: str, workload_kind: str) -> dict[str, float]:
     if len(documents) != 1:
         raise ValidationError(f"expected one {workload_kind} JSON result")
     document = documents[0]
+    timings = {}
+    for key, value in document.items():
+        if not isinstance(value, dict):
+            continue
+        if "median_ms" in value:
+            samples = value.get("samples_ms")
+            if samples is None:
+                samples = [value["median_ms"]]
+            if (
+                not isinstance(samples, list)
+                or not samples
+                or any(
+                    not isinstance(sample, (int, float))
+                    or not math.isfinite(float(sample))
+                    or sample <= 0
+                    for sample in samples
+                )
+            ):
+                raise ValidationError(
+                    f"invalid {workload_kind} timing samples for {key}"
+                )
+            timings[key] = [float(sample) for sample in samples]
+        device_samples = value.get("device_samples_ms")
+        if device_samples is None and "device_median_ms" in value:
+            device_samples = [value["device_median_ms"]]
+        if device_samples is not None:
+            if (
+                not isinstance(device_samples, list)
+                or not device_samples
+                or any(
+                    not isinstance(sample, (int, float))
+                    or not math.isfinite(float(sample))
+                    or sample <= 0
+                    for sample in device_samples
+                )
+            ):
+                raise ValidationError(
+                    f"invalid {workload_kind} device timing samples for {key}"
+                )
+            timings[f"{key}:device"] = [float(sample) for sample in device_samples]
+    return timings
+
+
+def _json_measurements(log_text: str, workload_kind: str) -> dict[str, dict]:
+    documents = []
+    for line in log_text.splitlines():
+        if line.startswith("{"):
+            try:
+                documents.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    if len(documents) != 1:
+        raise ValidationError(f"expected one {workload_kind} JSON result")
+    measurements = {
+        key: value
+        for key, value in documents[0].items()
+        if isinstance(key, str) and isinstance(value, dict)
+    }
+    if not measurements:
+        raise ValidationError(f"expected {workload_kind} measurement rows")
+    return measurements
+
+
+def _json_medians(log_text: str, workload_kind: str) -> dict[str, float]:
     return {
-        key: float(value["median_ms"])
-        for key, value in document.items()
-        if isinstance(value, dict) and "median_ms" in value
+        key: statistics.median(values)
+        for key, values in _json_timing_samples(log_text, workload_kind).items()
     }
 
 
@@ -3133,7 +3920,7 @@ def _sharktank_medians(log_text: str) -> dict[str, float]:
     return _json_medians(log_text, "Sharktank")
 
 
-def _gtest_median(log_texts: list[str]) -> dict[str, float]:
+def _gtest_timing_samples(log_texts: list[str]) -> dict[str, list[float]]:
     pattern = re.compile(r"\[==========\].*\(([0-9]+) ms total\)")
     values = []
     for log_text in log_texts:
@@ -3141,7 +3928,425 @@ def _gtest_median(log_texts: list[str]) -> dict[str, float]:
         if not matches:
             raise ValidationError("missing GTest total latency")
         values.append(float(matches[-1]))
-    return {"process": statistics.median(values)}
+    return {"process": values}
+
+
+def _gtest_median(log_texts: list[str]) -> dict[str, float]:
+    return {
+        mode: statistics.median(values)
+        for mode, values in _gtest_timing_samples(log_texts).items()
+    }
+
+
+def _gtest_device_measurement(
+    log_text: str, benchmark: str, expected_iterations: int
+) -> tuple[float, dict[str, object]]:
+    number = r"[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"
+    matches = re.findall(
+        rf"^hip_moi_gpu_timing benchmark={re.escape(benchmark)} timer=hip-event "
+        rf"aggregate_ms=({number}) iterations=([0-9]+) "
+        rf"per_iteration_ms=({number})$",
+        log_text,
+        re.MULTILINE,
+    )
+    if len(matches) != 1:
+        raise ValidationError(
+            f"expected one {benchmark} GPU timing row, found {len(matches)}"
+        )
+    aggregate_ms = float(matches[0][0])
+    iterations = int(matches[0][1])
+    per_iteration_ms = float(matches[0][2])
+    if iterations != expected_iterations:
+        raise ValidationError(
+            f"{benchmark} GPU timing iteration mismatch: "
+            f"{iterations} != {expected_iterations}"
+        )
+    if (
+        not math.isfinite(aggregate_ms)
+        or not math.isfinite(per_iteration_ms)
+        or aggregate_ms <= 0.0
+        or per_iteration_ms <= 0.0
+        or not math.isclose(aggregate_ms / iterations, per_iteration_ms, rel_tol=2.0e-6)
+    ):
+        raise ValidationError(f"{benchmark} GPU timing row is inconsistent")
+    return per_iteration_ms, {
+        "benchmark_iterations": iterations,
+        "timed_aggregate_ms": aggregate_ms,
+        "timing_source": "hip-event",
+    }
+
+
+def _discard_first_sample_per_process(
+    per_run: list[dict[str, list[float]]],
+) -> list[dict[str, list[float]]]:
+    discarded = []
+    for item in per_run:
+        if any(len(values) < 2 for values in item.values()):
+            raise ValidationError(
+                "cannot discard one warmup sample from a process with fewer than "
+                "two timing samples"
+            )
+        discarded.append({key: values[1:] for key, values in item.items()})
+    return discarded
+
+
+def _nonnegative_float(fields: dict[str, str], name: str) -> float | None:
+    try:
+        value = float(fields[name])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) and value >= 0.0 else None
+
+
+def _empirical_structural_metrics(log_text: str) -> dict[str, object]:
+    readers: dict[int, dict[str, object]] = {}
+    process_memory: dict[str, int] = {}
+    reasons = []
+
+    def parse(line: str, marker: str, context: str) -> dict[str, str] | None:
+        return _parse_log_fields(line, marker, context, reasons)
+
+    for line in log_text.splitlines():
+        fields = None
+        if "ConSan waitcheck timing reader=" in line:
+            fields = parse(line, "ConSan waitcheck timing ", "waitcheck timing")
+            if fields is not None:
+                reader = _unsigned(fields, "reader")
+                elapsed = _nonnegative_float(fields, "elapsed_ms")
+                if reader is None or elapsed is None:
+                    reasons.append("malformed waitcheck timing")
+                else:
+                    readers.setdefault(reader, {})["waitcheck_ms"] = elapsed
+        elif "ConSan MOI inventory end reader=" in line:
+            fields = parse(line, "ConSan MOI inventory end ", "MOI inventory timing")
+            if fields is not None:
+                reader = _unsigned(fields, "reader")
+                elapsed = _nonnegative_float(fields, "elapsed_ms")
+                if reader is None or elapsed is None:
+                    reasons.append("malformed MOI inventory timing")
+                else:
+                    readers.setdefault(reader, {})["inventory_ms"] = elapsed
+        elif "ConSan patch begin reader=" in line:
+            fields = parse(line, "ConSan patch begin ", "patch begin")
+            if fields is not None:
+                reader = _unsigned(fields, "reader")
+                byte_count = _unsigned(fields, "bytes")
+                if reader is None or byte_count is None:
+                    reasons.append("malformed patch begin")
+                else:
+                    readers.setdefault(reader, {})["original_bytes"] = byte_count
+        elif "ConSan patch end reader=" in line:
+            fields = parse(line, "ConSan patch end ", "patch end")
+            if fields is not None:
+                reader = _unsigned(fields, "reader")
+                elapsed = _nonnegative_float(fields, "patch_ms")
+                patches = _unsigned(fields, "patches")
+                if reader is None or elapsed is None or patches is None:
+                    reasons.append("patch end lacks empirical timing fields")
+                else:
+                    record = readers.setdefault(reader, {})
+                    record["patch_ms"] = elapsed
+                    record["patches"] = patches
+                    record["modified"] = _boolean(fields, "modified")
+                    record["outcome"] = fields.get("outcome")
+        elif "ConSan replacement reader=" in line:
+            fields = parse(line, "ConSan replacement ", "replacement image")
+            if fields is not None:
+                reader = _unsigned(fields, "original_reader")
+                byte_count = _unsigned(fields, "bytes")
+                if reader is None or byte_count is None:
+                    reasons.append("malformed replacement image")
+                else:
+                    readers.setdefault(reader, {})["patched_bytes"] = byte_count
+        elif "ConSan MOI resources reader=" in line:
+            fields = parse(line, "ConSan MOI resources ", "MOI resources")
+            if fields is not None:
+                reader = _unsigned(fields, "reader")
+                if reader is None:
+                    reasons.append("malformed MOI resources")
+                    continue
+                resource_names = (
+                    "explicit",
+                    "dead",
+                    "descriptor_growth",
+                    "spill",
+                    "unsupported",
+                    "planned_spill_slot_bytes",
+                    "emitted_spill_patches",
+                    "emitted_spill_slot_bytes",
+                    "alternative_attempts",
+                    "alternative_selected",
+                    "alternative_rejected",
+                    "alternative_superseded",
+                    "alternative_contributed",
+                    "alternative_vetoed",
+                )
+                resources = {name: _unsigned(fields, name) for name in resource_names}
+                if any(value is None for value in resources.values()):
+                    reasons.append("malformed MOI resources")
+                else:
+                    readers.setdefault(reader, {})["resources"] = resources
+        elif "ConSan MOI report memory required_bytes=" in line:
+            fields = parse(line, "ConSan MOI report memory ", "report memory")
+            if fields is not None:
+                for source, destination in (
+                    ("required_bytes", "report_required_bytes"),
+                    ("allocated_bytes", "report_allocated_bytes"),
+                    ("peak_live_bytes", "report_peak_live_bytes"),
+                    ("allocation_failures", "report_allocation_failures"),
+                    ("capacity_failures", "report_capacity_failures"),
+                    ("cleanup_failures", "report_cleanup_failures"),
+                ):
+                    value = _unsigned(fields, source)
+                    if value is None:
+                        reasons.append(f"malformed report memory field {source}")
+                    else:
+                        process_memory[destination] = value
+        elif "ConSan transform admission memory live_bytes=" in line:
+            fields = parse(
+                line,
+                "ConSan transform admission memory ",
+                "transform admission memory",
+            )
+            if fields is not None:
+                value = _unsigned(fields, "peak_reserved_bytes")
+                if value is None:
+                    reasons.append("malformed transform admission memory")
+                else:
+                    process_memory["transform_peak_reserved_bytes"] = value
+        elif "ConSan patched-image memory live_bytes=" in line:
+            fields = parse(line, "ConSan patched-image memory ", "patched image memory")
+            if fields is not None:
+                value = _unsigned(fields, "peak_image_bytes")
+                if value is None:
+                    reasons.append("malformed patched image memory")
+                else:
+                    process_memory["patched_image_peak_bytes"] = value
+        elif "ConSan patched-image growth memory live_bytes=" in line:
+            fields = parse(
+                line,
+                "ConSan patched-image growth memory ",
+                "patched image growth memory",
+            )
+            if fields is not None:
+                value = _unsigned(fields, "peak_growth_bytes")
+                if value is None:
+                    reasons.append("malformed patched image growth memory")
+                else:
+                    process_memory["patched_image_peak_growth_bytes"] = value
+
+    code_objects = []
+    for reader, record in sorted(readers.items()):
+        original = record.get("original_bytes")
+        patched = record.get("patched_bytes", original)
+        record["reader"] = reader
+        record["patched_bytes"] = patched
+        if isinstance(original, int) and isinstance(patched, int):
+            record["growth_bytes"] = patched - original
+            record["growth_ratio"] = patched / original if original else None
+        code_objects.append(record)
+    patched = [
+        record["patch_ms"]
+        for record in code_objects
+        if isinstance(record.get("patch_ms"), float)
+    ]
+    return {
+        "accepted": not reasons and bool(patched),
+        "reasons": reasons,
+        "code_objects": code_objects,
+        "total_patch_ms": sum(patched),
+        "process_memory": process_memory,
+    }
+
+
+def _empirical_structural_totals(result: dict) -> dict[str, float]:
+    if result.get("accepted") is not True:
+        raise ValidationError("empirical row was rejected")
+    runs = result.get("structural_metrics_runs")
+    if not isinstance(runs, list) or not runs:
+        raise ValidationError("empirical row has no structural metrics")
+    if any(run.get("accepted") is not True for run in runs):
+        raise ValidationError("empirical row has rejected structural metrics")
+    totals = {"patch_ms": 0.0, "waitcheck_ms": 0.0, "inventory_ms": 0.0}
+    for run in runs:
+        totals["patch_ms"] += float(run["total_patch_ms"])
+        for record in run["code_objects"]:
+            for source, destination in (
+                ("waitcheck_ms", "waitcheck_ms"),
+                ("inventory_ms", "inventory_ms"),
+            ):
+                value = record.get(source)
+                if isinstance(value, (int, float)):
+                    totals[destination] += float(value)
+    return totals
+
+
+def _parse_amdgpu_kernel_metadata(text: str) -> dict[str, object]:
+    integer_fields = {
+        "group_segment_fixed_size",
+        "private_segment_fixed_size",
+        "sgpr_count",
+        "sgpr_spill_count",
+        "vgpr_count",
+        "vgpr_spill_count",
+        "agpr_count",
+        "accum_offset",
+        "wavefront_size",
+        "max_flat_workgroup_size",
+    }
+    kernels = []
+    current: dict[str, object] | None = None
+    for line in text.splitlines():
+        start = re.match(r"^  - \.([a-z_]+):\s*(.*?)\s*$", line)
+        if start is not None:
+            if current:
+                kernels.append(current)
+            current = {}
+            name, value = start.groups()
+            if name in integer_fields and value:
+                try:
+                    current[name] = int(value, 0)
+                except ValueError:
+                    current[name] = None
+        if current is None:
+            continue
+        match = re.match(r"^    \.([a-z_]+):\s*(.*?)\s*$", line)
+        if match is None:
+            continue
+        name, value = match.groups()
+        if name == "name":
+            current[name] = value
+        elif name in integer_fields:
+            try:
+                current[name] = int(value, 0)
+            except ValueError:
+                current[name] = None
+    if current:
+        kernels.append(current)
+    return {
+        "kernels": kernels,
+        "kernel_count": len(kernels),
+        "fields": sorted(
+            {name for kernel in kernels for name in kernel if name != "name"}
+        ),
+    }
+
+
+def _llvm_readelf() -> Path | None:
+    configured = os.environ.get(LLVM_READELF_ENV)
+    if configured:
+        return Path(os.path.abspath(Path(configured).expanduser()))
+    discovered = shutil.which("llvm-readelf")
+    return Path(discovered) if discovered else None
+
+
+def _amdgpu_kernel_metadata(path: Path) -> dict[str, object]:
+    tool = _llvm_readelf()
+    if tool is None:
+        return {
+            "accepted": False,
+            "reason": "llvm-readelf is unavailable",
+            "tool": None,
+        }
+    try:
+        completed = subprocess.run(
+            [str(tool), "--notes", str(path)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {"accepted": False, "reason": str(error), "tool": str(tool)}
+    if completed.returncode != 0:
+        return {
+            "accepted": False,
+            "reason": completed.stderr.strip() or "llvm-readelf failed",
+            "tool": str(tool),
+        }
+    metadata = _parse_amdgpu_kernel_metadata(completed.stdout)
+    return {
+        "accepted": metadata["kernel_count"] > 0,
+        "reason": None if metadata["kernel_count"] > 0 else "no AMDGPU kernels found",
+        "tool": str(tool),
+        **metadata,
+    }
+
+
+def _retained_code_object_inventory(row_dir: Path) -> dict[str, object]:
+    records: dict[tuple[str, str], dict[str, object]] = {}
+    for path in sorted(row_dir.glob("code-objects-*/*.hsaco")):
+        match = _COVERAGE_DUMP_NAME.fullmatch(path.name)
+        if match is None:
+            continue
+        key = (match.group("dump_id"), match.group("reader"))
+        record = records.setdefault(
+            key,
+            {"dump_id": key[0], "reader": int(key[1])},
+        )
+        record[match.group("kind")] = {
+            "path": _retained_relative_path(row_dir, path),
+            "size": path.stat().st_size,
+            "sha256": sha256_file(path),
+            "metadata": _amdgpu_kernel_metadata(path),
+        }
+    pairs = []
+    for record in records.values():
+        original = record.get("original")
+        patched = record.get("patched")
+        if isinstance(original, dict) and isinstance(patched, dict):
+            record["growth_bytes"] = patched["size"] - original["size"]
+            record["growth_ratio"] = (
+                patched["size"] / original["size"] if original["size"] else None
+            )
+            original_kernels = {
+                kernel.get("name"): kernel
+                for kernel in original["metadata"].get("kernels", [])
+                if isinstance(kernel.get("name"), str)
+            }
+            patched_kernels = {
+                kernel.get("name"): kernel
+                for kernel in patched["metadata"].get("kernels", [])
+                if isinstance(kernel.get("name"), str)
+            }
+            original_names = sorted(original_kernels)
+            patched_names = sorted(patched_kernels)
+            resource_fields = (
+                "group_segment_fixed_size",
+                "private_segment_fixed_size",
+                "sgpr_count",
+                "sgpr_spill_count",
+                "vgpr_count",
+                "vgpr_spill_count",
+                "agpr_count",
+            )
+            record["kernel_metadata_delta"] = {
+                "original_names": original_names,
+                "patched_names": patched_names,
+                "name_sets_match": original_names == patched_names,
+                "kernels": {
+                    name: {
+                        field: patched_kernels[name][field]
+                        - original_kernels[name][field]
+                        for field in resource_fields
+                        if isinstance(original_kernels[name].get(field), int)
+                        and isinstance(patched_kernels[name].get(field), int)
+                    }
+                    for name in sorted(set(original_kernels) & set(patched_kernels))
+                },
+            }
+        pairs.append(record)
+    return {
+        "pairs": pairs,
+        "complete_pairs": sum("growth_bytes" in row for row in pairs),
+        "metadata_complete_pairs": sum(
+            "growth_bytes" in row
+            and row["original"]["metadata"]["accepted"]
+            and row["patched"]["metadata"]["accepted"]
+            for row in pairs
+        ),
+    }
 
 
 def _gtest_test_count(log_text: str) -> int | None:
@@ -3945,13 +5150,45 @@ def _run_profile(
     timeout: int,
     row_label: str | None = None,
     launcher: list[str] | None = None,
+    *,
+    row_dir_override: Path | None = None,
+    repetitions_override: int | None = None,
+    inner_repetitions_override: int | None = None,
+    discard_first_timing_sample: bool = False,
+    retain_code_objects: bool = False,
+    collect_structural_metrics: bool = False,
+    collect_gtest_device_timing: bool = False,
+    minimum_device_timed_aggregate_ms: float | None = None,
 ) -> dict:
     profile_id = profile or "baseline"
     result_phase = _result_phase(phase, profile, workload)
-    row_dir = artifact_root / workload.id / result_phase / (row_label or profile_id)
+    row_dir = row_dir_override or (
+        artifact_root / workload.id / result_phase / (row_label or profile_id)
+    )
     row_dir.mkdir(parents=True, exist_ok=False)
     hook = _hook_path(workspace)
-    repetitions = _outer_repetitions(target, phase, workload)
+    repetitions = (
+        repetitions_override
+        if repetitions_override is not None
+        else _outer_repetitions(target, phase, workload)
+    )
+    if repetitions <= 0:
+        raise ValidationError("profile repetitions must be positive")
+    if inner_repetitions_override is not None and inner_repetitions_override <= 0:
+        raise ValidationError("inner repetitions must be positive")
+    if collect_gtest_device_timing and (
+        phase != "overhead" or workload.warm_timing_mode != "device-gtest"
+    ):
+        raise ValidationError(
+            "GTest device timing requires an overhead row with native event support"
+        )
+    if collect_gtest_device_timing and workload.device_timing_warmup_iterations < 0:
+        raise ValidationError("GTest device timing warmup count must be nonnegative")
+    if minimum_device_timed_aggregate_ms is not None and (
+        not math.isfinite(minimum_device_timed_aggregate_ms)
+        or minimum_device_timed_aggregate_ms <= 0.0
+    ):
+        raise ValidationError("minimum device timed aggregate must be positive")
     coverage_contract = _coverage_contract_for_profile(workload, profile)
     logs = []
     commands = []
@@ -3961,11 +5198,29 @@ def _run_profile(
     qwen_json_paths = []
     for index in range(repetitions):
         benchmark_path = row_dir / f"benchmark-{index}.json"
-        command = _workload_command(workspace, target, workload, phase, benchmark_path)
+        command = _workload_command(
+            workspace,
+            target,
+            workload,
+            phase,
+            benchmark_path,
+            inner_repetitions_override,
+        )
         command = _with_launcher(launcher or [], command)
         log_path = row_dir / f"run-{index}.log"
-        environment = _run_environment(profile, workload, hook, target, phase)
-        if result_phase == "coverage-output":
+        environment = _run_environment(
+            profile, workload, hook, target, phase, workspace
+        )
+        if collect_gtest_device_timing:
+            environment[HIP_MOI_GPU_BENCHMARK_ITERATIONS_ENV] = str(
+                inner_repetitions_override or 1
+            )
+            environment[HIP_MOI_GPU_BENCHMARK_WARMUP_ITERATIONS_ENV] = str(
+                workload.device_timing_warmup_iterations
+            )
+        if profile is not None and (
+            result_phase == "coverage-output" or retain_code_objects
+        ):
             dump_dir = row_dir / f"code-objects-{index}"
             dump_dir.mkdir()
             environment["RJ_CONSAN_DUMP_DIR"] = str(dump_dir.resolve())
@@ -3985,22 +5240,97 @@ def _run_profile(
             qwen_json_paths.append(benchmark_path)
 
     timing = None
+    timing_samples = None
+    measurement_runs = None
     if phase == "overhead" and all(code == 0 for code in returncodes):
-        if workload.kind == "qwen":
-            timing = {
-                "dispatch": statistics.median(
-                    _benchmark_median(path) for path in qwen_json_paths
-                )
+        if collect_gtest_device_timing:
+            expected_dispatches = inner_repetitions_override or 1
+            parsed = [
+                _gtest_device_measurement(log, workload.id, expected_dispatches)
+                for log in logs
+            ]
+            timing_samples = {"target-dispatch:device": [value for value, _ in parsed]}
+            measurement_runs = [
+                {"target-dispatch": measurement} for _, measurement in parsed
+            ]
+        elif workload.kind == "qwen":
+            per_run_samples = [
+                {"dispatch": _benchmark_samples(path)} for path in qwen_json_paths
+            ]
+            if discard_first_timing_sample:
+                per_run_samples = _discard_first_sample_per_process(per_run_samples)
+            timing_samples = {
+                "dispatch": [
+                    value for item in per_run_samples for value in item["dispatch"]
+                ]
             }
-        elif workload.kind in {"sharktank", "pytorch", "tensile", "llama"}:
-            per_run = [_json_medians(log, workload.kind.capitalize()) for log in logs]
-            keys = set.intersection(*(set(item) for item in per_run))
-            timing = {
-                key: statistics.median(item[key] for item in per_run)
+        elif workload.kind in {
+            "sharktank",
+            "pytorch",
+            "tensile",
+            "llama",
+            "rdna4-matmul",
+        }:
+            per_run = [
+                _json_timing_samples(log, workload.kind.capitalize()) for log in logs
+            ]
+            key_sets = [set(item) for item in per_run]
+            if any(keys != key_sets[0] for keys in key_sets[1:]):
+                raise ValidationError(
+                    f"{workload.id} timing metric schema differs across processes"
+                )
+            keys = key_sets[0]
+            if discard_first_timing_sample:
+                per_run = _discard_first_sample_per_process(per_run)
+            timing_samples = {
+                key: [value for item in per_run for value in item[key]]
                 for key in sorted(keys)
             }
+            if workload.self_timed_device_minimum_ms is not None:
+                measurement_runs = [
+                    _json_measurements(log, workload.kind.capitalize()) for log in logs
+                ]
         else:
-            timing = _gtest_median(logs)
+            timing_samples = _gtest_timing_samples(logs)
+        timing = {
+            key: statistics.median(values) for key, values in timing_samples.items()
+        }
+
+    device_timed_aggregates_ms = None
+    timing_acceptance_reasons = []
+    if minimum_device_timed_aggregate_ms is not None:
+        if repetitions != 1:
+            raise ValidationError(
+                "device timed aggregate validation requires one outer process"
+            )
+        if workload.warm_timing_mode in {"device-fixed", "device-gtest"}:
+            aggregates = {}
+            if isinstance(measurement_runs, list) and len(measurement_runs) == 1:
+                for name, measurement in measurement_runs[0].items():
+                    if isinstance(measurement, dict):
+                        value = measurement.get("timed_aggregate_ms")
+                        if (
+                            isinstance(value, (int, float))
+                            and not isinstance(value, bool)
+                            and math.isfinite(float(value))
+                            and value > 0.0
+                        ):
+                            aggregates[f"{name}:device"] = float(value)
+        else:
+            aggregates = {
+                mode: sum(values)
+                for mode, values in (timing_samples or {}).items()
+                if mode.endswith(":device")
+            }
+        device_timed_aggregates_ms = aggregates
+        if not aggregates:
+            timing_acceptance_reasons.append("no GPU timed aggregate was recorded")
+        for mode, aggregate_ms in aggregates.items():
+            if aggregate_ms < minimum_device_timed_aggregate_ms:
+                timing_acceptance_reasons.append(
+                    f"{mode} timed aggregate {aggregate_ms} ms is below "
+                    f"{minimum_device_timed_aggregate_ms} ms"
+                )
 
     coverage = None
     coverage_runs = None
@@ -4025,6 +5355,11 @@ def _run_profile(
         len(commands),
     )
     provenance_path = _workload_provenance_path(artifact_root, workload)
+    structural_metrics_runs = (
+        [_empirical_structural_metrics(log) for log in logs]
+        if profile is not None and collect_structural_metrics
+        else None
+    )
     result = {
         "schema_version": SCHEMA_VERSION,
         "workload": workload.id,
@@ -4035,11 +5370,39 @@ def _run_profile(
         "environment": recorded_environment,
         "returncodes": returncodes,
         "elapsed_seconds": elapsed_seconds,
+        "timeout_seconds": timeout,
+        "repetition_policy": {
+            "empirical_row_schema_version": 2,
+            "outer_processes": repetitions,
+            "inner_repetitions_override": inner_repetitions_override,
+            "discarded_first_timing_sample": discard_first_timing_sample,
+            "discarded_timing_samples_per_process": int(discard_first_timing_sample),
+            "retained_code_objects": retain_code_objects,
+            "collected_structural_metrics": collect_structural_metrics,
+            "collected_gtest_device_timing": collect_gtest_device_timing,
+            "minimum_device_timed_aggregate_ms": minimum_device_timed_aggregate_ms,
+        },
         "timing_median_ms": timing,
+        "timing_samples_ms": timing_samples,
+        "timing_statistic": (
+            "median-of-raw-google-benchmark-iterations-single-identity"
+            if workload.kind == "qwen" and timing_samples is not None
+            else (
+                "median-of-retained-raw-samples" if timing_samples is not None else None
+            )
+        ),
+        "measurement_runs": measurement_runs,
+        "device_timed_aggregates_ms": device_timed_aggregates_ms,
+        "timing_acceptance_reasons": timing_acceptance_reasons,
+        "structural_metrics_runs": structural_metrics_runs,
         "coverage": coverage,
         "coverage_runs": coverage_runs,
         "gtest_test_counts": gtest_test_counts,
-        "accepted": runtime_accepted if result_phase != "coverage-output" else False,
+        "accepted": (
+            runtime_accepted and not timing_acceptance_reasons
+            if result_phase != "coverage-output"
+            else False
+        ),
         "files": {
             "hook": {
                 "path": str(hook),
@@ -4049,6 +5412,8 @@ def _run_profile(
         "sources": _source_identities(workspace, workload),
         "provenance": str(provenance_path),
     }
+    if profile is not None and retain_code_objects:
+        result["retained_code_objects"] = _retained_code_object_inventory(row_dir)
     if result_phase == "coverage-output":
         assert coverage_runs is not None
         result["coverage_acceptance"] = runtime_accepted
@@ -4106,6 +5471,376 @@ def _overhead_summary(results: list[dict]) -> dict:
         "baseline_policy": "mean-of-before-and-after-medians",
         "paired_baseline_median_ms": paired,
         "profiles": profiles,
+    }
+
+
+def _linear_quantile(values: list[float], probability: float) -> float:
+    if not values:
+        raise ValidationError("cannot summarize an empty sample")
+    if not 0.0 <= probability <= 1.0:
+        raise ValidationError("quantile probability must be between zero and one")
+    ordered = sorted(float(value) for value in values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = probability * (len(ordered) - 1)
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    fraction = position - lower
+    return ordered[lower] + fraction * (ordered[upper] - ordered[lower])
+
+
+def _bootstrap_median_interval(
+    values: list[float], *, resamples: int, seed: int
+) -> dict[str, float]:
+    if not values:
+        raise ValidationError("cannot bootstrap an empty sample")
+    if resamples <= 0:
+        raise ValidationError("bootstrap resamples must be positive")
+    if len(values) == 1:
+        lower = upper = float(values[0])
+    else:
+        generator = random.Random(seed)
+        medians = [
+            statistics.median(generator.choices(values, k=len(values)))
+            for _ in range(resamples)
+        ]
+        lower = _linear_quantile(medians, 0.025)
+        upper = _linear_quantile(medians, 0.975)
+    return {"lower": lower, "upper": upper}
+
+
+def _sample_summary(
+    values: list[float], *, bootstrap_resamples: int, bootstrap_seed: int
+) -> dict[str, object]:
+    if not values:
+        raise ValidationError("cannot summarize an empty sample")
+    q1 = _linear_quantile(values, 0.25)
+    q3 = _linear_quantile(values, 0.75)
+    return {
+        "count": len(values),
+        "minimum": min(values),
+        "q1": q1,
+        "median": statistics.median(values),
+        "q3": q3,
+        "maximum": max(values),
+        "iqr": q3 - q1,
+        "bootstrap_median_95": _bootstrap_median_interval(
+            values,
+            resamples=bootstrap_resamples,
+            seed=bootstrap_seed,
+        ),
+    }
+
+
+def _bootstrap_stream_seed(seed: int, *labels: str) -> int:
+    digest = hashlib.sha256("\0".join((str(seed), *labels)).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big")
+
+
+def _empirical_row_metrics(
+    result: dict,
+    *,
+    include_process: bool = True,
+    include_workload: bool = True,
+    device_workload_only: bool = False,
+    prefix: str = "",
+) -> dict[str, float]:
+    elapsed = result.get("elapsed_seconds")
+    if not isinstance(elapsed, list) or not elapsed:
+        raise ValidationError("empirical row has no process elapsed samples")
+    metrics = {}
+    if include_process:
+        process_name = f"{prefix}:process" if prefix else "process"
+        metrics[process_name] = statistics.median(elapsed) * 1000.0
+    timing = result.get("timing_median_ms")
+    if include_workload and isinstance(timing, dict):
+        metrics.update(
+            {
+                f"{prefix + ':' if prefix else ''}workload:{mode}": float(value)
+                for mode, value in timing.items()
+                if isinstance(mode, str)
+                and (not device_workload_only or mode.endswith(":device"))
+                and isinstance(value, (int, float))
+                and math.isfinite(float(value))
+                and value > 0.0
+            }
+        )
+    return metrics
+
+
+def _empirical_round_summary(
+    round_index: int,
+    order: list[str],
+    baseline_before: dict,
+    profile_results: dict[str, dict],
+    baseline_after: dict,
+    *,
+    baseline_drift_limit: float,
+    include_process_metric: bool = True,
+    include_workload_metrics: bool = True,
+    device_workload_only: bool = False,
+    qualifying: bool = True,
+    metric_prefix: str = "",
+) -> dict[str, object]:
+    rows = [
+        baseline_before,
+        *(profile_results[profile] for profile in order),
+        baseline_after,
+    ]
+    reasons = []
+    for label, result in (
+        ("baseline-before", baseline_before),
+        *((profile, profile_results[profile]) for profile in order),
+        ("baseline-after", baseline_after),
+    ):
+        if result.get("accepted") is not True:
+            returncodes = result.get("returncodes")
+            if isinstance(returncodes, list) and 124 in returncodes:
+                timeout_seconds = result.get("timeout_seconds")
+                suffix = (
+                    f" after {timeout_seconds}s"
+                    if isinstance(timeout_seconds, int)
+                    else ""
+                )
+                reasons.append(f"{label} row timed out{suffix}")
+            else:
+                reasons.append(f"{label} row rejected with returncodes={returncodes!r}")
+
+    row_metrics = [
+        _empirical_row_metrics(
+            result,
+            include_process=include_process_metric,
+            include_workload=include_workload_metrics,
+            device_workload_only=device_workload_only,
+            prefix=metric_prefix,
+        )
+        for result in rows
+    ]
+    metric_schemas = [set(row) for row in row_metrics]
+    expected_metrics = metric_schemas[0]
+    if qualifying and not expected_metrics:
+        reasons.append("rows have no timing metrics")
+    if any(schema != expected_metrics for schema in metric_schemas[1:]):
+        if qualifying:
+            reasons.append(
+                "row timing metric schemas differ: "
+                + "; ".join(
+                    f"row-{index}={sorted(schema)}"
+                    for index, schema in enumerate(metric_schemas)
+                )
+            )
+        else:
+            expected_metrics = set.intersection(*metric_schemas)
+    metrics = {}
+    denominator = len(order) + 1
+    rows_accepted = not reasons
+    for metric in sorted(expected_metrics if not reasons else set()):
+        before = row_metrics[0][metric]
+        after = row_metrics[-1][metric]
+        mean_baseline = statistics.mean((before, after))
+        drift = abs(after - before) / mean_baseline if mean_baseline > 0.0 else math.inf
+        metric_accepted = rows_accepted and (
+            not qualifying or drift <= baseline_drift_limit
+        )
+        if qualifying and drift > baseline_drift_limit:
+            reasons.append(
+                f"{metric} baseline drift {drift:.6f} exceeds "
+                f"{baseline_drift_limit:.6f}"
+            )
+        profiles = {}
+        for position, profile in enumerate(order, start=1):
+            measured = row_metrics[position][metric]
+            fraction = position / denominator
+            interpolated = before + fraction * (after - before)
+            profiles[profile] = {
+                "position": position,
+                "timing_ms": measured,
+                "interpolated_baseline_ms": interpolated,
+                "slowdown": measured / interpolated if interpolated > 0.0 else None,
+            }
+        metrics[metric] = {
+            "accepted": metric_accepted,
+            "qualifying": qualifying,
+            "baseline_before_ms": before,
+            "baseline_after_ms": after,
+            "baseline_drift_fraction": drift,
+            "profiles": profiles,
+        }
+    metric_acceptance = [
+        metric["accepted"]
+        for metric in metrics.values()
+        if metric.get("qualifying") is True
+    ]
+    return {
+        "round": round_index,
+        "profile_order": order,
+        "rows_accepted": rows_accepted,
+        "usable": rows_accepted and (any(metric_acceptance) if qualifying else True),
+        "fully_accepted": rows_accepted
+        and (
+            bool(metric_acceptance) and all(metric_acceptance) if qualifying else True
+        ),
+        "reasons": reasons,
+        "metrics": metrics,
+    }
+
+
+def _combine_empirical_round_summaries(
+    round_index: int,
+    order: list[str],
+    schedules: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    if not schedules:
+        raise ValidationError("empirical round has no timing schedules")
+    metrics = {}
+    for name, schedule in schedules.items():
+        if (
+            schedule.get("round") != round_index
+            or schedule.get("profile_order") != order
+        ):
+            raise ValidationError(
+                f"empirical {name} schedule does not match its parent round"
+            )
+        for metric, value in schedule["metrics"].items():
+            if metric in metrics:
+                raise ValidationError(
+                    f"empirical schedules duplicate timing metric {metric}"
+                )
+            metrics[metric] = value
+    reasons = [
+        f"{name}: {reason}"
+        for name, schedule in schedules.items()
+        for reason in schedule["reasons"]
+    ]
+    metric_acceptance = [
+        metric["accepted"]
+        for metric in metrics.values()
+        if metric.get("qualifying") is True
+    ]
+    rows_accepted = all(
+        bool(schedule["rows_accepted"]) for schedule in schedules.values()
+    )
+    return {
+        "round": round_index,
+        "profile_order": order,
+        "rows_accepted": rows_accepted,
+        "usable": rows_accepted and any(metric_acceptance),
+        "fully_accepted": (
+            rows_accepted and bool(metric_acceptance) and all(metric_acceptance)
+        ),
+        "reasons": reasons,
+        "metrics": metrics,
+        "schedules": schedules,
+    }
+
+
+def _empirical_campaign_summary(
+    rounds: list[dict[str, object]],
+    profiles: tuple[str, ...],
+    *,
+    required_accepted_rounds: int,
+    bootstrap_resamples: int,
+    bootstrap_seed: int,
+    require_structural_metrics: bool = False,
+) -> dict[str, object]:
+    metric_names = sorted(
+        {
+            metric
+            for round_result in rounds
+            for metric, value in round_result["metrics"].items()
+            if value.get("qualifying") is True
+        }
+    )
+    profile_summaries = {}
+    insufficient = []
+    for profile in profiles:
+        profile_metrics = {}
+        for metric in metric_names:
+            samples = [
+                round_result["metrics"][metric]["profiles"][profile]
+                for round_result in rounds
+                if metric in round_result["metrics"]
+                and round_result["metrics"][metric]["accepted"]
+                and profile in round_result["metrics"][metric]["profiles"]
+            ]
+            if not samples:
+                insufficient.append(
+                    f"{profile}/{metric}: 0/{required_accepted_rounds} accepted rounds"
+                )
+                continue
+            seed = _bootstrap_stream_seed(bootstrap_seed, profile, metric, "timing")
+            profile_metrics[metric] = {
+                "timing_ms": _sample_summary(
+                    [sample["timing_ms"] for sample in samples],
+                    bootstrap_resamples=bootstrap_resamples,
+                    bootstrap_seed=seed,
+                ),
+                "paired_baseline_ms": _sample_summary(
+                    [sample["interpolated_baseline_ms"] for sample in samples],
+                    bootstrap_resamples=bootstrap_resamples,
+                    bootstrap_seed=_bootstrap_stream_seed(
+                        bootstrap_seed, profile, metric, "baseline"
+                    ),
+                ),
+                "slowdown": _sample_summary(
+                    [sample["slowdown"] for sample in samples],
+                    bootstrap_resamples=bootstrap_resamples,
+                    bootstrap_seed=_bootstrap_stream_seed(
+                        bootstrap_seed, profile, metric, "slowdown"
+                    ),
+                ),
+            }
+            if len(samples) < required_accepted_rounds:
+                insufficient.append(
+                    f"{profile}/{metric}: {len(samples)}/{required_accepted_rounds} "
+                    "accepted rounds"
+                )
+        structural_samples: dict[str, list[float]] = {}
+        for round_result in rounds:
+            for schedule in round_result.get("schedules", {}).values():
+                if schedule.get("collects_structural_metrics") is not True:
+                    continue
+                profile_structural = schedule.get("structural_metrics", {}).get(profile)
+                if not isinstance(profile_structural, dict):
+                    continue
+                for name, value in profile_structural.items():
+                    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+                        structural_samples.setdefault(name, []).append(float(value))
+        structural_metrics = {
+            name: _sample_summary(
+                values,
+                bootstrap_resamples=bootstrap_resamples,
+                bootstrap_seed=_bootstrap_stream_seed(
+                    bootstrap_seed, profile, name, "structural"
+                ),
+            )
+            for name, values in sorted(structural_samples.items())
+        }
+        for name, values in sorted(structural_samples.items()):
+            if require_structural_metrics and len(values) < required_accepted_rounds:
+                insufficient.append(
+                    f"{profile}/structural:{name}: {len(values)}/"
+                    f"{required_accepted_rounds} accepted rounds"
+                )
+        if require_structural_metrics and not structural_metrics:
+            insufficient.append(f"{profile}: no structural metrics")
+        profile_summaries[profile] = {
+            "metrics": profile_metrics,
+            "structural_metrics": structural_metrics,
+        }
+    if not metric_names:
+        insufficient.append("campaign has no timing metrics")
+    return {
+        "schema_version": EMPIRICAL_CAMPAIGN_SCHEMA_VERSION,
+        "required_accepted_rounds": required_accepted_rounds,
+        "attempted_rounds": len(rounds),
+        "usable_rounds": sum(bool(round_result["usable"]) for round_result in rounds),
+        "fully_accepted_rounds": sum(
+            bool(round_result["fully_accepted"]) for round_result in rounds
+        ),
+        "accepted": not insufficient,
+        "reasons": insufficient,
+        "profiles": profile_summaries,
     }
 
 
@@ -4328,7 +6063,9 @@ def _inventory(args: argparse.Namespace) -> int:
     family_runs = []
     aggregate_records = {"sites": set(), "sequences": set(), "destinations": set()}
     for family in _fault_families(target, workload):
-        environment = _clean_environment("supercollider", workload, hook, target)
+        environment = _clean_environment(
+            "supercollider", workload, hook, target, workspace
+        )
         # Clean qualification uses compact level-1 summaries. Fault inventory
         # explicitly requests level 2 because it consumes per-site identities.
         environment["RJ_CONSAN_LOG"] = "2"
@@ -4479,6 +6216,16 @@ def _load_fault(
             or not site_provenance["inventory_run"]
         ):
             raise ValidationError("fault site_provenance is invalid")
+    reach_witness = fault.get("reach_witness")
+    if reach_witness is not None:
+        if (
+            not isinstance(reach_witness, dict)
+            or set(reach_witness) != {"kind", "evidence"}
+            or reach_witness.get("kind") != "reviewed-unconditional-final-isa"
+            or not isinstance(reach_witness.get("evidence"), str)
+            or not reach_witness["evidence"].strip()
+        ):
+            raise ValidationError("fault reach_witness is invalid")
     return fault
 
 
@@ -4535,6 +6282,35 @@ def _fault_trials(fault: dict, profile: str) -> tuple[dict, list[dict[str, str]]
     return policy, trials
 
 
+def _wilson_detection_interval(detections: int, trials: int) -> dict[str, float]:
+    if (
+        type(detections) is not int
+        or type(trials) is not int
+        or trials <= 0
+        or detections < 0
+        or detections > trials
+    ):
+        raise ValidationError("invalid detection count for Wilson interval")
+    z = 1.959963984540054
+    proportion = detections / trials
+    z_squared = z * z
+    denominator = 1.0 + z_squared / trials
+    center = (proportion + z_squared / (2.0 * trials)) / denominator
+    radius = (
+        z
+        * math.sqrt(
+            proportion * (1.0 - proportion) / trials
+            + z_squared / (4.0 * trials * trials)
+        )
+        / denominator
+    )
+    return {
+        "confidence": 0.95,
+        "lower": 0.0 if detections == 0 else max(0.0, center - radius),
+        "upper": 1.0 if detections == trials else min(1.0, center + radius),
+    }
+
+
 def _fault_trial_environment(
     profile: str,
     workload: Workload,
@@ -4543,8 +6319,9 @@ def _fault_trial_environment(
     fault: dict,
     policy: dict,
     trial: dict[str, str],
+    workspace: Path,
 ) -> dict[str, str]:
-    environment = _clean_environment(profile, workload, hook, target)
+    environment = _clean_environment(profile, workload, hook, target, workspace)
     environment["CTEST_PARALLEL_LEVEL"] = "1"
     environment.update(fault["environment"])
     if policy.get("detector") in {"detected", "statistical"}:
@@ -4643,7 +6420,14 @@ def _fault_audit(
         if policy.get("disposition") != "not-applicable":
             for index, trial in enumerate(trials):
                 environment = _fault_trial_environment(
-                    profile, workload, hook, target, fault, policy, trial
+                    profile,
+                    workload,
+                    hook,
+                    target,
+                    fault,
+                    policy,
+                    trial,
+                    workspace,
                 )
                 trial_audits.append(
                     {
@@ -4787,10 +6571,15 @@ def _explain_contract(
         for profile in profiles:
             result_phase = _result_phase("clean", profile, workload)
             environment = _run_environment(
-                profile, workload, _hook_path(workspace), target, "clean"
+                profile,
+                workload,
+                _hook_path(workspace),
+                target,
+                "clean",
+                workspace,
             )
             inherited = _clean_environment(
-                None, workload, _hook_path(workspace), target
+                None, workload, _hook_path(workspace), target, workspace
             )
             harness_environment = {
                 name: value
@@ -5113,6 +6902,66 @@ def _fault_acceptance(result: dict, policy: dict) -> tuple[bool, list[str]]:
     return not reasons, reasons
 
 
+def _fault_admission_and_reach(
+    result: dict, reach_witness: dict | None
+) -> tuple[bool, bool, str | None, list[str]]:
+    reasons = []
+    mutation = result.get("mutation", {})
+    if (
+        mutation.get("accounting_schema_version") != 2
+        or mutation.get("installation_evidence_complete") is not True
+        or mutation.get("requested") != 1
+        or mutation.get("planned") != 1
+        or mutation.get("applied") != 1
+        or mutation.get("discarded_applied", 0) != 0
+    ):
+        reasons.append("mutation installation was not admitted")
+    reservation_status, reservation_reasons = fault_reservation_qualification(
+        mutation.get("reservation")
+    )
+    if reservation_status != FAULT_RESERVATION_QUALIFIED:
+        reasons.extend(reservation_reasons)
+    execution = result.get("execution", {})
+    health_before = execution.get("health_before")
+    if not isinstance(health_before, dict) or not health_before.get("healthy"):
+        reasons.append("pre-execution health check failed")
+    admitted = not reasons
+    sanitizer = result.get("sanitizer", {})
+    sanitizer_outcome = sanitizer.get("outcome")
+    runtime_diagnostic_count = sum(
+        int(sanitizer.get(name, 0))
+        for name in (
+            "inline_diagnostics",
+            "replay_diagnostics",
+            "sampled_conflicts",
+            "sampled_immediate_conflicts",
+            "supercollider_diagnostics",
+        )
+        if isinstance(sanitizer.get(name, 0), int)
+    )
+    command_ran = execution.get("command_ran") is True
+    completed = execution.get("completed") is True
+    oracle_outcome = result.get("oracle", {}).get("outcome")
+    witness_outcome = None
+    if (
+        admitted
+        and command_ran
+        and sanitizer_outcome == "detected"
+        and runtime_diagnostic_count > 0
+    ):
+        witness_outcome = "detector-owned-runtime-diagnostic"
+    elif admitted and command_ran and oracle_outcome == "fail":
+        witness_outcome = "independent-oracle-manifestation"
+    elif admitted and command_ran and completed and reach_witness is not None:
+        witness_outcome = str(reach_witness["kind"])
+    reached = witness_outcome is not None
+    if admitted and not reached:
+        reasons.append(
+            "trial lacks a detector/oracle runtime witness or reviewed reach proof"
+        )
+    return admitted, reached, witness_outcome, reasons
+
+
 def _fault(args: argparse.Namespace) -> int:
     selection = _resolve_workload_selection(args, allow_all=False)
     target = selection.target
@@ -5186,7 +7035,14 @@ def _fault(args: argparse.Namespace) -> int:
         for index, trial in enumerate(trials):
             name = f"{fault['id']}-{profile}-{index}"
             environment = _fault_trial_environment(
-                profile, workload, hook, target, fault, policy, trial
+                profile,
+                workload,
+                hook,
+                target,
+                fault,
+                policy,
+                trial,
+                workspace,
             )
             enabled_mutations = [
                 key
@@ -5255,7 +7111,9 @@ def _fault(args: argparse.Namespace) -> int:
             for identity in identities:
                 invocation.extend(["--site-id", identity])
             invocation.extend(["--", *command])
-            child_environment = _clean_environment(None, workload, hook, target)
+            child_environment = _clean_environment(
+                None, workload, hook, target, workspace
+            )
             child_environment["CTEST_PARALLEL_LEVEL"] = "1"
             subprocess.run(invocation, env=child_environment, check=False)
             result_path = root / name / "result.json"
@@ -5266,12 +7124,18 @@ def _fault(args: argparse.Namespace) -> int:
                     "accepted": False,
                     "reasons": ["fault runner produced no result.json"],
                     "detector": None,
+                    "admitted": False,
+                    "reached": False,
+                    "reach_outcome": None,
                 }
                 summaries.append(row)
                 profile_rows.append(row)
                 continue
             result = json.loads(result_path.read_text(encoding="utf-8"))
             accepted, reasons = _fault_acceptance(result, policy)
+            admitted, reached, reach_outcome, reach_reasons = (
+                _fault_admission_and_reach(result, fault.get("reach_witness"))
+            )
             row = {
                 "profile": profile,
                 "trial": index,
@@ -5279,11 +7143,21 @@ def _fault(args: argparse.Namespace) -> int:
                 "reasons": reasons,
                 "detector": result.get("sanitizer", {}).get("outcome"),
                 "oracle": result.get("oracle", {}).get("outcome"),
+                "admitted": admitted,
+                "reached": reached,
+                "reach_outcome": reach_outcome,
+                "reach_reasons": reach_reasons,
                 "result": str(result_path),
             }
             summaries.append(row)
             profile_rows.append(row)
-        detected = sum(row.get("detector") == "detected" for row in profile_rows)
+        reached_rows = [row for row in profile_rows if row.get("reached") is True]
+        detected = sum(row.get("detector") == "detected" for row in reached_rows)
+        oracle_manifestations = sum(row.get("oracle") == "fail" for row in reached_rows)
+        reach_outcomes = {}
+        for row in reached_rows:
+            outcome = str(row.get("reach_outcome"))
+            reach_outcomes[outcome] = reach_outcomes.get(outcome, 0) + 1
         expected_detector = policy.get("detector")
         profile_reasons = []
         if expected_detector == "statistical":
@@ -5294,16 +7168,43 @@ def _fault(args: argparse.Namespace) -> int:
                 )
             elif detected < minimum:
                 profile_reasons.append(
-                    f"detections={detected}/{len(profile_rows)}, minimum={minimum}"
+                    f"detections={detected}/{len(reached_rows)}, minimum={minimum}"
                 )
+        if not reached_rows:
+            profile_reasons.append("no admitted trial reached workload execution")
+        detection_interval = (
+            _wilson_detection_interval(detected, len(reached_rows))
+            if reached_rows
+            else None
+        )
+        oracle_interval = (
+            _wilson_detection_interval(oracle_manifestations, len(reached_rows))
+            if reached_rows
+            else None
+        )
         profile_summaries.append(
             {
                 "profile": profile,
                 "accepted": all(row["accepted"] for row in profile_rows)
                 and not profile_reasons,
                 "detector_policy": expected_detector,
+                "attempted_trials": len(profile_rows),
+                "admitted_trials": sum(
+                    row.get("admitted") is True for row in profile_rows
+                ),
+                "reached_trials": len(reached_rows),
+                "reach_outcomes": reach_outcomes,
                 "detections": detected,
                 "trials": len(profile_rows),
+                "detection_rate": (
+                    detected / len(reached_rows) if reached_rows else None
+                ),
+                "detection_wilson_95": detection_interval,
+                "oracle_manifestations": oracle_manifestations,
+                "oracle_manifestation_rate": (
+                    oracle_manifestations / len(reached_rows) if reached_rows else None
+                ),
+                "oracle_manifestation_wilson_95": oracle_interval,
                 "reasons": profile_reasons,
             }
         )
@@ -5324,10 +7225,709 @@ def _fault(args: argparse.Namespace) -> int:
     }
     if "site_provenance" in fault:
         summary["site_provenance"] = fault["site_provenance"]
+    if "reach_witness" in fault:
+        summary["reach_witness"] = fault["reach_witness"]
     summary_path = fault_root / "summary.json"
     atomic_write_json(summary_path, summary)
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0 if summary["accepted"] else 1
+
+
+def _load_empirical_row(
+    row_dir: Path,
+    *,
+    target: str,
+    workload: Workload,
+    profile: str | None,
+    phase: str,
+    inner_repetitions_override: int | None,
+    discard_first_timing_sample: bool,
+    retain_code_objects: bool,
+    collect_structural_metrics: bool,
+    collect_gtest_device_timing: bool,
+    minimum_device_timed_aggregate_ms: float | None,
+) -> dict:
+    result_path = row_dir / "result.json"
+    try:
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"cannot resume empirical row {result_path}: {error}"
+        ) from error
+    expected = {
+        "schema_version": SCHEMA_VERSION,
+        "target": target,
+        "workload": workload.id,
+        "profile": profile or "baseline",
+        "phase": _result_phase(phase, profile, workload),
+    }
+    mismatches = [
+        f"{key}={result.get(key)!r}, expected={value!r}"
+        for key, value in expected.items()
+        if result.get(key) != value
+    ]
+    if mismatches:
+        raise ValidationError(
+            f"empirical row conflicts with campaign {result_path}: "
+            + "; ".join(mismatches)
+        )
+    expected_repetition_policy = {
+        "empirical_row_schema_version": 2,
+        "outer_processes": 1,
+        "inner_repetitions_override": inner_repetitions_override,
+        "discarded_first_timing_sample": discard_first_timing_sample,
+        "discarded_timing_samples_per_process": int(discard_first_timing_sample),
+        "retained_code_objects": retain_code_objects,
+        "collected_structural_metrics": collect_structural_metrics,
+        "collected_gtest_device_timing": collect_gtest_device_timing,
+        "minimum_device_timed_aggregate_ms": minimum_device_timed_aggregate_ms,
+    }
+    repetition_policy = result.get("repetition_policy")
+    if (
+        not isinstance(repetition_policy, dict)
+        or repetition_policy.get("empirical_row_schema_version") != 2
+    ):
+        raise ValidationError(
+            f"empirical row predates or lacks empirical row schema version 2: "
+            f"{result_path}"
+        )
+    if repetition_policy != expected_repetition_policy:
+        raise ValidationError(
+            f"empirical row repetition policy conflicts with campaign {result_path}"
+        )
+    return result
+
+
+def _preserve_incomplete_empirical_row(row_dir: Path) -> None:
+    suffix = 1
+    while True:
+        destination = row_dir.with_name(f"{row_dir.name}.incomplete-{suffix}")
+        if not destination.exists():
+            row_dir.rename(destination)
+            return
+        suffix += 1
+
+
+def _run_or_resume_empirical_row(
+    workspace: Path,
+    target: str,
+    workload: Workload,
+    profile: str | None,
+    phase: str,
+    artifact_root: Path,
+    timeout: int,
+    launcher: list[str],
+    row_dir: Path,
+    *,
+    resume: bool,
+    inner_repetitions_override: int | None = None,
+    discard_first_timing_sample: bool = False,
+    retain_code_objects: bool = False,
+    collect_structural_metrics: bool = False,
+    collect_gtest_device_timing: bool = False,
+    minimum_device_timed_aggregate_ms: float | None = None,
+) -> dict:
+    result_path = row_dir / "result.json"
+    if result_path.is_file():
+        if not resume:
+            raise ValidationError(f"empirical row already exists: {result_path}")
+        return _load_empirical_row(
+            row_dir,
+            target=target,
+            workload=workload,
+            profile=profile,
+            phase=phase,
+            inner_repetitions_override=inner_repetitions_override,
+            discard_first_timing_sample=discard_first_timing_sample,
+            retain_code_objects=retain_code_objects,
+            collect_structural_metrics=collect_structural_metrics,
+            collect_gtest_device_timing=collect_gtest_device_timing,
+            minimum_device_timed_aggregate_ms=minimum_device_timed_aggregate_ms,
+        )
+    if row_dir.exists():
+        if not resume:
+            raise ValidationError(f"empirical row directory already exists: {row_dir}")
+        _preserve_incomplete_empirical_row(row_dir)
+    return _run_profile(
+        workspace,
+        target,
+        workload,
+        profile,
+        phase,
+        artifact_root,
+        timeout,
+        launcher=launcher,
+        row_dir_override=row_dir,
+        repetitions_override=1,
+        inner_repetitions_override=inner_repetitions_override,
+        discard_first_timing_sample=discard_first_timing_sample,
+        retain_code_objects=retain_code_objects,
+        collect_structural_metrics=collect_structural_metrics,
+        collect_gtest_device_timing=collect_gtest_device_timing,
+        minimum_device_timed_aggregate_ms=minimum_device_timed_aggregate_ms,
+    )
+
+
+def _empirical_supports_warm_timing(target: str, workload: Workload) -> bool:
+    return target not in SINGLE_REPETITION_TARGETS and workload.warm_timing_mode in {
+        "host-json",
+        "device-json",
+        "device-fixed",
+        "device-gtest",
+    }
+
+
+def _empirical_uses_device_timing(workload: Workload) -> bool:
+    return workload.warm_timing_mode in {
+        "device-json",
+        "device-fixed",
+        "device-gtest",
+    }
+
+
+def _empirical_device_timed_minimum(workload: Workload) -> float:
+    minimum = (
+        workload.empirical_device_timed_minimum_ms
+        if workload.empirical_device_timed_minimum_ms is not None
+        else EMPIRICAL_MINIMUM_TIMED_MS
+    )
+    if not math.isfinite(minimum) or minimum <= 0.0:
+        raise ValidationError("empirical device timed minimum must be positive")
+    return minimum
+
+
+def _empirical_timing_protocol(
+    target: str, workload: Workload, calibration: dict | None
+) -> dict[str, object]:
+    if not _empirical_supports_warm_timing(target, workload):
+        return {
+            "kind": "cold-process",
+            "minimum_timed_aggregate_ms": None,
+            "timed_inner_repetitions": None,
+            "command_inner_repetitions": None,
+            "discard_first_timing_sample": False,
+        }
+    if calibration is None or calibration.get("accepted") is not True:
+        raise ValidationError(
+            "warm empirical timing requires an accepted calibration row"
+        )
+    timing = calibration.get("timing_median_ms")
+    if not isinstance(timing, dict) or not timing:
+        raise ValidationError("warm empirical calibration has no workload timing")
+    qualifying_timing = (
+        {
+            mode: value
+            for mode, value in timing.items()
+            if isinstance(mode, str) and mode.endswith(":device")
+        }
+        if _empirical_uses_device_timing(workload)
+        else timing
+    )
+    if not qualifying_timing:
+        raise ValidationError("warm empirical calibration has no qualifying timing")
+    values = [float(value) for value in qualifying_timing.values()]
+    if any(not math.isfinite(value) or value <= 0.0 for value in values):
+        raise ValidationError(
+            "warm empirical calibration timing must be finite and positive"
+        )
+    if workload.self_timed_device_minimum_ms is not None:
+        if workload.self_timed_device_minimum_ms < EMPIRICAL_MINIMUM_TIMED_MS:
+            raise ValidationError(
+                "self-timed empirical workload does not meet the minimum timed "
+                "aggregate"
+            )
+        measurement_runs = calibration.get("measurement_runs")
+        if not isinstance(measurement_runs, list) or len(measurement_runs) != 1:
+            raise ValidationError(
+                "self-timed empirical calibration lacks one measurement record"
+            )
+        measurements = measurement_runs[0]
+        if not isinstance(measurements, dict) or len(measurements) != 1:
+            raise ValidationError(
+                "self-timed empirical calibration must identify one benchmark"
+            )
+        measurement = next(iter(measurements.values()))
+        fixed_iterations = measurement.get("benchmark_iterations")
+        aggregate_ms = measurement.get("timed_aggregate_ms")
+        if (
+            not isinstance(fixed_iterations, int)
+            or isinstance(fixed_iterations, bool)
+            or fixed_iterations <= 0
+            or not isinstance(aggregate_ms, (int, float))
+            or not math.isfinite(float(aggregate_ms))
+            or aggregate_ms < workload.self_timed_device_minimum_ms
+        ):
+            raise ValidationError(
+                "self-timed empirical calibration lacks a valid fixed iteration "
+                "count and timed aggregate"
+            )
+        return {
+            "kind": "warm-device-self-timed",
+            "minimum_timed_aggregate_ms": workload.self_timed_device_minimum_ms,
+            "calibration_timing_median_ms": qualifying_timing,
+            "calibration_timed_aggregate_ms": float(aggregate_ms),
+            "timed_inner_repetitions": fixed_iterations,
+            "command_inner_repetitions": fixed_iterations,
+            "discard_first_timing_sample": False,
+        }
+    calibration_floor = dict(qualifying_timing)
+    timing_samples = calibration.get("timing_samples_ms")
+    if isinstance(timing_samples, dict):
+        for mode in qualifying_timing:
+            samples = timing_samples.get(mode)
+            if isinstance(samples, list) and samples:
+                sample_values = [float(value) for value in samples]
+                if any(
+                    not math.isfinite(value) or value <= 0.0 for value in sample_values
+                ):
+                    raise ValidationError(
+                        "warm empirical calibration samples must be finite and "
+                        "positive"
+                    )
+                calibration_floor[mode] = min(sample_values)
+    device_minimum = _empirical_device_timed_minimum(workload)
+    if (
+        not math.isfinite(workload.device_timing_aggregate_headroom)
+        or workload.device_timing_aggregate_headroom < 1.0
+    ):
+        raise ValidationError("device timing aggregate headroom must be at least one")
+    timed_repetitions = max(
+        1,
+        math.ceil(
+            device_minimum
+            * workload.device_timing_aggregate_headroom
+            / min(calibration_floor.values())
+        ),
+    )
+    if (
+        workload.device_timing_max_iterations is not None
+        and timed_repetitions > workload.device_timing_max_iterations
+    ):
+        raise ValidationError(
+            "warm empirical calibration exceeds the workload's device iteration "
+            f"limit: required={timed_repetitions}, "
+            f"maximum={workload.device_timing_max_iterations}"
+        )
+    discard_first = workload.kind == "pytorch"
+    command_repetitions = timed_repetitions + int(discard_first)
+    if command_repetitions > EMPIRICAL_MAX_INNER_REPETITIONS:
+        raise ValidationError(
+            "warm empirical calibration exceeds the inner-repetition safety bound: "
+            f"required={command_repetitions}, "
+            f"maximum={EMPIRICAL_MAX_INNER_REPETITIONS}"
+        )
+    return {
+        "kind": (
+            "warm-device-gtest"
+            if workload.warm_timing_mode == "device-gtest"
+            else (
+                "warm-device-json"
+                if workload.warm_timing_mode == "device-json"
+                else "warm-host"
+            )
+        ),
+        "minimum_timed_aggregate_ms": device_minimum,
+        "timed_aggregate_headroom": workload.device_timing_aggregate_headroom,
+        "calibration_timing_median_ms": qualifying_timing,
+        "calibration_timing_floor_ms": calibration_floor,
+        "timed_inner_repetitions": timed_repetitions,
+        "command_inner_repetitions": command_repetitions,
+        "discard_first_timing_sample": discard_first,
+    }
+
+
+def _empirical_config(
+    args: argparse.Namespace,
+    target: str,
+    workload: Workload,
+    profiles: tuple[str, ...],
+    max_rounds: int,
+    timeout: int,
+) -> dict[str, object]:
+    return {
+        "schema_version": EMPIRICAL_CAMPAIGN_SCHEMA_VERSION,
+        "protocol": "consan-gfx1201-empirical-v3",
+        "target": target,
+        "workload": workload.id,
+        "profiles": list(profiles),
+        "admission_policy": "time every admitted requested profile",
+        "required_accepted_rounds": args.rounds,
+        "max_rounds": max_rounds,
+        "randomization_seed": args.seed,
+        "baseline_drift_limit": args.baseline_drift_limit,
+        "bootstrap_resamples": args.bootstrap_resamples,
+        "minimum_timed_aggregate_ms": (
+            _empirical_device_timed_minimum(workload)
+            if _empirical_uses_device_timing(workload)
+            else EMPIRICAL_MINIMUM_TIMED_MS
+        ),
+        "timing_acceptance_source": (
+            "gpu-timestamps"
+            if _empirical_uses_device_timing(workload)
+            else "host-timing"
+        ),
+        "process_timing_role": (
+            "secondary-diagnostic"
+            if _empirical_uses_device_timing(workload)
+            else "qualifying"
+        ),
+        "maximum_inner_repetitions": EMPIRICAL_MAX_INNER_REPETITIONS,
+        "workload_maximum_device_iterations": workload.device_timing_max_iterations,
+        "device_timing_calibration_iterations": (
+            workload.device_timing_calibration_iterations
+        ),
+        "device_timing_aggregate_headroom": workload.device_timing_aggregate_headroom,
+        "timeout_seconds": timeout,
+        "launcher": args.launcher,
+    }
+
+
+def _write_or_verify_empirical_config(path: Path, config: dict[str, object]) -> None:
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise ValidationError(
+                f"cannot read empirical campaign config {path}: {error}"
+            ) from error
+        if existing != config:
+            raise ValidationError(f"empirical campaign config conflicts with {path}")
+        return
+    atomic_write_json(path, config)
+
+
+def _empirical_campaign(args: argparse.Namespace) -> int:
+    selection = _resolve_workload_selection(args, allow_all=False)
+    target = selection.target
+    if target != "gfx1201":
+        raise ValidationError(
+            "the empirical study command currently requires physical gfx1201"
+        )
+    workload = selection.require_workload()
+    workspace = _workspace_from_environment()
+    timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
+    doctor = _doctor(workspace, target, (workload.id,))
+    if not doctor["ok"]:
+        raise ValidationError("workspace doctor failed; run the doctor subcommand")
+    profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
+    max_rounds = args.max_rounds if args.max_rounds is not None else args.rounds * 2
+    if max_rounds < args.rounds:
+        raise ValidationError("--max-rounds must be at least --rounds")
+
+    artifact_root = args.artifact_root.resolve()
+    campaign_root = artifact_root / workload.id / "empirical-campaign"
+    if campaign_root.exists() and not args.resume:
+        raise ValidationError(
+            f"empirical campaign already exists; pass --resume or use a new root: {campaign_root}"
+        )
+    campaign_root.mkdir(parents=True, exist_ok=True)
+    _write_provenance(
+        workspace,
+        target,
+        workload,
+        _workload_provenance_path(artifact_root, workload).parent,
+    )
+    config = _empirical_config(args, target, workload, profiles, max_rounds, timeout)
+    _write_or_verify_empirical_config(campaign_root / "config.json", config)
+
+    admission_results = {}
+    admission_root = campaign_root / "admission"
+    for profile in (None, *profiles):
+        profile_id = profile or "baseline"
+        admission_results[profile_id] = _run_or_resume_empirical_row(
+            workspace,
+            target,
+            workload,
+            profile,
+            "clean",
+            artifact_root,
+            timeout,
+            args.launcher,
+            admission_root / profile_id,
+            resume=args.resume,
+            retain_code_objects=profile is not None,
+            collect_structural_metrics=profile is not None,
+        )
+    admission_row_acceptance = {}
+    for profile, result in admission_results.items():
+        accepted = result.get("accepted") is True
+        if profile != "baseline":
+            structural_runs = result.get("structural_metrics_runs")
+            retained = result.get("retained_code_objects")
+            accepted = (
+                accepted
+                and isinstance(structural_runs, list)
+                and bool(structural_runs)
+                and all(run.get("accepted") is True for run in structural_runs)
+                and isinstance(retained, dict)
+                and retained.get("complete_pairs", 0) > 0
+                and retained.get("metadata_complete_pairs", 0) > 0
+            )
+        admission_row_acceptance[profile] = accepted
+    baseline_accepted = admission_row_acceptance["baseline"]
+    admitted_profiles = tuple(
+        profile for profile in profiles if admission_row_acceptance[profile]
+    )
+    rejected_profiles = tuple(
+        profile for profile in profiles if not admission_row_acceptance[profile]
+    )
+    timing_eligible = baseline_accepted and bool(admitted_profiles)
+    admission = {
+        "accepted": timing_eligible,
+        "all_requested_profiles_accepted": not rejected_profiles,
+        "admitted_profiles": list(admitted_profiles),
+        "rejected_profiles": list(rejected_profiles),
+        "rows": {
+            profile: {
+                "accepted": admission_row_acceptance[profile],
+                "runtime_accepted": result.get("accepted") is True,
+                "result": str(
+                    (admission_root / profile / "result.json").relative_to(
+                        artifact_root
+                    )
+                ),
+            }
+            for profile, result in admission_results.items()
+        },
+    }
+    if not timing_eligible:
+        reasons = []
+        if not baseline_accepted:
+            reasons.append("baseline clean admission rejected")
+        if not admitted_profiles:
+            reasons.append("no requested profile passed clean admission")
+        campaign = {
+            **config,
+            "admission": admission,
+            "timed_profiles": [],
+            "rounds": [],
+            "summary": {
+                "schema_version": EMPIRICAL_CAMPAIGN_SCHEMA_VERSION,
+                "accepted": False,
+                "reasons": reasons,
+                "requested_profiles": list(profiles),
+                "timed_profiles": [],
+                "rejected_profiles": list(rejected_profiles),
+            },
+        }
+        atomic_write_json(campaign_root / "campaign.json", campaign)
+        print(json.dumps(campaign, indent=2, sort_keys=True))
+        return 1
+
+    requested_profiles = profiles
+    profiles = admitted_profiles
+
+    calibration = None
+    calibration_record = None
+    if _empirical_supports_warm_timing(target, workload):
+        calibration_root = campaign_root / "calibration" / "baseline"
+        calibration = _run_or_resume_empirical_row(
+            workspace,
+            target,
+            workload,
+            None,
+            "overhead",
+            artifact_root,
+            timeout,
+            args.launcher,
+            calibration_root,
+            resume=args.resume,
+            inner_repetitions_override=(workload.device_timing_calibration_iterations),
+            discard_first_timing_sample=(workload.kind == "pytorch"),
+            collect_gtest_device_timing=(workload.warm_timing_mode == "device-gtest"),
+            minimum_device_timed_aggregate_ms=(workload.self_timed_device_minimum_ms),
+        )
+        calibration_record = {
+            "accepted": calibration.get("accepted") is True,
+            "result": str(
+                (calibration_root / "result.json").relative_to(artifact_root)
+            ),
+        }
+    timing_protocol = _empirical_timing_protocol(target, workload, calibration)
+    inner_repetitions = timing_protocol["command_inner_repetitions"]
+    discard_first_timing_sample = timing_protocol["discard_first_timing_sample"]
+
+    rounds = []
+    campaign = None
+    for round_index in range(max_rounds):
+        if campaign is not None and campaign["summary"]["accepted"]:
+            break
+        order = list(profiles)
+        order_seed = _bootstrap_stream_seed(
+            args.seed, workload.id, "profile-order", str(round_index)
+        )
+        random.Random(order_seed).shuffle(order)
+        round_root = campaign_root / "rounds" / f"round-{round_index:03d}"
+
+        def run_schedule(
+            name: str,
+            schedule_inner_repetitions: int | None,
+            discard_first: bool,
+            include_process: bool,
+            include_workload: bool,
+            collect_structural_metrics: bool,
+            qualifying: bool,
+            device_workload_only: bool,
+            collect_gtest_device_timing: bool,
+            minimum_device_timed_aggregate_ms: float | None,
+        ) -> dict[str, object]:
+            schedule_root = round_root / name
+            row_phase = (
+                "clean"
+                if name == "cold" and workload.self_timed_device_minimum_ms is not None
+                else "overhead"
+            )
+            before = _run_or_resume_empirical_row(
+                workspace,
+                target,
+                workload,
+                None,
+                row_phase,
+                artifact_root,
+                timeout,
+                args.launcher,
+                schedule_root / "00-baseline-before",
+                resume=args.resume,
+                inner_repetitions_override=schedule_inner_repetitions,
+                discard_first_timing_sample=discard_first,
+                collect_gtest_device_timing=collect_gtest_device_timing,
+                minimum_device_timed_aggregate_ms=(minimum_device_timed_aggregate_ms),
+            )
+            profile_results = {}
+            for position, profile in enumerate(order, start=1):
+                profile_results[profile] = _run_or_resume_empirical_row(
+                    workspace,
+                    target,
+                    workload,
+                    profile,
+                    row_phase,
+                    artifact_root,
+                    timeout,
+                    args.launcher,
+                    schedule_root / f"{position:02d}-{profile}",
+                    resume=args.resume,
+                    inner_repetitions_override=schedule_inner_repetitions,
+                    discard_first_timing_sample=discard_first,
+                    collect_structural_metrics=collect_structural_metrics,
+                    collect_gtest_device_timing=collect_gtest_device_timing,
+                    minimum_device_timed_aggregate_ms=(
+                        minimum_device_timed_aggregate_ms
+                    ),
+                )
+            after_position = len(order) + 1
+            after = _run_or_resume_empirical_row(
+                workspace,
+                target,
+                workload,
+                None,
+                row_phase,
+                artifact_root,
+                timeout,
+                args.launcher,
+                schedule_root / f"{after_position:02d}-baseline-after",
+                resume=args.resume,
+                inner_repetitions_override=schedule_inner_repetitions,
+                discard_first_timing_sample=discard_first,
+                collect_gtest_device_timing=collect_gtest_device_timing,
+                minimum_device_timed_aggregate_ms=(minimum_device_timed_aggregate_ms),
+            )
+            schedule = _empirical_round_summary(
+                round_index,
+                order,
+                before,
+                profile_results,
+                after,
+                baseline_drift_limit=args.baseline_drift_limit,
+                include_process_metric=include_process,
+                include_workload_metrics=include_workload,
+                device_workload_only=device_workload_only,
+                qualifying=qualifying,
+                metric_prefix=name,
+            )
+            schedule["structural_metrics"] = {}
+            schedule["collects_structural_metrics"] = collect_structural_metrics
+            if collect_structural_metrics:
+                for profile, result in profile_results.items():
+                    try:
+                        schedule["structural_metrics"][profile] = (
+                            _empirical_structural_totals(result)
+                        )
+                    except ValidationError as error:
+                        schedule["reasons"].append(
+                            f"{profile}: structural metrics rejected: {error}"
+                        )
+                        schedule["rows_accepted"] = False
+                        schedule["usable"] = False
+                        schedule["fully_accepted"] = False
+            return schedule
+
+        schedules = {
+            "cold": run_schedule(
+                "cold",
+                1,
+                False,
+                True,
+                workload.self_timed_device_minimum_ms is None,
+                True,
+                not _empirical_uses_device_timing(workload),
+                False,
+                False,
+                None,
+            ),
+        }
+        if _empirical_supports_warm_timing(target, workload):
+            schedules["warm"] = run_schedule(
+                "warm",
+                inner_repetitions,
+                discard_first_timing_sample,
+                False,
+                True,
+                False,
+                True,
+                _empirical_uses_device_timing(workload),
+                workload.warm_timing_mode == "device-gtest",
+                (
+                    float(timing_protocol["minimum_timed_aggregate_ms"])
+                    if _empirical_uses_device_timing(workload)
+                    else None
+                ),
+            )
+        round_summary = _combine_empirical_round_summaries(
+            round_index,
+            order,
+            schedules,
+        )
+        round_summary["row_results"] = [
+            str(path.relative_to(artifact_root))
+            for path in sorted(round_root.rglob("result.json"))
+        ]
+        atomic_write_json(round_root / "round.json", round_summary)
+        rounds.append(round_summary)
+        summary = _empirical_campaign_summary(
+            rounds,
+            profiles,
+            required_accepted_rounds=args.rounds,
+            bootstrap_resamples=args.bootstrap_resamples,
+            bootstrap_seed=args.seed,
+            require_structural_metrics=True,
+        )
+        summary["requested_profiles"] = list(requested_profiles)
+        summary["timed_profiles"] = list(profiles)
+        summary["rejected_profiles"] = list(rejected_profiles)
+        campaign = {
+            **config,
+            "admission": admission,
+            "timed_profiles": list(profiles),
+            "calibration": calibration_record,
+            "timing_protocol": timing_protocol,
+            "rounds": rounds,
+            "summary": summary,
+        }
+        atomic_write_json(campaign_root / "campaign.json", campaign)
+
+    assert campaign is not None
+    print(json.dumps(campaign, indent=2, sort_keys=True))
+    return 0 if campaign["summary"]["accepted"] else 1
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -5449,6 +8049,53 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="JSON argv prefix used to launch each workload process",
     )
 
+    study = subparsers.add_parser(
+        "study",
+        help="run a reproducible physical-gfx1201 empirical overhead campaign",
+    )
+    study.add_argument("--workload", choices=tuple(WORKLOAD_BY_ID), required=True)
+    study.add_argument("--profile", choices=(*PROFILE_IDS, "all"), default="all")
+    study.add_argument("--artifact-root", type=Path, required=True)
+    study.add_argument(
+        "--rounds",
+        type=int,
+        default=EMPIRICAL_DEFAULT_ROUNDS,
+        help="required number of accepted independently bracketed rounds",
+    )
+    study.add_argument(
+        "--max-rounds",
+        type=int,
+        help="maximum attempted rounds; defaults to twice --rounds",
+    )
+    study.add_argument("--seed", type=int, default=0)
+    study.add_argument(
+        "--baseline-drift-limit",
+        type=float,
+        default=EMPIRICAL_DEFAULT_BASELINE_DRIFT_LIMIT,
+    )
+    study.add_argument(
+        "--bootstrap-resamples",
+        type=int,
+        default=EMPIRICAL_DEFAULT_BOOTSTRAP_RESAMPLES,
+    )
+    study.add_argument(
+        "--timeout",
+        type=int,
+        help="override the workload timeout declared by the executable manifest",
+    )
+    study.add_argument(
+        "--launcher-json",
+        dest="launcher",
+        type=_launcher_argument,
+        default=[],
+        help="JSON argv prefix used to launch each workload process",
+    )
+    study.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse complete rows and preserve then retry interrupted rows",
+    )
+
     verify_coverage = subparsers.add_parser(
         "verify-coverage-output",
         help="replay and verify one retained coverage-output result",
@@ -5516,6 +8163,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     timeout = getattr(args, "timeout", None)
     if timeout is not None and timeout <= 0:
         parser.error("--timeout must be positive")
+    if getattr(args, "rounds", 1) <= 0:
+        parser.error("--rounds must be positive")
+    max_rounds = getattr(args, "max_rounds", None)
+    if max_rounds is not None and max_rounds <= 0:
+        parser.error("--max-rounds must be positive")
+    if getattr(args, "bootstrap_resamples", 1) <= 0:
+        parser.error("--bootstrap-resamples must be positive")
+    drift_limit = getattr(args, "baseline_drift_limit", 0.05)
+    if not 0.0 <= drift_limit < 1.0:
+        parser.error("--baseline-drift-limit must be in [0, 1)")
     if getattr(args, "health_timeout", 1) <= 0:
         parser.error("--health-timeout must be positive")
     if (getattr(args, "health_command_json", None) is None) != (
@@ -5596,6 +8253,8 @@ def main(argv: list[str] | None = None) -> int:
             return _inventory(args)
         if args.command == "fault":
             return _fault(args)
+        if args.command == "study":
+            return _empirical_campaign(args)
         return _run(args)
     except (OSError, ValidationError, ValueError, json.JSONDecodeError) as error:
         print(f"validation error: {error}", file=sys.stderr)

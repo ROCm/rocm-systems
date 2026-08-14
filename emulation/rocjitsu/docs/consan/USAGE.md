@@ -57,7 +57,7 @@ comparison in [FLAVORS.md](FLAVORS.md).
 
 | Selection | Ordinary `standard-v1` behavior | Primary tradeoff |
 | --- | --- | --- |
-| default or `RJ_CONSAN_MODE=record-replay` | Instrument all admitted supported access, barrier, atomic, and fence sites; allocate an inventory-sized report; replay visible records on the host. | **Recommended starting engine:** clear reference/debug semantics, but only a bounded dynamic snapshot. |
+| default or `RJ_CONSAN_MODE=record-replay` | Instrument all admitted supported access, barrier, atomic, and fence sites; allocate an inventory-sized report; replay visible records on the host. | Mechanical default and expert synchronization engine with clear reference/debug semantics, but only a bounded dynamic snapshot. |
 | `RJ_CONSAN_MODE=inline-shadow` | Publish exact-shadow cells and bounded diagnostics on the GPU; track admitted barriers and atomics. | Strongest supported-form attribution, with higher overhead. |
 | `RJ_CONSAN_MODE=sampled` | Patch all admitted supported sites; use automatic runtime stride 16,384 and offset zero; retain bounded sampled causal windows and synchronization metadata. | Bounded retained state and probabilistic detection. |
 | `RJ_CONSAN_MODE=supercollider` | Duplicate/read-back supported LDS accesses, delay, compare, and set an automatically allocated non-trapping mismatch marker. | Complementary value-instability diagnostic; it does not attribute a happens-before edge or exact racing pair. |
@@ -86,7 +86,7 @@ an expert override.
 
 ## Minimal commands
 
-Recommended default, Record/Replay:
+Current mechanical default, Record/Replay:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
@@ -111,6 +111,11 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
+
+On gfx1201, the [empirical study](GFX1201_EMPIRICAL_STUDY.md) recommends
+Sampled for ordinary barrier/LDS triage, with multiple runtime offsets when
+confidence matters. Record/Replay remains the coded default until the public
+supported-mode policy is updated.
 
 SuperCollider:
 
