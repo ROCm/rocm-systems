@@ -226,7 +226,9 @@ counter_sampler::sample_counter_values(const std::vector<std::string>&          
             gpu_counters.push_back(it->second);
             expected_size += get_counter_size(it->second);
         }
-        if(gpu_counters.empty())
+        // A partial profile would silently drop a requested counter, so treat any missing
+        // counter as unavailable.
+        if(gpu_counters.size() < counters.size())
         {
             out.clear();
             return ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS;
@@ -402,49 +404,56 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     sampler = std::make_shared<counter_sampler>(agents[0].id);
 
     sampler_thread = new std::thread{[output_stream]() {
-        size_t                                    count              = 1;
-        bool                                      printed_dimensions = false;
-        std::vector<rocprofiler_counter_record_t> records;
-        while(sampler && exit_toggle().load() == false)
+        // An exception escaping this thread would terminate the profiled application.
+        try
         {
-            auto status = sampler->sample_counter_values(
-                {"SQ_WAVES", "GRBM_COUNT"}, records, {.value = count});
-            if(exit_toggle().load()) break;
-            if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED ||
-               status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR)
+            size_t                                    count              = 1;
+            bool                                      printed_dimensions = false;
+            std::vector<rocprofiler_counter_record_t> records;
+            while(sampler && exit_toggle().load() == false)
             {
-                std::clog << "Device counting service not ready yet....\n";
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                continue;
-            }
-            if(is_terminal_status(status)) break;
-            if(status == ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS)
-            {
-                *output_stream << "Device counting unavailable: no hardware counters\n";
-                break;
-            }
-            ROCPROFILER_CALL(status, "Could not sample");
-            *output_stream << "Sample " << count << ":\n";
-            for(const auto& record : records)
-            {
-                if(!sampler) break;
-                auto recname = sampler->decode_record_name(record);
-                *output_stream << "\tCounter: " << record.id << " Name: " << recname
-                               << " Value: " << record.counter_value
-                               << " User data: " << record.user_data.value << "\n";
-                if(!printed_dimensions)
+                auto status = sampler->sample_counter_values(
+                    {"SQ_WAVES", "GRBM_COUNT"}, records, {.value = count});
+                if(exit_toggle().load()) break;
+                if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED ||
+                   status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR)
+                {
+                    std::clog << "Device counting service not ready yet....\n";
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    continue;
+                }
+                if(is_terminal_status(status)) break;
+                if(status == ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS)
+                {
+                    *output_stream << "Device counting unavailable: no hardware counters\n";
+                    break;
+                }
+                ROCPROFILER_CALL(status, "Could not sample");
+                *output_stream << "Sample " << count << ":\n";
+                for(const auto& record : records)
                 {
                     if(!sampler) break;
-                    for(const auto& [dim, pos] : sampler->get_record_dimensions(record))
+                    auto recname = sampler->decode_record_name(record);
+                    *output_stream << "\tCounter: " << record.id << " Name: " << recname
+                                   << " Value: " << record.counter_value
+                                   << " User data: " << record.user_data.value << "\n";
+                    if(!printed_dimensions)
                     {
-                        *output_stream << "\t\tDimension Name: " << dim.name << ": " << pos << "/"
-                                       << dim.instance_size << "\n";
+                        if(!sampler) break;
+                        for(const auto& [dim, pos] : sampler->get_record_dimensions(record))
+                        {
+                            *output_stream << "\t\tDimension Name: " << dim.name << ": " << pos
+                                           << "/" << dim.instance_size << "\n";
+                        }
                     }
                 }
+                if(!records.empty()) printed_dimensions = true;
+                count++;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            if(!records.empty()) printed_dimensions = true;
-            count++;
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        } catch(const std::exception& e)
+        {
+            std::cerr << "Sampler thread threw an exception: " << e.what() << "\n";
         }
         exit_toggle().store(false);
     }};

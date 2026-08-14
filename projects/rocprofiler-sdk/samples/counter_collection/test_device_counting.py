@@ -128,6 +128,33 @@ def _parse_sync_output(output):
     return samples
 
 
+def _assert_complete_dimension_coverage(records, counter_name):
+    assert records, f"no {counter_name} records"
+    assert all(
+        record["dimensions"] for record in records
+    ), f"{counter_name} records without dimensions"
+    extents = {}
+    coordinates = set()
+    for record in records:
+        coordinate = []
+        for name, (position, extent) in sorted(record["dimensions"].items()):
+            assert extents.setdefault(name, extent) == extent
+            coordinate.append((name, position))
+        assert set(record["dimensions"]) == set(extents)
+        coordinates.add(tuple(coordinate))
+    dimension_names = sorted(extents)
+    expected_coordinates = {
+        tuple(zip(dimension_names, positions))
+        for positions in itertools.product(
+            *(range(extents[name]) for name in dimension_names)
+        )
+    }
+    assert (
+        coordinates == expected_coordinates
+    ), f"{counter_name} instances do not cover every dimension coordinate"
+    assert len(records) == len(expected_coordinates)
+
+
 def _validate_sync_samples(samples):
     sample_ids = sorted(samples)
     assert len(sample_ids) >= 2
@@ -149,27 +176,11 @@ def _validate_sync_samples(samples):
     expected_record_ids = set(samples[first_populated_sample])
     first_records = samples[first_populated_sample].values()
     assert {record["name"] for record in first_records} == EXPECTED_COUNTER_NAMES
-    sq_wave_records = [record for record in first_records if record["name"] == "SQ_WAVES"]
-    assert sq_wave_records
-    assert all(record["dimensions"] for record in sq_wave_records)
-    extents = {}
-    coordinates = set()
-    for record in sq_wave_records:
-        coordinate = []
-        for name, (position, extent) in sorted(record["dimensions"].items()):
-            assert extents.setdefault(name, extent) == extent
-            coordinate.append((name, position))
-        assert set(record["dimensions"]) == set(extents)
-        coordinates.add(tuple(coordinate))
-    dimension_names = sorted(extents)
-    expected_coordinates = {
-        tuple(zip(dimension_names, positions))
-        for positions in itertools.product(
-            *(range(extents[name]) for name in dimension_names)
+    for counter_name in sorted(EXPECTED_COUNTER_NAMES):
+        _assert_complete_dimension_coverage(
+            [record for record in first_records if record["name"] == counter_name],
+            counter_name,
         )
-    }
-    assert coordinates == expected_coordinates
-    assert len(sq_wave_records) == len(expected_coordinates)
 
     positive_counters = set()
     for sample_id in populated_sample_ids:

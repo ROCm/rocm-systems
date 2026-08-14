@@ -53,6 +53,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <sstream>
 #include <tuple>
 #include <unordered_map>
@@ -193,6 +194,14 @@ sort_counter_records(std::vector<rocprofiler_record_counter_t>& records)
                                                                       rhs.agent_id.handle,
                                                                       rhs.user_data.value);
     });
+}
+
+// Distinct user_data per (metric, sample) so records belonging to one metric cannot be
+// mistaken for a sample of the next metric.
+uint64_t
+sample_user_data(size_t metric_index, size_t sample_index, size_t sample_count)
+{
+    return ((metric_index - 1) * sample_count) + sample_index;
 }
 
 struct test_kernels
@@ -388,11 +397,8 @@ protected:
         global_sync_samples().wlock([](auto& data) { data.clear(); });
         global_dispatch_header_count().store(0, std::memory_order_relaxed);
 
-        size_t      expression_metrics_tested = 0;
-        bool        skip_focused_test         = false;
-        bool        abort_focused_test        = false;
-        std::string skip_reason;
-        const bool  has_focused_contract = !options.required_expression.empty();
+        size_t expression_metrics_tested = 0;
+        bool   abort_focused_test        = false;
 
         hsa_init();
         registration::init_logging();
@@ -555,15 +561,6 @@ protected:
                 {
                     ROCP_INFO << fmt::format("No hardware counters for {}, skipping",
                                              metric.name());
-                    EXPECT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
-                    EXPECT_EQ(rocprofiler_destroy_buffer(opt_buff_id), ROCPROFILER_STATUS_SUCCESS);
-                    if(has_focused_contract)
-                    {
-                        skip_focused_test = true;
-                        skip_reason =
-                            fmt::format("{} has no available hardware counters", metric.name());
-                        break;
-                    }
                     continue;
                 }
                 else if(status != ROCPROFILER_STATUS_SUCCESS)
@@ -589,7 +586,8 @@ protected:
 
                 uint64_t last_sample_user_data = 0;
                 auto     sample_once           = [&](size_t sample_idx) {
-                    last_sample_user_data = track_metric + sample_idx - 1;
+                    last_sample_user_data =
+                        sample_user_data(track_metric, sample_idx, options.sample_count);
                     if(options.flags == ROCPROFILER_COUNTER_FLAG_ASYNC)
                     {
                         ROCPROFILER_CALL(rocprofiler_sample_device_counting_service(
@@ -655,6 +653,19 @@ protected:
                 auto recs_local = global_recs().rlock([](const auto& data) { return data; });
                 for(const auto& record : recs_local)
                     EXPECT_EQ(record.agent_id.handle, configured_agent_id.handle);
+                if(options.sample_count > 0)
+                {
+                    // Each record must be stamped with the user_data of the sample that
+                    // produced it, so the values seen must be exactly the values passed in.
+                    auto observed_user_data = std::set<uint64_t>{};
+                    auto expected_user_data = std::set<uint64_t>{};
+                    for(const auto& record : recs_local)
+                        observed_user_data.insert(record.user_data.value);
+                    for(size_t idx = 1; idx <= options.sample_count; ++idx)
+                        expected_user_data.insert(
+                            sample_user_data(track_metric, idx, options.sample_count));
+                    EXPECT_EQ(observed_user_data, expected_user_data) << metric.name();
+                }
                 if(options.require_positive_value)
                 {
                     if(recs_local.empty())
@@ -697,16 +708,12 @@ protected:
             hsa_signal_destroy(barrier_signal);
             hsa_signal_destroy(found_data);
             hsa_queue_destroy(queue);
-            if(skip_focused_test || abort_focused_test) break;
+            if(abort_focused_test) break;
         }
         if(abort_focused_test) return;
         if(!options.required_expression.empty() && expression_metrics_tested == 0)
         {
             GTEST_SKIP() << "No supported metric matches the required expression";
-        }
-        if(skip_focused_test)
-        {
-            GTEST_SKIP() << skip_reason;
         }
     }
 

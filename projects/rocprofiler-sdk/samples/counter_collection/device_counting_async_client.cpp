@@ -208,7 +208,9 @@ build_profile_for_agent(rocprofiler_agent_id_t agent)
         }
     }
 
-    if(collect_counters.empty()) return {.handle = 0};
+    // A partial profile would silently drop a requested counter, so treat any missing
+    // counter as unavailable.
+    if(collect_counters.size() < counters_to_collect.size()) return {.handle = 0};
 
     rocprofiler_counter_config_id_t profile = {.handle = 0};
     ROCPROFILER_CALL(rocprofiler_create_counter_config(
@@ -305,49 +307,50 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
                      "Could not setup buffered service");
 
     sampler_thread() = new std::thread([=]() {
-        size_t count = 1;
-        while(exit_toggle().load() == false)
+        // An exception escaping this thread would terminate the profiled application.
+        try
         {
-            auto start_status = rocprofiler_start_context(get_client_ctx());
-            if(start_status == ROCPROFILER_STATUS_SUCCESS) break;
-            if(start_status == ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS)
+            size_t count = 1;
+            while(exit_toggle().load() == false)
             {
-                auto* output_stream = static_cast<std::ostream*>(user_data);
-                *output_stream << "Device counting unavailable: no hardware counters\n";
-                exit_toggle().store(false);
-                return;
+                auto start_status = rocprofiler_start_context(get_client_ctx());
+                if(start_status == ROCPROFILER_STATUS_SUCCESS) break;
+                if(is_terminal_status(start_status))
+                {
+                    exit_toggle().store(false);
+                    return;
+                }
+                if(start_status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED ||
+                   start_status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    continue;
+                }
+                ROCPROFILER_CALL(start_status, "Could not start context");
             }
-            if(is_terminal_status(start_status))
+            while(exit_toggle().load() == false)
             {
-                exit_toggle().store(false);
-                return;
-            }
-            if(start_status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED ||
-               start_status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR)
-            {
+                auto status =
+                    rocprofiler_sample_device_counting_service(get_client_ctx(),
+                                                               {.value = count},
+                                                               ROCPROFILER_COUNTER_FLAG_ASYNC,
+                                                               nullptr,
+                                                               nullptr);
+                if(exit_toggle().load()) break;
+                if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED ||
+                   status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    continue;
+                }
+                if(is_terminal_status(status)) break;
+                ROCPROFILER_CALL(status, "Could not sample");
+                count++;
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                continue;
             }
-            ROCPROFILER_CALL(start_status, "Could not start context");
-        }
-        while(exit_toggle().load() == false)
+        } catch(const std::exception& e)
         {
-            auto status = rocprofiler_sample_device_counting_service(get_client_ctx(),
-                                                                     {.value = count},
-                                                                     ROCPROFILER_COUNTER_FLAG_ASYNC,
-                                                                     nullptr,
-                                                                     nullptr);
-            if(exit_toggle().load()) break;
-            if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED ||
-               status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR)
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                continue;
-            }
-            if(is_terminal_status(status)) break;
-            ROCPROFILER_CALL(status, "Could not sample");
-            count++;
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::cerr << "Sampler thread threw an exception: " << e.what() << "\n";
         }
         exit_toggle().store(false);
     });
