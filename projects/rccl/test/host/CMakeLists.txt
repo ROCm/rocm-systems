@@ -384,9 +384,17 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+  # Same fallback-vs-runtime conflicts the host target guards against: without
+  # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
+  # enumerators on ROCm 7.14+, and the standalone build fails.
+  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
-target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt)
+# -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored
+# libgtest.a used by this standalone path is built without -fPIC, so a PIE
+# link fails with "relocation R_X86_64_32 cannot be used against local symbol".
+target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie)
 target_link_libraries(rccl-UnitTestsMicro PRIVATE
   GTest::GTest
   Threads::Threads
