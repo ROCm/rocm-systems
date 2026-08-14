@@ -1,5 +1,14 @@
 # Kernel Replay Callback Tracing API Design
 
+> **This page records design rationale and history, not current behavior.** It explains why kernel
+> replay was decoupled from counter collection and what shape decisions were taken along the way,
+> including review findings as they were resolved. For the behavior as implemented, read
+> [Callback API and tool configuration](kernel_replay_callback_api.md),
+> [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md) and
+> [Memory snapshot and restore](kernel_replay_memory_snapshot.md), which take precedence wherever
+> this page differs. In particular, the "Still unwired" note below has been overtaken: localized
+> per-pass context control is implemented in `kernel_replay/local_context.cpp`.
+
 ## Overview
 
 Kernel replay is redesigned as a **standalone callback tracing service** under a new

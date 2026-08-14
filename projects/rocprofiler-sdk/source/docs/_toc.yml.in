@@ -105,6 +105,14 @@ subtrees:
   - caption: Conceptual
     entries:
     - file: conceptual/comparing-with-legacy-tools
+    - file: conceptual/kernel_replay/index
+      title: Kernel replay (experimental)
+      subtrees:
+      - entries:
+        - file: conceptual/kernel_replay/kernel_replay_callback_api
+        - file: conceptual/kernel_replay/kernel_replay_concurrency_and_isolation
+        - file: conceptual/kernel_replay/kernel_replay_memory_snapshot
+        - file: conceptual/kernel_replay/kernel_replay_callback_api_design
   - caption: License
     entries:
     - file: license
