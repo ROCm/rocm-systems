@@ -151,6 +151,48 @@ reject_records(rocprofiler_thread_trace_decoder_record_type_t, void*, uint64_t, 
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
 }
 
+TEST(RecordFilterApiTest, ValidatesRequestsAndSupportsReset)
+{
+    HandleGuard handle;
+    ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+
+    EXPECT_EQ(
+        rocprof_trace_decoder_set_record_filter(handle.value, nullptr), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+
+    rocprofiler_thread_trace_decoder_record_filter_t empty{
+        .size = sizeof(empty), .records = nullptr, .record_count = 0};
+    EXPECT_EQ(
+        rocprof_trace_decoder_set_record_filter(handle.value, &empty), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+
+    rocprofiler_thread_trace_decoder_record_request_t request{
+        .size = sizeof(request),
+        .type = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER,
+        .flags = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_IMMEDIATE};
+    rocprofiler_thread_trace_decoder_record_filter_t marker_only{
+        .size = sizeof(marker_only), .records = &request, .record_count = 1};
+    EXPECT_EQ(
+        rocprof_trace_decoder_set_record_filter(handle.value, &marker_only),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+
+    request.type = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE;
+    EXPECT_EQ(
+        rocprof_trace_decoder_set_record_filter(handle.value, &marker_only),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
+    );
+
+    request.type = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER;
+    rocprofiler_thread_trace_decoder_record_request_t duplicate[] = {request, request};
+    rocprofiler_thread_trace_decoder_record_filter_t duplicate_filter{
+        .size = sizeof(duplicate_filter), .records = duplicate, .record_count = 2};
+    EXPECT_EQ(
+        rocprof_trace_decoder_set_record_filter(handle.value, &duplicate_filter),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
+    );
+}
+
 rocprofiler_thread_trace_decoder_status_t
 nop_isa(char*, uint64_t* memory_size, uint64_t* size, rocprofiler_thread_trace_decoder_pc_t, void*)
 {

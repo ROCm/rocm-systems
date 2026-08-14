@@ -278,6 +278,22 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 );
 
 /**
+ * @brief Replaces the enabled callback record set for subsequent parses.
+ *
+ * NULL restores all record types with
+ * pooled delivery. A non-NULL filter
+ * replaces the enabled set; the decoder copies its request array.
+ * IMMEDIATE is
+ * supported for shaderdata, occupancy, realtime, and marker records.
+ *
+ * Immediate occupancy records may precede delayed code-object attribution and
+ * therefore retain code_object_id zero.
+ */
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_record_filter(
+    rocprof_trace_decoder_handle_t handle, const rocprofiler_thread_trace_decoder_record_filter_t* filter
+);
+
+/**
  * @brief Parses a buffer of thread trace data (V2 API).
  *
  * Requires either loaded code objects (Mode 1) or a custom ISA callback (Mode 2)
