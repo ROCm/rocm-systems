@@ -27,8 +27,10 @@
 #include "nccl_device/lsa_barrier.h"
 #include "nccl_device/gin_barrier.h"
 
+#include <cassert>
 #include <cstdarg>
 #include <cstdlib>
+#include <sys/mman.h>
 
 // ---------------------------------------------------------------------------
 // Globals the translation unit references.
@@ -227,19 +229,22 @@ extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, 
 // ---------------------------------------------------------------------------
 #define HIP_FAKE /* default visibility: this binary does not link librccl */
 
-// A reserved VA range is just a host allocation; the "handle" is an opaque tag.
-HIP_FAKE hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*, unsigned long long) {
-  void* p = nullptr;
-  if (alignment < sizeof(void*)) alignment = sizeof(void*);
-  // Round size up to alignment for posix_memalign correctness.
-  size_t asize = (size + alignment - 1) & ~(alignment - 1);
-  if (asize == 0) asize = alignment;
-  if (posix_memalign(&p, alignment, asize) != 0) return hipErrorOutOfMemory;
+// A reserved VA range: mirror the real cuMemAddressReserve semantics with an
+// uncommitted anonymous mapping (MAP_NORESERVE). This makes multi-GB flat-VA
+// reservations cheap and never dereferenced (all cuMemMap/SetAccess are no-ops),
+// so no physical memory is committed.
+HIP_FAKE hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t, void*, unsigned long long) {
+  // The real driver rejects a zero-size reservation; a zero here would be a bug
+  // in the code under test, so surface it rather than silently substituting one.
+  assert(size != 0);
+  void* p = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  if (p == MAP_FAILED) return hipErrorOutOfMemory;
   *ptr = p;
   return hipSuccess;
 }
-HIP_FAKE hipError_t hipMemAddressFree(void* devPtr, size_t) {
-  free(devPtr);
+HIP_FAKE hipError_t hipMemAddressFree(void* devPtr, size_t size) {
+  assert(size != 0);
+  munmap(devPtr, size);
   return hipSuccess;
 }
 HIP_FAKE hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t, const hipMemAllocationProp*,
@@ -282,5 +287,21 @@ HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t
 HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
   if (pbase) *pbase = dptr;
   if (psize) *psize = 0;
+  return hipSuccess;
+}
+
+// ---------------------------------------------------------------------------
+// Fake HIP runtime stream API. ncclDevrFinalize creates/synchronizes/destroys
+// throwaway streams for its teardown bookkeeping; none carry real work on the
+// host, so a non-null opaque handle and success returns are sufficient.
+// ---------------------------------------------------------------------------
+HIP_FAKE hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int) {
+  if (stream) *stream = reinterpret_cast<hipStream_t>(0x1);
+  return hipSuccess;
+}
+HIP_FAKE hipError_t hipStreamSynchronize(hipStream_t) { return hipSuccess; }
+HIP_FAKE hipError_t hipStreamDestroy(hipStream_t) { return hipSuccess; }
+HIP_FAKE hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
+  if (mode) *mode = hipStreamCaptureModeRelaxed;
   return hipSuccess;
 }
