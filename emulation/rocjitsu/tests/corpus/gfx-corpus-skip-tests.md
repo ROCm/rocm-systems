@@ -27,7 +27,7 @@ The classifications below were collected with these revisions and SDKs.
 
 | ROCjitsu revision | `rocjitsu-test-corpus` revision | `ROCM_SDK_VERSION` |
 | --- | --- | --- |
-| `28fb310dbaaf91fea5ed69ead4878841d2602862` | `a1c3a1df8c87e46557ad505d111faa15d21a6efb` | `10.1.0a20260812` |
+| `5dad52e63393c503253735daafc4f32925efae93` | `a1c3a1df8c87e46557ad505d111faa15d21a6efb` | `10.1.0a20260812` |
 
 ## gfx942
 
