@@ -69,12 +69,16 @@ flowchart LR
 
 ## Module layout
 
-Stateful concerns are each a single global instance; the callback, user-scope,
-and wire-format layers are stateless functions over them.
+State lives in one `ProcessState`, reached through `process_state()`, plus one
+`ThreadState` per thread, reached through `thread_state()`. The callback,
+user-scope and wire-format layers are stateless functions over them.
+`at::addGlobalCallback` registers one callback pair for the whole process and
+passes the callbacks no state of their own, so the process-wide half is a single
+instance behind an accessor.
 
 ```mermaid
 flowchart TD
-    api[pybind API] --> bridge[RecordFunction bridge]
+    api[pybind API] --> bridge[RecordFunction callback]
     api --> scope[user scope]
     bridge --> stack[per-thread stack]
     scope --> stack
@@ -96,12 +100,13 @@ flowchart TD
 | Type (file) | Instance | Contents |
 | --- | --- | --- |
 | `StackEntry` (`stack_entry.h`) | — | one frame: marker name + context string |
-| `ThreadState` (`marker_stack.h`) | `thread_local g_thread` | frame stack + debug-info guards owned by user scopes |
-| `RoctxObserverContext` (`record_function_bridge.h`) | per op | flags for the range/leaf pushed and snapshot-frame count |
-| `SnapshotStore` (`snapshot_store.h`) | `g_snapshots` | sharded map (seqNr, threadId) → stack; each shard has a map, an LRU list, and a mutex |
-| `InstallState` (`install_state.h`) | `g_install` | callback handle, installed flag, mutex |
-| `Stats` (`stats.h`) | `g_stats` | atomic counters |
-| `CaptureBuffer` (`capture_buffer.h`) | `g_capture` | test-only buffer of emitted strings |
+| `ThreadState` (`marker_stack.h`) | `thread_state()`, `thread_local` | frame stack + debug-info guards owned by user scopes |
+| `RoctxObserverContext` (`record_function_callback.h`) | per op | flags for the range/leaf pushed and snapshot-frame count |
+| `ProcessState` (`process_state.h`) | `process_state()` | owns the four members below |
+| `Stats` (`stats.h`) | `process_state().stats` | atomic counters |
+| `InstallState` (`process_state.h`) | `process_state().install` | callback handle and installed flag, in a `synchronized_t` |
+| `SnapshotStore` (`snapshot_store.h`) | `process_state().snapshots` | sharded map (seqNr, threadId) → stack; each shard is a `synchronized_t` over that map plus its LRU list and index |
+| `CaptureBuffer` (`capture_buffer.h`) | `process_state().capture` | test-only buffer of emitted strings |
 
 ## Threading model
 
@@ -112,22 +117,22 @@ path. The snapshot store is the only state the threads share.
 ```mermaid
 flowchart TB
     subgraph t1["python thread, id T1"]
-        o1["ops"] --> s1["g_thread stack<br/>thread_local"] --> r1["ROCTX range"]
+        o1["ops"] --> s1["thread_state() stack<br/>thread_local"] --> r1["ROCTX range"]
         d1["debug-info chain<br/>thread_local"]
         s1 -.->|"push_user_scope"| d1
     end
 
     subgraph t2["python thread, id T2"]
-        o2["ops"] --> s2["g_thread stack<br/>thread_local"] --> r2["ROCTX range"]
+        o2["ops"] --> s2["thread_state() stack<br/>thread_local"] --> r2["ROCTX range"]
         d2["debug-info chain<br/>thread_local"]
         s2 -.->|"push_user_scope"| d2
     end
 
     subgraph w["autograd worker running the T1 graph"]
-        ow["backward ops<br/>forwardThreadId = T1"] --> sw["g_thread stack<br/>thread_local"] --> rw["ROCTX range"]
+        ow["backward ops<br/>forwardThreadId = T1"] --> sw["thread_state() stack<br/>thread_local"] --> rw["ROCTX range"]
     end
 
-    store[("g_snapshots<br/>key: seqNr + threadId<br/>process-wide, sharded")]
+    store[("process_state().snapshots<br/>key: seqNr + threadId<br/>process-wide, sharded")]
 
     s1 -->|"save (N, T1)"| store
     s2 -->|"save (N, T2)"| store
@@ -138,20 +143,22 @@ flowchart TB
 
 - The callback is **global**: one registration fires on every thread that runs
   ops. There is no per-thread install.
-- The marker stack (`g_thread`) is **`thread_local`**, so each thread owns its
-  stack and guard vector, needs no locking, and never sees another thread's
+- The marker stack (`thread_state()`) is **`thread_local`**, so each thread owns
+  its stack and guard vector, needs no locking, and never sees another thread's
   frames.
 - Two threads running forward passes concurrently both produce sequence number
   `N`, because PyTorch's counter is per-thread. The **snapshot store** is
   process-wide, so its key carries the thread id as well; the shard is chosen by
-  hashing that key and each shard has its own mutex, so saves and consumes
+  hashing that key and each shard is guarded independently, so saves and consumes
   rarely contend.
 - A backward op runs on an autograd worker, not on the thread that built the
   graph. It consumes the snapshot saved by that thread, which it identifies by
   the `forwardThreadId` on its own record.
 - User scope reaches a worker by a different route: it is per-thread state that
   travels with the graph task, not shared state (see Cross-thread context).
-- **Counters** are atomic; **install state** is mutex-guarded.
+- **Counters** are atomic; the **install state** and each **snapshot shard** are
+  held in a `synchronized_t` (`utils/synchronized`), which hands the guarded
+  value to a callable under a read or write lock.
 
 ## Stack maintenance
 
@@ -203,13 +210,15 @@ flowchart TD
 
 Where the source lives. Operators arrive through the callback and user scopes
 through the pybind entry points, but both end up pushing frames onto the same
-stack and emitting through the same encoder.
+stack and emitting through the same encoder. Both reach the shared state through
+`process_state()` in `process_state.h`.
 
 ```mermaid
 flowchart LR
-    op[ATen op] --> brg[record_function_bridge.h<br/>operator callback]
+    op[ATen op] --> brg[record_function_callback.h<br/>operator callback]
     py[Python] --> mod[torch_trace_collector_module.cpp<br/>pybind entry points]
-    mod --> brg
+    mod --> ins[record_function_installation.h<br/>register/remove the callback]
+    ins --> brg
     mod --> us[user_scope.h<br/>user scopes, TLS chain]
     brg --> st[marker_stack.h<br/>snapshot_store.h<br/>frames, fwd-to-bwd lookup]
     us --> st
@@ -251,10 +260,11 @@ own, so `#1@aten:0` is a placeholder: such an op is still recorded and its
 kernels still attribute to that operator, but nothing roots them at a line of
 the model.
 
-`install()` is idempotent and guarded by a mutex; `uninstall()` removes the
-callback. Both track a single handle. `uninstall()` also clears the snapshot
-store: with no callback left to consume them, snapshots from a forward whose
-backward never ran would be held for the life of the process.
+`install()` is idempotent and serialized by the `synchronized_t` holding the
+install state; `uninstall()` removes the callback. Both track a single handle.
+`uninstall()` also clears the snapshot store: with no callback left to consume
+them, snapshots from a forward whose backward never ran would be held for the
+life of the process.
 
 ### Worked example
 
@@ -266,7 +276,7 @@ flowchart LR
     py["Python<br/>push_user_scope"]
     cb["C++ callback<br/>start_cb"]
 
-    subgraph stk["g_thread stack, bottom to top"]
+    subgraph stk["thread stack, bottom to top"]
         direction TB
         f1["step<br/>#1@train.py:42"]
         f2["MyModel.forward<br/>#2@model.py:10"]
@@ -317,7 +327,7 @@ carries the id of the thread that built the node (`forwardThreadId`), which is
 the id the forward op saved under. A backward record without that id is left
 uncorrelated.
 
-The store is sharded (fixed shard count, per-shard mutex) so concurrent threads
+The store is sharded (fixed shard count, one lock per shard) so concurrent threads
 rarely contend; the shard is chosen by hashing the whole key. Each shard has a
 soft cap and evicts its oldest entry (LRU), which bounds memory when backward
 never runs (for example detached forward).
@@ -359,15 +369,24 @@ must tolerate the missing field: `_parse_function_backend` in
 ## Error and lifetime safety
 
 - Each operator callback runs in a single `try/catch(...)`; a caught error is
-  counted in `g_stats.callback_errors` and does not propagate.
+  counted in `callback_errors` and does not propagate.
+- `Expects` (`utils/gsl_assert`) states the invariants a callback cannot recover
+  from: the snapshot store's eviction precondition and its LRU index. A violation
+  throws and is then caught and counted like any other error, so the never-throw
+  contract towards PyTorch holds. Conditions a caller can provoke stay counted
+  `catch(...)` sites instead, since that count is reported at the end of the
+  workload.
 - A partial push in `start_cb` unwinds through a scope guard, so a mid-push
-  failure leaves the stack balanced. `push_user_scope` counts the error and
-  re-raises to Python; `pop_user_scope` counts and returns.
-- Header-defined globals are `inline`, so every translation unit in a binary
-  binds to one definition. The guarantee is per-binary: the pybind module and
-  the test executable link the static core library into separate images and
-  share no state. `g_thread` is also `thread_local`, so it is one instance per
-  thread.
+  failure leaves the stack balanced. `push_user_scope` orders its work so that
+  everything able to throw happens before `roctxRangePushA`; its two rollbacks
+  therefore cover the whole window in which a failure is possible, and the range
+  push itself needs no guard. It counts the error and re-raises to Python;
+  `pop_user_scope` counts and returns.
+- The accessors return function-local statics, so every translation unit in a
+  binary reaches the same instance. The guarantee is per-binary: the pybind
+  module and the test executable link the static core library into separate
+  images and share no state. `thread_state()` adds `thread_local`, so it is one
+  instance per thread.
 
 ## Python API
 
@@ -380,17 +399,35 @@ must tolerate the missing field: `_parse_function_backend` in
 
 ## Build and packaging
 
-- A static core library carries the shared source and its usage requirements
-  (torch/roctx includes and libraries, debug-info flag); the pybind11 `MODULE`
-  and the gtest binary both link it. The module omits the `lib` prefix and is
-  named by tag so the loader resolves it.
-- A probe script reports the interpreter's Python/torch paths and a source
-  fingerprint; these form the tag and resolve includes and torch libraries by
-  absolute path.
+- `BUILD_TORCH_TRACE_COLLECTOR` decides whether the extension is built. `AUTO`
+  builds it when the probed interpreter has torch and reports why it is skipped
+  when torch is absent; `ON` makes an absent torch a configure error; `OFF` skips
+  the directory. Any other value stops the configure. `TORCH_TRACE_PYTHON`
+  selects the interpreter to probe, defaulting to the one CMake finds.
+- A probe script reports the Python version, the torch version, the torch include
+  and library directories, a source fingerprint and the wheel's C++ ABI flag. The
+  Python version, torch version and fingerprint form the tag; the directories
+  resolve the includes and torch libraries by absolute path. Torch is resolved
+  this way rather than through `find_package(Torch)`, whose config enables the
+  HIP language and pulls in system dependencies this module does not need.
+- A static core library carries the shared source and its usage requirements —
+  the torch and roctx includes and libraries, `synchronized`, `gsl_assert`, the
+  debug-info flag and `_GLIBCXX_USE_CXX11_ABI` — and both the pybind11 `MODULE`
+  and the gtest binary link it and inherit them. `_GLIBCXX_USE_CXX11_ABI` is set
+  to what the probe read from the wheel: the module is loaded into an interpreter
+  that has already loaded that wheel's `libtorch`, so the two must agree on the
+  layout of every standard-library type crossing the boundary.
+- `torch_python` is resolved separately and linked only into the pybind module. It
+  leaves Python symbols undefined and names no `libpython` of its own, so only a
+  consumer already loaded by an interpreter can resolve them.
 - A compile check selects the debug-info slot.
-- One `CMakeLists` serves two modes: a subdirectory build under the project test
-  target, and a standalone build the runtime loader invokes when no prebuilt
-  module matches the tag.
+- One build path serves both entry points. The directory is registered
+  unconditionally from `src/lib/CMakeLists.txt`, so the project build and the
+  runtime build configure the same targets; the runtime build differs only in the
+  options it passes. The module omits the `lib` prefix, is named by tag so the
+  loader resolves it, lands in the build tree's `lib/`, and installs to
+  `<libdir>/rocprofiler-compute/`, where the loader globs for it. The gtest is
+  added only when `ENABLE_TESTS` is on and `gtest_main` exists.
 
 ## Validation
 

@@ -146,7 +146,7 @@ The `symbol` + `target_arch` join key is unique: in the verified rocflop rocpd a
 ## Packaging changes
 
 Build profiler-hub from source in-repo via `ExternalProject_Add`, linked statically into
-the single `librocprofiler-compute-tool.so`. `add_subdirectory` (one CMake configure) will
+`librocprofiler-compute-tool.so`. `add_subdirectory` (one CMake configure) will
 not work: profiler-hub FetchContent's its own fmt, spdlog, nlohmann_json, and sqlite3,
 which collide with the fmt, json, and googletest under `src/lib/external/` and duplicate
 those targets. A separate CMake invocation isolates its dependency resolution.
@@ -157,9 +157,11 @@ only `src/lib` is common to both:
 
 - Full / install build (TheRock CI): top-level `CMakeLists.txt` reaches it via
   `add_subdirectory(src/lib)`.
-- Runtime fallback build: the Python layer configures `src/lib` directly
-  (`src/utils/native_tool_finder.py`) when no installed library is found, never running the
-  top-level `CMakeLists.txt`.
+- Runtime fallback build: `src/utils/native_tool_finder.py` configures `src/lib` directly
+  when no installed artifact is found, never running the top-level `CMakeLists.txt`. The
+  helper serves two consumers — this tool and the `torch_trace_collector` extension — which
+  differ in the artifact they look for, the target they build and the options they configure
+  with, so `src/lib` is reached this way for either.
 
 `src/lib/CMakeLists.txt` is a standalone `project()`, so it configures either way, and the
 guard resolves the monorepo root via `git rev-parse --show-toplevel` regardless of entry
