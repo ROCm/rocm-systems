@@ -120,14 +120,14 @@ inline void push_user_scope(const std::string& marker, const std::string& contex
             wire_string += '|';
             wire_string += backend;
         }
-        roctxRangePushA(wire_string.c_str());
-        auto roctx_rollback = make_scope_guard([] { roctxRangePop(); });
-
         state.capture.capture(wire_string);
+
+        // Nothing below can throw, so the two rollbacks above cover every
+        // failure this call can see and the ROCTX push needs no guard of its own.
+        roctxRangePushA(wire_string.c_str());
         inc(state.stats.user_scope_pushes);
         inc(state.stats.pushes);
 
-        roctx_rollback.dismiss();
         guards_rollback.dismiss();
         stack_rollback.dismiss();
     }
