@@ -108,12 +108,15 @@ small-message (under 16 MB) latency and can degrade it by roughly
 5-10x compared to earlier ROCm releases. Setting ``HSA_NO_SCRATCH_RECLAIM=1``
 removes the overhead and restores the expected small-message latency.
 
-Improving performance on the MI300X 
-===================================
+Improving performance on the MI300X and MI350X
+===============================================
 
-This section outlines ways to improve RCCL performance on MI300X systems,
-including guidelines for systems with fewer than eight GPUs and the most efficient
-GPU partition modes.
+This section outlines ways to improve RCCL performance on MI300X and MI350X
+systems, including guidelines for systems with fewer than eight GPUs, the most
+efficient GPU partition modes, and channel tuning for multi-node
+configurations. Where behavior applies to both architectures, both are called
+out together; where behavior differs, the difference is described in its own
+subsection.
 
 Configuration with fewer than eight GPUs
 ----------------------------------------
@@ -148,20 +151,23 @@ logical partitioning of XCDs into devices in the ROCm stack. The names are
 derived from the number of logical partitions that are created out of the eight
 XCDs. In the default mode, SPX (Single Partition X-celerator), all eight XCDs are
 viewed as a single logical compute element, meaning that the :doc:`amd-smi <amdsmi:index>`
-utility will show a single MI300X device. In CPX (Core Partitioned X-celerator)
+utility will show a single MI300X or MI350X device. In CPX (Core Partitioned X-celerator)
 mode, each XCD appears as a separate logical GPU, for example, as eight separate
-GPUs in :doc:`amd-smi <amdsmi:index>` per MI300X. CPX mode can be viewed as
+GPUs in :doc:`amd-smi <amdsmi:index>` per MI300X or MI350X device. CPX mode can be viewed as
 having explicit scheduling privileges for each individual compute element (XCD).
+Both the MI300X and MI350X support SPX and CPX compute partitioning modes.
 
 While compute partitioning modes change the space on which you can assign work
 to compute units, the memory partitioning modes (known as Non-Uniform Memory
 Access (NUMA) Per Socket (NPS)) change the number of NUMA domains that a device
 exposes. In other words, it changes the number of HBM stacks which are
 accessible to a compute unit, and therefore the size of its memory space. However,
-for the MI300X, the number of memory partitions must be less than or equal to
-the number of compute partitions. NPS4 (viewing pairs of HBM stacks as a
+for the MI300X and MI350X, the number of memory partitions must be less than or equal to
+the number of compute partitions. On the MI300X, NPS4 (viewing pairs of HBM stacks as a
 disparate element), for example, is only enabled when in CPX mode (viewing each
-XCD as a disparate element).
+XCD as a disparate element). The MI350X doesn't support NPS4; see
+`MI350X partition mode differences`_ for the memory partitioning modes it
+supports instead.
 
 - Compute partition modes 
 
@@ -181,7 +187,7 @@ XCD as a disparate element).
     directly visible to the logical devices in its quadrant. An XCD can still
     access all portions of memory through multi-GPU programming techniques.
 
-The MI300 CPX mode can be accessed using the following :doc:`amdsmi:index`
+The MI300X CPX mode can be accessed using the following :doc:`amdsmi:index`
 commands.
 
 .. code-block:: shell
@@ -189,10 +195,21 @@ commands.
    amd-smi set --gpu all --compute-partition CPX
    amd-smi set --gpu all --memory-partition NPS4
 
-RCCL performance with CPX and NPS4
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+MI350X/MI355X partition modes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To run RCCL allreduce on 64 GPUs with CPX+NPS4 mode on the MI300X, use this
+For MI350X/MI355X, RCCL supports the DPX compute partitioning mode and the NPS2 memory partitioning mode.
+
+.. code-block:: shell
+
+   amd-smi set --gpu all --compute-partition DPX
+   amd-smi set --gpu all --memory-partition NPS2
+
+RCCL performance with CPX and NPS4 on MI300X
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The following benchmark results were measured on MI300X systems. To run RCCL
+allreduce on 64 GPUs with CPX+NPS4 mode on the MI300X, use this
 example:
 
 .. code-block:: shell
@@ -233,10 +250,11 @@ A significant performance improvement is achievable with optimized CPX mode,
 which peaks at ~340 GB/s with a single OAM. The difference in bus bandwidth
 between the unoptimized and optimized modes increases as the buffer size grows.
 
-Using RCCL and CPX in PyTorch
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Using RCCL and CPX in PyTorch on MI300X
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The PyTorch all_reduce benchmark is used to reproduce the performance reported
+The following benchmark results were measured on MI300X systems. The PyTorch
+all_reduce benchmark is used to reproduce the performance reported
 by RCCL-Tests with the RCCL and CPX optimizations.
 
 .. note::
@@ -275,6 +293,39 @@ set during the benchmark in the following manner:
 The default allreduce PyTorch benchmark peak bus bandwidth performance is
 ~170 GB/s on a single OAM with ROCm 6.2.4, while the optimized run for CPX on a
 single OAM peaks at ~315 GB/s.
+
+RCCL channel tuning for multi-node MI350X (ROCm 7.14 / RCCL 2.30.4)
+--------------------------------------------------------------------
+
+Starting with RCCL 2.30.4 (ROCm 7.14), the default number of communication
+channels for multi-node collectives on MI350X/MI355X in SPX mode has been reduced from 64 to 48,
+leaving additional Compute Units (CUs) free for compute kernels that run
+concurrently with communication. For computation-bound workloads that rely
+heavily on communication-computation overlap, staying with this default may
+be beneficial since it leaves more CUs available for compute, but this is a
+deliberate trade-off against raw communication bandwidth, so users measuring
+standalone rccl-tests bandwidth (with no concurrent compute contending for
+CUs) or running communication-bound workloads with negligible concurrent
+compute may see a regression compared to ROCm 7.2.1/RCCL 2.27.7. This expected
+behavior can be recovered by setting both ``NCCL_MAX_NCHANNELS=64`` and
+``NCCL_MIN_NCHANNELS=64`` (64 is the effective ceiling for multi-node jobs).
+In either case, the actual channel count in use should be confirmed via
+``NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,TUNING,COLL`` before drawing
+performance conclusions.
+
+As of ROCm 10.0, the default communication channel count will revert back to
+64 CUs.
+
+.. list-table:: Default max multi-node channel (CU) limits on MI350X by ROCm version
+   :header-rows: 1
+   :widths: 20 30
+
+   * - ROCm version
+     - Default max multi-node CUs
+   * - 7.14
+     - 48
+   * - 10.0
+     - 64
 
 Context tracking on GPUs
 ----------------------------------------

@@ -248,18 +248,16 @@ else()
     find_package(NUMA)
     if(NUMA_FOUND)
       set(NUMA "${NUMA_LIBRARIES}")
-      # In BUILD_SHARED_LIBS mode hsakmt-config.cmake loads hsakmtTargets.cmake.
-      # Because hsakmt is static, its private imported dependencies are exported
-      # through LINK_ONLY and must be recreated by the package config. The
-      # staticdrm package path links the raw library name instead.
-      if(BUILD_SHARED_LIBS)
-        foreach(_numa_library IN LISTS NUMA_LIBRARIES)
-          if(TARGET "${_numa_library}")
-            set(HSAKMT_FIND_NUMA_DEPENDENCY ON)
-            break()
-          endif()
-        endforeach()
-      endif()
+      # When NUMA was found as a target, ensure consumers can find it too
+      # by having hsakmt-config.cmake call find_dependency(NUMA).
+      # This is needed regardless of BUILD_SHARED_LIBS because hsakmt's
+      # exported targets reference numa::numa.
+      foreach(_numa_library IN LISTS NUMA_LIBRARIES)
+        if(TARGET "${_numa_library}")
+          set(HSAKMT_FIND_NUMA_DEPENDENCY ON)
+          break()
+        endif()
+      endforeach()
     else()
       find_library(NUMA NAMES numa REQUIRED)
     endif()

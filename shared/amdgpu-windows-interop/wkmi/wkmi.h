@@ -83,6 +83,7 @@ struct DeviceInfo {
   uint32_t max_scratch_slots_per_cu;          ///< Maximum scratch slots per CU
   uint32_t num_shader_engine;                 ///< Number of shader engines
   uint32_t shader_array_per_shader_engine;    ///< Number of shader arrays per shader engine
+  uint32_t max_phys_cu_per_engine;            ///< Max CUs per SE before harvest
   
   // Clock frequencies
   uint32_t max_engine_clock_mhz;              ///< Maximum engine clock frequency in MHz

@@ -9,7 +9,7 @@
 
 #include "amd_hip_fp16.h"
 
-#if __GNUC__ >= 13
+#if __GNUC__ >= 13 && !defined(__powerpc__) // TODO: remove powerpc exclusion when gcc supports __bf16 on ppc64le
 #define HIP_GNUC_BF16_TYPE 1
 #else
 #define HIP_GNUC_BF16_TYPE 0

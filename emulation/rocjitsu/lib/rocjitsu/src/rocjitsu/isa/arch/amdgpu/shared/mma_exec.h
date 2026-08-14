@@ -339,11 +339,9 @@ inline InputLoc wmma_f8f6f4_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint
 }
 
 inline InputLoc wmma_f4_32x16x128_a_input_loc(uint32_t row, uint32_t k) {
-  const uint32_t row_group = row >> 3;
-  const uint32_t lane_row = row - 8u * ((row_group + 1u) >> 1u);
-  const uint32_t lane = lane_row + 16u * ((k >> 2) & 1u);
-  const uint32_t slot = 64u * (row_group & 1u) + (k & 3u) + 4u * (k >> 3);
-  return wmma_packed_input_loc(lane, slot, 4);
+  auto loc = wmma_f8f6f4_input_loc(16, 128, row % 16, k, 4, /*mixed_subbyte=*/false);
+  loc.vgpr_offset += 8 * (row / 16);
+  return loc;
 }
 
 inline InputLoc wmma_a_input_loc(uint32_t M, uint32_t K, uint32_t row, uint32_t k, uint32_t a_bits,
@@ -373,6 +371,12 @@ inline InputLoc gfx12_wmma_b_input_loc(uint32_t wave_size, uint32_t N, uint32_t 
 }
 
 inline OutputLoc wmma_output_loc_32(uint32_t M, uint32_t N, uint32_t row, uint32_t col) {
+  if (M == 32 && N == 16) {
+    const uint32_t local_row = row % 16;
+    const uint32_t lane = (local_row / 8) * N + col;
+    const uint32_t reg = 8 * (row / 16) + local_row % 8;
+    return {reg, lane};
+  }
   uint32_t elems_per_lane = (M * N) / WMMA_WAVE32;
   uint32_t lane = (row / elems_per_lane) * N + col;
   uint32_t reg = row % elems_per_lane;
@@ -781,14 +785,7 @@ inline uint32_t wmma_scale_lane(uint32_t index, uint32_t scale_select) {
   return index + ((scale_select & 0x1u) ? 16u : 0u);
 }
 
-inline uint32_t wmma_f4_32x16x128_a_scale_lane(uint32_t row) {
-  const uint32_t row_group = row >> 3;
-  if (row_group == 1)
-    return row + 8u;
-  if (row_group == 2)
-    return row - 8u;
-  return row;
-}
+inline uint32_t wmma_f4_32x16x128_a_scale_lane(uint32_t row) { return row; }
 
 inline uint32_t wmma_a_scale_lane(uint32_t M, uint32_t K, uint32_t row, uint32_t scale_select,
                                   uint32_t a_bits, uint32_t b_bits) {
