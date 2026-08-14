@@ -443,7 +443,8 @@ TEST_F(RoctxRecordFnTest, UninstallClearsState)
 
     uninstall();
     EXPECT_FALSE(is_installed());
-    EXPECT_EQ(g_install.handle.load(), at::INVALID_CALLBACK_HANDLE);
+    const auto handle = g_install.rlock([](const InstallState& state) { return state.handle; });
+    EXPECT_EQ(handle, at::INVALID_CALLBACK_HANDLE);
 }
 
 TEST_F(RoctxRecordFnTest, UninstallWhenNotInstalledIsNoOp)

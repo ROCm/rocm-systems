@@ -3,14 +3,17 @@
 
 #pragma once
 
+#include "synchronized.hpp"
+
 #include <atomic>
 #include <cstddef>
-#include <mutex>
 #include <string>
 #include <vector>
 
 namespace torch_trace_collector::detail
 {
+
+using rocprofiler_compute_tool::common::synchronized_t;
 
 // Buffer of emitted wire strings for the test capture hook.
 class CaptureBuffer
@@ -18,37 +21,47 @@ class CaptureBuffer
 public:
     void capture(const std::string& wire_string)
     {
+        // Read outside the lock so the callback path takes no lock while
+        // capture is off, which is the case outside the tests.
         if (!capturing_.load(std::memory_order_relaxed))
             return;
-        std::lock_guard<std::mutex> guard(mutex_);
-        if (captured_.size() < kCap)
-        {
-            captured_.push_back(wire_string);
-        }
+        captured_.wlock(
+            [&](std::vector<std::string>& captured)
+            {
+                if (captured.size() < kCap)
+                {
+                    captured.push_back(wire_string);
+                }
+            });
     }
 
     void start()
     {
-        std::lock_guard<std::mutex> guard(mutex_);
-        captured_.clear();
-        capturing_.store(true, std::memory_order_release);
+        captured_.wlock(
+            [this](std::vector<std::string>& captured)
+            {
+                captured.clear();
+                capturing_.store(true, std::memory_order_release);
+            });
     }
 
     std::vector<std::string> stop()
     {
         capturing_.store(false, std::memory_order_release);
-        std::lock_guard<std::mutex> guard(mutex_);
-        std::vector<std::string>    out = captured_;
-        captured_.clear();
-        return out;
+        return captured_.wlock(
+            [](std::vector<std::string>& captured)
+            {
+                std::vector<std::string> out = captured;
+                captured.clear();
+                return out;
+            });
     }
 
 private:
     static constexpr std::size_t kCap = 4096;
 
-    std::atomic<bool>        capturing_{false};
-    std::mutex               mutex_;
-    std::vector<std::string> captured_;
+    std::atomic<bool>                        capturing_{false};
+    synchronized_t<std::vector<std::string>> captured_;
 };
 
 inline CaptureBuffer g_capture;

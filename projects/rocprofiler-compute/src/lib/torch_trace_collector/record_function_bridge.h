@@ -19,7 +19,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -162,36 +161,40 @@ inline void end_cb(const at::RecordFunction& /*record_fn*/, at::ObserverContext*
 
 inline std::int64_t install()
 {
-    std::lock_guard<std::mutex> lock(g_install.mutex);
-    const auto                  existing = g_install.handle.load();
-    if (existing != at::INVALID_CALLBACK_HANDLE)
-    {
-        return static_cast<std::int64_t>(existing);
-    }
-    const auto handle = at::addGlobalCallback(
-        at::RecordFunctionCallback(start_cb, end_cb)
-            .scopes({at::RecordScope::FUNCTION, at::RecordScope::BACKWARD_FUNCTION}));
-    g_install.handle.store(handle);
-    g_install.installed.store(true);
-    return static_cast<std::int64_t>(handle);
+    return g_install.wlock(
+        [](InstallState& state)
+        {
+            if (state.handle != at::INVALID_CALLBACK_HANDLE)
+            {
+                return static_cast<std::int64_t>(state.handle);
+            }
+            state.handle = at::addGlobalCallback(
+                at::RecordFunctionCallback(start_cb, end_cb)
+                    .scopes({at::RecordScope::FUNCTION, at::RecordScope::BACKWARD_FUNCTION}));
+            state.installed = true;
+            return static_cast<std::int64_t>(state.handle);
+        });
 }
 
 inline void uninstall()
 {
-    std::lock_guard<std::mutex> lock(g_install.mutex);
-    const auto                  handle = g_install.handle.exchange(at::INVALID_CALLBACK_HANDLE);
-    g_install.installed.store(false);
-    if (handle != at::INVALID_CALLBACK_HANDLE)
-    {
-        at::removeCallback(handle);
-    }
-    // Only the callback consumes snapshots.
-    g_snapshots.clear();
+    g_install.wlock(
+        [](InstallState& state)
+        {
+            const auto handle = std::exchange(state.handle, at::INVALID_CALLBACK_HANDLE);
+            state.installed   = false;
+            if (handle != at::INVALID_CALLBACK_HANDLE)
+            {
+                at::removeCallback(handle);
+            }
+            // Only the callback consumes snapshots.
+            g_snapshots.clear();
+        });
 }
 
 inline bool is_installed()
 {
-    return g_install.installed.load();
+    return g_install.rlock([](const InstallState& state) { return state.installed; });
 }
 
 }  // namespace torch_trace_collector::detail

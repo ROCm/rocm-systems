@@ -25,8 +25,12 @@ _THIS_DIR = Path(__file__).resolve().parent
 # parents[2] resolves to <repo>/src in dev and <install>/libexec/<project>
 # in installed layouts; both host the torch_trace_collector sources at lib/.
 _NATIVE_TOOL_ROOT = _THIS_DIR.parents[2]
-_SO_SOURCE_DIR = _NATIVE_TOOL_ROOT / "lib" / "torch_trace_collector"
+_NATIVE_SOURCE_DIR = _NATIVE_TOOL_ROOT / "lib"
+_SO_SOURCE_DIR = _NATIVE_SOURCE_DIR / "torch_trace_collector"
 _SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
+_SHARED_UTILS_HEADERS = (
+    _NATIVE_SOURCE_DIR / "utils" / "synchronized" / "synchronized.hpp",
+)
 
 _INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
 
@@ -38,12 +42,14 @@ C_TIER_NAMES = frozenset((TIER_PREBUILT, TIER_RUNTIME_BUILD))
 
 def _fingerprint_input_paths() -> tuple[Path, ...]:
     """The build inputs that determine the artifact: the C++ sources and
-    headers, the build file, and the CMake probe scripts.
+    headers, the shared utility headers the module includes, the build file,
+    and the CMake probe scripts.
 
     Sorted so the fingerprint does not depend on filesystem enumeration order.
     """
     inputs = set(_SO_SOURCE_DIR.glob("*.cpp")) | set(_SO_SOURCE_DIR.glob("*.h"))
     inputs |= set(_SO_SOURCE_DIR.glob("cmake/*.py"))
+    inputs |= set(_SHARED_UTILS_HEADERS)
     inputs.add(_SO_BUILDFILE)
     return tuple(sorted(inputs))
 
@@ -280,7 +286,7 @@ def _try_runtime_build(
     if missing_inputs:
         _safe_log(
             "log",
-            f"build inputs missing under {_SO_SOURCE_DIR} "
+            f"build inputs missing under {_NATIVE_SOURCE_DIR} "
             f"({', '.join(missing_inputs)}); skipping the runtime build",
             diagnostics,
         )
