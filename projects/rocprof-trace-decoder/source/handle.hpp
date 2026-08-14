@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #pragma once
+#include "record_filter.hpp"
 #include "trace_parser.hpp"
 
 #include <array>
@@ -115,6 +116,7 @@ public:
 
     rocprof_trace_decoder_se_data_callback_t se_data_cb{nullptr};
     void* se_data_userdata{nullptr};
+    RecordFilter record_filter{};
 
     mutable std::condition_variable_any cv;
     mutable std::atomic<int> gfxip = 0;
@@ -125,6 +127,7 @@ public:
     HandleData() : instance(std::make_shared<AddressTable>()) {}
 
     WriteLock<AddressTable> decoder() const { return {instance, decoder_mut}; }
+    ReadLock<AddressTable> decoder_read() const { return {instance, decoder_mut}; }
 #endif
 
     static std::mutex& get_map_mutex()

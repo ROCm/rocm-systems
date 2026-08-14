@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 from typing import Any
 
 __all__ = [
@@ -15,6 +15,10 @@ __all__ = [
     "EventType",
     "InstCategory",
     "Instruction",
+    "Marker",
+    "MarkerFlags",
+    "MarkerKind",
+    "MarkerRecordKind",
     "Occupancy",
     "OtherSimdInstruction",
     "Pc",
@@ -118,6 +122,28 @@ class ShaderDataFlags(IntEnum):
     PRIV = 1
 
 
+class MarkerRecordKind(IntEnum):
+    HEADER = 0
+    PAYLOAD = 1
+    LAST = 2
+
+
+class MarkerKind(IntEnum):
+    UNKNOWN = 0
+    FUNCTION = 1
+    USER_SCOPE = 2
+    POINT = 3
+    LAST = 4
+
+
+class MarkerFlags(IntFlag):
+    NONE = 0
+    EXIT_PREVIOUS = 0x1
+    ENTER = 0x2
+    NEW_WAVE = 0x4
+    LAST = 0x4
+
+
 class RecordType(IntEnum):
     GFXIP = 0
     OCCUPANCY = 1
@@ -130,7 +156,8 @@ class RecordType(IntEnum):
     RT_FREQUENCY = 8
     INST_OTHER_SIMD = 9
     DISPATCH = 10
-    LAST = 11
+    MARKER = 11
+    LAST = 12
 
 
 @dataclass(frozen=True, order=True)
@@ -217,6 +244,24 @@ class ShaderData:
 
 
 @dataclass
+class Marker:
+    size: int
+    shaderdata: ShaderData
+    kernel_entry: Pc
+    code_object_id: int
+    name: str | None
+    source_location: str | None
+    marker_id: int
+    record_kind: MarkerRecordKind
+    marker_kind: MarkerKind
+    marker_flags: MarkerFlags
+    payload_index: int
+    payload_count: int
+    delay: int
+    reserved: int
+
+
+@dataclass
 class OtherSimdInstruction:
     size: int
     time: int
@@ -277,4 +322,5 @@ class TraceRecords:
     realtime_frequency: int | None = None
     other_simd: list[OtherSimdInstruction] = field(default_factory=list)
     dispatches: list[Dispatch] = field(default_factory=list)
+    markers: list[Marker] = field(default_factory=list)
     batches: list[tuple[RecordType, list[Any] | int]] = field(default_factory=list)
