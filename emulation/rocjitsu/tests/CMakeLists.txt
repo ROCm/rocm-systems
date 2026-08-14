@@ -439,6 +439,10 @@ add_executable(
     dbt/waitcnt_translator_test.cpp
     dbt/virtual_lds_dispatch_rewrite_test.cpp
     dbt/virtual_lds_metadata_test.cpp
+    dbt/encoding_translator_test.cpp
+    dbt/legalization_table_test.cpp
+    dbt/support/translate_test_support.cpp
+    dbt/translate_gfx1250_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
     sysfs_test.cpp
