@@ -356,7 +356,7 @@ FenceOrderingTester::~FenceOrderingTester() {
   rocshmem_free(s_buf);
   rocshmem_free(r_buf);
   rocshmem_free(signal);
-  CHECK_HIP(hipFree(error_count));
+  CHECK_HIP(hipFreeHost(error_count));
 }
 
 void FenceOrderingTester::resetBuffers(size_t size) {

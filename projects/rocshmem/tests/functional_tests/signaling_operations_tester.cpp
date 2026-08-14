@@ -132,7 +132,7 @@ SignalingOperationsTester::~SignalingOperationsTester() {
   free_test_buffer(s_buf, args.local_buf_type);
   free_test_buffer(r_buf);
   free_test_buffer(sig_addr);
-  CHECK_HIP(hipFree(fetched_value));
+  CHECK_HIP(hipFreeHost(fetched_value));
 }
 
 void SignalingOperationsTester::resetBuffers([[maybe_unused]] size_t size) {
