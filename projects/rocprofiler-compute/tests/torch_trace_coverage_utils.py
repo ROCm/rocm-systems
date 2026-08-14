@@ -3146,7 +3146,7 @@ def parse_roctx_markers(
 
 
 # Sentinel leaf-context labels emitted by the C++ RecordFunction tier.
-# Source of truth: torch_trace_collector.cpp ``default_leaf_context``.
+# Source of truth: leaf_context.h ``default_leaf_context``.
 C_TIER_LEAF_CONTEXT_SENTINELS: Tuple[str, ...] = (
     "aten:0",
     "aten.nested:0",

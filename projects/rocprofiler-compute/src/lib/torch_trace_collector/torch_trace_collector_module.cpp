@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// pybind11 module exposing the ROCTX RecordFunction bridge to Python.
+// pybind11 module exposing the torch_trace_collector API to Python.
 
 #include "capture_buffer.h"
 #include "process_state.h"
@@ -44,7 +44,7 @@ PYBIND11_MODULE(torch_trace_collector, m)
 {
     using namespace torch_trace_collector::detail;
 
-    m.doc() = "ROCTX bridge for PyTorch's RecordFunction callback.";
+    m.doc() = "Emits ROCTX ranges around PyTorch operators through a RecordFunction callback.";
 
     m.def("install", &install, "Install the global RecordFunction callback. Idempotent.");
     m.def("uninstall", &uninstall, "Remove the registered callback.");
