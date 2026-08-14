@@ -53,8 +53,11 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <memory>
+#include <string_view>
+#include <thread>
 #include <utility>
 
 // static assert for rocprofiler_packet ABI compatibility
@@ -137,6 +140,51 @@ kernel_replay_pass_count(rocprofiler_dispatch_counting_service_data_t dispatch_d
         if(context::kernel_replay_is_enabled(ctx))
             return context::kernel_replay_pass_count(ctx, dispatch_data);
     return 1;
+}
+
+template <typename TryDrainFn>
+void
+replay_wait_or_fatal(TryDrainFn&& try_drain_once, std::string_view what)
+{
+    static constexpr int drain_slices = 5;
+    static constexpr int max_slices   = 12;
+
+    for(int i = 0; i < max_slices; ++i)
+    {
+        if(try_drain_once()) return;
+        ROCP_WARNING << fmt::format(
+            "kernel replay: still waiting for {} (~{}s elapsed)", what, (i + 1) * drain_slices);
+    }
+    ROCP_FATAL << fmt::format(
+        "kernel replay: {} did not drain after ~{}s", what, max_slices * drain_slices);
+}
+
+void
+replay_drain_agent_or_fatal(hsa_agent_t agent)
+{
+    auto* queue_controller = get_queue_controller();
+    if(queue_controller == nullptr) return;
+
+    constexpr auto poll_interval = std::chrono::milliseconds{2};
+    constexpr auto max_wait      = std::chrono::seconds{60};
+    const auto     deadline      = std::chrono::steady_clock::now() + max_wait;
+
+    for(;;)
+    {
+        int64_t in_flight = 0;
+        queue_controller->iterate_queues([&](const Queue* sibling) {
+            if(sibling != nullptr && sibling->get_agent().get_hsa_agent().handle == agent.handle)
+                in_flight += sibling->active_async_packets();
+        });
+
+        if(in_flight == 0) return;
+
+        ROCP_FATAL_IF(std::chrono::steady_clock::now() >= deadline)
+            << "kernel replay: agent-wide drain stuck (" << in_flight
+            << " async handler(s) still active after ~60s)";
+
+        std::this_thread::sleep_for(poll_interval);
+    }
 }
 
 template <typename DomainT, typename... Args>
@@ -818,23 +866,48 @@ WriteInterceptor(const void* packets,
     if(const int replay_n = static_cast<int>(kernel_replay_pass_count(_replay_pass_count_data));
        replay_n > 1 && pkt_count == 1 && num_dispatch_packets == 1)
     {
-        const auto& core = queue.core_api();
+        const auto& core         = queue.core_api();
+        hsa_agent_t replay_agent = queue.get_agent().get_hsa_agent();
 
         // Drain barrier: fence the CPU against all prior in-flight GPU work so device memory is
         // stable before snapshotting.
         hsa_signal_t drain_signal = null_hsa_signal;
         Queue::create_signal(0, &drain_signal, /*use_pool=*/false);
         {
+            using namespace std::chrono_literals;
+
             auto drain_pkts = packet_vector_t{};
             CreateBarrierPacket(nullptr, &drain_signal, drain_pkts);
             writer(drain_pkts.data(), drain_pkts.size());
-            core.hsa_signal_wait_scacquire_fn(
-                drain_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+            replay_wait_or_fatal(
+                [&]() {
+                    return core.hsa_signal_wait_scacquire_fn(
+                               drain_signal,
+                               HSA_SIGNAL_CONDITION_EQ,
+                               0,
+                               std::chrono::nanoseconds{5s}.count(),
+                               HSA_WAIT_STATE_BLOCKED) == 0;
+                },
+                "this queue's prior GPU work");
         }
+
+        replay_drain_agent_or_fatal(replay_agent);
 
         // Save all tracked device allocations.
         kernel_replay::memory_snapshot::Snapshot snapshot{};
         snapshot.snap();
+
+        if(!snapshot.ok())
+        {
+            ROCP_WARNING << "kernel replay: snapshot capture failed (memory pressure or copy "
+                            "error); running this dispatch once without replay";
+            if(drain_signal.handle != 0) get_core_table()->hsa_signal_destroy_fn(drain_signal);
+            process_packet_batch(packets_arr, 1, [&writer](packet_vector_t&& _packets) {
+                writer(_packets.data(), _packets.size());
+            });
+            return;
+        }
 
         // Per-pass loop. pass_done is reused across passes; reset to 1 before each submit so the
         // appended barrier decrements it to 0 on completion.
@@ -846,6 +919,8 @@ WriteInterceptor(const void* packets,
 
         for(int pass = 0; pass < replay_n; ++pass)
         {
+            using namespace std::chrono_literals;
+
             replay_state.is_final = (pass == replay_n - 1);
             core.hsa_signal_store_screlease_fn(pass_done, 1);
 
@@ -855,8 +930,16 @@ WriteInterceptor(const void* packets,
                 [&writer](packet_vector_t&& _packets) { writer(_packets.data(), _packets.size()); },
                 &replay_state);
 
-            core.hsa_signal_wait_scacquire_fn(
-                pass_done, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+            replay_wait_or_fatal(
+                [&]() {
+                    return core.hsa_signal_wait_scacquire_fn(
+                               pass_done,
+                               HSA_SIGNAL_CONDITION_EQ,
+                               0,
+                               std::chrono::nanoseconds{5s}.count(),
+                               HSA_WAIT_STATE_BLOCKED) == 0;
+                },
+                "this replay pass");
 
             // Restore device memory between passes so the next pass sees identical inputs. The
             // final pass leaves device memory as the app expects.

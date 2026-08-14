@@ -24,7 +24,10 @@
 
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
+#include <hsa/hsa.h>
+
 #include <cstddef>
+#include <optional>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -59,6 +62,11 @@ record_free(void* ptr);
 // Frozen copy of the inventory taken under a brief read lock. Used by memory_snapshot at snap time.
 alloc_map_t
 snap_inventory();
+
+// Copy a tracked region host->device under the inventory read lock. Returns nullopt when the
+// region is no longer live at the snapshotted size.
+std::optional<hsa_status_t>
+restore_tracked_region(void* gpu_addr, const void* host_copy, size_t size);
 
 // Install inventory wrappers on top of the existing table function pointers.
 void
