@@ -4,7 +4,6 @@ import re
 import shutil
 import subprocess
 import argparse
-import time
 from datetime import datetime
 import csv
 
@@ -104,31 +103,32 @@ def copy_images(images_path, num_images, benchmark_mode):
             dst_dir = os.path.join(dst_cat_dir, resolution)
             if not os.path.exists(src_dir):
                 continue
+            src_images = [f for f in os.listdir(src_dir) if f.endswith('.jpg')]
+            expected = len(src_images) * num_images
             existing = len([f for f in os.listdir(dst_dir) if f.endswith('.jpg')]) if os.path.exists(dst_dir) else 0
-            if existing >= num_images:
+            if existing >= expected:
                 print(f"Skipping copy: {dst_dir} already has {existing} images.")
                 continue
             os.makedirs(dst_dir, exist_ok=True)
-            src_images = [f for f in os.listdir(src_dir) if f.endswith('.jpg')]
             print(f"Copying images from {src_dir} to {dst_dir}")
-            # Copy all source images into destination
+            # Copy originals first
             for img in src_images:
                 shutil.copy(os.path.join(src_dir, img), os.path.join(dst_dir, img))
-            # If the destination still has fewer than num_images, duplicate until it does
-            dst_images = [f for f in os.listdir(dst_dir) if f.endswith('.jpg')]
-            if len(dst_images) < num_images:
-                base_image = os.path.join(dst_dir, dst_images[0])
-                base_name = os.path.splitext(dst_images[0])[0]
-                for i in range(len(dst_images), num_images):
-                    shutil.copy(base_image, os.path.join(dst_dir, f'{base_name}_{i}.jpg'))
+            # Add num_images - 1 duplicates per source image (original counts as 1)
+            for img in src_images:
+                base_stem = os.path.splitext(img)[0]
+                src_img = os.path.join(src_dir, img)
+                for i in range(num_images - 1):
+                    shutil.copy(src_img, os.path.join(dst_dir, f'{base_stem}_{i}.jpg'))
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 def build_jpegdecodeperf(rocm_path):
     """
     Builds the jpegdecodeperf sample app from source using cmake and make.
-    The build directory ~/jpegdecodeperf-test/ is wiped before each build to
-    ensure a clean state. Skips the build if the binary already exists.
+    Skips the build if the binary already exists in ~/jpegdecodeperf-test/.
+    If the directory exists but the binary is missing, it is wiped first to
+    ensure a clean build.
     """
     home_dir = os.path.expanduser('~')
     build_dir = os.path.join(home_dir, 'jpegdecodeperf-test')
@@ -139,12 +139,10 @@ def build_jpegdecodeperf(rocm_path):
         if os.path.exists(build_dir):
             shutil.rmtree(build_dir)
         os.makedirs(build_dir)
-        os.chdir(build_dir)
         cmake_source = os.path.join(rocm_path, 'share/rocjpeg/samples/jpegDecodePerf/')
         env = {**os.environ, 'ROCM_PATH': rocm_path}
-        subprocess.run(['cmake', cmake_source], check=True, env=env)
-        subprocess.run(['make', '-j8'], check=True, env=env)
-        os.chdir(home_dir)
+        subprocess.run(['cmake', cmake_source], check=True, env=env, cwd=build_dir)
+        subprocess.run(['make', '-j8'], check=True, env=env, cwd=build_dir)
 
 # ── Benchmark execution ───────────────────────────────────────────────────────
 
@@ -173,6 +171,11 @@ def run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_form
             base_cmd,
             capture_output=True, text=True, env=env
         )
+        if result.returncode != 0:
+            print(result.stderr)
+            raise RuntimeError(
+                f"jpegdecodeperf failed (exit {result.returncode}) on {dir_path}"
+            )
         print(result.stdout)
 
         ips, mps, proc_time, wall_time, images = 0, 0, 0, 0, 0
@@ -225,8 +228,9 @@ def run_benchmark(images_path, batch_size, num_threads, num_images, device_id, b
                 dir_path = os.path.join(cat_dir, resolution)
                 if not os.path.exists(dir_path):
                     continue
+                total = sum(1 for f in os.listdir(dir_path) if f.endswith('.jpg'))
                 ips, mps, proc_time, wall_time, _ = run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_format, crop, output_path)
-                results.append([category, decode_type, resolution.replace('_', 'x'), num_images, proc_time, ips, mps, wall_time])
+                results.append([category, decode_type, resolution.replace('_', 'x'), total, proc_time, ips, mps, wall_time])
 
     elif mode == 'category':
         # Benchmark each resolution subfolder within the single category
@@ -236,8 +240,9 @@ def run_benchmark(images_path, batch_size, num_threads, num_images, device_id, b
             dir_path = os.path.join(cat_dir, resolution)
             if not os.path.exists(dir_path):
                 continue
+            total = sum(1 for f in os.listdir(dir_path) if f.endswith('.jpg'))
             ips, mps, proc_time, wall_time, _ = run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_format, crop, output_path)
-            results.append([category, decode_type, resolution.replace('_', 'x'), num_images, proc_time, ips, mps, wall_time])
+            results.append([category, decode_type, resolution.replace('_', 'x'), total, proc_time, ips, mps, wall_time])
 
     else:  # flat or single — benchmark the whole folder (or file's parent folder) as one unit
         if direct:
@@ -273,7 +278,7 @@ def save_results(results, batch_size, num_threads, device_id):
     with open(csv_filename, 'w', newline='') as csvfile:
         fieldnames = [
             'Image Category', 'Decode Type', 'Resolution', 'Number of Images',
-            'Processing Time Per Image (ms)', 'Images Per Seconds (IPS)',
+            'Processing Time Per Image (ms)', 'Images Per Second (IPS)',
             'MPixels/sec', 'Total Wall Time (sec)'
         ]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -285,7 +290,7 @@ def save_results(results, batch_size, num_threads, device_id):
                 'Resolution':                    result[2],
                 'Number of Images':              result[3],
                 'Processing Time Per Image (ms)':result[4],
-                'Images Per Seconds (IPS)':      result[5],
+                'Images Per Second (IPS)':      result[5],
                 'MPixels/sec':                   result[6],
                 'Total Wall Time (sec)':         result[7],
             })
@@ -305,7 +310,7 @@ def main():
                              '(e.g. jpeg_images/flowers), a parent folder (e.g. jpeg_images/), or a flat '
                              f'folder of images. (default: {default_images_path})')
     parser.add_argument('-n', '--num_images', type=int, default=1,
-                        help='Number of images per source image to copy into the benchmark folder (default: 100)')
+                        help='Number of images per source image to copy into the benchmark folder (default: 1)')
     parser.add_argument('-b', '--batch_size', type=int, default=32,
                         help='Batch size for benchmarking (default: 32)')
     parser.add_argument('-t', '--num_threads', type=int, default=1,

@@ -83,11 +83,11 @@ benchmark_results_<YYYYMMDD_HHMMSS>_batch_size_<B>_num_threads_<T>_device_id_<D>
 | Column | Description |
 |---|---|
 | Image Category | Category or folder name |
-| Decode Type | Always `Native` (reflects the decoder mode) |
+| Decode Type | Output format used for decoding — reflects the `-fmt` argument (e.g. `rgb`, `yuv_planar`); defaults to `native` when `-fmt` is not specified |
 | Resolution | Image resolution string (e.g. `1920x1080` or `mixed` for flat/single layouts) |
 | Number of Images | Number of images processed |
 | Processing Time Per Image (ms) | Average decode time per image in milliseconds |
-| Images Per Seconds (IPS) | Decoder throughput |
+| Images Per Second (IPS) | Decoder throughput |
 | MPixels/sec | Megapixels per second |
 | Total Wall Time (sec) | End-to-end wall-clock time for the benchmark run |
 
