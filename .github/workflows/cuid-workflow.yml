@@ -26,6 +26,12 @@ jobs:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
     steps:
+      # Self-hosted runner workspace can be left with root-owned files by other jobs/containers.
+      - name: Clean workspace
+        run: |
+          sudo rm -rf "$GITHUB_WORKSPACE" || true
+          mkdir -p "$GITHUB_WORKSPACE"
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
@@ -62,6 +68,12 @@ jobs:
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
+      # Container runs as root, so clean any root-owned leftovers before checkout.
+      - name: Clean workspace
+        run: |
+          rm -rf "$GITHUB_WORKSPACE" || true
+          mkdir -p "$GITHUB_WORKSPACE"
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set Project Directory
