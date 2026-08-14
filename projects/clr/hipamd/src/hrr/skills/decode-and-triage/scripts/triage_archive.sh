@@ -11,7 +11,6 @@ COMPAT="$SCRIPT_DIR/check_replay_compat.py"
 
 ARCHIVE=""
 REPLAY_MODE="auto"
-NO_SYNC=0
 OUTPUT=""
 FORMAT="markdown"
 
@@ -23,7 +22,6 @@ Options:
   --archive PATH       pid-* HRR archive directory (required)
   --replay [MODE]      Replay mode: native, docker, auto (default), or bare --replay (= native)
   --no-replay          Metadata / --info only (no GPU replay or preflight block on replay)
-  --no-sync            Replay without --sync-after-launch (faster, but a fault is not attributed)
   -o, --output PATH    Write finding to PATH (default: HRR_TRIAGE_WORKDIR/<pid>-<ts>.finding.md)
   --format FORMAT      markdown (default) or json
   -h, --help           Show this help
@@ -46,7 +44,6 @@ while [[ $# -gt 0 ]]; do
       if [[ $# -lt 2 || "$2" == --* ]]; then REPLAY_MODE="native"; shift
       else REPLAY_MODE="$2"; shift 2; fi ;;
     --no-replay) REPLAY_MODE="skip"; shift ;;
-    --no-sync) NO_SYNC=1; shift ;;
     -o|--output) OUTPUT="$2"; shift 2 ;;
     --format) FORMAT="$2"; shift 2 ;;
     *) echo "error: unknown arg: $1" >&2; exit 1 ;;
@@ -101,53 +98,25 @@ pick_gpu() {
       [[ -n "$idx" ]] || continue
       (( free > best_free )) && { best_free=$free; best=$idx; }
     done < <(rocm-smi --showmeminfo vram 2>/dev/null | awk '
-      # The used line reads "VRAM Total Used Memory", so it also contains the
-      # word Total and must be tested first. Total and used arrive on separate
-      # lines whose order is not guaranteed, so collect both per device and
-      # subtract at END rather than on whichever line happens to land last.
-      /GPU\[/ {
-        id = $1; gsub(/[^0-9]/, "", id)
-        if ($0 ~ /Total Used Memory/) used[id] = $NF
-        else if ($0 ~ /Total Memory/) total[id] = $NF
-      }
-      END {
-        for (id in total)
-          if (id in used) print id, total[id] - used[id]
-      }')
+      /GPU\[/ { gsub(/[^0-9]/,"",$1); idx=$1 }
+      /Used Memory/ { used=$NF }
+      /Total Memory/ { total=$NF; if (idx!="") { print idx, total-used; idx="" } }')
     [[ -n "$best" ]] && { echo "[triage] GPU $best (most free VRAM)" >&2; echo "$best"; return; }
   fi
   echo "0"
 }
 
-replay_sync_args() {
-  # Default replay serializes the GPU once at the end, so a fault is reported
-  # but not attributed to a launch: the finding then has no failing event and
-  # no kernel. Synchronizing after every launch is what makes the last launch
-  # line before the fault the culprit. Opt out with --no-sync when throughput
-  # matters more than attribution, for instance a long soak.
-  [[ "$NO_SYNC" == "1" ]] && return 0
-  echo "--sync-after-launch"
-}
-
 run_native_replay() {
-  local play="$1" log="$2" gpu sync_args=()
+  local play="$1" log="$2" gpu
   setup_library_path "$play"
   gpu="$(pick_gpu)"
   [[ -r /dev/kfd ]] || { echo "error: /dev/kfd not accessible" >&2; return 1; }
-  read -r -a sync_args <<< "$(replay_sync_args)"
-  echo "[triage] native replay playback=$play GPU=$gpu ${sync_args[*]}" >&2
+  echo "[triage] native replay playback=$play GPU=$gpu" >&2
   set +e
-  # hrr-playback is a HIP program, so HIP_VISIBLE_DEVICES is the mask that
-  # applies to it. Setting ROCR_VISIBLE_DEVICES re-indexes devices underneath a
-  # HIP mask, which can land the replay on a device other than the one picked.
-  HIP_VISIBLE_DEVICES="$gpu" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
-    "$play" "$ARCHIVE" ${sync_args[@]+"${sync_args[@]}"} 2>&1 | tee "$log"
+  ROCR_VISIBLE_DEVICES="$gpu" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
+    "$play" "$ARCHIVE" 2>&1 | tee "$log"
   local rc=${PIPESTATUS[0]}
-  # Deliberately not re-enabling `set -e` here. The caller wraps this call in
-  # `set +e` precisely so a failing replay is survivable, and restores `set -e`
-  # afterwards. Re-arming it inside the function made the non-zero return fatal,
-  # so a replay that faulted killed the script before the finding was written:
-  # the skill produced nothing in exactly the case it exists for.
+  set -e
   echo "[triage] native replay exit=$rc" >&2
   return "$rc"
 }
