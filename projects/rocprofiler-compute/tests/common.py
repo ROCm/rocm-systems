@@ -246,6 +246,15 @@ def get_num_pmc_file(output_dir):
     ])
 
 
+def read_binary_file_tree(root: Path) -> dict[Path, bytes]:
+    """Return binary contents keyed by each file's path relative to root."""
+    return {
+        file_path.relative_to(root): file_path.read_bytes()
+        for file_path in root.rglob("*")
+        if file_path.is_file()
+    }
+
+
 def strip_ansi(s: str) -> str:
     ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
     return ansi_escape.sub("", s)

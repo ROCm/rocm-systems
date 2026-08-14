@@ -3,7 +3,9 @@
 
 """Unit tests for src/rocprof_compute_analyze/analysis_base.py."""
 
+import argparse
 import gzip
+from pathlib import Path
 
 import common
 import pandas as pd
@@ -173,3 +175,17 @@ def test_concat_result_csvs_rejects_wide_legacy_results(tmp_path, monkeypatch) -
         )
 
     assert not (tmp_path / "pmc_perf.csv").exists()
+
+
+def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -> None:
+    """Reject two paths whose last two components match."""
+    mock_error = common.patch_console(monkeypatch, MODULE, "error")["error"]
+    paths = [[str(tmp_path / parent / "vcopy" / "MI300")] for parent in ("a", "b")]
+    for path in paths:
+        Path(path[0]).mkdir(parents=True)
+
+    # The mock records instead of exiting, so sanitize runs on to a later error.
+    with pytest.raises(SystemExit):
+        OmniAnalyze_Base(argparse.Namespace(tui=False, path=paths), {}).sanitize()
+
+    assert "last two components" in mock_error.call_args.args[1]
