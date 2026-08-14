@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import text
 
-from rocprof_compute_analyze.analysis_db import db_analysis
+from rocprof_compute_analyze.analysis_db import SourceFrameCollector, db_analysis
 from utils import analysis_orm as orm
 from utils import schema
 from utils.metrics.noise_clamper import (
@@ -88,8 +88,13 @@ def make_colliding_pc_sampling_tool_data(process_id: int, sample_count: int):
     return tool_data
 
 
-def make_pc_sampling_only_database_analyzer(workload_path, tool_data_records):
-    """Build a database analyzer configured for sampling-only records."""
+def make_source_frame_collector(workload, workload_path="/fake/workload"):
+    """Build a collector for tests that call the insert paths directly."""
+    return SourceFrameCollector(Path(workload_path), workload)
+
+
+def make_pc_sampling_database_analyzer(tool_data_per_workload):
+    """Build a database analyzer configured for sampling-only workloads."""
     analyzer = db_analysis(
         SimpleNamespace(output_name=None, output_format="database"),
         {},
@@ -98,16 +103,23 @@ def make_pc_sampling_only_database_analyzer(workload_path, tool_data_records):
         workload_path: schema.Workload(
             sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
         )
+        for workload_path in tool_data_per_workload
     }
     analyzer._roofline_ceilings_per_workload = {}
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
-    analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
+    analyzer._pc_sampling_tool_data_per_workload = tool_data_per_workload
     analyzer._dispatch_data_per_workload = {
         workload_path: analyzer._build_pc_sampling_dispatch_data(tool_data_records)
+        for workload_path, tool_data_records in tool_data_per_workload.items()
     }
     analyzer._roofline_data_per_kernel = {}
     analyzer._roofline_data_per_workload = {}
     return analyzer
+
+
+def make_pc_sampling_only_database_analyzer(workload_path, tool_data_records):
+    """Build a database analyzer configured for one sampling-only workload."""
+    return make_pc_sampling_database_analyzer({workload_path: tool_data_records})
 
 
 def make_counter_backed_database_analyzer(
@@ -1007,7 +1019,7 @@ def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):
     analyzer._pc_sampling_tool_data_per_workload = {"/fake/workload": []}
 
     code_object_stores = analyzer.add_pc_sampling_data(
-        "/fake/workload", workload, {}, {}
+        "/fake/workload", workload, {}, {}, make_source_frame_collector(workload)
     )
     db_session.commit()
 
@@ -1033,7 +1045,7 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
         workload_path: [make_pc_sampling_tool_data()]
     }
     code_object_stores = analyzer.add_pc_sampling_data(
-        workload_path, workload, kernel_objs, {}
+        workload_path, workload, kernel_objs, {}, make_source_frame_collector(workload)
     )
     db_session.commit()
 
@@ -1085,7 +1097,7 @@ def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
         workload_path: [first_tool_data, second_tool_data]
     }
     code_object_stores = analyzer.add_pc_sampling_data(
-        workload_path, workload, kernel_objs, {}
+        workload_path, workload, kernel_objs, {}, make_source_frame_collector(workload)
     )
     db_session.commit()
 
@@ -1184,9 +1196,13 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     assert len({line.instruction_uuid for line in instruction_lines}) == 2
     assert len({line.kernel_symbol.code_object_uuid for line in instruction_lines}) == 2
     assert {
-        (line.code_object_offset, line.instruction, line.comment)
+        (line.code_object_offset, line.instruction) for line in instruction_lines
+    } == {(0x10, "v_mov")}
+    assert {
+        (frame.source_line.source_file.file_path, frame.source_line.line_number)
         for line in instruction_lines
-    } == {(0x10, "v_mov", "/s/shared.cpp:7")}
+        for frame in line.source_lines
+    } == {("/s/shared.cpp", 7)}
 
     instruction_by_process_id = {
         line.kernel_symbol.code_object_store.pid: line for line in instruction_lines
@@ -1249,7 +1265,11 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
     assert len({line.kernel_symbol.code_object_uuid for line in instruction_lines}) == 2
     assert {line.code_object_offset for line in instruction_lines} == {0x10}
     assert {line.instruction for line in instruction_lines} == {"v_mov"}
-    assert {line.comment for line in instruction_lines} == {"/s/shared.cpp:7"}
+    assert {
+        (frame.source_line.source_file.file_path, frame.source_line.line_number)
+        for line in instruction_lines
+        for frame in line.source_lines
+    } == {("/s/shared.cpp", 7)}
 
     instruction_by_process_id = {
         line.kernel_symbol.code_object_store.pid: line for line in instruction_lines
@@ -1346,7 +1366,7 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
         .execute(
             text(
                 "SELECT pid, kernel_uuid, kernel_name, count "
-                "FROM compute_pc_sampling_view ORDER BY pid"
+                "FROM compute_pc_sampling_summary_view ORDER BY pid"
             )
         )
         .mappings()
@@ -1408,7 +1428,10 @@ def test_run_analysis_exports_process_scoped_pc_sampling_csv(
         expected_pc_sampling_mapping = {
             pid: count
             for pid, count in database_session.execute(
-                text("SELECT pid, count FROM compute_pc_sampling_view ORDER BY pid")
+                text(
+                    "SELECT pid, count "
+                    "FROM compute_pc_sampling_summary_view ORDER BY pid"
+                )
             )
         }
         expected_kernel_mapping = {
@@ -1429,11 +1452,12 @@ def test_run_analysis_exports_process_scoped_pc_sampling_csv(
             "kernel.csv",
             "kernel_metric.csv",
             "workload_metric.csv",
-            "pc_sampling.csv",
+            "pc_sampling_summary.csv",
+            "source_lines.csv",
         }
         assert "dispatch.csv" not in output_filenames
 
-        pc_sampling_frame = pd.read_csv(csv_directory / "pc_sampling.csv")
+        pc_sampling_frame = pd.read_csv(csv_directory / "pc_sampling_summary.csv")
         kernel_frame = pd.read_csv(csv_directory / "kernel.csv")
         assert "pid" in pc_sampling_frame.columns
         assert "code_object_id" in pc_sampling_frame.columns
@@ -1671,6 +1695,198 @@ def make_disasm_code_object(code_object_id, instructions, symbol_name="sym"):
     }
 
 
+def make_source_workload_tool_data_records(
+    workload_path,
+    snapshot_sources,
+    sampled_sources,
+):
+    """Create PC-sampling inputs whose comments point at snapshot sources.
+
+    A path named only in sampled_sources is absent from the snapshot.
+    """
+    workload_path.mkdir(parents=True, exist_ok=True)
+    for original_source_path, content in snapshot_sources.items():
+        snapshot_path = (
+            workload_path / "src" / Path(original_source_path).relative_to("/")
+        )
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_path.write_text(content, encoding="utf-8")
+
+    tool_data = make_pc_sampling_tool_data()
+    tool_data["strings"]["pc_sample_comments"] = list(sampled_sources)
+    return [tool_data]
+
+
+def fetch_source_lines_by_workload(session):
+    """Group (file path, digest, line, content) tuples under each workload."""
+    source_lines_by_workload = {}
+    for source_file in session.query(orm.SourceFile).all():
+        source_lines_by_workload.setdefault(source_file.workload.sub_name, []).extend(
+            (
+                source_file.file_path,
+                source_file.md5_checksum,
+                source_line.line_number,
+                source_line.content,
+            )
+            for source_line in source_file.source_lines
+        )
+    return {
+        workload_name: sorted(
+            rows, key=lambda row: (row[0], row[2] is not None, row[2])
+        )
+        for workload_name, rows in source_lines_by_workload.items()
+    }
+
+
+def test_run_analysis_keeps_each_workloads_source_files_apart(db_session, tmp_path):
+    """Two workloads sharing a basename each keep their own absolute path."""
+    tool_data_per_workload = {}
+    for workload_name, source_path in (
+        ("first", "/home/u/first/src/a.cpp"),
+        ("second", "/opt/projects/second/src/a.cpp"),
+    ):
+        workload_path = tmp_path / workload_name
+        tool_data_per_workload[str(workload_path)] = (
+            make_source_workload_tool_data_records(
+                workload_path,
+                {source_path: "int first;\nint second;\n"},
+                [f"{source_path}:1", f"{source_path}:2"],
+            )
+        )
+    analyzer = make_pc_sampling_database_analyzer(tool_data_per_workload)
+
+    run_analysis_with_materialized_views(analyzer)
+
+    file_paths_by_workload = {
+        workload_name: sorted({row[0] for row in rows})
+        for workload_name, rows in fetch_source_lines_by_workload(db_session).items()
+    }
+    assert file_paths_by_workload == {
+        "first": ["/home/u/first/src/a.cpp"],
+        "second": ["/opt/projects/second/src/a.cpp"],
+    }
+    assert db_session.query(orm.SourceFile).count() == 2
+
+
+def test_run_analysis_stores_lines_no_instruction_references(db_session, tmp_path):
+    """A referenced file is stored whole, not just the lines a comment names."""
+    workload_path = tmp_path / "workload"
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {"/home/u/app/vcopy.cpp": "int first;\nint second;\nint third;\n"},
+        ["/home/u/app/vcopy.cpp:2", "/home/u/app/vcopy.cpp:2"],
+    )
+    analyzer = make_pc_sampling_database_analyzer({
+        str(workload_path): tool_data_records
+    })
+
+    run_analysis_with_materialized_views(analyzer)
+
+    digest = "86812da3721fe4b16ee110ad3dbcbbfa"
+    assert fetch_source_lines_by_workload(db_session)["workload"] == [
+        ("/home/u/app/vcopy.cpp", digest, 1, "int first;"),
+        ("/home/u/app/vcopy.cpp", digest, 2, "int second;"),
+        ("/home/u/app/vcopy.cpp", digest, 3, "int third;"),
+    ]
+
+
+def test_run_analysis_records_source_file_missing_from_snapshot(db_session, tmp_path):
+    """A referenced file absent from the snapshot still gets its rows."""
+    workload_path = tmp_path / "workload"
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {"/home/u/app/present.cpp": "int present;\n"},
+        ["/home/u/app/present.cpp:1", "/home/u/app/absent.cpp:7"],
+    )
+    analyzer = make_pc_sampling_database_analyzer({
+        str(workload_path): tool_data_records
+    })
+
+    run_analysis_with_materialized_views(analyzer)
+
+    assert fetch_source_lines_by_workload(db_session)["workload"] == [
+        ("/home/u/app/absent.cpp", None, 7, None),
+        (
+            "/home/u/app/present.cpp",
+            "d4aeed8f3a65c2f28866bd51dff2ebfd",
+            1,
+            "int present;",
+        ),
+    ]
+
+
+def test_run_analysis_records_line_past_end_of_source_file(db_session, tmp_path):
+    """A frame naming a line the snapshot copy lacks gets a contentless row."""
+    workload_path = tmp_path / "workload"
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {"/home/u/app/vcopy.cpp": "int only;\n"},
+        ["/home/u/app/vcopy.cpp:1", "/home/u/app/vcopy.cpp:99"],
+    )
+    analyzer = make_pc_sampling_database_analyzer({
+        str(workload_path): tool_data_records
+    })
+
+    run_analysis_with_materialized_views(analyzer)
+
+    digest = "ac72447959bb8fac84d23eea9b103598"
+    assert fetch_source_lines_by_workload(db_session)["workload"] == [
+        ("/home/u/app/vcopy.cpp", digest, 1, "int only;"),
+        ("/home/u/app/vcopy.cpp", digest, 99, None),
+    ]
+
+
+def test_run_analysis_links_frames_innermost_first(db_session, tmp_path):
+    """An inline stack is stored in order and rebuilt by the summary view."""
+    workload_path = tmp_path / "workload"
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {
+            "/opt/rocm/hip.h": "line one\nline two\n",
+            "/home/u/app/vcopy.cpp": "int a;\nint b;\n",
+        },
+        [
+            "/opt/rocm/hip.h:? -> /opt/rocm/hip.h:2 -> /home/u/app/vcopy.cpp:1",
+            "/home/u/app/vcopy.cpp:2",
+        ],
+    )
+    analyzer = make_pc_sampling_database_analyzer({
+        str(workload_path): tool_data_records
+    })
+
+    run_analysis_with_materialized_views(analyzer)
+
+    chained_line = (
+        db_session.query(orm.InstructionLine).filter_by(code_object_offset=0x10).one()
+    )
+    assert [
+        (
+            frame.frame_index,
+            frame.source_line.source_file.file_path,
+            frame.source_line.line_number,
+        )
+        for frame in chained_line.source_lines
+    ] == [
+        (0, "/opt/rocm/hip.h", None),
+        (1, "/opt/rocm/hip.h", 2),
+        (2, "/home/u/app/vcopy.cpp", 1),
+    ]
+
+    rebuilt_sources = {
+        offset: source
+        for offset, source in db_session.execute(
+            text(
+                "SELECT offset, source FROM compute_pc_sampling_summary_view "
+                "ORDER BY offset"
+            )
+        )
+    }
+    assert rebuilt_sources == {
+        0x10: ("/opt/rocm/hip.h:? -> /opt/rocm/hip.h:2 -> /home/u/app/vcopy.cpp:1"),
+        0x20: "/home/u/app/vcopy.cpp:2",
+    }
+
+
 def test_add_code_object_isa_adds_unsampled_lines(db_session):
     """Un-sampled instructions of a dispatched kernel are added and attributed
     via the mangled-name join; a disassembly offset that matches an already-
@@ -1755,8 +1971,9 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
             workload_path: [make_pc_sampling_tool_data()]
         }
         kernel_symbols = {}
+        source_frames = make_source_frame_collector(workload)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols
+            workload_path, workload, kernel_objs, kernel_symbols, source_frames
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -1764,6 +1981,7 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
             kernel_objs,
             code_object_stores,
             kernel_symbols,
+            source_frames,
         )
         db_session.commit()
 
@@ -1861,8 +2079,9 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
             workload_path: [first_tool_data, second_tool_data]
         }
         kernel_symbols = {}
+        source_frames = make_source_frame_collector(workload, workload_path)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols
+            workload_path, workload, kernel_objs, kernel_symbols, source_frames
         )
         assert code_object_stores == {}
         analyzer.add_code_object_isa(
@@ -1871,6 +2090,7 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
             kernel_objs,
             code_object_stores,
             kernel_symbols,
+            source_frames,
         )
         db_session.commit()
 
@@ -1930,8 +2150,9 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
         analyzer = db_analysis(MagicMock(), {})
         analyzer._pc_sampling_tool_data_per_workload = {workload_path: [tool_data]}
         kernel_symbols = {}
+        source_frames = make_source_frame_collector(workload)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols
+            workload_path, workload, kernel_objs, kernel_symbols, source_frames
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -1939,6 +2160,7 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
             kernel_objs,
             code_object_stores,
             kernel_symbols,
+            source_frames,
         )
         db_session.commit()
 
@@ -2015,8 +2237,9 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
             workload_path: [first_tool_data, second_tool_data]
         }
         kernel_symbols = {}
+        source_frames = make_source_frame_collector(workload)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols
+            workload_path, workload, kernel_objs, kernel_symbols, source_frames
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2024,6 +2247,7 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
             kernel_objs,
             code_object_stores,
             kernel_symbols,
+            source_frames,
         )
         db_session.commit()
 
@@ -2126,6 +2350,7 @@ def test_add_code_object_isa_requires_process_local_dispatch(db_session):
             kernel_objs,
             code_object_stores,
             {},
+            make_source_frame_collector(workload),
         )
         db_session.commit()
 
@@ -2156,7 +2381,9 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
     analyzer._pc_sampling_tool_data_per_workload = {
         workload_path: [make_pc_sampling_tool_data()]
     }
-    analyzer.add_pc_sampling_data(workload_path, workload, kernel_objs, {})
+    analyzer.add_pc_sampling_data(
+        workload_path, workload, kernel_objs, {}, make_source_frame_collector(workload)
+    )
     db_session.commit()
 
     lines = db_session.query(orm.InstructionLine).all()
@@ -2178,3 +2405,33 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
     assert retained_sample_state.instruction_samples == [instruction_type_count]
     assert instruction_type_count.instruction_sample_lookup.text == "VALU"
     assert instruction_type_count.count == 1
+
+
+def test_run_analysis_keeps_sampled_row_without_a_comment(db_session, tmp_path):
+    """An instruction with no comment keeps its row with a null source."""
+    workload_path = tmp_path / "workload"
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {"/home/u/app/vcopy.cpp": "int a;\n"},
+        # The sampling path turns the empty comment into the "N/A" sentinel.
+        ["/home/u/app/vcopy.cpp:1", ""],
+    )
+    analyzer = make_pc_sampling_database_analyzer({
+        str(workload_path): tool_data_records
+    })
+
+    run_analysis_with_materialized_views(analyzer)
+
+    assert [
+        source_file.file_path for source_file in db_session.query(orm.SourceFile)
+    ] == ["/home/u/app/vcopy.cpp"]
+    rebuilt_sources = {
+        offset: source
+        for offset, source in db_session.execute(
+            text(
+                "SELECT offset, source FROM compute_pc_sampling_summary_view "
+                "ORDER BY offset"
+            )
+        )
+    }
+    assert rebuilt_sources == {0x10: "/home/u/app/vcopy.cpp:1", 0x20: None}
