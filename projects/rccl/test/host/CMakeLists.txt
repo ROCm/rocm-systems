@@ -66,19 +66,19 @@ if(BUILD_TESTS)
   add_dependencies(rccl-UnitTestsMicro hipify_all copy_nccl_device_headers)
 
   # Always build this binary with llvm source-based coverage.
-  # Restrict the instrumentation to the host compilation pass: applying it to the
-  # amdgcn device pass pulls in LLVM profiling runtime symbols
-  # (__llvm_profile_raw_version, __start___llvm_prf_cnts, ...) that don't exist on
-  # the device, which makes amdgcn-link fail.
-  #
-  # The "SHELL:" prefix keeps each "-Xarch_device <flag>" pair intact: without
-  # it CMake de-duplicates the repeated -Xarch_device token, which would leave
-  # -fno-coverage-mapping unqualified and silently drop __llvm_covmap from the
-  # host pass too.
+  # Host-only micro-test: all HIP/device symbols are satisfied by fakes/, so it
+  # needs HIP host compile requirements but no amdgcn device codegen. Compile
+  # host-only (like the standalone build below) so llvm coverage instrumentation
+  # never reaches the device pass -- there it pulls in LLVM profiling runtime
+  # symbols (__llvm_profile_raw_version, __start___llvm_prf_cnts, ...) that do
+  # not exist on device, making amdgcn-link fail. --offload-host-only removes the
+  # device pass entirely, which is robust across clang toolchains that ignore the
+  # older -Xarch_device coverage split.
+  target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only)
+  target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt)
+
   target_compile_options(rccl-UnitTestsMicro PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping
-    "SHELL:-Xarch_device -fno-profile-instr-generate"
-    "SHELL:-Xarch_device -fno-coverage-mapping")
+    -fprofile-instr-generate -fcoverage-mapping)
   target_link_options(rccl-UnitTestsMicro PRIVATE
     -fprofile-instr-generate -fcoverage-mapping)
 
