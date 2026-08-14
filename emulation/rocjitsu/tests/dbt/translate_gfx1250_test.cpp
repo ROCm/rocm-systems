@@ -12414,7 +12414,11 @@ TEST(BinaryTranslatorE2E, Gfx1250TerminatesPrefetchSetupFallthroughIntoZeroPaddi
   EXPECT_EQ(decoded[3]->mnemonic(), "s_endpgm");
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250DoesNotInferSectionFinalImplicitTerminatorWithoutPadding) {
+// A stub whose last instruction ends exactly at the end of `.text` has no padding after it, but it
+// is no more terminated than one that does. Inferring the boundary only when the linker happened to
+// emit alignment bytes would make the translated tail depend on section layout, so section end is
+// treated as the same implicit boundary and the stub still receives its `s_endpgm`.
+TEST(BinaryTranslatorE2E, Gfx1250MaterializesSectionFinalClangUnreachableKernelStub) {
   constexpr uint32_t kSetReplayMode = 0xb9800641u;
   constexpr uint32_t kLiteralOne = 1u;
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
@@ -12431,8 +12435,9 @@ TEST(BinaryTranslatorE2E, Gfx1250DoesNotInferSectionFinalImplicitTerminatorWitho
   rocjitsu::AmdGpuCodeObject first_output(first.elf_bytes.data(), first.elf_bytes.size());
   const auto decoded =
       decode_text_instructions(*first_output.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_EQ(decoded.size(), 1u);
+  ASSERT_EQ(decoded.size(), 2u);
   EXPECT_EQ(decoded[0]->mnemonic(), "s_setreg_imm32_b32");
+  EXPECT_EQ(decoded[1]->mnemonic(), "s_endpgm");
 
   auto second = translator.translate(first_output);
   ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""

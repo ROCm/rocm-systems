@@ -269,7 +269,13 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
         const bool reaches_gfx1250_zero = decode_gap && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
                                           next_offset < section_end &&
                                           inst_data[next_offset / sizeof(uint32_t)] == 0;
-        if (can_fall_through && reaches_gfx1250_zero) {
+        // Running off the end of `.text` is the same boundary as running into padding: there is no
+        // next instruction either way. Requiring padding to be present would make the result
+        // depend on whether the linker happened to align the section, so an unterminated tail
+        // would be translated verbatim in one build and given a terminator in the next.
+        const bool reaches_section_end =
+            arch == ROCJITSU_CODE_ARCH_GFX1250 && i >= decoded.size() && next_offset >= section_end;
+        if (can_fall_through && (reaches_gfx1250_zero || reaches_section_end)) {
           current->has_terminator_ = true;
           current->has_implicit_terminator_ = true;
         }
@@ -483,9 +489,17 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
           continue;
         }
 
-        const bool is_program_exit =
-            block->has_implicit_terminator() || is_program_path_terminator(*term);
         const uint64_t flags = term->flags();
+        // An implicit terminator cuts the FALLTHROUGH edge only: the padding after this block is
+        // not code, so control cannot continue past it. A branch terminator still has its taken
+        // edge, and that edge's target must still be proven present. Treating the whole block as a
+        // program exit would skip both missing-target checks below, and an unresolved taken target
+        // would then leave has_unknown_exit false -- classifying the callee NonReturning and
+        // deleting the caller's continuation.
+        const bool has_branch_exit = term->branch_offset_bytes().has_value() ||
+                                     (flags & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0;
+        const bool is_program_exit = (block->has_implicit_terminator() && !has_branch_exit) ||
+                                     is_program_path_terminator(*term);
         if ((flags & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0) {
           const auto &fixups = block->static_indirect_call_fixups();
           if (fixups.empty() || std::ranges::any_of(fixups, &IndirectCallFixup::source_incomplete))

@@ -3024,6 +3024,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // materialization can turn this unreachable stub into a fallthrough.
         const uint32_t endpgm = build_s_endpgm(host_arch_);
         append_words(kernel_text, std::span<const uint32_t>(&endpgm, 1));
+        // The boundary is inferred from what follows the block, not from anything the block itself
+        // says, so a body that really did run on past here is cut short instead of translated.
+        // Name the offset: an execution that stops early is otherwise indistinguishable from one
+        // that was always meant to, and nothing else in the output records that a decision was
+        // made here.
+        append_warning(result.diagnostics, DiagnosticKind::Legalization,
+                       "fallthrough past this block reaches no decodable instruction; translated "
+                       "with a synthesized s_endpgm boundary",
+                       block->end_offset());
       }
       placement.target_end =
           block_generated_island_pool &&

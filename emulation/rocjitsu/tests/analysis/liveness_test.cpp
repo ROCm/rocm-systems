@@ -586,6 +586,36 @@ TEST(CfgAnalysis, DirectCallToImplicitNonreturningTargetDropsFallthrough) {
   EXPECT_FALSE(has_predecessor(*continuation, caller));
 }
 
+// An implicit terminator cuts the fallthrough edge only. This callee is a conditional branch whose
+// fallthrough runs into padding but whose TAKEN target leaves the section, so where control goes is
+// not known. Treating the whole block as a program exit would skip the missing-target check, call
+// the callee non-returning, and delete the caller's continuation -- silently removing the path the
+// program actually takes when the branch is not taken.
+TEST(CfgAnalysis, DirectCallToPaddingTerminatedBlockWithUnresolvedTakenTargetKeepsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kSCbranchScc0FarOutOfSection = 0xbfa11000u;
+  std::vector<uint32_t> words = {
+      rocjitsu::build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x04 continuation.
+      kSCbranchScc0FarOutOfSection,               // 0x08 callee: taken target is not in .text.
+      0,                                          // 0x0c padding terminates the fallthrough.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()))
+      << "an unresolved taken target must keep the callee's return path unknown";
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
 TEST(CfgAnalysis, PreviousInstructionReturnsPrecedingInstructionInBlock) {
   auto blocks = build_test_blocks({TestOpcode::Nop, TestOpcode::UseSgpr4, TestOpcode::End});
 
