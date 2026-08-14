@@ -16,6 +16,11 @@ if(NOT _rcfn_standalone AND NOT ENABLE_TESTS)
     return()
 endif()
 
+# torch >= 2.15 headers use C++20 constructs (operator<=>, requires-clauses,
+# string_view::starts_with). Applies to this directory and tests/.
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # Honor TORCH_TRACE_PYTHON when provided; otherwise locate an interpreter.
 if(TORCH_TRACE_PYTHON)
     set(_rcfn_python "${TORCH_TRACE_PYTHON}")
@@ -163,8 +168,6 @@ set_target_properties(
     PROPERTIES
         PREFIX ""
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
         POSITION_INDEPENDENT_CODE ON
 )
 
@@ -222,7 +225,7 @@ set(_rcfn_saved_required_libs ${CMAKE_REQUIRED_LIBRARIES})
 set(_rcfn_saved_required_includes ${CMAKE_REQUIRED_INCLUDES})
 get_target_property(_rcfn_inc_dirs ${_so_name} INCLUDE_DIRECTORIES)
 set(CMAKE_REQUIRED_INCLUDES ${_rcfn_inc_dirs})
-set(CMAKE_REQUIRED_FLAGS "-std=c++17")
+set(CMAKE_REQUIRED_FLAGS "-std=c++${CMAKE_CXX_STANDARD}")
 check_cxx_source_compiles(
     "#include <c10/util/ThreadLocalDebugInfo.h>
      #include <string_view>
