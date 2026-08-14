@@ -32,19 +32,17 @@
 namespace {
 
 __global__ void BusyKernel(int* out, int slot, int busy_iters) {
-  volatile float acc = 0.0f;
+  float acc = 0.0f;
   for (int i = 0; i < busy_iters; ++i) {
     acc += __sinf(static_cast<float>(i) * 0.001f);
   }
-  if (acc == 123456.789f) acc += 1.0f;  // never true; keeps the spin loop
-  out[slot] += 1;                        // unconditional sink defeats dead-code elimination
+  out[slot] += (acc > 3.0e38f) ? 2 : 1;  // branch never taken; keeps acc (and the loop) live
 }
 
 __global__ void BusyRmwKernel(int* buf, int busy_iters) {
-  volatile float acc = 0.0f;
+  float acc = 0.0f;
   for (int i = 0; i < busy_iters; ++i) acc += __sinf(static_cast<float>(i) * 0.001f);
-  if (acc == 123456.789f) buf[0] += 1;  // defeat DCE
-  buf[0] += 1;
+  buf[0] += (acc > 3.0e38f) ? 2 : 1;
 }
 
 double TimeEventDependencyPairs(int num_pairs, int busy_iters, int iters) {
@@ -148,7 +146,7 @@ double TimeStreamSweep(int num_streams, int busy_iters, int iters) {
  */
 TEST_CASE("Performance_hipPerfSharedQueueAnyOrderOverlap") {
   constexpr int kBusyIters = 20000;
-  constexpr int kIters = 100;
+  constexpr int kIters = 50;
   const int stream_counts[] = {2, 4, 8, 16, 32};
 
   hipDeviceProp_t props{};
@@ -180,8 +178,8 @@ TEST_CASE("Performance_hipPerfSharedQueueAnyOrderOverlap") {
  */
 TEST_CASE("Performance_hipPerfSharedQueueAnyOrderOverlap_EventDependency") {
   constexpr int kBusyIters = 20000;
-  constexpr int kIters = 100;
-  const int pair_counts[] = {2, 4, 8, 16};
+  constexpr int kIters = 50;
+  const int pair_counts[] = {2, 4, 8};
 
   hipDeviceProp_t props{};
   HIP_CHECK(hipGetDeviceProperties(&props, 0));

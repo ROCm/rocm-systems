@@ -69,7 +69,7 @@ __global__ void ReadLastByteKernel(const unsigned char* buf, size_t n, int* seen
  * ------------------------
  *  - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_Independence") {
+HIP_TEST_CASE(Unit_hipSharedQueueAnyOrderOverlap_Independence) {
   constexpr int kStreams = 32;  // >> GPU_MAX_HW_QUEUES (default 4) -> forced oversubscription
   constexpr int kChain = 4;
   constexpr int kReps = 20;
@@ -117,7 +117,7 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_Independence") {
  * ------------------------
  *  - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_EventDependencyHonored") {
+HIP_TEST_CASE(Unit_hipSharedQueueAnyOrderOverlap_EventDependencyHonored) {
   constexpr int kPairs = 8;  // 16 streams -> oversubscribes the default pool
   constexpr int kReps = 50;
   constexpr int kBusyIters = 8000;
@@ -173,7 +173,7 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_EventDependencyHonored") {
  * ------------------------
  *  - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_IntraStreamOrderAcrossActivation") {
+HIP_TEST_CASE(Unit_hipSharedQueueAnyOrderOverlap_IntraStreamOrderAcrossActivation) {
   constexpr int kIters = 200;
   constexpr int kBase = 5, kDelta = 7, kExpect = kBase + kDelta;
 
@@ -224,7 +224,7 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_IntraStreamOrderAcrossActivation")
  * ------------------------
  *  - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_InternalPredecessorOrdering") {
+HIP_TEST_CASE(Unit_hipSharedQueueAnyOrderOverlap_InternalPredecessorOrdering) {
   constexpr int kStreams = 16, kReps = 40;
   const size_t n = 32u << 20;  // large fill to widen the race window
   const unsigned char kVal = 0xAB;
@@ -276,7 +276,7 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_InternalPredecessorOrdering") {
  * ------------------------
  *  - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_NullStreamOrdering") {
+HIP_TEST_CASE(Unit_hipSharedQueueAnyOrderOverlap_NullStreamOrdering) {
   constexpr int kAsync = 16, kChain = 12;
   std::vector<hipStream_t> a(kAsync);
   for (auto& x : a) HIP_CHECK(hipStreamCreate(&x));
@@ -323,7 +323,7 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_NullStreamOrdering") {
  * ------------------------
  *  - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_GraphUnaffected") {
+HIP_TEST_CASE(Unit_hipSharedQueueAnyOrderOverlap_GraphUnaffected) {
   constexpr int kChains = 16, kDepth = 6, kLaunches = 50;
   std::vector<int*> buf(kChains);
   for (auto& b : buf) {
@@ -386,7 +386,7 @@ TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_GraphUnaffected") {
  *  - HIP_VERSION >= 5.6
  *  - Stream wait-value support (hipDeviceAttributeCanUseStreamWaitValue)
  */
-TEST_CASE("Unit_hipSharedQueueAnyOrderOverlap_StreamWaitValueDependencyHonored") {
+HIP_TEST_CASE(Unit_hipSharedQueueAnyOrderOverlap_StreamWaitValueDependencyHonored) {
   int waitValueSupported = 0;
   HIP_CHECK(hipDeviceGetAttribute(&waitValueSupported, hipDeviceAttributeCanUseStreamWaitValue, 0));
   if (waitValueSupported == 0) {
