@@ -181,8 +181,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Multicast_Large) {
 
 static void RunIndirectCopyP2pTest(unsigned int flags, size_t count, size_t size_in_bytes,
                                    int device_for_src, int device_for_dst) {
-  const bool indirect_src = (flags & hipMemcpyFlagExtOpIndirectSrc) != 0;
-  const bool indirect_dst = (flags & hipMemcpyFlagExtOpIndirectDst) != 0;
+  const bool is_indirect_src = flags & hipMemcpyFlagExtOpIndirectSrc;
+  const bool is_indirect_dst = flags & hipMemcpyFlagExtOpIndirectDst;
   const hipError_t expected_error =
       getIndirectExpectedReturn(LinearAllocs::hipMalloc, LinearAllocs::hipMalloc, device_for_src,
                                 device_for_dst, device_for_dst);
@@ -194,13 +194,13 @@ static void RunIndirectCopyP2pTest(unsigned int flags, size_t count, size_t size
                               LinearAllocs::hipMalloc, device_for_src, device_for_dst);
 
   for (size_t i = 0; i < count; ++i) {
-    if (indirect_src) {
+    if (is_indirect_src) {
       HIP_CHECK(hipSetDevice(device_for_src));
       buffers.batch_src_ptrs[i] =
           addPointerSlot(buffers.slots, buffers.src_ptrs[i], LinearAllocs::hipMalloc);
     }
 
-    if (indirect_dst) {
+    if (is_indirect_dst) {
       HIP_CHECK(hipSetDevice(device_for_dst));
       buffers.batch_dst_ptrs[i] =
           addPointerSlot(buffers.slots, buffers.dst_ptrs[i], LinearAllocs::hipMalloc);

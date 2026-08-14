@@ -972,20 +972,20 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources) {
 
 static void RunIndirectCopyTest(unsigned int flags, size_t count, size_t size_in_bytes,
                                 LinearAllocs alloc_type_src, LinearAllocs alloc_type_dst) {
-  const bool indirect_src = (flags & hipMemcpyFlagExtOpIndirectSrc) != 0;
-  const bool indirect_dst = (flags & hipMemcpyFlagExtOpIndirectDst) != 0;
+  const bool is_indirect_src = flags & hipMemcpyFlagExtOpIndirectSrc;
+  const bool is_indirect_dst = flags & hipMemcpyFlagExtOpIndirectDst;
   const hipError_t expected_error = getIndirectExpectedReturn(alloc_type_src, alloc_type_dst);
 
   IndirectCopyBuffers buffers =
       makeIndirectCopyBuffers(count, size_in_bytes, alloc_type_src, alloc_type_dst);
 
   for (size_t i = 0; i < count; ++i) {
-    if (indirect_src) {
+    if (is_indirect_src) {
       buffers.batch_src_ptrs[i] =
           addPointerSlot(buffers.slots, buffers.src_ptrs[i], alloc_type_src);
     }
 
-    if (indirect_dst) {
+    if (is_indirect_dst) {
       buffers.batch_dst_ptrs[i] =
           addPointerSlot(buffers.slots, buffers.dst_ptrs[i], alloc_type_dst);
     }
@@ -1128,8 +1128,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectCopy_StreamOrderedPointer) {
   constexpr uint64_t kBlocked = 1;
   constexpr uint64_t kReleased = 0;
 
-  const bool indirect_src = (flags & hipMemcpyFlagExtOpIndirectSrc) != 0;
-  const bool indirect_dst = (flags & hipMemcpyFlagExtOpIndirectDst) != 0;
+  const bool is_indirect_src = flags & hipMemcpyFlagExtOpIndirectSrc;
+  const bool is_indirect_dst = flags & hipMemcpyFlagExtOpIndirectDst;
   const hipError_t expected_return = getIndirectExpectedReturn(alloc_type_src, alloc_type_dst);
 
   IndirectCopyBuffers buffers =
@@ -1142,7 +1142,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectCopy_StreamOrderedPointer) {
   for (size_t i = 0; i < count; ++i) {
     // The slots start out pointing at decoys instead of the real buffers, so a slot read taken
     // before the addresses are published gives a wrong result rather than a crash.
-    if (indirect_src) {
+    if (is_indirect_src) {
       LinearAllocGuard<unsigned char> decoy(alloc_type_src, kSizeInBytes);
       fillBuffer(decoy.ptr(), decoy_values, alloc_type_src);
       buffers.batch_src_ptrs[i] = addPointerSlot(buffers.slots, decoy.ptr(), alloc_type_src);
@@ -1150,7 +1150,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectCopy_StreamOrderedPointer) {
       buffers.allocations.push_back(std::move(decoy));
     }
 
-    if (indirect_dst) {
+    if (is_indirect_dst) {
       LinearAllocGuard<unsigned char> decoy(alloc_type_dst, kSizeInBytes);
       buffers.batch_dst_ptrs[i] = addPointerSlot(buffers.slots, decoy.ptr(), alloc_type_dst);
       slots_to_publish.emplace_back(buffers.batch_dst_ptrs[i], buffers.dst_ptrs[i]);
