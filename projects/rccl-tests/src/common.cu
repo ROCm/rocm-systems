@@ -1090,19 +1090,37 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     // *TimedKernel bodies call the same __device__ collective functions as the
     // production kernels, so collective correctness is covered; only the timing-only
     // loop/skip/stamp wrapper around them is not exercised by that datacheck.
-    double deviceDeltaSec = 0.0;
+    // deviceTime() leaves this negative when the timing hook produced no
+    // measurement -- the timed kernel never ran (non-GIN impl, unsupported op/type,
+    // count == 0, or loop < 1). Reporting that as the metric would divide by zero in
+    // getBw (0.00 us / inf GB/s), and the DEVTIME_CHECK below would validate a stale
+    // buffer -- the warmup/production result (false pass), or raw init scratch under
+    // -w 0 (false fail) -- for a kernel that never executed. So WARN once and skip
+    // this row rather than emit a bogus metric or a misleading check verdict.
+    double deviceDeltaSec = -1.0;
     TESTCHECK(args->collTest->deviceTime(args, type, op, root, in_place, &deviceDeltaSec));
+    if (deviceDeltaSec <= 0.0) {
+      if (args->proc == 0 && args->thread == 0) {
+        fprintf(stderr, "# WARN NCCL_GIN_ANVIL_DEVICE_TIMING=2: no in-kernel device-time "
+                        "measurement for this size (timed kernel did not run: non-GIN impl, "
+                        "unsupported op/type, count==0, or loop<1); skipping row "
+                        "(size %ld bytes)\n", args->expectedBytes);
+      }
+      return testSuccess;
+    }
     deltaSec = deviceDeltaSec;
     cputimeSec = deviceDeltaSec;
 
     // Opt-in validation of the TIMED path itself (NCCL_GIN_ANVIL_DEVTIME_CHECK=1).
-    // The hook just ran skip+loop back-to-back collectives into recvbuff; each
-    // iteration is a full deterministic collective over the unchanged sendbuff, so
-    // the final recvbuff equals `expected` from initData. Validate it HERE -- this
-    // is the only point the timed kernel's output is live, before the datacheck
-    // loop below re-inits buffers and overwrites it with the production path. Needs
-    // datacheck on (that is what populates `expected`). Combines wrong-element
-    // counts across threads/ranks so any rank's mismatch fails the run.
+    // Reached only when the timed kernel actually ran (deviceDeltaSec > 0 above), so
+    // recvbuff holds the timed kernel's output -- not a stale warmup/production
+    // buffer. The hook just ran skip+loop back-to-back collectives into recvbuff;
+    // each iteration is a full deterministic collective over the unchanged sendbuff,
+    // so the final recvbuff equals `expected` from initData. Validate it HERE -- the
+    // only point the timed kernel's output is live, before the datacheck loop below
+    // re-inits buffers and overwrites it with the production path. Needs datacheck on
+    // (that is what populates `expected`). Combines wrong-element counts across
+    // threads/ranks so any rank's mismatch fails the run.
     static const int devTimeCheck = []() {
       const char* e = getenv("NCCL_GIN_ANVIL_DEVTIME_CHECK");
       return (e && *e) ? atoi(e) : 0;

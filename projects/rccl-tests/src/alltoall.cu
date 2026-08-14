@@ -541,7 +541,10 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
   // BenchTime, which reports it as THE time/busbw metric on the normal result
   // line. Stay silent here so that line is not split.
   if (outDeltaSec != nullptr) {
-    *outDeltaSec = devUs * 1.0e-6;
+    // Negative sentinel = "no valid measurement" (the timed grid produced no
+    // positive busy window). The caller (BenchTime mode 2) then WARNs and skips the
+    // row instead of reporting a bogus 0.00 us / inf GB/s.
+    *outDeltaSec = (devUs > 0.0) ? devUs * 1.0e-6 : -1.0;
     return testSuccess;
   }
 
