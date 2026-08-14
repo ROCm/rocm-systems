@@ -143,6 +143,16 @@ if [[ "$BACKEND" == "ro" || "$BACKEND" == "gda" ]]; then
     esac
 fi
 
+# Symmetric user-buffer registration is unsupported by the RO backend
+if [[ "$BACKEND" == "ro" ]]; then
+    case "$TEST_NAME" in
+        buffer_register_symmetric_*)
+            echo "Skip: $TEST_NAME (RO does not support symmetric buffer registration)"
+            exit $SKIP_CODE
+            ;;
+    esac
+fi
+
 # AIROCSHMEM-120: RO get tests abort
 if [[ "$BACKEND" == "ro" ]]; then
     case "$TEST_NAME" in

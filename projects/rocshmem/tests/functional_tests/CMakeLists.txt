@@ -72,6 +72,7 @@ target_sources(
     flood_amo_tester.cpp
     device_bitcode_tester.cpp
     library_info_tester.cpp
+    buffer_register_symmetric_tester.cpp
     fence_ordering_tester.cpp
     tile_rma_tester.cpp
     host_team_sync_barrier_tester.cpp
