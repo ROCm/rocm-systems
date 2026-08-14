@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/ldsdir.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3_5 {
@@ -27,6 +28,12 @@ LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeLdsParamLoadLdsdir(const MachineInst *opcode) {
+  return std::make_unique<LdsParamLoadLdsdir>(opcode);
+}
+} // namespace detail
+
 LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
     : Ldsdir("lds_direct_load", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::LdsDirectLoadLdsdir)),
@@ -40,6 +47,12 @@ LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeLdsDirectLoadLdsdir(const MachineInst *opcode) {
+  return std::make_unique<LdsDirectLoadLdsdir>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna3_5
 } // namespace rocjitsu
