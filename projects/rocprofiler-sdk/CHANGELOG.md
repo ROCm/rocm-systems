@@ -21,9 +21,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - `--spm-beta-enabled` flag to opt in to the beta SPM feature.
     - `--spm-config` option in `rocprofv3-avail` to list available SPM configurations.
   - JSON and rocpd output format support for SPM.
-  - OpenMP (OMPT) tracing via the new `--ompt-trace` flag:
-    - Accepts a bare boolean or category list (`all, thread, parallel, task, sync, mutex, target, device, error`); also folded into `--sys-trace`/`--runtime-trace`.
-    - rocpd-only trace: records go to the rocpd database (the default output format) and export via `rocpd convert`.
 
 **Documentation:**
 
@@ -39,10 +36,73 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Removed
 
 
-## ROCprofiler-SDK 1.3.5
+## ROCprofiler-SDK 1.3.5 for ROCm release 10.0.0
 
 ### Added
-- HipFile API tracing support
+
+**API:**
+
+  - rocSHMEM host-stream API interception for the rocSHMEM tracing domain introduced in 1.3.0:
+    - `rocshmem_putmem_on_stream`, `rocshmem_getmem_on_stream`, and `rocshmem_alltoallmem_on_stream` are intercepted and emitted as per-call trace records.
+    - Records are interleaved with HIP, HSA, RCCL, and other runtime traces so rocSHMEM communication activity can be viewed on the same timeline as GPU compute.
+  - hipFile API tracing as a first-class tracing domain:
+    - hipFile API calls are intercepted through dispatch-table wrapping and emitted as per-call trace records alongside HIP, HSA, and other runtime activity.
+    - Enables file I/O operations to be correlated with GPU kernels and memory copies in a single profiling timeline.
+  - Streaming Performance Monitor (SPM) counter data in the rocpd output format:
+    - SPM records are stored as `rocpd_track` rows labelled `SPM`, with counter values grouped by timestamp into `rocpd_sample` rows and per-dimension data in `rocpd_pmc_event` rows.
+    - The rocpd schema gains the `sample_id`, `xcc`, `shader_engine`, and `instance` columns.
+    - SPM data is consumable by any tool that reads the rocpd database and convertible to the other output formats, such as Perfetto.
+  - Advanced Thread Trace (ATT) support in the live attach workflow:
+    - On attach, the SDK registers for code-object iteration and creation callbacks so thread trace operates correctly on code objects that were loaded before the attach occurred.
+    - Makes ATT usable on already-running production workloads without an application restart.
+  - Experimental SQTT quick scan mode for thread trace, enabled through a new CMake flag:
+    - Collects thread trace data without packet insertion or HSA signal manipulation, removing the queue interception overhead required by the standard ATT path.
+    - Individual kernels can be traced without serialization, and the path is independent of the ROCm runtime version.
+    - Experimental: intended to validate the new collection path and to enable out-of-process thread trace and long-kernel tracing in future releases.
+
+**rocprofv3 (CLI):**
+
+  - OpenMP (OMPT) tracing via the new `--ompt-trace` flag:
+    - Accepts a bare boolean or a space-separated category list (`all, thread, parallel, task, sync, mutex, target, device, error`), following the same style as `--pmc` and `--output-format`; for example, `--ompt-trace parallel task target sync`. Also folded into `--sys-trace`/`--runtime-trace`.
+    - rocpd-only trace: records go to the rocpd database (the default output format) and export via `rocpd convert`.
+    - The OMPT callback layer has been supported by ROCprofiler-SDK since an earlier release; this flag makes it accessible without writing a custom tool.
+  - hipFile API tracing via the new `--hipfile-trace` flag (or the `ROCPROF_HIPFILE_API_TRACE` environment variable):
+    - Automatically included in `--runtime-trace` and `--sys-trace`.
+    - Records are emitted across all supported output backends: CSV, JSON, Perfetto, OTF2, and rocpd.
+  - Container-aware `rocattach` symbol resolution: attach entry points are resolved directly from the target process mapped ELF, and tool paths are validated from the target's perspective before injection. This allows attaching from a host to a containerized process without manually copying `.so` files.
+
+**rocprof-trace-decoder:**
+
+  - Python API for decoding Advanced Thread Trace (ATT) / SQTT data directly from Python, without writing a C++ consumer:
+    - Wraps the decoder library and exposes thread trace decoding as a first-class Python interface, with samples demonstrating common workflows.
+    - Useful for analysis scripts, Jupyter notebooks, and custom profiling tools that process ATT output programmatically.
+    - Decoder integration tests have been migrated to Python, simplifying test authoring and making it easier for downstream tools to validate their trace-decoding pipelines.
+
+### Changed
+
+- Previously, `rocattach` calculated symbol offsets from the host's `librocprofiler-register.so` and applied them to the target's mapping, which failed when the host and container libraries differ in ELF layout or path. Offsets are now resolved from the target process itself.
+- Idle inline queues with no active profiling consumers now bypass queue interposition entirely, reducing overhead for applications that create queues but do not immediately dispatch work.
+- DWARF information is now parsed lazily, reducing startup overhead for attach and tracing sessions on large binaries.
+- Disabled autoflush in thread trace to prevent premature buffer flushes that produced incomplete or corrupted traces.
+
+### Resolved issues
+
+- Fixed a GPU stall in device thread trace that occurred when thread trace was started before `hsa_init()`.
+- Fixed a counter-collection stall caused by an `InterceptQueue` ordering bug, and fixed an out-of-bounds write in `Submit()`.
+- Fixed `roctxMark` calls propagating as kernel rename labels, which caused spurious kernel name changes in traces containing ROCTx markers.
+- Fixed SQ aliasing on harvested WGPs and multi-counter desync on gfx11xx targets in AQLprofile, and corrected the `GcEaSeCounterBlockMaxEvent` value.
+- Added a guard to prevent double-initialization of the PC sampling service.
+- Fixed `rocprofv3` attach sessions exiting before all buffered output was flushed; attach sessions now block until the flush completes.
+- Fixed the ordering of code object callbacks during attach, which could race with tools that depend on ordered delivery.
+- Fixed the `fmt/format.h` include path, the `fpic` flag for samples, OMP lookup in CI, and clang-tidy quickscan enablement.
+
+### Known issues
+
+- SPM sessions can remain in a stale state after abrupt termination. See [GitHub issue #6489](https://github.com/ROCm/rocm-systems/issues/6489) for details.
+
+### Removed
+
+- Dependency on `libatomic`. The library was previously linked unconditionally through the `rocprofiler-sdk-atomic` interface target, which caused link failures on toolchains and container images where `libatomic1` is not installed. The single `std::atomic` use that required it has been replaced with explicit memory-ordering synchronization; behavior is unchanged.
 
 
 ## ROCprofiler-SDK 1.3.0 for ROCm release 7.2.4
