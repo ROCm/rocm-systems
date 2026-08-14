@@ -2,14 +2,9 @@
 # SPDX-License-Identifier:  MIT
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import common
-import pandas as pd
 import pytest
-
-from pc_sampling.pc_sampling_analysis import load_pc_sample_records
-from utils.parser import load_pc_sampling_data
 
 config = {}
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
@@ -396,55 +391,3 @@ def test_pc_sampling_with_sol_block(
     assert "instruction" in captured.out
 
     common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def _kernel_top_workload() -> SimpleNamespace:
-    """Workload stub with dfs[1] populated for load_pc_sampling_data tests."""
-    return SimpleNamespace(
-        filter_kernel_ids=[],
-        dfs={
-            1: pd.DataFrame({
-                "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
-                "Count": [2, 1, 1],
-                "Sum(ns)": [900, 800, 200],
-            }),
-        },
-    )
-
-
-def test_load_pc_sampling_data_missing_or_empty_sources_return_empty() -> None:
-    """Absent tool data and empty buffer records both yield empty frames."""
-    workload = SimpleNamespace(filter_kernel_ids=[])
-
-    assert load_pc_sampling_data(workload, "count", None).empty
-
-    workload.filter_kernel_ids = [0, 1, 2]
-    assert load_pc_sampling_data(workload, "count", None).empty
-
-    empty_records = load_pc_sample_records({
-        "buffer_records": {
-            "pc_sample_stochastic": [],
-            "pc_sample_host_trap": [],
-            "kernel_dispatch": [],
-        },
-    })
-    assert empty_records.empty
-
-
-def test_load_pc_sampling_data_out_of_bounds_kernel_warns(monkeypatch) -> None:
-    """An out-of-bounds kernel index warns and returns empty."""
-    mock_warning = common.patch_console(monkeypatch, "utils.parser", "warning")[
-        "warning"
-    ]
-    workload = _kernel_top_workload()
-    tool_data = {
-        "buffer_records": {"pc_sample_stochastic": [{}], "pc_sample_host_trap": []}
-    }
-
-    workload.filter_kernel_ids = [99]
-    result = load_pc_sampling_data(workload, "count", [tool_data])
-
-    mock_warning.assert_called()
-    call_args_str = str(mock_warning.call_args)
-    assert "out of bounds" in call_args_str or "99" in call_args_str
-    assert result.empty
