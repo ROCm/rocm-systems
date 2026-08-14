@@ -23,10 +23,19 @@
 #include "tmp_file_buffer.hpp"
 #include "domain_type.hpp"
 #include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
 
 #include <fmt/format.h>
 
+#include <cerrno>
+#include <cstring>
+#include <fstream>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
+
+#include <unistd.h>
 
 namespace rocprofiler
 {
@@ -43,6 +52,54 @@ compose_tmp_file_name(const output_config& cfg, domain_type buffer_type)
         fmt::format("{}-{}.dat", "%ppid%-%pid%", get_domain_trace_file_name(buffer_type));
 
     return rocprofiler::tool::format_path(filename.string());
+}
+
+std::optional<std::string>
+prepare_required_storage(const output_config& cfg)
+{
+    auto tmp_directory = fs::path{rocprofiler::tool::format_path(cfg.tmp_directory)};
+    auto probe_dir     = tmp_directory / ".rocprofv3";
+    auto probe_path =
+        probe_dir / fmt::format("attach-storage-probe-{}", static_cast<int>(::getpid()));
+
+    auto ec = std::error_code{};
+    fs::create_directories(probe_dir, ec);
+    if(ec)
+    {
+        return fmt::format("failed to create temporary storage directory '{}' :: {}",
+                           probe_dir.string(),
+                           ec.message());
+    }
+
+    {
+        auto ofs = std::ofstream{probe_path, std::ios::binary | std::ios::out | std::ios::trunc};
+        if(!ofs)
+        {
+            return fmt::format("failed to open temporary storage probe file '{}' :: {}",
+                               probe_path.string(),
+                               std::strerror(errno));
+        }
+
+        constexpr auto probe_bytes = std::string_view{"rocprofv3-attach-storage-probe"};
+        ofs.write(probe_bytes.data(), static_cast<std::streamsize>(probe_bytes.size()));
+        ofs.flush();
+        if(!ofs)
+        {
+            fs::remove(probe_path, ec);
+            return fmt::format("failed to write temporary storage probe file '{}' :: {}",
+                               probe_path.string(),
+                               std::strerror(errno));
+        }
+    }
+
+    if(!fs::remove(probe_path, ec) || ec)
+    {
+        ROCP_WARNING << fmt::format("failed to remove temporary storage probe file '{}' :: {}",
+                                    probe_path.string(),
+                                    ec ? ec.message() : "unknown error");
+    }
+
+    return std::nullopt;
 }
 
 tmp_file_name_callback_t&

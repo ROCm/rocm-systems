@@ -2519,6 +2519,12 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
            "After the initial attachment, it is recommended to just use `rocprofv3 --pid=<pid> [-o "
            "<output_file> -d <output_directory> ...]` to attach to a new process.";
 
+    if(auto err = tool::prepare_required_storage(tool::get_config()))
+    {
+        ROCP_ERROR << "Attach aborted: required profiling storage is unavailable: " << *err;
+        return -1;
+    }
+
     assign_attach_output_session_suffix();
 
     pid_t instrumented_pid = getpid();   // The process being profiled

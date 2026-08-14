@@ -34,6 +34,7 @@
 
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -50,6 +51,9 @@ using tmp_file_name_callback_t = std::function<std::string(domain_type)>;
 
 std::string
 compose_tmp_file_name(const output_config& cfg, domain_type buffer_type);
+
+std::optional<std::string>
+prepare_required_storage(const output_config& cfg);
 
 tmp_file_name_callback_t&
 get_tmp_file_name_callback();
