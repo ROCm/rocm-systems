@@ -395,14 +395,13 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             auto _dir         = p.get<std::string>("generate-configs");
             if(!_dir.empty()) _config_folder = std::move(_dir);
 
-            try
-            {
-                std::filesystem::create_directories(_config_folder);
-            } catch(const std::filesystem::filesystem_error& e)
+            std::error_code ec;
+            std::filesystem::create_directories(_config_folder, ec);
+            if(ec)
             {
                 stream(std::cerr, color::warning())
                     << "Failed to create config folder '" << _config_folder
-                    << "': " << e.code().message() << "\n";
+                    << "': " << ec.message() << "\n";
             }
         });
     parser
