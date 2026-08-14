@@ -726,6 +726,14 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
 
     if(_generate_configs)
     {
+        if(!std::filesystem::is_directory(_config_folder))
+        {
+            stream(std::cerr, color::fatal())
+                << "Cannot generate causal configs: output folder '" << _config_folder
+                << "' does not exist and could not be created\n";
+            exit(EXIT_FAILURE);
+        }
+
         auto _is_omni_cfg = [](std::string_view itr) {
             return (itr.find("ROCPROFSYS") == 0 && itr.find(env_vars::MODE) != 0 &&
                     itr.find("ROCPROFSYS_DEBUG_") != 0 && itr.find('=') < itr.length());
