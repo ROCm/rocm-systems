@@ -45,6 +45,9 @@ Examples:
   # Use a custom build directory
   %(prog)s -c test_config.json --build-dir /tmp/my_rccl_build
 
+  # Build and test against a Release build of RCCL (build/release)
+  %(prog)s -c mi455_ainic_roce_perf.json --rccl-build-type release
+
   # Generate coverage report from existing data
   %(prog)s -c test_config.json --no-build --skip-tests --coverage-report
 
@@ -100,6 +103,26 @@ Examples:
             '--build-dir',
             type=str,
             help="Custom build directory path (default: <workdir>/build/debug or build/release)"
+        )
+        self.parser.add_argument(
+            '--rccl-build-type',
+            type=str,
+            choices=['debug', 'release'],
+            default=None,
+            help="RCCL build flavor to build and test against: 'debug' -> <workdir>/build/debug, "
+                 "'release' -> <workdir>/build/release. Release drops the debug-only install.sh "
+                 "flags (--debug, --debug-fast, --enable-mpi-tests) and links rccl-tests against "
+                 "the release librccl.so. Overrides build_configuration.build_type; default is "
+                 "whatever the config selects (debug when its install_flags contain "
+                 "--debug/--debug-fast, else release)."
+        )
+        self.parser.add_argument(
+            '--allow-debug-perf',
+            action='store_true',
+            default=False,
+            help="Permit running rccl-tests perf binaries against a Debug build of RCCL. "
+                 "Without this the runner refuses, because perf numbers measured against "
+                 "a Debug build are not meaningful."
         )
         self.parser.add_argument(
             '--report-suffix',

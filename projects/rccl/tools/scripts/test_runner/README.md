@@ -97,6 +97,55 @@ python test_runner.py --config mi300x_mellanox_ib.json --skip-mpi-check
 python test_runner.py --config unit_tests_only.json --skip-mpi-check
 ```
 
+### Select the RCCL Build Flavor (Debug vs Release)
+
+`install.sh` builds into `build/debug` or `build/release`. Select the flavor the
+runner builds, links `rccl-tests` against, and puts first on `LD_LIBRARY_PATH`
+with `--rccl-build-type` or `build_configuration.build_type`:
+
+```bash
+python test_runner.py --config mi455_ainic_roce_perf.json --rccl-build-type release
+```
+
+Resolution order (highest first):
+
+1. `--rccl-build-type debug|release`
+2. `build_configuration.build_type`
+3. `release`, when every enabled suite runs `rccl-tests`
+4. `debug` if `install_flags` contains `--debug`/`--debug-fast`, else `release`
+
+Release drops the debug-only `install.sh` flags (`--debug`, `--debug-fast`,
+`--enable-mpi-tests`); Debug adds `--debug` if the flags don't already select a
+debug flavor. `--build-dir`, `RCCL_LIB_PATH`, and `RCCL_BUILD_DIR` point at an
+already-built tree and take precedence over `--rccl-build-type`; their flavor is
+whatever was built there, so the runner can only guess it from the path.
+
+### Perf configs must be Release
+
+Perf numbers from a Debug build are meaningless, so a config whose enabled suites
+run *only* `rccl-tests` defaults to `release` (ahead of the `install_flags`
+inference) and **hard-errors** if it still resolves to Debug — pass
+`--allow-debug-perf` to override. A config that *also* runs gtest suites gets a
+**warning** instead and continues, since `rccl-UnitTestsMPI` and
+`rccl-UnitTestsFixturesDebug` don't exist in a Release build. The mixed func+perf
+configs (`mi455_ainic_roce.json`, `mi355x_thor2_roce.json`,
+`mi300x_mellanox_ib.json`, `ainic.json`) therefore stay Debug by design; use the
+dedicated perf configs for numbers you can publish.
+
+A custom library path can't be checked this way, so a perf-only config pointed at
+one is warned only when the path itself has a `debug` directory component.
+
+The opposite direction is warned too: a Release build that runs
+`rccl-UnitTestsMPI` or `rccl-UnitTestsFixturesDebug` won't have those binaries, so
+their tests report `SKIPPED` and the run can still exit 0. The runner lists the
+missing binaries before the first test and repeats the reason in each skipped
+test's record. Pass `--rccl-build-type debug` to actually run them.
+
+A `rccl_tests_build_configuration.rccl_home` pointing at the other flavor's
+directory is redirected to the selected build, so `rccl-tests` never links
+against a stale `librccl.so`. Configs can also name the selected flavor with
+`${RCCL_BUILD_TYPE}`.
+
 ## Environment Variables
 
 The test runner supports the following environment variables to customize behavior:
@@ -110,6 +159,7 @@ The test runner supports the following environment variables to customize behavi
 | `RCCL_TEST_MPI_HOSTFILE` | Path to MPI hostfile for multi-node tests. | `~/.mpi_hostfile` |
 | `RCCL_MPI_LOG_ALL_RANKS` | Set to `1` to capture stdout/stderr from every MPI rank into `rccl_test_rank_<N>.log` in the working directory (rank 0 is tee'd to console + file; ranks 1-N go to file only). Useful for debugging failures on non-zero ranks. | `RCCL_MPI_LOG_ALL_RANKS=1` |
 | `RCCL_TEST_GPUS_PER_NODE` | Override the detected number of GPUs per node (used for `"auto"` sizing and GPU-count skipping). See [GPU Count Detection](#gpu-count-detection-and-auto-sizing). | `4` |
+| `RCCL_BUILD_TYPE` | Set by the test runner (not read from your shell) to the resolved build flavor, so configs can write `${WORKDIR}/build/${RCCL_BUILD_TYPE}`. | `release` |
 
 ### Configuration Path Variables
 
@@ -129,11 +179,12 @@ When determining which RCCL library to use, the test runner follows this priorit
    - Skips build automatically
    - Must contain `librccl.so` and `test/` subdirectory
 2. **`--no-build` flag with local build**
-   - Uses local `build/debug/` or `build/release/` directory (based on `install_flags`)
+   - Uses local `build/debug/` or `build/release/` directory (see
+     [Select the RCCL Build Flavor](#select-the-rccl-build-flavor-debug-vs-release))
    - Requires prior build
 3. **Default build process** (lowest priority)
    - Builds RCCL via `install.sh` into `build/debug/` or `build/release/`
-   - Uses `install_flags` and `cmake_options` from JSON config
+   - Uses `build_type`, `install_flags` and `cmake_options` from JSON config
 
 **Example Usage:**
 
@@ -456,6 +507,8 @@ Optional:
   --skip-tests              Skip test execution (useful with --coverage-report)
   --coverage-report         Generate code coverage report (HTML + text)
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
+  --rccl-build-type TYPE    RCCL build flavor: 'debug' or 'release' (overrides build_configuration.build_type)
+  --allow-debug-perf        Permit running rccl-tests perf binaries against a Debug build (refused by default)
   --rerun-failed            Rerun failed tests with additional environment variables
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
   --stop-on-rerun-failure   Stop testing immediately if a rerun also fails (requires --rerun-failed)
@@ -1178,6 +1231,7 @@ The test runner invokes `install.sh` directly, so build options map to `install.
 ```json
 {
   "build_configuration": {
+    "build_type": "release",
     "install_flags": ["-t", "-l", "--no_clean"]
   }
 }
@@ -1194,6 +1248,9 @@ The test runner invokes `install.sh` directly, so build options map to `install.
 ```
 
 **All Options:**
+- `build_type` - `"debug"` or `"release"`; selects the `build/<flavor>` directory and
+  reconciles `install_flags` with it. See
+  [Select the RCCL Build Flavor](#select-the-rccl-build-flavor-debug-vs-release)
 - `install_flags` - List of `install.sh` command-line flags (e.g. `--debug`, `-t`, `-c`, `-l`)
 - `cmake_options` - Additional CMake options string passed via `install.sh --cmake-options` (e.g. `-DFOO=BAR`)
 - `env_variables` - Build environment variables

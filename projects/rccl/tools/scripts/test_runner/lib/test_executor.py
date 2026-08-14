@@ -27,9 +27,11 @@ from pathlib import Path
 # Bash-style env-var expander (supports ${VAR:-default}); shared with the config
 # processor so binary/path resolution honors the same syntax used elsewhere.
 try:
-    from lib.test_config import expand_env_vars
+    from lib.test_config import (DEBUG_ONLY_GTEST_BINARIES, DEBUG_ONLY_INSTALL_FLAGS,
+                                 DEFAULT_GTEST_BINARY, RCCL_BUILD_TYPES, expand_env_vars)
 except ImportError:
-    from test_config import expand_env_vars
+    from test_config import (DEBUG_ONLY_GTEST_BINARIES, DEBUG_ONLY_INSTALL_FLAGS,
+                             DEFAULT_GTEST_BINARY, RCCL_BUILD_TYPES, expand_env_vars)
 
 # Make stdout unbuffered to prevent output ordering issues with subprocesses
 sys.stdout.reconfigure(line_buffering=True)
@@ -230,6 +232,29 @@ def _distinct_host_count(mpi_hosts: dict) -> int:
     return 0
 
 
+def _infer_build_flavor_from_path(path: str):
+    """
+    Guess the RCCL build flavor of a user-supplied library path.
+
+    install.sh writes to build/<flavor>, so a path handed to --build-dir /
+    RCCL_LIB_PATH / RCCL_BUILD_DIR usually still carries the flavor as a
+    directory component. Only whole components count, so "release-notes" or a
+    user named "debug" don't match, and a path holding both is treated as
+    unknown.
+
+    Args:
+        path: Custom build/library path
+
+    Returns:
+        str: "debug" or "release", or None when the path says neither
+    """
+    if not path:
+        return None
+    parts = {p.lower() for p in os.path.normpath(str(path)).split(os.sep) if p}
+    found = parts.intersection(RCCL_BUILD_TYPES)
+    return found.pop() if len(found) == 1 else None
+
+
 class TestExecutor:
     """
     Executes tests and manages build/test workflows
@@ -271,6 +296,9 @@ class TestExecutor:
                 print(f"WARNING: No system_env_variables for '{system}'. Available: {available}")
         self.build_config = config_processor.get_build_config()
         self.rccl_tests_build_config = config_processor.get_rccl_tests_build_config()
+
+        self.rccl_build_type = config_processor.get_rccl_build_type()
+        self.runs_rccl_tests, self.runs_gtest = config_processor.get_test_kinds()
 
         # Setup directories
         self.setup_directories()
@@ -325,6 +353,10 @@ class TestExecutor:
         # Determine build directory (priority: --build-dir > env var > default)
         custom_rccl_path = os.environ.get('RCCL_LIB_PATH') or os.environ.get('RCCL_BUILD_DIR')
 
+        if getattr(self.args, "rccl_build_type", None) and (self.args.build_dir or custom_rccl_path):
+            print(f"NOTE: --rccl-build-type {self.args.rccl_build_type} ignored; "
+                  "a custom RCCL library path takes precedence")
+
         if self.args.build_dir:
             # Use custom build directory from command line
             self.build_dir = os.path.abspath(os.path.expanduser(os.path.expandvars(self.args.build_dir)))
@@ -340,12 +372,7 @@ class TestExecutor:
         else:
             # Use default build directory matching install.sh convention
             self.using_custom_lib = False
-            install_flags = self.build_config.get("install_flags", [])
-            if "--debug" in install_flags or "--debug-fast" in install_flags:
-                build_type = "debug"
-            else:
-                build_type = "release"
-            self.build_dir = os.path.join(workdir, "build", build_type)
+            self.build_dir = os.path.join(workdir, "build", self.rccl_build_type)
 
         # Set log and report directories under workspace
         self.log_dir = os.path.join(self.workspace_dir, "logs")
@@ -597,11 +624,99 @@ class TestExecutor:
         print('        ./install.sh --cmake-options "-DENABLE_CODE_COVERAGE=ON" ...')
         print("=" * 80)
 
+    def check_perf_build_type(self):
+        """
+        Flag build flavors that invalidate part of a run, before any test starts.
+
+        Two directions, both silent otherwise:
+          - Debug + rccl-tests: perf numbers are meaningless. Perf-only configs
+            default to Release, so Debug there was explicit -- an error. Mixed
+            configs are only warned, since rccl-UnitTestsMPI and
+            rccl-UnitTestsFixturesDebug are not built in Release.
+          - Release + those same Debug-only gtest binaries: they won't exist, so
+            their tests report skipped. A warning, not an error -- Release is
+            often the deliberate choice for a mixed run.
+
+        Returns:
+            bool: False if the run should abort
+        """
+        if self.rccl_build_type == "release" and not self.using_custom_lib:
+            self._warn_release_skips_gtests()
+
+        if not self.runs_rccl_tests:
+            return True
+
+        # A custom build dir is used verbatim, so its flavor is only a guess.
+        if self.using_custom_lib:
+            if not self.runs_gtest and _infer_build_flavor_from_path(self.build_dir) == "debug":
+                print("WARNING: custom RCCL library path looks like a DEBUG build, so "
+                      f"perf numbers may not be representative: {self.build_dir}")
+            return True
+
+        if self.rccl_build_type != "debug":
+            return True
+
+        if self.runs_gtest or self.args.allow_debug_perf:
+            reason = "config also runs gtest suites" if self.runs_gtest else "--allow-debug-perf"
+            print(f"WARNING: rccl-tests perf will use a DEBUG build ({reason}); "
+                  f"numbers are not representative: {self.build_dir}")
+            return True
+
+        print("=" * 80)
+        print("ERROR: refusing to benchmark rccl-tests against a DEBUG build of RCCL")
+        print(f"       Build directory: {self.build_dir}")
+        print("       Every enabled suite runs rccl-tests, so Debug was selected explicitly.")
+        print("       Re-run with --rccl-build-type release, or --allow-debug-perf to override.")
+        print("=" * 80)
+        return False
+
+    def _warn_release_skips_gtests(self):
+        """Warn that a Release build drops the Debug-only gtest binaries this
+        config runs, so their tests will be skipped rather than executed."""
+        missing = sorted(self.config_processor.get_debug_only_gtest_binaries())
+        if not missing:
+            return
+        print("=" * 80)
+        print("WARNING: Release build will not run every gtest suite in this config")
+        print(f"         Build directory: {self.build_dir}")
+        print(f"         Not built in Release: {', '.join(missing)}")
+        print("         Tests using them are reported SKIPPED, not run, and the run")
+        print("         can still exit 0. Use --rccl-build-type debug to run them.")
+        print("=" * 80)
+
+    def _install_flags_for_build_type(self, install_flags):
+        """
+        Reconcile install.sh flags with the selected RCCL build flavor.
+
+        install.sh only builds Debug when --debug/--debug-fast is present, so the
+        flags must agree with the selected flavor or the library lands in the
+        other build/<flavor> directory.
+
+        Args:
+            install_flags: Flags from build_configuration.install_flags
+
+        Returns:
+            list: Flags consistent with the selected build type
+        """
+        flags = list(install_flags)
+
+        if self.rccl_build_type == "release":
+            dropped = [f for f in flags if f in DEBUG_ONLY_INSTALL_FLAGS]
+            if dropped:
+                flags = [f for f in flags if f not in DEBUG_ONLY_INSTALL_FLAGS]
+                print(f"NOTE: Release build; dropped debug-only flag(s): {' '.join(dropped)}")
+        elif not any(f in ("--debug", "--debug-fast") for f in flags):
+            flags.insert(0, "--debug")
+            print("NOTE: Debug build; added --debug")
+
+        return flags
+
     def build_rccl(self):
         """
         Build RCCL using install.sh with configurable build settings.
 
         The build_configuration in the JSON config specifies:
+        - build_type: "debug" or "release" (overridden by --rccl-build-type)
         - install_flags: List of install.sh command-line flags
         - cmake_options: Optional CMake options, either a string (e.g. "-DFOO=BAR") or a
           dict (e.g. {"FOO": "BAR"}); dicts are converted to "-DKEY=VAL" form (passed via --cmake-options)
@@ -630,7 +745,9 @@ class TestExecutor:
         rocm_path = self._rocm_root()
         mpi_path = self.paths.get("mpi_path", "")
 
-        install_flags = list(self.build_config.get("install_flags", []))
+        install_flags = self._install_flags_for_build_type(
+            self.build_config.get("install_flags", [])
+        )
         cmake_options = self.build_config.get("cmake_options", "")
         if isinstance(cmake_options, dict):
             cmake_options = " ".join(f"-D{k}={v}" for k, v in cmake_options.items())
@@ -789,6 +906,15 @@ class TestExecutor:
 
         # RCCL to link against: explicit rccl_home, else the RCCL build_dir we built.
         rccl_home = _expand(cfg.get("rccl_home", self.build_dir))
+
+        # Configs predating build_type hardcode the other flavor here, which would
+        # silently link a stale librccl.so.
+        other_flavor = "debug" if self.rccl_build_type == "release" else "release"
+        sibling_build_dir = os.path.join(workdir, "build", other_flavor)
+        if not self.using_custom_lib and os.path.normpath(rccl_home) == os.path.normpath(sibling_build_dir):
+            print(f"NOTE: rccl_home pointed at the {other_flavor} build; "
+                  f"using {self.build_dir}")
+            rccl_home = self.build_dir
 
         # Expand env vars / ~ in each flag so values like
         # "--hip_compiler ${HIP_COMPILER:-$HOME/.local/llvm/bin/amdclang++}"
@@ -1007,7 +1133,7 @@ class TestExecutor:
         test_name = test_config.get("name")
         is_gtest = test_config.get("is_gtest", True)  # Default to True for backward compatibility
         description = test_config.get("description", "")
-        binary = test_config.get("binary", "rccl-UnitTestsMPI")
+        binary = test_config.get("binary", DEFAULT_GTEST_BINARY)
 
         # Use test_filter for all test types
         test_filter = test_config.get("test_filter", "*")
@@ -1098,20 +1224,32 @@ class TestExecutor:
             print(f"  Binary path: {test_binary_path}")
 
         if not os.path.isfile(test_binary_path):
+            # Name the real cause when a Release build simply doesn't produce this
+            # binary, so the per-test record says why rather than just "not found".
+            binary_name = os.path.basename(test_binary_path)
+            if (binary_name in DEBUG_ONLY_GTEST_BINARIES
+                    and not self.using_custom_lib and self.rccl_build_type == "release"):
+                why = f"{binary_name} is not built in a Release build"
+            elif num_ranks > 1:
+                why = "build may not have --enable-mpi-tests"
+            else:
+                why = ""
+            detail = test_binary_path + (f" ({why})" if why else "")
+
             if num_ranks > 1:
-                print(f"SKIP: MPI test binary not found: {test_binary_path} (build may not have --enable-mpi-tests)")
+                print(f"SKIP: MPI test binary not found: {detail}")
                 return {
                     "name": test_name,
                     "result": TestResult.RESULT_SKIPPED.value,
                     "duration": 0,
-                    "error": f"MPI binary not found: {test_binary_path}"
+                    "error": f"MPI binary not found: {detail}"
                 }
-            print(f"ERROR: Test binary not found: {test_binary_path}")
+            print(f"ERROR: Test binary not found: {detail}")
             return {
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": 0,
-                "error": f"Binary not found: {test_binary_path}"
+                "error": f"Binary not found: {detail}"
             }
 
         # For MPI tests, verify mpirun is available
@@ -2446,13 +2584,7 @@ class TestExecutor:
             md = host_metadata.collect(rocm_version=re_mod._rocm_version(self._rocm_root()))
 
             # RCCL build type (perf configs should use a Release build).
-            install_flags = self.build_config.get("install_flags", []) if isinstance(self.build_config, dict) else []
-            if getattr(self, "using_custom_lib", False):
-                build_type = "custom"
-            elif any(f in install_flags for f in ("--debug", "--debug-fast")):
-                build_type = "debug"
-            else:
-                build_type = "release"
+            build_type = "custom" if self.using_custom_lib else self.rccl_build_type
             md["rccl_build_type"] = build_type
             md["mpi_impl"] = self.mpi_impl
             # Which librccl.so the tests actually loaded (and, if it came from a
@@ -2462,7 +2594,8 @@ class TestExecutor:
             md["rccl_lib"] = self._resolve_rccl_lib()
             md.setdefault("checks", {})["release_build"] = {
                 "status": "OK" if build_type == "release" else ("SKIP" if build_type == "custom" else "WARN"),
-                "value": build_type + (" (perf should use release)" if build_type == "debug" else ""),
+                "value": build_type + (" (perf should use release)"
+                                       if build_type == "debug" and self.runs_rccl_tests else ""),
             }
             manifest["metadata"] = md
         except Exception as e:

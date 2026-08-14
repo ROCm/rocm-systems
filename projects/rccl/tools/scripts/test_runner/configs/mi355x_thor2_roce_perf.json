@@ -29,13 +29,10 @@
     "--bind-to none"
   ],
   "build_configuration": {
+    "build_type": "release",
     "install_flags": [
-      "--debug",
       "-t",
       "-l",
-      "--log-trace",
-      "--enable-code-coverage",
-      "--enable-mpi-tests",
       "--no_clean"
     ],
     "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DEMIT_LLVM_IR=OFF -DBITCODE_LIB_ARCH=gfx950",
@@ -51,7 +48,7 @@
       "--gpu_targets",
       "gfx950"
     ],
-    "rccl_home": "${RCCL_HOME:-${WORKDIR}/build/debug}",
+    "rccl_home": "${RCCL_HOME:-${WORKDIR}/build/${RCCL_BUILD_TYPE:-release}}",
     "env_variables": {}
   },
   "test_configurations": {
