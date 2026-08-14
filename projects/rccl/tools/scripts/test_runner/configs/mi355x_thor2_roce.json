@@ -4228,12 +4228,14 @@
   "test_suites": [
     {
       "name": "SHM Tests - Complete Suite",
+      "serial_only": true,
       "description": "All shared memory transport tests (single node)",
       "config": "shm_comprehensive",
       "enabled": true
     },
     {
       "name": "P2P Tests - Complete Suite",
+      "serial_only": true,
       "description": "All peer-to-peer transport tests (single node)",
       "config": "p2p_comprehensive",
       "enabled": true
@@ -4335,12 +4337,14 @@
     },
     {
       "name": "Bootstrap socket poll - no busy loop",
+      "serial_only": true,
       "description": "AICOMRCCL-1322: NCCL_SOCKET_POLL_TIMEOUT_MSEC makes a blocked bootstrap socket recv wait in poll() instead of busy-spinning a CPU core (Debug only, no NIC/GPU required)",
       "config": "socket_poll_bootstrap",
       "enabled": true
     },
     {
       "name": "Unit Tests - Fixtures (Debug)",
+      "serial_only": true,
       "description": "Non-MPI unit tests accessing internal symbols (Debug only)",
       "config": "unit_tests_fixtures_debug",
       "enabled": true
@@ -4359,6 +4363,7 @@
     },
     {
       "name": "Debug and Logging Tests",
+      "serial_only": true,
       "description": "Tests for debug output and logging functionality",
       "config": "debug_tests",
       "enabled": true
@@ -4384,18 +4389,21 @@
     },
     {
       "name": "UBR Tests - Multi Node",
+      "serial_only": true,
       "description": "User Buffer Registration tests on multi-node (requires 2+ nodes)",
       "config": "ubr_multi_node",
       "enabled": true
     },
     {
       "name": "UBR Concurrent Registration Hang Tests",
+      "serial_only": true,
       "description": "Tests demonstrating UBR concurrent registration hang with separate buffers and fix with contiguous buffers. Includes one test expected to hang (run with timeout).",
       "config": "ubr_concurrent_reg_hang",
       "enabled": true
     },
     {
       "name": "Graph Capture Tests - Multi Node",
+      "serial_only": true,
       "description": "Graph capture with buffer registration on multi-node (requires 2+ nodes)",
       "config": "graph_capture_multi_node",
       "enabled": true
@@ -4539,6 +4547,7 @@
     },
     {
       "name": "Revoke MPI Tests - Multi-Node (4-rank, 2-node)",
+      "serial_only": true,
       "description": "ncclCommRevoke multi-node scenarios: asymmetric shrink across nodes (ring-only topology after revoke) and repeated revoke/shrink generations to verify no leaked resources",
       "config": "revoke_mpi_tests_multinode",
       "enabled": true
@@ -4617,6 +4626,7 @@
     },
     {
       "name": "Grow MPI Tests - Multi-Node (4-rank, 2-node)",
+      "serial_only": true,
       "description": "ncclCommGrow multi-node scenarios over IB transport: grow with SendRecv/AllReduce over network, parent destroy with IB teardown, elastic grow/shrink cycles over IB, and non-blocking grow with IB connection setup",
       "config": "grow_mpi_tests_multinode",
       "enabled": true
@@ -4747,138 +4757,161 @@
     },
     {
       "name": "nccl4py Build Smoke",
+      "serial_only": true,
       "description": "uv/CMake nccl4py wheel build + CPU smoke pytest modules; self-skips without cmake/uv/librccl.so",
       "config": "nccl4py_build_smoke",
       "enabled": true
     },
     {
       "name": "IR Device Tests",
+      "serial_only": true,
       "description": "librccl_device.bc (IR) device-API tests via pytest harness; builds artifacts on demand and self-skips when prerequisites are missing",
       "config": "ir_device",
       "enabled": true
     },
     {
       "name": "rccl-tests - Default Collectives",
+      "serial_only": true,
       "description": "All collectives (all_reduce, reduce, reduce_scatter, all_gather, broadcast, alltoall, scatter, gather, sendrecv) at three message sizes (1 KiB, 64 MiB, 1 GiB), all datatypes (-d all), and all operations (-o all) for reduction collectives",
       "config": "default_collectives",
       "enabled": true
     },
     {
       "name": "rccl-tests - CE AllReduce Graph Latch",
+      "serial_only": true,
       "description": "Regression for the CE AllReduce graph-capture latch: captured AllReduce immediately followed by eager AllReduce on the same comm, at CE-eligible sizes",
       "config": "ce_allreduce_graph_latch",
       "enabled": true
     },
     {
       "name": "rccl-tests - Tuning / Algo / Proto",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of NCCL_ALGO, NCCL_PROTO, NCCL_THREAD_THRESHOLDS, NCCL_LL128_NTHREADS, NCCL_PAT_ENABLE, NCCL_NET_OVERHEAD, NCCL_NTHREADS",
       "config": "tuning_algo_proto",
       "enabled": true
     },
     {
       "name": "rccl-tests - Enqueue Thresholds",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of NCCL_GRAPH_REGISTER, NCCL_P2P_LL_THRESHOLD, RCCL_P2P_NET_THRESHOLD, NCCL_CHUNK_SIZE, NCCL_L1_SHARED_MEMORY_CARVEOUT, RCCL_INTRANET_THRESHOLD",
       "config": "enqueue_thresholds",
       "enabled": true
     },
     {
       "name": "rccl-tests - Channels / Rings",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of NCCL_MIN/MAX_NRINGS, NCCL_MIN/MAX_NCHANNELS, NCCL_UNPACK_DOUBLE_NCHANNELS, NCCL_MIN/MAX_P2P_NCHANNELS",
       "config": "channels_rings",
       "enabled": true
     },
     {
       "name": "rccl-tests - Paths / Topology",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of NCCL_NET_GDR_LEVEL, NCCL_PXN_DISABLE, NCCL_NET_DISABLE_INTRA, NCCL_NET_GDR_READ, NCCL_NVB_DISABLE, NCCL_IGNORE_DISABLED_P2P, NCCL_CROSS_NIC, NCCL_P2P_PXN_LEVEL",
       "config": "paths_topo",
       "enabled": true
     },
     {
       "name": "rccl-tests - Rome Model Matching",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of RCCL_MODEL_MATCHING_DISABLE, RCCL_DISABLE_RAIL_TREES, RCCL_MODEL_REVERSAL_DISABLE, RCCL_DUMP_ROME_MODEL_FILE, NCCL_GRAPH_DUMP_FILE",
       "config": "model_matching",
       "enabled": true
     },
     {
       "name": "rccl-tests - IB Transport",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of NCCL_IB_PKEY, NCCL_IB_MERGE_VFS, NCCL_IB_WARN_RAIL_LOCAL, NCCL_IB_PCI_RELAXED_ORDERING, NCCL_IB_RETURN_ASYNC_EVENTS, NCCL_IB_TC, NCCL_IB_SL, NCCL_IB_SPLIT_DATA_ON_QPS, NCCL_IB_QPS_PER_CONNECTION, NCCL_IB_GID_INDEX, NCCL_IB_TIMEOUT, NCCL_IB_RETRY_CNT, NCCL_GDR_FLUSH_DISABLE, RCCL_FORCE_ENABLE_GDRDMA - requires IB hardware",
       "config": "ib_transport",
       "enabled": true
     },
     {
       "name": "rccl-tests - IB MQP Retry (ibvwrap)",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of NCCL_IB_MQP_RETRY_ALL, NCCL_IB_MQP_RETRY_CNT, NCCL_IB_MQP_RETRY_SLEEP_MSEC - requires IB hardware",
       "config": "ibvwrap_retry",
       "enabled": true
     },
     {
       "name": "rccl-tests - Socket Transport",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of NCCL_SOCKET_RETRY_CNT, NCCL_SOCKET_RETRY_SLEEP_MSEC, NCCL_NSOCKS_PERTHREAD, NCCL_SOCKET_NTHREADS",
       "config": "socket_transport",
       "enabled": true
     },
     {
       "name": "rccl-tests - SHM Transport",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of NCCL_SHM_DISABLE, NCCL_SHM_USE_CUDA_MEMCPY, NCCL_SHM_MEMCPY_MODE, NCCL_SHM_LOCALITY",
       "config": "shm_transport",
       "enabled": true
     },
     {
       "name": "rccl-tests - P2P Transport",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of NCCL_P2P_DIRECT_DISABLE, NCCL_P2P_USE_CUDA_MEMCPY, NCCL_P2P_LEVEL",
       "config": "p2p_transport",
       "enabled": true
     },
     {
       "name": "rccl-tests - GDR Copy / HDP Flush",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of NCCL_GDRCOPY_ENABLE, NCCL_GDRCOPY_FIFO_ENABLE, NCCL_GDRCOPY_SYNC_ENABLE, NCCL_GDRCOPY_FLUSH_ENABLE, RCCL_NET_HDP_FLUSH",
       "config": "gdr_copy",
       "enabled": true
     },
     {
       "name": "rccl-tests - Bootstrap / OOB Net",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of NCCL_OOB_NET_ENABLE, NCCL_OOB_NET_IFNAME, NCCL_UID_STAGGER_RATE, NCCL_UID_STAGGER_THRESHOLD",
       "config": "bootstrap_oob",
       "enabled": true
     },
     {
       "name": "rccl-tests - Debug / Observability",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of NCCL_DEBUG, NCCL_DEBUG_SUBSYS, NCCL_DEBUG_FILE, NCCL_SET_THREAD_NAME, RCCL_LOG_ROCTX, NCCL_GRAPH_MIXING_SUPPORT, RCCL_ENABLE_SIGNALHANDLER",
       "config": "debug_observability",
       "enabled": true
     },
     {
       "name": "rccl-tests - Init / Runtime",
+      "serial_only": true,
       "description": "rccl-tests perf sweep of RCCL_KERNEL_COLL_TRACE_ENABLE, RCCL_KERNEL_COLL_TRACE_THREAD_ENABLE, NCCL_MIN_CTAS, NCCL_MAX_CTAS, HSA_FORCE_FINE_GRAIN_PCIE, NCCL_BUFFSIZE, NCCL_NCHANNELS_PER_NET_PEER, NCCL_LAUNCH_MODE",
       "config": "init_runtime",
       "enabled": true
     },
     {
       "name": "rccl-tests - Collective Variants",
+      "serial_only": true,
       "description": "rccl-tests perf sweep across alltoall/allgather/reducescatter/broadcast (RCCL_ALL_TO_ALL_PIVOT_ENABLE, RCCL_PIVOT_ALLTOALL_ENABLE, RCCL_LL128_FORCE_ENABLE, RCCL_P2P_NET_DISABLE, RCCL_OUTPUT_TREES)",
       "config": "collective_variants",
       "enabled": true
     },
     {
       "name": "rccl-tests - Registration Matrix (DMABUF enabled)",
+      "serial_only": true,
       "description": "rccl-tests buffer registration matrix with DMABUF on (NCCL_DMABUF_ENABLE=1): local+legacy, local+cumem, graph+local+legacy, graph+local+cumem (NCCL_LOCAL_REGISTER, NCCL_GRAPH_REGISTER, NCCL_LEGACY_CUDA_REGISTER, NCCL_CUMEM_ENABLE; rccl-tests -R 1 and -G 2 flags)",
       "config": "registration_matrix",
       "enabled": true
     },
     {
       "name": "rccl-tests - Device API - Symmetric Memory",
+      "serial_only": true,
       "description": "Symmetric-memory window device-API path (rccl-tests -R 2) across broadcast/reduce/sendrecv/scatter/gather (NCCL_CUMEM_ENABLE, HSA_FORCE_FINE_GRAIN_PCIE). Requires rccl-tests built with --enable-device-api.",
       "config": "device_api_symmetric",
       "enabled": true
     },
     {
       "name": "rccl-tests - Device API - LSA",
+      "serial_only": true,
       "description": "LSA device-API all_reduce sweeping multimem depth (rccl-tests -R 2 -D 1 / -D 2). Requires rccl-tests built with --enable-device-api.",
       "config": "device_api_lsa",
       "enabled": true
     },
     {
       "name": "rccl-tests - Device API - GIN",
+      "serial_only": true,
       "description": "GIN device-API alltoall sweeping multimem depth (rccl-tests -R 2 -D 3 / -D 4) with GIN env (NCCL_DMABUF_ENABLE, NCCL_GIN_TYPE=2, HSA_NO_SCRATCH_RECLAIM, NCCL_ENV_PLUGIN=none, RCCL_ENABLE_INTRANET). Requires rccl-tests built with --enable-device-api.",
       "config": "device_api_gin",
       "enabled": true

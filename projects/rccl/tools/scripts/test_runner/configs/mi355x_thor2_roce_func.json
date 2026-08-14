@@ -2777,12 +2777,14 @@
   "test_suites": [
     {
       "name": "SHM Tests - Complete Suite",
+      "serial_only": true,
       "description": "All shared memory transport tests (single node)",
       "config": "shm_comprehensive",
       "enabled": true
     },
     {
       "name": "P2P Tests - Complete Suite",
+      "serial_only": true,
       "description": "All peer-to-peer transport tests (single node)",
       "config": "p2p_comprehensive",
       "enabled": true
@@ -3115,12 +3117,14 @@
     },
     {
       "name": "Bootstrap socket poll - no busy loop",
+      "serial_only": true,
       "description": "AICOMRCCL-1322: NCCL_SOCKET_POLL_TIMEOUT_MSEC makes a blocked bootstrap socket recv wait in poll() instead of busy-spinning a CPU core (Debug only, no NIC/GPU required)",
       "config": "socket_poll_bootstrap",
       "enabled": true
     },
     {
       "name": "Unit Tests - Fixtures (Debug)",
+      "serial_only": true,
       "description": "Non-MPI unit tests accessing internal symbols (Debug only)",
       "config": "unit_tests_fixtures_debug",
       "enabled": true
@@ -3133,6 +3137,7 @@
     },
     {
       "name": "Debug and Logging Tests",
+      "serial_only": true,
       "description": "Tests for debug output and logging functionality",
       "config": "debug_tests",
       "enabled": true
@@ -3164,18 +3169,21 @@
     },
     {
       "name": "UBR Tests - Multi Node",
+      "serial_only": true,
       "description": "User Buffer Registration tests on multi-node (requires 2+ nodes)",
       "config": "ubr_multi_node",
       "enabled": true
     },
     {
       "name": "UBR Concurrent Registration Hang Tests",
+      "serial_only": true,
       "description": "Tests demonstrating UBR concurrent registration hang with separate buffers and fix with contiguous buffers. Includes one test expected to hang (run with timeout).",
       "config": "ubr_concurrent_reg_hang",
       "enabled": true
     },
     {
       "name": "Graph Capture Tests - Multi Node",
+      "serial_only": true,
       "description": "Graph capture with buffer registration on multi-node (requires 2+ nodes)",
       "config": "graph_capture_multi_node",
       "enabled": true
@@ -3194,6 +3202,7 @@
     },
     {
       "name": "Revoke MPI Tests - Multi-Node (4-rank, 2-node)",
+      "serial_only": true,
       "description": "ncclCommRevoke multi-node scenarios: asymmetric shrink across nodes (ring-only topology after revoke) and repeated revoke/shrink generations to verify no leaked resources",
       "config": "revoke_mpi_tests_multinode",
       "enabled": true
@@ -3248,18 +3257,21 @@
     },
     {
       "name": "Grow MPI Tests - Multi-Node (4-rank, 2-node)",
+      "serial_only": true,
       "description": "ncclCommGrow multi-node scenarios over IB transport: grow with SendRecv/AllReduce over network, parent destroy with IB teardown, elastic grow/shrink cycles over IB, and non-blocking grow with IB connection setup",
       "config": "grow_mpi_tests_multinode",
       "enabled": true
     },
     {
       "name": "nccl4py Build Smoke",
+      "serial_only": true,
       "description": "uv/CMake nccl4py wheel build + CPU smoke pytest modules; self-skips without cmake/uv/librccl.so",
       "config": "nccl4py_build_smoke",
       "enabled": true
     },
     {
       "name": "IR Device Tests",
+      "serial_only": true,
       "description": "librccl_device.bc (IR) device-API tests via pytest harness; builds artifacts on demand and self-skips when prerequisites are missing",
       "config": "ir_device",
       "enabled": true
