@@ -441,9 +441,15 @@ def download_file(url: str, dest: Path) -> None:
         # non-TTY log (cron/sbatch) this bar is redrawn via carriage returns, so the
         # captured output is a single messy '\r'-laden line - acceptable trade-off.
         cmd = [
-            wget, "--continue", "--tries=3",
-            "-q", "--show-progress", "--progress=bar:force:noscroll",
-            "-O", str(tmp), url,
+            wget,
+            "--continue",
+            "--tries=3",
+            "-q",
+            "--show-progress",
+            "--progress=bar:force:noscroll",
+            "-O",
+            str(tmp),
+            url,
         ]
     elif curl:
         # curl's default meter already updates in place (no per-line spam).
@@ -560,13 +566,16 @@ def apply_hpc_cray_settings(args, facts: dict) -> list[str]:
     gtl_dir = os.environ.get("PE_MPICH_GTL_DIR_amd_gfx90a", "")
     gtl_libs = os.environ.get("PE_MPICH_GTL_LIBS_amd_gfx90a", "")
     if not gtl_libs:
-        log("WARNING: PE_MPICH_GTL_LIBS_amd_gfx90a is empty; GPU-aware MPI link may "
-            "fail. Ensure the craype-accel-amd-gfx90a module is loaded.")
+        log(
+            "WARNING: PE_MPICH_GTL_LIBS_amd_gfx90a is empty; GPU-aware MPI link may "
+            "fail. Ensure the craype-accel-amd-gfx90a module is loaded."
+        )
 
     # compile: MPI headers ; link: MPI + XPMEM + GPU-transport (GTL)
     cxx_flags = f"-I{mpich_dir}/include"
     link_flags = " ".join(
-        p for p in [f"-L{mpich_dir}/lib", "-lmpi", xpmem, "-lxpmem", gtl_dir, gtl_libs]
+        p
+        for p in [f"-L{mpich_dir}/lib", "-lmpi", xpmem, "-lxpmem", gtl_dir, gtl_libs]
         if p
     )
     extra = [f"-DCMAKE_CXX_FLAGS={cxx_flags}", f"-DCMAKE_EXE_LINKER_FLAGS={link_flags}"]
@@ -791,8 +800,10 @@ def smoke_check_rocprofsys(rocm_dir: Path, env: dict) -> None:
             timeout=60,
         ).returncode
     except subprocess.TimeoutExpired:
-        log("WARNING: 'rocprof-sys-avail --version' timed out during smoke check; "
-            "continuing.")
+        log(
+            "WARNING: 'rocprof-sys-avail --version' timed out during smoke check; "
+            "continuing."
+        )
         return
     # killed by a signal: negative returncode (direct exec) or 128+signal convention
     if rc < 0 or rc >= 128:
@@ -807,16 +818,20 @@ def smoke_check_rocprofsys(rocm_dir: Path, env: dict) -> None:
             f"gdb -q --batch -ex run -ex 'x/i $pc' --args {avail}"
         )
     if rc != 0:
-        log(f"WARNING: 'rocprof-sys-avail --version' exited {rc} during smoke check "
-            "(continuing).")
+        log(
+            f"WARNING: 'rocprof-sys-avail --version' exited {rc} during smoke check "
+            "(continuing)."
+        )
 
 
 def capture_rocm_sanity(rocm_dir: Path, env: dict, out_path: Path, facts: dict) -> None:
     """Write a ROCm environment sanity report (tool versions, GPU info) to a file."""
     checks = [
         ("hipcc --version", [str(rocm_dir / "bin" / "hipcc"), "--version"]),
-        ("rocm-smi --showproductname", [str(rocm_dir / "bin" / "rocm-smi"),
-                                        "--showproductname"]),
+        (
+            "rocm-smi --showproductname",
+            [str(rocm_dir / "bin" / "rocm-smi"), "--showproductname"],
+        ),
         ("amd-smi version", [str(rocm_dir / "bin" / "amd-smi"), "version"]),
         ("rocminfo", [str(rocm_dir / "bin" / "rocminfo")]),
     ]
@@ -827,9 +842,7 @@ def capture_rocm_sanity(rocm_dir: Path, env: dict, out_path: Path, facts: dict) 
             lines.append(f"(skipped: {cmd[0]} not found)")
             continue
         try:
-            r = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60, env=env
-            )
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
             out = (r.stdout or "") + (r.stderr or "")
             # rocminfo is long - keep only the first ~120 lines
             if title == "rocminfo":
@@ -860,13 +873,25 @@ def _update_submodules(repo_dir: Path, env: dict) -> None:
     log("Updating git submodules for projects/rocprofiler-systems (recursive)...")
     # Path-limited first (faster; avoids other monorepo projects), then fall back.
     rc = run(
-        ["git", "-C", str(repo_dir), "submodule", "update", "--init", "--recursive",
-         "--", PROJECT_SUBDIR],
-        env=env, check=False,
+        [
+            "git",
+            "-C",
+            str(repo_dir),
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
+            "--",
+            PROJECT_SUBDIR,
+        ],
+        env=env,
+        check=False,
     )
     if rc != 0:
-        run(["git", "-C", str(repo_dir), "submodule", "update", "--init", "--recursive"],
-            env=env)
+        run(
+            ["git", "-C", str(repo_dir), "submodule", "update", "--init", "--recursive"],
+            env=env,
+        )
 
 
 def sync_source(
@@ -1003,7 +1028,9 @@ def capture_pip_freeze(venv_py: Path, out_path: Path, facts: dict) -> None:
     try:
         r = subprocess.run(
             [str(venv_py), "-m", "pip", "freeze"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         out_path.write_text(r.stdout)
         facts["pip_freeze_log"] = str(out_path)
@@ -1056,8 +1083,10 @@ def build_from_source(
 
     cfg = [
         cmake,
-        "-S", str(src_dir),
-        "-B", str(build_dir),
+        "-S",
+        str(src_dir),
+        "-B",
+        str(build_dir),
         "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
         f"-DCMAKE_PREFIX_PATH={rocm_dir}",
         f"-DCMAKE_INSTALL_PREFIX={workdir / 'install-from-source'}",
@@ -1283,7 +1312,9 @@ def run_tests(
     else:
         base += ["-p", "no:cacheprovider"]
 
-    selection = extra_pytest_args.split() if extra_pytest_args else tier_selection_args(tier)
+    selection = (
+        extra_pytest_args.split() if extra_pytest_args else tier_selection_args(tier)
+    )
     if reruns > 0:
         selection += ["--reruns", str(reruns), "--reruns-delay", str(reruns_delay)]
 
@@ -1708,9 +1739,7 @@ def main(argv=None) -> int:
 
     env = make_rocm_env(os.environ.copy(), rocm_dir)
     report_under_test(rocm_dir, env, facts)
-    capture_rocm_sanity(
-        rocm_dir, env, workdir / f"rocm-sanity-{run_stamp}.log", facts
-    )
+    capture_rocm_sanity(rocm_dir, env, workdir / f"rocm-sanity-{run_stamp}.log", facts)
 
     # Fail fast if the tarball binaries can't start on this machine. Skipped when
     # building from source (those tarball binaries aren't what's tested) and during
@@ -1736,7 +1765,8 @@ def main(argv=None) -> int:
     facts["git_subject"] = (
         subprocess.run(
             ["git", "-C", str(repo_dir), "log", "-1", "--format=%s"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
         or "unknown"
     )
@@ -1755,8 +1785,10 @@ def main(argv=None) -> int:
         log("Network prep done. The tarball, source, and venv are staged under:")
         log(f"  {workdir}")
         log("Now run the tests on the (air-gapped) GPU compute node with:")
-        log(f"  python3 {Path(sys.argv[0]).name} --work-dir {workdir} --offline "
-            f"--tier {args.tier}")
+        log(
+            f"  python3 {Path(sys.argv[0]).name} --work-dir {workdir} --offline "
+            f"--tier {args.tier}"
+        )
         facts["result"] = "PREPARED (--prepare-only)"
         write_summary(summary_log, facts)
         return 0
@@ -1764,11 +1796,14 @@ def main(argv=None) -> int:
     # ---- 4. Build (source or examples) + prepare the test tree ------------ #
     if args.build_from_source:
         step("Build rocprofiler-systems from source")
-        _src_disable = [
-            e.strip() for e in args.disable_examples.split(",") if e.strip()
-        ]
+        _src_disable = [e.strip() for e in args.disable_examples.split(",") if e.strip()]
         build_dir = build_from_source(
-            src_dir, workdir, rocm_dir, env, venv_py, args.jobs,
+            src_dir,
+            workdir,
+            rocm_dir,
+            env,
+            venv_py,
+            args.jobs,
             args.build_mpi_examples,
             disable_examples=_src_disable,
             extra_cmake_args=hpc_cray_cmake_args,
