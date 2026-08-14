@@ -182,3 +182,63 @@ HIP_TEST_CASE(Contract_MemBatchCopy_HipMemcpyBatchAsync_NullDestination_IsReject
   REQUIRE(status != hipSuccess);
   (void)hipGetLastError();
 }
+
+#if HT_AMD
+// @asserts: hipExtMemcpyBatchAsync - a two-op batch with all extended parameters null (no per-entry ops, asymmetric swap, or wait/signal) delivers each source to its destination after synchronize (or reports unsupported)
+HIP_TEST_CASE(Contract_MemBatchCopy_HipExtMemcpyBatchAsync_TwoOps_RoundTripBytes) {
+  hip::contract::ContractCleanup cleanup;
+  const auto src_a = MakePattern(0x11);
+  const auto src_b = MakePattern(0x91);
+  std::array<uint8_t, kBytes> out_a{};
+  std::array<uint8_t, kBytes> out_b{};
+
+  void* dev_src_a = nullptr;
+  void* dev_src_b = nullptr;
+  void* dev_dst_a = nullptr;
+  void* dev_dst_b = nullptr;
+  hipStream_t stream = nullptr;
+
+  HIP_CHECK(hipMalloc(&dev_src_a, kBytes));
+  cleanup.Add([dev_src_a] { (void)hipFree(dev_src_a); });
+  HIP_CHECK(hipMalloc(&dev_src_b, kBytes));
+  cleanup.Add([dev_src_b] { (void)hipFree(dev_src_b); });
+  HIP_CHECK(hipMalloc(&dev_dst_a, kBytes));
+  cleanup.Add([dev_dst_a] { (void)hipFree(dev_dst_a); });
+  HIP_CHECK(hipMalloc(&dev_dst_b, kBytes));
+  cleanup.Add([dev_dst_b] { (void)hipFree(dev_dst_b); });
+  HIP_CHECK(hipStreamCreate(&stream));
+  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
+
+  HIP_CHECK(hipMemcpy(dev_src_a, src_a.data(), kBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dev_src_b, src_b.data(), kBytes, hipMemcpyHostToDevice));
+
+  // hipExtMemcpyBatchAsync with all extended parameters null (no per-entry ops,
+  // no asymmetric swap sizes, no wait/signal) must behave like hipMemcpyBatchAsync:
+  // each source is delivered to its matching destination after the stream is
+  // synchronized.
+  hipMemcpyAttributes attribute{};
+  attribute.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attribute.srcLocHint = DeviceLocation();
+  attribute.dstLocHint = DeviceLocation();
+
+  void* dsts[2] = {dev_dst_a, dev_dst_b};
+  void* srcs[2] = {dev_src_a, dev_src_b};
+  size_t sizes[2] = {kBytes, kBytes};
+  hipMemcpyAttributes attrs[1] = {attribute};
+  size_t attr_indices[1] = {0};
+  const hipError_t status =
+      hipExtMemcpyBatchAsync(dsts, srcs, sizes, /*sizesB=*/nullptr, /*waits=*/nullptr,
+                             /*signals=*/nullptr, /*ops=*/nullptr, 2, attrs, attr_indices, 1,
+                             stream);
+  if (status == hipErrorNotSupported) {
+    HIP_SKIP_TEST("Extended batch memcpy is not supported by this device/runtime path.");
+  }
+  HIP_CHECK(status);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  HIP_CHECK(hipMemcpy(out_a.data(), dev_dst_a, kBytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out_b.data(), dev_dst_b, kBytes, hipMemcpyDeviceToHost));
+  REQUIRE(out_a == src_a);
+  REQUIRE(out_b == src_b);
+}
+#endif  // HT_AMD
