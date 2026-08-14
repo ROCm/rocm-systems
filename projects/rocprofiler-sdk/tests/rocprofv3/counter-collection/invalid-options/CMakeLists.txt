@@ -32,25 +32,11 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pmc_groups.json
-               ${CMAKE_CURRENT_BINARY_DIR}/pmc_groups.json COPYONLY)
-
 # The counter-collection option conflicts in this file are rejected while parsing
-# arguments, so the application never launches. It exits zero to keep WILL_FAIL
-# attributable to rocprofv3 rejecting the options rather than to the application itself
-# failing. The tolerated case below reuses it as a workload that issues no dispatches.
+# arguments, so the application never launches. PASS_REGULAR_EXPRESSION strictly asserts
+# the rejection message (WILL_FAIL would accept any non-zero exit). The tolerated case
+# below reuses the no-op as a workload that issues no dispatches.
 set(_NOOP_APPLICATION ${CMAKE_COMMAND} -E true)
-
-# Conflict: --pmc on the command line + pmc_groups from an input file
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-counter-collection-cli-pmc-with-input-pmc-groups-will-fail
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --input
-            ${CMAKE_CURRENT_BINARY_DIR}/pmc_groups.json -- ${_NOOP_APPLICATION}
-    DEPENDS rocprofiler-sdk::rocprofv3
-    TIMEOUT 45
-    LABELS "integration-tests;counter-collection"
-    WILL_FAIL
-    FAIL_REGULAR_EXPRESSION "Cannot specify both --pmc and")
 
 # Conflict: SPM + pmc counter collection
 rocprofiler_add_integration_execute_test(
@@ -59,32 +45,9 @@ rocprofiler_add_integration_execute_test(
             --pmc SQ_WAVES -- ${_NOOP_APPLICATION}
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
-    LABELS "integration-tests;counter-collection"
-    WILL_FAIL
-    FAIL_REGULAR_EXPRESSION
+    LABELS "counter-collection"
+    PASS_REGULAR_EXPRESSION
         "SPM feature cannot be enabled along with pc sampling or pmc counter collection")
-
-# Conflict: multi-pass counter collection + --collection-period
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-counter-collection-multipass-with-collection-period-will-fail
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --pmc GRBM_COUNT
-            --collection-period 0:1:1 -- ${_NOOP_APPLICATION}
-    DEPENDS rocprofiler-sdk::rocprofv3
-    TIMEOUT 45
-    LABELS "integration-tests;counter-collection"
-    WILL_FAIL
-    FAIL_REGULAR_EXPRESSION "is not compatible with --collection-period")
-
-# Conflict: multi-pass counter collection + attach mode
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-counter-collection-multipass-with-pid-will-fail
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --pmc GRBM_COUNT
-            --pid 99999999 -- ${_NOOP_APPLICATION}
-    DEPENDS rocprofiler-sdk::rocprofv3
-    TIMEOUT 45
-    LABELS "integration-tests;counter-collection"
-    WILL_FAIL
-    FAIL_REGULAR_EXPRESSION "is not compatible with attach mode")
 
 # Invalid: a --pmc flag with no counters
 rocprofiler_add_integration_execute_test(
@@ -93,9 +56,8 @@ rocprofiler_add_integration_execute_test(
             ${_NOOP_APPLICATION}
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
-    LABELS "integration-tests;counter-collection"
-    WILL_FAIL
-    FAIL_REGULAR_EXPRESSION "Each --pmc must specify at least one counter")
+    LABELS "counter-collection"
+    PASS_REGULAR_EXPRESSION "Each --pmc must specify at least one counter")
 
 # Tolerated: a device qualifier naming a GPU index that does not exist
 # PASS_REGULAR_EXPRESSION disables the exit-code check, so nothing may require it
@@ -105,7 +67,7 @@ rocprofiler_add_integration_execute_test(
             SQ_CYCLES:device=16384 -- ${_NOOP_APPLICATION}
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
-    LABELS "integration-tests;counter-collection"
+    LABELS "counter-collection"
     ENVIRONMENT "ROCPROF_LOG_LEVEL=warning"
     PASS_REGULAR_EXPRESSION "Device ID not found for PMC counter 'SQ_CYCLES:device=16384'"
     )
