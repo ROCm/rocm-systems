@@ -34,6 +34,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iomanip>
 #include <iterator>
 #include <map>
@@ -2488,11 +2489,17 @@ main(int argc, char** argv)
     int code = -1;
     if(binary_rewrite)
     {
-        const auto& outf = outfile;
-        if(outf.find('/') != string_t::npos)
+        auto outdir = path::parent_path(outfile);
+        if(!outdir.empty())
         {
-            auto outdir = outf.substr(0, outf.find_last_of('/'));
-            tim::makedir(outdir);
+            try
+            {
+                std::filesystem::create_directories(outdir);
+            } catch(const std::filesystem::filesystem_error& e)
+            {
+                errprintf(0, "Failed to create output directory '%s': %s\n",
+                          outdir.c_str(), e.code().message().c_str());
+            }
         }
 
         const bool success = app_binary->writeFile(outfile.c_str());
