@@ -49,8 +49,11 @@ protected:
   }
 };
 
-// Absolute-minimal: prove symMemoryObtain is reachable and runs to success on a
-// plain host, returning an owned ncclDevrMemory linked into the memHead list.
+// Prove symMemoryObtain is reachable and runs to success on a plain host,
+// returning an owned ncclDevrMemory linked into the memHead list. This asserts
+// only the observable ownership contract (mem linked into memHead), not the
+// underlying reference-count mechanism, so it holds under both the RCCL counted
+// model and upstream's unconditional-destroy model.
 TEST_F(SymMemoryObtainTest, ObtainSucceeds) {
   hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   void* userAddr = reinterpret_cast<void*>(0x100000);
@@ -63,4 +66,28 @@ TEST_F(SymMemoryObtainTest, ObtainSucceeds) {
   ASSERT_EQ(ret, ncclSuccess);
   ASSERT_NE(mem, nullptr);
   EXPECT_EQ(comm->devrState.memHead, mem);
+}
+
+// Regression guard for the window memory leak. Obtaining then releasing the
+// memory must run the free path, which unlinks mem from devrState.memHead. This
+// asserts the observable release contract rather than any reference-count
+// internals, so it is agnostic to whether release is implemented as a counted
+// drop-to-zero (current RCCL) or an unconditional destroy (upstream NCCL).
+// On the buggy branch the release is a no-op and mem leaks (stays on memHead).
+// Observing memHead is safe: on the free path mem is freed, so we must not
+// dereference it afterwards.
+TEST_F(SymMemoryObtainTest, DropRefFreesMemory) {
+  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  void* userAddr = reinterpret_cast<void*>(0x100000);
+  const size_t size = 4096;
+
+  struct ncclDevrMemory* mem = nullptr;
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, size, /*winFlags=*/0, &mem),
+            ncclSuccess);
+  ASSERT_NE(mem, nullptr);
+  ASSERT_EQ(comm->devrState.memHead, mem);
+
+  symMemoryDropRef(comm, mem);
+
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
