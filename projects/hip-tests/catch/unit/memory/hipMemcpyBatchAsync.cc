@@ -2360,6 +2360,53 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_ops_IndirectSrc) {
 /**
  * Test Description
  * ------------------------
+ * - Indirect source for a device-to-device copy: srcs[i] holds (in device
+ *   memory) a pointer to the real device source buffer, dereferenced when the
+ *   copy runs. Exercises the device<->device indirect path (both operands are
+ *   device memory), which must be accepted (not restricted to host<->device).
+ *   Skipped where indirect copy is unsupported.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_ops_IndirectSrc_D2D) {
+  constexpr size_t copy_size = kSmallCopySize;
+
+  StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<int> src(LinearAllocs::hipMalloc, copy_size);            // device source
+  LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, copy_size);            // device destination
+  LinearAllocGuard<char> src_slot(LinearAllocs::hipMalloc, sizeof(void*));  // device pointer holder
+
+  const size_t copy_elements = copy_size / sizeof(int);
+  std::vector<int> host_src(copy_elements, kPatternValue);
+  HIP_CHECK(hipMemcpy(src.ptr(), host_src.data(), copy_size, hipMemcpyHostToDevice));
+
+  // Store the real source pointer in the device slot (dereferenced at execution).
+  void* src_ptr = src.ptr();
+  HIP_CHECK(hipMemcpy(src_slot.ptr(), &src_ptr, sizeof(void*), hipMemcpyHostToDevice));
+
+  std::vector<void*> dst_ptrs{dst.ptr()};
+  std::vector<void*> src_ptrs{src_slot.ptr()};
+  std::vector<size_t> sizesA{copy_size};
+  size_t attrs_idx = 0;
+  hipMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  hipExtMemcpyOp ops[] = {hipExtMemcpyOpIndirectSrc};
+
+  hipError_t status = hipExtMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizesA.data(),
+                                             nullptr, nullptr, nullptr, ops, 1, &attr, &attrs_idx,
+                                             1, stream_guard.stream());
+  if (status == hipErrorNotSupported) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaIndirectUnsupported);
+  }
+  HIP_CHECK(status);
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  VerifyDeviceBuffers(dst_ptrs, copy_size);
+}
+
+/**
+ * Test Description
+ * ------------------------
  * - Indirect destination specified via ops[] (hipExtMemcpyOpIndirectDst):
  *   dsts[i] holds a pointer to the real destination buffer, read when the copy
  *   executes. Skipped where indirect copy is unsupported.
