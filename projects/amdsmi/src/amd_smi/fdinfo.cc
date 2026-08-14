@@ -9,11 +9,13 @@
 #include <algorithm>
 #include <cinttypes>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "amd_smi/impl/amd_smi_container_id_parser.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 
 extern "C" {
@@ -198,21 +200,32 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
 
   if (name.empty()) return AMDSMI_STATUS_API_FAILED;
 
-  strncpy(info.name, name.c_str(),
-          std::min((unsigned long)AMDSMI_MAX_STRING_LENGTH, name.length()));
+  // Bounded copy: strncpy(dst, src, min(CAP, len)) leaves info.name without a
+  // NUL terminator when name.length() >= AMDSMI_MAX_STRING_LENGTH, so a later
+  // strlen/print reads past the buffer.
+  const size_t name_len =
+      std::min<size_t>(AMDSMI_MAX_STRING_LENGTH - 1, name.length());
+  std::memcpy(info.name, name.data(), name_len);
+  info.name[name_len] = '\0';
 
+  // Security-hardened container ID extraction: anchored type_name match +
+  // charset whitelist + bounded length. See
+  // amd_smi/impl/amd_smi_container_id_parser.h for the full threat model. This
+  // replaced a 16-char fixed truncation that (a) broke interop with
+  // `docker inspect` (moby fullLen=64) and (b) permitted log injection /
+  // shell metachar smuggling.
+  static_assert(AMDSMI_MAX_CONTAINER_ID_LENGTH < AMDSMI_MAX_STRING_LENGTH,
+                "container_name must fit ID + NUL terminator");
   for (int i = 0; i < AMDSMI_MAX_CONTAINER_TYPE; i++) {
     std::ifstream cgroup_info(cgroup_path.c_str());
-    std::string container_id;
     for (std::string line; getline(cgroup_info, line);) {
-      if (line.find(container_type_name[i]) != std::string::npos) {
-        container_id =
-            line.substr(line.find(container_type_name[i]) + strlen(container_type_name[i]) + 1, 16);
-        strcpy(info.container_name, container_id.c_str());
+      if (amd::smi::ExtractContainerId(line, container_type_name[i],
+                                       info.container_name,
+                                       AMDSMI_MAX_STRING_LENGTH) > 0) {
         break;
       }
     }
-    if (strlen(info.container_name) > 0) break;
+    if (info.container_name[0] != '\0') break;
   }
   info.pid = (uint32_t)pid;
 
