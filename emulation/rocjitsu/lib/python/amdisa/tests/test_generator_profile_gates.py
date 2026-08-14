@@ -3366,10 +3366,10 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
 
     decoder = (gfx1250_generated_root / 'decoder.cpp').read_text()
     decode_body = decoder.split(
-        'std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {'
-    )[1].split('std::unique_ptr<Instruction> Decoder::decodeInvalid', 1)[0]
+        'std::unique_ptr<Instruction> DecoderImpl::decode(const MachineInst *opcode) {'
+    )[1].split('std::unique_ptr<Instruction> DecoderImpl::decodeInvalid', 1)[0]
     assert 'isWmmaScaleF32Vop3px2' not in decode_body
-    assert decoder.count('&Decoder::decodeVWmmaScaleF32Vop3px2,') == 2
+    assert decoder.count('&DecoderImpl::decodeVWmmaScaleF32Vop3px2,') == 2
     assert 'if (!isVop3pOp(opcode[2], 0x33)' in decoder
 
 
@@ -3390,27 +3390,49 @@ def test_vopd_dispatch_uses_primary_decode_table(
     arch_root = amdgpu_generated_root / _generated_dir_name(arch_name)
     decoder = (arch_root / 'decoder.cpp').read_text()
     decode_body = decoder.split(
-        'std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {'
-    )[1].split('std::unique_ptr<Instruction> Decoder::decodeInvalid', 1)[0]
+        'std::unique_ptr<Instruction> DecoderImpl::decode(const MachineInst *opcode) {'
+    )[1].split('std::unique_ptr<Instruction> DecoderImpl::decodeInvalid', 1)[0]
 
     assert 'Vopd::is_vopd' not in decode_body
-    primary_table = decoder.split('Decoder::primary_decode_table = {', 1)[1].split(
+    primary_table = decoder.split('DecoderImpl::primary_decode_table = {', 1)[1].split(
         '\n};', 1
     )[0]
-    primary_entries = [
-        line.strip().removesuffix(',')
-        for line in primary_table.splitlines()
-        if line.strip()
-    ]
+    primary_entries = re.findall(
+        r'&(?:DecoderImpl|detail)::[A-Za-z0-9_]+', primary_table
+    )
+    assert len(primary_entries) == 512
     actual_vopd_indices = {
         index
         for index, entry in enumerate(primary_entries)
-        if entry == '&Decoder::decodeVopd'
+        if entry == '&DecoderImpl::decodeVopd'
     }
     assert actual_vopd_indices == expected_vopd_indices
-    assert 'Decoder::decodeVopd(const MachineInst *opcode)' in decoder
+    assert 'DecoderImpl::decodeVopd(const MachineInst *opcode)' in decoder
     assert 'is_vopd' not in (arch_root / 'vopd.h').read_text()
     assert 'is_vopd' not in (arch_root / 'vopd.cpp').read_text()
+
+
+def test_decoder_header_keeps_dispatch_details_private(
+    amdgpu_generated_root: Path,
+):
+    for arch_name in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'gfx1250',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ):
+        arch_root = amdgpu_generated_root / _generated_dir_name(arch_name)
+        decoder_header = (arch_root / 'decoder.h').read_text()
+        assert 'DecodeFunc' not in decoder_header
+        assert 'decodeInvalid' not in decoder_header
+        assert 'primary_decode_table' not in decoder_header
+        assert decoder_header.count('static std::unique_ptr<Instruction> decode(') == 1
 
 
 def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
@@ -4013,7 +4035,8 @@ def test_cdna4_mfma_f8f6f4_accepts_standalone_and_prefixed_encodings(
     source = (amdgpu_generated_root / 'cdna4' / 'vop3p.cpp').read_text()
 
     assert 'VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true)' in decoder
-    assert 'Decoder::decodeVMfmaF3216x16x128F8f6f4Vop3pMfma' in decoder
+    assert 'decodeVMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *opcode)' in source
+    assert 'decodeVMfmaF3216x16x128F8f6f4Vop3pMfma' in decoder
     assert 'bool has_vop3px2_prefix = false' in header
     assert 'if (has_vop3px2_prefix)' in source
     assert 'cdna4_matrix_fmt_element_bits' in source

@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/exp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna1 {
@@ -30,6 +31,12 @@ ExpExp::ExpExp(const MachineInst *inst)
   num_dst_ = 1;
   sdst_exec.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeExpExp(const MachineInst *opcode) {
+  return std::make_unique<ExpExp>(opcode);
+}
+} // namespace detail
 
 } // namespace cdna1
 } // namespace rocjitsu

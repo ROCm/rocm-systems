@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vinterp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3 {
@@ -26,6 +27,12 @@ VInterpP10F32Vinterp::VInterpP10F32Vinterp(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVInterpP10F32Vinterp(const MachineInst *opcode) {
+  return std::make_unique<VInterpP10F32Vinterp>(opcode);
+}
+} // namespace detail
+
 VInterpP2F32Vinterp::VInterpP2F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::VInterpP2F32Vinterp)),
@@ -40,6 +47,12 @@ VInterpP2F32Vinterp::VInterpP2F32Vinterp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVInterpP2F32Vinterp(const MachineInst *opcode) {
+  return std::make_unique<VInterpP2F32Vinterp>(opcode);
+}
+} // namespace detail
 
 VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p10_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -56,6 +69,12 @@ VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVInterpP10F16F32Vinterp(const MachineInst *opcode) {
+  return std::make_unique<VInterpP10F16F32Vinterp>(opcode);
+}
+} // namespace detail
+
 VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p2_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::VInterpP2F16F32Vinterp)),
@@ -70,6 +89,12 @@ VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVInterpP2F16F32Vinterp(const MachineInst *opcode) {
+  return std::make_unique<VInterpP2F16F32Vinterp>(opcode);
+}
+} // namespace detail
 
 void VInterpP2F16F32Vinterp::implicit_uses(RegisterSet &uses) const {
   Vinterp::implicit_uses(uses);
@@ -92,6 +117,12 @@ VInterpP10RtzF16F32Vinterp::VInterpP10RtzF16F32Vinterp(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVInterpP10RtzF16F32Vinterp(const MachineInst *opcode) {
+  return std::make_unique<VInterpP10RtzF16F32Vinterp>(opcode);
+}
+} // namespace detail
+
 VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p2_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::VInterpP2RtzF16F32Vinterp)),
@@ -106,6 +137,12 @@ VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVInterpP2RtzF16F32Vinterp(const MachineInst *opcode) {
+  return std::make_unique<VInterpP2RtzF16F32Vinterp>(opcode);
+}
+} // namespace detail
 
 void VInterpP2RtzF16F32Vinterp::implicit_uses(RegisterSet &uses) const {
   Vinterp::implicit_uses(uses);
