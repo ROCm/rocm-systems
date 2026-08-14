@@ -2897,6 +2897,19 @@ constexpr uint32_t mubuf_hi(uint32_t vdata, uint32_t vaddr, uint32_t srsrc,
   return (soffset << 24) | (srsrc << 16) | (vdata << 8) | vaddr;
 }
 
+// SMEM (64-bit): CDNA layout.
+// dword0: sbase[5:0] (SGPR pair index), sdata[12:6], soffset_en[14], nv[15],
+//         glc[16], imm[17], op[25:18], encoding[31:26]=0x30
+// dword1: offset[20:0], soffset[31:25]
+constexpr uint32_t smem_lo(uint32_t op, uint32_t sdata, uint32_t sbase_sgpr, bool imm,
+                           bool soffset_en = false) {
+  return (0x30u << 26) | (op << 18) | (static_cast<uint32_t>(imm) << 17) |
+         (static_cast<uint32_t>(soffset_en) << 14) | (sdata << 6) | (sbase_sgpr / 2);
+}
+constexpr uint32_t smem_hi(uint32_t offset, uint32_t soffset = 0) {
+  return (soffset << 25) | (offset & 0x1FFFFFu);
+}
+
 constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
 constexpr uint32_t S_ENDPGM = sopp(1, 0);
 
@@ -3352,6 +3365,53 @@ TEST_P(IsaTest, BranchLoop) {
 
   EXPECT_EQ(fx.read_sgpr(3), 0u);
   EXPECT_TRUE(fx.halted());
+}
+
+// SMEM offset forms: IMM=0 (SGPR), IMM=1, IMM=1+SOE, SOE=1.
+TEST_P(IsaTest, SLoad_OffsetForms) {
+  ExecFixture fx(arch());
+  constexpr uint64_t kBufferAddr = 0x2000;
+  for (uint32_t i = 0; i < 64; ++i)
+    fx.f.mem()->write32(kBufferAddr + i * 4, 0x1000 + i);
+
+  using namespace enc;
+  constexpr uint32_t S_LOAD_DWORD = 0;
+  constexpr uint32_t S_LOAD_DWORDX2 = 1;
+  constexpr uint32_t S_BUFFER_LOAD_DWORD = 8;
+  const std::vector<uint32_t> code = {
+      s_mov_b32(SGPR(4), 255), // s[4:5] = kBufferAddr
+      static_cast<uint32_t>(kBufferAddr),
+      s_mov_b32(SGPR(5), INLINE_CONST(0)),
+      s_mov_b32(SGPR(6), INLINE_CONST(64)),
+      s_mov_b32(SGPR(12), SGPR(4)), // V# s[12:15]: base, stride 0, 256 records
+      s_mov_b32(SGPR(13), INLINE_CONST(0)),
+      s_mov_b32(SGPR(14), 255),
+      256u,
+      s_mov_b32(SGPR(15), INLINE_CONST(0)),
+      smem_lo(S_LOAD_DWORD, 7, 4, /*imm=*/false), // s7 = [s[4:5] + s6]
+      smem_hi(6),
+      smem_lo(S_LOAD_DWORDX2, 8, 4, /*imm=*/false), // s[8:9] = [s[4:5] + s6]
+      smem_hi(6),
+      smem_lo(S_BUFFER_LOAD_DWORD, 10, 12, /*imm=*/false), // s10 = [V# + s6]
+      smem_hi(6),
+      smem_lo(S_LOAD_DWORD, 16, 4, /*imm=*/true), // s16 = [s[4:5] + 8]
+      smem_hi(0x8),
+      smem_lo(S_LOAD_DWORD, 17, 4, /*imm=*/true, /*soffset_en=*/true), // s17 = [s[4:5] + 8 + s6]
+      smem_hi(0x8, 6),
+      smem_lo(S_LOAD_DWORD, 18, 4, /*imm=*/false, /*soffset_en=*/true), // s18 = [s[4:5] + s6]
+      smem_hi(0, 6),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  fx.load_program(code);
+
+  EXPECT_EQ(fx.read_sgpr(7), 0x1010u) << "IMM=0 s_load_dword";
+  EXPECT_EQ(fx.read_sgpr(8), 0x1010u) << "IMM=0 s_load_dwordx2";
+  EXPECT_EQ(fx.read_sgpr(9), 0x1011u) << "IMM=0 s_load_dwordx2";
+  EXPECT_EQ(fx.read_sgpr(10), 0x1010u) << "IMM=0 s_buffer_load_dword";
+  EXPECT_EQ(fx.read_sgpr(16), 0x1002u) << "IMM=1";
+  EXPECT_EQ(fx.read_sgpr(17), 0x1012u) << "IMM=1 SOE=1";
+  EXPECT_EQ(fx.read_sgpr(18), 0x1010u) << "SOE=1";
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, IsaTest, ::testing::Values("cdna3", "cdna4"),

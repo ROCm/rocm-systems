@@ -11421,7 +11421,9 @@ class CodeGenerator:
                             '  if (enc->imm)\n'
                             '    return Operand(32, OperandType::OPR_SIMM32, '
                             'static_cast<int>(enc->offset));\n'
-                            '  return Operand(32, OperandType::OPR_SIMM32, 0);\n'
+                            # IMM=0, SOFFSET_EN=0: OFFSET[6:0] is the offset SGPR.
+                            '  return Operand(32, OperandType::OPR_SMEM_OFFSET, '
+                            'static_cast<int>(enc->offset & 0x7F));\n'
                             '}\n'
                             '} // namespace'
                         )
