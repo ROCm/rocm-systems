@@ -11,8 +11,8 @@
 // CTA stamps start_time[blockIdx.x] at i==skip and end_time[blockIdx.x] after the
 // final iteration -- and (2) a thin "*DeviceTime" hook that calls gin_devtime::measure
 // with a lambda that launches that kernel. measure() owns everything mechanical and
-// identical across collectives: query the wall-clock rate once, allocate the per-CTA
-// start/end stamp buffers, run the launch, reduce the grid busy window
+// identical across collectives: sample each GPU's wall-clock rate, allocate the
+// per-CTA start/end stamp buffers, run the launch, reduce the grid busy window
 // (min(start)..max(end) over CTAs) and the slowest rank (MPI MAX), and return the
 // per-iteration device latency in microseconds. This is the pure device-function
 // execution time -- it excludes host launch, stream/graph, and teardown overhead.
@@ -36,15 +36,14 @@ static inline int envInt(const char* name, int def) {
   return (e && *e) ? atoi(e) : def;
 }
 
-// GPU fixed-frequency wall-clock rate (kHz), queried once for the current device.
-static inline int wallClockRateKhz() {
-  static int khz = 0;
-  if (khz == 0) {
-    int dev = 0;
-    if (cudaGetDevice(&dev) != cudaSuccess) return 1;
-    if (hipDeviceGetAttribute(&khz, hipDeviceAttributeWallClockRate, dev) != hipSuccess || khz <= 0)
-      khz = 1;
-  }
+// GPU fixed-frequency wall-clock rate (kHz) for a specific device ordinal. Sampled
+// per-GPU (rather than once from the current device) so each GPU's cycle delta is
+// converted with its own rate on mixed-clock nodes. Falls back to 1 kHz if the query
+// fails, which yields a harmless raw-cycle magnitude instead of a divide-by-zero.
+static inline int wallClockRateKhz(int dev) {
+  int khz = 0;
+  if (hipDeviceGetAttribute(&khz, hipDeviceAttributeWallClockRate, dev) != hipSuccess || khz <= 0)
+    khz = 1;
   return khz;
 }
 
@@ -63,7 +62,6 @@ template <typename LaunchFn>
 static inline testResult_t measure(struct threadArgs* args, int gridCtas, int loop,
                                    LaunchFn&& launch, double* outUs) {
   if (gridCtas < 1) gridCtas = 1;
-  const int rate = wallClockRateKhz();
   double localMaxUs = 0.0;
 
   std::vector<long long*> d_start(args->nGpus, nullptr);
@@ -88,6 +86,10 @@ static inline testResult_t measure(struct threadArgs* args, int gridCtas, int lo
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
     CUDACHECK(cudaStreamSynchronize(args->streams[i]));
+
+    // Sample THIS GPU's wall-clock rate to convert its own cycle delta; on a
+    // mixed-clock node a single reference rate would skew the non-reference GPUs.
+    const int rate = wallClockRateKhz(args->gpus[i]);
 
     std::vector<long long> h_start(gridCtas), h_end(gridCtas);
     CUDACHECK(cudaMemcpy(h_start.data(), d_start[i], (size_t)gridCtas * sizeof(long long), cudaMemcpyDeviceToHost));
