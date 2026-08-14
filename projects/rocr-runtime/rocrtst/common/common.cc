@@ -48,6 +48,8 @@
 #include "common/common.h"
 #include "common/env_config.h"
 #include <assert.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <sstream>
 #include <string>
 #include <memory>
@@ -100,6 +102,30 @@ bool isEmuModeEnabled() {
   }
 
   return emu_mode;
+}
+
+bool isWslEnvironment() {
+  static bool checked = false;
+  static bool is_wsl = false;
+
+  if (!checked) {
+    // Mirror ROCr's own WSL/DXG detection (ThunkLoader::whoami): the DXG backend
+    // is used when /dev/dxg is present, which is what breaks these tests.
+    int fd = open("/dev/dxg", O_RDWR);
+    if (fd >= 0) {
+      close(fd);
+      is_wsl = true;
+    }
+    checked = true;
+  }
+
+  return is_wsl;
+}
+
+bool SkipOnWsl(const char* reason) {
+  if (!isWslEnvironment()) return false;
+  std::cout << "[ SKIPPED ] " << reason << std::endl;
+  return true;
 }
 
 bool PlatformDetector::isFFMEnvironment() {
