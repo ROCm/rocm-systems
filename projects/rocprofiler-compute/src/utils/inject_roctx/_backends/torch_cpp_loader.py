@@ -6,9 +6,10 @@
 The loader first looks for a prebuilt ``.so`` under the install prefix, then
 builds the extension from the source tree, using the user cache as the build
 directory when the source tree is read-only. Artifacts are named by the Python
-and torch versions in use and a fingerprint of the C++ inputs. Set
-``ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1`` to discard the build directory and
-build again.
+and torch versions in use and a fingerprint of the C++ inputs, so an artifact
+already present in the build directory is imported without running cmake
+again. Set ``ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1`` to discard the build
+directory and build again.
 """
 
 import hashlib
@@ -331,6 +332,7 @@ def _try_runtime_build(
         ),
         cmake_executable=cmake_exe,
         search_installed=not force_rebuild,
+        reuse_built_artifact=not force_rebuild,
     )
 
     try:
