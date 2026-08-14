@@ -68,15 +68,14 @@ TEST_F(SymMemoryObtainTest, ObtainSucceeds) {
   EXPECT_EQ(comm->devrState.memHead, mem);
 }
 
-// Regression guard for the window memory leak. Obtaining then releasing the
+// Regression guard for the window memory leak. Obtaining then destroying the
 // memory must run the free path, which unlinks mem from devrState.memHead. This
 // asserts the observable release contract rather than any reference-count
-// internals, so it is agnostic to whether release is implemented as a counted
-// drop-to-zero (current RCCL) or an unconditional destroy (upstream NCCL).
-// On the buggy branch the release is a no-op and mem leaks (stays on memHead).
+// internals, so it holds under an unconditional destroy (as adopted from
+// upstream NCCL) and would equally hold under a counted drop-to-zero model.
 // Observing memHead is safe: on the free path mem is freed, so we must not
 // dereference it afterwards.
-TEST_F(SymMemoryObtainTest, DropRefFreesMemory) {
+TEST_F(SymMemoryObtainTest, DestroyFreesMemory) {
   hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   void* userAddr = reinterpret_cast<void*>(0x100000);
   const size_t size = 4096;
@@ -87,7 +86,7 @@ TEST_F(SymMemoryObtainTest, DropRefFreesMemory) {
   ASSERT_NE(mem, nullptr);
   ASSERT_EQ(comm->devrState.memHead, mem);
 
-  symMemoryDropRef(comm, mem);
+  symMemoryDestroy(comm, mem);
 
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
@@ -100,9 +99,8 @@ TEST_F(SymMemoryObtainTest, DropRefFreesMemory) {
 // must drain those leftovers before freeing the LSA flat VA reservation. This
 // test drives the *real* init/finalize lifecycle (ncclDevrInitOnce pairs with
 // ncclDevrFinalize) so the state is self-consistent, then asserts the drain
-// empties memHead. It exercises the drain regardless of the create-path refCount
-// bug (the drain force-arms refCount itself), giving AICOMRCCL-835 its first
-// direct coverage.
+// empties memHead. The drain calls symMemoryDestroy unconditionally, giving
+// AICOMRCCL-835 its first direct coverage.
 class DevrFinalizeDrainTest : public ::testing::Test {
 protected:
   std::unique_ptr<ncclComm> commStorage;

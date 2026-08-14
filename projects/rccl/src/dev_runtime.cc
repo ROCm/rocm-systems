@@ -200,7 +200,7 @@ fail_lsaRankList:
 }
 
 static void symTeamDestroyAll(struct ncclComm* comm); // Further down
-static void symMemoryDropRef(struct ncclComm* comm, struct ncclDevrMemory* mem); // Further down
+static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem); // Further down
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm,
                                            struct ncclWindow_vidmem* winDev); // Further down
@@ -277,12 +277,10 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       INFO(NCCL_INIT, "ncclDevrFinalize: draining %d leftover device-API memory record(s)", leftover);
     }
     while (devr->memHead != nullptr) {
-      struct ncclDevrMemory* m = devr->memHead;
-      m->refCount = 1; // force drop on the next call
-      symMemoryDropRef(comm, m);
+      symMemoryDestroy(comm, devr->memHead);
     }
     if (devr->lsaFlatBase != nullptr) {
-      // The drain above unmapped every per-rank slice via symMemoryDropRef,
+      // The drain above unmapped every per-rank slice via symMemoryDestroy,
       // so this is now expected to succeed. Surface failures instead of
       // masking with CUCHECKIGNORE — a regression in the drain path should
       // not be silently swallowed (AICOMRCCL-835).
@@ -814,8 +812,8 @@ fail_mem:
   return ret;
 }
 
-static void symMemoryDropRef(struct ncclComm* comm, struct ncclDevrMemory* mem) {
-  if (mem != nullptr && 0 == --mem->refCount) {
+static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  if (mem != nullptr) {
     struct ncclDevrState* devr = &comm->devrState;
     if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
       for (int segment = 0; segment < mem->numGinSegments; segment++) {
@@ -994,7 +992,7 @@ static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vi
   NCCLCHECKGOTO(ncclShadowPoolToHost(&devr->shadows, winDev, &winDevHost), ret, fail);
   winHost = (struct ncclDevrWindow*)winDevHost->winHost;
 
-  symMemoryDropRef(comm, winHost->memory);
+  symMemoryDestroy(comm, winHost->memory);
 
   {
     struct ncclDevCommWindowTable* tableDev = devr->windowTable;
@@ -1397,7 +1395,7 @@ fail_locReg_memHandle_mem_stream_win:
   CUDACHECKIGNORE(cudaStreamSynchronize(stream));
 fail_locReg_memHandle_mem_stream:
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
-  symMemoryDropRef(comm, mem);
+  symMemoryDestroy(comm, mem);
 fail_locReg_memHandle:
   for (int idx = 0; idx < numSegments; idx++) {
     if (memHandles[idx] != 0x0ULL) {
@@ -1821,7 +1819,7 @@ fail_stream_mem:
   if (memHandle != 0x0) {
     CUCHECKIGNORE(cuMemRelease(memHandle));
   }
-  symMemoryDropRef(comm, mem);
+  symMemoryDestroy(comm, mem);
 fail_stream:
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail:

@@ -26,7 +26,6 @@ struct ncclDevrGinSegmentInfo {
 
 // Complete type for src/include/dev_runtime.h's forward declaration.
 struct ncclDevrMemory {
-  int refCount;
   struct ncclDevrMemory* next;
   CUmemGenericAllocationHandle* memHandles;
   void* primaryAddr; // What we hope is the VA of this memory's first mapping.
