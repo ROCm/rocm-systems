@@ -89,23 +89,16 @@ if(PROFILER_HUB_ENABLE_COVERAGE)
 endif()
 
 # ASAN: TheRock forces -shared-libsan fleet-wide but amd-llvm ships only the static asan
-# runtime, so link it statically here. Discovery stays skipped because the sanitized
-# binary aborts at startup ("ASan runtime does not come first"); release builds discover
-# and run the full suite.
+# runtime, so link it statically here.
 if(
     CMAKE_CXX_COMPILER_ID MATCHES "Clang"
     AND CMAKE_CXX_FLAGS MATCHES "-fsanitize=address"
 )
     target_link_options(profiler-hub_unit_tests PRIVATE -static-libsan)
-    message(
-        STATUS
-        "profiler-hub: skipping gtest_discover_tests under ASAN "
-        "(sanitized binary cannot init ASan at build-time discovery)"
-    )
-else()
-    gtest_discover_tests(
-        profiler-hub_unit_tests
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        PROPERTIES LABELS "unit"
-    )
 endif()
+
+gtest_discover_tests(
+    profiler-hub_unit_tests
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    PROPERTIES LABELS "unit"
+)
