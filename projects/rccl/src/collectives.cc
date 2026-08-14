@@ -10,6 +10,9 @@
 // paths filter and forces a real two-sided build, while leaving reference
 // and candidate functionally identical, so the expected verdict is known in
 // advance: no regression. Close this PR and delete the branch afterwards.
+// Round 2: re-run to validate the report job now that it posts from
+// ubuntu-latest off an uploaded artifact instead of re-rendering on the
+// self-hosted runner. Same known answer: no regression.
 
 #include "argcheck.h" // Need some checks here since we access comm
 #include "collectives.h"
