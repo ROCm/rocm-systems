@@ -634,10 +634,10 @@ class VirtualGPU : public device::VirtualDevice {
 
   void enableSyncBlit() const;
 
-  void hasPendingDispatch() { hasPendingDispatch_ = true; }
-  bool IsPendingDispatch() const { return (hasPendingDispatch_) ? true : false; }
+  void hasPendingDispatch() { SetStateFlag(kHasPendingDispatch); }
+  bool IsPendingDispatch() const { return GetStateFlag(kHasPendingDispatch); }
   void addSystemScope() override {
-    addSystemScope_ = true;
+    SetStateFlag(kAddSystemScope);
     fence_state_ = amd::Device::CacheState::kCacheStateInvalid;
   }
   void SetCopyCommandType(cl_command_type type) { copy_command_type_ = type; }
@@ -676,7 +676,7 @@ class VirtualGPU : public device::VirtualDevice {
   //! Analyzes a crashed AQL queue to find a broken AQL packet.
   //! Returns the faulting kernel name ("<not identified>" if not found).
   std::string AnalyzeAqlQueue() const;
-  bool ForceIrq() const { return force_irq_; }
+  bool ForceIrq() const { return GetStateFlag(kForceIrq); }
 
   //! SDMA engine affinity management
   uint32_t AssignedSdmaEngine() const {
@@ -845,19 +845,39 @@ class VirtualGPU : public device::VirtualDevice {
     } while (true);
   }
 
-  //! Queue state flags
-  union {
-    struct {
-      uint32_t hasPendingDispatch_ : 1;     //!< A kernel dispatch is outstanding
-      uint32_t profiling_ : 1;              //!< Profiling is enabled
-      uint32_t cooperative_ : 1;            //!< Cooperative launch is enabled
-      uint32_t addSystemScope_ : 1;         //!< Insert a system scope to the next aql
-      uint32_t tracking_created_ : 1;       //!< Enabled if tracking object was properly initialized
-      uint32_t retainExternalSignals_ : 1;  //!< Indicate to retain external signal array
-      uint32_t force_irq_ : 1;              //!< Forces interrupt on the signal completion
-    };
-    uint32_t state_;
+  //! Queue state flags — using atomic with bit operations to handle concurrent
+  //! access from multiple threads under different locks (or no locks).
+  enum StateFlags : uint8_t {
+    kHasPendingDispatch = 1 << 0,
+    kProfiling = 1 << 1,
+    kCooperative = 1 << 2,
+    kAddSystemScope = 1 << 3,
+    kTrackingCreated = 1 << 4,
+    kRetainExternalSignals = 1 << 5,
+    kForceIrq = 1 << 6,
   };
+
+  void SetStateFlag(StateFlags flag) {
+    uint8_t old_state = state_.load(std::memory_order_relaxed);
+    while (!state_.compare_exchange_weak(old_state, old_state | flag,
+                                         std::memory_order_release,
+                                         std::memory_order_relaxed)) {
+    }
+  }
+
+  void ClearStateFlag(StateFlags flag) {
+    uint8_t old_state = state_.load(std::memory_order_relaxed);
+    while (!state_.compare_exchange_weak(old_state, old_state & ~flag,
+                                         std::memory_order_release,
+                                         std::memory_order_relaxed)) {
+    }
+  }
+
+  bool GetStateFlag(StateFlags flag) const {
+    return (state_.load(std::memory_order_acquire) & flag) != 0;
+  }
+
+  std::atomic<uint8_t> state_{0};
 
   Timestamp* timestamp_;
   bool sdma_profiling_for_cmd_ = false;  //!< SDMA profiling enabled for current command
