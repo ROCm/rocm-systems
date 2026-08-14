@@ -3,9 +3,8 @@
 //
 // pybind11 module exposing the ROCTX RecordFunction bridge to Python.
 
-#include "capture_control.h"
-#include "install_state.h"
-#include "record_function_bridge.h"
+#include "capture_buffer.h"
+#include "record_function_installation.h"
 #include "snapshot_store.h"
 #include "stats.h"
 #include "user_scope.h"

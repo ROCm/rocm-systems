@@ -1,10 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
+//
+// The RecordFunction callback pair. start_cb builds the marker path for one ATen
+// operator and emits a ROCTX range; end_cb unwinds what start_cb pushed. Neither
+// throws, so an error inside either is counted and swallowed.
 
 #pragma once
 
 #include "capture_buffer.h"
-#include "install_state.h"
 #include "leaf_context.h"
 #include "marker_stack.h"
 #include "scope_guard.h"
@@ -157,44 +160,6 @@ inline void end_cb(const at::RecordFunction& /*record_fn*/, at::ObserverContext*
     {
         inc(g_stats.callback_errors);
     }
-}
-
-inline std::int64_t install()
-{
-    return g_install.wlock(
-        [](InstallState& state)
-        {
-            if (state.handle != at::INVALID_CALLBACK_HANDLE)
-            {
-                return static_cast<std::int64_t>(state.handle);
-            }
-            state.handle = at::addGlobalCallback(
-                at::RecordFunctionCallback(start_cb, end_cb)
-                    .scopes({at::RecordScope::FUNCTION, at::RecordScope::BACKWARD_FUNCTION}));
-            state.installed = true;
-            return static_cast<std::int64_t>(state.handle);
-        });
-}
-
-inline void uninstall()
-{
-    g_install.wlock(
-        [](InstallState& state)
-        {
-            const auto handle = std::exchange(state.handle, at::INVALID_CALLBACK_HANDLE);
-            state.installed   = false;
-            if (handle != at::INVALID_CALLBACK_HANDLE)
-            {
-                at::removeCallback(handle);
-            }
-            // Only the callback consumes snapshots.
-            g_snapshots.clear();
-        });
-}
-
-inline bool is_installed()
-{
-    return g_install.rlock([](const InstallState& state) { return state.installed; });
 }
 
 }  // namespace torch_trace_collector::detail
