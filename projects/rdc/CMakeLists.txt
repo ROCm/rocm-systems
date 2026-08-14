@@ -61,7 +61,7 @@ set_property(
 
 # Set compile flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|i.86")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
     string(APPEND CMAKE_CXX_FLAGS " -m64 -msse -msse2")
 endif()
 set(CMAKE_CXX_FLAGS_DEBUG
@@ -125,7 +125,7 @@ option(BUILD_EXAMPLES "Build examples" OFF)
 # Enable shared libraries for gtest
 option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|i.86")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
     option(BUILD_ESMI "Enable AMDSMI ESMI Library" ON)
 else()
     option(BUILD_ESMI "Enable AMDSMI ESMI Library" OFF)
