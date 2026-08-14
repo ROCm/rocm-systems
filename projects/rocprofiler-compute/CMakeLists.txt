@@ -661,6 +661,14 @@ add_test(
         tests/test_code_object_analysis.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_source_snapshot_analysis
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_source_snapshot_analysis.xml ${COV_OPTION}
+        tests/test_source_snapshot_analysis.py ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # Metrics unit tests
 # -----------------------------------
@@ -962,6 +970,7 @@ if(${ENABLE_COVERAGE})
         test_analysis_db
         test_analysis_orm
         test_code_object_analysis
+        test_source_snapshot_analysis
         test_pc_sampling_analysis
         test_pc_sampling_profile
         test_metrics_common

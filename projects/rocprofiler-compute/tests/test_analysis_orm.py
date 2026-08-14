@@ -11,20 +11,24 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from pc_sampling.source_snapshot_analysis import parse_source_frames
 from utils.analysis_orm import (
     CodeObjectStore,
     Database,
     Dispatch,
     InstructionLine,
+    InstructionSourceLine,
     Kernel,
     KernelSymbol,
     PCSampleStallReason,
     PCSampleStallReasonLookup,
     PCSampleState,
+    SourceFile,
+    SourceLine,
     Workload,
 )
 
-PC_SAMPLING_VIEW_COLUMNS = [
+PC_SAMPLING_SUMMARY_VIEW_COLUMNS = [
     "workload_id",
     "pid",
     "code_object_id",
@@ -87,6 +91,47 @@ def add_kernel_with_durations(
     return kernel
 
 
+def add_source_frames(
+    session: Session,
+    workload: Workload,
+    instruction_line: InstructionLine,
+    source: str | None,
+) -> None:
+    """Attach an instruction's inline stack, reusing rows already created."""
+    for frame_index, (file_path, line_number) in enumerate(parse_source_frames(source)):
+        source_file = next(
+            (
+                candidate
+                for candidate in workload.source_files
+                if candidate.file_path == file_path
+            ),
+            None,
+        )
+        if source_file is None:
+            source_file = SourceFile(workload=workload, file_path=file_path)
+            session.add(source_file)
+
+        source_line = next(
+            (
+                candidate
+                for candidate in source_file.source_lines
+                if candidate.line_number == line_number
+            ),
+            None,
+        )
+        if source_line is None:
+            source_line = SourceLine(source_file=source_file, line_number=line_number)
+            session.add(source_line)
+
+        session.add(
+            InstructionSourceLine(
+                instruction_line=instruction_line,
+                source_line=source_line,
+                frame_index=frame_index,
+            )
+        )
+
+
 def add_pc_sampling_state(
     session: Session,
     *,
@@ -111,10 +156,10 @@ def add_pc_sampling_state(
     )
     instruction_line = InstructionLine(
         code_object_offset=offset,
-        comment=source,
         instruction=instruction,
         kernel_symbol=KernelSymbol(code_object_store=code_object, kernel=kernel),
     )
+    add_source_frames(session, workload, instruction_line, source)
     sample_state = PCSampleState(
         total_count=total_count,
         issue_count=issue_count,
@@ -136,12 +181,12 @@ def add_pc_sampling_state(
     return sample_state
 
 
-def fetch_pc_sampling_rows(session: Session) -> list[dict[str, object]]:
-    """Fetch sampling view rows with decoded stall-reason JSON."""
-    selected_columns = ", ".join(PC_SAMPLING_VIEW_COLUMNS)
+def fetch_pc_sampling_summary_rows(session: Session) -> list[dict[str, object]]:
+    """Fetch sampling summary rows with decoded stall-reason JSON."""
+    selected_columns = ", ".join(PC_SAMPLING_SUMMARY_VIEW_COLUMNS)
     rows = session.execute(
         text(
-            f"SELECT {selected_columns} FROM compute_pc_sampling_view "
+            f"SELECT {selected_columns} FROM compute_pc_sampling_summary_view "
             "ORDER BY workload_id, pid, code_object_id, kernel_uuid, offset, "
             "instruction, source"
         )
@@ -233,13 +278,11 @@ def test_duplicate_instruction_identity_under_same_symbol_rejected(db_session):
     db_session.add_all([
         InstructionLine(
             code_object_offset=0x10,
-            comment="/s/a.cpp:1",
             instruction="v_mov",
             kernel_symbol=kernel_symbol,
         ),
         InstructionLine(
             code_object_offset=0x10,
-            comment="/s/a.cpp:1",
             instruction="v_mov",
             kernel_symbol=kernel_symbol,
         ),
@@ -376,13 +419,11 @@ def test_equal_identities_under_distinct_parent_chains_get_distinct_uuids(
     second_symbol = KernelSymbol(code_object_store=second_code_object, kernel=kernel)
     first_instruction = InstructionLine(
         code_object_offset=0x10,
-        comment="/s/a.cpp:1",
         instruction="v_mov",
         kernel_symbol=first_symbol,
     )
     second_instruction = InstructionLine(
         code_object_offset=0x10,
-        comment="/s/a.cpp:1",
         instruction="v_mov",
         kernel_symbol=second_symbol,
     )
@@ -442,12 +483,12 @@ def test_get_or_create_type_dedups(db_session):
 
 
 # =============================================================================
-# pc_sampling view
+# pc_sampling_summary view
 # =============================================================================
 
 
-def test_pc_sampling_view_flattens_normalized_tables(db_session):
-    """The pc_sampling view flattens the normalized tables and rebuilds
+def test_pc_sampling_summary_view_flattens_normalized_tables(db_session):
+    """The summary view flattens the normalized tables and rebuilds
     stall_reason as a JSON dict."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
@@ -461,7 +502,7 @@ def test_pc_sampling_view_flattens_normalized_tables(db_session):
     Database.create_views()
     db_session.commit()
 
-    assert fetch_pc_sampling_rows(db_session) == [
+    assert fetch_pc_sampling_summary_rows(db_session) == [
         {
             "workload_id": workload.workload_id,
             "pid": 42,
@@ -506,7 +547,7 @@ def test_instruction_line_static_type_defaults_to_none(db_session):
     assert sample_state.instruction_line.instruction_type_lookup is None
 
 
-def test_pc_sampling_view_separates_states_by_code_object(db_session):
+def test_pc_sampling_summary_view_separates_states_by_code_object(db_session):
     """States under one kernel stay separate per code object."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
@@ -534,7 +575,7 @@ def test_pc_sampling_view_separates_states_by_code_object(db_session):
     Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_rows(db_session)
+    rows = fetch_pc_sampling_summary_rows(db_session)
 
     # The same offset in two code objects can be different code, so the rows are
     # never summed together.
@@ -560,7 +601,7 @@ def test_pc_sampling_view_separates_states_by_code_object(db_session):
         ),
     ],
 )
-def test_pc_sampling_view_keeps_display_identity_fields_separate(
+def test_pc_sampling_summary_view_keeps_display_identity_fields_separate(
     db_session,
     identity_field: str,
     first_value: str,
@@ -593,7 +634,7 @@ def test_pc_sampling_view_keeps_display_identity_fields_separate(
     Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_rows(db_session)
+    rows = fetch_pc_sampling_summary_rows(db_session)
 
     assert {(row[identity_field], row["count"]) for row in rows} == {
         (first_value, 3),
@@ -601,7 +642,7 @@ def test_pc_sampling_view_keeps_display_identity_fields_separate(
     }
 
 
-def test_pc_sampling_view_keeps_processes_separate_under_one_kernel(db_session):
+def test_pc_sampling_summary_view_keeps_processes_separate_under_one_kernel(db_session):
     """Identical states in two processes remain separate view rows."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
@@ -626,14 +667,14 @@ def test_pc_sampling_view_keeps_processes_separate_under_one_kernel(db_session):
     Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_rows(db_session)
+    rows = fetch_pc_sampling_summary_rows(db_session)
 
     # One kernel row, one view row per process.
     assert {row["kernel_uuid"] for row in rows} == {kernel.kernel_uuid}
     assert {(row["pid"], row["count"]) for row in rows} == {(42, 3), (99, 5)}
 
 
-def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
+def test_pc_sampling_summary_view_keeps_different_workloads_separate(db_session):
     """Matching states for different workloads remain separate view rows."""
     first_workload = Workload(name="first", sub_name="s")
     second_workload = Workload(name="second", sub_name="s")
@@ -660,7 +701,7 @@ def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
     Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_rows(db_session)
+    rows = fetch_pc_sampling_summary_rows(db_session)
 
     assert {(row["workload_id"], row["count"]) for row in rows} == {
         (first_workload.workload_id, 3),
@@ -668,7 +709,7 @@ def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
     }
 
 
-def test_pc_sampling_view_keeps_host_trap_states_with_null_counts(db_session):
+def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_session):
     """Host-trap rows stay per code object with null issue, stall, and reason."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
@@ -694,7 +735,7 @@ def test_pc_sampling_view_keeps_host_trap_states_with_null_counts(db_session):
     Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_rows(db_session)
+    rows = fetch_pc_sampling_summary_rows(db_session)
 
     assert [row["code_object_id"] for row in rows] == [5, 6]
     assert [row["count"] for row in rows] == [3, 5]
@@ -704,7 +745,7 @@ def test_pc_sampling_view_keeps_host_trap_states_with_null_counts(db_session):
 
 
 @pytest.mark.parametrize("nullable_field", ["offset", "instruction", "source"])
-def test_pc_sampling_view_attaches_reasons_with_nullable_identity(
+def test_pc_sampling_summary_view_attaches_reasons_with_nullable_identity(
     db_session, nullable_field
 ):
     """Null identity fields keep their rows and their own stall reasons."""
@@ -742,9 +783,178 @@ def test_pc_sampling_view_attaches_reasons_with_nullable_identity(
     Database.create_views()
     db_session.commit()
 
-    rows = fetch_pc_sampling_rows(db_session)
+    rows = fetch_pc_sampling_summary_rows(db_session)
 
     assert [row["code_object_id"] for row in rows] == [5, 6]
     assert all(row[nullable_field] is None for row in rows)
     assert [row["count"] for row in rows] == [3, 5]
     assert [row["stall_reason"] for row in rows] == [{"WAITCNT": 2}, {"WAITCNT": 4}]
+
+
+# =============================================================================
+# source tables and source_lines view
+# =============================================================================
+
+
+def test_duplicate_source_file_under_same_workload_rejected(db_session):
+    """One workload cannot hold the same file path twice."""
+    workload = Workload(name="w", sub_name="s")
+    db_session.add_all([
+        SourceFile(workload=workload, file_path="a.cpp", md5_checksum="aa"),
+        SourceFile(workload=workload, file_path="a.cpp", md5_checksum="bb"),
+    ])
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+def test_same_source_file_under_distinct_workloads_allowed(db_session):
+    """Two workloads can each hold their own a.cpp with different content."""
+    first_workload = Workload(name="first", sub_name="s")
+    second_workload = Workload(name="second", sub_name="s")
+    db_session.add_all([
+        SourceFile(workload=first_workload, file_path="a.cpp", md5_checksum="aa"),
+        SourceFile(workload=second_workload, file_path="a.cpp", md5_checksum="bb"),
+    ])
+    db_session.commit()
+
+    assert db_session.query(SourceFile).count() == 2
+
+
+def test_duplicate_source_line_under_same_file_rejected(db_session):
+    """One file cannot hold the same line number twice."""
+    workload = Workload(name="w", sub_name="s")
+    source_file = SourceFile(workload=workload, file_path="a.cpp")
+    db_session.add_all([
+        SourceLine(source_file=source_file, line_number=1, content="int a;"),
+        SourceLine(source_file=source_file, line_number=1, content="int b;"),
+    ])
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+def test_duplicate_frame_index_under_same_instruction_rejected(db_session):
+    """One instruction cannot hold two frames at the same depth."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="k", workload=workload)
+    code_object = CodeObjectStore(
+        code_object_id=5, pid=42, load_base=0x1000, workload=workload
+    )
+    instruction_line = InstructionLine(
+        code_object_offset=0x10,
+        instruction="v_mov",
+        kernel_symbol=KernelSymbol(code_object_store=code_object, kernel=kernel),
+    )
+    source_file = SourceFile(workload=workload, file_path="a.cpp")
+    db_session.add_all([
+        InstructionSourceLine(
+            instruction_line=instruction_line,
+            source_line=SourceLine(source_file=source_file, line_number=1),
+            frame_index=0,
+        ),
+        InstructionSourceLine(
+            instruction_line=instruction_line,
+            source_line=SourceLine(source_file=source_file, line_number=2),
+            frame_index=0,
+        ),
+    ])
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+def test_source_lines_view_joins_lines_to_their_file(db_session):
+    """The view exposes each stored line beside its file path and digest."""
+    workload = Workload(name="w", sub_name="s")
+    source_file = SourceFile(workload=workload, file_path="a.cpp", md5_checksum="aa")
+    db_session.add_all([
+        SourceLine(source_file=source_file, line_number=1, content="int a;"),
+        # A dropped line number keeps the file identity with no content.
+        SourceLine(source_file=source_file, line_number=None, content=None),
+    ])
+    Database.create_views()
+    db_session.commit()
+
+    rows = [
+        tuple(row)
+        for row in db_session.execute(
+            text(
+                "SELECT workload_id, file_path, md5_checksum, line_number, content "
+                "FROM compute_source_lines_view ORDER BY line_number"
+            )
+        )
+    ]
+
+    assert rows == [
+        (workload.workload_id, "a.cpp", "aa", None, None),
+        (workload.workload_id, "a.cpp", "aa", 1, "int a;"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_source"),
+    [
+        pytest.param("/s/a.cpp:1", "/s/a.cpp:1", id="single_frame"),
+        pytest.param(
+            "/s/hip.h:258 -> /s/hip.h:317 -> /s/a.cpp:36",
+            "/s/hip.h:258 -> /s/hip.h:317 -> /s/a.cpp:36",
+            id="chain_rebuilt_innermost_first",
+        ),
+        pytest.param(
+            "/s/hip.h:? -> /s/a.cpp:36",
+            "/s/hip.h:? -> /s/a.cpp:36",
+            id="dropped_line_number_renders_question_mark",
+        ),
+        pytest.param(None, None, id="no_frames_yields_null"),
+    ],
+)
+def test_pc_sampling_summary_view_rebuilds_source_from_frames(
+    db_session, source, expected_source
+):
+    """The summary view reconstructs the comment text from ordered frames."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="vecCopy", workload=workload)
+    db_session.add(Dispatch(dispatch_id=0, kernel=kernel))
+    add_pc_sampling_state(
+        db_session, workload=workload, kernel=kernel, pid=42, source=source
+    )
+    Database.create_views()
+    db_session.commit()
+
+    rows = fetch_pc_sampling_summary_rows(db_session)
+
+    assert [row["source"] for row in rows] == [expected_source]
+
+
+def test_pc_sampling_summary_view_keeps_frames_of_one_instruction_together(db_session):
+    """Two instructions sharing a source line keep their own chains."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="vecCopy", workload=workload)
+    db_session.add(Dispatch(dispatch_id=0, kernel=kernel))
+    add_pc_sampling_state(
+        db_session,
+        workload=workload,
+        kernel=kernel,
+        pid=42,
+        offset=0x10,
+        source="/s/hip.h:317 -> /s/a.cpp:36",
+    )
+    add_pc_sampling_state(
+        db_session,
+        workload=workload,
+        kernel=kernel,
+        pid=42,
+        code_object_id=6,
+        offset=0x20,
+        source="/s/a.cpp:36",
+    )
+    Database.create_views()
+    db_session.commit()
+
+    rows = fetch_pc_sampling_summary_rows(db_session)
+
+    assert [row["source"] for row in rows] == [
+        "/s/hip.h:317 -> /s/a.cpp:36",
+        "/s/a.cpp:36",
+    ]

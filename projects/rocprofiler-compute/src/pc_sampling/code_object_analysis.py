@@ -22,7 +22,7 @@ class CodeObjectInstruction(NamedTuple):
 
     virtual_address: int
     instruction: Optional[str]
-    comment: Optional[str]
+    source: Optional[str]
 
 
 class CodeObjectSymbol(NamedTuple):
@@ -103,5 +103,5 @@ def _to_instruction(instruction: dict[str, Any]) -> CodeObjectInstruction:
     return CodeObjectInstruction(
         virtual_address=instruction["virtual_address"],
         instruction=instruction.get("name"),
-        comment=instruction.get("comment"),
+        source=instruction.get("comment"),
     )
