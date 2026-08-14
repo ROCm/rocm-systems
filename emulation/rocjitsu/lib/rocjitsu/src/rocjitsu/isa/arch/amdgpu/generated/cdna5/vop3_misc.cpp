@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna5 {
@@ -22,6 +23,12 @@ VNopVop3::VNopVop3(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVNopVop3(const MachineInst *opcode) {
+  return std::make_unique<VNopVop3>(opcode);
+}
+} // namespace detail
+
 VPipeflushVop3::VPipeflushVop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_pipeflush_e64_dpp"
@@ -31,6 +38,12 @@ VPipeflushVop3::VPipeflushVop3(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPipeflushVop3(const MachineInst *opcode) {
+  return std::make_unique<VPipeflushVop3>(opcode);
+}
+} // namespace detail
 
 VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -68,6 +81,12 @@ VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovrelsdB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMovrelsdB32Vop3>(opcode);
+}
+} // namespace detail
+
 VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_movrelsd_2_b32_e64_dpp"
@@ -103,6 +122,12 @@ VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovrelsd2B32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMovrelsd2B32Vop3>(opcode);
+}
+} // namespace detail
 
 VPrngB32Vop3::VPrngB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -141,6 +166,12 @@ VPrngB32Vop3::VPrngB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPrngB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VPrngB32Vop3>(opcode);
+}
+} // namespace detail
+
 VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_sat_pk_u8_i16_e64_dpp"
@@ -177,6 +208,12 @@ VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSatPkU8I16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSatPkU8I16Vop3>(opcode);
+}
+} // namespace detail
 
 void VSatPkU8I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -228,6 +265,12 @@ VSatPk4I4I8Vop3::VSatPk4I4I8Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSatPk4I4I8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSatPk4I4I8Vop3>(opcode);
+}
+} // namespace detail
+
 void VSatPk4I4I8Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -277,6 +320,12 @@ VSatPk4U4U8Vop3::VSatPk4U4U8Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSatPk4U4U8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSatPk4U4U8Vop3>(opcode);
+}
+} // namespace detail
 
 void VSatPk4U4U8Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -342,6 +391,12 @@ VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMullitF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMullitF32Vop3>(opcode);
+}
+} // namespace detail
+
 VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_qsad_pk_u16_u8_e64_dpp"
@@ -380,6 +435,12 @@ VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVQsadPkU16U8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VQsadPkU16U8Vop3>(opcode);
+}
+} // namespace detail
 
 VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -420,6 +481,12 @@ VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMqsadPkU16U8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMqsadPkU16U8Vop3>(opcode);
+}
+} // namespace detail
+
 VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mqsad_u32_u8_e64_dpp"
@@ -454,6 +521,12 @@ VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMqsadU32U8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMqsadU32U8Vop3>(opcode);
+}
+} // namespace detail
+
 VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_trig_preop_f64_e64_dpp"
@@ -485,6 +558,12 @@ VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVTrigPreopF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VTrigPreopF64Vop3>(opcode);
+}
+} // namespace detail
 
 } // namespace cdna5
 } // namespace rocjitsu
