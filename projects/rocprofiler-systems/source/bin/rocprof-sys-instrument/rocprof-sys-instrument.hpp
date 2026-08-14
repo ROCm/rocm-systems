@@ -149,7 +149,7 @@ rocprofsys_get_is_executable(const std::string& _cmd, bool _default_v)
         if(Dyninst::SymtabAPI::Symtab::openFile(_symtab, _cmd.data()))
         {
             _is_executable = _symtab->isExecutable() && _symtab->isExec();
-            Dyninst::SymtabAPI::Symtab::closeSymtab(_symtab);
+            // Dyninst::SymtabAPI::Symtab::closeSymtab(_symtab);
         }
     }
     return _is_executable;
