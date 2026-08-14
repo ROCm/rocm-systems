@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/mimg.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna1 {
@@ -24,6 +25,12 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadMimg>(opcode);
+}
+} // namespace detail
+
 ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
     : Mimg("image_load_mip", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageLoadMipMimg)),
@@ -36,6 +43,12 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadMipMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadMipMimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
     : Mimg("image_load_pck", reinterpret_cast<const OpEncoding *>(inst),
@@ -50,6 +63,12 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadPckMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadPckMimg>(opcode);
+}
+} // namespace detail
+
 ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
     : Mimg("image_load_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageLoadPckSgnMimg)),
@@ -62,6 +81,12 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadPckSgnMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadPckSgnMimg>(opcode);
+}
+} // namespace detail
 
 ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
     : Mimg("image_load_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
@@ -76,6 +101,12 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadMipPckMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadMipPckMimg>(opcode);
+}
+} // namespace detail
+
 ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
     : Mimg("image_load_mip_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageLoadMipPckSgnMimg)),
@@ -88,6 +119,12 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadMipPckSgnMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadMipPckSgnMimg>(opcode);
+}
+} // namespace detail
 
 ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
     : Mimg("image_store", reinterpret_cast<const OpEncoding *>(inst),
@@ -102,6 +139,12 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageStoreMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageStoreMimg>(opcode);
+}
+} // namespace detail
+
 ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
     : Mimg("image_store_mip", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageStoreMipMimg)),
@@ -114,6 +157,12 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageStoreMipMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageStoreMipMimg>(opcode);
+}
+} // namespace detail
 
 ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
     : Mimg("image_store_pck", reinterpret_cast<const OpEncoding *>(inst),
@@ -128,6 +177,12 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageStorePckMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageStorePckMimg>(opcode);
+}
+} // namespace detail
+
 ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
     : Mimg("image_store_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageStoreMipPckMimg)),
@@ -141,6 +196,12 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageStoreMipPckMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageStoreMipPckMimg>(opcode);
+}
+} // namespace detail
+
 ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
     : Mimg("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGetResinfoMimg)),
@@ -153,6 +214,12 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGetResinfoMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGetResinfoMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
     : Mimg("image_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
@@ -168,6 +235,12 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicSwapMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicSwapMimg>(opcode);
+}
+} // namespace detail
+
 ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
     : Mimg("image_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicCmpswapMimg)),
@@ -181,6 +254,12 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicCmpswapMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicCmpswapMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
     : Mimg("image_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
@@ -196,6 +275,12 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicAddMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicAddMimg>(opcode);
+}
+} // namespace detail
+
 ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
     : Mimg("image_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicSubMimg)),
@@ -209,6 +294,12 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicSubMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicSubMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
     : Mimg("image_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
@@ -224,6 +315,12 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicSminMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicSminMimg>(opcode);
+}
+} // namespace detail
+
 ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
     : Mimg("image_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicUminMimg)),
@@ -237,6 +334,12 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicUminMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicUminMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
     : Mimg("image_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
@@ -252,6 +355,12 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicSmaxMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicSmaxMimg>(opcode);
+}
+} // namespace detail
+
 ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
     : Mimg("image_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicUmaxMimg)),
@@ -265,6 +374,12 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicUmaxMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicUmaxMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
     : Mimg("image_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
@@ -280,6 +395,12 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicAndMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicAndMimg>(opcode);
+}
+} // namespace detail
+
 ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
     : Mimg("image_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicOrMimg)),
@@ -293,6 +414,12 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicOrMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicOrMimg>(opcode);
+}
+} // namespace detail
 
 ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
     : Mimg("image_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
@@ -308,6 +435,12 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicXorMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicXorMimg>(opcode);
+}
+} // namespace detail
+
 ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
     : Mimg("image_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicIncMimg)),
@@ -322,6 +455,12 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicIncMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicIncMimg>(opcode);
+}
+} // namespace detail
+
 ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
     : Mimg("image_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicDecMimg)),
@@ -335,6 +474,12 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicDecMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicDecMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
     : Mimg("image_sample", reinterpret_cast<const OpEncoding *>(inst),
@@ -351,6 +496,12 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
     : Mimg("image_sample_cl", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleClMimg)),
@@ -365,6 +516,12 @@ ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleClMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
     : Mimg("image_sample_d", reinterpret_cast<const OpEncoding *>(inst),
@@ -381,6 +538,12 @@ ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleDMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleDMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
     : Mimg("image_sample_d_cl", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleDClMimg)),
@@ -395,6 +558,12 @@ ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleDClMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleDClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
     : Mimg("image_sample_l", reinterpret_cast<const OpEncoding *>(inst),
@@ -411,6 +580,12 @@ ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleLMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleLMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
     : Mimg("image_sample_b", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleBMimg)),
@@ -425,6 +600,12 @@ ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleBMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleBMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
     : Mimg("image_sample_b_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -441,6 +622,12 @@ ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleBClMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleBClMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
     : Mimg("image_sample_lz", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleLzMimg)),
@@ -455,6 +642,12 @@ ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleLzMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleLzMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
     : Mimg("image_sample_c", reinterpret_cast<const OpEncoding *>(inst),
@@ -471,6 +664,12 @@ ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cl", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleCClMimg)),
@@ -485,6 +684,12 @@ ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCClMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
     : Mimg("image_sample_c_d", reinterpret_cast<const OpEncoding *>(inst),
@@ -501,6 +706,12 @@ ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCDMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCDMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_cl", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleCDClMimg)),
@@ -515,6 +726,12 @@ ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCDClMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCDClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
     : Mimg("image_sample_c_l", reinterpret_cast<const OpEncoding *>(inst),
@@ -531,6 +748,12 @@ ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCLMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCLMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
     : Mimg("image_sample_c_b", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleCBMimg)),
@@ -545,6 +768,12 @@ ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCBMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCBMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
     : Mimg("image_sample_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -561,6 +790,12 @@ ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCBClMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCBClMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
     : Mimg("image_sample_c_lz", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleCLzMimg)),
@@ -575,6 +810,12 @@ ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCLzMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCLzMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
     : Mimg("image_sample_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -591,6 +832,12 @@ ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleOMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
     : Mimg("image_sample_cl_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleClOMimg)),
@@ -605,6 +852,12 @@ ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleClOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
     : Mimg("image_sample_d_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -621,6 +874,12 @@ ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleDOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleDOMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
     : Mimg("image_sample_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleDClOMimg)),
@@ -635,6 +894,12 @@ ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleDClOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleDClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
     : Mimg("image_sample_l_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -651,6 +916,12 @@ ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleLOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleLOMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
     : Mimg("image_sample_b_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleBOMimg)),
@@ -665,6 +936,12 @@ ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleBOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleBOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
     : Mimg("image_sample_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -681,6 +958,12 @@ ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleBClOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleBClOMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
     : Mimg("image_sample_lz_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleLzOMimg)),
@@ -695,6 +978,12 @@ ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleLzOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleLzOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -711,6 +1000,12 @@ ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCOMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleCClOMimg)),
@@ -725,6 +1020,12 @@ ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCClOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -741,6 +1042,12 @@ ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCDOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCDOMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleCDClOMimg)),
@@ -755,6 +1062,12 @@ ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCDClOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCDClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -771,6 +1084,12 @@ ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCLOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCLOMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleCBOMimg)),
@@ -785,6 +1104,12 @@ ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCBOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCBOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -801,6 +1126,12 @@ ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCBClOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCBClOMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleCLzOMimg)),
@@ -815,6 +1146,12 @@ ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCLzOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCLzOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
     : Mimg("image_gather4", reinterpret_cast<const OpEncoding *>(inst),
@@ -831,6 +1168,12 @@ ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4Mimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4Mimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
     : Mimg("image_gather4_cl", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4ClMimg)),
@@ -845,6 +1188,12 @@ ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4ClMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4ClMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
     : Mimg("image_gather4h", reinterpret_cast<const OpEncoding *>(inst),
@@ -861,6 +1210,12 @@ ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4hMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4hMimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
     : Mimg("image_gather4_l", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4LMimg)),
@@ -875,6 +1230,12 @@ ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4LMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4LMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
     : Mimg("image_gather4_b", reinterpret_cast<const OpEncoding *>(inst),
@@ -891,6 +1252,12 @@ ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4BMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4BMimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
     : Mimg("image_gather4_b_cl", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4BClMimg)),
@@ -905,6 +1272,12 @@ ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4BClMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4BClMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
     : Mimg("image_gather4_lz", reinterpret_cast<const OpEncoding *>(inst),
@@ -921,6 +1294,12 @@ ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4LzMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4LzMimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
     : Mimg("image_gather4_c", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4CMimg)),
@@ -935,6 +1314,12 @@ ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -951,6 +1336,12 @@ ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CClMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CClMimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4hPckMimg::ImageGather4hPckMimg(const MachineInst *inst)
     : Mimg("image_gather4h_pck", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4hPckMimg)),
@@ -965,6 +1356,12 @@ ImageGather4hPckMimg::ImageGather4hPckMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4hPckMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4hPckMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather8hPckMimg::ImageGather8hPckMimg(const MachineInst *inst)
     : Mimg("image_gather8h_pck", reinterpret_cast<const OpEncoding *>(inst),
@@ -981,6 +1378,12 @@ ImageGather8hPckMimg::ImageGather8hPckMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather8hPckMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather8hPckMimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_l", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4CLMimg)),
@@ -995,6 +1398,12 @@ ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CLMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CLMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_b", reinterpret_cast<const OpEncoding *>(inst),
@@ -1011,6 +1420,12 @@ ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CBMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CBMimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4CBClMimg)),
@@ -1025,6 +1440,12 @@ ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CBClMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CBClMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_lz", reinterpret_cast<const OpEncoding *>(inst),
@@ -1041,6 +1462,12 @@ ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CLzMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CLzMimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
     : Mimg("image_gather4_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4OMimg)),
@@ -1055,6 +1482,12 @@ ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4OMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4OMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4ClOMimg::ImageGather4ClOMimg(const MachineInst *inst)
     : Mimg("image_gather4_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1071,6 +1504,12 @@ ImageGather4ClOMimg::ImageGather4ClOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4ClOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4ClOMimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4LOMimg::ImageGather4LOMimg(const MachineInst *inst)
     : Mimg("image_gather4_l_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4LOMimg)),
@@ -1085,6 +1524,12 @@ ImageGather4LOMimg::ImageGather4LOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4LOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4LOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4BOMimg::ImageGather4BOMimg(const MachineInst *inst)
     : Mimg("image_gather4_b_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1101,6 +1546,12 @@ ImageGather4BOMimg::ImageGather4BOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4BOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4BOMimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4BClOMimg::ImageGather4BClOMimg(const MachineInst *inst)
     : Mimg("image_gather4_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4BClOMimg)),
@@ -1115,6 +1566,12 @@ ImageGather4BClOMimg::ImageGather4BClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4BClOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4BClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
     : Mimg("image_gather4_lz_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1131,6 +1588,12 @@ ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4LzOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4LzOMimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4COMimg::ImageGather4COMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4COMimg)),
@@ -1145,6 +1608,12 @@ ImageGather4COMimg::ImageGather4COMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4COMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4COMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CClOMimg::ImageGather4CClOMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1161,6 +1630,12 @@ ImageGather4CClOMimg::ImageGather4CClOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CClOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CClOMimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4CLOMimg::ImageGather4CLOMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4CLOMimg)),
@@ -1175,6 +1650,12 @@ ImageGather4CLOMimg::ImageGather4CLOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CLOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CLOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CBOMimg::ImageGather4CBOMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1191,6 +1672,12 @@ ImageGather4CBOMimg::ImageGather4CBOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CBOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CBOMimg>(opcode);
+}
+} // namespace detail
+
 ImageGather4CBClOMimg::ImageGather4CBClOMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGather4CBClOMimg)),
@@ -1205,6 +1692,12 @@ ImageGather4CBClOMimg::ImageGather4CBClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CBClOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CBClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1221,6 +1714,12 @@ ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CLzOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CLzOMimg>(opcode);
+}
+} // namespace detail
+
 ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
     : Mimg("image_get_lod", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageGetLodMimg)),
@@ -1235,6 +1734,12 @@ ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGetLodMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGetLodMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCdMimg::ImageSampleCdMimg(const MachineInst *inst)
     : Mimg("image_sample_cd", reinterpret_cast<const OpEncoding *>(inst),
@@ -1251,6 +1756,12 @@ ImageSampleCdMimg::ImageSampleCdMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCdMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCdMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleCdClMimg::ImageSampleCdClMimg(const MachineInst *inst)
     : Mimg("image_sample_cd_cl", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleCdClMimg)),
@@ -1265,6 +1776,12 @@ ImageSampleCdClMimg::ImageSampleCdClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCdClMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCdClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCCdMimg::ImageSampleCCdMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cd", reinterpret_cast<const OpEncoding *>(inst),
@@ -1281,6 +1798,12 @@ ImageSampleCCdMimg::ImageSampleCCdMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCCdMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCCdMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleCCdClMimg::ImageSampleCCdClMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cd_cl", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleCCdClMimg)),
@@ -1295,6 +1818,12 @@ ImageSampleCCdClMimg::ImageSampleCCdClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCCdClMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCCdClMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCdOMimg::ImageSampleCdOMimg(const MachineInst *inst)
     : Mimg("image_sample_cd_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1311,6 +1840,12 @@ ImageSampleCdOMimg::ImageSampleCdOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCdOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCdOMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleCdClOMimg::ImageSampleCdClOMimg(const MachineInst *inst)
     : Mimg("image_sample_cd_cl_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleCdClOMimg)),
@@ -1325,6 +1860,12 @@ ImageSampleCdClOMimg::ImageSampleCdClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCdClOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCdClOMimg>(opcode);
+}
+} // namespace detail
 
 ImageSampleCCdOMimg::ImageSampleCCdOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cd_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -1341,6 +1882,12 @@ ImageSampleCCdOMimg::ImageSampleCCdOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCCdOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCCdOMimg>(opcode);
+}
+} // namespace detail
+
 ImageSampleCCdClOMimg::ImageSampleCCdClOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cd_cl_o", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleCCdClOMimg)),
@@ -1355,6 +1902,12 @@ ImageSampleCCdClOMimg::ImageSampleCCdClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCCdClOMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCCdClOMimg>(opcode);
+}
+} // namespace detail
 
 } // namespace cdna1
 } // namespace rocjitsu
