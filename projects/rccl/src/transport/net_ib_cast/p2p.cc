@@ -195,6 +195,9 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     }
 
     int devIndex = qp->devIndex;
+    // Hoisted out of the loop below: the WQE-size histogram is per device, so
+    // this index is the same for every sub-request posted on this QP.
+    const int telDevIdx = comm->base.vProps.devs[devIndex];
     for (int r = 0; r < nreqs; r++) {
       // Track this event for completion
       // IbCastAddEvent(reqs[r], devIndex);
@@ -225,7 +228,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
         comm->sges[r].length = length;
         comm->wrs[r].sg_list = comm->sges + r;
         comm->wrs[r].num_sge = 1;
-        rcclTelemetryWqeSize(comm->base.vProps.devs[devIndex], (uint64_t)length);
+        rcclTelemetryWqeSize(telDevIdx, (uint64_t)length);
       }
 
       // wr_id remapping is only used for CAST scheduler RTT timing (BY_INDEX).
@@ -313,9 +316,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
 
     NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
 
-    int telDevIdx = comm->base.vProps.devs[qp->devIndex];
-    rcclTelemetryWqePosted(telDevIdx, comm->telChId, qp->telQpSlot, 1);
-    rcclTelemetryWriteWqe(telDevIdx, comm->telChId, qp->telQpSlot, useWriteOp ? 0 : 1);
+    rcclTelemetryQpSendPosted(qp->telQpStats, useWriteOp ? 0 : 1);
 
     // Update the send offset and addresses for the next QP according to the
     // actual data size that was sent on the current QP, for every request
@@ -389,10 +390,7 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
       // Looking the QP up is telemetry-only work on a spin path.
       if (rcclTelemetryOn()) {
         int qpIdx = comm->base.qpIndex;
-        if (qpIdx >= 0 && qpIdx < comm->base.nqps) {
-          const struct ncclIbQp* missQp = &comm->base.qps[qpIdx];
-          rcclTelemetrySlotMiss(comm->base.vProps.devs[missQp->devIndex], comm->telChId, missQp->telQpSlot);
-        }
+        if (qpIdx >= 0 && qpIdx < comm->base.nqps) rcclTelemetryQpSlotMiss(comm->base.qps[qpIdx].telQpStats);
       }
       return ncclSuccess;
     }
@@ -589,8 +587,7 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   struct ibv_send_wr* bad_wr;
   NCCLCHECK(wrap_ibv_post_send(ctsQp->qp, &wr, &bad_wr));
 
-  rcclTelemetryCtsSent(comm->base.vProps.devs[ctsQp->devIndex], comm->telChId, ctsQp->telQpSlot,
-                       (wr.send_flags & IBV_SEND_SIGNALED) ? 1 : 0);
+  rcclTelemetryQpCtsSent(ctsQp->telQpStats, (wr.send_flags & IBV_SEND_SIGNALED) ? 1 : 0);
 
   TRACE(NCCL_NET,
         "NET/IB: %s: CTS posted (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld, opcode=%d, send_flags=%d, "
@@ -666,12 +663,12 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
           comm->ibRecvWorkRequest.wr_id = qpIndex;
           NCCLCHECK(IbCastPostRecvWorkRequest(qp->qp, &comm->ibRecvWorkRequest));
           comm->base.rxPosts[qpIndex]++;
-          rcclTelemetryWqePosted(comm->base.vProps.devs[qp->devIndex], comm->telChId, qp->telQpSlot, 0);
+          rcclTelemetryQpRecvPosted(qp->telQpStats);
         }
       } else {
         comm->ibRecvWorkRequest.wr_id = req - comm->base.reqs;
         NCCLCHECK(IbCastPostRecvWorkRequest(qp->qp, &comm->ibRecvWorkRequest));
-        rcclTelemetryWqePosted(comm->base.vProps.devs[qp->devIndex], comm->telChId, qp->telQpSlot, 0);
+        rcclTelemetryQpRecvPosted(qp->telQpStats);
       }
 #ifdef NCCL_ENABLE_NET_PROFILING
       // Start a QP event for every request in the multirecv and every qp
@@ -850,12 +847,12 @@ static inline ncclResult_t IbCastRequestComplete(struct ncclIbRequest* r, int* d
   TRACE(NCCL_NET, "NET/IB: %s: %s request completed (req=%p, comm=%p, id=%ld, type=%s)", __func__,
         r->base->isSend ? "Send" : "Recv", r, r->base, r->id, IbCastReqTypeStr[r->type]);
   *done = 1;
+  // devBases[0] is this comm's first device, which is the one telChStats was
+  // resolved on; keep the test so a request that never reached a device is
+  // charged to nothing, exactly as before.
   if (r->devBases[0]) {
-    int telDev = r->devBases[0]->ibDevN;
-    int telCh = r->base->isSend
-      ? ((struct ncclIbSendComm*)(r->base))->telChId
-      : ((struct ncclIbRecvComm*)(r->base))->telChId;
-    rcclTelemetryRequestCompleted(telDev, telCh);
+    rcclTelemetryChRequestCompleted(r->base->isSend ? ((struct ncclIbSendComm*)(r->base))->telChStats :
+                                                      ((struct ncclIbRecvComm*)(r->base))->telChStats);
   }
   if (sizes && r->type == NCCL_NET_IB_REQ_RECV) {
     TRACE(NCCL_NET, "NET/IB: %s: Recv request completed (req=%p, comm=%p, id=%ld, type=%s, nreqs=%d)", __func__, r,
@@ -929,7 +926,7 @@ static inline void IbCastTelemetryWqeComplete(struct ncclIbNetCommBase* commBase
   int telQpIdx = -1;
   if (IbCastCommBaseGetQpByQpNum(commBase, devIndex, wc->qp_num, &telQp, &telQpIdx) != ncclSuccess) return;
   if (telQp == NULL) return;
-  rcclTelemetryWqeComplete(commBase->vProps.devs[devIndex], telQp->channelId, telQp->telQpSlot, postTs);
+  rcclTelemetryQpWqeComplete(telQp->telQpStats, postTs);
 }
 
 static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commBase, struct ibv_wc* wc, int devIndex) {

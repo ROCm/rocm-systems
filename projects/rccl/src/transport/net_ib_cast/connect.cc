@@ -481,7 +481,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
 }
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs) {
-  qp->telQpSlot = -1;
+  qp->telQpStats = NULL;
   if (createQpAttrs->oooRq) {
     NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
     return ncclSuccess;
@@ -1080,10 +1080,12 @@ ib_recv_dev_list:
   NCCLCHECKGOTO(IbCastSenderQpsCreate(comm, &meta, channelId), ret, fail);
 
   comm->telChId = channelId;
+  comm->telChStats = NULL;
 
-  // Counting QPs per device and handing out slots only feeds telemetry, so skip
-  // it outright when telemetry is off. IbCastQpCreate() already left every
-  // telQpSlot at -1, which is the untracked value the hooks expect.
+  // Counting QPs per device, handing out slots and resolving the slot handles
+  // only feeds telemetry, so skip it outright when telemetry is off.
+  // IbCastQpCreate() already left every telQpStats at NULL, which is the
+  // untracked value the hooks expect.
   if (rcclTelemetryOn()) {
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       int ibDevN = comm->base.vProps.devs[i];
@@ -1095,12 +1097,15 @@ ib_recv_dev_list:
       int slotOffset = 0;
       for (int q = 0; q < comm->base.nqps && slotOffset < numSlots; q++) {
         if (comm->base.qps[q].devIndex != i) continue;
-        // QPs past the granted slots keep telQpSlot == -1 and stay untracked.
+        // QPs past the granted slots keep telQpStats == NULL and stay untracked.
         int telSlot = startSlot + slotOffset++;
-        comm->base.qps[q].telQpSlot = telSlot;
         rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, comm->base.qps[q].isDataQp);
+        comm->base.qps[q].telQpStats = rcclTelemetryResolveQp(ibDevN, channelId, telSlot);
       }
     }
+    // Request completions are charged to this channel on the comm's first
+    // device, which the loop above has just registered.
+    comm->telChStats = rcclTelemetryResolveChannel(comm->base.vProps.devs[0], channelId);
   }
 
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
@@ -1781,6 +1786,7 @@ ib_recv:
   }
 
   rComm->telChId = channelId;
+  rComm->telChStats = NULL;
 
   // See IbCastConnect(): telemetry-only work, skipped when telemetry is off.
   if (rcclTelemetryOn()) {
@@ -1794,14 +1800,15 @@ ib_recv:
       int slotOffset = 0;
       for (int q = 0; q < rComm->base.nqps && slotOffset < numSlots; q++) {
         if (rComm->base.qps[q].devIndex != i) continue;
-        // QPs past the granted slots keep telQpSlot == -1 and stay untracked.
+        // QPs past the granted slots keep telQpStats == NULL and stay untracked.
         int telSlot = startSlot + slotOffset++;
-        rComm->base.qps[q].telQpSlot = telSlot;
         // ncclIbQp::isDataQp is false for every receiver QP because it only
         // drives AINIC QP creation. Classify by who actually posts CTS.
         rcclTelemetrySetQpRole(telIbDevN, channelId, telSlot, !IbCastRecvCommIsCtsQp(rComm, q));
+        rComm->base.qps[q].telQpStats = rcclTelemetryResolveQp(telIbDevN, channelId, telSlot);
       }
     }
+    rComm->telChStats = rcclTelemetryResolveChannel(rComm->base.vProps.devs[0], channelId);
   }
 
   // Store the remote CTS FIFO info provided by the remote peer

@@ -45,6 +45,32 @@ static char rcclTelemetryProcessName[256];
 /* Serializes allocation only; counter updates deliberately take no lock. */
 static pthread_mutex_t rcclTelemetryAllocLock = PTHREAD_MUTEX_INITIALIZER;
 
+/* Serializes the one-shot per-device baseline capture. Held across the counter
+ * reads, deliberately: the baseline must be in place before the caller starts
+ * driving traffic on the device, and this happens once per device on the
+ * connection-setup path, never on the data path. It is a different lock from
+ * rcclTelemetryAllocLock so that slow counter I/O cannot block slot allocation
+ * for other channels. */
+static pthread_mutex_t rcclTelemetrySnapshotLock = PTHREAD_MUTEX_INITIALIZER;
+
+static void rcclTelemetryEnsureSnapshot(int devIdx);
+
+/* Zeroed block of `entries` cache-line-aligned entries.
+ *
+ * Both RcclChannelStats and RcclQpStats are declared aligned to
+ * RCCL_TELEMETRY_CACHELINE, so their sizeof() is a multiple of it and aligning
+ * only the block base is enough to keep every entry on its own line(s). Plain
+ * calloc() guarantees no more than 16-byte alignment, which would let one line
+ * straddle two neighbouring slots and reintroduce false sharing between the
+ * threads driving them. */
+static void* rcclTelemetryAlignedCalloc(size_t entries, size_t entrySize) {
+  size_t bytes = entries * entrySize;
+  void* p = NULL;
+  if (posix_memalign(&p, RCCL_TELEMETRY_CACHELINE, bytes) != 0 || p == NULL) return NULL;
+  memset(p, 0, bytes);
+  return p;
+}
+
 /* Appends blocks under rcclTelemetryAllocLock; publishes capacity last. */
 static int rcclTelemetryBlocksGrow(void** blocks, int* block0Log2, int* capacity, int need, size_t entrySize) {
   if (*capacity == 0) {
@@ -64,7 +90,7 @@ static int rcclTelemetryBlocksGrow(void** blocks, int* block0Log2, int* capacity
     int entries = base << numBlocks;
     /* Absurd request: stop rather than wrap the running total and spin. */
     if (entries <= 0 || reached > INT_MAX - entries) break;
-    void* block = calloc((size_t)entries, entrySize);
+    void* block = rcclTelemetryAlignedCalloc((size_t)entries, entrySize);
     if (block == NULL) break;
     blocks[numBlocks] = block;
     numBlocks++;
@@ -86,6 +112,12 @@ int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots) 
   }
 
   RcclDeviceStats* dstat = &rcclTelemetryDevs[devIdx];
+
+  /* First channel setup is the first use of this device, and it still precedes
+   * any traffic on it, so this is where the HW-counter baseline belongs. Done
+   * before the untracked-QP bail-out below so that a device whose slots could
+   * not be allocated still reports valid hw_counter deltas. */
+  rcclTelemetryEnsureSnapshot(devIdx);
 
   /* No storage for such an index; charge its QPs to the device. */
   if (chIdx < 0 || chIdx >= RCCL_TELEMETRY_MAX_CHANNELS) {
@@ -682,6 +714,10 @@ void rcclTelemetryInit(void) {
       rcclTelemetryCfg.histogram_bucket_interval_ns = val;
   }
 
+  /* The interval is final here; derive the reciprocal the completion hook uses
+   * in place of a division. */
+  rcclTelemetryConfigDeriveHistogram();
+
   env_val = getenv("RCCL_TELEMETRY_HW_COUNTERS");
   if (env_val != NULL) {
     strncpy(rcclTelemetryCfg.hw_counter_list, env_val, sizeof(rcclTelemetryCfg.hw_counter_list) - 1);
@@ -761,7 +797,12 @@ void rcclTelemetryFlush(void) {
   /* Stop the sampler first so the sample buffer is stable while we write. */
   rcclTelemetrySamplerStop();
 
+  /* Only devices this rank actually used have a baseline to subtract, and
+   * reading the others would cost one `ethtool -S` subprocess each to produce
+   * counters that no baseline makes meaningful. They keep the -1/N/A values
+   * installed at registration. */
   for (int i = 0; i < rcclTelemetryNumDevs; i++) {
+    if (!__atomic_load_n(&rcclTelemetryDevs[i].snap_taken, __ATOMIC_ACQUIRE)) continue;
     rcclTelemetryCollectHwCounters(&rcclTelemetryDevs[i]);
   }
 
@@ -774,10 +815,12 @@ void rcclTelemetryFlush(void) {
       for (int c = 0; c < d->num_channels; c++) {
         RcclChannelStats* ch = rcclTelemetryChannel(i, c);
         if (ch == NULL) continue;
-        wqe_sent += ch->num_wqe_sent;
-        recv_wqe += ch->num_recv_wqe;
-        wqe_rcvd += ch->num_wqe_rcvd;
-        wqe_comp += ch->num_wqe_completed;
+        RcclChannelAggregate agg;
+        rcclTelemetryChannelAggregate(ch, &agg);
+        wqe_sent += agg.num_wqe_sent;
+        recv_wqe += agg.num_recv_wqe;
+        wqe_rcvd += agg.num_wqe_rcvd;
+        wqe_comp += agg.num_wqe_completed;
       }
       fprintf(stderr, "RCCL NET_TELEMETRY:   dev[%d] roce=%s eth=%s chans=%d "
               "tx=%lu rx=%lu wqe_sent=%lu recv_wqe=%lu wqe_rcvd=%lu wqe_comp=%lu cq_err=%lu\n",
@@ -910,7 +953,23 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
   rcclTelemetryGetDriverName(dev->roce_device, driver_name, sizeof(driver_name));
   dev->hw_config = rcclTelemetryResolveHw(driver_name);
 
-  rcclTelemetrySnapshotInit(dev);
+  /* No baseline yet — it is captured on first use (see snap_taken). Until then
+   * every HW counter and delta reads as -1/N/A rather than as a value that
+   * would otherwise be an absolute count masquerading as a delta. */
+  for (int c = 0; c < RCCL_TELEMETRY_MAX_HWC; c++) {
+    dev->hw_counters[c] = -1;
+    dev->snap_init_hw_counters[c] = -1;
+  }
+  for (int p = 0; p < 8; p++) {
+    dev->pfc_rx_frames[p] = dev->snap_init_pfc_rx_frames[p] = -1;
+    dev->pfc_tx_frames[p] = dev->snap_init_pfc_tx_frames[p] = -1;
+    dev->pfc_rx_pause_us[p] = dev->snap_init_pfc_rx_pause_us[p] = -1;
+    dev->pfc_tx_pause_us[p] = dev->snap_init_pfc_tx_pause_us[p] = -1;
+  }
+  dev->snap_init_tx_bytes = dev->snap_init_rx_bytes = -1;
+  dev->snap_init_tx_packets = dev->snap_init_rx_packets = -1;
+  dev->delta_tx_bytes = dev->delta_rx_bytes = -1;
+  dev->delta_tx_packets = dev->delta_rx_packets = -1;
 
   /* Publish the high-water mark last, so a reader that observes the new count
    * also observes a fully populated slot. */
@@ -966,6 +1025,28 @@ static void rcclTelemetrySnapshotInit(RcclDeviceStats* dev) {
                             dev->snap_init_pfc_rx_pause_us, dev->snap_init_pfc_tx_pause_us,
                             &dev->snap_init_tx_bytes, &dev->snap_init_rx_bytes,
                             &dev->snap_init_tx_packets, &dev->snap_init_rx_packets);
+}
+
+/*
+ * Capture the baseline for `devIdx` exactly once, on the device's first use.
+ *
+ * Registration deliberately does not do this: a rank registers every NIC it can
+ * enumerate (8 on an MI300X node) but normally drives one or two, and every
+ * baseline costs one `ethtool -S` subprocess. Deferring to first use makes the
+ * number of subprocesses proportional to the NICs the rank actually drives.
+ */
+static void rcclTelemetryEnsureSnapshot(int devIdx) {
+  if (devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
+  RcclDeviceStats* dev = &rcclTelemetryDevs[devIdx];
+  if (__atomic_load_n(&dev->snap_taken, __ATOMIC_ACQUIRE)) return;
+
+  pthread_mutex_lock(&rcclTelemetrySnapshotLock);
+  if (!dev->snap_taken) {
+    rcclTelemetrySnapshotInit(dev);
+    /* Release store: a flush that sees the flag also sees the baseline. */
+    __atomic_store_n(&dev->snap_taken, 1, __ATOMIC_RELEASE);
+  }
+  pthread_mutex_unlock(&rcclTelemetrySnapshotLock);
 }
 
 /*
@@ -1390,8 +1471,10 @@ static void rcclTelemetryWriteJson(FILE* fp) {
     for (int c = 0; c < dev->num_channels; c++) {
       RcclChannelStats* ch = rcclTelemetryChannel(d, c);
       if (ch == NULL) continue;
-      if (ch->num_qps > 0 || ch->num_qp_untracked > 0 || ch->num_wqe_sent || ch->num_recv_wqe || ch->num_wqe_rcvd ||
-          ch->num_wqe_completed)
+      RcclChannelAggregate agg;
+      rcclTelemetryChannelAggregate(ch, &agg);
+      if (ch->num_qps > 0 || ch->num_qp_untracked > 0 || agg.num_wqe_sent || agg.num_recv_wqe || agg.num_wqe_rcvd ||
+          agg.num_wqe_completed)
         activeChannels++;
     }
     if (dev->tx_bytes == 0 && dev->rx_bytes == 0 && dev->num_cq_errors == 0 && activeChannels == 0)
@@ -1433,14 +1516,19 @@ static void rcclTelemetryWriteJson(FILE* fp) {
 
       if (ch->num_qps == 0 && ch->num_data_qp == 0 && ch->num_cts_qp == 0 && ch->num_qp_untracked == 0) continue;
 
+      /* Channel WQE/CTS totals are sums over this channel's QP slots, computed
+       * here rather than maintained on the hot path. */
+      RcclChannelAggregate agg;
+      rcclTelemetryChannelAggregate(ch, &agg);
+
       if (chPrinted > 0) fprintf(fp, ",\n");
       fprintf(fp, "        {\n");
       fprintf(fp, "          \"id\": %d,\n", ch->id);
-      fprintf(fp, "          \"num_wqe_sent\": %lu,\n", (unsigned long)ch->num_wqe_sent);
-      fprintf(fp, "          \"num_recv_wqe\": %lu,\n", (unsigned long)ch->num_recv_wqe);
-      fprintf(fp, "          \"num_wqe_rcvd\": %lu,\n", (unsigned long)ch->num_wqe_rcvd);
-      fprintf(fp, "          \"num_wqe_completed\": %lu,\n", (unsigned long)ch->num_wqe_completed);
-      fprintf(fp, "          \"num_cts_sent\": %lu,\n", (unsigned long)ch->num_cts_sent);
+      fprintf(fp, "          \"num_wqe_sent\": %lu,\n", (unsigned long)agg.num_wqe_sent);
+      fprintf(fp, "          \"num_recv_wqe\": %lu,\n", (unsigned long)agg.num_recv_wqe);
+      fprintf(fp, "          \"num_wqe_rcvd\": %lu,\n", (unsigned long)agg.num_wqe_rcvd);
+      fprintf(fp, "          \"num_wqe_completed\": %lu,\n", (unsigned long)agg.num_wqe_completed);
+      fprintf(fp, "          \"num_cts_sent\": %lu,\n", (unsigned long)agg.num_cts_sent);
       fprintf(fp, "          \"num_req_completed\": %lu,\n", (unsigned long)ch->num_req_completed);
       fprintf(fp, "          \"num_data_qp\": %d,\n", ch->num_data_qp);
       fprintf(fp, "          \"num_cts_qp\": %d,\n", ch->num_cts_qp);

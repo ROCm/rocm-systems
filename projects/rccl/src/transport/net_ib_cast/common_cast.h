@@ -17,6 +17,7 @@
 #include "utils.h"
 #include "param.h"
 #include "profiler/net_ib.h"
+#include "net_telemetry.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -429,7 +430,14 @@ struct ncclIbQp {
   int8_t ctsQpSlot;
   int channelId;
   bool isDataQp;
-  int telQpSlot;
+
+  // Telemetry slot of this QP, resolved once during connection setup and NULL
+  // for an untracked QP. Holding the pointer rather than a slot index is what
+  // keeps a posted WQE down to one slot resolution; see the "resolved slot
+  // handles" section in net_telemetry.h. It occupies what was otherwise
+  // trailing padding, so ncclIbQp (and with it ncclIbNetCommBase, which the
+  // static_asserts below constrain) does not change size.
+  RcclQpStats* telQpStats;
 };
 
 // We need to support NCCL_NET_MAX_REQUESTS for each concurrent receive
@@ -611,6 +619,11 @@ struct ncclIbSendComm {
   uint64_t putSignalScratchpad;
   bool useCtsOffload;
   int telChId; // Telemetry: NCCL channel ID for this communicator
+  // Telemetry slot of telChId on this comm's first device, resolved once during
+  // connection setup and NULL when untracked. Same reasoning as
+  // ncclIbQp::telQpStats: request completions are as frequent as WQE
+  // completions, so they must not re-resolve the channel every time.
+  RcclChannelStats* telChStats;
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
@@ -701,6 +714,8 @@ struct ncclIbRecvComm {
   struct ibv_recv_wr ibRecvWorkRequest;
   bool useCtsOffload;
   int telChId; // Telemetry: NCCL channel ID for this communicator
+  // See ncclIbSendComm::telChStats.
+  RcclChannelStats* telChStats;
 };
 static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0,
               "ncclIbRecvComm ctsFifo must be 32-byte aligned");

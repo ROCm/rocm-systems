@@ -37,6 +37,12 @@ extern "C" {
  * WQEs of [2^(b-1), 2^b - 1] bytes, bucket 0 holds zero-length WQEs. */
 #define RCCL_TELEMETRY_WQE_SIZE_BUCKETS 32
 
+/* Assumed cache-line size. Everything a hot-path hook writes to is aligned to
+ * this, so two threads working on different QPs (or different channels) never
+ * contend for the same line. 64 on x86-64 and on aarch64 Linux; over-aligning
+ * only wastes a little memory, under-aligning costs throughput. */
+#define RCCL_TELEMETRY_CACHELINE 64
+
 /*
  * Maximum number of scalar hardware counters stored per device.
  * Must be >= the largest per-HW counter table size (see net_telemetry.cc).
@@ -58,8 +64,8 @@ static inline int rcclTelemetryOn(void) {
 void rcclTelemetryInit(void);
 
 /* Flush telemetry to JSON file - called via atexit() or can be called manually.
- * HW counters report deltas vs the baseline captured at device registration, so
- * telemetry always covers the whole process lifetime.
+ * HW counters report deltas vs the baseline captured on each device's first use,
+ * so telemetry always covers the whole period the device carried traffic.
  * Only the first call writes a file, and no telemetry storage is ever released,
  * so a manual flush cannot race a concurrent hot-path hook. */
 void rcclTelemetryFlush(void);
@@ -102,10 +108,46 @@ typedef struct {
   char    output_dir[512];              /* default: "/tmp" */
   int     histogram_max_buckets;        /* default: 5 */
   int64_t histogram_bucket_interval_ns; /* default: 30000 */
+
+  /* Derived from histogram_bucket_interval_ns, never set directly: call
+   * rcclTelemetryConfigDeriveHistogram() after changing the interval. They let
+   * the completion hook reach the histogram bucket with a multiply instead of a
+   * 64-bit division; see rcclTelemetryLatencyBucket() for the exactness proof.
+   * Deliberately adjacent to the two fields above: the completion hook reads
+   * max_buckets, recip and recip_max_ns, and they fit one cache line together.
+   *
+   * histogram_recip == 0 means "not derived yet" and selects the division, so
+   * a zeroed config behaves exactly like the old code. */
+  uint64_t histogram_recip;
+  uint64_t histogram_recip_max_ns;
+
   char    hw_counter_list[1024];        /* default: "" means collect all */
 } RcclTelemetryConfig;
 
 extern RcclTelemetryConfig rcclTelemetryCfg;
+
+/* Fixed-point position of histogram_recip. */
+#define RCCL_TELEMETRY_RECIP_SHIFT 63
+
+/*
+ * Recompute the derived histogram fields from histogram_bucket_interval_ns.
+ * Idempotent, and a no-op for a non-positive interval (which leaves
+ * histogram_recip at 0, i.e. keeps the division). Must be called after every
+ * change to the interval; config parsing does, and so must any test.
+ */
+static inline void rcclTelemetryConfigDeriveHistogram(void) {
+  int64_t d = rcclTelemetryCfg.histogram_bucket_interval_ns;
+  if (d <= 0) {
+    rcclTelemetryCfg.histogram_recip = 0;
+    rcclTelemetryCfg.histogram_recip_max_ns = 0;
+    return;
+  }
+  const uint64_t two63 = (uint64_t)1 << RCCL_TELEMETRY_RECIP_SHIFT;
+  /* ceil(2^63 / d) written as floor + 1: the "round up" reciprocal. Fits in 64
+   * bits for every d >= 1 (worst case d == 1 gives 2^63 + 1). */
+  rcclTelemetryCfg.histogram_recip = two63 / (uint64_t)d + 1;
+  rcclTelemetryCfg.histogram_recip_max_ns = two63 / (uint64_t)d;
+}
 
 /*
  * Per-QP statistics
@@ -117,8 +159,12 @@ extern RcclTelemetryConfig rcclTelemetryCfg;
  *   num_wqe_completed completions matched to a tracked posting, i.e. those for
  *                     which a post timestamp was recorded and latency is
  *                     therefore computable
+ *
+ * This is the only structure the hot-path hooks write to, so it is cache-line
+ * aligned: two threads driving neighbouring QPs must not share a line. The
+ * blocks holding these slots are allocated with the same alignment.
  */
-typedef struct {
+typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
   int      id;
   int      is_data_qp;            /* 1 for data QPs, 0 for CTS QPs */
   uint64_t num_wqe_sent;
@@ -143,30 +189,43 @@ typedef struct {
 
 /*
  * Per-channel statistics
+ *
+ * The channel-level WQE/CTS totals (num_wqe_sent, num_recv_wqe, num_wqe_rcvd,
+ * num_wqe_completed, num_cts_sent) are NOT stored here. They are exact sums
+ * over this channel's QP slots and are derived on demand by
+ * rcclTelemetryChannelAggregate(); see the comment on that function for why.
+ *
+ * Cache-line aligned for the same reason as RcclQpStats: num_req_completed is
+ * written from the data path, and neighbouring channels must not share a line.
  */
-typedef struct {
-  int         id;
-  uint64_t    num_wqe_sent;
-  uint64_t    num_recv_wqe;
-  uint64_t    num_wqe_rcvd;
-  uint64_t    num_wqe_completed;
-  uint64_t    num_cts_sent;
-  /* Network requests completed on this channel. Not a WQE count: one request
-   * spans one WQE per QP it is striped over, and one CQE completes every
-   * sub-request of a multi-send, so this is neither an upper nor a lower bound
-   * on the num_wqe_* counters above. */
-  uint64_t    num_req_completed;
-  int         num_data_qp;
-  int         num_cts_qp;
-  /* Blocks of RcclQpStats; stored before qp_capacity leaves zero. */
+typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
+  /* --- First line: read-mostly. Every hook call reads qp_blocks, num_qps and
+   * qp_block0_log2 to reach a QP slot; all writes to this line happen during
+   * connection setup, never on the data path. --- */
+  int id;
+  int num_data_qp;
+  int num_cts_qp;
+  /* Blocks of RcclQpStats; stored before qp_capacity is raised. */
   void** qp_blocks;
   /* Allocation bound; runs ahead of num_qps since blocks are powers of 2. */
   int qp_capacity;
   int qp_block0_log2;
   /* Slots handed out; the bound every counter update tests. */
   int num_qps;
-  /* QPs with no slot; their traffic is missing from every counter above. */
+  /* QPs with no slot; their traffic is missing from every counter here. */
   int num_qp_untracked;
+
+  /* --- Second line: the only field the data path writes. ---
+   * Network requests completed on this channel. Not a WQE count: one request
+   * spans one WQE per QP it is striped over, and one CQE completes every
+   * sub-request of a multi-send, so this is neither an upper nor a lower bound
+   * on the derived num_wqe_* totals. It is genuinely per-channel — no QP sum
+   * produces it — so unlike those it stays a stored counter.
+   *
+   * It gets its own line deliberately: measured runs put it at 1-2.5x the
+   * num_wqe_sent rate, so leaving it next to the read-mostly fields above would
+   * invalidate, on every request, the line that every hook call reads. */
+  uint64_t num_req_completed __attribute__((aligned(RCCL_TELEMETRY_CACHELINE)));
 } RcclChannelStats;
 
 /*
@@ -192,7 +251,7 @@ typedef struct {
   int      num_channels;
   /* Per-channel shortfalls plus channels that could not be tracked. */
   int num_qp_untracked;
-  /* Blocks of RcclChannelStats; stored before channel_capacity leaves 0. */
+  /* Blocks of RcclChannelStats; stored before channel_capacity is raised. */
   void** channel_blocks;
   int channel_capacity;
   int channel_block0_log2;
@@ -213,7 +272,17 @@ typedef struct {
   int64_t snap_init_tx_packets;
   int64_t snap_init_rx_packets;
 
-  /* Baselines for hw_counters[]/pfc_*[] — captured at device registration,
+  /* 1 once the HW-counter baseline below has been captured.
+   *
+   * The baseline is taken on first use of the device (the first channel setup
+   * on it) rather than at registration: a rank registers every NIC it can see
+   * but normally drives only one or two, and each baseline costs an
+   * `ethtool -S` subprocess. Flush skips devices that never got a baseline, so
+   * their hw_counters stay at the -1 (N/A) that registration installed instead
+   * of being reported as bogus absolute values. */
+  int snap_taken;
+
+  /* Baselines for hw_counters[]/pfc_*[] — captured on first use of the device,
    * subtracted from the current values at flush so JSON reports deltas. */
   int64_t snap_init_hw_counters[RCCL_TELEMETRY_MAX_HWC];
   int64_t snap_init_pfc_rx_frames[8];
@@ -279,15 +348,26 @@ void rcclTelemetryGetEthDevice(const char* roce_device, char* eth_device, size_t
 /* FEATURE-FLAG RULE — the single convention every call site obeys:    */
 /* 1. Every telemetry entry point is self-guarding. It tests           */
 /*    rcclTelemetryOn() (directly, or through rcclTelemetryChannel()), */
-/*    and validates its own indices, so a negative or out-of-range     */
-/*    devIdx/chIdx/qpIdx is a silent no-op. In particular, an          */
-/*    untracked QP carries telQpSlot == -1 and needs no caller check.  */
-/* 2. Call sites therefore never test rcclTelemetryEnabled in order to */
-/*    decide whether to call a hook.                                   */
+/*    or validates the resolved handle it was given, and validates its */
+/*    own indices, so a negative or out-of-range devIdx/chIdx/qpIdx,   */
+/*    or a NULL handle, is a silent no-op. In particular, an untracked */
+/*    QP carries a NULL handle and needs no caller check.              */
+/* 2. Call sites therefore never test rcclTelemetryEnabled, and never  */
+/*    test a handle for NULL, in order to decide whether to call a     */
+/*    hook.                                                            */
 /* 3. The one permitted call-site guard is rcclTelemetryOn() wrapped   */
 /*    around work that exists solely to produce hook arguments         */
 /*    (timestamps, QP lookups, per-device slot assignment). That is an */
 /*    optimization for the disabled case, never a correctness check.   */
+/* 4. Resolved handles (see "resolved slot handles" below) do not bend */
+/*    any of the above. Obtaining a handle IS the guarded step: the    */
+/*    resolver tests rcclTelemetryOn() and the indices exactly as the  */
+/*    index-taking entry points do, and returns NULL when telemetry is */
+/*    off or the slot does not exist. Every hook that takes a handle   */
+/*    is then a silent no-op on NULL, which is why rule 2 forbids the  */
+/*    caller from checking. A handle is obtained once, on the setup    */
+/*    path that rule 3 already covers, and stored next to the object   */
+/*    it belongs to.                                                   */
 /* ------------------------------------------------------------------ */
 
 #include <time.h>
@@ -339,6 +419,224 @@ static inline RcclQpStats* rcclTelemetryQp(RcclChannelStats* ch, int qpIdx) {
   return &((RcclQpStats*)ch->qp_blocks[block])[offset];
 }
 
+/*
+ * Channel-level WQE/CTS totals, derived from the channel's QP slots.
+ *
+ * These five counters used to be maintained on the hot path as a second
+ * __atomic_fetch_add next to the per-QP one. Because every QP on a channel
+ * shares one RcclChannelStats cache line, that turned each per-WQE hook into a
+ * contended line acquisition and capped hook throughput at a fixed rate no
+ * matter how many threads were running. They are exact sums over the QP slots,
+ * so nothing is lost by computing them here instead, on the flush/JSON path.
+ *
+ * Consistency: every counter is read with a relaxed atomic load, bounded by the
+ * same num_qps acquire load the hot path uses, so a concurrent hook can never
+ * make this read a slot that does not exist. A total may straddle concurrent
+ * increments (it is a sum of independently-updated counters, not a snapshot),
+ * exactly as the old channel counter could be read mid-increment. At flush time
+ * the data path is quiescent, so the reported values are exact.
+ */
+typedef struct {
+  uint64_t num_wqe_sent;
+  uint64_t num_recv_wqe;
+  uint64_t num_wqe_rcvd;
+  uint64_t num_wqe_completed;
+  uint64_t num_cts_sent;
+} RcclChannelAggregate;
+
+static inline void rcclTelemetryChannelAggregate(RcclChannelStats* ch, RcclChannelAggregate* agg) {
+  agg->num_wqe_sent = agg->num_recv_wqe = agg->num_wqe_rcvd = 0;
+  agg->num_wqe_completed = agg->num_cts_sent = 0;
+  if (ch == NULL) return;
+  int numQps = __atomic_load_n(&ch->num_qps, __ATOMIC_ACQUIRE);
+  for (int q = 0; q < numQps; q++) {
+    RcclQpStats* qp = rcclTelemetryQp(ch, q);
+    if (qp == NULL) break;
+    agg->num_wqe_sent += __atomic_load_n(&qp->num_wqe_sent, __ATOMIC_RELAXED);
+    agg->num_recv_wqe += __atomic_load_n(&qp->num_recv_wqe, __ATOMIC_RELAXED);
+    agg->num_wqe_rcvd += __atomic_load_n(&qp->num_wqe_rcvd, __ATOMIC_RELAXED);
+    agg->num_wqe_completed += __atomic_load_n(&qp->num_wqe_completed, __ATOMIC_RELAXED);
+    agg->num_cts_sent += __atomic_load_n(&qp->num_cts_sent, __ATOMIC_RELAXED);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Resolved slot handles                                              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A single posted WQE used to drive three or four separate telemetry calls
+ * (posting, opcode, size, CTS-ness), and each of them re-walked the same path
+ * to the same slot: acquire-load a capacity, a clz, a dependent load into a
+ * block array, twice over — channel, then QP. That repeated resolution was
+ * shared by every hook family, and so showed up in all of their measured costs
+ * at once.
+ *
+ * A slot's address never changes: blocks are appended, never freed or moved,
+ * and a slot is only handed out after its block exists. So the resolution can
+ * be done once, when the QP is registered, and the resulting pointer stored on
+ * the QP. Every per-WQE hook then takes that pointer and does nothing but its
+ * counter updates.
+ *
+ * Publication ordering needs nothing new. A handle is produced on the
+ * connection-setup path, whose result — the whole comm — is already published
+ * to the data-path threads by the existing setup/handoff synchronization, the
+ * same reason those threads may read qp->qp. The resolver's acquire loads still
+ * pair with the release stores in the allocator, so the slot a handle names is
+ * fully constructed.
+ *
+ * Telemetry cannot be switched on after init (rcclTelemetryEnabled is published
+ * once, before any connection is made), so a handle that is NULL because
+ * telemetry was off can never become stale.
+ */
+
+/*
+ * Resolve the statistics slot of a QP registered by
+ * rcclTelemetrySetupChannel(). Returns NULL when telemetry is off, or when the
+ * indices name no slot — in which case the QP is untracked and every hook below
+ * is a no-op for it.
+ */
+static inline RcclQpStats* rcclTelemetryResolveQp(int devIdx, int chIdx, int qpIdx) {
+  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
+  if (ch == NULL) return NULL;
+  return rcclTelemetryQp(ch, qpIdx);
+}
+
+/*
+ * Resolve the statistics slot of a channel. Same contract as above; this is
+ * just rcclTelemetryChannel() under the name the handle callers use.
+ */
+static inline RcclChannelStats* rcclTelemetryResolveChannel(int devIdx, int chIdx) {
+  return rcclTelemetryChannel(devIdx, chIdx);
+}
+
+/*
+ * Histogram bucket for a completion latency.
+ *
+ * Bit-identical to what it replaced,
+ *
+ *   int bucket = (int)(latency_ns / rcclTelemetryCfg.histogram_bucket_interval_ns);
+ *   if (bucket >= max_buckets) bucket = max_buckets - 1;
+ *
+ * for every latency_ns, including the int narrowing, but without the 64-bit
+ * division that used to sit on every completion.
+ *
+ * Why the multiply is exact. Let d = histogram_bucket_interval_ns >= 1 and
+ * m = floor(2^63/d) + 1, so m*d = 2^63 + e with 1 <= e <= d. For n >= 0,
+ *
+ *   n*m / 2^63 = n/d + n*e/(d * 2^63)
+ *
+ * and writing n = k*d + s with 0 <= s < d, floor(n*m / 2^63) == k exactly when
+ * s + n*e/2^63 < d. Since s <= d-1 it is enough that n*e < 2^63, and since
+ * e <= d it is enough that n*d < 2^63. So the multiply is exact for every
+ * n < floor(2^63/d) == histogram_recip_max_ns, which is the bound tested here:
+ * at n = recip_max_ns - 1 we get n*d <= 2^63 - d < 2^63.
+ *
+ * Above that bound — 3.5 days of latency at the default 30 us interval — the
+ * division still runs, so the identity holds over the whole int64 range rather
+ * than only over a plausible one. histogram_recip == 0 (config not derived)
+ * takes the same path.
+ */
+static inline int rcclTelemetryLatencyBucket(int64_t latency_ns) {
+  int64_t q;
+  uint64_t recip = rcclTelemetryCfg.histogram_recip;
+  if (__builtin_expect(recip != 0 && (uint64_t)latency_ns < rcclTelemetryCfg.histogram_recip_max_ns, 1)) {
+    q = (int64_t)(uint64_t)(((__uint128_t)(uint64_t)latency_ns * recip) >> RCCL_TELEMETRY_RECIP_SHIFT);
+  } else {
+    q = latency_ns / rcclTelemetryCfg.histogram_bucket_interval_ns;
+  }
+  int bucket = (int)q;
+  if (bucket >= rcclTelemetryCfg.histogram_max_buckets) bucket = rcclTelemetryCfg.histogram_max_buckets - 1;
+  return bucket;
+}
+
+/**
+ * Record a completion drained from the CQ against a resolved QP slot, with
+ * latency tracking. See rcclTelemetryWqeComplete() for the counter semantics.
+ */
+static inline void rcclTelemetryQpWqeComplete(RcclQpStats* qp, int64_t postTs) {
+  if (qp == NULL) return;
+
+  __atomic_fetch_add(&qp->num_wqe_rcvd, 1, __ATOMIC_RELAXED);
+  if (postTs <= 0) return;
+
+  __atomic_fetch_add(&qp->num_wqe_completed, 1, __ATOMIC_RELAXED);
+  int64_t latency_ns = rcclTelemetryGetNs() - postTs;
+  if (latency_ns <= 0) return;
+
+  int bucket = rcclTelemetryLatencyBucket(latency_ns);
+  if (bucket >= 0 && bucket < RCCL_TELEMETRY_HISTOGRAM_SIZE)
+    __atomic_fetch_add(&qp->wqe_completion_histogram[bucket], 1, __ATOMIC_RELAXED);
+
+  int64_t cur_min = __atomic_load_n(&qp->wqe_completion_ns_min, __ATOMIC_RELAXED);
+  while (cur_min == 0 || latency_ns < cur_min) {
+    if (__atomic_compare_exchange_n(&qp->wqe_completion_ns_min, &cur_min, latency_ns, 1, __ATOMIC_RELAXED,
+                                    __ATOMIC_RELAXED))
+      break;
+  }
+
+  int64_t cur_max = __atomic_load_n(&qp->wqe_completion_ns_max, __ATOMIC_RELAXED);
+  while (latency_ns > cur_max) {
+    if (__atomic_compare_exchange_n(&qp->wqe_completion_ns_max, &cur_max, latency_ns, 1, __ATOMIC_RELAXED,
+                                    __ATOMIC_RELAXED))
+      break;
+  }
+}
+
+/**
+ * Record everything one posted send WQE contributes to its QP: the posting
+ * itself (num_wqe_sent) and its opcode (num_write_wqe or num_write_imm_wqe).
+ *
+ * This is the combined per-WQE entry point the send path uses. It exists so
+ * that one posting costs one slot resolution and one branch instead of two of
+ * each; the counters it touches, and their values, are exactly those of
+ * rcclTelemetryWqePosted(..., 1) followed by rcclTelemetryWriteWqe(..., withImm).
+ *
+ * @param withImm  1 for RDMA_WRITE_WITH_IMM, 0 for plain RDMA_WRITE
+ */
+static inline void rcclTelemetryQpSendPosted(RcclQpStats* qp, int withImm) {
+  if (qp == NULL) return;
+  __atomic_fetch_add(&qp->num_wqe_sent, 1, __ATOMIC_RELAXED);
+  __atomic_fetch_add(withImm ? &qp->num_write_imm_wqe : &qp->num_write_wqe, 1, __ATOMIC_RELAXED);
+}
+
+/**
+ * Record a posted receive WQE (num_recv_wqe) against a resolved QP slot.
+ */
+static inline void rcclTelemetryQpRecvPosted(RcclQpStats* qp) {
+  if (qp == NULL) return;
+  __atomic_fetch_add(&qp->num_recv_wqe, 1, __ATOMIC_RELAXED);
+}
+
+/**
+ * Record a CTS posting against a resolved QP slot.
+ *
+ * @param signalled  1 if the work request carried IBV_SEND_SIGNALED
+ */
+static inline void rcclTelemetryQpCtsSent(RcclQpStats* qp, int signalled) {
+  if (qp == NULL) return;
+  __atomic_fetch_add(&qp->num_cts_sent, 1, __ATOMIC_RELAXED);
+  if (signalled) __atomic_fetch_add(&qp->num_cts_sent_signalled, 1, __ATOMIC_RELAXED);
+  else __atomic_fetch_add(&qp->num_cts_sent_unsignalled, 1, __ATOMIC_RELAXED);
+}
+
+/**
+ * Record a CTS FIFO slot miss against a resolved QP slot.
+ */
+static inline void rcclTelemetryQpSlotMiss(RcclQpStats* qp) {
+  if (qp == NULL) return;
+  __atomic_fetch_add(&qp->num_slot_miss, 1, __ATOMIC_RELAXED);
+}
+
+/**
+ * Record a completed network request against a resolved channel slot.
+ * See rcclTelemetryRequestCompleted() for what this counter is and is not.
+ */
+static inline void rcclTelemetryChRequestCompleted(RcclChannelStats* ch) {
+  if (ch == NULL) return;
+  __atomic_fetch_add(&ch->num_req_completed, 1, __ATOMIC_RELAXED);
+}
+
 /**
  * Record transferred bytes on a device.
  * Call after ibv_post_send succeeds (isSend=1) or when receive data is
@@ -378,9 +676,13 @@ static inline void rcclTelemetryCqError(int devIdx) {
  * - Updates the latency histogram bucket
  * - Updates min/max latency atomically
  *
- * Both counters are incremented on the channel as well as on the QP, under the
- * one bounds check, so that a channel total can never include a completion that
- * no QP slot accounts for.
+ * Both counters are per-QP only. The matching channel totals are derived from
+ * the QP slots by rcclTelemetryChannelAggregate() at flush time, so a channel
+ * total can never include a completion that no QP slot accounts for.
+ *
+ * The index-taking form below resolves the slot and defers to
+ * rcclTelemetryQpWqeComplete(). The data path holds a resolved handle and calls
+ * that one directly; this form is for callers that only have indices.
  *
  * @param devIdx   Device index in rcclTelemetryDevs array
  * @param chIdx    Channel index
@@ -388,45 +690,15 @@ static inline void rcclTelemetryCqError(int devIdx) {
  * @param postTs   Timestamp when work request was posted (0 if unmatched)
  */
 static inline void rcclTelemetryWqeComplete(int devIdx, int chIdx, int qpIdx, int64_t postTs) {
-  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
-  if (ch == NULL) return;
-  RcclQpStats* qp = rcclTelemetryQp(ch, qpIdx);
-  if (qp == NULL) return;
-
-  __atomic_fetch_add(&qp->num_wqe_rcvd, 1, __ATOMIC_RELAXED);
-  __atomic_fetch_add(&ch->num_wqe_rcvd, 1, __ATOMIC_RELAXED);
-  
-  if (postTs > 0) {
-    __atomic_fetch_add(&qp->num_wqe_completed, 1, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&ch->num_wqe_completed, 1, __ATOMIC_RELAXED);
-    int64_t latency_ns = rcclTelemetryGetNs() - postTs;
-    if (latency_ns > 0) {
-      int bucket = (int)(latency_ns / rcclTelemetryCfg.histogram_bucket_interval_ns);
-      if (bucket >= rcclTelemetryCfg.histogram_max_buckets)
-        bucket = rcclTelemetryCfg.histogram_max_buckets - 1;
-      if (bucket >= 0 && bucket < RCCL_TELEMETRY_HISTOGRAM_SIZE)
-        __atomic_fetch_add(&qp->wqe_completion_histogram[bucket], 1, __ATOMIC_RELAXED);
-      
-      int64_t cur_min = __atomic_load_n(&qp->wqe_completion_ns_min, __ATOMIC_RELAXED);
-      while (cur_min == 0 || latency_ns < cur_min) {
-        if (__atomic_compare_exchange_n(&qp->wqe_completion_ns_min, &cur_min, latency_ns,
-            1, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
-          break;
-      }
-      
-      int64_t cur_max = __atomic_load_n(&qp->wqe_completion_ns_max, __ATOMIC_RELAXED);
-      while (latency_ns > cur_max) {
-        if (__atomic_compare_exchange_n(&qp->wqe_completion_ns_max, &cur_max, latency_ns,
-            1, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
-          break;
-      }
-    }
-  }
+  rcclTelemetryQpWqeComplete(rcclTelemetryResolveQp(devIdx, chIdx, qpIdx), postTs);
 }
 
 /**
- * Increment channel- and QP-level posted-WQE counters: num_wqe_sent for sends,
+ * Increment the QP-level posted-WQE counter: num_wqe_sent for sends,
  * num_recv_wqe for receives. Call after ibv_post_send / ibv_post_recv.
+ *
+ * The channel totals of the same name are derived from the QP slots at flush
+ * time by rcclTelemetryChannelAggregate(), not incremented here.
  *
  * @param devIdx   Device index
  * @param chIdx    Channel index
@@ -434,16 +706,12 @@ static inline void rcclTelemetryWqeComplete(int devIdx, int chIdx, int qpIdx, in
  * @param isSend   1 for send, 0 for recv
  */
 static inline void rcclTelemetryWqePosted(int devIdx, int chIdx, int qpIdx, int isSend) {
-  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
-  if (ch == NULL) return;
-  RcclQpStats* qp = rcclTelemetryQp(ch, qpIdx);
+  RcclQpStats* qp = rcclTelemetryResolveQp(devIdx, chIdx, qpIdx);
   if (qp == NULL) return;
   if (isSend) {
     __atomic_fetch_add(&qp->num_wqe_sent, 1, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&ch->num_wqe_sent, 1, __ATOMIC_RELAXED);
   } else {
     __atomic_fetch_add(&qp->num_recv_wqe, 1, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&ch->num_recv_wqe, 1, __ATOMIC_RELAXED);
   }
 }
 
@@ -451,16 +719,15 @@ static inline void rcclTelemetryWqePosted(int devIdx, int chIdx, int qpIdx, int 
  * Record a completed network request on a channel. Call once per request, when
  * its last outstanding event has been accounted for.
  *
- * This is a request count, not a WQE count: it does not aggregate the per-QP
- * num_wqe_* counters and must not be used as if it did.
+ * This is a request count, not a WQE count: it is not a sum over the per-QP
+ * num_wqe_* counters and must not be used as if it were. It is therefore the
+ * one channel counter that is still stored rather than derived at flush.
  *
  * @param devIdx   Device index
  * @param chIdx    Channel index
  */
 static inline void rcclTelemetryRequestCompleted(int devIdx, int chIdx) {
-  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
-  if (ch == NULL) return;
-  __atomic_fetch_add(&ch->num_req_completed, 1, __ATOMIC_RELAXED);
+  rcclTelemetryChRequestCompleted(rcclTelemetryResolveChannel(devIdx, chIdx));
 }
 
 /**
@@ -469,39 +736,29 @@ static inline void rcclTelemetryRequestCompleted(int devIdx, int chIdx) {
  * returns without posting.
  */
 static inline void rcclTelemetrySlotMiss(int devIdx, int chIdx, int qpIdx) {
-  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
-  if (ch == NULL) return;
-  RcclQpStats* qp = rcclTelemetryQp(ch, qpIdx);
-  if (qp == NULL) return;
-  __atomic_fetch_add(&qp->num_slot_miss, 1, __ATOMIC_RELAXED);
+  rcclTelemetryQpSlotMiss(rcclTelemetryResolveQp(devIdx, chIdx, qpIdx));
 }
 
 /**
  * Record a CTS posting on a CTS QP.
  * Call after ibv_post_send succeeds on the CTS path.
  *
+ * QP-level only; the channel's num_cts_sent is derived at flush time.
+ *
  * @param signalled  1 if the work request carried IBV_SEND_SIGNALED
  */
 static inline void rcclTelemetryCtsSent(int devIdx, int chIdx, int qpIdx, int signalled) {
-  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
-  if (ch == NULL) return;
-  RcclQpStats* qp = rcclTelemetryQp(ch, qpIdx);
-  if (qp == NULL) return;
-  __atomic_fetch_add(&qp->num_cts_sent, 1, __ATOMIC_RELAXED);
-  __atomic_fetch_add(&ch->num_cts_sent, 1, __ATOMIC_RELAXED);
-  if (signalled)
-    __atomic_fetch_add(&qp->num_cts_sent_signalled, 1, __ATOMIC_RELAXED);
-  else
-    __atomic_fetch_add(&qp->num_cts_sent_unsignalled, 1, __ATOMIC_RELAXED);
+  rcclTelemetryQpCtsSent(rcclTelemetryResolveQp(devIdx, chIdx, qpIdx), signalled);
 }
 
 /**
  * Record an RDMA_WRITE (withImm=0) or RDMA_WRITE_WITH_IMM (withImm=1) posting.
+ *
+ * The send path does not call this: it posts through
+ * rcclTelemetryQpSendPosted(), which folds this counter in.
  */
 static inline void rcclTelemetryWriteWqe(int devIdx, int chIdx, int qpIdx, int withImm) {
-  RcclChannelStats* ch = rcclTelemetryChannel(devIdx, chIdx);
-  if (ch == NULL) return;
-  RcclQpStats* qp = rcclTelemetryQp(ch, qpIdx);
+  RcclQpStats* qp = rcclTelemetryResolveQp(devIdx, chIdx, qpIdx);
   if (qp == NULL) return;
   __atomic_fetch_add(withImm ? &qp->num_write_imm_wqe : &qp->num_write_wqe, 1, __ATOMIC_RELAXED);
 }
@@ -536,7 +793,7 @@ static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
  * This only allocates slots; the data/CTS role is per QP and is assigned
  * separately via rcclTelemetrySetQpRole().
  *
- * QPs that got no slot must keep telQpSlot == -1, so nothing charges them.
+ * QPs that got no slot must keep a NULL handle, so nothing charges them.
  *
  * @param devIdx     Device index in rcclTelemetryDevs array
  * @param chIdx      Channel index (typically allocated via atomic counter)
@@ -545,13 +802,14 @@ static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
  * @return           First reserved QP slot index, or -1 if no slot was reserved
  *
  * Usage (in ncclIbConnect/ncclIbAccept). This is the one setup path that rule 3
- * above applies to, hence the rcclTelemetryOn() wrapper:
+ * above applies to, hence the rcclTelemetryOn() wrapper, and it is also where
+ * rule 4's one-time handle resolution happens:
  *   if (rcclTelemetryOn()) {
  *     int numSlots = 0;
  *     int qpSlot = rcclTelemetrySetupChannel(devIdx, chIdx, numQps, &numSlots);
  *     for (int q = 0; q < numSlots; q++) {
- *       comm->base.qps[q].telQpSlot = qpSlot + q;
  *       rcclTelemetrySetQpRole(devIdx, chIdx, qpSlot + q, comm->base.qps[q].isDataQp);
+ *       comm->base.qps[q].telQpStats = rcclTelemetryResolveQp(devIdx, chIdx, qpSlot + q);
  *     }
  *   }
  */
