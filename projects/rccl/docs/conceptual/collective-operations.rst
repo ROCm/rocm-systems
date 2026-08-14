@@ -166,11 +166,7 @@ selects the one with the lowest estimated execution time using the model:
 
 The candidate algorithms are:
 
-- **Ring**: Data flows around a ring of GPUs. Each GPU simultaneously sends to
-its successor and receives from its predecessor. After *N−1* steps every GPU
-has contributed to and received the full result. Ring is the default for
-bandwidth-bound workloads (large messages) because it fully utilizes every
-link in the ring simultaneously.
+- **Ring**: Data flows around a ring of GPUs. Each GPU simultaneously sends to its successor and receives from its predecessor. After *N−1* steps every GPU has contributed to and received the full result. Ring is the default for bandwidth-bound workloads (large messages) because it fully utilizes every link in the ring simultaneously.
 
   AllReduce using Ring is decomposed into two phases:
 
@@ -180,23 +176,13 @@ link in the ring simultaneously.
   2. **AllGather** — each GPU broadcasts its fully reduced slice around the
     ring. After *N−1* more steps, every GPU holds all slices.
 
-- **Tree**: A binary reduction tree is used for latency-bound workloads (small
-messages). The tree converges partial results in ``log₂(N)`` steps rather
-than ``N−1``, so it out-performs Ring when the per-step latency dominates
-over the bandwidth term.
+- **Tree**: A binary reduction tree is used for latency-bound workloads (small messages). The tree converges partial results in ``log₂(N)`` steps rather than ``N−1``, so it out-performs Ring when the per-step latency dominates over the bandwidth term.
 
-- **Hierarchical**: A two-level algorithm that uses fast intra-node
-communication (xGMI) for the first level and inter-node network communication
-for the second. This is the default for multi-node workloads with 8 or more
-nodes for AllGather and ReduceScatter in recent RCCL releases.
+- **Hierarchical**: A two-level algorithm that uses fast intra-node communication (xGMI) for the first level and inter-node network communication for the second. This is the default for multi-node workloads with 8 or more nodes for AllGather and ReduceScatter in recent RCCL releases.
 
-- **CollNet**: When an in-network computing switch is available (for example,
-a SHARP-enabled InfiniBand switch), RCCL can offload the reduction to the
-switch fabric, freeing GPU resources and reducing round-trip latency.
-CollNetDirect and CollNetChain are two variants.
+- **CollNet**: When an in-network computing switch is available (for example, a SHARP-enabled InfiniBand switch), RCCL can offload the reduction to the switch fabric, freeing GPU resources and reducing round-trip latency. CollNetDirect and CollNetChain are two variants.
 
-- **PAT (Port-Aggregated Topology)**: An algorithm that aggregates bandwidth
-across multiple NIC ports for workloads that exhaust a single port's capacity.
+- **PAT (Port-Aggregated Topology)**: An algorithm that aggregates bandwidth across multiple NIC ports for workloads that exhaust a single port's capacity.
 
 The selection is performed by ``getAlgoInfo()`` in ``src/graph/tuning.cc`` and
 takes into account message size, GPU generation, node count, and whether
@@ -208,25 +194,11 @@ Protocol selection
 Independently of the algorithm, RCCL selects one of three wire protocols that
 control how data is packetized, flagged, and acknowledged on each hop:
 
-- **LL (Low Latency)**: Sends data in small, flag-tagged packets. Each 8-byte
-packet carries 4 bytes of data and a 4-byte flag. The receiver polls the flag
-to detect arrival without any memory fence. LL achieves the lowest possible
-latency but at the cost of 2× bandwidth overhead (50% of each packet is
-metadata). LL is selected for the smallest messages, typically under a few
-kilobytes.
+- **LL (Low Latency)**: Sends data in small, flag-tagged packets. Each 8-byte packet carries 4 bytes of data and a 4-byte flag. The receiver polls the flag to detect arrival without any memory fence. LL achieves the lowest possible latency but at the cost of 2× bandwidth overhead (50% of each packet is metadata). LL is selected for the smallest messages, typically under a few kilobytes.
 
-- **LL128**: A hybrid protocol that uses 128-byte aligned atomic writes — 120
-bytes of data and an 8-byte flag. The larger payload-to-flag ratio delivers
-approximately 95% of peak hardware bandwidth while retaining flag-based
-(fence-free) synchronization. LL128 is selected for medium-sized messages and
-requires hardware support for 128-byte atomics. On AMD hardware, LL128 support
-is architecture-specific; it is enabled for gfx942 with 4-NIC configurations
-and gfx950 by default.
+- **LL128**: A hybrid protocol that uses 128-byte aligned atomic writes — 120 bytes of data and an 8-byte flag. The larger payload-to-flag ratio delivers approximately 95% of peak hardware bandwidth while retaining flag-based (fence-free) synchronization. LL128 is selected for medium-sized messages and requires hardware support for 128-byte atomics. On AMD hardware, LL128 support is architecture-specific; it is enabled for gfx942 with 4-NIC configurations and gfx950 by default.
 
-- **Simple**: Divides the data into large chunks and uses standard memory fences
-for synchronization. Simple maximizes sustained bandwidth for large messages
-and is selected when the message is large enough that the fence overhead is
-negligible compared to the transfer time.
+- **Simple**: Divides the data into large chunks and uses standard memory fences for synchronization. Simple maximizes sustained bandwidth for large messages and is selected when the message is large enough that the fence overhead is negligible compared to the transfer time.
 
 The decision is made at enqueue time in ``src/enqueue.cc`` based on the
 estimated time model and the target GPU architecture.

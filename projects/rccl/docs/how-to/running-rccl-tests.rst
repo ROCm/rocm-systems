@@ -96,16 +96,9 @@ Understand the output
 Every executable produces a table with one row per message size. Before reading
 results, it is important to understand the two bandwidth metrics reported:
 
-- **Algorithm bandwidth (algBw)** is the application-visible rate; the input data 
-size divided by the elapsed time. This is the number that matters most for
-estimating the communication overhead in your workload.
+- **Algorithm bandwidth (algBw)** is the application-visible rate; the input data size divided by the elapsed time. This is the number that matters most for estimating the communication overhead in your workload.
 
-- **Bus bandwidth (busBw)** is the actual bytes transferred on the interconnect,
-divided by time. Because collective algorithms send more data than the input
-size (for example, a Ring AllReduce with *N* ranks transfers
-2(N−1)/N × input size), busBw is always higher than algBw. As N grows large,
-busBw approaches 2 × algBw for AllReduce. Bus bandwidth is useful for
-comparing actual utilization against the theoretical hardware limit.
+- **Bus bandwidth (busBw)** is the actual bytes transferred on the interconnect, divided by time. Because collective algorithms send more data than the input size (for example, a Ring AllReduce with *N* ranks transfers 2(N−1)/N × input size), busBw is always higher than algBw. As N grows large, busBw approaches 2 × algBw for AllReduce. Bus bandwidth is useful for comparing actual utilization against the theoretical hardware limit.
 
 For example, on an 8-GPU MI300X node running a 1 GB AllReduce at 179.90 GB/s
 algBw:
@@ -312,30 +305,17 @@ times for measurement.
 Interpret the results
 ======================
 
-- Check algBw against hardware limits: For a single MI300X node with 8 GPUs
-in a fully connected xGMI mesh, the theoretical AllReduce bandwidth approaches
-~179 GB/s algBw for large messages. If your results are significantly lower,
-check that:
+- Check algBw against hardware limits: For a single MI300X node with 8 GPUs in a fully connected xGMI mesh, the theoretical AllReduce bandwidth approaches ~179 GB/s algBw for large messages. If your results are significantly lower, check that:
 
   - All 8 GPUs are participating (``-g 8`` or 8 MPI ranks).
   - ``HSA_NO_SCRATCH_RECLAIM=1`` is set (critical on ROCm 7.13+ with gfx90a).
   - The system is not throttled (check GPU clocks with ``rocm-smi``).
 
-- Compare algBw against busBw: For a Ring AllReduce with *N* ranks, the
-formula is ``busBw = algBw × 2(N-1)/N``. If your measured busBw is close to
-the peak xGMI or network link bandwidth, communication is saturating the
-hardware. If it is well below, the bottleneck might be latency (small messages),
-CPU overhead, or a topology issue.
+- Compare algBw against busBw: For a Ring AllReduce with *N* ranks, the formula is ``busBw = algBw × 2(N-1)/N``. If your measured busBw is close to the peak xGMI or network link bandwidth, communication is saturating the hardware. If it is well below, the bottleneck might be latency (small messages), CPU overhead, or a topology issue.
 
-- The ``#wrong`` column: A non-zero value means the collective produced an
-incorrect result for at least one element. This should not happen in normal
-operation. Common causes are mismatched RCCL and ROCm versions, GPU memory
-errors, or reduced-precision data types hitting floating-point edge cases. Run
-with ``NCCL_DEBUG=WARN`` to get additional diagnostic output.
+- The ``#wrong`` column: A non-zero value means the collective produced an incorrect result for at least one element. This should not happen in normal operation. Common causes are mismatched RCCL and ROCm versions, GPU memory errors, or reduced-precision data types hitting floating-point edge cases. Run with ``NCCL_DEBUG=WARN`` to get additional diagnostic output.
 
-- Avg bus bandwidth line: The final line of each test run prints the average
-bus bandwidth across all tested message sizes. This is useful as a single
-summary number for comparing runs.
+- Avg bus bandwidth line: The final line of each test run prints the average bus bandwidth across all tested message sizes. This is useful as a single summary number for comparing runs.
 
 Troubleshoot test failures
 ===========================

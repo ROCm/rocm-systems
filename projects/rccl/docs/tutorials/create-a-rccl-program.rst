@@ -23,7 +23,7 @@ Prerequisites
 =============
 
 Before you begin, ensure the following are available on your system:
-.. verify ROCm version.
+
 - `ROCm 7.0 or later <https://rocm.docs.amd.com/en/latest/deploy/linux/index.html>`_.
 - The latest version of RCCL is installed. See :doc:`Install RCCL <../install/installation>`.
 - A C++20-capable compiler (``hipcc`` from ROCm, which wraps ``amdclang++``).

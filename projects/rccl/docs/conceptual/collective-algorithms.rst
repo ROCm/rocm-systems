@@ -100,18 +100,18 @@ For AllReduce, the ring operates in two phases:
 
 Total steps: 2(N−1). Total data transferred per GPU: 2(N−1)/N × input size.
 
-**When ring wins.** Ring is bandwidth-optimal for large messages: as *N* grows,
+**When ring wins:** Ring is bandwidth-optimal for large messages: as *N* grows,
 each GPU sends and receives close to 2× the input size regardless of how many
 GPUs are in the ring, so the per-step data movement per link saturates the
 interconnect. Ring is the default for AllGather, ReduceScatter, Broadcast,
 Reduce, and for large-message AllReduce.
 
-**When ring loses.** For small messages, the *N−1* sequential steps mean that
+**When ring loses:** For small messages, the *N−1* sequential steps mean that
 total latency grows linearly with *N*. On a 256-rank job, a tiny AllReduce
 requires 510 steps even if the data fits in a single packet. Tree algorithms
 close this gap.
 
-**Bus bandwidth correction factor.** Because ring sends more data than the
+**Bus bandwidth correction factor:** Because ring sends more data than the
 input size, the bus bandwidth (busBw) reported by RCCL-Tests is related to
 algorithm bandwidth (algBw) by:
 
