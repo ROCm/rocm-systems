@@ -610,26 +610,14 @@ TEST_F(HsaHotswapHookTest, DiagnosticPrefixMatchesWarningSeverity) {
   const rj_gfx1250_b0_to_a0_diagnostic_t diagnostic{
       "warning", "translator-data-only", 0, 0, "", "test warning", 0,
   };
-  ASSERT_EQ(setenv("HSA_HOTSWAP_VERBOSE", "1", 1), 0);
   testing::internal::CaptureStderr();
   rj_test_log_translation_diagnostic(0x1234, &diagnostic);
   const std::string log_text = testing::internal::GetCapturedStderr();
-  ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
   EXPECT_NE(log_text.find("[hsa-hotswap-rj] warning: translation diagnostic "), std::string::npos)
       << log_text;
   EXPECT_NE(log_text.find(" severity=warning kind=translator-data-only "), std::string::npos)
       << log_text;
   EXPECT_EQ(log_text.find("[hsa-hotswap-rj] error:"), std::string::npos) << log_text;
-}
-
-TEST_F(HsaHotswapHookTest, SuppressesWarningDiagnosticUnlessVerbose) {
-  const rj_gfx1250_b0_to_a0_diagnostic_t diagnostic{
-      "warning", "translator-data-only", 0, 0, "", "test warning", 0,
-  };
-  ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
-  testing::internal::CaptureStderr();
-  rj_test_log_translation_diagnostic(0x1234, &diagnostic);
-  EXPECT_TRUE(testing::internal::GetCapturedStderr().empty());
 }
 
 TEST_F(HsaHotswapHookTest, RendersRequiredWorkDiagnostic) {

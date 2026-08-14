@@ -44,7 +44,6 @@
 #include <functional>
 #include <iterator>
 #include <limits>
-#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -1977,12 +1976,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return base;
   };
 
-  struct OpaqueWordSummary {
-    size_t occurrences = 0;
-    uint64_t first_offset = 0;
-  };
-  std::map<uint32_t, OpaqueWordSummary> opaque_words;
-  std::unordered_set<const BasicBlock *> recorded_opaque_blocks;
   for (const KernelTranslationScope &scope : scopes) {
     if (scope.blocks.empty())
       continue;
@@ -2020,21 +2013,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                               text_relocations_begin, data_relocations_begin, relocation_snapshot))
         continue;
       return leave_unchanged();
-    }
-
-    for (const BasicBlock *block : scope.blocks) {
-      if (block == nullptr || !block->has_implicit_terminator())
-        continue;
-      if (!recorded_opaque_blocks.insert(block).second)
-        continue;
-      uint64_t offset = block->start_offset();
-      for (uint32_t word : block->opaque_words()) {
-        OpaqueWordSummary &summary = opaque_words[word];
-        if (summary.occurrences == 0)
-          summary.first_offset = offset;
-        ++summary.occurrences;
-        offset += sizeof(uint32_t);
-      }
     }
 
     // Phase 3: translate this kernel into a temporary, source-ordered body. The
@@ -3588,16 +3566,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                                   .target_literal_offset = pending.target_literal_offset,
                                   .target_text_offset = placed->second});
     }
-  }
-
-  for (const auto &[word, summary] : opaque_words) {
-    if (summary.occurrences == 0)
-      continue;
-    std::ostringstream message;
-    message << "assuming undecodable source word 0x" << std::hex << word << std::dec
-            << " is unreachable and substituting s_endpgm; occurrences=" << summary.occurrences;
-    append_warning(result.diagnostics, DiagnosticKind::Legalization, message.str(),
-                   summary.first_offset);
   }
 
   if (continue_after_failure && has_error_diagnostic(result.diagnostics))

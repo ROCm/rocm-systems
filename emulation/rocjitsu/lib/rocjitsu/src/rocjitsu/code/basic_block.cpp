@@ -103,13 +103,6 @@ const Instruction *BasicBlock::terminator() const {
   return storage_.back().get();
 }
 
-void BasicBlock::make_opaque_terminator(std::span<const uint32_t> words) {
-  size_ = static_cast<uint32_t>(words.size_bytes());
-  has_terminator_ = true;
-  has_implicit_terminator_ = true;
-  opaque_words_.assign(words.begin(), words.end());
-}
-
 void BasicBlock::add_successor(BasicBlock &successor) {
   if (std::ranges::find(successors_, &successor) != successors_.end())
     return;
@@ -167,8 +160,9 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
     std::vector<std::unique_ptr<Instruction>> decoded;
 
     while (pc < inst_data_size) {
-      // Zero-filled alignment is not an instruction. It is represented below by
-      // an opaque implicit-terminator block if control flow reaches it.
+      // gfx1250 code objects use zero-filled alignment between function bodies.
+      // Zero is not an instruction; block construction below treats sequential
+      // fallthrough into it as an implicit unreachable boundary.
       if (arch == ROCJITSU_CODE_ARCH_GFX1250 && inst_data[pc] == 0) {
         ++pc;
         byte_offset += sizeof(uint32_t);
@@ -178,13 +172,9 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
       Instruction *raw_inst = nullptr;
       try {
         raw_inst = decoder.decode(&inst_data[pc], byte_offset);
-      } catch (const util::InvalidInst &) {
-        // Preserve the source address space and let block construction represent
-        // this word as opaque code. Advancing one word allows decoding to resume
-        // at the next possible instruction boundary.
-        ++pc;
-        byte_offset += sizeof(uint32_t);
-        continue;
+      } catch (const util::InvalidInst &error) {
+        throw util::InvalidInst(
+            std::string(error.what()) + " at .text byte offset " + std::to_string(byte_offset), "");
       }
       std::unique_ptr<Instruction> inst(raw_inst);
       uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
@@ -194,6 +184,9 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
       pc += inst_words;
       byte_offset += inst_size_bytes;
     }
+
+    if (decoded.empty())
+      continue;
 
     std::vector<const Instruction *> decoded_insts;
     decoded_insts.reserve(decoded.size());
@@ -215,7 +208,7 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
         decoded_span, text, arch, extra_leaders, entry_policy, &pc_address_builders);
 
     std::set<uint64_t> leaders;
-    leaders.insert(decoded.empty() ? 0 : decoded.front()->src_loc());
+    leaders.insert(decoded.front()->src_loc());
     for (uint64_t leader : extra_leaders) {
       if (leader < section_end)
         leaders.insert(leader);
@@ -269,55 +262,22 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
 
         const bool decode_gap =
             i >= decoded.size() ? next_offset < section_end : decoded[i]->src_loc() != next_offset;
+        const Instruction &last = *current->terminator();
+        const bool can_fall_through = !is_program_path_terminator(last) &&
+                                      !is_unconditional_branch(last) &&
+                                      (last.flags() & INDIRECT_BRANCH) == 0;
+        const bool reaches_gfx1250_zero = decode_gap && arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+                                          next_offset < section_end &&
+                                          inst_data[next_offset / sizeof(uint32_t)] == 0;
+        if (can_fall_through && reaches_gfx1250_zero) {
+          current->has_terminator_ = true;
+          current->has_implicit_terminator_ = true;
+        }
         if (terminates || decode_gap || (i < decoded.size() && leaders.contains(next_offset)))
           break;
       }
       section_blocks.push_back(std::move(current));
     }
-
-    // Materialize every undecodable range as one or more CFG blocks. Split at
-    // known leaders so branches, calls, descriptors, and recovered indirect
-    // entries into opaque bytes all resolve to a block that terminates with the
-    // same unreachable-path assumption.
-    uint64_t cursor = 0;
-    std::vector<std::pair<uint64_t, uint64_t>> decoded_ranges;
-    decoded_ranges.reserve(decoded_insts.size());
-    for (const Instruction *inst : decoded_insts)
-      decoded_ranges.emplace_back(inst->src_loc(), inst->src_loc() + inst->size());
-    for (const auto &[begin, end] : decoded_ranges) {
-      if (cursor < begin) {
-        std::vector<uint64_t> cuts{cursor};
-        for (uint64_t leader : leaders) {
-          if (leader > cursor && leader < begin)
-            cuts.push_back(leader);
-        }
-        cuts.push_back(begin);
-        for (size_t cut = 0; cut + 1 < cuts.size(); ++cut) {
-          auto opaque = std::make_unique<BasicBlock>(cuts[cut]);
-          opaque->make_opaque_terminator(
-              std::span(inst_data + cuts[cut] / sizeof(uint32_t),
-                        static_cast<size_t>((cuts[cut + 1] - cuts[cut]) / sizeof(uint32_t))));
-          section_blocks.push_back(std::move(opaque));
-        }
-      }
-      cursor = std::max(cursor, end);
-    }
-    if (cursor < section_end) {
-      std::vector<uint64_t> cuts{cursor};
-      for (uint64_t leader : leaders) {
-        if (leader > cursor && leader < section_end)
-          cuts.push_back(leader);
-      }
-      cuts.push_back(section_end);
-      for (size_t cut = 0; cut + 1 < cuts.size(); ++cut) {
-        auto opaque = std::make_unique<BasicBlock>(cuts[cut]);
-        opaque->make_opaque_terminator(
-            std::span(inst_data + cuts[cut] / sizeof(uint32_t),
-                      static_cast<size_t>((cuts[cut + 1] - cuts[cut]) / sizeof(uint32_t))));
-        section_blocks.push_back(std::move(opaque));
-      }
-    }
-    std::ranges::sort(section_blocks, {}, &BasicBlock::start_offset);
 
     std::unordered_map<uint64_t, BasicBlock *> block_by_offset;
     block_by_offset.reserve(section_blocks.size());
@@ -482,8 +442,6 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
           continue;
 
         const Instruction *term = block->terminator();
-        if (term == nullptr && block->has_implicit_terminator())
-          continue;
         if (term == nullptr) {
           has_unknown_exit = true;
           continue;

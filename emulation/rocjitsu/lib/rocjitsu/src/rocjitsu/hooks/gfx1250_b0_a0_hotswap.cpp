@@ -412,8 +412,6 @@ void log_translation_diagnostic(uint64_t source_id,
   const char *kind = diagnostic->kind != nullptr ? diagnostic->kind : "unknown";
   const char *mnemonic = diagnostic->mnemonic != nullptr ? diagnostic->mnemonic : "";
   const char *message = diagnostic->message != nullptr ? diagnostic->message : "";
-  if (std::strcmp(severity, "warning") == 0 && !verbose_logging())
-    return;
 
   flockfile(stderr);
   std::fprintf(stderr,

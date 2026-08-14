@@ -70,19 +70,17 @@ public:
   uint32_t num_instructions() const { return num_instructions_; }
 
   /// @brief Whether the block ends with an explicit or implicit terminator.
-  /// @retval true The last instruction is a branch/program terminator, or the
-  /// block represents undecodable source code assumed to be unreachable.
+  /// @retval true The last instruction is a branch/program terminator, or its
+  /// sequential fallthrough reaches zero-filled gfx1250 text padding.
   /// @retval false The block falls through to the next.
   bool has_terminator() const { return has_terminator_; }
 
-  /// @brief Whether undecodable source bytes supply this block's implicit terminator.
+  /// @brief Whether zero-filled text padding terminates this block's fallthrough.
   ///
-  /// @details An opaque block is assumed unreachable by the source program.
-  /// Relocation materializes that assumption as an s_endpgm in target text.
+  /// @details Clang may omit an architectural terminator after
+  /// __builtin_unreachable(). When the next source word is gfx1250 zero-filled
+  /// text padding, relocation materializes that boundary as an s_endpgm.
   bool has_implicit_terminator() const { return has_implicit_terminator_; }
-
-  /// @brief Raw source words represented by an implicit opaque terminator.
-  [[nodiscard]] std::span<const uint32_t> opaque_words() const { return opaque_words_; }
 
   /// @brief Last instruction in the block, or nullptr for an empty block.
   [[nodiscard]] const Instruction *terminator() const;
@@ -161,7 +159,6 @@ public:
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
-  void make_opaque_terminator(std::span<const uint32_t> words);
   void add_successor(BasicBlock &successor);
   /// Remove one proven-dead edge while preserving the inverse predecessor list.
   [[nodiscard]] bool remove_successor(BasicBlock &successor);
@@ -173,7 +170,6 @@ private:
   uint32_t num_instructions_ = 0;
   bool has_terminator_ = false;
   bool has_implicit_terminator_ = false;
-  std::vector<uint32_t> opaque_words_;
   InstructionList instructions_;
   std::vector<std::unique_ptr<Instruction>> storage_;
   std::vector<BasicBlock *> successors_;

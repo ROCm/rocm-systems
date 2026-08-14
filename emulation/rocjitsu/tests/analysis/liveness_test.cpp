@@ -506,25 +506,26 @@ TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
   EXPECT_TRUE(has_predecessor(*blocks[0], blocks[0].get()));
 }
 
-TEST(CfgAnalysis, UndecodableRangesBecomeImplicitTerminators) {
+TEST(CfgAnalysis, Gfx1250ZeroPaddingTerminatesFallthrough) {
   struct Case {
     const char *name;
     std::vector<uint32_t> words;
-    size_t expected_blocks;
-    size_t implicit_block;
+    bool has_implicit_terminator;
   };
   const std::array cases = {
-      Case{"setup followed by opaque word", {0xb9800641u, 1u, 0}, 2, 1},
-      Case{"setup sequence followed by opaque word",
+      Case{"setup followed by padding", {0xb9800641u, 1u, 0}, true},
+      Case{"setup sequence followed by padding",
            {0xee174000u, 0x00040000u, 0, 0x7e000000u, 0xb9800641u, 1u, 0},
-           2,
-           1},
-      Case{"opaque section", {0}, 1, 0},
-      Case{"ordinary fallthrough into opaque word",
+           true},
+      Case{"ordinary fallthrough into padding",
            {build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), 0},
-           2,
-           1},
-      Case{"architectural terminator", {build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), 0}, 2, 1},
+           true},
+      Case{"architectural terminator followed by padding",
+           {build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), 0},
+           false},
+      Case{"unconditional branch followed by padding",
+           {build_s_branch(-1, ROCJITSU_CODE_ARCH_GFX1250), 0},
+           false},
   };
 
   for (const auto &test_case : cases) {
@@ -534,12 +535,27 @@ TEST(CfgAnalysis, UndecodableRangesBecomeImplicitTerminators) {
     ASSERT_NE(decoder, nullptr);
     auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
 
-    ASSERT_EQ(blocks.size(), test_case.expected_blocks);
-    EXPECT_TRUE(blocks[test_case.implicit_block]->has_terminator());
-    EXPECT_TRUE(blocks[test_case.implicit_block]->has_implicit_terminator());
-    ASSERT_FALSE(blocks[test_case.implicit_block]->opaque_words().empty());
-    EXPECT_EQ(blocks[test_case.implicit_block]->opaque_words().front(), 0u);
+    ASSERT_EQ(blocks.size(), 1u);
+    EXPECT_EQ(blocks[0]->has_implicit_terminator(), test_case.has_implicit_terminator);
   }
+}
+
+TEST(CfgAnalysis, Gfx1250ConditionalBranchKeepsTakenEdgeWhenPaddingTerminatesFallthrough) {
+  constexpr uint32_t kSCbranchScc0PlusOne = 0xbfa10001u;
+  std::vector<uint32_t> words = {
+      kSCbranchScc0PlusOne, // 0x00 -> 0x08; fallthrough reaches padding at 0x04.
+      0,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_EQ(blocks.size(), 2u);
+  EXPECT_TRUE(blocks[0]->has_implicit_terminator());
+  ASSERT_EQ(blocks[0]->successors().size(), 1u);
+  EXPECT_EQ(blocks[0]->successors()[0], blocks[1].get());
 }
 
 TEST(CfgAnalysis, DirectCallToImplicitNonreturningTargetDropsFallthrough) {
