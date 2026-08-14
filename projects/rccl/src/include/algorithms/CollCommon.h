@@ -278,4 +278,24 @@ __device__ __forceinline__ void ddaLLLoadLineB128(const uint32_t* src, uint32_t&
 #endif
 }
 
+__device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId, uint32_t inc) {
+  uint32_t flag = epochDev[flatBlockId] + inc;
+  if (flag == 0u) flag = 2u; // skip 0 sentinel; keep bank parity
+  __syncthreads();
+  return flag;
+}
+
+__device__ __forceinline__ void ddaSetLLEpoch(uint32_t* __restrict__ epochDev, int epochLen,
+                                              int flatBlockId, int total, uint32_t flag) {
+  // Bump every cell this block owns (cell e belongs to block e % total), split
+  // across the block's threads. The barrier is what makes the flag read above
+  // safe: thread 0 rewrites cell flatBlockId here, so every thread must have
+  // read it first. Cells at or above `total` are never read this launch.
+  for (int e = flatBlockId + (int)threadIdx.x * total;
+       e < epochLen;
+       e += total * (int)blockDim.x) {
+    epochDev[e] = flag;
+  }
+}
+
 } // namespace meta::comms
