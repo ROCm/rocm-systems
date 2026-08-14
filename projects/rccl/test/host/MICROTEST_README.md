@@ -30,6 +30,25 @@ This document is the standing record of:
 If you just want to *run* it, jump to [Running and rebuilding](#running-and-rebuilding).
 
 
+## Units under test
+
+Each production `.cc` gets its own binary so that `#include`-ing it cannot
+collide with another unit's file-scope state (`static` globals, `std::once_flag`,
+translation-unit anonymous namespaces):
+
+- **`rccl-UnitTestsMicro`** — `p2p.cc` (via `P2P_CC_PATH`); suites `P2pMicrotest.*`,
+  `FreshRegistration*`.
+- **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**) — `init.cc` (via `INIT_CC_PATH`);
+  suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
+  `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc
+  arm. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
+  TUs) from the hipify tree rather than stubbing them; `--gc-sections` drops the
+  deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
+
+Everything below (seams, fakes, coverage) applies to both; the concrete examples
+use `p2p.cc`.
+
+
 ## Why a separate test binary
 
 The existing `rccl-UnitTests` binary links against `librccl.so`. That
@@ -86,13 +105,15 @@ build-time path macro (e.g. `P2P_CC_PATH` → the hipified `p2p.cc`). To add a
 test:
 
 1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d
-   (currently `p2p.cc`), skip to step 3. Otherwise add a new path macro in
-   `CMakeLists.txt` (mirror `P2P_CC_PATH`) pointing at the hipified copy, and
-   `#include` it from the test TU *after* the fakes/macro shims are in scope.
+   (currently `p2p.cc` or `init.cc`), skip to step 3. Otherwise add a new path
+   macro in `CMakeLists.txt` (mirror `P2P_CC_PATH`/`INIT_CC_PATH`) pointing at the
+   hipified copy, and `#include` it from the test TU *after* the fakes/macro shims
+   are in scope. A new unit generally warrants its own binary (see
+   [Units under test](#units-under-test)) so its file-scope state stays isolated.
 2. **Register the source.** Add the test `.cc` to the target's source list in
-   `test/host/CMakeLists.txt` — both the in-build `TEST_MICRO_SOURCE_FILES`
-   and the standalone `rccl-UnitTestsMicro` list. If you add a new gtest suite,
-   add its pattern to `test/test_categories_micro.yaml` so CTest runs it.
+   `test/host/CMakeLists.txt` — both the in-build source list and the standalone
+   list for that target. If you add a new gtest suite, add its pattern to the
+   target's `test/test_categories_micro*.yaml` so CTest runs it.
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls
    `ResetP2pFakes()` so hooks do not leak between tests. Install per-test
    behaviour by overwriting a `std::function` hook (see the `ScopedHook`
@@ -299,7 +320,9 @@ cd projects/rccl/test/host
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DRCCL_BUILD_DIR=/path/to/projects/rccl/build/release
 cmake --build build -j"$(nproc)"
-./build/rccl-UnitTestsMicro     # 30/30 p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
+./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
+./build/rccl-UnitTestsMicroInit      # init.cc tests
+./build/rccl-UnitTestsMicroInit-uncached
 ./build/rccl-HostUnitTests
 ```
 

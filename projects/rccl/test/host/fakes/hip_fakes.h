@@ -62,6 +62,46 @@ extern std::function<hipError_t(void* /*data*/,
                                 hipDeviceptr_t /*ptr*/)>
     g_hipPointerGetAttribute;
 
+// ---------------------------------------------------------------------------
+// init.cc device-model seams (rccl-UnitTestsMicroInit).
+//
+// init.cc drives a wider slice of the HIP runtime than p2p.cc. These hooks
+// let the init tests model device inventory and inject faults on the
+// commAlloc/devCommSetup happy path. Defaults succeed with plausible values so
+// InstallCommAllocSuccess only has to flip the deep-path result seams below;
+// p2p never touches these (its call sites are unexercised stubs).
+extern std::function<hipError_t(int* /*version*/)> g_hipRuntimeGetVersion;
+extern std::function<hipError_t(hipDeviceProp_t* /*prop*/, int /*device*/)>
+    g_hipGetDeviceProperties;
+extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
+                                unsigned /*flags*/)>
+    g_hipExtMallocWithFlags;
+extern std::function<hipError_t(void* /*ptr*/)> g_hipFree;
+
+// Device inventory + current-device state (hipGetDeviceCount/hipGetDevice/
+// hipSetDevice). Defaults succeed; g_deviceCount backs the count and
+// g_currentDevice tracks the selected device. Tests inject faults or set count.
+extern int g_deviceCount;
+extern int g_currentDevice;
+extern std::function<hipError_t(int* /*dev*/)> g_hipGetDevice;
+extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
+extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
+
+// Deep-path (commAlloc/devCommSetup) result seams. Default to
+// hipErrorInvalidValue so any call a test hasn't opted into still surfaces as
+// an unexpected call; set to hipSuccess to enable the commAlloc happy path, or
+// leave one at the error value to exercise a specific CUDACHECK early-return.
+// g_hipWarpSize is reported by hipDeviceGetAttribute(hipDeviceAttributeWarpSize).
+extern hipError_t g_hipDeviceGetAttributeResult;
+extern hipError_t g_hipDeviceGetPCIBusIdResult;
+extern hipError_t g_hipEventCreateResult;
+extern hipError_t g_hipMemPoolResult;
+extern hipError_t g_hipStreamCreateResult;
+// Async stream ops reached by devCommSetup's alloc/copy templates
+// (hipThreadExchangeStreamCaptureMode / hipMemsetAsync / hipMemcpyAsync).
+extern hipError_t g_hipAsyncOpsResult;
+extern int g_hipWarpSize;
+
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();
