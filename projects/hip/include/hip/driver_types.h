@@ -470,20 +470,26 @@ typedef enum hipMemcpyFlags {
  * Per-entry wait condition for hipExtMemcpyBatchAsync. Reserved for future use.
  */
 typedef struct hipExtMemcpyWait {
-  void*    addr;       ///< GPU address to poll (NULL = no wait, use stream ordering)
-  uint64_t value;      ///< Reference value for comparison
-  uint64_t mask;       ///< AND mask applied before comparison
-  uint32_t compareOp;  ///< Reserved; comparison function
-} hipExtMemcpyWait;
+  void*    addr;        ///< GPU address to poll (NULL = no wait, use stream ordering)
+  uint64_t value;       ///< Reference value for comparison
+  uint64_t mask;        ///< AND mask applied before comparison
+  uint32_t compareOp;   ///< Reserved; comparison function
+  uint32_t reserved0;   ///< Reserved; must be 0
+  uint64_t reserved[4]; ///< Reserved; must be 0 (future use)
+} hipExtMemcpyWait;      // 64 bytes; zero-initialize. Future fields carve out of the
+                        // reserved space so the size/ABI stays fixed.
 
 /**
  * Per-entry signal-after-copy for hipExtMemcpyBatchAsync. Reserved for future use.
  */
 typedef struct hipExtMemcpySignal {
-  void*    addr;       ///< GPU address to signal (NULL = no signal)
-  uint64_t data;       ///< Data value for the atomic operation
-  uint32_t signalOp;   ///< Reserved; atomic operation
-} hipExtMemcpySignal;
+  void*    addr;        ///< GPU address to signal (NULL = no signal)
+  uint64_t data;        ///< Data value for the atomic operation
+  uint32_t signalOp;    ///< Reserved; atomic operation
+  uint32_t reserved0;   ///< Reserved; must be 0
+  uint64_t reserved[5]; ///< Reserved; must be 0 (future use)
+} hipExtMemcpySignal;    // 64 bytes; zero-initialize. Future fields carve out of the
+                        // reserved space so the size/ABI stays fixed.
 
 /**
  * Per-entry operation type for hipExtMemcpyBatchAsync.
