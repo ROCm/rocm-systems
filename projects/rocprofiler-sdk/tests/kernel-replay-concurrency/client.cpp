@@ -94,8 +94,28 @@ constexpr uint32_t       HOG_BLOCK_X = 256;
 rocprofiler_context_id_t g_ctx{0};
 std::atomic<long>        g_hog_cfg{0};
 std::atomic<long>        g_victim_cfg{0};
+std::atomic<long>        g_id_checks{0};  // KERNEL_REPLAY records whose dispatch_id was inspected
+std::atomic<long>        g_id_bad{0};     // records with a bad (zero or changed) dispatch_id
+
+// Reserved id of the hog replay currently in flight. Only the hog launcher thread runs the replay
+// (one at a time, synchronously in the WriteInterceptor), so a plain global is safe.
+rocprofiler_dispatch_id_t g_hog_dispatch_id{0};
 
 uint64_t hog_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t) { return 5; }
+
+// A replay dispatch_id must be nonzero (0 is the "unset" sentinel that make_dispatch_info leaves)
+// and identical across the CONFIG and every PASS of one dispatch. A violation prints a [repro] FAIL
+// line (fails the ctest via FAIL_REGULAR_EXPRESSION) and bumps g_id_bad.
+void
+flag_bad_dispatch_id(const char* what, rocprofiler_dispatch_id_t id, uint64_t pass)
+{
+    fprintf(stderr,
+            "[repro] FAIL: kernel-replay dispatch_id %s (id=%lu pass=%lu)\n",
+            what,
+            static_cast<unsigned long>(id),
+            static_cast<unsigned long>(pass));
+    g_id_bad.fetch_add(1, std::memory_order_relaxed);
+}
 
 void
 kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t*, void*)
@@ -105,6 +125,13 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     const bool hog = (p->dispatch_info.workgroup_size.x == HOG_BLOCK_X);
     auto*      c   = kr_coord_get();
 
+    // Every replay record (hog or victim, any phase) must carry the reserved, nonzero dispatch id
+    // -- these CONFIG/PASS callback records are not in rocprofv3 JSON, so this is where that is
+    // checked.
+    g_id_checks.fetch_add(1, std::memory_order_relaxed);
+    if(p->dispatch_info.dispatch_id == 0)
+        flag_bad_dispatch_id("is zero", p->dispatch_info.dispatch_id, p->current_pass);
+
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
@@ -113,7 +140,8 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
             g_victim_cfg.fetch_add(1, std::memory_order_relaxed);
             return;
         }
-        p->pass_count_cb = hog_pass_count;
+        p->pass_count_cb  = hog_pass_count;
+        g_hog_dispatch_id = p->dispatch_info.dispatch_id;  // reused by every pass of this replay
         g_hog_cfg.fetch_add(1, std::memory_order_relaxed);
         // snapshot happens right after this returns -> make sure V=OLD is already set
         while(c->old_ready.load() == 0)
@@ -123,14 +151,22 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     {
         return;
     }
-    else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS &&
-            record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER && p->current_pass == 0)
+    else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
     {
-        c->snapshot_done.store(c->old_ready.load());  // snapshot captured OLD -> victim writes NEW
+        // Every pass (enter and exit) must reuse the id reserved at CONFIG, unchanged.
+        if(p->dispatch_info.dispatch_id != g_hog_dispatch_id)
+            flag_bad_dispatch_id(
+                "changed across passes", p->dispatch_info.dispatch_id, p->current_pass);
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER && p->current_pass == 0)
+            c->snapshot_done.store(
+                c->old_ready.load());  // snapshot captured OLD -> victim writes NEW
     }
     else if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
             record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
     {
+        if(p->dispatch_info.dispatch_id != g_hog_dispatch_id)
+            flag_bad_dispatch_id(
+                "changed at config exit", p->dispatch_info.dispatch_id, p->current_pass);
         c->window_done.store(c->old_ready.load());  // all restores done -> victim reads
     }
 }
@@ -207,9 +243,11 @@ void
 tool_fini(void*)
 {
     fprintf(stderr,
-            "[tool] fini hog_replayed=%ld victim_optouts=%ld\n",
+            "[tool] fini hog_replayed=%ld victim_optouts=%ld id_checks=%ld id_bad=%ld\n",
             g_hog_cfg.load(),
-            g_victim_cfg.load());
+            g_victim_cfg.load(),
+            g_id_checks.load(),
+            g_id_bad.load());
 }
 }  // namespace
 
