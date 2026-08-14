@@ -203,6 +203,8 @@ set(counter-collection-device-profiling-env
     "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
     "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-output}")
 
+# Iteration count is raised above the default so that machines with few GPUs still run
+# long enough to produce the minimum number of samples the validator requires.
 add_test(NAME counter-collection-device-profiling
          COMMAND $<TARGET_FILE:counter-collection-device-profiling> 50000 50 0)
 
@@ -248,6 +250,8 @@ set(counter-collection-device-profiling-sync-env
     "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
     "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-sync-output}")
 
+# Iteration count is raised above the default so that machines with few GPUs still run
+# long enough to produce the minimum number of samples the validator requires.
 add_test(NAME counter-collection-device-profiling-sync
          COMMAND $<TARGET_FILE:counter-collection-device-profiling-sync> 50000 50 0)
 
