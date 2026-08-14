@@ -46,6 +46,21 @@ RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
+
+// Common DDA protocol-tier knobs, shared by every fabric collective (no
+// per-collective variants). For a given collective's size:
+//   size <= DdaLLThreshold     -> LL    one-shot (16B lines)
+//   size <= DdaLL128Threshold  -> LL128 one-shot (128B lines)
+//   otherwise                  -> Simple (flat one-shot / tree two-shot)
+// Constraint: DdaLLThreshold <= DdaLL128Threshold <= DdaThreshold. Setting an
+// enable flag (or its threshold) to 0 disables that tier and falls through to
+// the next, so each protocol can be A/B'd in isolation at runtime.
+RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
+RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(134217728));           // 128 MiB
+RCCL_PARAM(DdaLL, "DDA_LL", 1);
+RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));          // 32 KiB
+RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
+RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -523,6 +538,27 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
   }
   *protocolName = ncclProtoToString(protocol);
   return ncclSuccess;
+}
+
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default,
+                    size_t gfx950Default, size_t gfx1250Default) {
+  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
+    return false;
+  }
+  size_t threshold;
+  if (IsArchMatch(comm->archName, "gfx1250")) {
+    threshold = gfx1250Default ? gfx1250Default : static_cast<size_t>(rcclParamDdaThreshold());
+  } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
+    if (comm->nRanks < 8) return false;
+    if (IsArchMatch(comm->archName, "gfx942")) {
+      threshold = gfx942Default;
+    } else {
+      threshold = gfx950Default ? gfx950Default : static_cast<size_t>(rcclParamDdaThreshold());
+    }
+  } else {
+    return false;
+  }
+  return threshold > 0 && totalBytes <= threshold;
 }
 
 bool rcclUseAlltoAllGda(struct ncclComm* comm) {
