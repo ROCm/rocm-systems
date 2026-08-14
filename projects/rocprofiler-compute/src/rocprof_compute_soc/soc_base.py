@@ -422,7 +422,7 @@ class OmniSoC_Base:
                 continue
             placed = False
             for bucket_idx, bucket in enumerate(files):
-                if bucket.name.endswith("_ACCUM"):
+                if _is_accum_counter(bucket.name):
                     continue
                 trial = _trial_counter_file_with_extra(bucket, cfg, need_sorted)
                 if trial is not None:
@@ -553,7 +553,7 @@ class OmniSoC_Base:
         accu_file_count = 0
         work = sorted(list(counters))
         for counter in work.copy():
-            if counter.endswith("_ACCUM") and not is_tcc_channel_counter(counter):
+            if _is_accum_counter(counter) and not is_tcc_channel_counter(counter):
                 work.remove(counter)
                 output_files.append(CounterFile(counter, self.__perfmon_config))
                 output_files[-1].add(counter)
@@ -880,6 +880,11 @@ class CounterFile:
         return self.blocks[counter_to_block(counter)].reserve(n)
 
 
+def _is_accum_counter(counter: str) -> bool:
+    """Return whether a counter requires a paired level-event slot."""
+    return counter.endswith("_ACCUM") or counter.endswith("_ACCUM_sum")
+
+
 def _trial_counter_file_with_extra(
     basis: CounterFile,
     perfmon_config: dict[str, int],
@@ -890,6 +895,11 @@ def _trial_counter_file_with_extra(
     for ctr in flat_counters_in_perfmon_file(basis):
         if not trial.add(ctr):
             msg = f"clone replay failed for {ctr!r} in bucket {basis.name!r}"
+            raise RuntimeError(msg)
+    for block, basis_set in basis.blocks.items():
+        reservation = trial.blocks[block].avail - basis_set.avail
+        if reservation < 0 or not trial.blocks[block].reserve(reservation):
+            msg = f"clone reservation failed for block {block!r} in {basis.name!r}"
             raise RuntimeError(msg)
     for ctr in extra_counters_sorted:
         if not trial.add(ctr):
