@@ -172,6 +172,7 @@ declare -A TEST_NUMBERS=(
   ["tile_reduce"]="155"
   ["tile_reduce_wave"]="156"
   ["tile_reduce_wg"]="157"
+  ["buffer_register_symmetric"]="162"
 )
 
 # Detect which runtime to use
@@ -252,6 +253,37 @@ AdjustGridBarrierProblemSize() {
 
 # Router function - dispatches to appropriate implementation
 ExecTest() {
+  if [[ "$1" == "buffer_register_symmetric" ]]; then
+    local selected_backend="${ROCSHMEM_BACKEND:-${ROCSHMEM_BACKEND_TYPE:-$TEST}}"
+    if [[ "$selected_backend" == ro* ]]; then
+      echo "Skip:   buffer_register_symmetric (RO backend is unsupported)"
+      return
+    fi
+
+    local rocm_version=""
+    if [[ -x "$ROCSHMEM_INFO" ]]; then
+      rocm_version=$("$ROCSHMEM_INFO" 2>/dev/null |
+        awk -F ':' '/^# ROCm[[:space:]]*:/{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); split($2, fields, " "); print fields[1]; exit}')
+    fi
+
+    local rocm_major=0
+    local rocm_minor=0
+    IFS='.' read -r rocm_major rocm_minor _ <<< "$rocm_version"
+    if (( rocm_major < 7 || (rocm_major == 7 && rocm_minor < 2) )); then
+      echo "Skip:   buffer_register_symmetric (requires ROCm 7.2 or newer)"
+      return
+    fi
+
+    if [ $USE_SLR -ne 1 ]; then
+      if ! command -v nm >/dev/null ||
+         ! nm -D "$APP" 2>/dev/null |
+           awk '$NF == "PMIx_Init" { found = 1 } END { exit !found }'; then
+        echo "Skip:   buffer_register_symmetric (MPI UUID bootstrap requires PMIx)"
+        return
+      fi
+    fi
+  fi
+
   if [ $USE_SLR -eq 1 ]; then
     ExecTest_SLR "$@"
   else
@@ -318,6 +350,9 @@ ExecTest_SLR() {
   fi
   if [[ -n "${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}" ]]; then
     env_vars+=("ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM")
+  fi
+  if [[ "$TEST_NAME" == "buffer_register_symmetric" ]]; then
+    env_vars+=("ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix")
   fi
   # Note: ROCSHMEM_TEST_UUID not needed - SLR always uses uniqueid approach
 
@@ -457,6 +492,15 @@ ExecTest_MPI() {
 
   # Build command as an array to avoid command injection with eval
   local -a cmd
+  local -a test_env_args
+  test_env_args=()
+  if [[ "$TEST_NAME" == "buffer_register_symmetric" ]]; then
+    test_env_args+=(
+      -x "ROCSHMEM_TEST_UUID=1"
+      -x "ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix"
+    )
+  fi
+
   cmd=( "$LAUNCHER"
         -n "$NUM_RANKS"
         -mca pml "${OMPI_MCA_pml:-ucx}"
@@ -467,6 +511,7 @@ ExecTest_MPI() {
         ${ROCSHMEM_MAX_NUM_HOST_CONTEXTS:+-x "ROCSHMEM_MAX_NUM_HOST_CONTEXTS=$ROCSHMEM_MAX_NUM_HOST_CONTEXTS"}
         ${ROCSHMEM_TEST_USE_DEFAULT_STREAM:+-x "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"}
         ${ROCSHMEM_TEST_UUID:+-x "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID"}
+        "${test_env_args[@]}"
         ${TIMEOUT:+--timeout "$TIMEOUT"}
         ${HOSTFILE:+--hostfile "$HOSTFILE"}
         --map-by numa
@@ -932,6 +977,7 @@ TestOther() {
   ##############################################################################
   ExecTest  "init"             2       1            1
   ExecTest  "library_info"     2       1            1
+  ExecTest  "buffer_register_symmetric" 2  1         1
   ExecTest  "hipmodule_init"   2       1            1
   ExecTest  "device_bitcode"   2       1            1
   ExecTest  "device_bitcode"   2       32           1024
