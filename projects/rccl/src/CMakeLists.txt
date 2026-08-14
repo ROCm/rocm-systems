@@ -81,7 +81,7 @@ set(SRC_FILES
   device/reduce_scatter.h
   device/rccl_metadata.h
   device/sendrecv.h
-  device/hierarchical_ag_shuffle.h
+  device/hierarchical_shuffle.h
   device/ce_reduce.cc
   device/common.cu
   device/onerank.cu
@@ -134,6 +134,7 @@ set(SRC_FILES
   include/algorithms/alltoall/alltoall_dda_fabric_ll128.h
   include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
+  include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
   include/api_trace.h
@@ -679,6 +680,13 @@ add_custom_command(
 )
 add_custom_target(rma_header_symlinks DEPENDS "${RMA_HIPIFY_DIR}/rma.h")
 
+# hipify_all is the contract for "the staged tree is ready to compile against",
+# including for consumers that build it as a standalone prerequisite
+# (test/host/run_host_tests.sh). The symlinks above are part of that tree: the
+# hipified sources still #include the un-suffixed names, so staging without them
+# yields a tree that cannot compile.
+add_dependencies(hipify_all net_ib_header_symlinks rma_header_symlinks)
+
 # nccl_device/{core,comm,gin}.h share basenames with the top-level src/include/
 # {core,comm,gin}.h, so add_file_unique() renames the nccl_device copies to
 # *_tmp.h in the hipify tree. Hipified sources have their #includes rewritten to
@@ -1167,7 +1175,6 @@ if(RCCL_ROCPROFILER_REGISTER)
   target_link_libraries(
       rccl PRIVATE rocprofiler-register::rocprofiler-register)
 endif()
-
 # Device Linker: include pipeline and wire up dependencies
 # (placed after all target_compile_definitions so DeviceLinker.cmake
 #  can read the rccl target's definitions directly)

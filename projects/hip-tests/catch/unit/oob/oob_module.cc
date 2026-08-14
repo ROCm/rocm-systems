@@ -196,18 +196,11 @@ HIP_TEST_CASE(OOB_hip_module_load_over) {
   }
 }
 
-// In-memory path: hipModuleLoadData(image) - no length, bound is derived from the
-// mapping that contains the (anonymous heap) buffer. These cases reject in
-// getElfSize before any device/arch check, so they are arch-independent. The valid
-// in-memory load is covered by OOB_hiprtc_roundtrip_loads, which is arch-correct.
+// In-memory path: hipModuleLoadData carries no length, so only malformations
+// detectable without one can be asserted. Length-dependent cases (e.g. a
+// corrupt e_shoff) are covered against the file path in OOB_hip_module_load_over.
 HIP_TEST_CASE(OOB_hip_module_load_data_over) {
   Bytes elf = ExtractElf(ReadFile(kValidModule));
-
-  SECTION("bad shoff in-memory") {
-    Bytes buf = MakeBadShoff(elf);
-    hipModule_t module{};
-    HIP_CHECK_ERROR(hipModuleLoadData(&module, buf.data()), hipErrorInvalidImage);
-  }
 
   SECTION("sh overflow in-memory") {
     Bytes buf = MakeShOverflow(elf);
@@ -242,28 +235,15 @@ HIP_TEST_CASE(OOB_hiprtc_roundtrip_loads) {
 }
 
 // ---------------------------------------------------------------------------
-// Readable-size bounds tests for fat-binary parsing.
-//
-// Pointer-based load APIs carry no length, so the runtime can only bound
-// parsing when the image comes from a file-backed mapping.
-//
-// Malformed pointer inputs are tail-mapped before a no-access guard page so
-// over-reads fault instead of silently succeeding, while correct parsing
-// returns hipErrorInvalidImage. The bundle-header/magic and ELF-header-size
-// bounds exercised here complement the getElfSize ELF-internal cases above.
+// Size-bounds tests for fat-binary parsing. Only file-backed loads have an
+// exact size, so bounds are asserted there; pointer inputs carry no length.
 // ---------------------------------------------------------------------------
 #if HT_AMD
 
 namespace {
 
-// Magic strings for ROCm clang offload bundles.
+// Magic string for ROCm compressed clang offload bundles.
 constexpr char kCompressedBundleMagic[] = "CCOB";
-constexpr char kUncompressedBundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
-
-// AMDGPU ELF identity values the runtime checks. Defined locally so this test
-// stays independent of runtime headers.
-constexpr unsigned char kElfOsabiAmdgpuHsa = 64;  // ELFOSABI_AMDGPU_HSA
-constexpr unsigned char kEmAmdgpuLowByte = 224;   // EM_AMDGPU (0x00E0), low byte
 
 // Builds a `size`-byte compressed offload bundle: the "CCOB" magic with
 // `total_size` written to the totalSize field (offset 8); remaining bytes zero.
@@ -272,24 +252,6 @@ Bytes MakeCompressedBundle(size_t size, uint32_t total_size) {
   Bytes image(size, 0);
   std::memcpy(image.data(), kCompressedBundleMagic, 4);
   std::memcpy(image.data() + 8, &total_size, sizeof(total_size));
-  return image;
-}
-
-// Builds a `size`-byte little-endian AMDGPU ELFCLASS64 image whose identity
-// fields (EM_AMDGPU + ELFOSABI_AMDGPU_HSA) pass the runtime's ELF check. Only
-// the e_ident bytes and e_machine are set; all other fields are zero.
-Bytes MakeAmdgpuElf64Image(size_t size) {
-  REQUIRE(size >= 20);  // the last field written, spans offsets 18-19
-  Bytes image(size, 0);
-  image[0] = 0x7f;
-  image[1] = 'E';
-  image[2] = 'L';
-  image[3] = 'F';
-  image[4] = 2;  // EI_CLASS   = ELFCLASS64
-  image[5] = 1;  // EI_DATA    = ELFDATA2LSB (little-endian)
-  image[6] = 1;  // EI_VERSION = EV_CURRENT
-  image[7] = static_cast<char>(kElfOsabiAmdgpuHsa);  // EI_OSABI
-  image[18] = static_cast<char>(kEmAmdgpuLowByte);   // e_machine low byte (little-endian)
   return image;
 }
 
@@ -330,146 +292,7 @@ class FileBackedMapping {
   size_t size_ = 0;
 };
 
-// Places `payload` at the end of a file-backed page immediately followed by a
-// no-access guard page. The runtime then sees exactly payload.size() readable
-// bytes, and any read past the payload faults instead of succeeding silently.
-class TailMappedImage {
- public:
-  explicit TailMappedImage(const Bytes& payload) {
-    page_size_ = static_cast<size_t>(sysconf(_SC_PAGESIZE));
-    REQUIRE(!payload.empty());
-    REQUIRE(payload.size() <= page_size_);
-
-    char tmpl[] = "/tmp/hip_fatbin_bounds_XXXXXX";
-    fd_ = mkstemp(tmpl);
-    REQUIRE(fd_ >= 0);
-    path_ = tmpl;
-
-    // Back the image with a one-page file holding the payload at its very end
-    // (leading bytes zero-padded). Mapped at a page boundary below, this puts
-    // the payload's last byte flush against the page boundary.
-    Bytes file_bytes(page_size_, 0);
-    std::memcpy(file_bytes.data() + (page_size_ - payload.size()), payload.data(),
-                payload.size());
-    REQUIRE(write(fd_, file_bytes.data(), file_bytes.size()) ==
-            static_cast<ssize_t>(file_bytes.size()));
-
-    // Reserve two adjacent pages with no access. The second one stays
-    // unmapped/no-access as a guard page, so any read past the first page faults.
-    region_len_ = 2 * page_size_;
-    region_ = mmap(nullptr, region_len_, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    REQUIRE(region_ != MAP_FAILED);
-
-    // Map the file read-only over the first page only, leaving the guard page
-    // intact immediately after it.
-    void* file_page = mmap(region_, page_size_, PROT_READ, MAP_PRIVATE | MAP_FIXED, fd_, 0);
-    REQUIRE(file_page == region_);
-
-    // Point at the payload's start; image_ + payload.size() lands exactly on
-    // the guard page, so reads past the payload fault.
-    image_ = static_cast<char*>(region_) + (page_size_ - payload.size());
-  }
-
-  ~TailMappedImage() {
-    if (region_ != nullptr && region_ != MAP_FAILED) {
-      munmap(region_, region_len_);
-    }
-    if (fd_ >= 0) {
-      close(fd_);
-    }
-    if (!path_.empty()) {
-      unlink(path_.c_str());
-    }
-  }
-
-  TailMappedImage(const TailMappedImage&) = delete;
-  TailMappedImage& operator=(const TailMappedImage&) = delete;
-
-  const void* image() const { return image_; }
-
- private:
-  size_t page_size_ = 0;
-  int fd_ = -1;
-  std::string path_;
-  void* region_ = nullptr;
-  size_t region_len_ = 0;
-  char* image_ = nullptr;
-};
-
 }  // namespace
-
-/**
- * Feeds guard-page-backed malformed images to hipModuleLoadData and
- * expects hipErrorInvalidImage instead of an out-of-bounds read.
- */
-HIP_TEST_CASE(OOB_hipModuleLoadData_Negative_TruncatedImages) {
-  hipModule_t module = nullptr;
-
-  SECTION("compressed magic shorter than the magic itself") {
-    // Only 3 readable bytes, fewer than the 4-byte compressed magic. Checks that
-    // the magic comparison doesn't read past the image.
-    const Bytes payload(kCompressedBundleMagic, kCompressedBundleMagic + 3);
-    TailMappedImage img(payload);
-    HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
-  }
-
-  SECTION("compressed magic with too little readable image") {
-    // Only 4 readable bytes (magic, no header). Checks that probing for a header
-    // doesn't read past the image.
-    const Bytes payload(kCompressedBundleMagic, kCompressedBundleMagic + 4);
-    TailMappedImage img(payload);
-    HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
-  }
-
-  SECTION("compressed header with out-of-bounds totalSize") {
-    // Valid 32-byte header, but its declared totalSize (offset 8) claims a far
-    // larger image than exists. Checks that the runtime doesn't trust that size
-    // and read past the image.
-    const Bytes payload = MakeCompressedBundle(32, 0xFFFFFFFFu);
-    TailMappedImage img(payload);
-    HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
-  }
-
-  SECTION("AMDGPU ELF header smaller than Elf64_Ehdr") {
-    // 40-byte AMDGPU ELF header: big enough that the magic checks stay in
-    // bounds, but smaller than a full Elf64_Ehdr (64 bytes). Checks that reading
-    // ELF header fields doesn't read past the image.
-    const Bytes payload = MakeAmdgpuElf64Image(40);
-    TailMappedImage img(payload);
-    HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
-  }
-
-  SECTION("uncompressed bundle magic truncated below magic length") {
-    // Only 10 readable bytes of the 24-byte uncompressed magic. Checks that
-    // comparing the full magic doesn't read past the image.
-    const Bytes payload(kUncompressedBundleMagic, kUncompressedBundleMagic + 10);
-    TailMappedImage img(payload);
-    HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
-  }
-
-  SECTION("AMDGPU ELF whose declared size exceeds the readable image") {
-    // Full 64-byte Elf64_Ehdr so the header checks pass, but e_shoff points a
-    // section table far past the image. e_shnum stays 0 so computing the ELF
-    // size does not itself walk out of bounds; the computed size is what is out
-    // of bounds. Checks that the oversized size isn't used to read past the image
-    // when the code object is handed off for loading.
-    Bytes payload = MakeAmdgpuElf64Image(64);
-    Wr16(payload, kEShentsize, 64);
-    Wr64(payload, kEShoff, uint64_t(1) << 24);  // e_shoff: table far past 64 bytes
-    Wr16(payload, kEShnum, 1);                  // one entry
-    TailMappedImage img(payload);
-    HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
-  }
-
-  SECTION("uncompressed bundle magic with no readable body") {
-    // Exactly the 24-byte magic and nothing else. Checks that reading the bundle
-    // header is clamped to the readable size rather than a fixed 4096-byte slice
-    // that reads past the image.
-    const Bytes payload(kUncompressedBundleMagic, kUncompressedBundleMagic + 24);
-    TailMappedImage img(payload);
-    HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
-  }
-}
 
 /**
  * Loads a valid file-backed compressed module and runs its kernel, guarding

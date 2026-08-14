@@ -30,7 +30,6 @@
 #include <timemory/unwind/bfd.hpp>
 #include <timemory/unwind/dlinfo.hpp>
 #include <timemory/unwind/types.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
 #include "logger/debug.hpp"
@@ -138,7 +137,7 @@ get_binary_info(const std::vector<std::string>&  _files,
     auto _filter = [&_satisfies_binary_filter](const procfs::maps& _v) {
         if(_v.pathname.empty()) return false;
         auto _path = path::realpath(_v.pathname);
-        return (filepath::exists(_path) && _satisfies_binary_filter(_path));
+        return (path::is_regular_file(_path) && _satisfies_binary_filter(_path));
     };
 
     auto _data = std::vector<binary_info>{};
@@ -148,7 +147,7 @@ get_binary_info(const std::vector<std::string>&  _files,
         for(const auto& itr : _files)
         {
             auto _filename = path::realpath(itr);
-            if(filepath::exists(_filename) && _satisfies_binary_filter(_filename) &&
+            if(path::is_regular_file(_filename) && _satisfies_binary_filter(_filename) &&
                _exists.find(_filename) == _exists.end())
             {
                 _data.emplace_back(parse_line_info(_filename, _process_dwarf,

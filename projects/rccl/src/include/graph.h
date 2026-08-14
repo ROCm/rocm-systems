@@ -120,9 +120,10 @@ enum netDevsPolicy {
 };
 ncclResult_t ncclTopoGetNetDevsPolicy(enum netDevsPolicy* policy, int* policyNum);
 
-// [RCCL] Kept at 64 (not upstream's 640): ncclTopoGraph's RCCL-specific treeBase array is
+// Allows for up to 144 GPUs in scale-up domain (72 GPUs in DPX mode).
+// [RCCL] Not raised to upstream's 640: ncclTopoGraph's RCCL-specific treeBase array is
 // O(NCCL_TOPO_MAX_NODES^2), so 640 would blow sizeof(ncclComm) up to ~17.6 MiB. TODO: decouple.
-#define NCCL_TOPO_MAX_NODES 64
+#define NCCL_TOPO_MAX_NODES 144
 ncclResult_t ncclTopoGetLocal(struct ncclTopoSystem* system, int type, int index, int resultType,
                               int locals[NCCL_TOPO_MAX_NODES], int* localCount, int* pathType);
 ncclResult_t ncclTopoGetDevNodes(struct ncclTopoSystem* system, int64_t baseId, struct ncclTopoNode** nodes,
