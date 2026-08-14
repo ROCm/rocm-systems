@@ -612,6 +612,26 @@ class AmdSmiGpuBlock(IntEnum):
     JPEG = amdsmi_wrapper.AMDSMI_GPU_BLOCK_JPEG
     IH = amdsmi_wrapper.AMDSMI_GPU_BLOCK_IH
     MPIO = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPIO
+    MMSCH = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MMSCH
+    MP5 = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MP5
+    ATU = amdsmi_wrapper.AMDSMI_GPU_BLOCK_ATU
+    DACC_BE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_DACC_BE
+    ECLR = amdsmi_wrapper.AMDSMI_GPU_BLOCK_ECLR
+    KPX_SERDES = amdsmi_wrapper.AMDSMI_GPU_BLOCK_KPX_SERDES
+    LSDMA = amdsmi_wrapper.AMDSMI_GPU_BLOCK_LSDMA
+    MPART = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPART
+    MPIFOE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPIFOE
+    MPRAS = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPRAS
+    NBIF = amdsmi_wrapper.AMDSMI_GPU_BLOCK_NBIF
+    NBIO = amdsmi_wrapper.AMDSMI_GPU_BLOCK_NBIO
+    OXRP = amdsmi_wrapper.AMDSMI_GPU_BLOCK_OXRP
+    PCIE_PL = amdsmi_wrapper.AMDSMI_GPU_BLOCK_PCIE_PL
+    PCS_XGMI = amdsmi_wrapper.AMDSMI_GPU_BLOCK_PCS_XGMI
+    PIE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_PIE
+    CS = amdsmi_wrapper.AMDSMI_GPU_BLOCK_CS
+    SHUB = amdsmi_wrapper.AMDSMI_GPU_BLOCK_SHUB
+    SSBDCI = amdsmi_wrapper.AMDSMI_GPU_BLOCK_SSBDCI
+    UCIE_PCS = amdsmi_wrapper.AMDSMI_GPU_BLOCK_UCIE_PCS
     RESERVED = amdsmi_wrapper.AMDSMI_GPU_BLOCK_RESERVED
 
 
@@ -3650,7 +3670,7 @@ def amdsmi_get_gpu_ras_block_features_enabled(
             continue
         gpu_block_name = gpu_block.name
         if gpu_block.name == "LAST":
-            gpu_block_name = "MPIO"
+            gpu_block_name = "UCIE_PCS"
         _check_res(
             amdsmi_wrapper.amdsmi_get_gpu_ras_block_features_enabled(
                 processor_handle,
