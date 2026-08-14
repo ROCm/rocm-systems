@@ -243,6 +243,15 @@ class AbiCompatTest(unittest.TestCase):
         # cannot catch the case where someone adds a new unguarded binding
         # for a symbol that only exists in newer .so revisions.
         unguarded = _scan_unguarded_bindings()
+        # Guard against the scan itself silently matching nothing (e.g. the
+        # generator renames the "_libraries" binding): an empty result would
+        # trivially satisfy the assertion below and turn this gate into a no-op.
+        self.assertTrue(
+            unguarded,
+            "scan found no unguarded amdsmi_* bindings -- the wrapper layout "
+            "changed and _scan_unguarded_bindings() needs updating, otherwise "
+            "this ABI gate no longer checks anything.",
+        )
         unstable = unguarded - STABLE_SYMBOLS
         self.assertFalse(
             unstable,

@@ -9,6 +9,7 @@
 #include "api.hpp"
 #include "common/defines.h"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -296,7 +297,7 @@ extern "C"
                 {
                     auto&& _path = itr.pathname;
                     if(!_path.empty() && _path.at(0) != '[' &&
-                       rocprofsys::filepath::exists(_path))
+                       rocprofsys::path::is_regular_file(_path))
                         _libs.emplace(_path);
                 }
                 for(const auto& itr : _libs)

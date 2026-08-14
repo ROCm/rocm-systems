@@ -1,0 +1,264 @@
+# gfx1250 Workgroup Manager (SPI) Performance Metrics
+
+Panel Config:
+  id: 600
+  title: Workgroup Manager (SPI)
+  data source:
+  - metric_table:
+      id: 601
+      title: "Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        SPI Utilization:
+          avg: AVG((100 * SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $SE_NUM)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          min: MIN((100 * SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $SE_NUM)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          max: MAX((100 * SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $SE_NUM)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          unit: Percent
+
+  - metric_table:
+      id: 602
+      title: "Wave Dispatch"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        # SPI_CSN_NUM_THREADGROUPS_* is CS-pipe scoped; SPI_RA_REQ_ALLOC_sum counts
+        # successful SPI resource allocations per dispatch (= workgroups launched).
+        Dispatched Workgroups:
+          avg: AVG(SPI_RA_REQ_ALLOC_sum)
+          min: MIN(SPI_RA_REQ_ALLOC_sum)
+          max: MAX(SPI_RA_REQ_ALLOC_sum)
+          unit: Count
+        # SPI_CSN_WAVE_* reads CS0-only (DEBUG_PIPE_SEL); compute uses SPI_ALL_WAVE.
+        Dispatched Waves:
+          avg: AVG(SPI_ALL_WAVE_sum)
+          min: MIN(SPI_ALL_WAVE_sum)
+          max: MAX(SPI_ALL_WAVE_sum)
+          unit: Count
+        Dispatched Clusters:
+          avg: AVG(SPI_CSN_NUM_CLUSTERS_sum)
+          min: MIN(SPI_CSN_NUM_CLUSTERS_sum)
+          max: MAX(SPI_CSN_NUM_CLUSTERS_sum)
+          unit: Count
+        Dispatched Group-of-Groups:
+          avg: AVG(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
+          min: MIN(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
+          max: MAX(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
+          unit: Count
+        Wave Dispatch Rate:
+          avg: AVG((SPI_ALL_WAVE_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((SPI_ALL_WAVE_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((SPI_ALL_WAVE_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Waves/cycle
+        Thread Dispatch Rate:
+          avg: AVG((SPI_ALL_WAVE_ITEMS_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((SPI_ALL_WAVE_ITEMS_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((SPI_ALL_WAVE_ITEMS_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Threads/cycle
+        Per-SE Wave Occupancy:
+          avg: AVG((SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Waves
+        Per-SE Wave Life:
+          avg: AVG((SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_ALL_WAVE_sum) if (SPI_ALL_WAVE_sum != 0) else None)
+          min: MIN((SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_ALL_WAVE_sum) if (SPI_ALL_WAVE_sum != 0) else None)
+          max: MAX((SPI_ALL_WAVE_IN_FLIGHT_sum / SPI_ALL_WAVE_sum) if (SPI_ALL_WAVE_sum != 0) else None)
+          unit: Cycles
+        Context Save Rate:
+          avg: AVG((100 * SPI_ALL_WAVE_SAVED_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_ALL_WAVE_SAVED_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_ALL_WAVE_SAVED_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+        Context Restore Rate:
+          avg: AVG((100 * SPI_ALL_WAVE_RESTORED_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_ALL_WAVE_RESTORED_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_ALL_WAVE_RESTORED_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+        Wave Dispatch FIFO Full Rate:
+          avg: AVG((100 * SPI_RA_WR_CTL_FULL_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_RA_WR_CTL_FULL_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_RA_WR_CTL_FULL_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+
+  - metric_table:
+      id: 603
+      title: "Resource Allocation"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Resource No-Allocation Rate:
+          avg: AVG((100 * SPI_RA_REQ_NO_ALLOC_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_RA_REQ_NO_ALLOC_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_RA_REQ_NO_ALLOC_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+        Resource Allocation Rate:
+          avg: AVG((100 * SPI_RA_REQ_ALLOC_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_RA_REQ_ALLOC_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_RA_REQ_ALLOC_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+        Alloc Failure - LDS Full:
+          avg: AVG((100 * SPI_RA_LDS_CU_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_RA_LDS_CU_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_RA_LDS_CU_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+        Alloc Failure - Waveslots Full:
+          avg: AVG((100 * SPI_RA_WAVE_SIMD_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_RA_WAVE_SIMD_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_RA_WAVE_SIMD_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+        Alloc Failure - VGPR Full:
+          avg: AVG((100 * SPI_RA_VGPR_SIMD_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_RA_VGPR_SIMD_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_RA_VGPR_SIMD_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+        Alloc Failure - Barrier Full:
+          avg: AVG((100 * SPI_RA_BAR_CU_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_RA_BAR_CU_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_RA_BAR_CU_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+        Alloc Failure - Bulky Full:
+          avg: AVG((100 * SPI_RA_BULKY_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_RA_BULKY_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_RA_BULKY_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+        Alloc Failure - Named Barriers Full:
+          avg: AVG((100 * SPI_RA_NAMED_BAR_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_RA_NAMED_BAR_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_RA_NAMED_BAR_FULL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+        Alloc Failure - Temp Space Full:
+          avg: AVG((100 * SPI_RA_TMP_STALL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_RA_TMP_STALL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_RA_TMP_STALL_CSN_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+
+  - metric_table:
+      id: 604
+      title: "CPC-SPI Interface"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Per-Queue Outstanding Dispatch Requests (P0_Q0_sum):
+          avg: AVG((SPI_CSQ_P0_Q0_OCCUPANCY_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((SPI_CSQ_P0_Q0_OCCUPANCY_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((SPI_CSQ_P0_Q0_OCCUPANCY_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Count
+        Per-Queue Outstanding Dispatch Requests (P0_Q1_sum):
+          avg: AVG((SPI_CSQ_P0_Q1_OCCUPANCY_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((SPI_CSQ_P0_Q1_OCCUPANCY_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((SPI_CSQ_P0_Q1_OCCUPANCY_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Count
+        Per-Queue Outstanding Dispatch Requests (P1_Q0_sum):
+          avg: AVG((SPI_CSQ_P1_Q0_OCCUPANCY_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((SPI_CSQ_P1_Q0_OCCUPANCY_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((SPI_CSQ_P1_Q0_OCCUPANCY_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Count
+        Per-Queue Outstanding Dispatch Requests (P1_Q1_sum):
+          avg: AVG((SPI_CSQ_P1_Q1_OCCUPANCY_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((SPI_CSQ_P1_Q1_OCCUPANCY_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((SPI_CSQ_P1_Q1_OCCUPANCY_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Count
+        CPC Pre-Alloc Request Stall Rate:
+          avg: AVG((100 * SPI_RA_PRE_ALLOC_STALL_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          min: MIN((100 * SPI_RA_PRE_ALLOC_STALL_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          max: MAX((100 * SPI_RA_PRE_ALLOC_STALL_sum / SPI_BUSY_sum) if (SPI_BUSY_sum != 0) else None)
+          unit: Percent
+
+  metrics_description:
+    SPI Utilization: >-
+      Percentage of GPU-busy cycles the SPI is dispatching workgroups.
+
+    Dispatched Workgroups: >-
+      Workgroups launched via successful SPI resource allocation
+      (SPI_RA_REQ_ALLOC_sum). SPI_CSN_NUM_THREADGROUPS_sum is CS-pipe scoped and
+      reads zero for gfx1250 compute dispatches.
+
+    Dispatched Waves: >-
+      Total wavefronts dispatched (SPI_ALL_WAVE_sum; SPI_CSN_WAVE_sum is CS-pipe
+      scoped and reads zero for gfx1250 compute dispatches).
+
+    Dispatched Clusters: >-
+      Total cluster-level dispatches issued by SPI.
+
+    Dispatched Group-of-Groups: >-
+      Total group-of-groups dispatch operations issued by SPI.
+
+    Wave Dispatch Rate: >-
+      Average wavefronts launched per busy cycle.
+
+    Thread Dispatch Rate: >-
+      Average threads launched per busy cycle.
+
+    Per-SE Wave Occupancy: >-
+      Average wavefronts in-flight per Shader Engine.
+
+    Per-SE Wave Life: >-
+      Average wavefront lifetime in cycles per Shader Engine.
+
+    Context Save Rate: >-
+      Percentage of SPI-busy cycles the GPU is saving wavefront contexts.
+
+    Context Restore Rate: >-
+      Percentage of SPI-busy cycles the GPU is restoring wavefront contexts.
+
+    Wave Dispatch FIFO Full Rate: >-
+      Percentage of SPI-busy cycles the wave dispatch FIFO is full.
+
+    Resource No-Allocation Rate: >-
+      Percentage of SPI-busy cycles SPI failed to allocate resources for a workgroup.
+
+    Resource Allocation Rate: >-
+      Percentage of SPI-busy cycles SPI successfully allocated resources and dispatched a workgroup.
+
+    Alloc Failure - LDS Full: >-
+      Percentage of SPI-busy cycles workgroup allocation failed due to full LDS.
+
+    Alloc Failure - Waveslots Full: >-
+      Percentage of SPI-busy cycles workgroup allocation failed due to full wavefront slots.
+
+    Alloc Failure - VGPR Full: >-
+      Percentage of SPI-busy cycles workgroup allocation failed due to VGPR exhaustion.
+
+    Alloc Failure - Barrier Full: >-
+      Percentage of SPI-busy cycles workgroup allocation failed due to full barrier slots.
+
+    Alloc Failure - Bulky Full: >-
+      Percentage of SPI-busy cycles workgroup allocation failed because a bulky workgroup could not be placed.
+
+    Alloc Failure - Named Barriers Full: >-
+      Percentage of SPI-busy cycles workgroup allocation failed due to named barrier exhaustion.
+
+    Alloc Failure - Temp Space Full: >-
+      Percentage of SPI-busy cycles workgroup allocation failed due to exhausted scratch space.
+
+    Per-Queue Outstanding Dispatch Requests (P0_Q0_sum): >-
+      Average in-flight dispatch requests in CPC pipe 0, queue 0.
+
+    Per-Queue Outstanding Dispatch Requests (P0_Q1_sum): >-
+      Average in-flight dispatch requests in CPC pipe 0, queue 1.
+
+    Per-Queue Outstanding Dispatch Requests (P1_Q0_sum): >-
+      Average in-flight dispatch requests in CPC pipe 1, queue 0.
+
+    Per-Queue Outstanding Dispatch Requests (P1_Q1_sum): >-
+      Average in-flight dispatch requests in CPC pipe 1, queue 1.
+
+    CPC Pre-Alloc Request Stall Rate: >-
+      Percentage of SPI-busy cycles where SPI cannot accept new pre-allocation requests from CPC because its internal pre-allocation pipeline is full.
