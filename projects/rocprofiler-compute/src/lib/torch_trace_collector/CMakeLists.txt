@@ -215,11 +215,10 @@ set(CMAKE_REQUIRED_INCLUDES "${_ttc_saved_includes}")
 # torch_python is not among them.
 set(_ttc_headers
     capture_buffer.h
-    capture_control.h
-    install_state.h
     leaf_context.h
     marker_stack.h
-    record_function_bridge.h
+    record_function_callback.h
+    record_function_installation.h
     scope_guard.h
     snapshot_store.h
     stack_entry.h

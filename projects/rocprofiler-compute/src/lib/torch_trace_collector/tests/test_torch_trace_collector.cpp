@@ -2,11 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include "capture_buffer.h"
-#include "capture_control.h"
-#include "install_state.h"
 #include "leaf_context.h"
 #include "marker_stack.h"
-#include "record_function_bridge.h"
+#include "record_function_installation.h"
 #include "snapshot_store.h"
 #include "stack_entry.h"
 #include "stats.h"
