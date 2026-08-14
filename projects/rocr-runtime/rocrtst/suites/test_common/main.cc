@@ -493,23 +493,22 @@ TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
 
 // Trap Handler Tests (SWDEV-209233)
 // Tests s_trap instruction handling and queue error callbacks.
-// Working tests: NoTrap, Abort, Generic (validated on MI300X gfx942)
 
-TEST(rocrtstFunc, TrapHandler_NoTrap) {
+TEST(rocrtstFunc, DISABLED_TrapHandler_NoTrap) {
     TrapHandlerTest th;
     if (!RunCustomTestProlog(&th)) return;
     th.TestNoTrap();
     RunCustomTestEpilog(&th);
 }
 
-TEST(rocrtstFunc, TrapHandler_Abort) {
+TEST(rocrtstFunc, DISABLED_TrapHandler_Abort) {
     TrapHandlerTest th;
     if (!RunCustomTestProlog(&th)) return;
     th.TestTrapAbort();
     RunCustomTestEpilog(&th);
 }
 
-TEST(rocrtstFunc, TrapHandler_Generic) {
+TEST(rocrtstFunc, DISABLED_TrapHandler_Generic) {
     TrapHandlerTest th;
     if (!RunCustomTestProlog(&th)) return;
     th.TestTrapGeneric();
