@@ -332,6 +332,7 @@ class TestConfigProcessor:
         default_fields = [
             "is_gtest", "binary", "num_ranks", "num_nodes", "num_gpus", "timeout",
             "is_pytest", "test_dir", "python_bin", "setup_venv", "venv_dir", "requirements",
+            "serial_only",
         ]
 
         processed_tests = []
@@ -390,6 +391,7 @@ class TestConfigProcessor:
                 "setup_venv": combined_config.get("setup_venv"),
                 "venv_dir": combined_config.get("venv_dir"),
                 "requirements": combined_config.get("requirements"),
+                "serial_only": combined_config.get("serial_only"),
             }
             # Remove None values
             config_defaults = {k: v for k, v in config_defaults.items() if v is not None}
@@ -408,6 +410,7 @@ class TestConfigProcessor:
                 "setup_venv": suite.get("setup_venv"),
                 "venv_dir": suite.get("venv_dir"),
                 "requirements": suite.get("requirements"),
+                "serial_only": suite.get("serial_only"),
             }
             # Remove None values
             suite_defaults = {k: v for k, v in suite_defaults.items() if v is not None}

@@ -200,6 +200,15 @@ Examples:
                  "pool (each thread = one test process), overlapping their per-process init. "
                  "PROTOTYPE: immediate --rerun-failed is disabled in parallel mode."
         )
+        self.parser.add_argument(
+            '--max-parallel-ranks',
+            type=int,
+            default=3,
+            help="Under --jobs>1, only entries needing at most this many ranks are "
+                 "co-tenanted; entries needing more run serially (avoids GPU oversubscription "
+                 "on a single node). Default: 3. Entries flagged serial_only always run "
+                 "serially regardless of rank."
+        )
 
     def parse_arguments(self):
         """Parse command-line arguments"""

@@ -1795,30 +1795,33 @@ class TestExecutor:
 
         return results
 
-    def _is_serial_only(self, test, suite_config):
+    def _can_parallelize(self, test, suite_config):
         """
-        True if an entry must run SERIALLY (never co-tenanted), independent of rank count.
-        An explicit `serial_only` flag (test- or suite-level) wins. Otherwise classify the
-        contention-prone categories by binary/name/suite text:
-          - NET/IB tests    -> IB HCA fabric contention (QP create/destroy races)
-          - SMI tests       -> rocm-smi / amd-smi device-enumeration races
-          - rccl-tests perf -> bandwidth co-tenancy skew
-        These are exactly the categories observed to flake under --jobs>1 co-tenancy.
+        Decide whether `test` may run concurrently (co-tenant) under --jobs>1.
+
+        Each admissibility rule is an independent, short-circuiting clause; extend the
+        policy by adding a clause here (e.g. a future host-memory budget or a
+        node_exclusive flag) rather than changing call sites. Returns True only if every
+        rule passes.
         """
+        # Rule 1: entries tagged serial_only in the config (config -> suite -> test,
+        # resolved by TestConfigProcessor) never co-tenant. This is where NET/IB, SMI and
+        # perf suites are excluded -- via config data, not hard-coded name matching.
         if test.get("serial_only") or suite_config.get("serial_only"):
-            return True
-        binary = str(test.get("binary", suite_config.get("binary", ""))).lower()
-        name = str(test.get("name", "")).lower()
-        filt = str(test.get("test_filter", "")).lower()
-        suite = str(suite_config.get("suite_details", {}).get("name", "")).lower()
-        hay = " ".join((binary, name, filt, suite))
-        if "netib" in hay or "net ib" in hay or "net_ib" in hay:   # NET/IB fabric
-            return True
-        if "rsmi" in hay or "amdsmi" in hay or "amd-smi" in hay:     # SMI monitoring
-            return True
-        if "rccl-tests" in binary or "perf" in suite:               # perf bandwidth
-            return True
-        return False
+            return False
+
+        # Rule 2: bound concurrent rank demand so several MPI entries don't oversubscribe
+        # a single node's GPUs. "auto" (= all GPUs) is treated as too large to co-tenant.
+        tr = test.get("num_ranks", suite_config.get("num_ranks", 1))
+        is_auto = isinstance(tr, str) and tr.strip().lower() == "auto"
+        try:
+            nranks = 10**9 if is_auto else int(tr)
+        except (ValueError, TypeError):
+            nranks = 10**9
+        if nranks > getattr(self.args, "max_parallel_ranks", 3):
+            return False
+
+        return True
 
     def _run_test_suite_parallel(self, suite_config, suite_name, tests):
         """
@@ -1847,26 +1850,19 @@ class TestExecutor:
                 continue
             runnable.append(test)
 
-        # Co-tenancy scope: an entry runs concurrently only if it needs <=3 ranks AND is
-        # not a contention-prone category. >=4-rank (and "auto") entries oversubscribe the
-        # 8-GPU node; NET/IB tests contend on the IB HCA and SMI tests perturb each other's
-        # monitoring reads -> those run SERIALLY regardless of rank. (See _is_serial_only.)
+        # Partition into concurrent vs serial by the admissibility policy (see
+        # _can_parallelize): serial_only-tagged entries (NET/IB, SMI, perf) and entries
+        # exceeding --max-parallel-ranks run serially; the rest co-tenant.
         parallel_entries, serial_entries = [], []
         for test in runnable:
-            tr = test.get("num_ranks", suite_config.get("num_ranks", 1))
-            is_auto = isinstance(tr, str) and tr.strip().lower() == "auto"
-            try:
-                nranks = 999 if is_auto else int(tr)
-            except (ValueError, TypeError):
-                nranks = 999
-            if nranks <= 3 and not self._is_serial_only(test, suite_config):
+            if self._can_parallelize(test, suite_config):
                 parallel_entries.append(test)
             else:
                 serial_entries.append(test)
 
         jobs = self.args.jobs
-        print(f"\n[parallel] suite '{suite_name}': {len(parallel_entries)} parallel(<=3-rank compute) + "
-              f"{len(serial_entries)} serial(>=4-rank / NET-IB / SMI / perf) entries, jobs={jobs}"
+        print(f"\n[parallel] suite '{suite_name}': {len(parallel_entries)} concurrent + "
+              f"{len(serial_entries)} serial entries, jobs={jobs}"
               f"{f', {skipped_count} filtered' if skipped_count else ''}")
 
         lock = threading.Lock()
