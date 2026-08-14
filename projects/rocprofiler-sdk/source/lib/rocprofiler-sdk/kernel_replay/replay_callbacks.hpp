@@ -77,14 +77,17 @@ bool
 has_active_replay_contexts();
 
 rocprofiler_kernel_dispatch_info_t
-make_dispatch_info(const hsa::Queue& queue, const hsa::rocprofiler_packet& pkt);
+make_dispatch_info(const hsa::Queue&              queue,
+                   const hsa::rocprofiler_packet& pkt,
+                   rocprofiler_dispatch_id_t      dispatch_id);
 
 replay_plan_t
 execute_config_phase_enter(const hsa::Queue&              queue,
                            const hsa::rocprofiler_packet& pkt,
                            rocprofiler_thread_id_t        thr_id,
                            uint64_t                       internal_corr_id,
-                           uint64_t                       ancestor_corr_id);
+                           uint64_t                       ancestor_corr_id,
+                           rocprofiler_dispatch_id_t      dispatch_id);
 
 void
 execute_config_phase_exit(const replay_plan_t&    plan,
