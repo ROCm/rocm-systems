@@ -288,7 +288,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
         }
 
         // Test that the script exists
-        if(!filepath::exists(_script_path))
+        if(!path::is_regular_file(_script_path))
         {
             LOG_WARNING("Script not found: {}", _script_path);
         }
