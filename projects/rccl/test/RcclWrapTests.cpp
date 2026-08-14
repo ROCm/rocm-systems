@@ -14,7 +14,6 @@
 #include "comm.h"
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
-#include "common/StandaloneUtils.hpp"
 #include "debug.h"
 #include "graph/topo.h"
 #include "net.h"
@@ -2396,36 +2395,35 @@ TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
 {
     RUN_ISOLATED_TEST("Gfx1250_SkipsRomeModelMatching", []()
     {
-        int numDevices;
-        HIPCALL(hipGetDeviceCount(&numDevices));
+        int numDevices = 0;
+        ASSERT_EQ(hipGetDeviceCount(&numDevices), hipSuccess);
         if (numDevices < 1) {
             GTEST_SKIP() << "No devices available.";
         }
 
         // Check if this is gfx1250
-        hipDeviceProp_t prop;
-        HIPCALL(hipGetDeviceProperties(&prop, 0));
+        hipDeviceProp_t prop{};
+        ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
         bool isGfx1250 = (strncmp(prop.gcnArchName, "gfx1250", 7) == 0);
+        if (!isGfx1250) {
+            GTEST_SKIP() << "Test only applicable on gfx1250 hardware.";
+        }
 
-        ncclComm_t commHandle;
-        ncclUniqueId id;
-        NCCLCHECK(ncclGetUniqueId(&id));
-        HIPCALL(hipSetDevice(0));
-        NCCLCHECK(ncclCommInitRank(&commHandle, 1, id, 0));
+        ncclComm_t commHandle{};
+        ncclUniqueId id{};
+        ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        ASSERT_EQ(ncclCommInitRank(&commHandle, 1, id, 0), ncclSuccess);
 
         // Cast to internal struct to access topo
         ncclComm* comm = commHandle;
 
-        if (isGfx1250) {
-            // gfx1250 should skip preset topo matching
-            EXPECT_TRUE(comm->topo->skipPresetTopoMatching);
-            // Rome model index should be NONE (no preset matched)
-            EXPECT_EQ(comm->topo->romeTopoModelIdx, RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE);
-        }
-        // For other archs, we don't assert - skipPresetTopoMatching depends on
-        // uniformRanksPerHost which varies by system config.
+        // gfx1250 should skip preset topo matching
+        EXPECT_TRUE(comm->topo->skipPresetTopoMatching);
+        // Rome model index should be NONE (no preset matched)
+        EXPECT_EQ(comm->topo->romeTopoModelIdx, RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE);
 
-        NCCLCHECK(ncclCommDestroy(commHandle));
+        ASSERT_EQ(ncclCommDestroy(commHandle), ncclSuccess);
     });
 }
 
