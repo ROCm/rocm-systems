@@ -84,9 +84,10 @@
  * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
  * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
  * - 1.32 - hsa_amd_svm_discard_and_prefetch_batch_async
+ * - 1.33 - hsa_amd_agent_set_attribute: GL2 persisting cache size control
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 32
+#define HSA_AMD_INTERFACE_VERSION_MINOR 33
 
 #ifdef __cplusplus
 extern "C" {
@@ -991,6 +992,18 @@ typedef enum hsa_amd_agent_info_s {
    * Use HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED instead.
    */
   HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
+  /**
+   * Returns the last value set by
+   * HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE, default 0.
+   * The type of this attribute is size_t.
+   */
+  HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE = 0xA125,
+  /**
+   * Returns the maximum supported persisting L2 cache size on this HW in bytes.
+   * The type of this attribute is size_t.
+   */
+  HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE = 0xA126
+
 } hsa_amd_agent_info_t;
 
 /**
@@ -4378,6 +4391,25 @@ hsa_status_t hsa_amd_spm_release(hsa_agent_t preferred_agent);
 hsa_status_t hsa_amd_spm_set_dest_buffer(hsa_agent_t preferred_agent, size_t size_in_bytes,
                                          uint32_t* timeout, uint32_t* size_copied, void* dest,
                                          bool* is_data_loss);
+
+
+/** @} */
+
+/** \addtogroup hsa agent attribute
+ *  @{
+ */
+typedef enum hsa_amd_agent_attribute_s {
+  /**
+   * Requested persisting L2 cache size in bytes.
+   * The type of this attribute is size_t.
+   */
+  HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE,
+
+} hsa_amd_agent_attribute_t;
+
+hsa_status_t HSA_API hsa_amd_agent_set_attribute(hsa_agent_t agent,
+                                                 hsa_amd_agent_attribute_t attribute,
+                                                 void* value);
 
 /** @} */
 
