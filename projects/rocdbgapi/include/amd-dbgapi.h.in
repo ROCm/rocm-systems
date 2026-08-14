@@ -6398,7 +6398,9 @@ typedef enum
  * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY \p
  * address_space_id depends on the active wave but \p wave_id is
  * ::AMD_DBGAPI_WAVE_NONE, or \p address_space_id is not supported by the
- * architecture of \p wave_id.  \p segment_address_dependencies is unaltered.
+ * architecture of \p wave_id, or the wave denoted by \p wave_id does not
+ * belong to the process denoted by \p process_id.
+ * \p segment_address_dependencies is unaltered.
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_address_dependency (
   amd_dbgapi_process_id_t process_id,
