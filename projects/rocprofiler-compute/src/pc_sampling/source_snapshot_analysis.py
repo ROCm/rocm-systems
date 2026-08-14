@@ -108,15 +108,19 @@ def resolve_export_path(
 
 def export_source_snapshot_files(
     workload_source_snapshots: Iterable[WorkloadSourceSnapshot],
-    csv_result_directory: Path,
+    export_directory: Path,
 ) -> None:
-    """Copy the source files a CSV result references into the result folder."""
+    """Copy the source files a CSV result references into the result folder.
+
+    The source of one workload sits beside the ISA that points at it, under
+    that workload's folder.
+    """
     for workload_source_snapshot in workload_source_snapshots:
         workload_result_directory = (
-            csv_result_directory
-            / SOURCE_EXPORT_DIRECTORY_NAME
+            export_directory
             / workload_source_snapshot.workload_name
             / workload_source_snapshot.workload_sub_name
+            / SOURCE_EXPORT_DIRECTORY_NAME
         )
         for absolute_path in workload_source_snapshot.absolute_source_paths:
             export_path = resolve_export_path(workload_result_directory, absolute_path)
