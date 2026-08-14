@@ -1,0 +1,4 @@
+{
+  "name": "ROCm Systems",
+  "install": "bash .cursor/install.sh"
+}
