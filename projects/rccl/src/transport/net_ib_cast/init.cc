@@ -356,9 +356,9 @@ const char* ibCastProviderName[] = {
 };
 
 ncclResult_t IbCastFinalizeDevices(void) {
-  if (--netRefCount == 0) {
-    rcclTelemetryFlush();
-  }
+  // No telemetry flush here: netRefCount reaching 0 is not process exit, and
+  // the flush is one-shot. atexit(rcclTelemetryFlush) covers the process.
+  --netRefCount;
   return ncclSuccess;
 }
 
@@ -593,7 +593,8 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       // every counter under the post-sort index d, so registering during
       // enumeration would attach each slot to whichever NIC happened to occupy
       // that position in the ibv_get_device_list order.
-      {
+      // The sysfs walk is telemetry-only work, so skip it when disabled.
+      if (rcclTelemetryOn()) {
         char telEthDev[64];
         rcclTelemetryGetEthDevice(IbCastDevs[d].devName, telEthDev, sizeof(telEthDev));
         rcclTelemetryRegisterDevice(d, IbCastDevs[d].devName, telEthDev, "IB-CAST");

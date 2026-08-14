@@ -43,15 +43,25 @@ extern "C" {
  */
 #define RCCL_TELEMETRY_MAX_HWC        80
 
-/* Runtime guard - 1 if telemetry is enabled, 0 otherwise */
+/* Runtime guard - 1 if telemetry is enabled, 0 otherwise.
+ * Published with a release store at the very end of rcclTelemetryInit(), so it
+ * is never 1 while the tables behind it are still unseeded. */
 extern int rcclTelemetryEnabled;
+
+/* Acquire-load of the guard, pairing with that release store. Every telemetry
+ * entry point tests this; read the call-site rule further down. */
+static inline int rcclTelemetryOn(void) {
+  return __atomic_load_n(&rcclTelemetryEnabled, __ATOMIC_ACQUIRE);
+}
 
 /* Initialize telemetry system - reads env vars, parses config, registers atexit handler */
 void rcclTelemetryInit(void);
 
 /* Flush telemetry to JSON file - called via atexit() or can be called manually.
  * HW counters report deltas vs the baseline captured at device registration, so
- * telemetry always covers the whole process lifetime. */
+ * telemetry always covers the whole process lifetime.
+ * Only the first call writes a file, and no telemetry storage is ever released,
+ * so a manual flush cannot race a concurrent hot-path hook. */
 void rcclTelemetryFlush(void);
 
 /*
@@ -126,7 +136,8 @@ typedef struct {
   uint64_t wqe_completion_histogram[RCCL_TELEMETRY_HISTOGRAM_SIZE];
 } RcclQpStats;
 
-/* Doubling heap blocks; growth only appends, so reads need no lock. */
+/* Doubling heap blocks. Growth only appends and nothing is ever freed, so a
+ * reader needs no lock and no slot can be pulled out from under it. */
 #define RCCL_TELEMETRY_BLOCKS 32
 #define RCCL_TELEMETRY_BLOCK0_MIN_LOG2 3
 
@@ -264,6 +275,19 @@ void rcclTelemetryGetEthDevice(const char* roce_device, char* eth_device, size_t
 /*                                                                     */
 /* 4. ERROR PATH (on CQ error):                                        */
 /*    - Increment cq_errors counter                                    */
+/*                                                                     */
+/* FEATURE-FLAG RULE — the single convention every call site obeys:    */
+/* 1. Every telemetry entry point is self-guarding. It tests           */
+/*    rcclTelemetryOn() (directly, or through rcclTelemetryChannel()), */
+/*    and validates its own indices, so a negative or out-of-range     */
+/*    devIdx/chIdx/qpIdx is a silent no-op. In particular, an          */
+/*    untracked QP carries telQpSlot == -1 and needs no caller check.  */
+/* 2. Call sites therefore never test rcclTelemetryEnabled in order to */
+/*    decide whether to call a hook.                                   */
+/* 3. The one permitted call-site guard is rcclTelemetryOn() wrapped   */
+/*    around work that exists solely to produce hook arguments         */
+/*    (timestamps, QP lookups, per-device slot assignment). That is an */
+/*    optimization for the disabled case, never a correctness check.   */
 /* ------------------------------------------------------------------ */
 
 #include <time.h>
@@ -288,7 +312,7 @@ static inline void rcclTelemetryBlockIndex(int idx, int block0Log2, unsigned int
 
 /* Returns NULL when telemetry is off or the channel has no storage. */
 static inline RcclChannelStats* rcclTelemetryChannel(int devIdx, int chIdx) {
-  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return NULL;
+  if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return NULL;
   RcclDeviceStats* dev = &rcclTelemetryDevs[devIdx];
   int capacity = __atomic_load_n(&dev->channel_capacity, __ATOMIC_ACQUIRE);
   if (chIdx < 0 || chIdx >= capacity) return NULL;
@@ -325,7 +349,7 @@ static inline RcclQpStats* rcclTelemetryQp(RcclChannelStats* ch, int qpIdx) {
  * @param bytes    Number of bytes transferred
  */
 static inline void rcclTelemetryBytes(int devIdx, int isSend, uint64_t bytes) {
-  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
+  if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
   uint64_t* field = isSend ? &rcclTelemetryDevs[devIdx].tx_bytes
                            : &rcclTelemetryDevs[devIdx].rx_bytes;
   __atomic_fetch_add(field, bytes, __ATOMIC_RELAXED);
@@ -338,7 +362,7 @@ static inline void rcclTelemetryBytes(int devIdx, int isSend, uint64_t bytes) {
  * @param devIdx   Device index in rcclTelemetryDevs array
  */
 static inline void rcclTelemetryCqError(int devIdx) {
-  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
+  if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
   __atomic_fetch_add(&rcclTelemetryDevs[devIdx].num_cq_errors, 1, __ATOMIC_RELAXED);
 }
 
@@ -486,7 +510,7 @@ static inline void rcclTelemetryWriteWqe(int devIdx, int chIdx, int qpIdx, int w
  * Record one ibv_poll_cq invocation on a device's completion queue.
  */
 static inline void rcclTelemetryCqPoll(int devIdx) {
-  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
+  if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
   __atomic_fetch_add(&rcclTelemetryDevs[devIdx].cq_poll_count, 1, __ATOMIC_RELAXED);
 }
 
@@ -495,7 +519,7 @@ static inline void rcclTelemetryCqPoll(int devIdx) {
  * size distribution.
  */
 static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
-  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
+  if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
   int bucket = 0;
   if (bytes > 0) {
     bucket = 64 - __builtin_clzll((unsigned long long)bytes);
@@ -520,12 +544,15 @@ static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
  * @param numSlots   Out: number of slots actually reserved, 0 if none
  * @return           First reserved QP slot index, or -1 if no slot was reserved
  *
- * Usage (in ncclIbConnect/ncclIbAccept):
- *   int numSlots = 0;
- *   int qpSlot = rcclTelemetrySetupChannel(devIdx, chIdx, numQps, &numSlots);
- *   for (int q = 0; q < numSlots; q++) {
- *     comm->base.qps[q].telQpSlot = qpSlot + q;
- *     rcclTelemetrySetQpRole(devIdx, chIdx, qpSlot + q, comm->base.qps[q].isDataQp);
+ * Usage (in ncclIbConnect/ncclIbAccept). This is the one setup path that rule 3
+ * above applies to, hence the rcclTelemetryOn() wrapper:
+ *   if (rcclTelemetryOn()) {
+ *     int numSlots = 0;
+ *     int qpSlot = rcclTelemetrySetupChannel(devIdx, chIdx, numQps, &numSlots);
+ *     for (int q = 0; q < numSlots; q++) {
+ *       comm->base.qps[q].telQpSlot = qpSlot + q;
+ *       rcclTelemetrySetQpRole(devIdx, chIdx, qpSlot + q, comm->base.qps[q].isDataQp);
+ *     }
  *   }
  */
 int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots);

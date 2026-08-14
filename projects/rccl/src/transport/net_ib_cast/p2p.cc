@@ -305,18 +305,17 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       }
     }
 #endif
-    if (rcclTelemetryEnabled && i == 0) {
+    // The post timestamp exists only to feed telemetry latencies.
+    if (rcclTelemetryOn() && i == 0) {
       int64_t _tel_ns = rcclTelemetryGetNs();
       for (int r=0; r<nreqs; r++) reqs[r]->tel_post_ts = _tel_ns;
     }
 
     NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
 
-    if (qp->telQpSlot >= 0) {
-      int telDevIdx = comm->base.vProps.devs[qp->devIndex];
-      rcclTelemetryWqePosted(telDevIdx, comm->telChId, qp->telQpSlot, 1);
-      rcclTelemetryWriteWqe(telDevIdx, comm->telChId, qp->telQpSlot, useWriteOp ? 0 : 1);
-    }
+    int telDevIdx = comm->base.vProps.devs[qp->devIndex];
+    rcclTelemetryWqePosted(telDevIdx, comm->telChId, qp->telQpSlot, 1);
+    rcclTelemetryWriteWqe(telDevIdx, comm->telChId, qp->telQpSlot, useWriteOp ? 0 : 1);
 
     // Update the send offset and addresses for the next QP according to the
     // actual data size that was sent on the current QP, for every request
@@ -387,7 +386,8 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     uint32_t idx = (uint32_t)(comm->base.fifoHead + 1);
     if (ctsFifoIdx(slots, 0) != idx) {
       *request = NULL;
-      if (rcclTelemetryEnabled) {
+      // Looking the QP up is telemetry-only work on a spin path.
+      if (rcclTelemetryOn()) {
         int qpIdx = comm->base.qpIndex;
         if (qpIdx >= 0 && qpIdx < comm->base.nqps) {
           const struct ncclIbQp* missQp = &comm->base.qps[qpIdx];
@@ -589,9 +589,8 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   struct ibv_send_wr* bad_wr;
   NCCLCHECK(wrap_ibv_post_send(ctsQp->qp, &wr, &bad_wr));
 
-  if (ctsQp->telQpSlot >= 0)
-    rcclTelemetryCtsSent(comm->base.vProps.devs[ctsQp->devIndex], comm->telChId, ctsQp->telQpSlot,
-                         (wr.send_flags & IBV_SEND_SIGNALED) ? 1 : 0);
+  rcclTelemetryCtsSent(comm->base.vProps.devs[ctsQp->devIndex], comm->telChId, ctsQp->telQpSlot,
+                       (wr.send_flags & IBV_SEND_SIGNALED) ? 1 : 0);
 
   TRACE(NCCL_NET,
         "NET/IB: %s: CTS posted (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld, opcode=%d, send_flags=%d, "
@@ -659,22 +658,20 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       if (comm->prepostReceiveWorkRequests) {
         continue;
       }
-      if (rcclTelemetryEnabled && i == 0)
-        req->tel_post_ts = rcclTelemetryGetNs();
+      // The post timestamp exists only to feed telemetry latencies.
+      if (rcclTelemetryOn() && i == 0) req->tel_post_ts = rcclTelemetryGetNs();
       // Post receive work request on the QP
       if (comm->base.recvMatchingScheme != BY_ORDER) {
         if (comm->base.rxPosts[qpIndex] < NET_IB_MAX_REQUESTS) {
           comm->ibRecvWorkRequest.wr_id = qpIndex;
           NCCLCHECK(IbCastPostRecvWorkRequest(qp->qp, &comm->ibRecvWorkRequest));
           comm->base.rxPosts[qpIndex]++;
-          if (qp->telQpSlot >= 0)
-            rcclTelemetryWqePosted(comm->base.vProps.devs[qp->devIndex], comm->telChId, qp->telQpSlot, 0);
+          rcclTelemetryWqePosted(comm->base.vProps.devs[qp->devIndex], comm->telChId, qp->telQpSlot, 0);
         }
       } else {
         comm->ibRecvWorkRequest.wr_id = req - comm->base.reqs;
         NCCLCHECK(IbCastPostRecvWorkRequest(qp->qp, &comm->ibRecvWorkRequest));
-        if (qp->telQpSlot >= 0)
-          rcclTelemetryWqePosted(comm->base.vProps.devs[qp->devIndex], comm->telChId, qp->telQpSlot, 0);
+        rcclTelemetryWqePosted(comm->base.vProps.devs[qp->devIndex], comm->telChId, qp->telQpSlot, 0);
       }
 #ifdef NCCL_ENABLE_NET_PROFILING
       // Start a QP event for every request in the multirecv and every qp
@@ -924,13 +921,14 @@ static ncclResult_t IbCastLogCompletionWithError(struct ncclIbNetCommBase* commB
 }
 
 // Record one drained CQE against its QP, once per CQE not per sub-request.
+// The qp_num lookup exists only to feed telemetry, hence the flag test here.
 static inline void IbCastTelemetryWqeComplete(struct ncclIbNetCommBase* commBase, struct ibv_wc* wc, int devIndex,
                                               int64_t postTs) {
-  if (!rcclTelemetryEnabled) return;
+  if (!rcclTelemetryOn()) return;
   ncclIbQp* telQp = NULL;
   int telQpIdx = -1;
   if (IbCastCommBaseGetQpByQpNum(commBase, devIndex, wc->qp_num, &telQp, &telQpIdx) != ncclSuccess) return;
-  if (telQp == NULL || telQp->telQpSlot < 0) return;
+  if (telQp == NULL) return;
   rcclTelemetryWqeComplete(commBase->vProps.devs[devIndex], telQp->channelId, telQp->telQpSlot, postTs);
 }
 

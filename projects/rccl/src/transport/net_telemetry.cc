@@ -18,6 +18,17 @@
 #include <sys/stat.h>
 #include <pthread.h>
 
+/* POSIX puts this in <limits.h>, but it is optional and musl-based and some
+ * BSD-derived libcs omit it. 255 is the Linux kernel bound. */
+#ifndef HOST_NAME_MAX
+#define HOST_NAME_MAX 255
+#endif
+
+/* One bound for every filesystem path this file builds, so the JSON output
+ * path and the sysfs/debugfs paths cannot drift apart. Must exceed
+ * RcclTelemetryConfig::output_dir plus a hostname and a pid. */
+#define RCCL_TEL_PATH_MAX 1024
+
 /* Global telemetry state */
 int rcclTelemetryEnabled = 0;
 RcclTelemetryConfig rcclTelemetryCfg;
@@ -63,11 +74,6 @@ static int rcclTelemetryBlocksGrow(void** blocks, int* block0Log2, int* capacity
   return reached;
 }
 
-/* Caller holds the lock and has already zeroed the matching capacity. */
-static void rcclTelemetryBlocksFree(void** blocks) {
-  for (int b = 0; b < RCCL_TELEMETRY_BLOCKS; b++) free(blocks[b]);
-}
-
 /* Reserve the block table itself, once per parent. Caller holds the lock. */
 static void** rcclTelemetryBlocksAlloc(void) {
   return (void**)calloc(RCCL_TELEMETRY_BLOCKS, sizeof(void*));
@@ -75,7 +81,7 @@ static void** rcclTelemetryBlocksAlloc(void) {
 
 int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots) {
   if (numSlots) *numSlots = 0;
-  if (!rcclTelemetryEnabled || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS || numQps <= 0) {
+  if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS || numQps <= 0) {
     return -1;
   }
 
@@ -139,29 +145,6 @@ int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots) 
   return startSlot;
 }
 
-/* Called after the JSON is written; zeroes each capacity before freeing. */
-static void rcclTelemetryFreeStorage(void) {
-  pthread_mutex_lock(&rcclTelemetryAllocLock);
-  for (int d = 0; d < RCCL_TELEMETRY_MAX_DEVS; d++) {
-    RcclDeviceStats* dev = &rcclTelemetryDevs[d];
-    if (dev->channel_blocks == NULL) continue;
-    int numChannels = dev->channel_capacity;
-    for (int c = 0; c < numChannels; c++) {
-      RcclChannelStats* ch = rcclTelemetryChannel(d, c);
-      if (ch == NULL || ch->qp_blocks == NULL) continue;
-      __atomic_store_n(&ch->qp_capacity, 0, __ATOMIC_RELEASE);
-      rcclTelemetryBlocksFree(ch->qp_blocks);
-      free(ch->qp_blocks);
-      ch->qp_blocks = NULL;
-    }
-    __atomic_store_n(&dev->channel_capacity, 0, __ATOMIC_RELEASE);
-    rcclTelemetryBlocksFree(dev->channel_blocks);
-    free(dev->channel_blocks);
-    dev->channel_blocks = NULL;
-  }
-  pthread_mutex_unlock(&rcclTelemetryAllocLock);
-}
-
 /* ---- Periodic HW-counter sampler (time series for congestion) ------ */
 /* When RCCL_TELEMETRY_SAMPLE_MS > 0, a background thread samples a small
  * set of congestion-relevant IB-sysfs counters plus the atomic SW byte
@@ -169,12 +152,35 @@ static void rcclTelemetryFreeStorage(void) {
  * done (no ethtool/popen), so the hot path is undisturbed. The absolute
  * per-sample values are emitted as a "hw_samples" time series; rates are
  * computed offline by the trace merger. */
-static const char* const rcclTelSampledNames[] = {
-  "np_ecn_marked_roce_packets", "np_cnp_sent", "rp_cnp_handled",
-  "out_of_buffer", "packet_seq_err", "out_of_sequence",
-  "local_ack_timeout_err", "rnr_nak_retry_err"
+
+/*
+ * One sampled slot. `name` is a canonical json_name, the same vocabulary the
+ * per-HW tables below and the hw_counters JSON object use, never a raw sysfs
+ * key: rcclTelemetrySampledTableIdx() matches on json_name and the sysfs key it
+ * then reads comes from the resolved table row.
+ *
+ * `alt` is an optional second json_name for a signal the tables spell
+ * differently, e.g. CNP-received is cnp_rcvd on ainic and cnp_handled on mlx5
+ * and thor2. The series key stays `name` on every NIC, so a consumer gets one
+ * stable column per signal instead of a NIC-dependent one.
+ */
+typedef struct {
+  const char* name;
+  const char* alt;
+} RcclTelSampledDesc;
+
+/* Trailing comment per row: which of the three tables resolves the slot. */
+static const RcclTelSampledDesc rcclTelSampled[] = {
+  {"ecn_marked_pkts", NULL},                      /* ainic, mlx5, thor2 */
+  {"cnp_sent", NULL},                             /* ainic, mlx5, thor2 */
+  {"cnp_rcvd", "cnp_handled"},                    /* ainic | mlx5, thor2 */
+  {"out_of_buffer", NULL},                        /* ainic, mlx5 */
+  {"oos_drop_count", NULL},                       /* ainic, mlx5, thor2 */
+  {"seq_err_naks_rcvd", NULL},                    /* ainic, mlx5, thor2 */
+  {"rnr_retry_err", NULL},                        /* ainic, mlx5, thor2 */
+  {"local_ack_timeout_err", "to_retransmits"},    /* mlx5, thor2 | ainic */
 };
-#define RCCL_TEL_NUM_SAMPLED ((int)(sizeof(rcclTelSampledNames) / sizeof(rcclTelSampledNames[0])))
+#define RCCL_TEL_NUM_SAMPLED ((int)(sizeof(rcclTelSampled) / sizeof(rcclTelSampled[0])))
 #define RCCL_TEL_MAX_SAMPLES 100000
 
 typedef struct {
@@ -648,8 +654,6 @@ void rcclTelemetryInit(void) {
     return;
   }
 
-  rcclTelemetryEnabled = 1;
-
   strncpy(rcclTelemetryCfg.output_dir, "/tmp", sizeof(rcclTelemetryCfg.output_dir) - 1);
   rcclTelemetryCfg.output_dir[sizeof(rcclTelemetryCfg.output_dir) - 1] = '\0';
   rcclTelemetryCfg.histogram_max_buckets = 5;
@@ -721,7 +725,7 @@ void rcclTelemetryInit(void) {
   rcclTelemetryGetTimestamp(rcclTelemetryStartTime, sizeof(rcclTelemetryStartTime));
 
   rcclTelemetryProcessName[0] = '\0';
-  char proc_path[64];
+  char proc_path[RCCL_TEL_PATH_MAX];
   snprintf(proc_path, sizeof(proc_path), "/proc/%d/comm", (int)getpid());
   FILE* fp = fopen(proc_path, "r");
   if (fp != NULL) {
@@ -735,11 +739,17 @@ void rcclTelemetryInit(void) {
 
   atexit(rcclTelemetryFlush);
 
+  /* The sampler only needs rcclTelemetryNumDevs, which stays 0 until a device
+   * registers, and registration is itself gated on the flag below. */
   rcclTelemetrySamplerStart();
+
+  /* Publish last: every hot-path hook keys off this flag, so it must not be
+   * observable as 1 before the table above is seeded. */
+  __atomic_store_n(&rcclTelemetryEnabled, 1, __ATOMIC_RELEASE);
 }
 
 void rcclTelemetryFlush(void) {
-  if (!rcclTelemetryEnabled) {
+  if (!rcclTelemetryOn()) {
     return;
   }
 
@@ -779,13 +789,13 @@ void rcclTelemetryFlush(void) {
     }
   }
 
-  char hostname[256];
+  char hostname[HOST_NAME_MAX + 1];
   if (gethostname(hostname, sizeof(hostname)) != 0) {
     strncpy(hostname, "unknown", sizeof(hostname) - 1);
     hostname[sizeof(hostname) - 1] = '\0';
   }
 
-  char filepath[1024];
+  char filepath[RCCL_TEL_PATH_MAX];
   snprintf(filepath, sizeof(filepath), "%s/rccl_telemetry_%s_%d.json",
            rcclTelemetryCfg.output_dir, hostname, (int)getpid());
 
@@ -794,13 +804,11 @@ void rcclTelemetryFlush(void) {
     rcclTelemetryWriteJson(fp);
     fclose(fp);
   }
-
-  rcclTelemetryFreeStorage();
 }
 
 __attribute__((visibility("default")))
 int rcclTelemetrySwCapture(RcclTelemetrySwSnapshot* out, int maxDevs) {
-  if (!rcclTelemetryEnabled || out == NULL || maxDevs <= 0) return 0;
+  if (!rcclTelemetryOn() || out == NULL || maxDevs <= 0) return 0;
 
   int num_devs = __atomic_load_n(&rcclTelemetryNumDevs, __ATOMIC_ACQUIRE);
   if (num_devs > RCCL_TELEMETRY_MAX_DEVS) num_devs = RCCL_TELEMETRY_MAX_DEVS;
@@ -852,7 +860,7 @@ int rcclTelemetrySwCapture(RcclTelemetrySwSnapshot* out, int maxDevs) {
 
 int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
                                  const char* eth_device, const char* transport) {
-  if (!rcclTelemetryEnabled) {
+  if (!rcclTelemetryOn()) {
     return -1;
   }
 
@@ -922,7 +930,7 @@ void rcclTelemetryGetEthDevice(const char* roce_device, char* eth_device, size_t
     return;
   }
 
-  char path[512];
+  char path[RCCL_TEL_PATH_MAX];
   snprintf(path, sizeof(path), "/sys/class/infiniband/%s/device/net", roce_device);
 
   DIR* dir = opendir(path);
@@ -1108,10 +1116,10 @@ static int rcclTelemetryIsCounterEnabled(const char* counter_name) {
 static void rcclTelemetryGetDriverName(const char* roce_device, char* driver_name, size_t size) {
   driver_name[0] = '\0';
 
-  char link_path[512];
+  char link_path[RCCL_TEL_PATH_MAX];
   snprintf(link_path, sizeof(link_path), "/sys/class/infiniband/%s/device/driver", roce_device);
 
-  char resolved[512];
+  char resolved[RCCL_TEL_PATH_MAX];
   ssize_t len = readlink(link_path, resolved, sizeof(resolved) - 1);
   if (len < 0) return;
   resolved[len] = '\0';
@@ -1124,7 +1132,7 @@ static void rcclTelemetryGetDriverName(const char* roce_device, char* driver_nam
 }
 
 static int64_t rcclTelemetryReadHwCounter(const char* roce_device, const char* counter_name) {
-  char path[512];
+  char path[RCCL_TEL_PATH_MAX];
   int64_t val;
 
   snprintf(path, sizeof(path), "/sys/class/infiniband/%s/hw_counters/%s",
@@ -1146,13 +1154,45 @@ static int64_t rcclTelemetryReadHwCounter(const char* roce_device, const char* c
 /* Periodic HW-counter sampler                                        */
 /* ------------------------------------------------------------------ */
 
-/* Resolve a sampled counter name to its index in the device's HW table. */
+/* Resolve a sampled json_name, or its alternate, to a row of the HW table. */
 static int rcclTelemetrySampledTableIdx(const RcclHwConfig* hw, int sampled) {
+  const RcclTelSampledDesc* s = &rcclTelSampled[sampled];
   for (int c = 0; c < hw->num_counters; c++) {
-    if (strcmp(hw->counters[c].json_name, rcclTelSampledNames[sampled]) == 0)
-      return c;
+    if (strcmp(hw->counters[c].json_name, s->name) == 0) return c;
+  }
+  if (s->alt == NULL) return -1;
+  for (int c = 0; c < hw->num_counters; c++) {
+    if (strcmp(hw->counters[c].json_name, s->alt) == 0) return c;
   }
   return -1;
+}
+
+/* Read one resolved row, honouring the table's fallback sysfs key. */
+static int64_t rcclTelemetrySampleRow(const RcclDeviceStats* dev, const RcclHwCounterDesc* d) {
+  int64_t v = rcclTelemetryReadHwCounter(dev->roce_device, d->key);
+  if (v < 0 && d->key_fallback != NULL) v = rcclTelemetryReadHwCounter(dev->roce_device, d->key_fallback);
+  return v;
+}
+
+/* Warn once about any sampled name that no configured device's table defines,
+ * so a series that is silently all -1 cannot go unnoticed. idx is the sampler's
+ * resolution cache; -2 means a device was not evaluated yet and is skipped. */
+static void rcclTelemetryWarnUnresolvedSampled(const int idx[][RCCL_TEL_NUM_SAMPLED], int nd, int* warned) {
+  for (int c = 0; c < RCCL_TEL_NUM_SAMPLED; c++) {
+    if (warned[c]) continue;
+    int evaluated = 0, resolved = 0;
+    for (int i = 0; i < nd; i++) {
+      if (idx[i][c] == -2) continue;
+      evaluated++;
+      if (idx[i][c] >= 0) resolved++;
+    }
+    if (evaluated == 0 || resolved > 0) continue;
+    warned[c] = 1;
+    fprintf(stderr,
+            "RCCL NET_TELEMETRY: sampled counter \"%s\" is not defined by any "
+            "configured device counter table, its hw_samples series stays -1\n",
+            rcclTelSampled[c].name);
+  }
 }
 
 static void* rcclTelemetrySamplerMain(void* arg) {
@@ -1161,6 +1201,7 @@ static void* rcclTelemetrySamplerMain(void* arg) {
   int idx_cache[RCCL_TELEMETRY_MAX_DEVS][RCCL_TEL_NUM_SAMPLED];
   for (int i = 0; i < RCCL_TELEMETRY_MAX_DEVS; i++)
     for (int c = 0; c < RCCL_TEL_NUM_SAMPLED; c++) idx_cache[i][c] = -2;
+  int warned[RCCL_TEL_NUM_SAMPLED] = {0};
 
   while (!__atomic_load_n(&rcclTelemetrySamplerStopFlag, __ATOMIC_ACQUIRE)) {
     int64_t ts_us = rcclTelemetryGetNs() / 1000;
@@ -1183,12 +1224,12 @@ static void* rcclTelemetrySamplerMain(void* arg) {
       for (int c = 0; c < RCCL_TEL_NUM_SAMPLED; c++) {
         if (idx_cache[i][c] == -2) idx_cache[i][c] = rcclTelemetrySampledTableIdx(hw, c);
         int ti = idx_cache[i][c];
-        smp->cong[c] = (ti >= 0)
-          ? rcclTelemetryReadHwCounter(dev->roce_device, hw->counters[ti].key)
-          : -1;
+        smp->cong[c] = (ti >= 0) ? rcclTelemetrySampleRow(dev, &hw->counters[ti]) : -1;
       }
       rcclTelemetryNumSamples = s + 1;
     }
+
+    rcclTelemetryWarnUnresolvedSampled(idx_cache, nd, warned);
 
     struct timespec req;
     req.tv_sec  = rcclTelemetrySampleIntervalMs / 1000;
@@ -1227,7 +1268,7 @@ static void rcclTelemetryCollectDebugfs(int64_t* hwc,
                                          int num_wanted) {
   if (driver_name[0] == '\0' || num_wanted == 0) return;
 
-  char path[512];
+  char path[RCCL_TEL_PATH_MAX];
   snprintf(path, sizeof(path), "/sys/kernel/debug/%s/%s/info",
            driver_name, roce_device);
 
@@ -1260,6 +1301,13 @@ static void rcclTelemetryCollectDebugfs(int64_t* hwc,
 /* Main hw-counter collection (HW-agnostic; driven by dev->hw_config)  */
 /* ------------------------------------------------------------------ */
 
+/* Replace eight absolute per-priority values with deltas vs. their baseline.
+ * A -1 on either side means the counter or the baseline was unavailable, and
+ * stays -1 rather than becoming a bogus difference. */
+static void rcclTelemetryPfcDelta(int64_t* cur, const int64_t* init) {
+  for (int p = 0; p < 8; p++) cur[p] = (cur[p] >= 0 && init[p] >= 0) ? (cur[p] - init[p]) : -1;
+}
+
 static void rcclTelemetryCollectHwCounters(RcclDeviceStats* dev) {
   if (dev->roce_device[0] == '\0' || dev->hw_config == NULL) return;
 
@@ -1291,18 +1339,10 @@ static void rcclTelemetryCollectHwCounters(RcclDeviceStats* dev) {
     int64_t init = dev->snap_init_hw_counters[c];
     dev->hw_counters[c] = (cur >= 0 && init >= 0) ? (cur - init) : -1;
   }
-  for (int p = 0; p < 8; p++) {
-#define RCCL_TEL_PFC_DELTA(field, init_field) do {                           \
-      int64_t cur  = dev->field[p];                                          \
-      int64_t init = dev->init_field[p];                                     \
-      dev->field[p] = (cur >= 0 && init >= 0) ? (cur - init) : -1;           \
-    } while (0)
-    RCCL_TEL_PFC_DELTA(pfc_rx_frames,   snap_init_pfc_rx_frames);
-    RCCL_TEL_PFC_DELTA(pfc_tx_frames,   snap_init_pfc_tx_frames);
-    RCCL_TEL_PFC_DELTA(pfc_rx_pause_us, snap_init_pfc_rx_pause_us);
-    RCCL_TEL_PFC_DELTA(pfc_tx_pause_us, snap_init_pfc_tx_pause_us);
-#undef RCCL_TEL_PFC_DELTA
-  }
+  rcclTelemetryPfcDelta(dev->pfc_rx_frames, dev->snap_init_pfc_rx_frames);
+  rcclTelemetryPfcDelta(dev->pfc_tx_frames, dev->snap_init_pfc_tx_frames);
+  rcclTelemetryPfcDelta(dev->pfc_rx_pause_us, dev->snap_init_pfc_rx_pause_us);
+  rcclTelemetryPfcDelta(dev->pfc_tx_pause_us, dev->snap_init_pfc_tx_pause_us);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1321,7 +1361,7 @@ static void rcclTelemetryWriteJson(FILE* fp) {
   char end_time[64];
   rcclTelemetryGetTimestamp(end_time, sizeof(end_time));
 
-  char hostname[256];
+  char hostname[HOST_NAME_MAX + 1];
   if (gethostname(hostname, sizeof(hostname)) != 0) {
     strncpy(hostname, "unknown", sizeof(hostname) - 1);
     hostname[sizeof(hostname) - 1] = '\0';
@@ -1498,7 +1538,7 @@ static void rcclTelemetryWriteJson(FILE* fp) {
               (long)s->ts_us, dev->device_id, dev->roce_device,
               (unsigned long)s->tx_bytes, (unsigned long)s->rx_bytes);
       for (int c = 0; c < RCCL_TEL_NUM_SAMPLED; c++)
-        fprintf(fp, ", \"%s\": %ld", rcclTelSampledNames[c], (long)s->cong[c]);
+        fprintf(fp, ", \"%s\": %ld", rcclTelSampled[c].name, (long)s->cong[c]);
       fprintf(fp, "}%s\n", (i < rcclTelemetryNumSamples - 1) ? "," : "");
     }
     fprintf(fp, "  ]\n");

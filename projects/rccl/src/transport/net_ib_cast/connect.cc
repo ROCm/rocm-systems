@@ -1081,20 +1081,25 @@ ib_recv_dev_list:
 
   comm->telChId = channelId;
 
-  for (int i = 0; i < comm->base.vProps.ndevs; i++) {
-    int ibDevN = comm->base.vProps.devs[i];
-    int numQpsForDev = 0;
-    for (int q = 0; q < comm->base.nqps; q++)
-      if (comm->base.qps[q].devIndex == i) numQpsForDev++;
-    int numSlots = 0;
-    int startSlot = rcclTelemetrySetupChannel(ibDevN, channelId, numQpsForDev, &numSlots);
-    int slotOffset = 0;
-    for (int q = 0; q < comm->base.nqps && slotOffset < numSlots; q++) {
-      if (comm->base.qps[q].devIndex != i) continue;
-      // QPs past the granted slots keep telQpSlot == -1 and stay untracked.
-      int telSlot = startSlot + slotOffset++;
-      comm->base.qps[q].telQpSlot = telSlot;
-      rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, comm->base.qps[q].isDataQp);
+  // Counting QPs per device and handing out slots only feeds telemetry, so skip
+  // it outright when telemetry is off. IbCastQpCreate() already left every
+  // telQpSlot at -1, which is the untracked value the hooks expect.
+  if (rcclTelemetryOn()) {
+    for (int i = 0; i < comm->base.vProps.ndevs; i++) {
+      int ibDevN = comm->base.vProps.devs[i];
+      int numQpsForDev = 0;
+      for (int q = 0; q < comm->base.nqps; q++)
+        if (comm->base.qps[q].devIndex == i) numQpsForDev++;
+      int numSlots = 0;
+      int startSlot = rcclTelemetrySetupChannel(ibDevN, channelId, numQpsForDev, &numSlots);
+      int slotOffset = 0;
+      for (int q = 0; q < comm->base.nqps && slotOffset < numSlots; q++) {
+        if (comm->base.qps[q].devIndex != i) continue;
+        // QPs past the granted slots keep telQpSlot == -1 and stay untracked.
+        int telSlot = startSlot + slotOffset++;
+        comm->base.qps[q].telQpSlot = telSlot;
+        rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, comm->base.qps[q].isDataQp);
+      }
     }
   }
 
@@ -1777,22 +1782,25 @@ ib_recv:
 
   rComm->telChId = channelId;
 
-  for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
-    int telIbDevN = rComm->base.vProps.devs[i];
-    int numQpsForDev = 0;
-    for (int q = 0; q < rComm->base.nqps; q++)
-      if (rComm->base.qps[q].devIndex == i) numQpsForDev++;
-    int numSlots = 0;
-    int startSlot = rcclTelemetrySetupChannel(telIbDevN, channelId, numQpsForDev, &numSlots);
-    int slotOffset = 0;
-    for (int q = 0; q < rComm->base.nqps && slotOffset < numSlots; q++) {
-      if (rComm->base.qps[q].devIndex != i) continue;
-      // QPs past the granted slots keep telQpSlot == -1 and stay untracked.
-      int telSlot = startSlot + slotOffset++;
-      rComm->base.qps[q].telQpSlot = telSlot;
-      // ncclIbQp::isDataQp is false for every receiver QP because it only
-      // drives AINIC QP creation. Classify by who actually posts CTS.
-      rcclTelemetrySetQpRole(telIbDevN, channelId, telSlot, !IbCastRecvCommQpPostsCts(rComm, q));
+  // See IbCastConnect(): telemetry-only work, skipped when telemetry is off.
+  if (rcclTelemetryOn()) {
+    for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
+      int telIbDevN = rComm->base.vProps.devs[i];
+      int numQpsForDev = 0;
+      for (int q = 0; q < rComm->base.nqps; q++)
+        if (rComm->base.qps[q].devIndex == i) numQpsForDev++;
+      int numSlots = 0;
+      int startSlot = rcclTelemetrySetupChannel(telIbDevN, channelId, numQpsForDev, &numSlots);
+      int slotOffset = 0;
+      for (int q = 0; q < rComm->base.nqps && slotOffset < numSlots; q++) {
+        if (rComm->base.qps[q].devIndex != i) continue;
+        // QPs past the granted slots keep telQpSlot == -1 and stay untracked.
+        int telSlot = startSlot + slotOffset++;
+        rComm->base.qps[q].telQpSlot = telSlot;
+        // ncclIbQp::isDataQp is false for every receiver QP because it only
+        // drives AINIC QP creation. Classify by who actually posts CTS.
+        rcclTelemetrySetQpRole(telIbDevN, channelId, telSlot, !IbCastRecvCommIsCtsQp(rComm, q));
+      }
     }
   }
 
