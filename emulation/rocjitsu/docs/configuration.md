@@ -56,8 +56,12 @@ The example above is intentionally minimal and single-threaded.
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned) |
-| `exec_mode` | string | `"functional"` or `"clocked"` |
+| `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
+
+`exec_mode` is matched literally: only the exact string `"clocked"` selects
+clocked mode. If the field is omitted, set to `"functional"`, or given any
+other value, the simulator runs in functional mode.
 
 ### Simulation threading
 
