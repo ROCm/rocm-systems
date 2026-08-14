@@ -84,15 +84,17 @@ has_active_replay_contexts()
 }
 
 rocprofiler_kernel_dispatch_info_t
-make_dispatch_info(const hsa::Queue& queue, const hsa::rocprofiler_packet& pkt)
+make_dispatch_info(const hsa::Queue&              queue,
+                   const hsa::rocprofiler_packet& pkt,
+                   rocprofiler_dispatch_id_t      dispatch_id)
 {
     constexpr auto kernel_dispatch_info_rt_size =
         common::compute_runtime_sizeof<rocprofiler_kernel_dispatch_info_t>();
 
-    auto info     = common::init_public_api_struct(rocprofiler_kernel_dispatch_info_t{});
-    info.size     = kernel_dispatch_info_rt_size;
-    info.queue_id = queue.get_id();
-    // info.dispatch_id = set before callback is invoked;
+    auto info        = common::init_public_api_struct(rocprofiler_kernel_dispatch_info_t{});
+    info.size        = kernel_dispatch_info_rt_size;
+    info.queue_id    = queue.get_id();
+    info.dispatch_id = dispatch_id;
 
     info.agent_id = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
 
@@ -143,7 +145,8 @@ execute_config_phase_enter(const hsa::Queue&              queue,
                            const hsa::rocprofiler_packet& pkt,
                            rocprofiler_thread_id_t        thr_id,
                            uint64_t                       internal_corr_id,
-                           uint64_t                       ancestor_corr_id)
+                           uint64_t                       ancestor_corr_id,
+                           rocprofiler_dispatch_id_t      dispatch_id)
 {
     auto plan = replay_plan_t{};
 
@@ -161,7 +164,7 @@ execute_config_phase_enter(const hsa::Queue&              queue,
 
     plan.config_data =
         common::init_public_api_struct(rocprofiler_callback_tracing_kernel_replay_data_t{});
-    plan.config_data.dispatch_info = make_dispatch_info(queue, pkt);
+    plan.config_data.dispatch_info = make_dispatch_info(queue, pkt, dispatch_id);
 
     tracing::execute_phase_enter_callbacks(config_contexts,
                                            thr_id,

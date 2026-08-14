@@ -34,6 +34,9 @@
 #      multi-pass rather than one repeated batch.
 #   4. Counters differ between the three kernels (vecAdd / saxpy / vecScale), so they are real
 #      per-dispatch measurements, not a constant artifact.
+#   5. dispatch_id identity: a replayed dispatch keeps ONE dispatch_id across its passes (only the
+#      replay_pass index advances), and dispatch_id increments sequentially across dispatches -- one
+#      id minted per logical dispatch, reused by every pass (never one id per pass).
 # (The app verifies its own results in the generate step, guarding the restored data itself.)
 
 import collections
@@ -182,14 +185,69 @@ def _records_by_dispatch(sdk):
     return table
 
 
-def test_every_dispatch_replayed_n_passes(json_data, expected_passes):
-    table = _records_by_dispatch(_sdk(json_data))
-    want = set(range(expected_passes))
-    for dispatch_id, entry in table.items():
-        passes = set(entry["passes"])
-        assert (
-            passes == want
-        ), f"dispatch {dispatch_id} ({entry['kernel']}) passes={sorted(passes)}, expected {sorted(want)}"
+def _dispatch_passes(sdk):
+    """dispatch_id -> {"kernel_id": int, "passes": [replay_pass, ...]} from raw counter records.
+
+    Kept separate from _records_by_dispatch, which keys passes in a dict (hiding a duplicate pass
+    index) and groups by counter name. Here every pass occurrence is retained alongside the
+    kernel_id so a dispatch_id can be asserted stable: one kernel, each replay pass exactly once.
+    """
+    table = {}
+    for rec in _counter_records(sdk):
+        info = _dispatch_info(rec)
+        did = int(info["dispatch_id"])
+        kid = int(info["kernel_id"])
+        entry = table.setdefault(did, {"kernel_id": kid, "passes": []})
+        assert entry["kernel_id"] == kid, (
+            f"dispatch_id {did} appears with two kernel_ids {entry['kernel_id']} and {kid}: "
+            "a dispatch_id must identify a single logical dispatch"
+        )
+        entry["passes"].append(_pass_index(rec))
+    assert table, "no counter records found"
+    return table
+
+
+def test_dispatch_id_constant_across_replay_passes(json_data, expected_passes):
+    # A replayed dispatch carries ONE dispatch_id across all of its passes; only the replay_pass
+    # index advances, taking each value 0..N-1 exactly once. This is the reserve-one-id-per-dispatch
+    # invariant: minting an id per pass would fan a single dispatch across N ids (shrinking each
+    # pass sequence to one entry), and a CONFIG/pass id mismatch would drop or duplicate a pass.
+    table = _dispatch_passes(_sdk(json_data))
+    want = list(range(expected_passes))
+    for did, entry in table.items():
+        passes = sorted(entry["passes"])
+        assert passes == want, (
+            f"dispatch {did} (kernel_id={entry['kernel_id']}) replay_pass sequence {passes} != "
+            f"{want}: dispatch_id must stay constant while replay_pass covers 0..N-1 once each"
+        )
+
+
+def test_dispatch_ids_increment_sequentially(json_data):
+    # Across distinct dispatches the dispatch_id increments sequentially -- one fresh id per logical
+    # dispatch, none skipped, none reused. Replay passes reuse their dispatch's reserved id (they
+    # must not consume new ids), so the observed ids form a contiguous ascending run. A regression
+    # that minted per pass, or double-minted at CONFIG, would leave gaps or duplicates here.
+    table = _dispatch_passes(_sdk(json_data))
+    ids = sorted(table)
+    assert len(ids) == len(set(ids)), f"duplicate dispatch_ids observed: {ids}"
+    assert ids == list(
+        range(ids[0], ids[0] + len(ids))
+    ), f"dispatch_ids are not sequential (expected a contiguous ascending run): {ids}"
+
+
+def test_dispatch_id_nonzero_every_pass(json_data):
+    # dispatch_id 0 is the "unset" sentinel (make_dispatch_info leaves it 0): the replay path
+    # reserves a real, nonzero id before CONFIG and threads it through every pass, so no pass record
+    # may carry 0. This is the C9 regression directly -- CONFIG/pass callbacks and pass records
+    # previously saw 0 instead of the reserved id, which a contiguous-run check alone can mask.
+    zero = [
+        _pass_index(rec)
+        for rec in _counter_records(_sdk(json_data))
+        if _dispatch_id(rec) == 0
+    ]
+    assert (
+        not zero
+    ), f"{len(zero)} pass record(s) carry dispatch_id==0 (replay_pass indices {zero})"
 
 
 def test_common_counters_constant_across_passes(json_data, common_counters):
