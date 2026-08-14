@@ -28,6 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GENERATE_PY = os.path.join(HERE, "generate.py")
 DEVICE_H = os.path.join(HERE, "..", "include", "device.h")
 NT_SYM_H = os.path.join(HERE, "..", "include", "rccl_nt_sym.h")
+DEVICE_LINKER_CMAKE = os.path.join(HERE, "..", "..", "cmake", "DeviceLinker.cmake")
 
 # A small, fast slice of collectives. "AllReduce RING SIMPLE Sum f32" expands to
 # both an unguarded primary and an arch-guarded variant, which exercises the
@@ -200,6 +201,58 @@ class Gfx950ThreadVariantTest(unittest.TestCase):
         self.assertNotRegex(v512, r"\bncclDevFuncTable_1\b")
         self.assertNotRegex(v512, r"\bncclDevKernel_Generic_1\b")
         self.assertNotRegex(v512, r"\bncclShmem\b")
+
+
+class Gfx950Build512GatingTest(unittest.TestCase):
+    """The opt-in gfx950 512-thread kernel set must not build on ROCm <= 7.0.2
+    unless the compiler accepts the -mllvm -amdgpu-agpr-bug-fix=1 codegen
+    workaround; on ROCm > 7.0.2 the AGPR bug is fixed upstream and it builds
+    directly. This guards that version gating in cmake/DeviceLinker.cmake, which
+    cannot be unit-compiled here, so we assert its structure (matching the
+    generated-text style of the tests above).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(DEVICE_LINKER_CMAKE):
+            raise unittest.SkipTest("DeviceLinker.cmake not found")
+        with open(DEVICE_LINKER_CMAKE) as f:
+            cls.text = f.read()
+
+    def test_opt_in_defaults_off_and_result_starts_disabled(self):
+        # The build switch is off by default and the result variable starts
+        # FALSE, so nothing is built without the explicit opt-in.
+        self.assertRegex(self.text, r"option\(BUILD_GFX950_512_THREADS_KERNELS[^)]*\bOFF\b")
+        self.assertIn("set(RCCL_BUILD_GFX950_512 FALSE)", self.text)
+        # Everything below is scoped to the opt-in AND gfx950 being a target.
+        self.assertIn(
+            'if(BUILD_GFX950_512_THREADS_KERNELS AND "gfx950" IN_LIST DL_GPU_TARGETS)',
+            self.text,
+        )
+
+    def test_rocm_version_gate_present(self):
+        self.assertRegex(self.text, r'VERSION_GREATER\s+"7\.0\.2"')
+
+    def test_enabled_only_when_rocm_gt_702_or_agpr_probe_passes(self):
+        guard = 'if(BUILD_GFX950_512_THREADS_KERNELS AND "gfx950" IN_LIST DL_GPU_TARGETS)'
+        body = self.text[self.text.index(guard):]
+
+        # The set is enabled in exactly two spots -- never unconditionally: the
+        # ROCm > 7.0.2 branch, and the ROCm <= 7.0.2 branch after the probe.
+        self.assertEqual(body.count("set(RCCL_BUILD_GFX950_512 TRUE)"), 2)
+
+        # On ROCm <= 7.0.2 (the else branch of if(_dl_rocm_gt_702)) the set is
+        # enabled only inside if(_dl_agpr_ok) -- i.e. gated on the compiler
+        # accepting the workaround, so "flag set but old ROCm" alone won't build.
+        gt702_idx = body.index("if(_dl_rocm_gt_702)")
+        else_body = body[body.index("else()", gt702_idx):]
+        probe_idx = else_body.index("if(_dl_agpr_ok)")
+        enable_idx = else_body.index("set(RCCL_BUILD_GFX950_512 TRUE)")
+        self.assertLess(
+            probe_idx,
+            enable_idx,
+            "on ROCm <= 7.0.2 the 512 set must be enabled only after the agpr probe succeeds",
+        )
 
 
 if __name__ == "__main__":

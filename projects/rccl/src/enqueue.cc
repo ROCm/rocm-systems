@@ -58,24 +58,25 @@ static ncclKernelMatch const ncclKerns[3] = {
 // [RCCL] Alternate gfx950 512-thread kernel set (declaration in device/common.h).
 // Selected at runtime via RCCL_GFX950_NTHREADS=512 (comm->use512Kernels).
 //
-// Only the unroll-2 kernel is built: the 512-thread set only benefits launches
-// that actually run with more than 256 threads, which on gfx950 is the
-// multi-node (unroll 2) path. Single-node uses unroll 1 but is capped at 256
-// threads (RCCL_SINGLE_NODE_MAX_NTHREADS) and unroll 4 is never auto-selected on
-// gfx950 (see commSetUnrollFactor), so those slots stay null and fall back to
-// the 256-thread kernels below. Indexed by ncclGetKernelIndex(comm) == unroll.
+// Only the unroll-2 kernel is built at 512 threads: that is the only path that
+// runs with more than 256 threads on gfx950 (the multi-node path). Single-node
+// uses unroll 1 but is capped at 256 threads (RCCL_SINGLE_NODE_MAX_NTHREADS) and
+// unroll 4 is never auto-selected on gfx950 (see commSetUnrollFactor). Rather
+// than leave those slots null (a launch-time footgun), point them at the
+// matching 256-thread kernels so every slot holds a launchable stub and
+// selection can never dereference a null. Indexed by ncclGetKernelIndex(comm).
 static ncclKernelMatch const ncclKerns512[3] = {
-  {nullptr, true}, {(void*)ncclDevKernel_Generic_2_512, true}, {nullptr, true}
+  {(void*)ncclDevKernel_Generic_1, true}, {(void*)ncclDevKernel_Generic_2_512, true}, {(void*)ncclDevKernel_Generic_4, true}
 };
 #endif
 
 // Select the host launch stub for this comm's unroll factor, honoring the gfx950
 // 512-thread kernel set when enabled at runtime. Unroll factors without a
-// 512-thread kernel (see ncclKerns512) fall back to the default 256-thread set.
+// 512-thread kernel (see ncclKerns512) reuse the default 256-thread kernel.
 static inline void* rcclSelectKernelFn(struct ncclComm* comm) {
   int idx = ncclGetKernelIndex(comm);
 #ifdef RCCL_ENABLE_GFX950_512
-  if (comm->use512Kernels && ncclKerns512[idx].kernelFn != nullptr) return ncclKerns512[idx].kernelFn;
+  if (comm->use512Kernels) return ncclKerns512[idx].kernelFn;
 #endif
   return ncclKerns[idx].kernelFn;
 }
