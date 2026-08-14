@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/spm/core.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
+#include <rocprofiler-sdk/experimental/kernel_replay.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 
@@ -100,6 +101,17 @@ struct spm_dispatch_counter_collection_service
     common::Synchronized<bool> enabled{false};
 };
 
+/// @brief Kernel replay (multi-pass counter collection) service state.
+/// Dispatch counting callbacks are stored in dispatch_counter_collection; this service marks that
+/// the HSA queue path should run the multi-pass replay loop for this context.
+struct kernel_replay_service
+{
+    common::Synchronized<bool> enabled{false};
+    // Returns how many replay passes (counter batches) to run for a dispatch. Supplied by the tool.
+    rocprofiler_kernel_replay_pass_count_cb_t pass_count_cb      = nullptr;
+    void*                                     pass_count_cb_args = nullptr;
+};
+
 struct device_counting_service
 {
     std::unordered_set<uint64_t>                            conf_agents;
@@ -149,6 +161,8 @@ struct context
 
     std::unique_ptr<spm_dispatch_counter_collection_service> dispatch_spm = {};
 
+    std::unique_ptr<kernel_replay_service> kernel_replay = {};
+
     template <typename KindT>
     bool is_tracing(KindT _kind) const;
 
@@ -161,6 +175,16 @@ struct context
         return (is_tracing(_args) || ...);
     }
 };
+
+/// @brief True when this context was configured for kernel replay (multi-pass dispatch counting).
+bool
+kernel_replay_is_enabled(const context* ctx);
+
+/// @brief Number of replay passes the tool wants for this context (1 == no replay).
+/// @p dispatch_data provides the tool with dispatch context (kernel/agent/dims) for the decision.
+uint64_t
+kernel_replay_pass_count(const context*                               ctx,
+                         rocprofiler_dispatch_counting_service_data_t dispatch_data);
 
 // set the client index needs to be called before allocate_context()
 void push_client(uint32_t);

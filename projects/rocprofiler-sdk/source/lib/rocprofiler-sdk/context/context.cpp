@@ -173,6 +173,23 @@ get_active_contexts(context_filter_t filter)
     return data;
 }
 
+bool
+kernel_replay_is_enabled(const context* ctx)
+{
+    if(!ctx || !ctx->kernel_replay) return false;
+    bool enabled = false;
+    ctx->kernel_replay->enabled.rlock([&](const bool& v) { enabled = v; });
+    return enabled;
+}
+
+uint64_t
+kernel_replay_pass_count(const context*                               ctx,
+                         rocprofiler_dispatch_counting_service_data_t dispatch_data)
+{
+    if(!ctx || !ctx->kernel_replay || !ctx->kernel_replay->pass_count_cb) return 1;
+    return ctx->kernel_replay->pass_count_cb(dispatch_data, ctx->kernel_replay->pass_count_cb_args);
+}
+
 const context*
 get_active_context(rocprofiler_context_id_t id)
 {

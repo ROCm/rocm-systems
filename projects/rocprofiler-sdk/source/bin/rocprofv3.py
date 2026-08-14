@@ -42,17 +42,6 @@ CONST_VERSION_INFO = {
     "rocm_version": "@rocm_version_FULL_VERSION@",
 }
 
-# Perfetto's TraceConfig BufferConfig.size_kb field is a uint32_t, and the
-# tracing service allocates size_kb * 1024 bytes and rejects the config when
-# that byte count does not fit in a uint32_t. So although the option is named
-# in "KB", the value is treated as KiB (multiplied by 1024). The usable range
-# is 1 KiB up to floor((2^32 - 1) / 1024) = 4,194,303 KiB. These bounds mirror
-# the C++ limits (defaults::perfetto_buffer_size_{min,max}_kb in
-# source/lib/output/output_config.hpp) so both validation paths agree.
-PERFETTO_BUFFER_SIZE_KB_MIN = 1
-PERFETTO_BUFFER_SIZE_KB_MAX = ((1 << 32) - 1) // 1024
-DEPRECATED_DIRECT_OUTPUT_FORMATS = ("csv", "pftrace", "otf2")
-
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes"""
@@ -101,30 +90,6 @@ def warning(msg, *args):
     sys.stderr.flush()
 
 
-def warn_deprecated_output_formats(output_formats):
-    requested_formats = {
-        str(itr).strip().lower() for itr in (output_formats or []) if str(itr).strip()
-    }
-    deprecated_formats = [
-        itr for itr in DEPRECATED_DIRECT_OUTPUT_FORMATS if itr in requested_formats
-    ]
-
-    if deprecated_formats:
-        display_names = {
-            "csv": "CSV",
-            "pftrace": "PFTrace (Perfetto)",
-            "otf2": "OTF2",
-        }
-        warning(
-            "The following direct rocprofv3 output format(s) are deprecated: "
-            f"{', '.join(display_names[itr] for itr in deprecated_formats)}. "
-            "Some tracing features, including hipFILE and rocSHMEM tracing, might not "
-            "produce output in these formats. Use `--output-format rocpd` (the default), "
-            "then run `rocpd convert -i <database>.db --output-format csv` when CSV "
-            "output is needed."
-        )
-
-
 def format_help(formatter, w=120, h=40):
     """Return a wider HelpFormatter, if possible."""
     try:
@@ -157,24 +122,6 @@ def strtobool(val):
     else:
         val_type = type(val).__name__
         raise ValueError(f"invalid truth value {val} (type={val_type})")
-
-
-def perfetto_buffer_size_kb(val):
-    if isinstance(val, bool) or not isinstance(val, (int, str)):
-        raise argparse.ArgumentTypeError(f"invalid integer value: {val}")
-
-    try:
-        value = int(val)
-    except (TypeError, ValueError):
-        raise argparse.ArgumentTypeError(f"invalid integer value: {val}")
-
-    if not PERFETTO_BUFFER_SIZE_KB_MIN <= value <= PERFETTO_BUFFER_SIZE_KB_MAX:
-        raise argparse.ArgumentTypeError(
-            f"must be between {PERFETTO_BUFFER_SIZE_KB_MIN} and "
-            f"{PERFETTO_BUFFER_SIZE_KB_MAX} KB"
-        )
-
-    return value
 
 
 def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
@@ -540,7 +487,7 @@ For attachment profiling of running processes:
     io_options.add_argument(
         "-f",
         "--output-format",
-        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd). Direct csv, pftrace, and otf2 output is deprecated; use rocpd and rocpd convert",
+        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd)",
         nargs="+",
         default=None,
         choices=("csv", "json", "pftrace", "otf2", "rocpd"),
@@ -746,6 +693,25 @@ For attachment profiling of running processes:
         default=None,
         nargs="*",
         action="append",
+    )
+
+    add_parser_bool_argument(
+        counter_collection_options,
+        "--kernel-replay",
+        help=(
+            "Collect counters via in-process kernel replay (snapshot/restore device memory between "
+            "passes and re-launch the same dispatch) instead of re-running the whole application. "
+            "Each dispatch is replayed --kernel-replay-passes times; all passes share the same "
+            "Dispatch_Id and add a Replay_Pass column to the counter CSV. (experimental)"
+        ),
+    )
+
+    counter_collection_options.add_argument(
+        "--kernel-replay-passes",
+        help="Number of kernel-replay passes per dispatch (requires --kernel-replay). Default: 1",
+        default=None,
+        type=int,
+        metavar="N",
     )
 
     spm_options = parser.add_argument_group("Streaming Performance Monitor(SPM) options")
@@ -961,9 +927,9 @@ For attachment profiling of running processes:
     )
     perfetto_options.add_argument(
         "--perfetto-buffer-size",
-        help=f"Size of buffer for perfetto output in KB ({PERFETTO_BUFFER_SIZE_KB_MIN}-{PERFETTO_BUFFER_SIZE_KB_MAX}). default: 1 GB",
+        help="Size of buffer for perfetto output in KB. default: 1 GB",
         default=None,
-        type=perfetto_buffer_size_kb,
+        type=int,
         metavar="KB",
     )
     perfetto_options.add_argument(
@@ -1246,12 +1212,6 @@ For attachment profiling of running processes:
         help="Serialize all kernels, not just the traced ones.",
     )
 
-    add_parser_bool_argument(
-        att_options,
-        "--att-no-detail",
-        help="Collect occupancy data without instruction-level detail.",
-    )
-
     return (parser.parse_args(rocp_args), app_args)
 
 
@@ -1382,12 +1342,6 @@ def has_set_attr(obj, key):
 
 def patch_args(data):
     """Used to handle certain fields which might be specified as a string instead of an array or vice-versa"""
-
-    if hasattr(data, "perfetto_buffer_size") and data.perfetto_buffer_size is not None:
-        try:
-            data.perfetto_buffer_size = perfetto_buffer_size_kb(data.perfetto_buffer_size)
-        except argparse.ArgumentTypeError as err:
-            fatal_error(f"Invalid perfetto_buffer_size: {err}")
 
     if hasattr(data, "kernel_iteration_range") and isinstance(
         data.kernel_iteration_range, str
@@ -1725,13 +1679,6 @@ def run(app_args, args, **kwargs):
     if not args.output_format:
         args.output_format = ["rocpd"]
 
-    effective_output_formats = list(args.output_format)
-    effective_output_formats.extend(
-        re.split(r"[\s,;:]+", app_env.get("ROCPROF_OUTPUT_FORMAT", ""))
-    )
-    if args.hipfile_trace or args.rocshmem_trace:
-        warn_deprecated_output_formats(effective_output_formats)
-
     if args.kokkos_trace:
         update_env("KOKKOS_TOOLS_LIBS", ROCPROF_KOKKOSP_LIBRARY, append=True)
         for itr in (
@@ -1776,6 +1723,21 @@ def run(app_args, args, **kwargs):
             "hipfile_trace",
         ):
             setattrifnone(args, itr, True)
+
+    # OMPT is a rocpd-only trace: it is written to the rocpd database and exported to
+    # other formats via `rocpd convert`; the direct csv/json/pftrace/otf2 emitters do
+    # not contain OMPT records. This runs after the --sys-trace/--runtime-trace folds
+    # have resolved args.ompt_trace, which honors an explicit --ompt-trace=false. If
+    # OMPT tracing is effectively enabled but rocpd was not requested, add it so OMPT
+    # data is not silently dropped, and warn the user.
+    if bool(getattr(args, "ompt_trace", None)) and "rocpd" not in args.output_format:
+        warning(
+            "--ompt-trace: OMPT data is only emitted to the 'rocpd' output format; "
+            "the requested output format(s) {fmts} will not contain OMPT records. "
+            "Adding 'rocpd' to --output-format -- use `rocpd convert` to export OMPT "
+            "to csv/pftrace/otf2.".format(fmts=", ".join(args.output_format))
+        )
+        args.output_format.append("rocpd")
 
     update_env(
         "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
@@ -2134,6 +2096,19 @@ def run(app_args, args, **kwargs):
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
+    if getattr(args, "kernel_replay", None) and not args.pmc:
+        fatal_error(
+            "--kernel-replay requires --pmc (it routes counter collection through replay)"
+        )
+
+    if getattr(args, "kernel_replay", None):
+        # Route counter collection through the in-process kernel-replay service (consumed by the
+        # tool, config.hpp: ROCPROF_KERNEL_REPLAY). The SDK derives the pass count from the number
+        # of counter groups via the tool's pass-count callback, so no pass-count env is needed.
+        update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
+    elif getattr(args, "kernel_replay_passes", None) is not None:
+        fatal_error("--kernel-replay-passes requires --kernel-replay")
+
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
 
@@ -2312,12 +2287,6 @@ def run(app_args, args, **kwargs):
                 args.att_serialize_all,
                 overwrite=True,
             )
-        if args.att_no_detail:
-            update_env(
-                "ROCPROF_ATT_PARAM_NO_DETAIL",
-                args.att_no_detail,
-                overwrite=True,
-            )
         if args.att_gpu_index:
             update_env(
                 "ROCPROF_ATT_PARAM_GPU_INDEX",
@@ -2476,6 +2445,29 @@ def main(argv=None):
     # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
     cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
     input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
+
+    # Kernel replay collects all counter groups within a SINGLE application run (the SDK replays
+    # each dispatch once per group), so it must not use the per-group child-process relaunch. Merge
+    # every counter group (from CLI --pmc and/or input-file pmc lines) into cmd_args.pmc as a
+    # list-of-lists; process_args then emits ROCPROF_COUNTER_GROUPS and the app runs once.
+    if getattr(cmd_args, "kernel_replay", None):
+        replay_groups = []
+        if cli_has_pmc:
+            for g in cmd_args.pmc:
+                replay_groups.append(g if isinstance(g, list) else [g])
+        for inp_arg in inp_args:
+            if has_set_attr(inp_arg, "pmc"):
+                pmc = inp_arg.pmc
+                replay_groups.append(pmc if isinstance(pmc, list) else [pmc])
+        if replay_groups:
+            cmd_args.pmc = replay_groups
+            inp_args = inp_args[:1] if inp_args else [dotdict({})]
+            if has_set_attr(inp_args[0], "pmc"):
+                inp_args[0].pmc = None
+        cli_has_pmc = cmd_args.pmc is not None
+        input_has_pmc = False
+        cli_multipass = False
+
     use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
 
     if not use_multipass:

@@ -333,7 +333,7 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
               expression: 400*reduce(SQ_WAIT_INST_LDS,sum)/reduce(SQ_WAVES,sum)/reduce(GRBM_GUI_ACTIVE,max)
 
       # Required: Firmware restrictions schema version
-      fw-restriction-schema-version: 2
+      fw_restriction_schema_version: 1
 
       # List of firmware restrictions
       firmware_restrictions:
@@ -355,18 +355,9 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
             - "gfx1100"
             - "gfx1101"
 
-        # Example: per-feature capability floor (queried at runtime, not a hard
-        # startup requirement)
-        - firmware_type: CP
-          feature: pc_sampling_host_trap
-          min_version: 210
-          reason: "PC sampling host-trap mode requires CP firmware version 210 or newer on MI300 devices"
-          affected_architectures:
-            - "gfx942"
-
 **Schema elements:**
 
-- ``fw-restriction-schema-version`` (required): Integer specifying the schema version (currently 2; the ``feature`` field was added in version 2).
+- ``fw_restriction_schema_version`` (required): Integer specifying the schema version (currently 1).
 - ``firmware_restrictions``: Array of restriction objects consisting of the following fields:
 
   - ``firmware_type`` (required): Type of firmware being restricted. Supported types include:
@@ -377,7 +368,6 @@ Firmware restrictions are defined alongside counter definitions in the ``config.
   - ``min_version`` (required): Integer specifying the minimum firmware version.
   - ``reason`` (optional): Human-readable explanation for the restriction.
   - ``affected_architectures`` (optional): Array of GPU architecture names, such as "gfx940" and "gfx942" liable to meet this restriction. If empty, the restriction applies to all the architectures.
-  - ``feature`` (optional): String naming a firmware-gated feature. When present, the entry is treated as a *per-feature capability floor* rather than a hard startup requirement: it is **not** enforced during the startup firmware validation and does not prevent ROCprofiler-SDK from initializing. Instead, services query it at runtime (via the internal feature-support API) to decide whether functionality requiring that firmware feature can be enabled on a given agent. When ``feature`` is absent (or empty), the entry is a hard floor as before and is enforced at startup.
 
 Counter definitions file location
 ++++++++++++++++++++++++++++++++++
@@ -562,6 +552,34 @@ The accumulate() function sums the values of a basic level counter over the spec
       <metric name="MeanOccupancyPerCU" expr=accumulate(SQ_LEVEL_WAVES,HIGH_RES)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM descr="Mean occupancy per compute unit."></metric>
 
 ``MeanOccupancyPerCU``: In the preceding example, the ``MeanOccupancyPerCU`` metric calculates the mean occupancy per compute unit. It uses the accumulate() function with ``HIGH_RES`` to sum up the ``SQ_LEVEL_WAVES`` counter every clock cycle. This sum is then divided by the maximum value of ``GRBM_GUI_ACTIVE`` and the number of compute units ``CU_NUM`` to derive the mean occupancy.
+
+Kernel replay (multi-pass dispatch counting)
+----------------------------------------------
+
+When a single set of hardware counters cannot be collected in one pass (because the hardware has a limited number of counter registers), kernel replay re-executes the same dispatch multiple times — once per counter batch — while the application observes only a single completion.
+
+Between passes, directly-allocated device memory is saved and restored so every pass runs against identical inputs. The replay service is configured via:
+
+.. code-block:: cpp
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_kernel_replay_counting_service(
+            ctx,
+            dispatch_callback,      // invoked once per pass (counter batch selection)
+            dispatch_callback_args,
+            record_callback,        // invoked once per pass (counter records)
+            record_callback_args),
+        "Could not setup kernel replay counting service");
+
+.. note::
+    - This API is **mutually exclusive** with ``rocprofiler_configure_callback_dispatch_counting_service`` and ``rocprofiler_configure_buffer_dispatch_counting_service`` on the same context.
+    - Configure kernel replay *first*, or use only the regular dispatch counting entry points without replay.
+    - The number of replay passes is controlled via the ``ROCPROFILER_KERNEL_REPLAY_PASSES`` environment variable.
+    - Only directly-allocated device memory (``hipMalloc`` / ``hsa_amd_memory_pool_allocate``) is tracked and restored. Unified/managed memory is out of scope.
+
+The ``rocprofv3`` tool exposes this service through the ``--kernel-replay`` and ``--kernel-replay-passes`` command-line options (which set ``ROCPROF_KERNEL_REPLAY`` and ``ROCPROFILER_KERNEL_REPLAY_PASSES`` respectively). When enabled, counter collection is routed through the replay service instead of the regular dispatch counting service, and the output ``counter_collection.csv`` gains a ``Replay_Pass`` column distinguishing each pass of a replayed dispatch. See :ref:`kernel-counter-collection` in the rocprofv3 how-to guide for usage details.
+
+This API is marked **experimental** (``ROCPROFILER_SDK_EXPERIMENTAL``). See :ref:`kernel_replay_service_reference` for the full API documentation.
 
 Kernel serialization
 ---------------------
