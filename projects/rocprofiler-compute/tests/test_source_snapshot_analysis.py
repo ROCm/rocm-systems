@@ -182,15 +182,15 @@ def test_export_source_snapshot_files_mirrors_absolute_paths(
         tmp_path / "vector_copy" / "MI300X_A1",
         snapshot_contents_by_absolute_path,
     )
-    csv_result_directory = tmp_path / "csv_result"
+    export_directory = tmp_path / "per_kernel_pc_sampling"
 
     source_snapshot_analysis.export_source_snapshot_files(
         workload_source_snapshots=[workload_source_snapshot],
-        csv_result_directory=csv_result_directory,
+        export_directory=export_directory,
     )
 
     workload_export_directory = (
-        csv_result_directory / "source" / "vector_copy" / "MI300X_A1"
+        export_directory / "vector_copy" / "MI300X_A1" / "source"
     )
     assert (
         common.read_binary_file_tree(workload_export_directory)
@@ -208,15 +208,15 @@ def test_export_source_snapshot_files_copies_only_referenced_paths(tmp_path):
         },
         exported_absolute_paths=("/home/u/app/kernel.cpp",),
     )
-    csv_result_directory = tmp_path / "csv_result"
+    export_directory = tmp_path / "per_kernel_pc_sampling"
 
     source_snapshot_analysis.export_source_snapshot_files(
         workload_source_snapshots=[workload_source_snapshot],
-        csv_result_directory=csv_result_directory,
+        export_directory=export_directory,
     )
 
     workload_export_directory = (
-        csv_result_directory / "source" / "vector_copy" / "MI300X_A1"
+        export_directory / "vector_copy" / "MI300X_A1" / "source"
     )
     assert common.read_binary_file_tree(workload_export_directory) == {
         Path("home/u/app/kernel.cpp"): b"kernel source\n"
@@ -235,16 +235,20 @@ def test_export_source_snapshot_files_keeps_workloads_apart(tmp_path):
             ("second_workload", b"second source\n"),
         )
     ]
-    csv_result_directory = tmp_path / "csv_result"
+    export_directory = tmp_path / "per_kernel_pc_sampling"
 
     source_snapshot_analysis.export_source_snapshot_files(
         workload_source_snapshots=workload_source_snapshots,
-        csv_result_directory=csv_result_directory,
+        export_directory=export_directory,
     )
 
-    assert common.read_binary_file_tree(csv_result_directory / "source") == {
-        Path("first_workload/MI300X_A1/home/u/app/kernel.cpp"): b"first source\n",
-        Path("second_workload/MI300X_A1/home/u/app/kernel.cpp"): b"second source\n",
+    assert common.read_binary_file_tree(export_directory) == {
+        Path(
+            "first_workload/MI300X_A1/source/home/u/app/kernel.cpp"
+        ): b"first source\n",
+        Path(
+            "second_workload/MI300X_A1/source/home/u/app/kernel.cpp"
+        ): b"second source\n",
     }
 
 
@@ -268,15 +272,15 @@ def test_export_source_snapshot_files_is_quiet_for_workload_without_sources(
         tmp_path / "vector_copy" / "MI300X_A1",
         {},
     )
-    csv_result_directory = tmp_path / "csv_result"
+    export_directory = tmp_path / "per_kernel_pc_sampling"
 
     source_snapshot_analysis.export_source_snapshot_files(
         workload_source_snapshots=[workload_source_snapshot],
-        csv_result_directory=csv_result_directory,
+        export_directory=export_directory,
     )
 
     assert warning_messages == []
-    assert not (csv_result_directory / "source").exists()
+    assert not export_directory.exists()
 
 
 def test_export_source_snapshot_files_leaves_exports_writable(tmp_path):
@@ -292,15 +296,15 @@ def test_export_source_snapshot_files_leaves_exports_writable(tmp_path):
     )
     snapshot_path = resolve_snapshot_path(workload_path, "/home/u/app/kernel.cpp")
     snapshot_path.chmod(0o444)
-    csv_result_directory = tmp_path / "csv_result"
+    export_directory = tmp_path / "per_kernel_pc_sampling"
 
     source_snapshot_analysis.export_source_snapshot_files(
         workload_source_snapshots=[workload_source_snapshot],
-        csv_result_directory=csv_result_directory,
+        export_directory=export_directory,
     )
 
     exported_path = resolve_export_path(
-        csv_result_directory / "source" / "vector_copy" / "MI300X_A1",
+        export_directory / "vector_copy" / "MI300X_A1" / "source",
         "/home/u/app/kernel.cpp",
     )
     assert exported_path.read_bytes() == b"kernel source\n"

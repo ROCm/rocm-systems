@@ -163,9 +163,77 @@ Sorting by ``count`` ranks on sample count alone, so rows from different
 processes can interleave. In both cases, ``--pc-sampling-rows 10`` selects ten
 rows from the workload as a whole, not ten rows per process.
 
+.. _pc-sampling-per-kernel-csv:
+
+Per-kernel ISA and source in CSV output
+=======================================
+
+``--output-format csv`` writes, alongside the analysis tables, one file per
+kernel per code object per process holding that kernel's instruction lines with
+the samples collected on them, and exports the source those instructions were
+compiled from beside it:
+
+.. code-block:: none
+
+   <output_name>/
+       kernel.csv, pc_sampling_summary.csv, ...
+       per_kernel_pc_sampling/
+           <workload_name>/<workload_sub_name>/
+               source/<source path with the leading separator dropped>
+               kernel_<kernel_uuid>/
+                   isa_code_object_id_<code_object_id>_pid_<pid>.csv
+
+A folder is named by ``kernel_uuid`` because a kernel name is a C++ signature,
+which cannot be a path. ``kernel.csv`` carries ``kernel_uuid`` alongside
+``kernel_name``, so it maps a folder back to the kernel it holds. One kernel has
+more than one file when it was compiled into several code objects, or when
+several processes ran it.
+
+Each file holds one row per instruction line, ordered by code object offset:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Column
+     - Description
+   * - ``Instruction line number``
+     - Position of the line within this file, counting from 1.
+   * - ``Code object offset``
+     - Offset of the instruction from the code object's load address.
+   * - ``Instruction line``
+     - Disassembled instruction.
+   * - ``Total count``
+     - Samples that landed on this instruction.
+   * - ``Active count``
+     - Samples where the wave issued. Empty for ``host_trap``.
+   * - ``Stall count``
+     - Samples where the wave was stalled. Empty for ``host_trap``.
+   * - ``Wave occupancy percent``
+     - Reserved; not yet collected, so empty on every row.
+   * - ``Active thread percent``
+     - Reserved; not yet collected, so empty on every row.
+   * - ``Stall <REASON>``
+     - Samples stalled at this instruction for that reason.
+   * - ``Source``
+     - Inline stack of ``path:line`` frames, innermost first.
+   * - ``Code object id``
+     - Code object the instruction belongs to, local to its process.
+   * - ``Pid``
+     - Process the code object was loaded in.
+
+The ``Stall <REASON>`` columns are the reasons the workload's samples actually
+carry, so they vary between runs, and a ``host_trap`` workload has none of them.
+Every file of one workload has the same columns. A cell is empty where that
+reason was not seen at that offset.
+
+An instruction that no sample landed on keeps its row, with empty counts.
+
+The ``Source`` column and the ``source/`` folder are populated only when the
+target app was built with debug info; see the :ref:`note <pc-sampling-note>`.
+
 .. _pc-sampling-note:
 
 .. note::
 
   * PC sampling now only shows assembly instructions collected in our record of pc samples and not all instructions of compiled code are represented.
-  * To associate PC sampling info back to HIP source code, you need to build the profiling target app with ``-g`` to keep the symbols. Otherwise, PC sampling info will be only associated with assembly lines.
+  * Source information requires the target app to be built with debug info (for example ``hipcc -g``). Without it, samples map to assembly only: profile mode captures no source files, the terminal table's ``source_line`` shows ``N/A``, and the ``Source`` column of the per-kernel CSV is empty.

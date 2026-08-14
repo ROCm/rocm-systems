@@ -4,6 +4,7 @@
 """Unit tests for analysis_db.py static methods."""
 
 import copy
+import csv
 import json
 from contextlib import ExitStack
 from functools import partial
@@ -18,7 +19,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import text
 
-from pc_sampling import source_snapshot_analysis
+from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
 from rocprof_compute_analyze.analysis_db import SourceFrameCollector, db_analysis
 from utils import analysis_orm as orm
 from utils import schema
@@ -26,6 +27,9 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
+
+ISA_WORKLOAD_NAME = "vector_copy"
+ISA_WORKLOAD_SUB_NAME = "run"
 
 VIEW_CSV_FILENAMES = frozenset({
     "kernel.csv",
@@ -103,7 +107,12 @@ def make_source_frame_collector(workload, workload_path="/fake/workload"):
     return SourceFrameCollector(Path(workload_path), workload)
 
 
-def make_pc_sampling_database_analyzer(tool_data_per_workload):
+def make_pc_sampling_database_analyzer(
+    tool_data_per_workload,
+    filter_gpu_ids=(),
+    filter_kernel_ids=(),
+    filter_dispatch_ids=(),
+):
     """Build a database analyzer configured for sampling-only workloads."""
     analyzer = db_analysis(
         SimpleNamespace(output_name=None, output_format="database"),
@@ -112,6 +121,9 @@ def make_pc_sampling_database_analyzer(tool_data_per_workload):
     analyzer._runs = {
         workload_path: schema.Workload(
             sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
+            filter_gpu_ids=list(filter_gpu_ids),
+            filter_kernel_ids=list(filter_kernel_ids),
+            filter_dispatch_ids=list(filter_dispatch_ids),
         )
         for workload_path in tool_data_per_workload
     }
@@ -119,7 +131,9 @@ def make_pc_sampling_database_analyzer(tool_data_per_workload):
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
     analyzer._pc_sampling_tool_data_per_workload = tool_data_per_workload
     analyzer._dispatch_data_per_workload = {
-        workload_path: analyzer._build_pc_sampling_dispatch_data(tool_data_records)
+        workload_path: analyzer._build_pc_sampling_dispatch_data(
+            tool_data_records, analyzer._runs[workload_path]
+        )
         for workload_path, tool_data_records in tool_data_per_workload.items()
     }
     analyzer._roofline_data_per_kernel = {}
@@ -127,9 +141,18 @@ def make_pc_sampling_database_analyzer(tool_data_per_workload):
     return analyzer
 
 
-def make_pc_sampling_only_database_analyzer(workload_path, tool_data_records):
+def make_pc_sampling_only_database_analyzer(
+    workload_path,
+    tool_data_records,
+    filter_kernel_ids=(),
+    filter_dispatch_ids=(),
+):
     """Build a database analyzer configured for one sampling-only workload."""
-    return make_pc_sampling_database_analyzer({workload_path: tool_data_records})
+    return make_pc_sampling_database_analyzer(
+        {workload_path: tool_data_records},
+        filter_kernel_ids=filter_kernel_ids,
+        filter_dispatch_ids=filter_dispatch_ids,
+    )
 
 
 def make_counter_backed_database_analyzer(
@@ -1168,7 +1191,9 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
     analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
     analyzer._dispatch_data_per_workload = {
-        workload_path: analyzer._build_pc_sampling_dispatch_data(tool_data_records)
+        workload_path: analyzer._build_pc_sampling_dispatch_data(
+            tool_data_records, workload
+        )
     }
     analyzer._roofline_data_per_kernel = {}
     analyzer._roofline_data_per_workload = {}
@@ -1772,7 +1797,10 @@ def make_source_export_analyzer(tmp_path, output_format):
             )
         )
         expected_exported_files[
-            Path(workload_name) / "run" / Path(referenced_source_path).relative_to("/")
+            Path(workload_name)
+            / "run"
+            / "source"
+            / Path(referenced_source_path).relative_to("/")
         ] = contents.encode()
 
     analyzer = make_pc_sampling_database_analyzer(tool_data_per_workload)
@@ -1798,6 +1826,18 @@ def run_source_export_analysis(analyzer):
         cleanup_database()
 
 
+def read_exported_source_files(result_path):
+    """Return the exported source files under a CSV result folder."""
+    exported_files = common.read_binary_file_tree(
+        result_path / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
+    )
+    return {
+        exported_path: contents
+        for exported_path, contents in exported_files.items()
+        if source_snapshot_analysis.SOURCE_EXPORT_DIRECTORY_NAME in exported_path.parts
+    }
+
+
 def read_view_csv_files(result_path):
     """Return view CSV contents keyed by filename."""
     return {
@@ -1815,8 +1855,8 @@ def write_view_csv_files_and_capture(
     captured_view_csv_files.update(read_view_csv_files(csv_directory))
 
 
-def test_run_analysis_source_export_is_not_created_for_db_output(tmp_path):
-    """Do not export source snapshots for database output."""
+def test_run_analysis_per_kernel_export_is_not_created_for_db_output(tmp_path):
+    """Do not export per-kernel ISA or source snapshots for database output."""
     analyzer, result_path, _expected_exported_files = make_source_export_analyzer(
         tmp_path,
         "db",
@@ -1829,7 +1869,7 @@ def test_run_analysis_source_export_is_not_created_for_db_output(tmp_path):
 
     export_source_snapshot_files.assert_not_called()
     assert Path(f"{result_path}.db").is_file()
-    assert not (result_path / "source").exists()
+    assert not (result_path / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME).exists()
 
 
 def test_run_analysis_source_export_scopes_workloads_and_preserves_view_csvs(
@@ -1866,7 +1906,9 @@ def test_run_analysis_source_export_scopes_workloads_and_preserves_view_csvs(
     # The analyzer names each export folder, rather than the export rederiving
     # it, so a folder cannot drift from the workload row it belongs to.
     export_arguments = export_source_snapshot_files.call_args.kwargs
-    assert export_arguments["csv_result_directory"] == result_path
+    assert (
+        export_arguments["export_directory"] == result_path / "per_kernel_pc_sampling"
+    )
     assert [
         (snapshot.workload_name, snapshot.workload_sub_name)
         for snapshot in export_arguments["workload_source_snapshots"]
@@ -1877,20 +1919,18 @@ def test_run_analysis_source_export_scopes_workloads_and_preserves_view_csvs(
     assert set(view_csvs_after_analysis) == VIEW_CSV_FILENAMES
     assert view_csvs_after_analysis == view_csvs_before_source_export
 
-    source_directory = result_path / "source"
-    assert source_directory.is_dir()
-    assert common.read_binary_file_tree(source_directory) == expected_exported_files
+    exported_source_files = read_exported_source_files(result_path)
+    assert exported_source_files == expected_exported_files
 
     # Every path the CSV records locates its copy by dropping the leading "/".
-    exported_paths = common.read_binary_file_tree(source_directory)
     source_lines_frame = pd.read_csv(result_path / "source_lines.csv")
     assert {
         Path(file_path).relative_to("/")
         for file_path in source_lines_frame["file_path"]
     } == {
-        # The first two components name the workload, not the source file.
-        Path(*exported_path.parts[2:])
-        for exported_path in exported_paths
+        # The first three components name the workload and the source folder.
+        Path(*exported_path.parts[3:])
+        for exported_path in exported_source_files
     }
 
 
@@ -2591,3 +2631,267 @@ def test_run_analysis_keeps_sampled_row_without_a_comment(db_session, tmp_path):
         )
     }
     assert rebuilt_sources == {0x10: "/home/u/app/vcopy.cpp:1", 0x20: None}
+
+
+def make_csv_run_analyzer(tmp_path, tool_data_per_workload, **filters):
+    """Build a CSV-output analyzer over sampling-only workloads."""
+    analyzer = make_pc_sampling_database_analyzer(tool_data_per_workload, **filters)
+    result_path = tmp_path / "csv_analysis"
+    analyzer.get_args().output_name = str(result_path)
+    analyzer.get_args().output_format = "csv"
+    return analyzer, result_path
+
+
+def read_per_kernel_isa_file(result_path, kernel_uuid, code_object_id=5, pid=42):
+    """Return one exported ISA file as its header and its rows."""
+    export_path = (
+        result_path
+        / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
+        / ISA_WORKLOAD_NAME
+        / ISA_WORKLOAD_SUB_NAME
+        / f"kernel_{kernel_uuid}"
+        / f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
+    )
+    with export_path.open(newline="", encoding="utf-8") as export_file:
+        header, *rows = list(csv.reader(export_file))
+    return header, rows
+
+
+def stall_reason_columns(header):
+    """Return the pivoted stall-reason columns of one ISA header."""
+    return header[header.index("Active thread percent") + 1 : header.index("Source")]
+
+
+def per_kernel_isa_paths(result_path):
+    """Return the exported ISA files, relative to the per-kernel folder."""
+    per_kernel_directory = result_path / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
+    return sorted(
+        str(export_path.relative_to(per_kernel_directory))
+        for export_path in per_kernel_directory.rglob("isa_*.csv")
+    )
+
+
+def test_run_analysis_writes_one_isa_file_per_kernel_code_object_and_process(
+    tmp_path,
+):
+    """A kernel compiled twice, and a code object in two processes, split up."""
+    workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    first_process_tool_data = make_pc_sampling_tool_data()
+    second_process_tool_data = make_pc_sampling_tool_data()
+    second_process_tool_data["metadata"]["pid"] = 43
+    # The same kernel, sampled a second time out of another code object.
+    other_code_object_tool_data = make_pc_sampling_tool_data()
+    other_code_object_tool_data["metadata"]["pid"] = 44
+    other_code_object_tool_data["code_objects"] = [
+        {"code_object_id": 6, "load_base": 0x2000}
+    ]
+    for sample in other_code_object_tool_data["buffer_records"]["pc_sample_stochastic"]:
+        sample["record"]["pc"]["code_object_id"] = 6
+    for kernel_symbol in other_code_object_tool_data["kernel_symbols"]:
+        kernel_symbol["code_object_id"] = 6
+
+    analyzer, result_path = make_csv_run_analyzer(
+        tmp_path,
+        {
+            str(workload_path): [
+                first_process_tool_data,
+                second_process_tool_data,
+                other_code_object_tool_data,
+            ]
+        },
+    )
+    run_source_export_analysis(analyzer)
+
+    kernel_frame = pd.read_csv(result_path / "kernel.csv")
+    kernel_uuids = dict(
+        zip(kernel_frame["kernel_name"], kernel_frame["kernel_uuid"], strict=True)
+    )
+    assert per_kernel_isa_paths(result_path) == sorted(
+        f"vector_copy/run/kernel_{kernel_uuid}"
+        f"/isa_code_object_id_{code_object_id}_pid_{pid}.csv"
+        for kernel_uuid in kernel_uuids.values()
+        for code_object_id, pid in ((5, 42), (5, 43), (6, 44))
+    )
+
+
+@pytest.mark.parametrize("filter_gpu_ids", [(), ["0"]])
+def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
+    tmp_path, filter_gpu_ids
+):
+    """One kernel's file holds its own offsets, counts and source.
+
+    Filtering on the workload's own GPU keeps every row it already had.
+    """
+    workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    analyzer, result_path = make_csv_run_analyzer(
+        tmp_path,
+        {str(workload_path): [make_pc_sampling_tool_data()]},
+        filter_gpu_ids=filter_gpu_ids,
+    )
+    run_source_export_analysis(analyzer)
+
+    kernel_frame = pd.read_csv(result_path / "kernel.csv")
+    kernel_uuids = dict(
+        zip(kernel_frame["kernel_name"], kernel_frame["kernel_uuid"], strict=True)
+    )
+    header, rows = read_per_kernel_isa_file(result_path, kernel_uuids["vecCopy"])
+
+    assert header == [
+        "Instruction line number",
+        "Code object offset",
+        "Instruction line",
+        "Total count",
+        "Active count",
+        "Stall count",
+        "Wave occupancy percent",
+        "Active thread percent",
+        "Stall WAITCNT",
+        "Source",
+        "Code object id",
+        "Pid",
+    ]
+    assert rows == [
+        [
+            "1",
+            str(0x10),
+            "v_mov",
+            "1",
+            "0",
+            "1",
+            "",
+            "",
+            "1",
+            "/s/a.cpp:1",
+            "5",
+            "42",
+        ]
+    ]
+
+
+def test_run_analysis_isa_stall_columns_follow_the_workloads_reasons(tmp_path):
+    """Each observed reason gets a column, empty where it was not seen."""
+    workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    tool_data = make_pc_sampling_tool_data()
+    tool_data["buffer_records"]["pc_sample_stochastic"][1]["record"]["snapshot"] = {
+        "stall_reason": (
+            "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_SLEEP_WAIT"
+        )
+    }
+    tool_data["buffer_records"]["pc_sample_stochastic"][1]["record"]["wave_issued"] = (
+        False
+    )
+    # Both offsets belong to one kernel, so one file holds both reasons.
+    tool_data["kernel_symbols"][1]["kernel_id"] = 100
+    tool_data["buffer_records"]["kernel_dispatch"][1]["dispatch_info"]["kernel_id"] = (
+        100
+    )
+
+    analyzer, result_path = make_csv_run_analyzer(
+        tmp_path,
+        {str(workload_path): [tool_data]},
+    )
+    run_source_export_analysis(analyzer)
+
+    kernel_uuid = pd.read_csv(result_path / "kernel.csv")["kernel_uuid"].iloc[0]
+    header, rows = read_per_kernel_isa_file(result_path, kernel_uuid)
+
+    assert stall_reason_columns(header) == ["Stall SLEEP_WAIT", "Stall WAITCNT"]
+    sleep_index, waitcnt_index = (
+        header.index("Stall SLEEP_WAIT"),
+        header.index("Stall WAITCNT"),
+    )
+    assert [(row[sleep_index], row[waitcnt_index]) for row in rows] == [
+        ("", "1"),
+        ("1", ""),
+    ]
+
+
+def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
+    """host_trap records no stall reason, so its files carry no stall column."""
+    workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    tool_data = make_pc_sampling_tool_data()
+    tool_data["buffer_records"]["pc_sample_host_trap"] = [
+        {
+            "inst_index": 0,
+            "record": {
+                "pc": {"code_object_id": 5, "code_object_offset": 0x10},
+                "dispatch_id": 0,
+            },
+        }
+    ]
+    tool_data["buffer_records"]["pc_sample_stochastic"] = []
+
+    analyzer, result_path = make_csv_run_analyzer(
+        tmp_path,
+        {str(workload_path): [tool_data]},
+    )
+    run_source_export_analysis(analyzer)
+
+    kernel_uuid = pd.read_csv(result_path / "kernel.csv")["kernel_uuid"].iloc[0]
+    header, rows = read_per_kernel_isa_file(result_path, kernel_uuid)
+
+    assert stall_reason_columns(header) == []
+    # host_trap knows the sample landed, but not whether the wave issued.
+    assert rows[0][3:6] == ["1", "", ""]
+
+
+def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
+    """-k keeps one kernel's rows, and no code object left with nothing in it."""
+    workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    tool_data = make_pc_sampling_tool_data()
+    # The filter indexes kernels by descending dispatch duration.
+    tool_data["buffer_records"]["kernel_dispatch"][0]["end_timestamp"] = 10
+    other_code_object_tool_data = make_pc_sampling_tool_data()
+    other_code_object_tool_data["metadata"]["pid"] = 43
+    other_code_object_tool_data["code_objects"] = [
+        {"code_object_id": 6, "load_base": 0x2000}
+    ]
+    # Only the kernel the filter drops was sampled out of this code object.
+    other_code_object_tool_data["buffer_records"]["pc_sample_stochastic"] = [
+        other_code_object_tool_data["buffer_records"]["pc_sample_stochastic"][1]
+    ]
+    other_code_object_tool_data["buffer_records"]["pc_sample_stochastic"][0]["record"][
+        "pc"
+    ]["code_object_id"] = 6
+    for kernel_symbol in other_code_object_tool_data["kernel_symbols"]:
+        kernel_symbol["code_object_id"] = 6
+
+    analyzer, result_path = make_csv_run_analyzer(
+        tmp_path,
+        {str(workload_path): [tool_data, other_code_object_tool_data]},
+        filter_kernel_ids=[0],
+    )
+    run_source_export_analysis(analyzer)
+
+    kernel_frame = pd.read_csv(result_path / "kernel.csv")
+    assert list(kernel_frame["kernel_name"]) == ["vecCopy"]
+    summary_frame = pd.read_csv(result_path / "pc_sampling_summary.csv")
+    assert list(summary_frame["offset"]) == [0x10]
+    # The second code object held only the kernel the filter dropped.
+    assert set(summary_frame["code_object_id"]) == {5}
+    assert per_kernel_isa_paths(result_path) == [
+        f"vector_copy/run/kernel_{kernel_frame['kernel_uuid'].iloc[0]}"
+        "/isa_code_object_id_5_pid_42.csv"
+    ]
+
+
+@pytest.mark.parametrize("filter_dispatch_ids", [["1"], [">0"], ["> 0"]])
+def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
+    tmp_path, filter_dispatch_ids
+):
+    """-d drops a dispatch, and the kernel that keeps none of its own."""
+    workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    analyzer, result_path = make_csv_run_analyzer(
+        tmp_path,
+        {str(workload_path): [make_pc_sampling_tool_data()]},
+        filter_dispatch_ids=filter_dispatch_ids,
+    )
+
+    run_source_export_analysis(analyzer)
+
+    kernel_frame = pd.read_csv(result_path / "kernel.csv")
+    assert list(kernel_frame["kernel_name"]) == ["vecAdd"]
+    assert per_kernel_isa_paths(result_path) == [
+        f"vector_copy/run/kernel_{kernel_frame['kernel_uuid'].iloc[0]}"
+        "/isa_code_object_id_5_pid_42.csv"
+    ]
