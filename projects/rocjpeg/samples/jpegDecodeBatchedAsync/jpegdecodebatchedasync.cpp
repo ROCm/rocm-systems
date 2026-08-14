@@ -107,7 +107,13 @@ int main(int argc, char **argv) {
     // Sync thread: continuously drains pending_queue by calling rocJpegDecodeBatchedSync,
     // optionally saves the results, then returns the slot to available_queue.
     std::thread sync_thread([&]() {
-        CHECK_HIP(hipSetDevice(device_id));
+        if (hipSetDevice(device_id) != hipSuccess) {
+            std::lock_guard<std::mutex> lock(mtx);
+            async_status = ROCJPEG_STATUS_RUNTIME_ERROR;
+            sync_error   = true;
+            cv_available.notify_all();
+            return;
+        }
         while (true) {
             BatchPipelineSlot* slot;
             {

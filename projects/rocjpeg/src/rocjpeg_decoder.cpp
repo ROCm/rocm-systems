@@ -407,6 +407,11 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
+    if (batch_size <= 0) {
+        ErrorLog(g_rocjpeg_logger, "Invalid batch_size: " + ROCJPEG_TOSTR(batch_size));
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
     if (!pending_decodes_.empty()) {
         ErrorLog(g_rocjpeg_logger, "Asynchronous decodes are pending for this handle!");
         FunctionExitLog(g_rocjpeg_logger);
@@ -444,6 +449,11 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_strea
     FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_streams) + ", " + ROCJPEG_TOSTR(batch_size) + ", " + RocJpegFmtPtr(decode_params) + ", " + RocJpegFmtPtr(destinations));
     if (jpeg_streams == nullptr || decode_params == nullptr || destinations == nullptr) {
         CriticalLog(g_rocjpeg_logger, "Null pointer");
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    if (batch_size <= 0) {
+        ErrorLog(g_rocjpeg_logger, "Invalid batch_size: " + ROCJPEG_TOSTR(batch_size));
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
