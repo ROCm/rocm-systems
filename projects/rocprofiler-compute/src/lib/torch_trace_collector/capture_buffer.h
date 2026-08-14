@@ -64,8 +64,6 @@ private:
     synchronized_t<std::vector<std::string>> captured_;
 };
 
-inline CaptureBuffer g_capture;
-
 // Start and stop recording of the emitted wire strings.
 void                     start_capture();
 std::vector<std::string> stop_capture();

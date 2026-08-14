@@ -1,15 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// Registration of the callback pair with ATen, and the state that records it.
-// at::addGlobalCallback registers process-wide, so the state is one guarded
-// global and install() is idempotent.
+// Registration of the callback pair with ATen. at::addGlobalCallback registers
+// process-wide, so install() is idempotent and its state lives in
+// process_state().
 
 #pragma once
 
+#include "process_state.h"
 #include "record_function_callback.h"
-#include "snapshot_store.h"
-#include "synchronized.hpp"
 
 #include <ATen/record_function.h>
 
@@ -19,20 +18,9 @@
 namespace torch_trace_collector::detail
 {
 
-using rocprofiler_compute_tool::common::synchronized_t;
-
-// Global RecordFunction callback registration state.
-struct InstallState
-{
-    at::CallbackHandle handle    = at::INVALID_CALLBACK_HANDLE;
-    bool               installed = false;
-};
-
-inline synchronized_t<InstallState> g_install;
-
 inline std::int64_t install()
 {
-    return g_install.wlock(
+    return process_state().install.wlock(
         [](InstallState& state)
         {
             if (state.handle != at::INVALID_CALLBACK_HANDLE)
@@ -49,7 +37,7 @@ inline std::int64_t install()
 
 inline void uninstall()
 {
-    g_install.wlock(
+    process_state().install.wlock(
         [](InstallState& state)
         {
             const auto handle = std::exchange(state.handle, at::INVALID_CALLBACK_HANDLE);
@@ -59,13 +47,13 @@ inline void uninstall()
                 at::removeCallback(handle);
             }
             // Only the callback consumes snapshots.
-            g_snapshots.clear();
+            process_state().snapshots.clear();
         });
 }
 
 inline bool is_installed()
 {
-    return g_install.rlock([](const InstallState& state) { return state.installed; });
+    return process_state().install.rlock([](const InstallState& state) { return state.installed; });
 }
 
 }  // namespace torch_trace_collector::detail

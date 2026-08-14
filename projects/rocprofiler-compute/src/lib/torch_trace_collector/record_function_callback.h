@@ -10,6 +10,7 @@
 #include "capture_buffer.h"
 #include "leaf_context.h"
 #include "marker_stack.h"
+#include "process_state.h"
 #include "scope_guard.h"
 #include "snapshot_store.h"
 #include "stack_entry.h"
@@ -46,24 +47,25 @@ struct RoctxObserverContext : public at::ObserverContext
 inline constexpr const char* kRecordFnBackend = "torch";
 
 // Pops the ROCTX range, leaf frame, and snapshot frames recorded in
-// observer_ctx. When count_pop is true, the pop is counted in g_stats.pops.
+// observer_ctx. When count_pop is true, the pop is counted in Stats::pops.
 inline void unwind_observer_context(const RoctxObserverContext& observer_ctx, bool count_pop)
 {
+    std::vector<StackEntry>& stack = thread_state().stack;
     if (observer_ctx.pushed_roctx_range)
     {
         roctxRangePop();
         if (count_pop)
         {
-            inc(g_stats.pops);
+            inc(process_state().stats.pops);
         }
     }
-    if (observer_ctx.pushed_leaf && !g_thread.stack.empty())
+    if (observer_ctx.pushed_leaf && !stack.empty())
     {
-        g_thread.stack.pop_back();
+        stack.pop_back();
     }
-    for (std::size_t i = 0; i < observer_ctx.pushed_snapshot_frames && !g_thread.stack.empty(); ++i)
+    for (std::size_t i = 0; i < observer_ctx.pushed_snapshot_frames && !stack.empty(); ++i)
     {
-        g_thread.stack.pop_back();
+        stack.pop_back();
     }
 }
 
@@ -75,6 +77,9 @@ inline std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& r
         auto rollback     = make_scope_guard(
             [&] { unwind_observer_context(*observer_ctx, /*count_pop=*/false); });
 
+        ProcessState&            state = process_state();
+        std::vector<StackEntry>& stack = thread_state().stack;
+
         const at::RecordScope scope  = record_fn.scope();
         const std::int64_t    seq_nr = record_fn.seqNr();
         const char*           name   = record_fn.name();
@@ -83,7 +88,7 @@ inline std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& r
             name = "<anonymous>";
         }
 
-        const bool stack_was_empty          = g_thread.stack.empty();
+        const bool stack_was_empty          = stack.empty();
         bool       stack_was_empty_for_leaf = stack_was_empty;
 
         // On the first record seen on this thread, apply the TLS overlay to
@@ -105,7 +110,7 @@ inline std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& r
             // there is nothing to correlate.
             const std::uint64_t     forward_thread_id = record_fn.forwardThreadId();
             std::vector<StackEntry> snapshot;
-            if (forward_thread_id != 0 && g_snapshots.consume(seq_nr, forward_thread_id, &snapshot))
+            if (forward_thread_id != 0 && state.snapshots.consume(seq_nr, forward_thread_id, &snapshot))
             {
                 observer_ctx->pushed_snapshot_frames += push_with_prefix_dedup(snapshot);
             }
@@ -117,30 +122,30 @@ inline std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& r
         leaf.context = torch_trace_collector::default_leaf_context(is_backward_scope,
                                                                    seq_nr,
                                                                    stack_was_empty_for_leaf);
-        g_thread.stack.push_back(std::move(leaf));
+        stack.push_back(std::move(leaf));
         observer_ctx->pushed_leaf = true;
 
         if (scope == at::RecordScope::FUNCTION && seq_nr >= 0)
         {
             // Autograd records this same thread id when it builds the node.
-            g_snapshots.save(seq_nr, at::RecordFunction::currentThreadId(), g_thread.stack);
+            state.snapshots.save(seq_nr, at::RecordFunction::currentThreadId(), stack);
         }
 
         // Emit the ROCTX range. RecordFunction ops are torch-backed.
-        std::string wire_string = build_marker_string(g_thread.stack);
+        std::string wire_string = build_marker_string(stack);
         wire_string += '|';
         wire_string += kRecordFnBackend;
         roctxRangePushA(wire_string.c_str());
         observer_ctx->pushed_roctx_range = true;
-        g_capture.capture(wire_string);
-        inc(g_stats.pushes);
+        state.capture.capture(wire_string);
+        inc(state.stats.pushes);
 
         rollback.dismiss();
         return observer_ctx;
     }
     catch (...)
     {
-        inc(g_stats.callback_errors);
+        inc(process_state().stats.callback_errors);
         return nullptr;
     }
 }
@@ -158,7 +163,7 @@ inline void end_cb(const at::RecordFunction& /*record_fn*/, at::ObserverContext*
     }
     catch (...)
     {
-        inc(g_stats.callback_errors);
+        inc(process_state().stats.callback_errors);
     }
 }
 

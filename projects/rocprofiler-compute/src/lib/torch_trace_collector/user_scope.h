@@ -5,6 +5,7 @@
 
 #include "capture_buffer.h"
 #include "marker_stack.h"
+#include "process_state.h"
 #include "scope_guard.h"
 #include "stack_entry.h"
 #include "stats.h"
@@ -61,7 +62,7 @@ inline std::size_t apply_userscope_overlay()
     const std::size_t             pushed     = push_with_prefix_dedup(chain_copy);
     if (pushed > 0)
     {
-        inc(g_stats.user_scope_inherits);
+        inc(process_state().stats.user_scope_inherits);
     }
     return pushed;
 }
@@ -87,30 +88,33 @@ inline void push_user_scope(const std::string& marker, const std::string& contex
 {
     try
     {
+        ProcessState& state  = process_state();
+        ThreadState&  thread = thread_state();
+
         StackEntry entry;
         entry.marker  = marker;
         entry.context = context;
-        g_thread.stack.push_back(std::move(entry));
+        thread.stack.push_back(std::move(entry));
         auto stack_rollback = make_scope_guard(
-            []
+            [&thread]
             {
-                if (!g_thread.stack.empty())
+                if (!thread.stack.empty())
                 {
-                    g_thread.stack.pop_back();
+                    thread.stack.pop_back();
                 }
             });
 
-        g_thread.guards.push_back(make_userscope_guard(g_thread.stack));
+        thread.guards.push_back(make_userscope_guard(thread.stack));
         auto guards_rollback = make_scope_guard(
-            []
+            [&thread]
             {
-                if (!g_thread.guards.empty())
+                if (!thread.guards.empty())
                 {
-                    g_thread.guards.pop_back();
+                    thread.guards.pop_back();
                 }
             });
 
-        std::string wire_string = build_marker_string(g_thread.stack);
+        std::string wire_string = build_marker_string(thread.stack);
         if (!backend.empty())
         {
             wire_string += '|';
@@ -119,9 +123,9 @@ inline void push_user_scope(const std::string& marker, const std::string& contex
         roctxRangePushA(wire_string.c_str());
         auto roctx_rollback = make_scope_guard([] { roctxRangePop(); });
 
-        g_capture.capture(wire_string);
-        inc(g_stats.user_scope_pushes);
-        inc(g_stats.pushes);
+        state.capture.capture(wire_string);
+        inc(state.stats.user_scope_pushes);
+        inc(state.stats.pushes);
 
         roctx_rollback.dismiss();
         guards_rollback.dismiss();
@@ -129,7 +133,7 @@ inline void push_user_scope(const std::string& marker, const std::string& contex
     }
     catch (...)
     {
-        inc(g_stats.callback_errors);
+        inc(process_state().stats.callback_errors);
         throw;
     }
 }
@@ -138,20 +142,23 @@ inline void pop_user_scope()
 {
     try
     {
-        if (g_thread.stack.empty() || g_thread.guards.empty())
+        ProcessState& state  = process_state();
+        ThreadState&  thread = thread_state();
+
+        if (thread.stack.empty() || thread.guards.empty())
         {
-            inc(g_stats.callback_errors);
+            inc(state.stats.callback_errors);
             return;
         }
         roctxRangePop();
-        inc(g_stats.user_scope_pops);
-        inc(g_stats.pops);
-        g_thread.stack.pop_back();
-        g_thread.guards.pop_back();
+        inc(state.stats.user_scope_pops);
+        inc(state.stats.pops);
+        thread.stack.pop_back();
+        thread.guards.pop_back();
     }
     catch (...)
     {
-        inc(g_stats.callback_errors);
+        inc(process_state().stats.callback_errors);
     }
 }
 

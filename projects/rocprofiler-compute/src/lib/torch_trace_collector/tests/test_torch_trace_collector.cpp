@@ -4,6 +4,7 @@
 #include "capture_buffer.h"
 #include "leaf_context.h"
 #include "marker_stack.h"
+#include "process_state.h"
 #include "record_function_installation.h"
 #include "snapshot_store.h"
 #include "stack_entry.h"
@@ -29,25 +30,36 @@ using namespace torch_trace_collector::detail;
 namespace
 {
 
+// Shorthands for the process-wide state these tests drive directly.
+Stats& stats()
+{
+    return process_state().stats;
+}
+
+SnapshotStore& snapshots()
+{
+    return process_state().snapshots;
+}
+
 void reset_state()
 {
     if (is_installed())
     {
         uninstall();
     }
-    g_thread.stack.clear();
-    g_thread.guards.clear();
-    g_snapshots.clear();
-    g_stats.pushes.store(0);
-    g_stats.pops.store(0);
-    g_stats.snapshots_saved.store(0);
-    g_stats.snapshots_consumed.store(0);
-    g_stats.snapshots_dropped.store(0);
-    g_stats.snapshots_overwritten.store(0);
-    g_stats.callback_errors.store(0);
-    g_stats.user_scope_pushes.store(0);
-    g_stats.user_scope_pops.store(0);
-    g_stats.user_scope_inherits.store(0);
+    thread_state().stack.clear();
+    thread_state().guards.clear();
+    snapshots().clear();
+    stats().pushes.store(0);
+    stats().pops.store(0);
+    stats().snapshots_saved.store(0);
+    stats().snapshots_consumed.store(0);
+    stats().snapshots_dropped.store(0);
+    stats().snapshots_overwritten.store(0);
+    stats().callback_errors.store(0);
+    stats().user_scope_pushes.store(0);
+    stats().user_scope_pops.store(0);
+    stats().user_scope_inherits.store(0);
 }
 
 class RoctxRecordFnTest : public ::testing::Test
@@ -76,11 +88,6 @@ protected:
 constexpr std::uint64_t kThreadA = 1;
 constexpr std::uint64_t kThreadB = 2;
 constexpr std::uint64_t kThreadC = 3;
-
-std::size_t pending_snapshots()
-{
-    return g_snapshots.pending();
-}
 
 // The first `count` sequence numbers that hash to `shard` for `thread_id`.
 std::vector<std::int64_t> seq_nrs_on_shard(std::size_t shard, std::uint64_t thread_id, std::size_t count)
@@ -223,74 +230,74 @@ TEST(MarkerEncoding, RoundTripsThroughBuildCallTreesDecode)
 TEST_F(RoctxRecordFnTest, SaveThenConsumeReturnsSavedStack)
 {
     const std::vector<StackEntry> stack = {{"A", "a"}, {"B", "b"}};
-    g_snapshots.save(42, kThreadA, stack);
+    snapshots().save(42, kThreadA, stack);
 
     std::vector<StackEntry> out;
-    ASSERT_TRUE(g_snapshots.consume(42, kThreadA, &out));
+    ASSERT_TRUE(snapshots().consume(42, kThreadA, &out));
     ASSERT_EQ(out.size(), 2u);
     EXPECT_EQ(out[0].marker, "A");
     EXPECT_EQ(out[0].context, "a");
     EXPECT_EQ(out[1].marker, "B");
     EXPECT_EQ(out[1].context, "b");
-    EXPECT_EQ(g_stats.snapshots_saved.load(), 1u);
-    EXPECT_EQ(g_stats.snapshots_consumed.load(), 1u);
+    EXPECT_EQ(stats().snapshots_saved.load(), 1u);
+    EXPECT_EQ(stats().snapshots_consumed.load(), 1u);
 }
 
 TEST_F(RoctxRecordFnTest, ConsumeUnknownReturnsFalse)
 {
     std::vector<StackEntry> out;
-    EXPECT_FALSE(g_snapshots.consume(999, kThreadA, &out));
+    EXPECT_FALSE(snapshots().consume(999, kThreadA, &out));
     EXPECT_TRUE(out.empty());
-    EXPECT_EQ(g_stats.snapshots_consumed.load(), 0u);
+    EXPECT_EQ(stats().snapshots_consumed.load(), 0u);
 }
 
 TEST_F(RoctxRecordFnTest, ConsumeIsOneShot)
 {
-    g_snapshots.save(7, kThreadA, std::vector<StackEntry>{{"X", "x"}});
+    snapshots().save(7, kThreadA, std::vector<StackEntry>{{"X", "x"}});
 
     std::vector<StackEntry> out;
-    ASSERT_TRUE(g_snapshots.consume(7, kThreadA, &out));
-    EXPECT_FALSE(g_snapshots.consume(7, kThreadA, &out));
-    EXPECT_EQ(g_stats.snapshots_consumed.load(), 1u);
+    ASSERT_TRUE(snapshots().consume(7, kThreadA, &out));
+    EXPECT_FALSE(snapshots().consume(7, kThreadA, &out));
+    EXPECT_EQ(stats().snapshots_consumed.load(), 1u);
 }
 
 TEST_F(RoctxRecordFnTest, SaveTwiceReturnsLatest)
 {
-    g_snapshots.save(1, kThreadA, std::vector<StackEntry>{{"first", "f"}});
-    g_snapshots.save(1, kThreadA, std::vector<StackEntry>{{"second", "s"}});
+    snapshots().save(1, kThreadA, std::vector<StackEntry>{{"first", "f"}});
+    snapshots().save(1, kThreadA, std::vector<StackEntry>{{"second", "s"}});
 
     std::vector<StackEntry> out;
-    ASSERT_TRUE(g_snapshots.consume(1, kThreadA, &out));
+    ASSERT_TRUE(snapshots().consume(1, kThreadA, &out));
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].marker, "second");
-    EXPECT_EQ(g_stats.snapshots_saved.load(), 2u);
-    EXPECT_EQ(g_stats.snapshots_overwritten.load(), 1u);
+    EXPECT_EQ(stats().snapshots_saved.load(), 2u);
+    EXPECT_EQ(stats().snapshots_overwritten.load(), 1u);
 }
 
 TEST_F(RoctxRecordFnTest, SameSeqNrOnDifferentThreadsDoesNotCollide)
 {
     // Concurrent forward passes both count from zero, so one thread's snapshot
     // must not displace another's under the same sequence number.
-    g_snapshots.save(0, kThreadA, std::vector<StackEntry>{{"threadA", "a"}});
-    g_snapshots.save(0, kThreadB, std::vector<StackEntry>{{"threadB", "b"}});
-    EXPECT_EQ(g_stats.snapshots_saved.load(), 2u);
-    EXPECT_EQ(g_stats.snapshots_overwritten.load(), 0u);
-    EXPECT_EQ(pending_snapshots(), 2u);
+    snapshots().save(0, kThreadA, std::vector<StackEntry>{{"threadA", "a"}});
+    snapshots().save(0, kThreadB, std::vector<StackEntry>{{"threadB", "b"}});
+    EXPECT_EQ(stats().snapshots_saved.load(), 2u);
+    EXPECT_EQ(stats().snapshots_overwritten.load(), 0u);
+    EXPECT_EQ(snapshots().pending(), 2u);
 
     std::vector<StackEntry> out_a;
-    ASSERT_TRUE(g_snapshots.consume(0, kThreadA, &out_a));
+    ASSERT_TRUE(snapshots().consume(0, kThreadA, &out_a));
     ASSERT_EQ(out_a.size(), 1u);
     EXPECT_EQ(out_a[0].marker, "threadA");
 
     std::vector<StackEntry> out_b;
-    ASSERT_TRUE(g_snapshots.consume(0, kThreadB, &out_b));
+    ASSERT_TRUE(snapshots().consume(0, kThreadB, &out_b));
     ASSERT_EQ(out_b.size(), 1u);
     EXPECT_EQ(out_b[0].marker, "threadB");
 
     std::vector<StackEntry> out_c;
-    EXPECT_FALSE(g_snapshots.consume(0, kThreadC, &out_c));
-    EXPECT_EQ(g_stats.snapshots_consumed.load(), 2u);
-    EXPECT_EQ(pending_snapshots(), 0u);
+    EXPECT_FALSE(snapshots().consume(0, kThreadC, &out_c));
+    EXPECT_EQ(stats().snapshots_consumed.load(), 2u);
+    EXPECT_EQ(snapshots().pending(), 0u);
 }
 
 TEST_F(RoctxRecordFnTest, EvictsOldestPastSoftCap)
@@ -298,16 +305,16 @@ TEST_F(RoctxRecordFnTest, EvictsOldestPastSoftCap)
     const auto seq_nrs = seq_nrs_on_shard(0, kThreadA, SnapshotStore::kShardSoftCap + 1);
     for (std::size_t i = 0; i < SnapshotStore::kShardSoftCap; ++i)
     {
-        g_snapshots.save(seq_nrs[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
+        snapshots().save(seq_nrs[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
     }
-    ASSERT_EQ(g_stats.snapshots_dropped.load(), 0u);
+    ASSERT_EQ(stats().snapshots_dropped.load(), 0u);
 
-    g_snapshots.save(seq_nrs.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
-    EXPECT_EQ(g_stats.snapshots_dropped.load(), 1u);
+    snapshots().save(seq_nrs.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
+    EXPECT_EQ(stats().snapshots_dropped.load(), 1u);
 
     std::vector<StackEntry> out;
-    EXPECT_FALSE(g_snapshots.consume(seq_nrs.front(), kThreadA, &out));
-    EXPECT_TRUE(g_snapshots.consume(seq_nrs.back(), kThreadA, &out));
+    EXPECT_FALSE(snapshots().consume(seq_nrs.front(), kThreadA, &out));
+    EXPECT_TRUE(snapshots().consume(seq_nrs.back(), kThreadA, &out));
 }
 
 TEST_F(RoctxRecordFnTest, EvictionIsPerShard)
@@ -316,14 +323,14 @@ TEST_F(RoctxRecordFnTest, EvictionIsPerShard)
     const auto other_shard = seq_nrs_on_shard(1, kThreadA, 1);
     for (std::size_t i = 0; i < SnapshotStore::kShardSoftCap; ++i)
     {
-        g_snapshots.save(seq_nrs[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
+        snapshots().save(seq_nrs[i], kThreadA, std::vector<StackEntry>{{"k", "v"}});
     }
-    g_snapshots.save(other_shard.front(), kThreadA, std::vector<StackEntry>{{"shard1", "v"}});
+    snapshots().save(other_shard.front(), kThreadA, std::vector<StackEntry>{{"shard1", "v"}});
 
-    g_snapshots.save(seq_nrs.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
+    snapshots().save(seq_nrs.back(), kThreadA, std::vector<StackEntry>{{"k", "v"}});
 
     std::vector<StackEntry> out;
-    EXPECT_TRUE(g_snapshots.consume(other_shard.front(), kThreadA, &out));
+    EXPECT_TRUE(snapshots().consume(other_shard.front(), kThreadA, &out));
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].marker, "shard1");
 }
@@ -348,9 +355,9 @@ TEST_F(RoctxRecordFnTest, ConcurrentOverlappingSeqNrsAreIsolated)
                 for (int i = 0; i < per_thread; ++i)
                 {
                     const std::int64_t seq = i;
-                    g_snapshots.save(seq, thread_id, std::vector<StackEntry>{{marker, "v"}});
+                    snapshots().save(seq, thread_id, std::vector<StackEntry>{{marker, "v"}});
                     std::vector<StackEntry> out;
-                    if (!g_snapshots.consume(seq, thread_id, &out))
+                    if (!snapshots().consume(seq, thread_id, &out))
                     {
                         ++lost;
                     }
@@ -368,9 +375,9 @@ TEST_F(RoctxRecordFnTest, ConcurrentOverlappingSeqNrsAreIsolated)
     EXPECT_EQ(lost.load(), 0);
     EXPECT_EQ(mismatched.load(), 0);
     const auto expected = static_cast<std::uint64_t>(n_threads) * per_thread;
-    EXPECT_EQ(g_stats.snapshots_saved.load(), expected);
-    EXPECT_EQ(g_stats.snapshots_consumed.load(), expected);
-    EXPECT_EQ(pending_snapshots(), 0u);
+    EXPECT_EQ(stats().snapshots_saved.load(), expected);
+    EXPECT_EQ(stats().snapshots_consumed.load(), expected);
+    EXPECT_EQ(snapshots().pending(), 0u);
 }
 
 TEST_F(RoctxRecordFnTest, PushPopAreBalanced)
@@ -380,26 +387,26 @@ TEST_F(RoctxRecordFnTest, PushPopAreBalanced)
     {
         push_user_scope("m" + std::to_string(i), "c", "gtest");
     }
-    EXPECT_EQ(g_thread.stack.size(), static_cast<std::size_t>(n));
-    EXPECT_EQ(g_thread.guards.size(), static_cast<std::size_t>(n));
+    EXPECT_EQ(thread_state().stack.size(), static_cast<std::size_t>(n));
+    EXPECT_EQ(thread_state().guards.size(), static_cast<std::size_t>(n));
 
     for (int i = 0; i < n; ++i)
     {
         pop_user_scope();
     }
-    EXPECT_TRUE(g_thread.stack.empty());
-    EXPECT_TRUE(g_thread.guards.empty());
-    EXPECT_EQ(g_stats.user_scope_pushes.load(), static_cast<std::uint64_t>(n));
-    EXPECT_EQ(g_stats.user_scope_pops.load(), static_cast<std::uint64_t>(n));
+    EXPECT_TRUE(thread_state().stack.empty());
+    EXPECT_TRUE(thread_state().guards.empty());
+    EXPECT_EQ(stats().user_scope_pushes.load(), static_cast<std::uint64_t>(n));
+    EXPECT_EQ(stats().user_scope_pops.load(), static_cast<std::uint64_t>(n));
 }
 
 TEST_F(RoctxRecordFnTest, PopOnEmptyBumpsCallbackErrors)
 {
-    ASSERT_TRUE(g_thread.stack.empty());
+    ASSERT_TRUE(thread_state().stack.empty());
     pop_user_scope();
-    EXPECT_TRUE(g_thread.stack.empty());
-    EXPECT_EQ(g_stats.user_scope_pops.load(), 0u);
-    EXPECT_EQ(g_stats.callback_errors.load(), 1u);
+    EXPECT_TRUE(thread_state().stack.empty());
+    EXPECT_EQ(stats().user_scope_pops.load(), 0u);
+    EXPECT_EQ(stats().callback_errors.load(), 1u);
 }
 
 TEST_F(RoctxRecordFnTest, DeepNestingPreservesOrder)
@@ -409,14 +416,14 @@ TEST_F(RoctxRecordFnTest, DeepNestingPreservesOrder)
     {
         push_user_scope("m" + std::to_string(i), "c" + std::to_string(i), "gtest");
     }
-    ASSERT_EQ(g_thread.stack.size(), static_cast<std::size_t>(depth));
+    ASSERT_EQ(thread_state().stack.size(), static_cast<std::size_t>(depth));
 
     for (int i = depth - 1; i >= 0; --i)
     {
-        ASSERT_EQ(g_thread.stack.back().marker, "m" + std::to_string(i));
+        ASSERT_EQ(thread_state().stack.back().marker, "m" + std::to_string(i));
         pop_user_scope();
     }
-    EXPECT_TRUE(g_thread.stack.empty());
+    EXPECT_TRUE(thread_state().stack.empty());
 }
 
 TEST_F(RoctxRecordFnTest, InstallReturnsValidHandle)
@@ -441,7 +448,8 @@ TEST_F(RoctxRecordFnTest, UninstallClearsState)
 
     uninstall();
     EXPECT_FALSE(is_installed());
-    const auto handle = g_install.rlock([](const InstallState& state) { return state.handle; });
+    const auto handle = process_state().install.rlock([](const InstallState& state)
+                                                      { return state.handle; });
     EXPECT_EQ(handle, at::INVALID_CALLBACK_HANDLE);
 }
 
@@ -464,10 +472,10 @@ TEST_F(RoctxRecordFnTest, InstallAfterUninstallReinstalls)
 
 TEST_F(RoctxRecordFnTest, EmptyParentChainIsNoOp)
 {
-    ASSERT_TRUE(g_thread.stack.empty());
+    ASSERT_TRUE(thread_state().stack.empty());
     EXPECT_EQ(apply_userscope_overlay(), 0u);
-    EXPECT_TRUE(g_thread.stack.empty());
-    EXPECT_EQ(g_stats.user_scope_inherits.load(), 0u);
+    EXPECT_TRUE(thread_state().stack.empty());
+    EXPECT_EQ(stats().user_scope_inherits.load(), 0u);
 }
 
 TEST_F(RoctxRecordFnTest, CopiesParentChain)
@@ -476,14 +484,14 @@ TEST_F(RoctxRecordFnTest, CopiesParentChain)
         std::vector<StackEntry>{{"P1", "c1"}, {"P2", "c2"}});
     c10::DebugInfoGuard guard(kRoctxDbgKind, info);
 
-    ASSERT_TRUE(g_thread.stack.empty());
+    ASSERT_TRUE(thread_state().stack.empty());
     EXPECT_EQ(apply_userscope_overlay(), 2u);
-    ASSERT_EQ(g_thread.stack.size(), 2u);
-    EXPECT_EQ(g_thread.stack[0].marker, "P1");
-    EXPECT_EQ(g_thread.stack[0].context, "c1");
-    EXPECT_EQ(g_thread.stack[1].marker, "P2");
-    EXPECT_EQ(g_thread.stack[1].context, "c2");
-    EXPECT_EQ(g_stats.user_scope_inherits.load(), 1u);
+    ASSERT_EQ(thread_state().stack.size(), 2u);
+    EXPECT_EQ(thread_state().stack[0].marker, "P1");
+    EXPECT_EQ(thread_state().stack[0].context, "c1");
+    EXPECT_EQ(thread_state().stack[1].marker, "P2");
+    EXPECT_EQ(thread_state().stack[1].context, "c2");
+    EXPECT_EQ(stats().user_scope_inherits.load(), 1u);
 }
 
 TEST_F(RoctxRecordFnTest, DedupesIdenticalPrefix)
@@ -492,12 +500,12 @@ TEST_F(RoctxRecordFnTest, DedupesIdenticalPrefix)
         std::vector<StackEntry>{{"P1", "c1"}, {"P2", "c2"}});
     c10::DebugInfoGuard guard(kRoctxDbgKind, info);
 
-    g_thread.stack.push_back(StackEntry{"P1", "c1"});
-    g_thread.stack.push_back(StackEntry{"P2", "c2"});
+    thread_state().stack.push_back(StackEntry{"P1", "c1"});
+    thread_state().stack.push_back(StackEntry{"P2", "c2"});
 
     EXPECT_EQ(apply_userscope_overlay(), 0u);
-    EXPECT_EQ(g_thread.stack.size(), 2u);
-    EXPECT_EQ(g_stats.user_scope_inherits.load(), 0u);
+    EXPECT_EQ(thread_state().stack.size(), 2u);
+    EXPECT_EQ(stats().user_scope_inherits.load(), 0u);
 }
 
 TEST_F(RoctxRecordFnRealOpsTest, FwdBwdCounterSanity)
@@ -510,12 +518,12 @@ TEST_F(RoctxRecordFnRealOpsTest, FwdBwdCounterSanity)
     pop_user_scope();
     y.backward();
 
-    EXPECT_GT(g_stats.snapshots_saved.load(), 0u);
-    EXPECT_GT(g_stats.snapshots_consumed.load(), 0u);
-    EXPECT_EQ(g_stats.callback_errors.load(), 0u);
-    EXPECT_EQ(g_stats.pushes.load(), g_stats.pops.load());
-    EXPECT_EQ(g_stats.user_scope_pushes.load(), g_stats.user_scope_pops.load());
-    EXPECT_LE(pending_snapshots(), 4u);
+    EXPECT_GT(stats().snapshots_saved.load(), 0u);
+    EXPECT_GT(stats().snapshots_consumed.load(), 0u);
+    EXPECT_EQ(stats().callback_errors.load(), 0u);
+    EXPECT_EQ(stats().pushes.load(), stats().pops.load());
+    EXPECT_EQ(stats().user_scope_pushes.load(), stats().user_scope_pops.load());
+    EXPECT_LE(snapshots().pending(), 4u);
 }
 
 TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
@@ -587,7 +595,7 @@ TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
     EXPECT_TRUE(saw_torch_backend);
     ASSERT_GT(bwd_total, 0u);
     EXPECT_GT(bwd_under_scope, 0u);
-    EXPECT_GT(g_stats.user_scope_inherits.load(), 0u);
+    EXPECT_GT(stats().user_scope_inherits.load(), 0u);
 }
 
 TEST_F(RoctxRecordFnRealOpsTest, ManyStepsCorrelation)
@@ -601,12 +609,12 @@ TEST_F(RoctxRecordFnRealOpsTest, ManyStepsCorrelation)
         y.backward();
     }
 
-    const auto saved    = g_stats.snapshots_saved.load();
-    const auto consumed = g_stats.snapshots_consumed.load();
+    const auto saved    = stats().snapshots_saved.load();
+    const auto consumed = stats().snapshots_consumed.load();
     EXPECT_GT(saved, 0u);
     EXPECT_GE(consumed, saved / 2);
-    EXPECT_EQ(g_stats.snapshots_dropped.load(), 0u);
-    EXPECT_EQ(g_stats.callback_errors.load(), 0u);
+    EXPECT_EQ(stats().snapshots_dropped.load(), 0u);
+    EXPECT_EQ(stats().callback_errors.load(), 0u);
 }
 
 TEST_F(RoctxRecordFnRealOpsTest, DetachedForwardBounded)
@@ -619,11 +627,11 @@ TEST_F(RoctxRecordFnRealOpsTest, DetachedForwardBounded)
         (void)y;
     }
 
-    EXPECT_GT(g_stats.snapshots_saved.load(), 0u);
-    EXPECT_EQ(g_stats.callback_errors.load(), 0u);
+    EXPECT_GT(stats().snapshots_saved.load(), 0u);
+    EXPECT_EQ(stats().callback_errors.load(), 0u);
     // 50 forward-only iterations stay well below a single shard's soft cap.
-    EXPECT_LT(pending_snapshots(), SnapshotStore::kShardSoftCap);
-    EXPECT_EQ(g_stats.snapshots_dropped.load(), 0u);
+    EXPECT_LT(snapshots().pending(), SnapshotStore::kShardSoftCap);
+    EXPECT_EQ(stats().snapshots_dropped.load(), 0u);
 }
 
 TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
@@ -698,7 +706,7 @@ TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
         EXPECT_LE(workers_named, 1u) << m;
     }
 
-    EXPECT_EQ(g_stats.callback_errors.load(), 0u);
-    EXPECT_EQ(g_stats.pushes.load(), g_stats.pops.load());
-    EXPECT_EQ(g_stats.user_scope_pushes.load(), g_stats.user_scope_pops.load());
+    EXPECT_EQ(stats().callback_errors.load(), 0u);
+    EXPECT_EQ(stats().pushes.load(), stats().pops.load());
+    EXPECT_EQ(stats().user_scope_pushes.load(), stats().user_scope_pops.load());
 }
