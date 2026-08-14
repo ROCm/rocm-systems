@@ -80,6 +80,34 @@ THE SOFTWARE.
 #  endif
 #endif
 
+// ============================================================================
+//  DROP-IN PARITY API (mirrors tdmCopy.h)
+// ----------------------------------------------------------------------------
+// The entry points below expose the EXACT same public surface as tdm/tdmCopy.h
+// -- same names, signatures, defaults, and memcpy-style semantics -- so the two
+// libraries are interchangeable. The only difference is internal: this
+// implementation stages HBM->LDS->HBM through the async-to/from-LDS builtins
+// (see warpAsyncCopy above) instead of the tensor-data-mover load/store
+// instructions.
+//
+// AVAILABILITY: the async-to/from-LDS builtins are a gfx1250 feature. As with
+// tdmCopy.h, ASYNC_COPY_SUPPORTED is 1 only for a device pass on a capable arch
+// whose compiler exposes the builtin; otherwise each entry point is `= delete`d,
+// so including the header is fine but CALLING one on an unsupported target is a
+// compile-time error at the call site. async::IsTdmCopySupported() is always
+// callable (host and device) and is the runtime/host-side guard.
+// ============================================================================
+// The pair is defined here, ahead of the first declaration that needs it, and applies to every
+// namespace-scope entry point in this header -- the one-way asyncLoadToLDS()/asyncStoreFromLDS()
+// primitives and asyncWait() as well as the async:: parity API.
+#if ASYNC_COPY_SUPPORTED
+#  define ASYNC_API      inline
+#  define ASYNC_DELETED
+#else
+#  define ASYNC_API
+#  define ASYNC_DELETED  = delete
+#endif
+
 // Used for setting TDM descriptor fields and arguments to the async load/store builtins
 using __rccl_int32x2 = int32_t __attribute__((__vector_size__(8)));
 using __rccl_int32x4 = int32_t __attribute__((__vector_size__(16)));
@@ -95,15 +123,40 @@ namespace {
 // Waits until at most WAIT_CNT outstanding async-to/from-LDS transfers remain in flight.  The count
 // is baked into the hardware instruction, so it must be a compile-time constant.
 template<int WAIT_CNT = 0>
-__device__ void asyncWait(){
-  __builtin_amdgcn_s_wait_asynccnt(WAIT_CNT);
-}
+__device__ ASYNC_API void asyncWait() ASYNC_DELETED;
 
 /* Async load/Store APIs */
 // The async-to/from-LDS builtins move a single b8/b32/b64/b128 access per lane between global memory and LDS.
 // A whole warp issues one instruction, so a warp moves (warpSize * accessWidth) bytes at a time, with each
 // lane targeting its own slice via a per-lane pointer offset.  The hardware only provides b8/b32/b64/b128
 // variants -- there is no 16-bit per lane instruction.
+
+// Warp-level async copy from global memory into LDS.  The entire warp calls this with the same arguments.
+// Set Aligned=true only when globalSrc and ldsDst are known to be 128-byte aligned (skips the peel).
+template<SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
+__device__ ASYNC_API void asyncLoadToLDS(const uint8_t* globalSrc, uint8_t* ldsDst,
+                                         size_t sizeInBytes) ASYNC_DELETED;
+
+// Warp-level async copy from LDS into global memory.  The entire warp calls this with the same arguments.
+// Set Aligned=true only when globalDst and ldsSrc are known to be 128-byte aligned (skips the peel).
+template<SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
+__device__ ASYNC_API void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst,
+                                            size_t sizeInBytes) ASYNC_DELETED;
+
+// ============================================================================
+//  IMPLEMENTATION of the three primitives declared above
+// ----------------------------------------------------------------------------
+// Every body below names an async builtin, either directly or through a helper that does. Those
+// names are non-dependent, so a device pass for an arch that does not expose them rejects the body
+// when this header is PARSED -- being a template does not defer the lookup to instantiation. Since a
+// multi-arch build (e.g. --amdgpu_targets gfx950 gfx1250) parses the header once per target, the
+// implementation is compiled only on a capable pass; elsewhere the declarations above stand deleted,
+// so a caller that slipped past its own guard fails at the call site instead of silently skipping
+// the transfer. The async_detail helpers are internal, so they simply do not exist on those passes
+// (same treatment as tdm::detail in tdmCopy.h) -- nothing outside this header can name them.
+// ============================================================================
+#if ASYNC_COPY_SUPPORTED
+
 namespace async_detail {
 
 // Direction of the transfer.  In both cases the first pointer is the global-memory side and the second is the
@@ -275,20 +328,21 @@ __device__ inline void warpAsyncCopy(const uint8_t* global, uint8_t* lds, size_t
 
 } // namespace async_detail
 
-// Warp-level async copy from global memory into LDS.  The entire warp calls this with the same arguments.
-// Set Aligned=true only when globalSrc and ldsDst are known to be 128-byte aligned (skips the peel).
-template<SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
-__device__ void asyncLoadToLDS(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes){
+template<int WAIT_CNT>
+__device__ inline void asyncWait(){
+  __builtin_amdgcn_s_wait_asynccnt(WAIT_CNT);
+}
+
+template<SyncPolicy sp, CachePolicy cp, bool Aligned>
+__device__ inline void asyncLoadToLDS(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes){
   async_detail::warpAsyncCopy<async_detail::AsyncDir::Load, cp, Aligned>(globalSrc, ldsDst, sizeInBytes);
   if constexpr (sp == SyncPolicy::Sync) {
     asyncWait<0>();
   }
 }
 
-// Warp-level async copy from LDS into global memory.  The entire warp calls this with the same arguments.
-// Set Aligned=true only when globalDst and ldsSrc are known to be 128-byte aligned (skips the peel).
-template<SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
-__device__ void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes){
+template<SyncPolicy sp, CachePolicy cp, bool Aligned>
+__device__ inline void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes){
   // warpAsyncCopy shares one non-const `lds` parameter across load and store; the store path only reads from
   // it, so dropping const here is safe.
   async_detail::warpAsyncCopy<async_detail::AsyncDir::Store, cp, Aligned>(globalDst, const_cast<uint8_t*>(ldsSrc), sizeInBytes);
@@ -297,6 +351,7 @@ __device__ void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst, siz
   }
 }
 
+#endif // ASYNC_COPY_SUPPORTED
 
 
 
@@ -401,33 +456,6 @@ struct TileMover{
 };
 #endif // TDM_TOOLCHAIN_AVAILABLE
 
-
-// ============================================================================
-//  DROP-IN PARITY API (mirrors tdmCopy.h)
-// ----------------------------------------------------------------------------
-// The entry points below expose the EXACT same public surface as tdm/tdmCopy.h
-// -- same names, signatures, defaults, and memcpy-style semantics -- so the two
-// libraries are interchangeable. The only difference is internal: this
-// implementation stages HBM->LDS->HBM through the async-to/from-LDS builtins
-// (see warpAsyncCopy above) instead of the tensor-data-mover load/store
-// instructions.
-//
-// AVAILABILITY: the async-to/from-LDS builtins are a gfx1250 feature. As with
-// tdmCopy.h, ASYNC_COPY_SUPPORTED is 1 only for a device pass on a capable arch
-// whose compiler exposes the builtin; otherwise each entry point is `= delete`d,
-// so including the header is fine but CALLING one on an unsupported target is a
-// compile-time error at the call site. async::IsTdmCopySupported() is always
-// callable (host and device) and is the runtime/host-side guard.
-// ============================================================================
-// ASYNC_COPY_SUPPORTED is defined near the top of this header, above the wrappers
-// that also need it.
-#if ASYNC_COPY_SUPPORTED
-#  define ASYNC_API      inline
-#  define ASYNC_DELETED
-#else
-#  define ASYNC_API
-#  define ASYNC_DELETED  = delete
-#endif
 
 namespace async {
 
