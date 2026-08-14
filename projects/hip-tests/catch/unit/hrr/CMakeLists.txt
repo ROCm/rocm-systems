@@ -28,6 +28,11 @@
 #   hrr_api_matrix_test.cc — Unit_HRR_ApiMatrix_T*_Roundtrip: captures each
 #                          tier's workloads and asserts every API's replay
 #                          class still matches what HRR's generator declares.
+#   hrr_regions_test.cc  — External region annotations (hrr_regions.h): CPU-only
+#                          sidecar framing tests, plus a GPU workload that carves
+#                          blocks out of one hipMalloc by pointer arithmetic and
+#                          is replayed against a synthetic sidecar. Contains its
+#                          own hidden [.][hrr-direct] workload.
 #
 # hrr_test_common.h is the shared capture/replay harness (ScopedDir,
 # hrr_run_roundtrip, hrr_playback_env, hrr_playback_watchdog,
@@ -62,6 +67,7 @@ set(TEST_SRC
     hrr_roundtrip_test.cc
     hrr_api_matrix_workload_test.cc
     hrr_api_matrix_test.cc
+    hrr_regions_test.cc
     ${HRR_CLR_DIR}/playback/hrr_reader.cpp
 )
 
