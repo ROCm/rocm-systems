@@ -1402,34 +1402,21 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	args->attrs[num_gpus + 1].type = flags.ui32.ExtendedCoherent ?
 							HSA_SVM_ATTR_SET_FLAGS : HSA_SVM_ATTR_CLR_FLAGS;
 	args->attrs[num_gpus + 1].value = HSA_SVM_FLAG_EXT_COHERENT;
-	/* Validate and reserve the tracking entry before touching kernel state,
-	 * so a same-base re-registration with a mismatched size is rejected
-	 * (INVALID_PARAMETER) without issuing a stray SET_ATTR - deregister is
-	 * keyed only by base address and could not disambiguate the two extents.
-	 * Identical (base, size) registrations are refcounted.
-	 */
-	ret = svm_api_range_get(fmm_ctx, (void *)aligned_addr, aligned_size);
-	if (ret != HSAKMT_STATUS_SUCCESS)
-		return ret;
 
 	pr_debug("Registering to SVM %p size: %" PRIu64 "\n", (void*)aligned_addr,
 		 aligned_size);
 	/* Driver does one copy_from_user, with extra attrs size */
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
-		struct svm_revoke_range *rr = NULL;
-
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
-		/* The kernel never got the attributes; drop the reference we
-		 * reserved above. No GPU access was granted, so any revoke
-		 * ranges it computes are moot - just free them.
-		 */
-		svm_api_range_put(fmm_ctx, address, &rr);
-		free(rr);
 		ret = HSAKMT_STATUS_ERROR;
 		goto out;
 	}
 
-	ret = HSAKMT_STATUS_SUCCESS;
+	/* Track only once the kernel has the attributes, so a failed register
+	 * leaves nothing behind and cannot grow a same-base entry's extent to a
+	 * span that never got GPU access.
+	 */
+	ret = svm_api_range_get(fmm_ctx, (void *)aligned_addr, aligned_size);
 
 out:
 	free(args);
