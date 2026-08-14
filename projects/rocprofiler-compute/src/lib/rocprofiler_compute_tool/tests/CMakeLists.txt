@@ -30,6 +30,15 @@ target_link_libraries(
         asan_build_dependencies
 )
 
+# TheRock's post-hook overwrites INSTALL_RPATH with its own computed value, so
+# this only takes effect in standalone TEST_FROM_INSTALL builds, where nothing
+# else stamps an RPATH and librocprofiler-compute-tool.so is otherwise unfound.
+set_target_properties(
+    ${target}
+    PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../../../${CMAKE_INSTALL_LIBDIR}/${CMAKE_PROJECT_NAME}"
+)
+
 if(INSTALL_TESTS)
     install(
         TARGETS ${target}
