@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "core/control/session.hpp"
 #include "core/timemory.hpp"
 
@@ -42,7 +44,7 @@ void
 resume();
 
 void
-bind_session(control::session& sess);
+bind_session(std::shared_ptr<control::session> sess);
 
 void
 reset_sdk_session_guards();

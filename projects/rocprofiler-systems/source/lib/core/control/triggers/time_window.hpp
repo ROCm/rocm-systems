@@ -8,6 +8,7 @@
 #include "core/state.hpp"
 
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <string_view>
 #include <thread>
@@ -24,18 +25,18 @@ public:
         clock_duration duration{};
     };
 
-    time_window(session& sess, Clock& clk, config cfg)
-    : m_session{ sess }
+    time_window(std::shared_ptr<session> sess, Clock& clk, config cfg)
+    : m_session{ std::move(sess) }
     , m_clock{ clk }
     , m_config{ cfg }
     {
-        sess.register_trigger(trigger_name, initial_action(cfg));
+        m_session->register_trigger(trigger_name, initial_action(cfg));
     }
 
     ~time_window()
     {
         stop();
-        m_session.unregister_trigger(trigger_name);
+        m_session->unregister_trigger(trigger_name);
     }
 
     time_window(const time_window&)            = delete;
@@ -71,11 +72,11 @@ public:
 private:
     static constexpr std::string_view trigger_name = "time_window";
 
-    session&     m_session;
-    Clock&       m_clock;
-    const config m_config;
-    std::thread  m_thread;
-    std::mutex   m_lifecycle_mutex;
+    std::shared_ptr<session> m_session;
+    Clock&                   m_clock;
+    const config             m_config;
+    std::thread              m_thread;
+    std::mutex               m_lifecycle_mutex;
 
     [[nodiscard]] static action initial_action(const config& cfg) noexcept
     {
@@ -101,14 +102,14 @@ private:
         if(has_delay)
         {
             if(!m_clock.sleep_until(t0 + m_config.delay)) return;  // interrupted
-            m_session.set_action(trigger_name, action::trace);
+            m_session->set_action(trigger_name, action::trace);
         }
 
         if(has_duration)
         {
             const auto end = t0 + m_config.delay + m_config.duration;
-            if(!m_clock.sleep_until(end)) return;               // interrupted
-            m_session.set_action(trigger_name, action::pause);  // terminal
+            if(!m_clock.sleep_until(end)) return;                // interrupted
+            m_session->set_action(trigger_name, action::pause);  // terminal
         }
     }
 };
