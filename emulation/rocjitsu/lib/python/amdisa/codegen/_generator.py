@@ -6589,15 +6589,16 @@ class CodeGenerator:
         signal the memory pipeline to apply the cross-lane shuffle after the
         raw read.
         """
-        # TR_B4=1, TR_B6=2, TR_B8=3, TR_B16=4
+        # amdgpu::TransposeKind: TR_B4=1, TR_B6=2, TR_B8=3, TR16_B128=4,
+        # B64_TR_B16=5. Defaults describe the B64 (num_elems=2) forms.
         tr_map = {
             'ds_read_tr_b4': (4, 2, 1),  # elem_size=4, num_elems=2, transpose=1
             'ds_read_tr_b6': (4, 3, 2),  # elem_size=4, num_elems=3, transpose=2
             'ds_read_tr_b8': (4, 2, 3),  # elem_size=4, num_elems=2, transpose=3
-            'ds_read_tr_b16': (4, 2, 4),  # elem_size=4, num_elems=2, transpose=4
+            'ds_read_tr_b16': (4, 2, 5),  # elem_size=4, num_elems=2, transpose=5
         }
         default_esz, default_ne, default_tr_kind = tr_map.get(
-            sem.semantic_class, (4, 2, 4)
+            sem.semantic_class, (4, 2, 5)
         )
         esz = sem.elem_size if sem.elem_size is not None else default_esz
         ne = sem.num_elems if sem.num_elems is not None else default_ne
