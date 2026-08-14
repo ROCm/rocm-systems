@@ -53,6 +53,23 @@ dma_copy(void* dst, const void* src, size_t n)
     return core->hsa_memory_copy_fn(dst, src, n);
 }
 
+/// @brief Run @p copy under the tracker read lock, but only while [@p gpu_addr, +@p size) is still
+/// a live tracked allocation of >= @p size bytes, so a concurrent free (write lock) can't retire it
+/// mid-copy. Direction is caller-supplied: snap reads device->host, restore writes host->device.
+/// @return @p copy's status, or @c std::nullopt if the region was freed/shrunk since it was
+/// recorded.
+template <typename CopyFn>
+std::optional<hsa_status_t>
+with_inventory_check(void* gpu_addr, size_t size, CopyFn&& copy)
+{
+    return memory_tracker::inventory().rlock(
+        [&](const memory_tracker::tracked_map_t& map) -> std::optional<hsa_status_t> {
+            auto itr = map.find(gpu_addr);
+            if(itr == map.end() || itr->second.size < size) return std::nullopt;
+            return copy();
+        });
+}
+
 // A module-scope variable (__device__ / __constant__ global) discovered in a loaded executable.
 struct module_variable_t
 {
@@ -134,10 +151,12 @@ snap(hsa_agent_t agent)
         }
     }();
 
-    // Capture one region (device->host) into the snapshot. Returns false on failure: a host
-    // allocation failure under memory pressure (resize throws bad_alloc) or a failed DMA copy.
-    // Either leaves the snapshot incomplete, so the caller must decline replay rather than restore
-    // partial state.
+    /// @brief Capture one region (device->host) into the snapshot.
+    /// @retval false The snapshot is incomplete because a host allocation or the DMA copy failed.
+    /// The caller must decline replay rather than restore partial state.
+    /// @retval true The region was captured. For tracker regions it may instead have been dropped
+    /// after being freed or shrunk since snap_inventory(). That drop is safe because restore() runs
+    /// the same liveness check, so a region gone now could not have been restored anyway.
     auto capture =
         [&](void* gpu_addr, size_t size, std::string_view what, bool from_tracker) -> bool {
         if(size == 0) return true;
@@ -158,7 +177,33 @@ snap(hsa_agent_t agent)
             return false;
         }
 
-        if(dma_copy(blk.host_copy.data(), gpu_addr, size) != HSA_STATUS_SUCCESS)
+        // snap_inventory() released the tracker lock before returning. A host thread calling
+        // hsa_amd_memory_pool_free / hsa_memory_free can retire this allocation while we
+        // read it, because the alloc/free wrappers are not covered by the per-agent replay lock.
+        // The with_inventory_check helper re-checks liveness and copies under the read lock, the
+        // same guard restore() applies to the write direction. A nullopt result means the region
+        // was freed or shrunk after snap_inventory(), so we drop it rather than read retired device
+        // memory. Module variables live in the loaded executable, not the tracker. They are always
+        // present, so we copy them directly.
+        const auto st =
+            from_tracker
+                ? with_inventory_check(
+                      gpu_addr,
+                      size,
+                      [&] { return dma_copy(blk.host_copy.data(), gpu_addr, size); })
+                : std::optional<hsa_status_t>{dma_copy(blk.host_copy.data(), gpu_addr, size)};
+
+        if(!st)
+        {
+            ROCP_INFO << fmt::format("kernel-replay snapshot: {} {} ({}B) was retired before "
+                                     "capture, dropping from snapshot",
+                                     what,
+                                     gpu_addr,
+                                     size);
+            return true;
+        }
+
+        if(*st != HSA_STATUS_SUCCESS)
         {
             ROCP_WARNING << fmt::format(
                 "kernel-replay snapshot: device->host copy failed for {} {} ({}B)",
@@ -210,16 +255,13 @@ restore(const device_snapshot_t& snapshot)
 
         if(blk.from_tracker)
         {
-            // Copy under the read lock so a concurrent free cannot race the check and the write.
-            // returns nullopt when the region is no longer a live allocation of at least its
-            // size, meaning it was freed or reallocated after snap. Skip it.
-            const auto st = memory_tracker::inventory().rlock(
-                [&](const memory_tracker::tracked_map_t& map) -> std::optional<hsa_status_t> {
-                    auto itr = map.find(blk.gpu_addr);
-                    if(itr == map.end() || itr->second.size < blk.host_copy.size())
-                        return std::nullopt;
-                    return dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
-                });
+            // Re-check liveness and copy under the read lock so a concurrent free cannot race the
+            // check and the write (see with_inventory_check). A nullopt result means the region is
+            // no longer a live allocation of at least its size. It was freed or reallocated after
+            // snap, so skip it.
+            const auto st = with_inventory_check(blk.gpu_addr, blk.host_copy.size(), [&] {
+                return dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
+            });
 
             if(!st)
             {
