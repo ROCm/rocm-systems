@@ -62,6 +62,8 @@ extern int ncclNMergedIbDevs;
 struct alignas(64) ncclIbMergedDev {
   ncclNetVDeviceProps_t vProps;
   int speed;
+  int16_t railId;
+  int16_t planeId;
   char devName[MAX_MERGED_DEV_NAME]; // Up to NCCL_IB_MAX_DEVS_PER_NIC * name size, and a character for each '+'
 };
 
@@ -98,6 +100,9 @@ struct alignas(64) ncclIbDev {
   struct ibv_port_attr portAttr;
   struct ncclIbStats stats;
   int dmaBufSupported;
+  int16_t railId;
+  int16_t planeId;
+  int16_t planeIdx;
   enum ncclIbProvider ibProvider;
   union {
     struct {
@@ -230,7 +235,7 @@ struct ncclIbRequest {
       int rank;
     } iget;
   };
-  void* ginProxyCtx;
+  void* rmaProxyCtx;
 };
 
 struct ncclIbNetCommDevBase {
@@ -268,6 +273,7 @@ struct ncclIbQpRtrAttr {
   union ibv_gid remoteGid;
 
   uint8_t localIbPort;
+  uint8_t localPortFlags;
   union ibv_gid localGid;
   int32_t localGidIndex;
 };
@@ -371,6 +377,15 @@ static inline ncclResult_t ncclIbCommBaseGetQpByIndex(struct ncclIbNetCommBase* 
   return ncclSuccess;
 }
 
+// Each request is transferred over all devices, and depending on the
+// "splitDataOnQps" configuration parameter, a request may be transferred over
+// a single QP per device or on all QPs of each device.
+static inline int ncclIbCommBaseGetNqpsPerRequest(struct ncclIbNetCommBase* baseComm) {
+  assert(baseComm->nDataQps != -1);
+  assert(baseComm->nqps != -1);
+  return (baseComm->splitDataOnQps == 1) ? baseComm->nqps : baseComm->nDataQps;
+}
+
 // The function selects the QP to be used for the request. The QP selected
 // based on the request ID and also based on the provided QP index. A request
 // can be posted on multiple QPs. For example, if a request is posted on 4
@@ -381,7 +396,8 @@ static inline ncclResult_t ncclIbCommBaseGetQpByIndex(struct ncclIbNetCommBase* 
 // outQpIndex is the index of the QP in the base::qps[] array.
 static inline ncclResult_t ncclIbCommBaseGetQpForRequest(struct ncclIbNetCommBase* baseComm, const uint64_t id,
                                                          const uint8_t qpIndex, ncclIbQp** outQp, int* outQpIndex) {
-  *outQpIndex = (id + qpIndex) % baseComm->nqps;
+  int nQps = ncclIbCommBaseGetNqpsPerRequest(baseComm);
+  *outQpIndex = (id * nQps + qpIndex) % baseComm->nqps;
   *outQp = baseComm->activeQps[*outQpIndex];
   assert(*outQp != NULL);
   return ncclSuccess;
@@ -406,15 +422,6 @@ static inline ncclResult_t ncclIbCommBaseGetQpByQpNum(struct ncclIbNetCommBase* 
   }
   *qp = NULL;
   return ncclInternalError;
-}
-
-// Each request is transfered over all devices, and depending on the
-// "splitDataOnQps" configuration parameter, a request may be transffered over
-// a single QP per device or on all QPs of each device.
-static inline int ncclIbCommBaseGetNqpsPerRequest(struct ncclIbNetCommBase* baseComm) {
-  assert(baseComm->nDataQps != -1);
-  assert(baseComm->nqps != -1);
-  return (baseComm->splitDataOnQps == 1) ? baseComm->nqps : baseComm->nDataQps;
 }
 
 static inline ncclResult_t ncclIbPostRecvWorkRequest(struct ibv_qp* qp, struct ibv_recv_wr* wr) {
@@ -584,8 +591,8 @@ ncclResult_t ncclIbGetGidIndex(struct ibv_context* context, uint8_t portNum, str
 ncclResult_t ncclIbGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req);
 ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r);
 
-ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset,
-                                       int fd, ibv_mr** mhandle);
+ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
+                                       uint64_t mrFlags, void** mhandle);
 
 int ncclIbGetTrafficClass(void* ctx);
 void ncclIbSetTrafficClass(void* ctx, int trafficClass);
@@ -598,9 +605,12 @@ ncclResult_t ncclIbDevices(int* ndev);
 ncclResult_t ncclIbGetProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t ncclIbListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
+ncclResult_t ncclIbConnectImpl(void* ctx, int dev, void* opaqueHandle, void** sendComm,
+                               ncclNetDeviceHandle_t** sendDevComm, int nQpsPerDev, int envTrafficClass);
 ncclResult_t ncclIbConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
-                           ncclNetDeviceHandle_t** /*sendDevComm*/);
-ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** /*recvDevComm*/);
+                           ncclNetDeviceHandle_t** sendDevComm);
+ncclResult_t ncclIbAcceptImpl(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** recvDevComm, int nQpsPerDev);
+ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** recvDevComm);
 ncclResult_t ncclIbRegMr(void* comm, void* data, size_t size, int type, void** mhandle);
 ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle);
 ncclResult_t ncclIbDeregMr(void* comm, void* mhandle);
@@ -617,5 +627,25 @@ ncclResult_t ncclIbMakeVDevice(int* d, ncclNetVDeviceProps_t* props);
 ncclResult_t ncclIbFinalizeDevices(void);
 ncclResult_t ncclIbFinalize(void* ctx);
 ncclResult_t ncclIbSetNetAttr(void* ctx, ncclNetAttr_t* netAttr);
+
+static inline void printIbWcStatusHint(int status) {
+  switch (status) {
+  case IBV_WC_LOC_PROT_ERR:
+    INFO(NCCL_NET,
+         "HINT: In many cases this error occurs when ACS is enabled which would break GPU Direct RDMA protocol.");
+    INFO(NCCL_NET, "HINT: To confirm and fix the problem, you can set NCCL_NET_GDR_LEVEL=0 to disable ACS following "
+                   "vendor documentation.");
+  case IBV_WC_WR_FLUSH_ERR:
+    INFO(NCCL_NET, "HINT: In many cases this error occurs when NIC on the same instance cannot talk to each other.");
+  case IBV_WC_RETRY_EXC_ERR:
+    INFO(NCCL_NET, "HINT: In many cases this error occurs when the NCCL_IB_TIMEOUT is set too short.");
+    INFO(NCCL_NET, "HINT: Default value is 20, which is ~30 seconds before error.");
+    INFO(NCCL_NET, "HINT: To confirm, try increasing the value of NCCL_IB_TIMEOUT and see if the error persists.");
+    INFO(NCCL_NET, "HINT: See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-ib-timeout for "
+                   "more information.");
+  default:
+    break;
+  }
+}
 
 #endif
