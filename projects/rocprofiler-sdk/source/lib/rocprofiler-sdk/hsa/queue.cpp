@@ -37,6 +37,7 @@
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -52,6 +53,7 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
+#include <cstdlib>
 #include <memory>
 #include <utility>
 
@@ -84,6 +86,58 @@ namespace hsa
 namespace
 {
 constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
+
+// Kernel-replay per-pass descriptor threaded into process_packet_batch. When non-null the batch is
+// one replay pass: the app's original completion signal is fired only on the final pass, every pass
+// shares one dispatch_id, and a CPU-observable barrier signal (pass_done) is appended so the
+// WriteInterceptor thread can wait for the pass to finish.
+struct replay_pass_state
+{
+    bool                      is_final          = false;
+    rocprofiler_dispatch_id_t fixed_dispatch_id = 0;
+    hsa_signal_t              pass_done         = {.handle = 0};
+};
+
+// Build the dispatch info handed to the kernel-replay pass-count callback so the tool can decide
+// the pass count per kernel/agent. dispatch_id is 0 for now: the id is not minted until inside
+// process_packet_batch, and the pass-count query happens before that. Populates from the regular
+// kernel-dispatch packet (the replayed case); ext-dispatch dims are left zero for now.
+rocprofiler_dispatch_counting_service_data_t
+make_replay_pass_count_data(const Queue& queue, const rocprofiler_packet& pkt)
+{
+    auto data = common::init_public_api_struct(rocprofiler_dispatch_counting_service_data_t{});
+    auto info = common::init_public_api_struct(rocprofiler_kernel_dispatch_info_t{});
+
+    const auto& s             = pkt.kernel_dispatch;
+    info.kernel_id            = code_object::get_kernel_id(s.kernel_object);
+    info.queue_id             = queue.get_id();
+    info.private_segment_size = s.private_segment_size;
+    info.group_segment_size   = s.group_segment_size;
+    info.workgroup_size       = {s.workgroup_size_x, s.workgroup_size_y, s.workgroup_size_z};
+    info.grid_size            = {s.grid_size_x, s.grid_size_y, s.grid_size_z};
+
+    // TODO: get the dispatch id from the packet, needs to be inside process_packet_batch
+    info.dispatch_id = 0;
+    if(const auto* agent = queue.get_agent().get_rocp_agent())
+    {
+        info.agent_id = agent->id;
+    }
+
+    data.dispatch_info = info;
+    return data;
+}
+
+// Number of replay passes for the active kernel-replay context (the tool supplies it via the
+// service's pass-count callback). Returns 1 when no replay context is active, which disables
+// replay. @p dispatch_data gives the tool the dispatch context for the decision.
+uint64_t
+kernel_replay_pass_count(rocprofiler_dispatch_counting_service_data_t dispatch_data)
+{
+    for(const auto* ctx : context::get_active_contexts())
+        if(context::kernel_replay_is_enabled(ctx))
+            return context::kernel_replay_pass_count(ctx, dispatch_data);
+    return 1;
+}
 
 template <typename DomainT, typename... Args>
 inline bool
@@ -409,7 +463,8 @@ WriteInterceptor(const void* packets,
     auto process_packet_batch = [&queue, &corr_id, tracing_data_v](
                                     const rocprofiler_packet* _packets,
                                     uint64_t                  _num_packets,
-                                    const packet_writer_fn_t& _writer) {
+                                    const packet_writer_fn_t& _writer,
+                                    replay_pass_state*        _replay = nullptr) {
         auto transformed_packets = packet_vector_t{};
 
         auto thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
@@ -548,13 +603,18 @@ WriteInterceptor(const void* packets,
             static_assert(kernel_dispatch_info_rt_size < sizeof(rocprofiler_kernel_dispatch_info_t),
                           "failed to compute size field based on offset of reserved_padding field");
 
-            auto dispatch_id = ++sequence_counter;
-
             // Always feed HIP_GRAPH summary's kernel_dispatch_count (independent of
             // subscription).
             if(auto* graph_launch_state = ::rocprofiler::hip::graph::current_launch_state();
                graph_launch_state != nullptr)
                 ++graph_launch_state->dispatch_count;
+
+            // Replay: all N passes for one dispatch share a single dispatch_id. The first pass
+            // mints it; later passes reuse it.
+            auto dispatch_id = (_replay && _replay->fixed_dispatch_id != 0)
+                                   ? _replay->fixed_dispatch_id
+                                   : ++sequence_counter;
+            if(_replay && _replay->fixed_dispatch_id == 0) _replay->fixed_dispatch_id = dispatch_id;
 
             _packet_data.callback_record =
                 callback_record_t{sizeof(callback_record_t),
@@ -664,8 +724,10 @@ WriteInterceptor(const void* packets,
             if(inserted_before)
                 transformed_packets.back().kernel_dispatch.header |= 1 << HSA_PACKET_HEADER_BARRIER;
 
-            // if the original completion signal exists, trigger it via a barrier packet
-            if(existing_completion_signal)
+            // if the original completion signal exists, trigger it via a barrier packet.
+            // Replay: defer the app's completion signal until the final pass so the application
+            // observes only one execution.
+            if(existing_completion_signal && (!_replay || _replay->is_final))
             {
                 auto barrier   = hsa_barrier_and_packet_t{};
                 barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
@@ -731,6 +793,12 @@ WriteInterceptor(const void* packets,
                                        new std::shared_ptr<info_session_t>(shared));
         }
 
+        // Replay: append a CPU-observable barrier so the WriteInterceptor thread can block until
+        // this pass's GPU work (kernel + counter read/stop packets) has fully drained before it
+        // snaps/restores and submits the next pass.
+        if(_replay && _replay->pass_done.handle != 0)
+            CreateBarrierPacket(nullptr, &_replay->pass_done, transformed_packets);
+
         // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op
         ROCP_TRACE << fmt::format("QueueID {}: {}",
                                   queue.get_id().handle,
@@ -738,6 +806,70 @@ WriteInterceptor(const void* packets,
 
         _writer(std::move(transformed_packets));
     };
+
+    // ---------------------------------------------------------------------------------------------
+    // Kernel replay. Re-execute a single kernel dispatch N times -- once per counter batch --
+    // restoring device memory between passes so each pass runs against identical inputs, while the
+    // application observes only one execution. Runs synchronously on this (WriteInterceptor)
+    // thread; reuses process_packet_batch for each pass so counter collection, the serializer, the
+    // async signal handler, and record_callback all behave exactly as in the single-pass path.
+    // Opt-in and gated so non-replay runs are unchanged.
+    const auto _replay_pass_count_data = make_replay_pass_count_data(queue, packets_arr[0]);
+    if(const int replay_n = static_cast<int>(kernel_replay_pass_count(_replay_pass_count_data));
+       replay_n > 1 && pkt_count == 1 && num_dispatch_packets == 1)
+    {
+        const auto& core = queue.core_api();
+
+        // Drain barrier: fence the CPU against all prior in-flight GPU work so device memory is
+        // stable before snapshotting.
+        hsa_signal_t drain_signal = null_hsa_signal;
+        Queue::create_signal(0, &drain_signal, /*use_pool=*/false);
+        {
+            auto drain_pkts = packet_vector_t{};
+            CreateBarrierPacket(nullptr, &drain_signal, drain_pkts);
+            writer(drain_pkts.data(), drain_pkts.size());
+            core.hsa_signal_wait_scacquire_fn(
+                drain_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+        }
+
+        // Save all tracked device allocations.
+        kernel_replay::memory_snapshot::Snapshot snapshot{};
+        snapshot.snap();
+
+        // Per-pass loop. pass_done is reused across passes; reset to 1 before each submit so the
+        // appended barrier decrements it to 0 on completion.
+        hsa_signal_t pass_done = null_hsa_signal;
+        Queue::create_signal(0, &pass_done, /*use_pool=*/false);
+
+        auto replay_state      = replay_pass_state{};
+        replay_state.pass_done = pass_done;
+
+        for(int pass = 0; pass < replay_n; ++pass)
+        {
+            replay_state.is_final = (pass == replay_n - 1);
+            core.hsa_signal_store_screlease_fn(pass_done, 1);
+
+            process_packet_batch(
+                packets_arr,
+                1,
+                [&writer](packet_vector_t&& _packets) { writer(_packets.data(), _packets.size()); },
+                &replay_state);
+
+            core.hsa_signal_wait_scacquire_fn(
+                pass_done, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+            // Restore device memory between passes so the next pass sees identical inputs. The
+            // final pass leaves device memory as the app expects.
+            if(!replay_state.is_final) snapshot.restore();
+        }
+
+        // The final pass already emitted the app's original completion signal barrier and flowed
+        // through the serializer normally, so the application unblocks and the next kernel on this
+        // GPU can dispatch. Clean up our private signals.
+        if(drain_signal.handle != 0) get_core_table()->hsa_signal_destroy_fn(drain_signal);
+        if(pass_done.handle != 0) get_core_table()->hsa_signal_destroy_fn(pass_done);
+        return;
+    }
 
     bool should_batch_packets = true;
     queue.signal_callback([&should_batch_packets](const auto& map) {

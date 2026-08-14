@@ -52,6 +52,7 @@ add_subdirectory(thread_trace)
 add_subdirectory(spm)
 add_subdirectory(tracing)
 add_subdirectory(kernel_dispatch)
+add_subdirectory(kernel_replay)
 add_subdirectory(kfd)
 add_subdirectory(rccl)
 add_subdirectory(rocdecode)
@@ -66,7 +67,7 @@ target_link_libraries(
     rocprofiler-sdk-object-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-build-flags
-            rocprofiler-sdk::rocprofiler-sdk-sanitizer
+            rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-aqlprofile

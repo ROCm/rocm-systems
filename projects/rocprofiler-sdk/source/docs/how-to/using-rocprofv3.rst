@@ -131,19 +131,12 @@ To use ``rocprofv3`` for application tracing, run:
     rocprofv3 <tracing_option> -- <application_path>
 
 
-.. warning::
+.. note::
 
-  The tracing examples below use ``--output-format csv`` to demonstrate the CSV data layout.
-  Direct CSV, PFTrace (Perfetto), and OTF2 output from ``rocprofv3`` is deprecated and might omit data for some tracing features, including hipFILE and rocSHMEM tracing.
-  Use the default ``rocpd`` format for data collection, then use ``rocpd convert`` when CSV output is needed:
-
-  .. code-block:: bash
-
-     rocprofv3 <tracing_option> --output-format rocpd -- <application_path>
-     rocpd convert -i <output-file>_results.db --output-format csv
-
-  You can omit ``--output-format rocpd`` because ``rocpd`` is the default.
-  For more conversion options, see :ref:`using-rocpd-output-format`.
+  All the tracing examples below use the ``--output-format csv`` option to generate output in CSV format.
+  However, the default output format is ``rocpd`` (SQLite3 database). You can simply omit the ``--output-format`` option to generate output in the default format.
+  ``rocpd`` format can be converted to other formats such as CSV, OTF2, and PFTrace using the ``rocpd`` module.
+  To understand how to convert ``rocpd`` output to other formats, see :ref:`using-rocpd-output-format`.
 
 HIP trace
 +++++++++++
@@ -586,11 +579,11 @@ Here are the contents of ``rocjpeg_api_trace.csv`` file:
 rocSHMEM trace
 ++++++++++++++
 
-`rocSHMEM <https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/>`_ is an intra-kernel networking library that provides GPU-centric networking through an OpenSHMEM-like interface. This option traces the rocSHMEM host-stream API (the ``rocshmem_*_on_stream`` routines that enqueue communication and synchronization operations on a HIP stream).
+`rocSHMEM <https://rocm.docs.amd.com/projects/rocshmem/en/latest/>`_ is an intra-kernel networking library that provides GPU-centric networking through an OpenSHMEM-like interface. This option traces the rocSHMEM host-stream API (the ``rocshmem_*_on_stream`` routines that enqueue communication and synchronization operations on a HIP stream).
 
 .. note::
 
-   rocSHMEM tracing requires rocSHMEM to be built with rocprofiler-register support (the ``USE_ROCPROFILER_REGISTER`` build option, enabled by default). See the `rocSHMEM build documentation <https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/build.html>`_ for details.
+   rocSHMEM tracing requires rocSHMEM to be built with rocprofiler-register support (the ``USE_ROCPROFILER_REGISTER`` build option, enabled by default). See the `rocSHMEM build documentation <https://rocm.docs.amd.com/projects/rocshmem/en/latest/build.html>`_ for details.
 
 .. code-block:: shell
 
@@ -619,11 +612,9 @@ hipFILE trace
 
 .. code-block:: shell
 
-    rocprofv3 --hipfile-trace -- <application_path>
-    rocpd convert -i <output-file>_results.db --output-format csv
+    rocprofv3 --hipfile-trace --output-format json rocpd -- <application_path>
 
-The first command stores hipFILE API records in the default rocpd database.
-hipFILE is emitted directly only to the JSON and ``rocpd`` formats; use ``rocpd convert`` to produce CSV, Perfetto, or OTF2 output from the database.
+The above command stores hipFILE API records in the JSON results file and the rocpd database file.
 
 The hipFILE records include API arguments. Pointers are not dereferenced unless argument
 iteration is configured to do so.
@@ -637,7 +628,7 @@ OMPT trace
 
     rocprofv3 --ompt-trace --output-format rocpd -- <application_path>
 
-OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. OMPT records are only captured when ``rocpd`` is among the requested ``--output-format`` values, so a run that requests only the deprecated direct generators contains no OMPT data; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
+OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. If ``--ompt-trace`` is used with another ``--output-format``, ``rocprofv3`` warns and adds ``rocpd`` automatically; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
 
 .. note::
 
@@ -962,7 +953,7 @@ Sample output for the list-avail command:
 
 You can also customize the counters according to the requirement. Such counters are named :ref:`extra-counters`.
 
-For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/reference/gpu-arch/mi300-mi200-performance-counters.html>`_.
+For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300-mi200-performance-counters.html>`_.
 
 .. note::
 
@@ -1148,6 +1139,31 @@ In multi-pass counter collection, each pass generates its output in a separate `
    - Multi-pass counter collection is not compatible with ``--collection-period``.
 
    - Each pass runs the application from start to finish.
+
+Kernel replay counter collection
++++++++++++++++++++++++++++++++++
+
+Multi-pass counter collection (described above) re-runs the *entire application* once per counter group. Kernel replay is an alternative that, instead, re-executes each individual GPU dispatch multiple times within a **single** application run, saving and restoring device memory between passes so every pass observes identical inputs. This is useful when you want repeated counter samples per dispatch (or, in the future, multiple counter groups) without paying the cost of a full application re-run.
+
+Enable it with ``--kernel-replay`` (requires ``--pmc``) and choose the number of passes with ``--kernel-replay-passes``:
+
+.. code-block:: shell
+
+   rocprofv3 --pmc SQ_WAVES SQ_INSTS_VALU --kernel-replay --kernel-replay-passes 3 -- <application_path>
+
+With ``--kernel-replay-passes N`` every dispatch is replayed ``N`` times, producing ``N`` counter rows per dispatch. All passes of a given dispatch share the same ``Dispatch_Id``; they are distinguished by an additional ``Replay_Pass`` column (0-based) that is added to ``counter_collection.csv`` only when kernel replay is active.
+
+.. note::
+
+   - Kernel replay is **experimental**.
+
+   - ``--kernel-replay`` requires ``--pmc``; ``--kernel-replay-passes`` requires ``--kernel-replay``.
+
+   - The counter set must fit in a single hardware pass (kernel replay does not split counter groups). Combine with multi-pass ``--pmc`` groups is not supported.
+
+   - Only directly-allocated device memory (``hipMalloc`` / ``hsa_amd_memory_pool_allocate``) is snapshotted and restored between passes. Unified or managed memory is out of scope.
+
+   - Replay overhead scales with the total tracked device-memory footprint (snapshot/restore cost), not with the dispatch size.
 
 .. _extra-counters:
 
@@ -1500,38 +1516,27 @@ Output formats
 ----------------
 
 - rocpd (SQLite3 Database (Default))
-- CSV (direct output is deprecated)
+- CSV
 - JSON (Custom format for programmatic analysis only)
-- PFTrace (Perfetto trace; direct output is deprecated)
-- OTF2 (Open Trace Format; direct output is deprecated)
+- PFTrace (Perfetto trace for visualization with Perfetto)
+- OTF2 (Open Trace Format for visualization with compatible third-party tools)
 
 
-The default and recommended output format is ``rocpd``. To know more about the rocpd format, see :ref:`using-rocpd-output-format`.
+The default output format is ``rocpd``. To know more about the rocpd format, see :ref:`using-rocpd-output-format`.
 To specify the particular output format, use the ``--output-format`` option followed by the desired format.
 
-.. warning::
-
-   Direct CSV, PFTrace, and OTF2 generation by ``rocprofv3`` is deprecated.
-   These direct generators might not produce output for every tracing feature, including hipFILE and rocSHMEM tracing.
-   Collect to rocpd and convert the database instead:
-
-   .. code-block:: bash
-
-      rocprofv3 <tracing_option> --output-format rocpd -- <application_path>
-      rocpd convert -i <output-file>_results.db --output-format csv
-
-.. code-block:: bash
+.. code-block::
 
    rocprofv3 -i input.txt --output-format json -- <application_path>
 
-Format selection is case-insensitive and multiple output formats are supported. For example, ``--output-format json rocpd`` enables both JSON and rocpd output for the run.
+Format selection is case-insensitive and multiple output formats are supported. While ``--output-format json`` exclusively enables JSON output, ``--output-format csv json pftrace otf2, rocpd`` enables all four output formats for the run.
 
-For PFTrace trace visualization, convert the rocpd database using ``rocpd convert -i <output-file>_results.db --output-format pftrace`` and open the trace in `ui.perfetto.dev <https://ui.perfetto.dev/>`_.
+For PFTrace trace visualization, use the PFTrace format and open the trace in `ui.perfetto.dev <https://ui.perfetto.dev/>`_.
 
-For OTF2 trace visualization, convert the rocpd database using ``rocpd convert -i <output-file>_results.db --output-format otf2`` and open the trace in `vampir.eu <https://vampir.eu/>`_ or any supported visualizer.
+For OTF2 trace visualization, open the trace in `vampir.eu <https://vampir.eu/>`_ or any supported visualizer.
 
 .. note::
-  For large converted trace files (> 10GB), it's recommended to use OTF2 format.
+  For large trace files (> 10GB), it's recommended to use OTF2 format.
 
 JSON output schema
 ++++++++++++++++++++
