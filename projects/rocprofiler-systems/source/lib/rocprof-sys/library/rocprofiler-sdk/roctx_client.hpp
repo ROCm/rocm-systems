@@ -35,7 +35,8 @@ template <typename MarkerWriterPolicy = default_marker_policy>
 class roctx_client
 {
 public:
-    roctx_client(control::session& session, const roctx_client_config& roctx_cfg);
+    roctx_client(std::shared_ptr<control::session> session,
+                 const roctx_client_config&        roctx_cfg);
 
     ~roctx_client()                              = default;
     roctx_client(const roctx_client&)            = delete;
@@ -45,8 +46,8 @@ public:
 
     void configure_services(rocprofiler_context_id_t ctx);
 
-    control::session&         get_session() const { return m_session; }
-    control::triggers::roctx& get_trigger() const { return *m_trigger; }
+    const std::shared_ptr<control::session>& get_session() const { return m_session; }
+    control::triggers::roctx&                get_trigger() const { return *m_trigger; }
 
 private:
     struct marker_range_entry
@@ -62,7 +63,7 @@ private:
     rocprofiler_context_id_t                  m_ctx{ 0 };
     roctx_client_config                       m_config;
     marker_writer<MarkerWriterPolicy>         m_writer;
-    control::session&                         m_session;
+    std::shared_ptr<control::session>         m_session;
     std::unique_ptr<control::triggers::roctx> m_trigger;
 
     static thread_local marker_range_stack_t m_pushed_ranges;
@@ -93,12 +94,12 @@ thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
     roctx_client<MarkerWriterPolicy>::m_started_ranges{};
 
 template <typename MarkerWriterPolicy>
-roctx_client<MarkerWriterPolicy>::roctx_client(control::session&          session,
+roctx_client<MarkerWriterPolicy>::roctx_client(std::shared_ptr<control::session> session,
                                                const roctx_client_config& roctx_cfg)
 : m_config{ roctx_cfg }
 , m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
             roctx_cfg.perfetto_annotations }
-, m_session{ session }
+, m_session{ std::move(session) }
 , m_trigger{ std::make_unique<control::triggers::roctx>(
       m_session, roctx_cfg.selected_trace_regions) }
 {}

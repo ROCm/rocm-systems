@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -19,7 +20,7 @@ namespace rocprofsys::control::triggers
 class roctx
 {
 public:
-    roctx(session& sess, std::string_view trace_regions);
+    roctx(std::shared_ptr<session> sess, std::string_view trace_regions);
     ~roctx();
 
     roctx(const roctx&)            = delete;
@@ -48,7 +49,7 @@ private:
     std::atomic<bool>                  m_user_paused{ false };
     std::atomic<bool>                  m_should_write{ true };
     std::mutex                         m_mutex;
-    session&                           m_session;
+    std::shared_ptr<session>           m_session;
 
     static constexpr std::string_view trigger_name = "roctx";
 
