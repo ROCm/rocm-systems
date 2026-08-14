@@ -342,17 +342,20 @@ if(BUILD_TESTS)
     list(APPEND TEST_FIXTURE_SOURCE_FILES
       gin/GinAnvilIpcTableHost_test.cpp
       ../src/gin/gin_anvil_ipc_table_host.cc
-      # GIN rocSHMEM-GDA device template test. Self-contained: supplies its own
-      # rocshmem::QueuePair device stubs in-TU (no librocshmem device link, no
-      # header shadow), so it only needs ENABLE_ROCSHMEM_GIN (which enables
-      # NCCL_GIN_ROCSHMEM_GDA_ENABLE) and does not depend on the SDMA
-      # anvil_device.hpp shadow used by the Anvil-SDMA template test below.
-      device/GinRocshmemGdaTemplate_test.cpp
     )
   endif()
 
   if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
     list(APPEND TEST_FIXTURE_SOURCE_FILES
+      # GIN rocSHMEM-GDA device template test. Self-contained: supplies its own
+      # rocshmem::QueuePair device stubs in-TU (no librocshmem device link, no
+      # header shadow). Its body is guarded by NCCL_GIN_ROCSHMEM_GDA_ENABLE, which
+      # is 1 only when ENABLE_ROCSHMEM is defined -- and ENABLE_ROCSHMEM is added to
+      # this target under the same (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS)
+      # condition below. So it is built and run here (e.g. GIN_ANVIL_UNIT_TESTS)
+      # alongside the Anvil-SDMA template test, not in a pure ENABLE_ROCSHMEM_GIN
+      # build (where the body would compile out to zero test cases).
+      device/GinRocshmemGdaTemplate_test.cpp
       device/GinAnvilSdmaTemplate_test.cpp
     )
   endif()
