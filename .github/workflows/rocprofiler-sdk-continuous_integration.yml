@@ -253,7 +253,6 @@ jobs:
             --site ${{ needs.ci_config.outputs.gfx94x_runner }} \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
-            --stages Start Update Configure Build Submit \
             ${{ matrix.system.ci-flags }} -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
@@ -468,7 +467,6 @@ jobs:
             --site ${{ needs.ci_config.outputs.gfx94x_runner }} \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
-            --stages Start Update Configure Build Submit \
             ${{ matrix.system.ci-flags }} \
             -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
@@ -612,7 +610,6 @@ jobs:
           --gpu-targets ${{ env.GPU_TARGETS }} \
           --memcheck ${{ matrix.system.sanitizer }} \
           --run-attempt ${{ github.run_attempt }} \
-          --stages Start Update Configure Build Submit \
           -- \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}" \

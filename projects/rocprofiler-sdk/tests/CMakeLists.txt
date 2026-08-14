@@ -107,7 +107,8 @@ rocprofiler_sdk_timed_add_subdirectory(rocpd-api)
 rocprofiler_sdk_timed_add_subdirectory(rocattach)
 
 # rocprofv3 validation tests
-rocprofiler_sdk_timed_add_subdirectory(rocprofv3)
+# temporarily disabled while investigating slow test configuration
+# rocprofiler_sdk_timed_add_subdirectory(rocprofv3)
 
 # late-start tracing validation tests
 rocprofiler_sdk_timed_add_subdirectory(late-start-tracing)

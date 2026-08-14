@@ -261,7 +261,6 @@ jobs:
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage all
           --run-attempt ${{ github.run_attempt }}
-          --stages Start Update Configure Build Submit
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
@@ -284,7 +283,6 @@ jobs:
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage tests
           --run-attempt ${{ github.run_attempt }}
-          --stages Start Update Configure Build Submit
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
@@ -307,7 +305,6 @@ jobs:
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage samples
           --run-attempt ${{ github.run_attempt }}
-          --stages Start Update Configure Build Submit
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
