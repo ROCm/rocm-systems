@@ -24,6 +24,8 @@ from pc_sampling.pc_sampling_analysis import (
 )
 from pc_sampling.source_snapshot_analysis import (
     SourceFrame,
+    WorkloadSourceSnapshot,
+    export_source_snapshot_files,
     parse_source_frames,
     read_source_file_digest_and_lines,
     resolve_snapshot_path,
@@ -137,6 +139,18 @@ class SourceFrameCollector:
                 )
             )
 
+    def captured_source_paths(self) -> tuple[str, ...]:
+        """Return the absolute paths whose snapshot copy this workload holds.
+
+        A path the snapshot does not hold, and a frame naming a relative path,
+        carries no digest and has no copy to export.
+        """
+        return tuple(
+            absolute_path
+            for absolute_path, source_file in self._source_files.items()
+            if source_file.md5_checksum is not None
+        )
+
     def _get_or_create_source_line(self, frame: SourceFrame) -> orm.SourceLine:
         """Return the row for one frame's line, creating it if absent.
 
@@ -249,6 +263,7 @@ class db_analysis(OmniAnalyze_Base):
         console_debug(f"Initialized database: {db_name}")
 
         # Iterate over all workloads
+        workload_source_snapshots: list[WorkloadSourceSnapshot] = []
         for workload_path in self._runs.keys():
             # Add workload
             workload_obj = orm.Workload(
@@ -345,6 +360,14 @@ class db_analysis(OmniAnalyze_Base):
                 kernel_symbols,
                 source_frames,
             )
+            workload_source_snapshots.append(
+                WorkloadSourceSnapshot(
+                    workload_path=Path(workload_path),
+                    workload_name=workload_obj.name,
+                    workload_sub_name=workload_obj.sub_name,
+                    absolute_source_paths=source_frames.captured_source_paths(),
+                )
+            )
 
             # Add metrics and values - iterate on values, create metrics as needed
             self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
@@ -360,7 +383,12 @@ class db_analysis(OmniAnalyze_Base):
 
         if self.get_args().output_format == "csv":
             Database.commit()
-            Database.write_csv_dir(Path(db_name).with_suffix(""))
+            csv_result_folder = Path(db_name).with_suffix("")
+            Database.write_csv_dir(csv_result_folder)
+            export_source_snapshot_files(
+                workload_source_snapshots=workload_source_snapshots,
+                csv_result_directory=csv_result_folder,
+            )
         else:
             Database.create_views()
             Database.commit()

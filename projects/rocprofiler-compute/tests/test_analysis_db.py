@@ -6,6 +6,7 @@
 import copy
 import json
 from contextlib import ExitStack
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
@@ -17,6 +18,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import text
 
+from pc_sampling import source_snapshot_analysis
 from rocprof_compute_analyze.analysis_db import SourceFrameCollector, db_analysis
 from utils import analysis_orm as orm
 from utils import schema
@@ -24,6 +26,14 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
+
+VIEW_CSV_FILENAMES = frozenset({
+    "kernel.csv",
+    "kernel_metric.csv",
+    "pc_sampling_summary.csv",
+    "source_lines.csv",
+    "workload_metric.csv",
+})
 
 
 def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
@@ -187,6 +197,18 @@ def run_analysis_with_materialized_views(analyzer):
             )
         )
         analyzer.run_analysis()
+
+
+def cleanup_database() -> None:
+    """Close and clear the process-wide test database state."""
+    current_session = orm.Database._session
+    if current_session is not None:
+        current_session.close()
+    current_engine = orm.Database._engine
+    if current_engine is not None:
+        current_engine.dispose()
+    orm.Database._session = None
+    orm.Database._engine = None
 
 
 # =============================================================================
@@ -1448,13 +1470,7 @@ def test_run_analysis_exports_process_scoped_pc_sampling_csv(
         orm.Database.write_csv_dir(csv_directory)
 
         output_filenames = {path.name for path in csv_directory.iterdir()}
-        assert output_filenames == {
-            "kernel.csv",
-            "kernel_metric.csv",
-            "workload_metric.csv",
-            "pc_sampling_summary.csv",
-            "source_lines.csv",
-        }
+        assert output_filenames == VIEW_CSV_FILENAMES
         assert "dispatch.csv" not in output_filenames
 
         pc_sampling_frame = pd.read_csv(csv_directory / "pc_sampling_summary.csv")
@@ -1481,14 +1497,7 @@ def test_run_analysis_exports_process_scoped_pc_sampling_csv(
         # T1 regression guard: every sampling row must resolve in kernel.csv.
         assert set(pc_sampling_frame["kernel_uuid"]) <= set(kernel_frame["kernel_uuid"])
     finally:
-        current_session = orm.Database._session
-        if current_session is not None:
-            current_session.close()
-        current_engine = orm.Database._engine
-        if current_engine is not None:
-            current_engine.dispose()
-        orm.Database._session = None
-        orm.Database._engine = None
+        cleanup_database()
 
 
 def test_run_analysis_keeps_mixed_counter_and_pc_sampling_ownership(
@@ -1735,6 +1744,153 @@ def fetch_source_lines_by_workload(session):
             rows, key=lambda row: (row[0], row[2] is not None, row[2])
         )
         for workload_name, rows in source_lines_by_workload.items()
+    }
+
+
+def make_source_export_analyzer(tmp_path, output_format):
+    """Build an analyzer and the source export its result folder should hold.
+
+    Each workload holds one file its samples name and one it does not, so the
+    export is pinned to the files the database records.
+    """
+    unreferenced_source_path = "/workspace/include/unreferenced.hpp"
+    tool_data_per_workload = {}
+    expected_exported_files = {}
+    for workload_name, referenced_source_path, contents in (
+        ("first", "/workspace/src/first.cpp", "int first;\n"),
+        ("second", "/workspace/src/second.cpp", "int second;\n"),
+    ):
+        workload_path = tmp_path / "workloads" / workload_name / "run"
+        tool_data_per_workload[str(workload_path)] = (
+            make_source_workload_tool_data_records(
+                workload_path,
+                {
+                    referenced_source_path: contents,
+                    unreferenced_source_path: "int unreferenced;\n",
+                },
+                [f"{referenced_source_path}:1"],
+            )
+        )
+        expected_exported_files[
+            Path(workload_name) / "run" / Path(referenced_source_path).relative_to("/")
+        ] = contents.encode()
+
+    analyzer = make_pc_sampling_database_analyzer(tool_data_per_workload)
+    result_path = tmp_path / f"{output_format}_analysis"
+    analyzer.get_args().output_name = str(result_path)
+    analyzer.get_args().output_format = output_format
+    return analyzer, result_path, expected_exported_files
+
+
+def run_source_export_analysis(analyzer):
+    """Run source-export analysis and always clear the test database state."""
+    try:
+        with ExitStack() as patch_stack:
+            patch_stack.enter_context(patch.object(analyzer, "run_analysis_metrics"))
+            patch_stack.enter_context(
+                patch(
+                    "rocprof_compute_analyze.analysis_db.get_version",
+                    return_value={"version": "test", "sha": "test"},
+                )
+            )
+            analyzer.run_analysis()
+    finally:
+        cleanup_database()
+
+
+def read_view_csv_files(result_path):
+    """Return view CSV contents keyed by filename."""
+    return {
+        csv_path.name: csv_path.read_bytes() for csv_path in result_path.glob("*.csv")
+    }
+
+
+def write_view_csv_files_and_capture(
+    original_write_csv_dir,
+    captured_view_csv_files,
+    csv_directory,
+):
+    """Write view CSVs and capture their contents before source export."""
+    original_write_csv_dir(csv_directory)
+    captured_view_csv_files.update(read_view_csv_files(csv_directory))
+
+
+def test_run_analysis_source_export_is_not_created_for_db_output(tmp_path):
+    """Do not export source snapshots for database output."""
+    analyzer, result_path, _expected_exported_files = make_source_export_analyzer(
+        tmp_path,
+        "db",
+    )
+
+    with patch(
+        "rocprof_compute_analyze.analysis_db.export_source_snapshot_files"
+    ) as export_source_snapshot_files:
+        run_source_export_analysis(analyzer)
+
+    export_source_snapshot_files.assert_not_called()
+    assert Path(f"{result_path}.db").is_file()
+    assert not (result_path / "source").exists()
+
+
+def test_run_analysis_source_export_scopes_workloads_and_preserves_view_csvs(
+    tmp_path,
+):
+    """Isolate workload exports without changing the generated view CSVs."""
+    analyzer, result_path, expected_exported_files = make_source_export_analyzer(
+        tmp_path,
+        "csv",
+    )
+    view_csvs_before_source_export = {}
+    original_write_csv_dir = orm.Database.write_csv_dir
+
+    with ExitStack() as patch_stack:
+        patch_stack.enter_context(
+            patch.object(
+                orm.Database,
+                "write_csv_dir",
+                side_effect=partial(
+                    write_view_csv_files_and_capture,
+                    original_write_csv_dir,
+                    view_csvs_before_source_export,
+                ),
+            )
+        )
+        export_source_snapshot_files = patch_stack.enter_context(
+            patch(
+                "rocprof_compute_analyze.analysis_db.export_source_snapshot_files",
+                wraps=source_snapshot_analysis.export_source_snapshot_files,
+            )
+        )
+        run_source_export_analysis(analyzer)
+
+    # The analyzer names each export folder, rather than the export rederiving
+    # it, so a folder cannot drift from the workload row it belongs to.
+    export_arguments = export_source_snapshot_files.call_args.kwargs
+    assert export_arguments["csv_result_directory"] == result_path
+    assert [
+        (snapshot.workload_name, snapshot.workload_sub_name)
+        for snapshot in export_arguments["workload_source_snapshots"]
+    ] == [("first", "run"), ("second", "run")]
+
+    view_csvs_after_analysis = read_view_csv_files(result_path)
+    assert set(view_csvs_before_source_export) == VIEW_CSV_FILENAMES
+    assert set(view_csvs_after_analysis) == VIEW_CSV_FILENAMES
+    assert view_csvs_after_analysis == view_csvs_before_source_export
+
+    source_directory = result_path / "source"
+    assert source_directory.is_dir()
+    assert common.read_binary_file_tree(source_directory) == expected_exported_files
+
+    # Every path the CSV records locates its copy by dropping the leading "/".
+    exported_paths = common.read_binary_file_tree(source_directory)
+    source_lines_frame = pd.read_csv(result_path / "source_lines.csv")
+    assert {
+        Path(file_path).relative_to("/")
+        for file_path in source_lines_frame["file_path"]
+    } == {
+        # The first two components name the workload, not the source file.
+        Path(*exported_path.parts[2:])
+        for exported_path in exported_paths
     }
 
 

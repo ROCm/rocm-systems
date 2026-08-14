@@ -52,6 +52,8 @@ Base = declarative_base()
 
 class Workload(Base):
     __tablename__ = f"{PREFIX}workload"
+    # The pair names the workload's source export folder, so it must be unique.
+    __table_args__ = (UniqueConstraint("name", "sub_name"),)
 
     workload_id = Column(Integer, primary_key=True)
     name = Column(String)
