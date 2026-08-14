@@ -289,6 +289,33 @@ class CodeGenerator:
     _SRC_OPERANDS_CAPACITY = 6
     _DST_OPERANDS_CAPACITY = 3
 
+    # These selectors name a canonical unified register namespace, while their
+    # instruction fields use a format-dependent bank namespace completed by
+    # separate ACC/ACC_CD bits or format selectors. Some malformed fields are
+    # intentionally preserved for instruction-specific diagnostics, so the
+    # generic Operand constructor must not compare those raw values with the
+    # canonical selector intervals.
+    _NON_CANONICAL_SELECTOR_OPERAND_TYPES = frozenset(
+        {
+            'OPR_SRC_ACCVGPR',
+            'OPR_SRC_ACCVGPR_OR_CONST',
+            'OPR_SRC_VGPR_OR_ACCVGPR',
+            'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST',
+            'OPR_VGPR_OR_ACCVGPR',
+        }
+    )
+
+    # These gfx1250 K=128 forms accept an ordinary scalar source for src2 in
+    # addition to the VGPR/inline spellings declared by the shared XML operand
+    # type. Keep that instruction-specific namespace explicit while validating
+    # the other OPR_SRC_VGPR_OR_INLINE users against their declared intervals.
+    _GENERIC_WMMA_ACCUMULATOR_INSTRUCTIONS = frozenset(
+        f'V_WMMA_F{result_bits}_16X16X128_{lhs}_{rhs}'
+        for result_bits in (16, 32)
+        for lhs in ('FP8', 'BF8')
+        for rhs in ('FP8', 'BF8')
+    )
+
     def __init__(
         self,
         isa_spec: IsaSpec,
@@ -308,11 +335,22 @@ class CodeGenerator:
         # lazily from the spec's selectors on first use (see
         # _fieldless_canonical_value).
         self._fieldless_canon_cache: dict[str, int] | None = None
+        self._selector_interval_cache: dict[str, list[tuple[int, int]]] = {}
         self._emitter = _SemanticEmitter(isa_spec, semantics)
         # Split profiles assign a dense, named ID to every concrete instruction
         # class. The matching immutable callback table is emitted after all
         # instruction classes have been generated.
         self._split_execution_classes: list[str] = []
+
+    @property
+    def generated_dir_name(self) -> str:
+        """Filesystem directory for this ISA's generated and handwritten files."""
+        return self.isa_spec.generated_dir_name
+
+    @property
+    def cpp_namespace(self) -> str:
+        """C++ namespace for this ISA's generated declarations."""
+        return self.isa_spec.cpp_namespace
 
     def _split_execute_expr(self, class_name: str) -> str:
         """Return the model constructor expression for one split instruction."""
@@ -538,7 +576,7 @@ class CodeGenerator:
         ``kSGetPcB64``) is emitted only when all instances of that mnemonic in
         this ISA use the same raw opcode.
         """
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         mnemonic_values: dict[str, list[int]] = defaultdict(list)
         concrete: list[tuple[str, int]] = []
         seen: dict[str, int] = {}
@@ -604,7 +642,7 @@ class CodeGenerator:
             ]
         )
 
-        arch_out_path = os.path.join(self.out_path, arch)
+        arch_out_path = os.path.join(self.out_path, self.generated_dir_name)
         os.makedirs(arch_out_path, exist_ok=True)
         with open(os.path.join(arch_out_path, 'opcodes.h'), 'w') as f:
             f.write('\n'.join(lines))
@@ -663,7 +701,7 @@ class CodeGenerator:
         structure: callers should describe only operands and modifiers, while
         the generator remains responsible for the binary layout.
         """
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         body: list[str] = [
             CppFile._prologue_comment(),
             f'#ifndef ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_BUILDERS_H_',
@@ -783,7 +821,7 @@ class CodeGenerator:
             ]
         )
 
-        arch_out_path = os.path.join(self.out_path, arch)
+        arch_out_path = os.path.join(self.out_path, self.generated_dir_name)
         os.makedirs(arch_out_path, exist_ok=True)
         with open(os.path.join(arch_out_path, 'builders.h'), 'w') as f:
             f.write('\n'.join(body))
@@ -791,6 +829,8 @@ class CodeGenerator:
     def _constructor_operand_type(
         self, inst_sem: InstructionSemantics | None, opnd: Operand
     ) -> str:
+        if self._uses_generic_wmma_accumulator_selector(inst_sem, opnd):
+            return 'OPR_SRC'
         if (
             inst_sem
             and inst_sem.semantic_class in ('vector_readfirstlane', 'vector_readlane')
@@ -802,6 +842,17 @@ class CodeGenerator:
         if inst_sem and inst_sem.accvgpr_srcs and opnd.is_input:
             return 'OPR_SRC_VGPR_OR_ACCVGPR'
         return opnd.operand_type
+
+    def _uses_generic_wmma_accumulator_selector(
+        self, inst_sem: InstructionSemantics | None, opnd: Operand
+    ) -> bool:
+        return (
+            getattr(self.isa_spec, 'arch_name', None) == 'gfx1250'
+            and inst_sem is not None
+            and inst_sem.name in self._GENERIC_WMMA_ACCUMULATOR_INSTRUCTIONS
+            and opnd.name == 'src2'
+            and opnd.operand_type == 'OPR_SRC_VGPR_OR_INLINE'
+        )
 
     @staticmethod
     def _sdwa_source_modifier_format(
@@ -1141,6 +1192,76 @@ class CodeGenerator:
     def _instruction_supports_sdwa(self, inst: Instruction, enc_name: str) -> bool:
         return self._instruction_supports_modifier_encoding(inst, enc_name, 'sdwa')
 
+    def _instruction_supports_literal_encoding(
+        self, inst: Instruction, parent_enc_name: str, width: int
+    ) -> bool:
+        """Whether the instruction lists a literal alternate for this format."""
+        if inst.available_encodings is None:
+            raise ValueError(
+                f'{inst.name}: cannot determine literal support without '
+                'instruction encoding provenance'
+            )
+
+        suffix = '_INST_LITERAL64' if width == 64 else '_INST_LITERAL'
+        parent_upper = parent_enc_name.upper()
+        for enc_name in inst.available_encodings:
+            enc_upper = enc_name.upper()
+            if not enc_upper.endswith(suffix):
+                continue
+            if (
+                self.isa_spec.profile.is_alt_encoding(enc_name)
+                and self.isa_spec.profile.derive_parent_enc_name(enc_name).upper()
+                == parent_upper
+            ):
+                return True
+        return False
+
+    def _instruction_literal_support(
+        self, inst: Instruction, inst_enc: InstEncoding
+    ) -> tuple[bool, bool, bool]:
+        """Return whether support is tracked and the accepted literal widths."""
+        tracks_support = self._supports_simm64_literal_operands()
+        if not tracks_support:
+            return False, True, False
+
+        base_enc_name = self._instruction_base_encoding_name(inst)
+        supports_literal32 = self._instruction_supports_literal_encoding(
+            inst, base_enc_name, 32
+        )
+        supports_literal64 = bool(self._literal64_condition_names(inst_enc)) and (
+            self._instruction_supports_literal_encoding(inst, base_enc_name, 64)
+        )
+        return tracks_support, supports_literal32, supports_literal64
+
+    @staticmethod
+    def _literal_support_enum_name(
+        supports_literal32: bool, supports_literal64: bool
+    ) -> str:
+        if supports_literal32 and supports_literal64:
+            return 'Both'
+        if supports_literal32:
+            return 'Literal32'
+        if supports_literal64:
+            return 'Literal64'
+        return 'None'
+
+    @staticmethod
+    def _active_literal_selector_fields(
+        inst: Instruction, literal_fields: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        """Return the encoded source fields that are literal selectors for inst."""
+        non_literal_operand_types = ('OPR_SENDMSG', 'OPR_SENDMSG_RTN')
+        return tuple(
+            field
+            for field in literal_fields
+            if any(
+                opnd.is_input
+                and opnd.name == field
+                and opnd.operand_type not in non_literal_operand_types
+                for opnd in inst.operands
+            )
+        )
+
     def _instruction_base_encoding_name(self, inst: Instruction) -> str:
         if inst.is_implied_literal_enc:
             return self.isa_spec.profile.derive_parent_enc_name(inst.enc_name)
@@ -1178,9 +1299,9 @@ class CodeGenerator:
         if not self.isa_spec.profile.split_execution_sources:
             return
 
-        arch = self.isa_spec.arch_name
-        generated_arch = self.config.generated_include(arch)
-        handwritten_arch = self.config.handwritten_include(arch)
+        arch = self.cpp_namespace
+        generated_arch = self.config.generated_include(self.generated_dir_name)
+        handwritten_arch = self.config.handwritten_include(self.generated_dir_name)
         execution_ids = ''.join(
             f'  {class_name},\n' for class_name in self._split_execution_classes
         )
@@ -1255,7 +1376,7 @@ class CodeGenerator:
             }} // namespace {arch}
             }} // namespace rocjitsu
             ''')
-        arch_dir = os.path.join(self.out_path, arch)
+        arch_dir = os.path.join(self.out_path, self.generated_dir_name)
         os.makedirs(arch_dir, exist_ok=True)
         with open(os.path.join(arch_dir, 'execution_backend.h'), 'w') as f:
             f.write(header)
@@ -1276,7 +1397,8 @@ class CodeGenerator:
         if not self._supports_generated_vopd():
             return
 
-        arch = self.isa_spec.arch_name
+        logical_arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         vopd_encoding_prefixes = self.isa_spec.profile.vopd_encoding_prefixes
         vopd_prefixes = [
             prefix for prefix in vopd_encoding_prefixes if not prefix.is_vopd3
@@ -1285,7 +1407,9 @@ class CodeGenerator:
             prefix for prefix in vopd_encoding_prefixes if prefix.is_vopd3
         ]
         if len(vopd_prefixes) != 1 or len(vopd3_prefixes) > 1:
-            raise ValueError(f'{arch} has invalid VOPD encoding prefix metadata')
+            raise ValueError(
+                f'{logical_arch} has invalid VOPD encoding prefix metadata'
+            )
         vopd_prefix = vopd_prefixes[0]
         vopd3_prefix = vopd3_prefixes[0] if vopd3_prefixes else None
         has_vopd3 = vopd3_prefix is not None
@@ -1303,7 +1427,9 @@ class CodeGenerator:
 
         vopd_slot_ops = self.isa_spec.profile.vopd_slot_ops
         if not vopd_slot_ops:
-            raise ValueError(f'{arch} has VOPD enabled without a slot opcode table')
+            raise ValueError(
+                f'{logical_arch} has VOPD enabled without a slot opcode table'
+            )
         vopd_slot_op_names = {op.enum_name for op in vopd_slot_ops}
 
         def has_op(enum_name: str) -> bool:
@@ -1341,7 +1467,7 @@ class CodeGenerator:
             unknown_opcodes = opcodes.difference(op.opcode for op in vopd_slot_ops)
             if unknown_opcodes:
                 raise ValueError(
-                    f'{arch} {name} references unknown VOPD opcodes: '
+                    f'{logical_arch} {name} references unknown VOPD opcodes: '
                     f'{sorted(unknown_opcodes)}'
                 )
             mask = sum(1 << opcode for opcode in opcodes)
@@ -1806,6 +1932,8 @@ class CodeGenerator:
                   throw util::InvalidInst("invalid VOPD3 Y opcode", "");
                 uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
                 uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
+                if (srcx0 == 254 || srcx0 == 255 || srcy0 == 254 || srcy0 == 255)
+                  throw util::InvalidInst("VOPD3 does not support literal selectors", "");
                 negx_ = static_cast<uint8_t>((word1_ >> 9) & 0x7);
                 negy_ = static_cast<uint8_t>((word1_ >> 12) & 0x7);
                 uint16_t vsrcx1 = static_cast<uint16_t>((word1_ >> 16) & 0xFF);
@@ -1887,7 +2015,7 @@ class CodeGenerator:
             vopd_execute_slot_cases, vopd3_execute_slot_cases
         )
         vopd_impl_includes = textwrap.dedent('''\
-            #include "@GENERATED_BASE@/@ARCH@/vopd.h"
+            #include "@GENERATED_ARCH@/vopd.h"
             #include "util/except.h"
             #include "rocjitsu/vm/amdgpu/wavefront.h"
             #include <algorithm>
@@ -1898,16 +2026,17 @@ class CodeGenerator:
             ''')
         if self.isa_spec.profile.split_execution_sources:
             vopd_impl_includes = textwrap.dedent('''\
-                #include "@GENERATED_BASE@/@ARCH@/vopd.h"
-                #include "@GENERATED_BASE@/@ARCH@/execution_backend.h"
+                #include "@GENERATED_ARCH@/vopd.h"
+                #include "@GENERATED_ARCH@/execution_backend.h"
                 #include "util/except.h"
                 #include <format>
                 #include <string>
                 ''')
         vopd_impl_includes = vopd_impl_includes.replace(
-            '@GENERATED_BASE@', self.config.generated_include_base
-        ).replace('@ARCH@', arch)
-        out_dir = os.path.join(self.out_path, arch)
+            '@GENERATED_ARCH@',
+            self.config.generated_include(self.generated_dir_name),
+        )
+        out_dir = os.path.join(self.out_path, self.generated_dir_name)
         os.makedirs(out_dir, exist_ok=True)
         guard = f'ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_VOPD_H_'
 
@@ -1922,8 +2051,8 @@ class CodeGenerator:
             #ifndef @GUARD@
             #define @GUARD@
 
-            #include "@GENERATED_BASE@/@ARCH@/encodings.h"
-            #include "@GENERATED_BASE@/@ARCH@/operand.h"
+            #include "@GENERATED_ARCH@/encodings.h"
+            #include "@GENERATED_ARCH@/operand.h"
             #include <cstdint>
             #include <string>
 
@@ -1991,7 +2120,10 @@ class CodeGenerator:
             ''')
             .lstrip()
             .replace('@ARCH@', arch)
-            .replace('@GENERATED_BASE@', self.config.generated_include_base)
+            .replace(
+                '@GENERATED_ARCH@',
+                self.config.generated_include(self.generated_dir_name),
+            )
             .replace('@GUARD@', guard)
             .replace('@VOPD3_FORMAT_ENUM@', ', Vopd3' if has_vopd3 else '')
             .replace('@VOPD3_HEADER_DECLS@', vopd3_header_decls)
@@ -2129,6 +2261,8 @@ class CodeGenerator:
                 uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
                 uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
                 uint16_t vsrcy1 = static_cast<uint16_t>((word1_ >> 9) & 0xFF);
+                if (srcx0 == 254 || srcy0 == 254)
+                  throw util::InvalidInst("VOPD does not support 64-bit literals", "");
                 uint16_t vdstx = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
                 uint16_t vdsty_hi = static_cast<uint16_t>((word1_ >> 17) & 0x7F);
                 uint16_t vdsty = static_cast<uint16_t>((vdsty_hi << 1) | ((~vdstx) & 1u));
@@ -2282,7 +2416,7 @@ class CodeGenerator:
                 '//\n'
                 '// AUTO-GENERATED by the amdisa codegen pipeline. DO NOT EDIT.\n'
                 '// See lib/python/amdisa/README.md for regeneration instructions.\n\n'
-                f'#include "{self.config.generated_include(arch, "vopd.h")}"\n'
+                f'#include "{self.config.generated_include(self.generated_dir_name, "vopd.h")}"\n'
                 '#include "util/except.h"\n'
                 '#include "rocjitsu/vm/amdgpu/register_access.h"\n'
                 '#include "rocjitsu/vm/amdgpu/wavefront.h"\n'
@@ -2372,7 +2506,8 @@ class CodeGenerator:
             includes,
             [],
             enc_structs,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
+            generated_dir_name=self.generated_dir_name,
         )
         cpp_file.gen_code()
 
@@ -2381,9 +2516,23 @@ class CodeGenerator:
         enc_classes = []
         class_func_impls = []
         cond_emitted: set[str] = set()
+        needs_invalid_inst_include = False
         for inst_enc in self.isa_spec.inst_encodings:
             if not inst_enc.insts:
                 continue
+            enc_field_names = {f.name for f in inst_enc.ucode_fields}
+            literal_fields = _LITERAL_ENCODING_OPERANDS.get(
+                inst_enc.enc_name.upper(), ('', ())
+            )[1]
+            encoded_literal_fields = tuple(
+                field for field in literal_fields if field in enc_field_names
+            )
+            uses_instruction_literal_policy = (
+                self._supports_simm64_literal_operands()
+                and bool(encoded_literal_fields)
+            )
+            if uses_instruction_literal_policy:
+                needs_invalid_inst_include = True
             unsupported_literal64_fields = self._unsupported_literal64_selector_fields(
                 inst_enc
             )
@@ -2413,7 +2562,20 @@ class CodeGenerator:
                 ),
                 cgen.Value('ExecuteFn', 'exec_fn'),
             ]
-            if unsupported_literal64_fields:
+            if uses_instruction_literal_policy:
+                constructor_args.extend(
+                    [
+                        cgen.Value(
+                            'LiteralSupport',
+                            'literal_support = LiteralSupport::Both',
+                        ),
+                        cgen.Value(
+                            'int',
+                            'num_encoded_sources = ' f'{len(encoded_literal_fields)}',
+                        ),
+                    ]
+                )
+            elif unsupported_literal64_fields:
                 constructor_args.append(cgen.Value('int', 'num_encoded_sources = 3'))
             if supports_fixed_size_embedding:
                 constructor_args.append(
@@ -2478,7 +2640,6 @@ class CodeGenerator:
                 mnemonic_expr = 'mnemonic'
 
             modifier_lines = ''
-            enc_field_names = {f.name for f in inst_enc.ucode_fields}
             for mod in profile.encoding_modifiers(inst_enc.enc_name):
                 if not mod.preamble and mod.field not in enc_field_names:
                     continue
@@ -2543,6 +2704,42 @@ class CodeGenerator:
                     f' throw util::InvalidInst("{inst_enc.fmt_enc_name} does not support '
                     'Literal64", "");'
                 )
+            if uses_instruction_literal_policy:
+                for width, selector in ((32, 255), (64, 254)):
+                    reject_condition = ' || '.join(
+                        f'(num_encoded_sources > {source_idx} && '
+                        f'inst_.{field} == {selector})'
+                        for source_idx, field in enumerate(encoded_literal_fields)
+                    )
+                    size_line += (
+                        f'\n  if (!supports_literal(literal_support, '
+                        f'LiteralSupport::Literal{width}) && ({reject_condition}))'
+                        ' throw util::InvalidInst('
+                        f'std::string(mnemonic) + " does not support {width}-bit literals", "");'
+                    )
+            non_literal_selector_ops = sorted(
+                {
+                    inst.opcode
+                    for inst in inst_enc.insts
+                    if any(
+                        opnd.name in literal_fields
+                        and opnd.operand_type in ('OPR_SENDMSG', 'OPR_SENDMSG_RTN')
+                        for opnd in inst.operands
+                    )
+                }
+            )
+            if needs_explicit_dpp_size and encoded_literal_fields:
+                dpp_extension_condition = ' || '.join(dpp_extension_conditions)
+                literal_selector_condition = ' || '.join(
+                    f'inst_.{field} == 255' for field in encoded_literal_fields
+                )
+                size_line += (
+                    f' if (({dpp_extension_condition}) && '
+                    f'({literal_selector_condition}))'
+                    ' throw util::InvalidInst('
+                    '"DPP and literal operands cannot be combined", "");'
+                )
+                needs_invalid_inst_include = True
             # Size owned storage from this encoding's declared extension forms,
             # not the architecture-wide operand selector table. For example,
             # gfx1250 defines selector 254 for 64-bit literals, but the 64-bit
@@ -2586,6 +2783,13 @@ class CodeGenerator:
                 extension_size_line = (
                     f' if ({literal32_condition}) size_ += sizeof(MachineInst);'
                 )
+            if extension_size_line and non_literal_selector_ops:
+                extension_guard = ' && '.join(
+                    f'inst_.op != {opcode}' for opcode in non_literal_selector_ops
+                )
+                extension_size_line = (
+                    f' if ({extension_guard}) {{' + extension_size_line + ' }'
+                )
             if inst_enc.has_variable_implied_literal_size:
                 size_line += (
                     ' if (hasImpliedLiteral()) size_ += impliedLiteralWordCount()'
@@ -2611,7 +2815,11 @@ class CodeGenerator:
             if supports_fixed_size_embedding:
                 size_line += ' }'
             constructor_extra_params = ''
-            if unsupported_literal64_fields:
+            if uses_instruction_literal_policy:
+                constructor_extra_params += (
+                    ', LiteralSupport literal_support, int num_encoded_sources'
+                )
+            elif unsupported_literal64_fields:
                 constructor_extra_params += ', int num_encoded_sources'
             if supports_fixed_size_embedding:
                 constructor_extra_params += ', ExtensionDecodePolicy extension_policy'
@@ -2860,6 +3068,24 @@ class CodeGenerator:
             )
             enc_classes.append(s)
 
+        if self._supports_simm64_literal_operands():
+            enc_classes.insert(
+                0,
+                cgen.Line(
+                    'enum class LiteralSupport : uint8_t {\n'
+                    '  None = 0,\n'
+                    '  Literal32 = 1,\n'
+                    '  Literal64 = 2,\n'
+                    '  Both = 3,\n'
+                    '};\n\n'
+                    '[[nodiscard]] constexpr bool supports_literal(\n'
+                    '    LiteralSupport support, LiteralSupport required) {\n'
+                    '  return (static_cast<uint8_t>(support) &\n'
+                    '          static_cast<uint8_t>(required)) != 0;\n'
+                    '}'
+                ),
+            )
+
         encoding_constants = self._encoding_constants_block()
         if encoding_constants is not None:
             enc_classes.insert(0, encoding_constants)
@@ -2875,12 +3101,12 @@ class CodeGenerator:
             True,
             [
                 (
-                    self.config.handwritten_include(self.isa_spec.arch_name, 'isa.h'),
+                    self.config.handwritten_include(self.generated_dir_name, 'isa.h'),
                     False,
                 ),
                 (
                     self.config.generated_include(
-                        self.isa_spec.arch_name, 'machine_insts.h'
+                        self.generated_dir_name, 'machine_insts.h'
                     ),
                     False,
                 ),
@@ -2893,8 +3119,9 @@ class CodeGenerator:
             ],
             [],
             enc_classes,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
             True,
+            generated_dir_name=self.generated_dir_name,
         )
         needs_flat_mnemonic = any(
             self.isa_spec.profile.mnemonic_rule(enc.enc_name).use_flat_mnemonic
@@ -2917,17 +3144,20 @@ class CodeGenerator:
 
         _enc_cpp_includes = [
             (
-                self.config.generated_include(self.isa_spec.arch_name, 'encodings.h'),
+                self.config.generated_include(self.generated_dir_name, 'encodings.h'),
                 False,
             ),
             ('cstring', True),
             ('string', True),
         ]
-        if self._supports_simm64_literal_operands() and any(
-            self._rejects_unencoded_vop3p_literal64(enc)
-            for enc in self.isa_spec.inst_encodings
+        if needs_invalid_inst_include or (
+            self._supports_simm64_literal_operands()
+            and any(
+                self._rejects_unencoded_vop3p_literal64(enc)
+                for enc in self.isa_spec.inst_encodings
+            )
         ):
-            _enc_cpp_includes.append(('util/except.h', False))
+            _enc_cpp_includes.insert(1, ('util/except.h', False))
         class_impl_file = CppFile(
             'encodings',
             self.out_path,
@@ -2935,7 +3165,8 @@ class CodeGenerator:
             _enc_cpp_includes,
             [],
             class_func_impls,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
+            generated_dir_name=self.generated_dir_name,
         )
         class_def_file.gen_code()
         class_impl_file.gen_code()
@@ -3741,7 +3972,8 @@ class CodeGenerator:
         model = textwrap.dedent('''\
             VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
                 : Vop3p(gfx1250_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
-                        @EXEC_FN@, 3, Vop3p::ExtensionDecodePolicy::Skip),
+                        @EXEC_FN@, LiteralSupport::Both, 3,
+                        Vop3p::ExtensionDecodePolicy::Skip),
                   vdst(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->vdst),
                   src0(gfx1250_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
@@ -6981,6 +7213,110 @@ class CodeGenerator:
             self._fieldless_canon_cache = cache
         return cache.get(operand_type, 0)
 
+    def _operand_selector_intervals(self, operand_type: str) -> list[tuple[int, int]]:
+        """Return merged numeric intervals declared for an operand type."""
+        cached = self._selector_interval_cache.get(operand_type)
+        if cached is not None:
+            return cached
+
+        selector = next(
+            (
+                item
+                for item in self.isa_spec.opnd_selectors
+                if item.operand_type == operand_type
+            ),
+            None,
+        )
+        if selector is None:
+            raise ValueError(f'{operand_type}: operand selector is not defined')
+
+        enum_values = {}
+        for name, value in selector.op_sel_vals:
+            try:
+                enum_values[name] = int(value, 0)
+            except (TypeError, ValueError):
+                continue
+
+        intervals = [(value, value) for value in enum_values.values()]
+        for pattern in selector.name_patterns:
+            if pattern.kind not in (
+                OperandNamePattern.REG_RANGE,
+                OperandNamePattern.POS_INT,
+                OperandNamePattern.NEG_INT,
+            ):
+                continue
+            lo = enum_values[pattern.min_enum]
+            hi = enum_values[pattern.max_enum]
+            intervals.append((min(lo, hi), max(lo, hi)))
+
+        merged: list[tuple[int, int]] = []
+        for lo, hi in sorted(intervals):
+            if merged and lo <= merged[-1][1] + 1:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+            else:
+                merged.append((lo, hi))
+        self._selector_interval_cache[operand_type] = merged
+        return merged
+
+    def _operand_selector_contains(self, operand_type: str, value: int) -> bool | None:
+        """Whether a selector declares ``value``, or None for a non-selector type."""
+        try:
+            intervals = self._operand_selector_intervals(operand_type)
+        except ValueError:
+            return None
+        return any(lo <= value <= hi for lo, hi in intervals)
+
+    def _instruction_encoding_field_names(self, inst: Instruction) -> set[str]:
+        """Return fields visible to the generated constructor for ``inst``."""
+        inst_enc = self.isa_spec.encoding_map.get(inst.enc_name)
+        if inst_enc is None:
+            return set()
+
+        profile = self.isa_spec.profile
+        if not profile.is_alt_encoding(inst.enc_name):
+            return {field.name for field in inst_enc.ucode_fields}
+
+        parent_name = profile.derive_parent_enc_name(inst.enc_name)
+        parent = self.isa_spec.encoding_map.get(parent_name)
+        fields = {field.name for field in parent.ucode_fields} if parent else set()
+        if not inst.is_implied_literal_enc:
+            fields.update(field.name for field in inst_enc.ucode_fields)
+        return fields
+
+    def _selector_constructors_use_canonical_values(self, operand_type: str) -> bool:
+        """Whether every generated constructor value is in the selector namespace.
+
+        Encoding fields are passed through ``_operand_encoding_value_expr``, which
+        maps grouped register fields and accumulator-bank bits to canonical selector
+        values. Fieldless operands use a canonical fixed value. A missing,
+        non-fieldless operand is initialized with zero until instruction-specific
+        code replaces it; such a placeholder is safe to validate only when zero is
+        itself declared by the selector.
+        """
+        if operand_type in self._NON_CANONICAL_SELECTOR_OPERAND_TYPES:
+            return False
+
+        zero_is_valid = self._operand_selector_contains(operand_type, 0)
+        if zero_is_valid is None:
+            return False
+
+        for enc in self.isa_spec.inst_encodings:
+            for inst in enc.insts:
+                inst_sem = (
+                    self.semantics.instructions.get(inst.name)
+                    if self.semantics
+                    else None
+                )
+                field_names = self._instruction_encoding_field_names(inst)
+                for opnd in inst.operands:
+                    if self._constructor_operand_type(inst_sem, opnd) != operand_type:
+                        continue
+                    if opnd.name in field_names or opnd.fieldless:
+                        continue
+                    if not zero_is_valid:
+                        return False
+        return True
+
     def gen_insts(self) -> None:
         """Generate instruction classes deriving from encoding classes.
 
@@ -6996,6 +7332,8 @@ class CodeGenerator:
         The ``encoding_map`` is used to resolve each instruction's actual
         encoding fields for correct struct member access.
         """
+        decoder_factories = self._distributed_decoder_factories()
+
         # Build a mapping of parent encoding names to their child alt
         # encodings that have their own instructions (Category 1 alts).
         profile = self.isa_spec.profile
@@ -7515,38 +7853,43 @@ class CodeGenerator:
                     exec_fn_expr = f'make_exec_fn<{inst.fmt_name}>()'
                     if profile.split_execution_sources:
                         exec_fn_expr = self._split_execute_expr(inst.fmt_name)
-                    encoded_source_count_arg = ''
-                    unsupported_literal64_fields = (
-                        self._unsupported_literal64_selector_fields(enc)
+                    (
+                        _tracks_instruction_literal_support,
+                        _supports_simm32_literals,
+                        _supports_simm64_literals,
+                    ) = self._instruction_literal_support(inst, enc)
+                    _base_literal_fields = tuple(
+                        field
+                        for field in _LITERAL_ENCODING_OPERANDS.get(
+                            enc.enc_name.upper(), ('', ())
+                        )[1]
+                        if field in enc_field_names
                     )
-                    if unsupported_literal64_fields:
-                        active_selector_fields = tuple(
-                            field
-                            for field in unsupported_literal64_fields
-                            if any(
-                                opnd.is_input and opnd.name == field
-                                for opnd in inst.operands
-                            )
+                    literal_policy_args = ''
+                    if _tracks_instruction_literal_support and _base_literal_fields:
+                        active_selector_fields = self._active_literal_selector_fields(
+                            inst, _base_literal_fields
                         )
                         assert (
                             active_selector_fields
-                            == unsupported_literal64_fields[
-                                : len(active_selector_fields)
-                            ]
+                            == _base_literal_fields[: len(active_selector_fields)]
                         ), (
                             f'{inst.name}: non-contiguous encoded source selectors '
                             f'{active_selector_fields}'
                         )
-                        if len(active_selector_fields) != len(
-                            unsupported_literal64_fields
-                        ):
-                            encoded_source_count_arg = (
-                                f', {len(active_selector_fields)}'
-                            )
+                        literal_support = self._literal_support_enum_name(
+                            _supports_simm32_literals, _supports_simm64_literals
+                        )
+                        if literal_support != 'Both' or len(
+                            active_selector_fields
+                        ) != len(_base_literal_fields):
+                            literal_policy_args = f', LiteralSupport::{literal_support}'
+                        if len(active_selector_fields) != len(_base_literal_fields):
+                            literal_policy_args += f', {len(active_selector_fields)}'
                     init_list_parts = [
                         f'{inst.fmt_true_enc_name}({mnemonic_expr}, '
                         f'reinterpret_cast<const OpEncoding*>(inst), '
-                        f'{exec_fn_expr}{encoded_source_count_arg})'
+                        f'{exec_fn_expr}{literal_policy_args})'
                     ] + opnd_ctor_init
                     init_list = ', '.join(init_list_parts)
                     # Check if this is a memory instruction to set MEMORY_OP flag
@@ -7604,6 +7947,27 @@ class CodeGenerator:
                     ctor_body_parts.append(f'num_dst_ = {dst_idx};')
                     ctor_body_parts.extend(conditional_src_body)
                     ctor_body_parts.extend(conditional_dst_body)
+
+                    for opnd in inst.operands:
+                        if not self._uses_generic_wmma_accumulator_selector(
+                            inst_sem, opnd
+                        ):
+                            continue
+                        intervals = [(0, 124)] + self._operand_selector_intervals(
+                            opnd.operand_type
+                        )
+                        raw_value = (
+                            f'reinterpret_cast<const OpEncoding*>(inst)->{opnd.name}'
+                        )
+                        valid_expr = ' || '.join(
+                            f'({raw_value} >= {lo} && {raw_value} <= {hi})'
+                            for lo, hi in intervals
+                        )
+                        ctor_body_parts.append(
+                            f'if (!({valid_expr})) '
+                            f'throw util::InvalidInst("{inst.name} has an invalid '
+                            'accumulator selector", "");'
+                        )
 
                     # LLVM models pseudo-scalar V_S_* destinations as
                     # SReg_32_XEXEC: selectors 0..125 (SGPRs, TTMPs, VCC,
@@ -7670,10 +8034,6 @@ class CodeGenerator:
                     # with it (no double-patch of one operand).
                     _generic_literal_patched: set[str] = set()
                     _lit_info = self._literal_encoding_info(enc, inst_enc_obj, inst)
-                    _supports_simm64_literals = (
-                        self._supports_simm64_literal_operands()
-                        and not self._rejects_unencoded_vop3p_literal64(enc)
-                    )
                     if _lit_info and self._has_machine_inst_struct(_lit_info[0]):
                         _lit_struct, _lit_fields = _lit_info
                         _lit32_struct = _lit_struct
@@ -7686,6 +8046,35 @@ class CodeGenerator:
                             )
                             if _lit32_info:
                                 _lit32_struct = _lit32_info[0]
+                        _encoded_literal_fields = [
+                            opnd.name
+                            for opnd in inst.operands
+                            if opnd.name in _lit_fields
+                            and opnd.name in enc_field_names
+                            and opnd.operand_type
+                            not in ('OPR_SENDMSG', 'OPR_SENDMSG_RTN')
+                        ]
+                        if (
+                            _supports_simm32_literals
+                            and _supports_simm64_literals
+                            and len(_encoded_literal_fields) > 1
+                        ):
+                            literal32_selector = ' || '.join(
+                                'reinterpret_cast<const OpEncoding*>(inst)->'
+                                f'{field} == 255'
+                                for field in _encoded_literal_fields
+                            )
+                            literal64_selector = ' || '.join(
+                                'reinterpret_cast<const OpEncoding*>(inst)->'
+                                f'{field} == 254'
+                                for field in _encoded_literal_fields
+                            )
+                            ctor_body_parts.append(
+                                f'if (({literal32_selector}) && '
+                                f'({literal64_selector})) '
+                                f'throw util::InvalidInst("{inst.name} may not mix '
+                                '32-bit and 64-bit literals", "");'
+                            )
                         for opnd in inst.operands:
                             # The only fieldless operand that needs a fixup
                             # are LITERAL ones.
@@ -7699,6 +8088,24 @@ class CodeGenerator:
                                 opnd.name in _lit_fields
                                 and opnd.name in enc_field_names
                             ):
+                                if opnd.operand_type in (
+                                    'OPR_SENDMSG',
+                                    'OPR_SENDMSG_RTN',
+                                ):
+                                    continue
+                                literal_operand_type = self._constructor_operand_type(
+                                    inst_sem, opnd
+                                )
+                                if self._uses_generic_wmma_accumulator_selector(
+                                    inst_sem, opnd
+                                ):
+                                    literal_operand_type = opnd.operand_type
+                                accepts_literal32 = self._operand_selector_contains(
+                                    literal_operand_type, 255
+                                )
+                                accepts_literal64 = self._operand_selector_contains(
+                                    literal_operand_type, 254
+                                )
                                 # F16 pseudo-scalar V_S_* instructions always
                                 # consume literal bits [15:0]. Unlike generic
                                 # true16 VOP3 operands, OPSEL does not select a
@@ -7728,12 +8135,19 @@ class CodeGenerator:
                                     inst.enc_name,
                                 )
                                 assert fixup is not None
-                                ctor_body_parts.append(
-                                    f'if (reinterpret_cast<const OpEncoding*>(inst)->{opnd.name} == 255) '
-                                    f'{fixup}'
-                                )
-                                _generic_literal_patched.add(opnd.name)
-                                if _supports_simm64_literals:
+                                if (
+                                    _supports_simm32_literals
+                                    and accepts_literal32 is not False
+                                ):
+                                    ctor_body_parts.append(
+                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->{opnd.name} == 255) '
+                                        f'{fixup}'
+                                    )
+                                    _generic_literal_patched.add(opnd.name)
+                                if (
+                                    _supports_simm64_literals
+                                    and accepts_literal64 is not False
+                                ):
                                     ctor_body_parts.append(
                                         f'if (reinterpret_cast<const OpEncoding*>(inst)->{opnd.name} == 254) {{ '
                                         f'const auto *words = reinterpret_cast<const uint32_t *>(inst); '
@@ -8569,6 +8983,18 @@ class CodeGenerator:
 
                     inst_classes.append(s)
                     inst_impls = [class_ctor_impl]
+                    decoder_factory = decoder_factories.get(inst.fmt_name)
+                    if decoder_factory is not None:
+                        inst_impls.append(
+                            cgen.Line(
+                                'namespace detail {\n'
+                                f'std::unique_ptr<Instruction> {decoder_factory}'
+                                '(const MachineInst *opcode) {\n'
+                                f'  return std::make_unique<{inst.fmt_name}>(opcode);\n'
+                                '}\n'
+                                '} // namespace detail'
+                            )
+                        )
                     if gfx1250_f8f6f4_shape is not None:
                         inst_impls.append(
                             cgen.Line(
@@ -8729,7 +9155,7 @@ class CodeGenerator:
                 cpp_includes = [
                     (
                         self.config.generated_include(
-                            self.isa_spec.arch_name,
+                            self.generated_dir_name,
                             f'{enc.fmt_enc_name.lower()}.h',
                         ),
                         False,
@@ -8758,7 +9184,7 @@ class CodeGenerator:
                         [
                             (
                                 self.config.handwritten_include(
-                                    self.isa_spec.arch_name, 'addr_calc.h'
+                                    self.generated_dir_name, 'addr_calc.h'
                                 ),
                                 False,
                             ),
@@ -8797,7 +9223,7 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             self.config.handwritten_include(
-                                self.isa_spec.arch_name, 'mma_exec.h'
+                                self.generated_dir_name, 'mma_exec.h'
                             ),
                             False,
                         )
@@ -8915,19 +9341,19 @@ class CodeGenerator:
                 h_includes = [
                     (
                         self.config.generated_include(
-                            self.isa_spec.arch_name, 'encodings.h'
+                            self.generated_dir_name, 'encodings.h'
                         ),
                         False,
                     ),
                     (
                         self.config.handwritten_include(
-                            self.isa_spec.arch_name, 'isa.h'
+                            self.generated_dir_name, 'isa.h'
                         ),
                         False,
                     ),
                     (
                         self.config.generated_include(
-                            self.isa_spec.arch_name, 'operand.h'
+                            self.generated_dir_name, 'operand.h'
                         ),
                         False,
                     ),
@@ -8963,8 +9389,9 @@ class CodeGenerator:
                     h_includes,
                     [],
                     inst_classes,
-                    self.isa_spec.arch_name,
+                    self.cpp_namespace,
                     True,
+                    generated_dir_name=self.generated_dir_name,
                 )
                 # No local f16 helpers needed - using util::f16_to_f32 etc.
                 # from data_types.h (included via cpp_includes when has_sem).
@@ -9064,7 +9491,7 @@ class CodeGenerator:
                         cpp_includes[0],
                         (
                             self.config.generated_include(
-                                self.isa_spec.arch_name,
+                                self.generated_dir_name,
                                 'execution_backend.h',
                             ),
                             False,
@@ -9092,6 +9519,12 @@ class CodeGenerator:
                     if 'std::array' in model_impl_text:
                         model_cpp_includes.append(('array', True))
 
+                model_impl_text = '\n'.join(
+                    str(impl) for impl in class_func_impls.model
+                )
+                if 'std::make_unique' in model_impl_text:
+                    model_cpp_includes.append(('memory', True))
+
                 inst_def_file.gen_code()
                 self._write_inst_impl_files(
                     enc.enc_name,
@@ -9106,9 +9539,9 @@ class CodeGenerator:
         # encoding instruction headers. Only primary (non-alt) encodings
         # that have instructions generate their own files; alt encoding
         # instructions are merged into their parent's file.
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         guard = f'ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_INSTS_H_'
-        inc_base = self.config.generated_include(arch)
+        inc_base = self.config.generated_include(self.generated_dir_name)
         insts_h_lines = [
             CppFile._prologue_comment(),
             f'#ifndef {guard}\n#define {guard}\n\n',
@@ -9124,7 +9557,7 @@ class CodeGenerator:
         if self._supports_generated_vopd():
             insts_h_lines.append(f'#include "{inc_base}/vopd.h"\n')
         insts_h_lines.append(f'\n#endif // {guard}\n')
-        insts_h_path = os.path.join(self.out_path, arch, 'insts.h')
+        insts_h_path = os.path.join(self.out_path, self.generated_dir_name, 'insts.h')
         with open(insts_h_path, 'w') as f:
             f.write(''.join(insts_h_lines))
 
@@ -9186,7 +9619,7 @@ class CodeGenerator:
     ) -> None:
         """Write one model or execution implementation file set."""
         max_bytes = self.isa_spec.profile.source_split_max_bytes.get(enc_name.upper())
-        arch_dir = os.path.join(self.out_path, self.isa_spec.arch_name)
+        arch_dir = os.path.join(self.out_path, self.generated_dir_name)
         if os.path.isdir(arch_dir):
             self._remove_generated_source_split_files(
                 arch_dir, base_name, source_impl_units
@@ -9206,7 +9639,8 @@ class CodeGenerator:
                 cpp_includes,
                 [],
                 class_func_impls,
-                self.isa_spec.arch_name,
+                self.cpp_namespace,
+                generated_dir_name=self.generated_dir_name,
             ).gen_code()
             return
 
@@ -9269,7 +9703,8 @@ class CodeGenerator:
                 cpp_includes,
                 [],
                 chunk,
-                self.isa_spec.arch_name,
+                self.cpp_namespace,
+                generated_dir_name=self.generated_dir_name,
             ).gen_code()
 
     @staticmethod
@@ -10116,7 +10551,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             [],
             [],
             code_lines,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
+            generated_dir_name=self.generated_dir_name,
         )
         opnd_type_def_file.gen_code()
 
@@ -10146,7 +10582,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
     def gen_operand(self) -> None:
         """Generate the ISA-specific Operand class with name resolution."""
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         scalar_null_precedes_m0 = self.isa_spec.profile.scalar_null_precedes_m0
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
@@ -10477,6 +10913,39 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             if uses_packed_16bit_sources
             else ''
         )
+        selector_validation = ''
+        for selector in sorted(
+            self.isa_spec.opnd_selectors, key=lambda item: item.operand_type
+        ):
+            operand_type = selector.operand_type
+            if not self._selector_constructors_use_canonical_values(operand_type):
+                continue
+            if operand_type == 'OPR_SSRC_LANESEL':
+                error = 'InvalidLaneSelector'
+            elif operand_type.startswith('OPR_SREG'):
+                error = 'InvalidScalarRegisterSelector'
+            elif operand_type.startswith('OPR_SDST'):
+                error = 'InvalidSelector'
+            elif operand_type == 'OPR_EXEC':
+                error = 'InvalidExecSelector'
+            elif operand_type == 'OPR_SRC_VGPR':
+                error = 'InvalidVgprSourceSelector'
+            elif operand_type.startswith('OPR_SSRC'):
+                error = 'InvalidScalarSourceSelector'
+            else:
+                error = 'InvalidSelector'
+            intervals = self._operand_selector_intervals(operand_type)
+            if not intervals:
+                continue
+            valid_expr = ' || '.join(
+                f'(encoding_value >= {lo} && encoding_value <= {hi})'
+                for lo, hi in intervals
+            )
+            selector_validation += (
+                f'  if (opr_type == OperandType::{operand_type} && '
+                f'!({valid_expr}))\n'
+                f'    defer_encoding_error(EncodingError::{error});\n'
+            )
         packed_16bit_ctor_impl = []
         if uses_packed_16bit_sources:
             packed_16bit_ctor_impl.append(
@@ -10518,6 +10987,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'    : {operand_base_init}(size_bits, opr_type, encoding_value)'
                     f'{execution_backend_ctor_init}'
                     f'{operand_ctor_init} {{\n'
+                    f'{selector_validation}'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
                     '}'
                 ),
@@ -10529,6 +10999,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'{execution_backend_ctor_init},\n'
                     '      literal16_display_value_(literal16_display_value),\n'
                     '      has_literal16_display_(has_literal16_display) {\n'
+                    f'{selector_validation}'
                     '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
                     '}'
                 ),
@@ -11531,8 +12002,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         ).append(resolve_code)
 
         operand_header_includes = [
-            (self.config.handwritten_include(arch, 'isa.h'), False),
-            (self.config.generated_include(arch, 'operand_types.h'), False),
+            (self.config.handwritten_include(self.generated_dir_name, 'isa.h'), False),
+            (
+                self.config.generated_include(
+                    self.generated_dir_name, 'operand_types.h'
+                ),
+                False,
+            ),
             ('rocjitsu/isa/operand.h', False),
             ('string', True),
         ]
@@ -11547,6 +12023,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             [],
             class_def,
             arch,
+            generated_dir_name=self.generated_dir_name,
         )
         header_file.gen_code()
         if self.isa_spec.profile.split_execution_sources:
@@ -11555,8 +12032,14 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 self.out_path,
                 False,
                 [
-                    (self.config.generated_include(arch, 'operand.h'), False),
+                    (
+                        self.config.generated_include(
+                            self.generated_dir_name, 'operand.h'
+                        ),
+                        False,
+                    ),
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h', False),
+                    ('util/except.h', False),
                     ('format', True),
                     ('optional', True),
                     ('stdexcept', True),
@@ -11565,13 +12048,19 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 [],
                 class_impl.model,
                 arch,
+                generated_dir_name=self.generated_dir_name,
             ).gen_code()
             CppFile(
                 'operand_exec',
                 self.out_path,
                 False,
                 [
-                    (self.config.generated_include(arch, 'operand.h'), False),
+                    (
+                        self.config.generated_include(
+                            self.generated_dir_name, 'operand.h'
+                        ),
+                        False,
+                    ),
                     ('rocjitsu/isa/isa_operand_simd_inl.h', False),
                     ('rocjitsu/vm/amdgpu/compute_unit.h', False),
                     ('rocjitsu/vm/amdgpu/operand_execution_access.h', False),
@@ -11586,6 +12075,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 [],
                 class_impl.execution,
                 arch,
+                generated_dir_name=self.generated_dir_name,
             ).gen_code()
         else:
             CppFile(
@@ -11593,12 +12083,18 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 self.out_path,
                 False,
                 [
-                    (self.config.generated_include(arch, 'operand.h'), False),
+                    (
+                        self.config.generated_include(
+                            self.generated_dir_name, 'operand.h'
+                        ),
+                        False,
+                    ),
                     ('rocjitsu/isa/isa_operand_simd_inl.h', False),
                     ('rocjitsu/vm/amdgpu/compute_unit.h', False),
                     ('rocjitsu/vm/amdgpu/register_access.h', False),
                     ('rocjitsu/vm/amdgpu/wavefront.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h', False),
+                    ('util/except.h', False),
                     ('format', True),
                     ('optional', True),
                     ('stdexcept', True),
@@ -11607,11 +12103,50 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 [],
                 class_impl.model,
                 arch,
+                generated_dir_name=self.generated_dir_name,
             ).gen_code()
+
+    def _distributed_decoder_factories(self) -> dict[str, str]:
+        """Return instruction classes whose trivial factories live with their model.
+
+        Decoder tables contain both dispatch helpers and one-line instruction
+        factories.  Keeping the latter in each encoding's existing model source
+        distributes code generation without creating more translation units.
+        """
+        classes = {
+            inst.fmt_name for enc in self.isa_spec.inst_encodings for inst in enc.insts
+        }
+        factory_names: set[str] = set()
+        for dte in self.isa_spec.primary_decode_table:
+            if dte is None:
+                continue
+            if dte.is_primary:
+                factory_names.add(dte.decode_func)
+            elif dte.sub_decode_funcs is not None:
+                factory_names.update(dte.sub_decode_funcs)
+
+        return {
+            class_name: factory_name
+            for class_name in sorted(classes)
+            if (factory_name := f'decode{class_name}') in factory_names
+        }
 
     def gen_decoder(self) -> None:
         """Generate decoder lookup tables and decode functions."""
-        class_def = []
+        distributed_factories = self._distributed_decoder_factories()
+        distributed_factory_names = set(distributed_factories.values())
+        class_def = [
+            cgen.Struct(
+                'Decoder',
+                [
+                    cgen.Line('public:'),
+                    cgen.FunctionDeclaration(
+                        cgen.Value('static std::unique_ptr<Instruction>', 'decode'),
+                        [cgen.Value('const MachineInst *', 'opcode')],
+                    ),
+                ],
+            )
+        ]
         class_impl = []
         class_members = [
             cgen.Line('public:'),
@@ -11658,7 +12193,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         decode_table_funcs = [
             cgen.FunctionBody(
                 cgen.FunctionDeclaration(
-                    cgen.Value('std::unique_ptr<Instruction>', 'Decoder::decode'),
+                    cgen.Value('std::unique_ptr<Instruction>', 'DecoderImpl::decode'),
                     [cgen.Value('const MachineInst *', 'opcode')],
                 ),
                 cgen.Block(decode_body),
@@ -11667,7 +12202,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 cgen.FunctionDeclaration(
                     cgen.Value(
                         'std::unique_ptr<Instruction>',
-                        'Decoder::decodeInvalid',
+                        'DecoderImpl::decodeInvalid',
                     ),
                     [cgen.Value('const MachineInst *', 'opcode')],
                 ),
@@ -11806,7 +12341,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             decode_table_funcs.append(
                 cgen.FunctionBody(
                     cgen.FunctionDeclaration(
-                        cgen.Value('std::unique_ptr<Instruction>', f'Decoder::{_fn}'),
+                        cgen.Value(
+                            'std::unique_ptr<Instruction>', f'DecoderImpl::{_fn}'
+                        ),
                         [cgen.Value('const MachineInst *', 'opcode')],
                     ),
                     _body,
@@ -11816,22 +12353,30 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         for _primary_index, dte in enumerate(self.isa_spec.primary_decode_table):
             if _primary_index in _custom_primary_decode_funcs:
                 decode_table_entries.append(
-                    f'&Decoder::{_custom_primary_decode_funcs[_primary_index]},'
+                    f'&DecoderImpl::{_custom_primary_decode_funcs[_primary_index]},'
                 )
                 continue
             if dte is not None:
-                decode_table_entries.append(f'&Decoder::{dte.decode_func},')
+                primary_factory_is_distributed = (
+                    dte.is_primary and dte.decode_func in distributed_factory_names
+                )
+                if primary_factory_is_distributed:
+                    decode_table_entries.append(f'&detail::{dte.decode_func},')
+                else:
+                    decode_table_entries.append(f'&DecoderImpl::{dte.decode_func},')
                 if dte.decode_func not in decode_funcs_found:
                     decode_funcs_found.add(dte.decode_func)
                     func_decl = cgen.FunctionDeclaration(
                         cgen.Value(
                             'std::unique_ptr<Instruction>',
-                            f'Decoder::{dte.decode_func}',
+                            f'DecoderImpl::{dte.decode_func}',
                         ),
                         [cgen.Value('const MachineInst *', 'opcode')],
                     )
                     sub_decode_func_decls = []
-                    if dte.is_primary:
+                    if primary_factory_is_distributed:
+                        pass
+                    elif dte.is_primary:
                         decode_table_funcs.append(
                             cgen.FunctionBody(
                                 func_decl,
@@ -11868,49 +12413,28 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         )
                         sub_decode_table_entries.append(
                             cgen.Line(
-                                f'const std::array<Decoder::DecodeFunc, {len(dte.sub_decode_funcs)}> Decoder::{dte.sub_decode_table} = {{'
+                                f'const std::array<DecoderImpl::DecodeFunc, {len(dte.sub_decode_funcs)}> DecoderImpl::{dte.sub_decode_table} = {{'
                             )
                         )
                         sub_decode_table_entry_str = []
                         sub_decode_funcs_found = set()
                         for fn in dte.sub_decode_funcs:
+                            sub_factory_is_distributed = (
+                                fn in distributed_factory_names
+                                and fn not in _custom_decode_bodies
+                            )
                             if (
                                 fn != 'decodeInvalid'
                                 and fn not in sub_decode_funcs_found
                             ):
                                 sub_decode_funcs_found.add(fn)
                                 class_name = fn.removeprefix('decode')
-                                sub_decode_func_decls.append(
-                                    cgen.FunctionDeclaration(
-                                        cgen.Value(
-                                            'static std::unique_ptr<Instruction>',
-                                            fn,
-                                        ),
-                                        [
-                                            cgen.Value(
-                                                'const MachineInst *',
-                                                'opcode',
-                                            )
-                                        ],
-                                    )
-                                )
-                                _fn_body = (
-                                    _custom_decode_bodies[fn]
-                                    if fn in _custom_decode_bodies
-                                    else cgen.Block(
-                                        [
-                                            cgen.Statement(
-                                                f'return std::make_unique<{class_name}>(opcode)'
-                                            )
-                                        ]
-                                    )
-                                )
-                                decode_table_funcs.append(
-                                    cgen.FunctionBody(
+                                if not sub_factory_is_distributed:
+                                    sub_decode_func_decls.append(
                                         cgen.FunctionDeclaration(
                                             cgen.Value(
-                                                'std::unique_ptr<Instruction>',
-                                                f'Decoder::{fn}',
+                                                'static std::unique_ptr<Instruction>',
+                                                fn,
                                             ),
                                             [
                                                 cgen.Value(
@@ -11918,34 +12442,86 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                     'opcode',
                                                 )
                                             ],
-                                        ),
-                                        _fn_body,
+                                        )
                                     )
+                                    _fn_body = (
+                                        _custom_decode_bodies[fn]
+                                        if fn in _custom_decode_bodies
+                                        else cgen.Block(
+                                            [
+                                                cgen.Statement(
+                                                    f'return std::make_unique<{class_name}>(opcode)'
+                                                )
+                                            ]
+                                        )
+                                    )
+                                    decode_table_funcs.append(
+                                        cgen.FunctionBody(
+                                            cgen.FunctionDeclaration(
+                                                cgen.Value(
+                                                    'std::unique_ptr<Instruction>',
+                                                    f'DecoderImpl::{fn}',
+                                                ),
+                                                [
+                                                    cgen.Value(
+                                                        'const MachineInst *',
+                                                        'opcode',
+                                                    )
+                                                ],
+                                            ),
+                                            _fn_body,
+                                        ),
+                                    )
+                            if sub_factory_is_distributed:
+                                sub_decode_table_entry_str.append(f'&detail::{fn},')
+                            else:
+                                sub_decode_table_entry_str.append(
+                                    f'&DecoderImpl::{fn},'
                                 )
-                            sub_decode_table_entry_str.append(f'&Decoder::{fn},')
                         sub_decode_table_entries.append(
                             cgen.Line(''.join(sub_decode_table_entry_str))
                         )
                         sub_decode_table_entries.append(cgen.Line('};'))
-                    class_members.append(
-                        cgen.FunctionDeclaration(
-                            cgen.Value(
-                                'static std::unique_ptr<Instruction>',
-                                f'{dte.decode_func}',
-                            ),
-                            [cgen.Value('const MachineInst *', 'opcode')],
+                    if not primary_factory_is_distributed:
+                        class_members.append(
+                            cgen.FunctionDeclaration(
+                                cgen.Value(
+                                    'static std::unique_ptr<Instruction>',
+                                    f'{dte.decode_func}',
+                                ),
+                                [cgen.Value('const MachineInst *', 'opcode')],
+                            )
                         )
-                    )
                     class_members.extend(sub_decode_func_decls)
             else:
-                decode_table_entries.append('&Decoder::decodeInvalid,')
+                decode_table_entries.append('&DecoderImpl::decodeInvalid,')
         decode_table_entries = ''.join(decode_table_entries)
         class_members.extend(decode_tables)
-        class_def.append(cgen.Struct('Decoder', class_members))
+        detail_decls = '\n'.join(
+            f'std::unique_ptr<Instruction> {factory_name}'
+            '(const MachineInst *opcode);'
+            for factory_name in sorted(distributed_factory_names)
+        )
+        class_impl[0:0] = [
+            cgen.Line(
+                'namespace detail {\n' f'{detail_decls}\n' '} // namespace detail'
+            ),
+            cgen.Struct('DecoderImpl', class_members),
+        ]
+        decode_table_funcs.insert(
+            0,
+            cgen.FunctionBody(
+                cgen.FunctionDeclaration(
+                    cgen.Value('std::unique_ptr<Instruction>', 'Decoder::decode'),
+                    [cgen.Value('const MachineInst *', 'opcode')],
+                ),
+                cgen.Block([cgen.Statement('return DecoderImpl::decode(opcode)')]),
+            ),
+        )
         class_impl.extend(decode_table_funcs)
         class_impl.append(
             cgen.Line(
-                f'const std::array<Decoder::DecodeFunc, {pow(2, self.isa_spec.profile.max_enc_bits)}> Decoder::primary_decode_table = {{'
+                f'const std::array<DecoderImpl::DecodeFunc, {pow(2, self.isa_spec.profile.max_enc_bits)}> DecoderImpl::primary_decode_table = {{'
             )
         )
         class_impl.append(cgen.Line(decode_table_entries))
@@ -11958,38 +12534,52 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             [
                 (
                     self.config.generated_include(
-                        self.isa_spec.arch_name, 'machine_insts.h'
+                        self.generated_dir_name, 'machine_insts.h'
                     ),
                     False,
                 ),
-                ('array', True),
                 ('memory', True),
             ],
             ['Instruction'],
             class_def,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
             True,
+            generated_dir_name=self.generated_dir_name,
         )
+        decoder_impl_includes = [
+            (
+                self.config.generated_include(self.generated_dir_name, 'decoder.h'),
+                False,
+            ),
+            ('util/except.h', False),
+            (
+                self.config.generated_include(
+                    self.generated_dir_name,
+                    'vop3p.h',
+                ),
+                False,
+            ),
+        ]
+        if self._supports_generated_vopd():
+            decoder_impl_includes.append(
+                (
+                    self.config.generated_include(
+                        self.generated_dir_name,
+                        'vopd.h',
+                    ),
+                    False,
+                )
+            )
+        decoder_impl_includes.extend([('array', True), ('bit', True), ('format', True)])
         class_impl_file = CppFile(
             'decoder',
             self.out_path,
             False,
-            [
-                (
-                    self.config.generated_include(self.isa_spec.arch_name, 'decoder.h'),
-                    False,
-                ),
-                ('util/except.h', False),
-                (
-                    self.config.generated_include(self.isa_spec.arch_name, 'insts.h'),
-                    False,
-                ),
-                ('bit', True),
-                ('format', True),
-            ],
+            decoder_impl_includes,
             [],
             class_impl,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
+            generated_dir_name=self.generated_dir_name,
         )
         class_def_file.gen_code()
         class_impl_file.gen_code()
@@ -12009,6 +12599,18 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         word = (enc_val << (32 - self.isa_spec.profile.max_enc_bits)) | (
             inst.opcode << op_field.bit_offset
         )
+        for operand in inst.explicit_operands:
+            if operand.operand_type != 'OPR_SSRC_BARRIER_ID':
+                continue
+            operand_field = next(
+                (field for field in enc.ucode_fields if field.name == operand.name),
+                None,
+            )
+            if operand_field is not None:
+                # The zero selector is reserved for barrier IDs. Encode the
+                # inline integer zero instead so the execution smoke fixture
+                # remains a valid instruction.
+                word |= 128 << operand_field.bit_offset
         return word & 0xFFFFFFFF, (word >> 32) & 0xFFFFFFFF
 
     def gen_test_encodings(self) -> None:
@@ -12047,7 +12649,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     f'  {{"{inst.mnemonic}", {{0x{w0:08X}U, 0x{w1:08X}U}}}},'
                 )
 
-        arch = self.isa_spec.arch_name
+        arch = self.cpp_namespace
         ns = arch
         guard = f'ROCJITSU_ISA_AMDGPU_{arch.upper()}_TEST_ENCODINGS_H_'
         lines = CppFile._prologue_comment().splitlines()
@@ -12079,7 +12681,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         lines.append('')
 
         out_path = os.path.join(
-            self.out_path, self.isa_spec.arch_name, 'test_encodings.h'
+            self.out_path, self.generated_dir_name, 'test_encodings.h'
         )
         with open(out_path, 'w') as f:
             f.write('\n'.join(lines))
@@ -12097,18 +12699,19 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             True,
             [
                 (
-                    self.config.generated_include(self.isa_spec.arch_name, 'decoder.h'),
+                    self.config.generated_include(self.generated_dir_name, 'decoder.h'),
                     False,
                 ),
                 (
                     self.config.generated_include(
-                        self.isa_spec.arch_name, 'operand_types.h'
+                        self.generated_dir_name, 'operand_types.h'
                     ),
                     False,
                 ),
             ],
             [],
             isa_struct,
-            self.isa_spec.arch_name,
+            self.cpp_namespace,
+            generated_dir_name=self.generated_dir_name,
         )
         isa_struct_file.gen_code()

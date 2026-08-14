@@ -20,6 +20,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace RcclUnitTesting
@@ -79,7 +80,9 @@ class GinAnvilPluginTest : public ::testing::Test {
     if (hipGetDeviceCount(&ndev) == hipSuccess && ndev > 0) {
       ASSERT_EQ(hipSetDevice(0), hipSuccess);
     }
-    setenv("NCCL_GIN_TYPE", "5", 1);
+    // Anvil-SDMA is ncclNetDeviceType NCCL_NET_DEVICE_GIN_ANVIL_SDMA (=6); derive
+    // from the enum so this never drifts from net_device.h (type 5 is ROCSHMEM_GDA).
+    setenv("NCCL_GIN_TYPE", std::to_string(static_cast<int>(NCCL_NET_DEVICE_GIN_ANVIL_SDMA)).c_str(), 1);
     GinAnvilPluginStubs::SetProbeResult(1);
     GinAnvilPluginStubs::SetBootstrapNranks(1);
   }
@@ -229,7 +232,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_MissingInfra) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_t cfg{};
   cfg.nSignals = 0;
   cfg.nCounters = 0;
   void* ginCtx = nullptr;
@@ -247,7 +250,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_EnvAndCounters) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_t cfg{};
   cfg.nSignals = 2;
   cfg.nCounters = 1;
   void* ginCtx = nullptr;
@@ -285,7 +288,7 @@ TEST_F(GinAnvilPluginTest, BindSignals_SlotOutOfRange) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_t cfg{};
   cfg.nSignals = 1;
   void* ginCtx1 = nullptr;
   void* ginCtx2 = nullptr;
@@ -309,7 +312,7 @@ TEST_F(GinAnvilPluginTest, BindSignals_Success) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_t cfg{};
   cfg.nSignals = 2;
   void* ginCtx = nullptr;
   ncclNetDeviceHandle_v11_t* devHandle = nullptr;
@@ -355,7 +358,7 @@ TEST_F(GinAnvilPluginTest, BindSignals_LsaResolveFail) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_t cfg{};
   cfg.nSignals = 1;
   void* ginCtx = nullptr;
   ncclNetDeviceHandle_v11_t* devHandle = nullptr;
@@ -376,7 +379,7 @@ TEST_F(GinAnvilPluginTest, BindSignals_IpcTableFull) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_t cfg{};
   cfg.nSignals = 1;
   void* ginCtx = nullptr;
   ncclNetDeviceHandle_v11_t* devHandle = nullptr;
@@ -407,7 +410,7 @@ TEST_F(GinAnvilPluginTest, CloseColl_AfterSignalBind) {
   initCtx(&ictx);
   void* coll = nullptr;
   connectColl(ictx, &coll);
-  ncclGinConfig_v13_t cfg{};
+  ncclGinConfig_t cfg{};
   cfg.nSignals = 1;
   void* ginCtx = nullptr;
   ncclNetDeviceHandle_v11_t* devHandle = nullptr;

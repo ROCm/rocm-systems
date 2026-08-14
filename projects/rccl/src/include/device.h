@@ -541,7 +541,13 @@ constexpr size_t ncclDevWorkSize(enum ncclDevWorkType type) {
 }
 
 __host__ __device__ constexpr int ncclMaxDevWorkBatchBytes(int cudaArch = NCCL_CUDA_ARCH) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // HIP has no __CUDA_ARCH__, so NCCL_CUDA_ARCH is 0 at device compile time and
+  // would return 1 KiB. All RCCL supported gfx targets can accommodate 16 KiB.
+  return (16 << 10);
+#else
   return cudaArch < 800 ? (1 << 10) : cudaArch < 900 ? (8 << 10) : (16 << 10);
+#endif
 }
 
 #define NCCL_MAX_DEV_WORK_BATCH_BYTES 192
