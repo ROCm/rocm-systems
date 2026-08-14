@@ -1657,7 +1657,7 @@ def test_build_agent_to_gpu_map_empty() -> None:
 def make_db_analysis(workload_path: str) -> db_analysis:
     """Construct a db_analysis whose only populated state is _runs."""
     instance = db_analysis.__new__(db_analysis)
-    instance._runs = {workload_path: None}
+    instance._runs = {workload_path: schema.Workload()}
     return instance
 
 

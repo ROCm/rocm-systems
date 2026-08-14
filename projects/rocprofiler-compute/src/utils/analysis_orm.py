@@ -11,6 +11,7 @@ import csv
 import json
 import math
 import sqlite3
+from collections.abc import Iterator
 from contextlib import closing
 from pathlib import Path
 from typing import Any, Optional
@@ -24,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    case,
     cast,
     create_engine,
     func,
@@ -641,6 +643,45 @@ class Database:
             cls._session = None
 
     @classmethod
+    def get_stall_reasons_by_workload(cls) -> dict[int, list[str]]:
+        """Return the stall reasons each workload's samples actually carry.
+
+        A host_trap workload records none, so it maps to an empty list and its
+        exports carry no stall columns.
+        """
+        stall_reasons_by_workload: dict[int, list[str]] = {}
+        for workload_id, reason in cls._session.execute(
+            cls._stall_reasons_by_workload_statement()
+        ):
+            stall_reasons_by_workload.setdefault(workload_id, []).append(reason)
+        return {
+            workload_id: sorted(reasons)
+            for workload_id, reasons in stall_reasons_by_workload.items()
+        }
+
+    @classmethod
+    def stream_per_kernel_isa_rows(
+        cls,
+        workload_id: int,
+        stall_reasons: list[str],
+    ) -> Iterator[tuple[Any, ...]]:
+        """Yield one workload's instruction lines, grouped file by file.
+
+        Rows arrive in the order the exporter writes them, through the raw
+        sqlite3 cursor so the full result set is never held in memory.
+        """
+        statement = cls._per_kernel_isa_statement(workload_id, stall_reasons)
+        raw_conn = cls._session.connection().connection
+        yield from raw_conn.execute(
+            str(
+                statement.compile(
+                    dialect=sqlite.dialect(),
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+        )
+
+    @classmethod
     def create_views(cls) -> None:
         """Materialize CREATE VIEW statements in the in-memory DB."""
         for name, sql in cls.get_view_sql().items():
@@ -728,6 +769,124 @@ class Database:
                 .exists()
             )
         ).subquery("source_chain")
+
+    @staticmethod
+    def _stall_reasons_by_workload_statement() -> Select[Any]:
+        """Select the distinct (workload, stall reason) pairs that were stored."""
+        return (
+            select(
+                CodeObjectStore.workload_id,
+                PCSampleStallReasonLookup.text,
+            )
+            .select_from(PCSampleStallReason)
+            .join(
+                PCSampleStallReasonLookup,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
+                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
+            )
+            .join(
+                PCSampleState,
+                PCSampleStallReason.pc_sample_state_uuid
+                == PCSampleState.pc_sample_state_uuid,
+            )
+            .join(
+                InstructionLine,
+                PCSampleState.instruction_uuid == InstructionLine.instruction_uuid,
+            )
+            .join(
+                KernelSymbol,
+                InstructionLine.kernel_symbol_uuid == KernelSymbol.kernel_symbol_uuid,
+            )
+            .join(
+                CodeObjectStore,
+                KernelSymbol.code_object_uuid == CodeObjectStore.code_object_uuid,
+            )
+            .distinct()
+        )
+
+    @staticmethod
+    def _per_kernel_isa_statement(
+        workload_id: int,
+        stall_reasons: list[str],
+    ) -> Select[Any]:
+        """Select one workload's instruction lines with their sample counts.
+
+        The first columns name the file each row belongs in; the rest are the
+        row as it is written, in CSV column order. Every disassembled line is
+        returned, so an unsampled line arrives with empty counts.
+        """
+        source_chain_subquery = Database._source_chain_subquery()
+        # The CASE is non-null on one row of each group; MAX skips the nulls.
+        stall_reason_columns = [
+            func.max(
+                case((
+                    PCSampleStallReasonLookup.text == stall_reason,
+                    PCSampleStallReason.count,
+                ))
+            ).label(stall_reason)
+            for stall_reason in stall_reasons
+        ]
+
+        return (
+            select(
+                Workload.name.label("workload_name"),
+                Workload.sub_name.label("workload_sub_name"),
+                Kernel.kernel_uuid.label("kernel_uuid"),
+                CodeObjectStore.code_object_id.label("code_object_id"),
+                CodeObjectStore.pid.label("pid"),
+                InstructionLine.code_object_offset.label("offset"),
+                InstructionLine.instruction,
+                PCSampleState.total_count.label("count"),
+                PCSampleState.issue_count.label("count_issue"),
+                PCSampleState.stall_count.label("count_stall"),
+                PCSampleState.wave_occupancy_percent,
+                PCSampleState.active_thread_percent,
+                *stall_reason_columns,
+                source_chain_subquery.c.source.label("source"),
+                CodeObjectStore.code_object_id.label("code_object_id_cell"),
+                CodeObjectStore.pid.label("pid_cell"),
+            )
+            .select_from(InstructionLine)
+            .join(
+                KernelSymbol,
+                InstructionLine.kernel_symbol_uuid == KernelSymbol.kernel_symbol_uuid,
+            )
+            .join(
+                CodeObjectStore,
+                KernelSymbol.code_object_uuid == CodeObjectStore.code_object_uuid,
+            )
+            .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
+            .join(Workload, CodeObjectStore.workload_id == Workload.workload_id)
+            # A line the disassembly holds but no sample landed on has no state.
+            .outerjoin(
+                PCSampleState,
+                InstructionLine.instruction_uuid == PCSampleState.instruction_uuid,
+            )
+            .outerjoin(
+                PCSampleStallReason,
+                PCSampleState.pc_sample_state_uuid
+                == PCSampleStallReason.pc_sample_state_uuid,
+            )
+            .outerjoin(
+                PCSampleStallReasonLookup,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
+                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
+            )
+            .outerjoin(
+                source_chain_subquery,
+                InstructionLine.instruction_uuid
+                == source_chain_subquery.c.instruction_uuid,
+            )
+            .where(CodeObjectStore.workload_id == workload_id)
+            # One row per line: the stall-reason join multiplies them otherwise.
+            .group_by(InstructionLine.instruction_uuid)
+            .order_by(
+                Kernel.kernel_uuid,
+                CodeObjectStore.code_object_id,
+                CodeObjectStore.pid,
+                InstructionLine.code_object_offset,
+            )
+        )
 
     @staticmethod
     def _compile_view_sql() -> dict[str, str]:
