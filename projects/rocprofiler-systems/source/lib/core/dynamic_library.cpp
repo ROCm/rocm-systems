@@ -6,7 +6,7 @@
 
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
-#include <timemory/utility/filepath.hpp>
+#include "common/path.hpp"
 #include <timemory/utility/procfs/maps.hpp>
 
 #include "logger/debug.hpp"
@@ -28,8 +28,10 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
     for(const auto& itr : procfs::get_maps(process::get_id(), true))
     {
         auto&& _path = itr.pathname;
-        if(_path.find(_name) != std::string::npos && filepath::exists(_path))
+        if(_path.find(_name) != std::string::npos && path::is_regular_file(_path))
+        {
             return _path;
+        }
     }
 
     auto _paths = std::vector<std::string>{};
@@ -48,11 +50,11 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
     for(auto& itr : _paths)
     {
         auto _v = fmt::format("{}/{}", itr, _name);
-        if(filepath::exists(_v)) return _v;
+        if(path::is_regular_file(_v)) return _v;
         for(const auto& litr : _path_suffixes)
         {
             _v = fmt::format("{}/{}/{}", itr, litr, _name);
-            if(filepath::exists(_v)) return _v;
+            if(path::is_regular_file(_v)) return _v;
         }
     }
 
@@ -75,17 +77,17 @@ dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flag
         // override with value
         if(!_env_val.empty())
         {
-            if(_env_val.find('/') == 0 && filepath::exists(_env_val))
+            if(_env_val.starts_with('/') && path::is_regular_file(_env_val))
             {
                 filename = _env_val;
             }
-            else if(_env_val.find('/') == 0)
+            else if(_env_val.starts_with('/'))
             {
                 LOG_WARNING("Ignoring environment variable {}=\"{}\" because the "
                             "filepath does not exist. Using \"{}\" instead...",
                             envname, _env_val, filename);
             }
-            else if(_env_val.find('/') != 0 && filename.find('/') == 0)
+            else if(!_env_val.starts_with('/') && filename.starts_with('/'))
             {
                 LOG_WARNING("Ignoring environment variable {}=\"{}\" because the "
                             "filepath is relative. Using absolute path \"{}\" instead...",

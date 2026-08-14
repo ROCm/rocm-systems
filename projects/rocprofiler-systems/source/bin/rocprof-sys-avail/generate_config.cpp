@@ -10,6 +10,7 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/json_config.hpp"
+#include "common/path.hpp"
 
 #include <nlohmann/json.hpp>
 #include <spdlog/fmt/fmt.h>
@@ -251,7 +252,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     auto _open = [&_nout, &fmt_opts](std::ofstream& _ofs, const std::string& _fname,
                                      const std::string& _type) -> std::ofstream& {
         ++_nout;
-        if(file_exists(_fname))
+        if(rocprofsys::path::is_regular_file(_fname))
         {
             if(fmt_opts.force_config)
             {
