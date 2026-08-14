@@ -1615,9 +1615,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
-  comm->topo->skipPresetTopoMatching = !uniformRanksPerHost(comm, nranks) ||
-                                       (comm->topo->nodes[GPU].count > 0 &&
-                                        IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250"));
+  {
+    bool nonUniformRanks = !uniformRanksPerHost(comm, nranks);
+    bool isGfx1250 = comm->topo->nodes[GPU].count > 0 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+    comm->topo->skipPresetTopoMatching = nonUniformRanks || isGfx1250;
+    if (comm->topo->skipPresetTopoMatching) {
+      INFO(NCCL_INIT, "Rome model matching disabled %s", isGfx1250 ? "on gfx1250" : "due to non-uniform ranks per host");
+    }
+  }
 
   timers[TIMER_INIT_GRAPHS] = clockNano();
   // Get rings and trees
