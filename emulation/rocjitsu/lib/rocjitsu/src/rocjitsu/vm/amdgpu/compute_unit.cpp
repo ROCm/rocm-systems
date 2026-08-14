@@ -353,9 +353,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   active->trace_inst_count_++;
 
-  Instruction *inst = nullptr;
+  std::unique_ptr<Instruction> inst;
   try {
-    inst = decoder_->decode(words);
+    inst.reset(decoder_->decode(words));
   } catch (const util::InvalidInst &e) {
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(InvalidInst) pc=0x",
                      std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
@@ -409,13 +409,12 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
                         (static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx + 1)) << 32);
       if (target == 0) {
         active->halt();
-        delete inst;
         return;
       }
     }
   }
 
-  execute_instruction(inst, *active);
+  execute_instruction(inst.get(), *active);
 
   // A terminating instruction (s_endpgm with no pending waits) halts the wave
   // inside execute_instruction, which frees and resets its slot. Its registers,
@@ -429,10 +428,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // below; the immediate-halt case does not. onAmdgpuWavefrontHalted is the
   // authoritative terminal hook and fires in both cases — consumers should observe
   // termination there, not via the after-execute hook.
-  if (active->is_halted()) {
-    delete inst;
+  if (active->is_halted())
     return;
-  }
 
   plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
 
@@ -457,9 +454,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
       auto *d = inst->data_as<VectorMemState>();
       d->issue_pc = active->pc;
     }
-    route_memory_inst(inst, *active);
-  } else
-    delete inst;
+    route_memory_inst(inst.get(), *active);
+    inst.release();
+  }
 
   active->pc += inst_size;
 }

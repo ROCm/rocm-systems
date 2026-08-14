@@ -49,6 +49,16 @@ namespace amdgpu {
 
 class CommandProcessor;
 
+struct FunctionalQuantumResult {
+  bool ran = false;
+  bool yielded = false;
+
+  void merge(const FunctionalQuantumResult &other) {
+    ran |= other.ran;
+    yielded |= other.yielded;
+  }
+};
+
 /// @brief Base AMDGPU compute unit that owns wavefront slots and register files.
 ///
 /// @details Owns the physical SGPR and VGPR register files and a fixed array of
@@ -71,7 +81,7 @@ class CommandProcessor;
 /// to construct.
 class ComputeUnitCore : public simdojo::CompositeComponent {
 public:
-  static constexpr uint32_t kFunctionalQuantum = 1024;
+  static constexpr uint32_t kFunctionalQuantum = 16384;
 
   /// @brief Configuration for a compute unit.
   struct Config {
@@ -80,6 +90,7 @@ public:
     uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
     uint32_t vgprs_per_wf; ///< Vector GPRs per wavefront (allocation granularity).
     uint32_t lds_size_kb;  ///< Local Data Share size in kilobytes.
+    uint32_t functional_quantum = kFunctionalQuantum; ///< Max instructions per functional slice.
   };
 
   ~ComputeUnitCore() override = default;
@@ -154,6 +165,30 @@ public:
   /// components can publish the state on which the wavefront is polling.
   void request_functional_yield() { functional_yield_requested_ = true; }
 
+  uint32_t functional_quantum() const {
+    return config_.functional_quantum == 0 ? UINT32_MAX : config_.functional_quantum;
+  }
+
+  /// @brief Execute up to one functional quantum of instructions on this CU.
+  /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
+  FunctionalQuantumResult run_quantum() {
+    // A request left by direct step() execution must not shorten this quantum.
+    functional_yield_requested_ = false;
+    FunctionalQuantumResult result;
+    for (uint32_t i = 0, quantum = functional_quantum(); i < quantum; ++i) {
+      if (!has_active_wfs())
+        break;
+      result.ran = true;
+      if (!step())
+        break;
+      if (std::exchange(functional_yield_requested_, false)) {
+        result.yielded = true;
+        break;
+      }
+    }
+    return result;
+  }
+
   /// @brief Schedule the tick event if the CU is not already executing.
   /// Called from dispatch_wf(), the cpl_ port handler, and single-threaded VM
   /// initialization after engine creation but before simulation workers start.
@@ -214,7 +249,7 @@ public:
 
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
-    plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
+    plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
   }
 
   /// @brief Return the execution plugin group.
@@ -404,12 +439,9 @@ public:
   /// RegisterAccess APIs instead.
   /// @param reg_idx Physical register index.
   /// @returns Register value.
-  // TODO(newling) consider cmake flag to build without plugins, this call
-  // overhead might be non-negligible.
   uint32_t read_sgpr(uint32_t reg_idx) const {
-    if (auto *wf = sgpr_to_wave_[reg_idx]) {
+    if (auto *wf = sgpr_to_wave_[reg_idx])
       plugin_group_->onAmdgpuReadSgpr(wf, reg_idx);
-    }
     return sgpr_file_[reg_idx];
   }
 
@@ -687,7 +719,7 @@ public:
       // A request left by direct step() execution must not shorten this quantum.
       functional_yield_requested_ = false;
       last_quantum_executed_ = 0;
-      for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
+      for (uint32_t i = 0, quantum = this->functional_quantum(); i < quantum && step(); ++i) {
         ++last_quantum_executed_;
         if (std::exchange(functional_yield_requested_, false))
           break;
