@@ -26,8 +26,7 @@ struct InstallState
     bool               installed = false;
 };
 
-// State shared by every thread in the process. Per-thread state is separate;
-// see ThreadState in marker_stack.h.
+// Per-thread state is separate; see ThreadState in marker_stack.h.
 struct ProcessState
 {
     Stats                        stats;
@@ -37,7 +36,7 @@ struct ProcessState
 };
 
 // The one instance, constructed on first use. Each binary that links the
-// collector holds its own, which is what the callback registration expects.
+// collector holds its own and registers its own callback.
 inline ProcessState& process_state()
 {
     static ProcessState state;
