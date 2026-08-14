@@ -5,10 +5,9 @@
 
 #include "common/defines.h"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "logger/debug.hpp"
 #include <spdlog/fmt/fmt.h>
-
-#include <timemory/utility/filepath.hpp>
 
 #include <algorithm>
 #include <array>
@@ -16,7 +15,7 @@
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
-#include <exception>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -417,6 +416,20 @@ remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
     }
 }
 
+/// @brief Build the default colon-delimited library search-path list.
+///
+/// Concatenates the process's @c ROCPROFSYS_PATH, @c LD_LIBRARY_PATH, @c LIBRARY_PATH and
+/// @c PWD environment variables (in that order), followed by the current
+/// directory @c "." , into a single @c ':' -delimited string.
+/// @return Colon-delimited search paths; never empty (always ends with @c "." ).
+[[nodiscard]] inline std::string
+get_default_lib_search_paths()
+{
+    return fmt::format("{}:{}:{}:{}:.", get_env(env_vars::PATH, ""),
+                       get_env("LD_LIBRARY_PATH", ""), get_env("LIBRARY_PATH", ""),
+                       get_env("PWD", ""));
+}
+
 /// @brief Locate the ROCm LLVM library directory that contains libomptarget.so.
 ///
 /// Probes candidates derived from @c ROCM_PATH and @c ROCmVersion_DIR plus the
@@ -470,7 +483,7 @@ discover_llvm_libdir_for_ompt()
 
     auto has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";
-        return ::tim::filepath::exists(so);
+        return path::is_regular_file(so);
     };
 
     // Pick the first candidate that contains libomptarget.so
@@ -493,10 +506,7 @@ is_python_interpreter(std::string_view executable)
 {
     if(executable.empty()) return false;
 
-    const auto slash_pos = executable.rfind('/');
-    const auto basename  = (slash_pos != std::string_view::npos)
-                               ? executable.substr(slash_pos + 1)
-                               : executable;
+    const auto basename = path::filename(executable);
 
     if(basename == "python" || basename == "python3") return true;
 
@@ -588,7 +598,7 @@ discover_torch_libpath(const std::string& python_binary)
 
     std::string torch_libdir = result + "/lib";
 
-    if(!::tim::filepath::direxists(torch_libdir))
+    if(!path::is_directory(torch_libdir))
     {
         LOG_WARNING("torch lib directory does not exist: {}", torch_libdir);
         return {};

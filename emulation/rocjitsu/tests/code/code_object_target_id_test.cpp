@@ -7,28 +7,25 @@
 ///        rj_code_target_id_t value, and that the corresponding C API path
 ///        (rj_code_executable_create -> get_code_object ->
 ///        basic_block_list_create) accepts each target by exercising the
-///        create_decoder_for_target switch in rj_code.cpp.
+///        provider-selected target registry in rj_code.cpp.
 ///
 /// Covers the only currently supported targets (gfx90a, gfx942, gfx950,
 /// gfx1200, gfx1201, gfx1250) plus an unknown-machine-flag case to guard the
 /// INVALID sentinel and prevent a future edit from silently aliasing one target
 /// onto another.
 
-// \NPI new GPU: extend these tests with its MACH/triple -> target mapping.
+// \NPI new GPU: extend these tests with its provider-owned MACH/triple binding.
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/code/rj_code.h"
+#include "scoped_temp.h"
 
 #include <gtest/gtest.h>
-
-#include <unistd.h>
 
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -54,7 +51,9 @@ uint64_t align_up(uint64_t value, uint64_t alignment) {
 
 // Minimal AMDGPU ELF tagged with @p mach_flag. .text contains two `s_nop 0`
 // words so it can be decoded by any AMDGPU ISA (SOPP encoding is shared).
-std::vector<uint8_t> make_minimal_amdgpu_elf(uint32_t mach_flag) {
+std::vector<uint8_t> make_minimal_amdgpu_elf(uint32_t mach_flag,
+                                             std::array<uint32_t, 2> text_words = {0xBF800000u,
+                                                                                   0xBF800000u}) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_size = 8;
   constexpr uint64_t rodata_size = 4;
@@ -86,7 +85,6 @@ std::vector<uint8_t> make_minimal_amdgpu_elf(uint32_t mach_flag) {
   ehdr.e_shstrndx = 3;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
-  const std::array<uint32_t, 2> text_words = {0xBF800000u, 0xBF800000u};
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
   const uint32_t rodata_word = 0xA5A55A5Au;
@@ -134,20 +132,11 @@ void expect_machine_flag_maps_to_target(uint32_t mach_flag, rj_code_target_id_t 
 void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target) {
   auto image = make_minimal_amdgpu_elf(mach_flag);
 
-  // PID-suffix the tmp filename so concurrent ctest runs and stale leftovers
-  // from prior crashed runs don't collide.
-  const std::filesystem::path tmp =
-      std::filesystem::temp_directory_path() /
-      ("rj_code_object_target_id_test_" + std::to_string(getpid()) + ".co");
-  {
-    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-    ASSERT_TRUE(out.is_open()) << "could not open " << tmp;
-    out.write(reinterpret_cast<const char *>(image.data()),
-              static_cast<std::streamsize>(image.size()));
-  }
+  test::ScopedTempFile file("rj-code-object-target-id-");
+  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
 
   rj_code_executable_t *exec = nullptr;
-  ASSERT_EQ(rj_code_executable_create(tmp.c_str(), &exec), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_code_executable_create(file.path().c_str(), &exec), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(exec, nullptr);
 
   ASSERT_GT(rj_code_executable_num_code_objects(exec, target), 0u)
@@ -157,23 +146,31 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
   ASSERT_EQ(rj_code_executable_get_code_object(exec, target, 0, &obj), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(obj, nullptr);
 
+  // The returned code-object handle must keep its executable storage alive.
+  rj_code_executable_destroy(exec);
+
   rj_code_basic_block_list_t *blocks = nullptr;
   EXPECT_EQ(rj_code_basic_block_list_create(obj, target, &blocks), ROCJITSU_STATUS_SUCCESS)
       << "rj_code_basic_block_list_create must succeed for a target whose decoder is wired in";
-  EXPECT_NE(blocks, nullptr);
+  ASSERT_NE(blocks, nullptr);
+
+  rj_code_basic_block_t *block = nullptr;
+  ASSERT_EQ(rj_code_basic_block_list_get(blocks, 0, &block), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(block, nullptr);
+
+  // Likewise, a returned block must keep its list and decoded instructions alive.
+  rj_code_basic_block_list_destroy(blocks);
+  EXPECT_EQ(rj_code_basic_block_start_offset(block), 0u);
+  EXPECT_EQ(rj_code_basic_block_num_instructions(block), 2u);
 
   // Cleanup follows the refcount discipline in refcount.h:
-  //   - blocks came from _create()   -> refcount 0 -> destroy only.
+  //   - block  came from _get()      -> refcount 1 -> destroy + release.
   //   - obj    came from _get_code_object() -> refcount 1 -> destroy + release.
-  //   - exec   came from _create()   -> refcount 0 -> destroy only.
-  if (blocks)
-    rj_code_basic_block_list_destroy(blocks);
+  // Their destroyed parents are released automatically with the child handles.
+  rj_code_basic_block_destroy(block);
+  rj_code_basic_block_release(block);
   rj_code_object_destroy(obj);
   rj_code_object_release(obj);
-  rj_code_executable_destroy(exec);
-
-  std::error_code ec;
-  std::filesystem::remove(tmp, ec); // best-effort
 }
 
 //==============================================================================
@@ -243,6 +240,40 @@ TEST(GfxCodeObjectTargets, CApiAcceptsGfx1201ForBasicBlockList) {
 
 TEST(GfxCodeObjectTargets, CApiAcceptsGfx1250ForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_TARGET_GFX1250);
+}
+
+TEST(GfxCodeObjectTargets, CApiContainsInvalidInstructionFromListBuilders) {
+  constexpr std::array<uint32_t, 2> invalid_vopd = {
+      (0x32u << 26) | (12u << 22) | (8u << 17), // Opcode 12 is not an X op.
+      0,
+  };
+  auto image = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1250, invalid_vopd);
+
+  test::ScopedTempFile file("rj-code-object-invalid-inst-");
+  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+
+  rj_code_executable_t *exec = nullptr;
+  ASSERT_EQ(rj_code_executable_create(file.path().c_str(), &exec), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(exec, nullptr);
+
+  rj_code_object_t *obj = nullptr;
+  ASSERT_EQ(rj_code_executable_get_code_object(exec, ROCJITSU_CODE_TARGET_GFX1250, 0, &obj),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(obj, nullptr);
+
+  auto *inst_list = reinterpret_cast<rj_code_inst_list_t *>(static_cast<uintptr_t>(1));
+  EXPECT_EQ(rj_code_inst_list_create(obj, ROCJITSU_CODE_TARGET_GFX1250, &inst_list),
+            ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(inst_list, nullptr);
+
+  auto *block_list = reinterpret_cast<rj_code_basic_block_list_t *>(static_cast<uintptr_t>(1));
+  EXPECT_EQ(rj_code_basic_block_list_create(obj, ROCJITSU_CODE_TARGET_GFX1250, &block_list),
+            ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(block_list, nullptr);
+
+  rj_code_object_destroy(obj);
+  rj_code_object_release(obj);
+  rj_code_executable_destroy(exec);
 }
 
 TEST(KernelSymbolTest, DemanglesMangledKernelSymbol) {

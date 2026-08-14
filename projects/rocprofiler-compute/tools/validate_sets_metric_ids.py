@@ -131,7 +131,7 @@ def validate() -> list[str]:
     errors: list[str] = []
     perfmon_configs = load_perfmon_configs()
     gpu_series_map = load_gpu_series_mapping()
-    shared_arch_expansions = {"gfx115x": ["gfx1150", "gfx1151", "gfx1152"]}
+    shared_arch_expansions = {"gfx115x": ["gfx1150", "gfx1151", "gfx1152", "gfx1153"]}
 
     for sets_path in sorted(SETS_DIR.glob("gfx*_sets.yaml")):
         arch = sets_path.stem.replace("_sets", "")

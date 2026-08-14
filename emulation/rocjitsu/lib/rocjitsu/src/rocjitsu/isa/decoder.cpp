@@ -4,8 +4,20 @@
 #include "rocjitsu/isa/decoder.h"
 
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 
 namespace rocjitsu {
+
+std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
+                                         std::string_view target_id) {
+  const IsaTargetDescriptor *target = registry.find(target_id);
+  return target == nullptr ? nullptr : target->decoder_factory();
+}
+
+std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry, rj_code_arch_t arch) {
+  const IsaTargetDescriptor *target = registry.find(arch);
+  return target == nullptr ? nullptr : target->decoder_factory();
+}
 
 Decoder::~Decoder() {
   // If this decoder's pool is still the active one, deactivate it so
@@ -13,6 +25,17 @@ Decoder::~Decoder() {
   // back to ::operator delete instead of following a dangling pool pointer.
   if (Instruction::alloc_pool_ == &pool_)
     deactivate_pool();
+}
+
+void Decoder::validate_instruction_operands(const Instruction &inst) {
+  for (int index = 0; index < inst.num_src_operands(); ++index) {
+    if (const Operand *operand = inst.src_operand(index))
+      operand->validate_encoding();
+  }
+  for (int index = 0; index < inst.num_dst_operands(); ++index) {
+    if (const Operand *operand = inst.dst_operand(index))
+      operand->validate_encoding();
+  }
 }
 
 Instruction *Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc) {

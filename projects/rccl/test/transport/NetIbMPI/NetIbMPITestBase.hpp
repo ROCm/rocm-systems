@@ -168,6 +168,7 @@ protected:
     // Timing constants
     static constexpr int kDefaultTimeoutMs = 5000;
     static constexpr int kLargeTransferTimeoutMs = 30000;
+    static constexpr int kConnectTimeoutMs = 30000;  // Handshake watchdog (see SetupConnection)
     static constexpr int kPollIntervalUs = 10000;  // 10ms
     static constexpr int kPollIntervalMs = 10;
     static constexpr int kMaxRetryAttempts = 1000;  // For NULL request handling
@@ -318,6 +319,9 @@ protected:
     };
 
     ncclResult_t SetupConnection(int dev, ConnectionPair& pair, int rank, int peerRank) {
+        // Cap the accept/connect handshake so a dead fabric fails fast instead
+        // of spinning forever (AICOMRCCL-1577).
+        const int maxAttempts = kConnectTimeoutMs / kPollIntervalMs;
         if (rank == 0) {
             // Rank 0: Listen
             RCCL_TEST_CHECK(CreateListenComm(dev, &pair.handle, &pair.listenComm));
@@ -327,11 +331,20 @@ protected:
 
             // Accept connection
             int done = 0;
+            int attempts = 0;
             while (!done) {
                 ncclResult_t result = AcceptConnection(pair.listenComm, &pair.recvComm);
-                if (result == ncclSuccess && pair.recvComm != nullptr) {
-                    done = 1;
+                if (result != ncclSuccess) {
+                    return result;
                 }
+                if (pair.recvComm != nullptr) {
+                    done = 1;
+                    break;
+                }
+                if (++attempts >= maxAttempts) {
+                    return ncclInternalError;
+                }
+                usleep(kPollIntervalUs);
             }
         } else {
             // Rank 1: Connect
@@ -339,11 +352,20 @@ protected:
 
             // Connect to peer
             int done = 0;
+            int attempts = 0;
             while (!done) {
                 ncclResult_t result = ConnectToRemote(dev, &pair.handle, &pair.sendComm);
-                if (result == ncclSuccess && pair.sendComm != nullptr) {
-                    done = 1;
+                if (result != ncclSuccess) {
+                    return result;
                 }
+                if (pair.sendComm != nullptr) {
+                    done = 1;
+                    break;
+                }
+                if (++attempts >= maxAttempts) {
+                    return ncclInternalError;
+                }
+                usleep(kPollIntervalUs);
             }
         }
 
@@ -448,53 +470,126 @@ protected:
         ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, request), ncclSuccess);
     }
 
-    // Returns true if the IB device has at least one routable GID (non-zero IPv4-mapped
-    // or global-scope IPv6). NICs with only link-local GIDs cannot do cross-node RDMA.
-    static bool HasRoutableGid(const char* devName) {
+    static bool PortIsEthernet(const char* portsPath, const char* port) {
         char path[PATH_MAX];
-        if (snprintf(path, sizeof(path), "/sys/class/infiniband/%s/ports/1/gids", devName) >= PATH_MAX)
+        if (snprintf(path, sizeof(path), "%s/%s/link_layer", portsPath, port) >= (int)sizeof(path))
             return false;
-        DIR* d = opendir(path);
-        if (!d) return false;
+
+        FILE* linkLayerFile = fopen(path, "r");
+        if (!linkLayerFile) return false;
+
+        char linkLayer[32] = {};
+        bool linkLayerRead = (fscanf(linkLayerFile, "%31s", linkLayer) == 1);
+        fclose(linkLayerFile);
+
+        return linkLayerRead && strcmp(linkLayer, "Ethernet") == 0;
+    }
+
+    static bool PortHasRoutableGid(const char* portsPath, const char* port) {
+        char path[PATH_MAX];
+        if (snprintf(path, sizeof(path), "%s/%s/gids", portsPath, port) >= (int)sizeof(path))
+            return false;
+
+        DIR* gidDir = opendir(path);
+        if (!gidDir) return false;
+
         struct dirent* ent;
         bool found = false;
-        while ((ent = readdir(d)) != nullptr) {
+        while (!found && (ent = readdir(gidDir)) != nullptr) {
             if (ent->d_name[0] == '.') continue;
             char gidPath[PATH_MAX];
-            snprintf(gidPath, sizeof(gidPath), "%s/%s", path, ent->d_name);
+            if (snprintf(gidPath, sizeof(gidPath), "%s/%s", path, ent->d_name) >= (int)sizeof(gidPath))
+                continue;
             FILE* f = fopen(gidPath, "r");
             if (!f) continue;
             char gid[64] = {};
-            fscanf(f, "%63s", gid);
+            bool gidRead = (fscanf(f, "%63s", gid) == 1);
             fclose(f);
+            if (!gidRead) continue;
             // Skip all-zero GIDs and link-local (fe80::) GIDs
             bool allZero = (strcmp(gid, "0000:0000:0000:0000:0000:0000:0000:0000") == 0);
             bool linkLocal = (strncmp(gid, "fe80:", 5) == 0);
-            if (!allZero && !linkLocal) { found = true; break; }
+            found = !allZero && !linkLocal;
         }
-        closedir(d);
+        closedir(gidDir);
         return found;
     }
 
+    // Returns true unless the device is RoCE with no routable GID on any port: such a port
+    // completes QP setup and then silently drops cross-node RDMA traffic. On InfiniBand every
+    // GID is link-local, so the GID table says nothing about routability there. When the device
+    // cannot be inspected, assume it is usable rather than dropping the NIC.
+    //
+    // The ports come from the device directory rather than ncclNetProperties_t::port, which the
+    // plugin sets to portNum + realPort. realPort counts VF siblings on one PCI path, so for
+    // every VF past the first it names a port that does not exist in sysfs.
+    static bool CanRouteCrossNode(const char* devName) {
+        char portsPath[PATH_MAX];
+        if (snprintf(portsPath, sizeof(portsPath), "/sys/class/infiniband/%s/ports", devName)
+            >= (int)sizeof(portsPath))
+            return true;
+
+        DIR* portsDir = opendir(portsPath);
+        if (!portsDir) return true;
+
+        int ethernetPorts = 0;
+        bool routable = false;
+        struct dirent* ent;
+        while (!routable && (ent = readdir(portsDir)) != nullptr) {
+            if (ent->d_name[0] == '.') continue;
+            if (!PortIsEthernet(portsPath, ent->d_name)) continue;
+            ethernetPorts++;
+            routable = PortHasRoutableGid(portsPath, ent->d_name);
+        }
+        closedir(portsDir);
+
+        return routable || ethernetPorts == 0;
+    }
+
+    // What CreateMergedDevice() tried before giving up. Empty after a success.
+    // Callers put it in their GTEST_SKIP() message, so a skip states which speed
+    // groups existed and why each one was rejected.
+    std::string mergeSkipReason_;
+
+    void AppendMergeSkipReason(const std::string& clause) {
+        if (!mergeSkipReason_.empty()) mergeSkipReason_ += "; ";
+        mergeSkipReason_ += clause;
+    }
+
     // Helper: create a merged device from N physical NICs.
-    // Returns merged device index, or -1 if no suitable group found.
-    // Iterates speed groups (fastest-first by enumeration order). Within each
-    // group, slides a window of nNicsToMerge; skips windows containing a NIC
-    // without a routable GID (those can set up QPs but drop RDMA traffic cross-node).
+    // Returns merged device index, or -1 if no suitable group found, in which case
+    // mergeSkipReason_ describes the attempt.
+    // Iterates speed groups in order of first appearance. Within each group, slides
+    // a window of nNicsToMerge; skips windows containing a NIC that cannot carry
+    // cross-node RDMA traffic.
     // speedGroupStart: index into physDevs indicating which speed group to try first.
-    // rank: MPI rank of this process
-    int CreateMergedDevice(int nNicsToMerge, int rank, int speedGroupStart = 0)
+    int CreateMergedDevice(int nNicsToMerge, int speedGroupStart = 0)
     {
+        mergeSkipReason_.clear();
+
         if (nNicsToMerge <= 0 || nNicsToMerge > NCCL_NET_MAX_DEVS_PER_NIC) {
-            fprintf(stderr,
-                    "Rank %d requested invalid merge size %d (valid range: 1..%d)\n",
-                    rank, nNicsToMerge, NCCL_NET_MAX_DEVS_PER_NIC);
+            mergeSkipReason_ = "invalid merge size " + std::to_string(nNicsToMerge) +
+                               " (valid range: 1.." + std::to_string(NCCL_NET_MAX_DEVS_PER_NIC) + ")";
             return -1;
         }
 
+        int mergedDev = CreateMergedDeviceFromSpeedGroup(nNicsToMerge, speedGroupStart);
+        if (mergedDev < 0)
+            mergeSkipReason_ = "no group of " + std::to_string(nNicsToMerge) +
+                               " mergeable NICs: " + mergeSkipReason_;
+        else
+            mergeSkipReason_.clear();
+        return mergedDev;
+    }
+
+    int CreateMergedDeviceFromSpeedGroup(int nNicsToMerge, int speedGroupStart)
+    {
         int ndev = 0;
         RCCL_TEST_CHECK(GetDeviceCount(&ndev));
-        if (ndev <= 0) return -1;
+        if (ndev <= 0) {
+            AppendMergeSkipReason("the plugin reports no devices");
+            return -1;
+        }
 
         std::vector<ncclNetProperties_t> props(ndev);
         std::vector<int> physDevs;
@@ -505,41 +600,70 @@ protected:
                 physDevs.push_back(i);
         }
 
-        if (speedGroupStart >= (int)physDevs.size()) return -1;
-
-        // Build the speed group starting at speedGroupStart
-        int targetSpeed = props[physDevs[speedGroupStart]].speed;
-        std::vector<int> compat;
-        for (int d : physDevs)
-            if (props[d].speed == targetSpeed) compat.push_back(d);
-
-        // Try each consecutive window of nNicsToMerge within this speed group
-        for (int w = 0; w + nNicsToMerge <= (int)compat.size(); w++) {
-            bool routable = true;
-            for (int i = 0; i < nNicsToMerge; i++) {
-                const char* name = props[compat[w + i]].name;
-                if (name && !HasRoutableGid(name)) { routable = false; break; }
-            }
-            if (!routable) continue;
-
-            ncclNetVDeviceProps_t vProps;
-            memset(&vProps, 0, sizeof(vProps));
-            vProps.ndevs = nNicsToMerge;
-            for (int i = 0; i < nNicsToMerge; i++)
-                vProps.devs[i] = compat[w + i];
-
-            int outMergedDev = -1;
-            if (MakeVirtualDevice(&outMergedDev, &vProps) == ncclSuccess && outMergedDev >= 0)
-                return outMergedDev;
+        if (speedGroupStart >= (int)physDevs.size()) {
+            AppendMergeSkipReason(std::to_string(physDevs.size()) +
+                                  " physical NICs, none from index " +
+                                  std::to_string(speedGroupStart) + " on");
+            return -1;
         }
 
-        // This speed group exhausted — advance to the next one
-        int nextStart = speedGroupStart;
-        while (nextStart < (int)physDevs.size() &&
-               props[physDevs[nextStart]].speed == targetSpeed)
-            nextStart++;
+        // A speed group is every NIC at that speed, wherever it sits in physDevs, so walking the
+        // start index would revisit a group whose members are not contiguous.
+        std::set<int> triedSpeeds;
 
-        return CreateMergedDevice(nNicsToMerge, rank, nextStart);
+        for (int start = speedGroupStart; start < (int)physDevs.size(); start++) {
+            int targetSpeed = props[physDevs[start]].speed;
+            if (!triedSpeeds.insert(targetSpeed).second) continue;
+
+            std::vector<int> compat;
+            for (int d : physDevs)
+                if (props[d].speed == targetSpeed) compat.push_back(d);
+
+            int windowsTried = 0;
+            int windowsUnroutable = 0;
+            int windowsRefused = 0;
+            std::string firstUnroutableNic;
+
+            // Try each consecutive window of nNicsToMerge within this speed group
+            for (int w = 0; w + nNicsToMerge <= (int)compat.size(); w++) {
+                windowsTried++;
+                bool routable = true;
+                for (int i = 0; i < nNicsToMerge; i++) {
+                    const ncclNetProperties_t& dev = props[compat[w + i]];
+                    if (dev.name && !CanRouteCrossNode(dev.name)) {
+                        routable = false;
+                        if (firstUnroutableNic.empty()) firstUnroutableNic = dev.name;
+                        break;
+                    }
+                }
+                if (!routable) { windowsUnroutable++; continue; }
+
+                ncclNetVDeviceProps_t vProps;
+                memset(&vProps, 0, sizeof(vProps));
+                vProps.ndevs = nNicsToMerge;
+                for (int i = 0; i < nNicsToMerge; i++)
+                    vProps.devs[i] = compat[w + i];
+
+                int outMergedDev = -1;
+                if (MakeVirtualDevice(&outMergedDev, &vProps) == ncclSuccess && outMergedDev >= 0)
+                    return outMergedDev;
+                windowsRefused++;
+            }
+
+            std::ostringstream clause;
+            if (windowsTried == 0) {
+                clause << compat.size() << " of the " << nNicsToMerge
+                       << " NICs required at speed " << targetSpeed;
+            } else {
+                clause << compat.size() << " NICs at speed " << targetSpeed << ": "
+                       << windowsTried << " windows tried, " << windowsUnroutable << " unroutable";
+                if (!firstUnroutableNic.empty()) clause << " (" << firstUnroutableNic << ")";
+                clause << ", " << windowsRefused << " refused by makeVDevice";
+            }
+            AppendMergeSkipReason(clause.str());
+        }
+
+        return -1;
     }
 
 

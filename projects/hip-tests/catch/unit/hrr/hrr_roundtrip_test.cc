@@ -574,6 +574,25 @@ static void hrr_run_roundtrip(const std::string& direct_case,
   hrr_run_playback(cap_path, /*extra_args=*/"", require_d2h);
 }
 
+static bool hrr_find_peer_accessible_pair(int& src_dev, int& dst_dev, int& ndev) {
+  HIP_CHECK(hipGetDeviceCount(&ndev));
+  if (ndev < 2) return false;
+
+  for (int src = 0; src < ndev; ++src) {
+    for (int dst = 0; dst < ndev; ++dst) {
+      if (src == dst) continue;
+      int can_access = 0;
+      HIP_CHECK(hipDeviceCanAccessPeer(&can_access, src, dst));
+      if (can_access) {
+        src_dev = src;
+        dst_dev = dst;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Env-aware capture + playback helpers (used by the repro roundtrips).
 //
@@ -767,6 +786,58 @@ TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
   REQUIRE(ret == 2);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_StreamWriteValue_Direct (hipStreamWriteValue32 /
+ *     hipStreamWriteValue64, including one hipExtStreamWriteValueIncrement
+ *     write) and replay it.  Replay must reproduce every written value.
+ *   - Replay with HIP_HRR_D2H_EXACT=1.  This is deliberate, not decoration:
+ *     with the default tolerant validator a lost 32-bit write is accepted as
+ *     "f64 within tolerance" on any blob whose length is a multiple of 8, and
+ *     the increment slot differs from its no-increment value by far less than
+ *     atol=rtol=1e-3 of the recorded magnitude.  Exact mode makes the playback
+ *     exit code (the real gate) a byte-for-byte verdict.
+ *   - Gated on hipDeviceAttributeCanUseStreamWaitValue: on a target without
+ *     support the workload skips, which would leave too few events / no D2H
+ *     blob for the archive assertions, so skip the roundtrip as well.
+ */
+HIP_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
+  int canUseStreamValue = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&canUseStreamValue,
+                                  hipDeviceAttributeCanUseStreamWaitValue, 0));
+  if (!canUseStreamValue) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
+  }
+
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwritevalue"};
+  hrr_capture_direct("Unit_HRR_StreamWriteValue_Direct", cap.path);
+
+  auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_D2H_EXACT", "1"}});
+  INFO("Playback stdout:\n" << out);
+  INFO("Playback exit code: " << ret);
+#ifdef _WIN32
+  // Same policy as hrr_run_playback: on the Windows consumer-iGPU CI target
+  // replay is not guaranteed to reproduce device output bit-for-bit, so D2H
+  // fidelity is best-effort there.  A crash still fails via ret < 128.
+  REQUIRE(ret < 128);
+  if (ret != 0) return;
+#else
+  REQUIRE(ret == 0);  // exact-mode D2H: any differing byte fails the replay
+#endif
+
+  // Assert the three sentinel blobs were actually compared, so a replay that
+  // silently validated nothing cannot pass on the exit code alone.
+  size_t pos = out.find("D2H checks");
+  REQUIRE(pos != std::string::npos);
+  size_t colon = out.find(':', pos);
+  REQUIRE(colon != std::string::npos);
+  int d2h_pass = 0;
+  sscanf(out.c_str() + colon + 1, " %d pass", &d2h_pass);
+  INFO("D2H pass=" << d2h_pass);
+  CHECK(d2h_pass >= 3);
+}
+
 HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetvariants"};
   hrr_run_roundtrip("Unit_HRR_MemsetVariants_Direct", cap.path);
@@ -889,6 +960,87 @@ HIP_TEST_CASE(Unit_HRR_MemPoolExtendedRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_MemPoolExtended_Direct", cap.path);
 }
 
+HIP_TEST_CASE(Unit_HRR_DeviceMemPoolRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_devicemempool"};
+  // Exercises hipDeviceSetMemPool (device stream-ordered pool association),
+  // the one device mem-pool API left untested by Unit_HRR_DeviceInfo_Direct.
+  hrr_run_roundtrip("Unit_HRR_DeviceMemPool_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ExtMallocRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extmalloc"};
+  // Exercises hipExtMallocWithFlags (device allocation, manual playback handler).
+  hrr_run_roundtrip("Unit_HRR_ExtMalloc_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamWaitEventSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwaitspt"};
+  // Exercises hipStreamWaitEvent_spt (per-thread-stream cross-stream ordering).
+  hrr_run_roundtrip("Unit_HRR_StreamWaitEventSpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_GraphLaunchSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_graphlaunchspt"};
+  // Exercises hipGraphLaunch_spt (per-thread-stream graph launch).
+  hrr_run_roundtrip("Unit_HRR_GraphLaunchSpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ExtModuleLaunchKernelRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extmodulelaunch"};
+  // Exercises hipExtModuleLaunchKernel (manual kernarg + device-ptr replay via
+  // the HIPRTC module path, which is captured/replayed on Linux).
+  hrr_run_roundtrip("Unit_HRR_ExtModuleLaunchKernel_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_HostFreeRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostfree"};
+  // Exercises hipHostFree + hipHostMalloc (pinned-host alloc-map lifecycle).
+  hrr_run_roundtrip("Unit_HRR_HostFree_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_LoggingRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_logging"};
+  // Exercises hipExtSetLoggingParams / hipExtEnableLogging / hipExtDisableLogging.
+  hrr_run_roundtrip("Unit_HRR_Logging_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamCaptureQuerySptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_capturequeryspt"};
+  // Exercises hipStreamIsCapturing_spt + hipStreamGetCaptureInfo_spt inside a
+  // manual capture frame (graph executes -> D2H validates the whole path).
+  hrr_run_roundtrip("Unit_HRR_StreamCaptureQuerySpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamCaptureBeginSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_capturebeginspt"};
+  // Validates hipStreamBeginCapture_spt on GPU (generated handler omits the
+  // ctx.in_graph_capture bookkeeping; safe for a memset-only capture region).
+  hrr_run_roundtrip("Unit_HRR_StreamCaptureBeginSpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ConfigureCallRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_configurecall"};
+  // Exercises hipConfigureCall (legacy execution-stack launch configuration).
+  hrr_run_roundtrip("Unit_HRR_ConfigureCall_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_MemcpyPeerRoundtrip) {
+  int src_dev = 0;
+  int dst_dev = 1;
+  int ndev = 0;
+  if (!hrr_find_peer_accessible_pair(src_dev, dst_dev, ndev)) {
+    if (ndev < 2) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    } else {
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    }
+  }
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpypeer"};
+  // Exercises hipMemcpyPeer across two GPUs: capture on a multi-GPU host, replay
+  // must recreate both allocations on their devices and validate the D2H bytes.
+  hrr_run_roundtrip("Unit_HRR_MemcpyPeer_Direct", cap.path);
+}
+
 HIP_TEST_CASE(Unit_HRR_MemsetExtraRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetextra"};
   hrr_run_roundtrip("Unit_HRR_MemsetExtra_Direct", cap.path);
@@ -924,9 +1076,58 @@ HIP_TEST_CASE(Unit_HRR_MiscAPIsRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_MiscAPIs_Direct", cap.path);
 }
 
+// ---------------------------------------------------------------------------
+// Driver-memcpy roundtrips (hipDrvMemcpy3D / 3DAsync / 2DUnaligned).
+//
+// These workloads are pure copy chains (hipMemsetD32 -> driver copy -> D2H) with
+// no floating-point arithmetic, so the captured output is bit-reproducible and
+// byte-exact comparison is the correct oracle.  HIP_HRR_D2H_EXACT=1 disables the
+// validator's float-tolerance fallback: without it a canary that decodes near
+// 0.0 in any of the candidate f32/bf16/f16/f64 encodings passes against replay's
+// zero-initialised allocations, which would make the roundtrip pass even with
+// the driver-memcpy playback handlers removed.
+//
+// Windows (gfx1151 iGPU) is exempted from D2H fidelity for the same reason as
+// hrr_run_playback: replay there is not guaranteed to reproduce device output
+// bit-for-bit.  A crash still fails the test.
+// ---------------------------------------------------------------------------
+static void hrr_run_exact_roundtrip(const std::string& direct_case,
+                                    const fs::path& cap_path) {
+  hrr_capture_direct(direct_case, cap_path);
+
+  auto [ret, out] = hrr_playback_env(cap_path, {{"HIP_HRR_D2H_EXACT", "1"}});
+  INFO("Playback stdout:\n" << out);
+  INFO("Playback exit code: " << ret);
+#ifdef _WIN32
+  REQUIRE(ret < 128);        // best-effort D2H, but never a crash
+  if (ret != 0) return;
+#else
+  // hrr-playback exits non-zero when any D2H check failed and when every
+  // attempted check was skipped, so this covers d2h_fail == 0 on its own.
+  REQUIRE(ret == 0);
+#endif
+
+  // Guard against a vacuous pass: the archive must contain at least one
+  // validated D2H blob.  Parse only the pass count; the summary reads
+  // "N pass (X exact, Y within tol), M fail, K skipped".
+  size_t pos = out.find("D2H checks");
+  REQUIRE(pos != std::string::npos);
+  size_t colon = out.find(':', pos);
+  REQUIRE(colon != std::string::npos);
+  int d2h_pass = 0;
+  sscanf(out.c_str() + colon + 1, " %d pass", &d2h_pass);
+  INFO("D2H pass=" << d2h_pass);
+  CHECK(d2h_pass >= 1);
+}
+
 HIP_TEST_CASE(Unit_HRR_DrvMemcpy3DRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy3d"};
-  hrr_run_roundtrip("Unit_HRR_DrvMemcpy3D_Direct", cap.path);
+  hrr_run_exact_roundtrip("Unit_HRR_DrvMemcpy3D_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_DrvMemcpy2DUnalignedRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy2dunaligned"};
+  hrr_run_exact_roundtrip("Unit_HRR_DrvMemcpy2DUnaligned_Direct", cap.path);
 }
 
 HIP_TEST_CASE(Unit_HRR_TextureRoundtrip) {

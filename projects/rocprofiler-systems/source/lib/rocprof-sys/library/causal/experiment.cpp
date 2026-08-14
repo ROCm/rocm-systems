@@ -7,6 +7,7 @@
 #include "binary/symbol.hpp"
 #include "common/defines.h"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "common/units.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
@@ -238,7 +239,7 @@ experiment::start()
 
     LOG_INFO("Starting causal experiment #{}: {}", index, as_string());
 
-    if(get_state() < State::Finalized)
+    if(state::process::get() < state::process::Finalized)
     {
         current_experiment_value = *this;
         current_selected_count.store(0);
@@ -255,7 +256,7 @@ experiment::wait() const
     auto _wait = experiment_time - (_now - start_time);
     auto _end  = _now + _wait;
     auto _incr = std::min<std::uint64_t>(_wait / 100, 1000000);
-    while(tracing::now() < _end && get_state() < State::Finalized)
+    while(tracing::now() < _end && state::process::get() < state::process::Finalized)
     {
         std::this_thread::yield();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _incr });
@@ -354,7 +355,7 @@ experiment::as_string() const
     if(selection.symbol_address > 0 && selection.address != selection.symbol_address)
         _ss << "(symbol@" << fmt::format("0x{:X}", selection.symbol_address) << ") ";
     if(!selection.symbol.file.empty() && selection.symbol.line > 0)
-        _ss << "[" << filepath::basename(selection.symbol.file) << ":"
+        _ss << "[" << path::filename(selection.symbol.file) << ":"
             << selection.symbol.line << "]";
 
     auto _patch = [](std::string _v) {

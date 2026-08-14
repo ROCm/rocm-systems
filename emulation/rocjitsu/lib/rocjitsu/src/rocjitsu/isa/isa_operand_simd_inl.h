@@ -25,6 +25,12 @@ namespace detail {
 template <typename Isa, typename Op>
 std::optional<uint32_t> resolved_vgpr_offset_for_operand(const amdgpu::Wavefront &wf,
                                                          const Op &op) {
+  // Operands that do not read a real value (inert placeholder / side-effect
+  // fieldless operands) do not resolve to a VGPR, so every SIMD storage helper
+  // that funnels through here (simd_vgpr_base / simd_vgpr_storage* /
+  // simd_notify_read, and write_lane_chunk's fast path) stays inert.
+  if (!op.reads_value())
+    return std::nullopt;
   if constexpr (requires {
                   Isa::resolved_vgpr_offset(wf, op.opr_type_, op.encoding_value_,
                                             op.vgpr_msb_role());
@@ -40,6 +46,11 @@ std::optional<uint32_t> resolved_vgpr_offset_for_operand(const amdgpu::Wavefront
 template <typename Isa> bool AmdgpuIsaOperand<Isa>::simd_capable() const {
   if (this->delegate())
     return this->delegate()->simd_capable();
+  // Operands that do not read a real value (inert placeholder / side-effect
+  // fieldless operands) must not inherit VGPR/immediate SIMD-capability from
+  // their operand type.
+  if (!this->reads_value())
+    return false;
   return Isa::simd_capable_value(this->opr_type_, this->encoding_value_);
 }
 
@@ -48,6 +59,11 @@ void AmdgpuIsaOperand<Isa>::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_
                                             uint32_t count, uint32_t *out) const {
   if (this->delegate()) {
     this->delegate()->read_lane_chunk(wf, lane_base, count, out);
+    return;
+  }
+  // Inert (non-value-reading) operand: fill benign zero.
+  if (!this->reads_value()) {
+    std::fill_n(out, count, 0u);
     return;
   }
   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
@@ -68,6 +84,9 @@ template <typename Isa>
 void AmdgpuIsaOperand<Isa>::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base,
                                              uint32_t count, const uint32_t *vals,
                                              uint64_t mask) const {
+  // Non-writable operand: inert write.
+  if (!this->is_writable())
+    return;
   auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this);
   if (!off) {
     Operand::write_lane_chunk(wf, lane_base, count, vals, mask);
@@ -106,6 +125,14 @@ std::optional<uint32_t>
 AmdgpuIsaOperand<Isa>::simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const {
   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
     return wf.vgpr_alloc().base + (wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off);
+  return std::nullopt;
+}
+
+template <typename Isa>
+std::optional<uint32_t>
+AmdgpuIsaOperand<Isa>::simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
+    return wf.vgpr_alloc().base + (wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off);
   return std::nullopt;
 }
 
@@ -168,6 +195,27 @@ void AmdgpuIsaOperand<Isa>::simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, u
     uint32_t physical_reg = wf.vgpr_alloc().base + voff;
     wf.cu().raw_cu().notify_vgpr_read(&wf, physical_reg, lane_mask, byte_mask);
     wf.cu().raw_cu().notify_vgpr_read(&wf, physical_reg + 1, lane_mask, byte_mask);
+  }
+}
+
+template <typename Isa>
+void AmdgpuIsaOperand<Isa>::simd_notify_write_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                                       uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    uint32_t physical_reg = wf.vgpr_alloc().base + voff;
+    wf.cu().raw_cu().notify_vgpr_write(&wf, physical_reg, lane_mask, byte_mask);
+  }
+}
+
+template <typename Isa>
+void AmdgpuIsaOperand<Isa>::simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                                         uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    uint32_t physical_reg = wf.vgpr_alloc().base + voff;
+    wf.cu().raw_cu().notify_vgpr_write(&wf, physical_reg, lane_mask, byte_mask);
+    wf.cu().raw_cu().notify_vgpr_write(&wf, physical_reg + 1, lane_mask, byte_mask);
   }
 }
 

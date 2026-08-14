@@ -30,7 +30,6 @@
 #include <timemory/unwind/bfd.hpp>
 #include <timemory/unwind/dlinfo.hpp>
 #include <timemory/unwind/types.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
 #include "logger/debug.hpp"
@@ -138,7 +137,7 @@ get_binary_info(const std::vector<std::string>&  _files,
     auto _filter = [&_satisfies_binary_filter](const procfs::maps& _v) {
         if(_v.pathname.empty()) return false;
         auto _path = path::realpath(_v.pathname);
-        return (filepath::exists(_path) && _satisfies_binary_filter(_path));
+        return (path::is_regular_file(_path) && _satisfies_binary_filter(_path));
     };
 
     auto _data = std::vector<binary_info>{};
@@ -148,7 +147,7 @@ get_binary_info(const std::vector<std::string>&  _files,
         for(const auto& itr : _files)
         {
             auto _filename = path::realpath(itr);
-            if(filepath::exists(_filename) && _satisfies_binary_filter(_filename) &&
+            if(path::is_regular_file(_filename) && _satisfies_binary_filter(_filename) &&
                _exists.find(_filename) == _exists.end())
             {
                 _data.emplace_back(parse_line_info(_filename, _process_dwarf,
@@ -206,12 +205,11 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
             auto _exclude_range_v      = std::set<address_range>{};
             auto _insert_exclude_range = [&_maps,
                                           &_exclude_range_v](const std::string& _v) {
-                auto _base_v = std::string_view{ filepath::basename(_v) };
+                auto _base_v = path::filename(_v);
                 auto _real_v = path::realpath(_v);
                 for(const auto& mitr : _maps)
                 {
-                    if(std::string_view{ filepath::basename(mitr.pathname) } == _base_v ||
-                       _real_v == _v)
+                    if(path::filename(mitr.pathname) == _base_v || _real_v == _v)
                     {
                         _exclude_range_v.emplace(
                             address_range{ mitr.load_address, mitr.last_address });
