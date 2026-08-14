@@ -153,7 +153,7 @@ jobs:
         # Self-healing janitor. The cleanup steps below cover the paths we can
         # predict, but a runner dying mid-job leaves its copy behind forever on
         # NFS. Anything older than a day is unambiguously dead: the longest a run
-        # can legally live is the detect job's 540min timeout.
+        # can legally live is the detect job's 560min timeout.
         run: |
           find "${RCCL_CI_ROOT}/configs" -maxdepth 1 -name 'ci_detect_run_*.json' \
             -mmin +1440 -print -delete 2>/dev/null || true
@@ -383,14 +383,24 @@ jobs:
             echo "" >> "${GITHUB_STEP_SUMMARY}"
             echo "No report was produced for this run (\`${REPORT}\` is missing)." >> "${GITHUB_STEP_SUMMARY}"
             echo "See the detector step log above for the failure." >> "${GITHUB_STEP_SUMMARY}"
-            printf 'No report was produced for this run.\n' > "${RUNNER_TEMP}/rccl_report.md"
+            # Deliberately do NOT write rccl_report.md here. Its presence in the
+            # uploaded artifact is the `report` job's signal that a real verdict
+            # exists; a placeholder file would make "the detector measured
+            # nothing" indistinguishable from "the detector said pass", and
+            # report would post the placeholder text as though it were a result.
             exit 0
           fi
+          # Render into the artifact dir, not RUNNER_TEMP: upload-artifact@v4
+          # roots the archive at the least-common-ancestor of its paths, so a
+          # file from RUNNER_TEMP alongside files from NFS would push the LCA up
+          # to / and bury every entry under its full absolute path. Keeping all
+          # four under the same dir puts them at the artifact root, which is what
+          # the report job expects to find.
           python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
             "${REPORT}" \
             --no-exit-code \
-            --output "${RUNNER_TEMP}/rccl_report.md"
-          cat "${RUNNER_TEMP}/rccl_report.md" >> "${GITHUB_STEP_SUMMARY}"
+            --output "${_ART}/rccl_report.md"
+          cat "${_ART}/rccl_report.md" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload artifacts
         if: always()
@@ -406,10 +416,16 @@ jobs:
           # other PRs' command lines and output, re-uploaded in full on every run.
           # In workspace mode steps.art.outputs.dir is per-run, so this is now
           # only our own log.
+          # rccl_report.md is the rendered comment body. It is uploaded so the
+          # `report` job can post it without a self-hosted runner: rendering
+          # needs format_report.py and the report JSON, both of which live on
+          # NFS, and that dependency was the only reason the comment job held
+          # the tw-gfx950 label. See the note above `report`.
           path: |
             ${{ steps.art.outputs.dir }}/ab_regression_report.json
             ${{ steps.art.outputs.dir }}/ab_derived_thresholds.json
             ${{ steps.art.outputs.dir }}/rccl_runs.log
+            ${{ steps.art.outputs.dir }}/rccl_report.md
 
       - name: Clean up per-run config copy
         if: always()
@@ -481,15 +497,42 @@ jobs:
   # PASS. So: separate job, needs both, if: always(), and it renders SOMETHING for
   # every terminal state of the two jobs above.
   # ---------------------------------------------------------------------------
+  # It also runs on a GitHub-hosted runner, not the self-hosted one, and that is
+  # load-bearing rather than incidental. build, detect and arravikum's rccl-gin
+  # pipeline all contend for the single tw-gfx950 runner, and rccl-gin alone
+  # occupies roughly 21 minutes of every 24. Measured 2026-08-13: detect finished
+  # at 23:46 with a correct verdict and report was still queued 1h35m later,
+  # having never been assigned a runner. Two consequences, the second worse than
+  # the first: the comment lands hours after the answer is known, and a queued
+  # report is cancelled outright if anyone pushes to the PR -- discarding a
+  # completed 4-node measurement without posting anything.
+  #
+  # The only thing that ever tied this job to that runner was re-rendering the
+  # markdown, which needs format_report.py and the report JSON, both on NFS. But
+  # detect ALREADY renders exactly that file and now uploads it, so this job just
+  # downloads it. The "not measured" branches are pure string logic and never
+  # needed the cluster at all.
   report:
     needs: [build, detect]
     if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
     steps:
+      - name: Fetch the rendered report
+        id: dl
+        # Absent whenever detect did not produce a verdict -- skipped, cancelled,
+        # or run but measured nothing. That is a normal outcome here, not an
+        # error, so never fail the job over it: the whole point of this job is to
+        # say something in exactly those cases.
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: rccl-ab-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dl
+
       - name: Compose comment
         id: compose
         env:
@@ -515,16 +558,13 @@ jobs:
           elif [[ "${_DETECT}" == "cancelled" ]]; then
             emit ":warning: **Not measured.** The detector job was cancelled before it produced a verdict."
           else
-            HELPER="${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/lib/workspace.sh"
-            ART=""
-            [[ -f "${HELPER}" ]] && ART="$(bash "${HELPER}" --print-artifacts 2>/dev/null)" || true
-            [[ -n "${ART}" ]] || ART="${RCCL_CI_ROOT}/ab_artifacts"
-            REPORT="${ART}/ab_regression_report.json"
-            if [[ -f "${REPORT}" ]]; then
-              python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
-                "${REPORT}" --no-exit-code --output "${RUNNER_TEMP}/rccl_body.md" \
-                && emit "$(cat "${RUNNER_TEMP}/rccl_body.md")" \
-                || emit ":warning: **Not measured.** A report exists at \`${REPORT}\` but could not be rendered."
+            # detect writes this file only when format_report.py rendered a real
+            # verdict, so presence is the signal. Do not substitute any other
+            # source: a comment on this PR must come from this run or say that it
+            # could not.
+            BODY="${RUNNER_TEMP}/dl/rccl_report.md"
+            if [[ -s "${BODY}" ]]; then
+              emit "$(cat "${BODY}")"
             else
               emit ":x: **Not measured.** The detector job ended \`${_DETECT}\` and produced no report. This is an infrastructure result, not a statement about your change."
             fi
@@ -538,13 +578,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           path: ${{ runner.temp }}/rccl_comment.md
 
-      - name: Reap this run's per-run config
-        if: always()
-        env:
-          _CONFIG: ${{ needs.build.outputs.config_json }}
-        run: |
-          # Last line of defence: detect's own cleanup step doesn't run if detect
-          # never ran. This job always does.
-          case "${_CONFIG}" in
-            "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
-          esac
+      # This job used to end with a `rm -f` on the per-run config as a last line
+      # of defence for the case where detect never ran to clean up after itself.
+      # It cannot do that from a GitHub-hosted runner -- no NFS -- so the
+      # backstop is now solely the `Reap orphaned per-run configs` step at the
+      # top of `build`, which sweeps ci_detect_run_*.json left behind by earlier
+      # runs. That step already covered this case; it is why the janitor exists.
+      # The consequence of the move is that an orphaned config now survives until
+      # the next run of the gate instead of being removed within the minute.
