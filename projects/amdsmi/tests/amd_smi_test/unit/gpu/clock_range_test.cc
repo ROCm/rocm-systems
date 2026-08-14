@@ -58,6 +58,31 @@ constexpr char kOdWithFclk[] =
     "0: 1000Mhz\n"
     "1: 1100Mhz\n";
 
+// Bare GFXCLK/MCLK/FCLK aliases in place of the OD_* headers, as some GPUs emit.
+constexpr char kOdAliasHeaders[] =
+    "GFXCLK:\n"
+    "0: 500Mhz\n"
+    "1: 2100Mhz\n"
+    "MCLK:\n"
+    "0: 900Mhz\n"
+    "1: 1200Mhz\n"
+    "FCLK:\n"
+    "0: 1000Mhz\n"
+    "1: 1100Mhz\n";
+
+// OD_FCLK present but every level reads 0 -- no usable range.
+constexpr char kOdFclkAllZero[] =
+    "OD_FCLK:\n"
+    "0: 0Mhz\n"
+    "1: 0Mhz\n";
+
+// OD_FCLK with a non-conforming line between two valid levels.
+constexpr char kOdFclkGarbageLine[] =
+    "OD_FCLK:\n"
+    "0: 1000Mhz\n"
+    "not-a-level\n"
+    "1: 1100Mhz\n";
+
 TEST(GpuUnit, OdClkRangeReadsSclkSection) {
   std::istringstream od(kOdNoFclk);
   unsigned int max = 0;
@@ -112,6 +137,52 @@ TEST(GpuUnit, OdClkRangeRejectsNonOdDomain) {
   unsigned int max = 7;
   unsigned int min = 7;
   EXPECT_FALSE(smi_amdgpu_parse_od_clk_range(od, AMDSMI_CLK_TYPE_SOC, &max, &min));
+}
+
+// The bare GFXCLK/MCLK/FCLK aliases are accepted just like the OD_* headers.
+TEST(GpuUnit, OdClkRangeReadsAliasHeaders) {
+  unsigned int max = 0;
+  unsigned int min = UINT_MAX;
+  std::istringstream gfx(kOdAliasHeaders);
+  EXPECT_TRUE(smi_amdgpu_parse_od_clk_range(gfx, AMDSMI_CLK_TYPE_GFX, &max, &min));
+  EXPECT_EQ(max, 2100u);
+  EXPECT_EQ(min, 500u);
+
+  max = 0;
+  min = UINT_MAX;
+  std::istringstream mem(kOdAliasHeaders);
+  EXPECT_TRUE(smi_amdgpu_parse_od_clk_range(mem, AMDSMI_CLK_TYPE_MEM, &max, &min));
+  EXPECT_EQ(max, 1200u);
+  EXPECT_EQ(min, 900u);
+
+  max = 0;
+  min = UINT_MAX;
+  std::istringstream df(kOdAliasHeaders);
+  EXPECT_TRUE(smi_amdgpu_parse_od_clk_range(df, AMDSMI_CLK_TYPE_DF, &max, &min));
+  EXPECT_EQ(max, 1100u);
+  EXPECT_EQ(min, 1000u);
+}
+
+// Section present but every level parses to 0 -> reported absent so the caller
+// still falls back to pp_dpm_*.
+TEST(GpuUnit, OdClkRangeFallsBackWhenAllLevelsZero) {
+  std::istringstream od(kOdFclkAllZero);
+  unsigned int max = 555;
+  unsigned int min = 555;
+  EXPECT_FALSE(smi_amdgpu_parse_od_clk_range(od, AMDSMI_CLK_TYPE_DF, &max, &min));
+  EXPECT_EQ(max, 555u);
+  EXPECT_EQ(min, 555u);
+}
+
+// A non-conforming line inside the section is skipped, not treated as its end,
+// so levels on both sides still contribute to the range.
+TEST(GpuUnit, OdClkRangeSkipsMalformedLineWithinSection) {
+  std::istringstream od(kOdFclkGarbageLine);
+  unsigned int max = 0;
+  unsigned int min = UINT_MAX;
+  EXPECT_TRUE(smi_amdgpu_parse_od_clk_range(od, AMDSMI_CLK_TYPE_DF, &max, &min));
+  EXPECT_EQ(max, 1100u);
+  EXPECT_EQ(min, 1000u);
 }
 
 }  // namespace

@@ -135,7 +135,7 @@ GPU: 0
 
 ### Resolved Issues
 
-- **Fixed FCLK maximum clock reported as 0 MHz**.
+- **Fixed `amd-smi metric --clock` reporting FCLK `max_clk` as 0 MHz**.
   - `amdsmi_get_clock_info()` derived the FCLK (data-fabric) range from `pp_od_clk_voltage`, which on some GPUs (e.g. MI45x) lists only `OD_SCLK`/`OD_MCLK` and no FCLK section. The parsed maximum stayed at 0 and the code never fell back to `pp_dpm_fclk`, so `amd-smi metric --clock` showed `FCLK_0 MAX_CLK: 0 MHz`. The range now falls back to `pp_dpm_fclk` (and the analogous `pp_dpm_sclk`/`pp_dpm_mclk`) whenever the overdrive file omits that domain.
 
 - **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.  

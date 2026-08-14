@@ -336,7 +336,7 @@ bool smi_amdgpu_parse_od_clk_range(std::istream& od_stream, amdsmi_clk_type_t do
     if (!in_domain) {
       continue;
     }
-    if (sscanf(line.c_str(), "%u: %d%9s", &dpm_level, &freq, str) <= 2) {
+    if (sscanf(line.c_str(), "%u: %u%9s", &dpm_level, &freq, str) <= 2) {
       continue;  // skip lines that don't conform to the format
     }
     found = true;
@@ -429,7 +429,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
 
     char firstChar = line[0];
     if (firstChar == 'S') {
-      if (sscanf(line.c_str(), "%c: %d%9s", &single_char, &sleep_freq, str) <= 2) {
+      if (sscanf(line.c_str(), "%c: %u%9s", &single_char, &sleep_freq, str) <= 2) {
         ranges.close();
         return AMDSMI_STATUS_NO_DATA;
       }
@@ -443,7 +443,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
        * incorrect min value.
        */
 
-      if (sscanf(line.c_str(), "%u: %d%c", &dpm_level, &freq, str) <= 2) {
+      if (sscanf(line.c_str(), "%u: %u%c", &dpm_level, &freq, str) <= 2) {
         ranges.close();
         return AMDSMI_STATUS_IO;
       }
