@@ -3637,8 +3637,17 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
       bool ceAvailable = ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+      size_t totalBytes = comm->nRanks * info->count * ncclTypeSize(info->datatype);
+      // Check if sendbuff and recvbuff overlap
+      bool isOverlapping = rcclBuffersOverlap(info->sendbuff, info->recvbuff, totalBytes);
+      if (isOverlapping && info->coll == ncclFuncAlltoAll) {
+        WARN("AllToAll: Overlapping/In-Place buffers detected [%p, %p) vs [%p, %p). "
+            "this may lead to data corruption.",
+            info->sendbuff, (const char*)(info->sendbuff) + totalBytes,
+            info->recvbuff, (const char*)(info->recvbuff) + totalBytes);    
+      }
 
-      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment) {
+      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment && !(isOverlapping && info->coll == ncclFuncAlltoAll)) {
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
       }
       // Append kernel-based collective
@@ -3654,30 +3663,19 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         // For cuda graph checking
         NCCLCHECK(ncclCudaGetCapturingGraph(&graph, info->stream, comm->config.graphUsageMode));
         captured = ncclCudaGraphValid(graph);
-        if (info->coll == ncclFuncAlltoAll) {
-          size_t totalBytes = comm->nRanks * info->count * ncclTypeSize(info->datatype);
-          // Check if sendbuff and recvbuff overlap
-          bool isOverlapping = rcclBuffersOverlap(info->sendbuff, info->recvbuff, totalBytes);
-          if (isOverlapping) {
-            WARN("AllToAll: Overlapping/In-Place buffers detected [%p, %p) vs [%p, %p). "
-                    "Bypassing RMA zero-copy paths to prevent data corruption.",
-                    info->sendbuff, (const char*)(info->sendbuff) + totalBytes,
-                    info->recvbuff, (const char*)(info->recvbuff) + totalBytes);
-            return ncclInvalidArgument;          
-          } else {
-            NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
-                                  &sendReg));
-            NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
-                                  &recvReg));
-            allowUB = (captured || (sendReg != NULL && recvReg != NULL));
-            for (int r = 0; r < comm->nRanks; r++) {
-              NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI,
-                                      (void*)((char*)info->sendbuff + r * info->count * ncclTypeSize(info->datatype)),
-                                      info->count, info->datatype, r, allowUB));
-              NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI,
-                                      (void*)((char*)info->recvbuff + r * info->count * ncclTypeSize(info->datatype)),
-                                      info->count, info->datatype, r, allowUB));
-            }
+        if (info->coll == ncclFuncAlltoAll) { 
+          NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
+                                &sendReg));
+          NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
+                                &recvReg));
+          allowUB = false; //!isOverlapping && (captured || (sendReg != NULL && recvReg != NULL));
+          for (int r = 0; r < comm->nRanks; r++) {
+            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI,
+                                    (void*)((char*)info->sendbuff + r * info->count * ncclTypeSize(info->datatype)),
+                                    info->count, info->datatype, r, allowUB));
+            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI,
+                                    (void*)((char*)info->recvbuff + r * info->count * ncclTypeSize(info->datatype)),
+                                    info->count, info->datatype, r, allowUB));
           }
         } else if (info->coll == ncclFuncAllGather && info->useDirect) {
           NCCLCHECK(ncclRegFind(comm, info->sendbuff, info->count * ncclTypeSize(info->datatype), &sendReg));
@@ -3706,7 +3704,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           }
         } else if (info->coll == ncclFuncScatter) {
           size_t offset = 0;
-          allowUB = captured;
+          allowUB = false; //captured;
           if (comm->rank == info->root) {
             for (int r = 0; r < comm->nRanks; r++) {
               void* buff = (void*)((char*)info->sendbuff + offset);
