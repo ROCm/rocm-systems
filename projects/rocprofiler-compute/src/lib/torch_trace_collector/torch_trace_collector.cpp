@@ -4,7 +4,6 @@
 // Definitions for the torch_trace_collector capture hooks.
 
 #include "capture_buffer.h"
-#include "capture_control.h"
 
 #include <string>
 #include <vector>
