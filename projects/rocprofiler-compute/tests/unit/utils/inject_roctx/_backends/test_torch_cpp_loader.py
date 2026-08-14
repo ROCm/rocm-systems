@@ -522,6 +522,10 @@ def test_runtime_build_names_the_tagged_artifact_and_pins_the_interpreter(
     )
     assert finder.cmake_executable == "/fake/cmake"
     assert finder.search_installed is True
+    assert finder.reuse_built_artifact is True, (
+        "the tag identifies the sources, so an artifact already built under it "
+        "must be imported without configuring again"
+    )
 
 
 def test_runtime_build_force_rebuild_discards_the_build_directory(
@@ -554,6 +558,9 @@ def test_runtime_build_force_rebuild_discards_the_build_directory(
     assert not stale.exists(), "force_rebuild must discard the stale build directory"
     assert instances[0].search_installed is False, (
         "force_rebuild must not resolve to an installed artifact"
+    )
+    assert instances[0].reuse_built_artifact is False, (
+        "force_rebuild must not reuse an artifact from the build directory"
     )
 
 

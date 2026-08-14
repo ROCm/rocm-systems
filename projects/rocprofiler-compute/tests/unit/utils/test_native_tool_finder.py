@@ -112,6 +112,53 @@ class TestNativeToolFinder:
                 )
                 assert finder.get_artifact_path() == artifact_path
 
+    def test_when_reuse_is_requested__an_existing_artifact_skips_cmake(
+        self, tmp_path: Path
+    ) -> None:
+        artifact_name = "torch_trace_collector-py3.12_torch2.9_src000000000000.so"
+        root_path = tmp_path / "src"
+        build_path = tmp_path / "cache" / "_build"
+        artifact_path = (
+            build_path / NativeToolFinder.sources_bin_subdir_name / artifact_name
+        )
+        self.__create_file(artifact_path)
+
+        finder = NativeToolFinder(
+            root_path,
+            artifact_name=artifact_name,
+            build_path=build_path,
+            reuse_built_artifact=True,
+        )
+        with patch.object(NativeToolFinder, "_generate_cmake") as generate:
+            with patch.object(NativeToolFinder, "_build_cmake") as build:
+                assert finder.get_artifact_path() == artifact_path
+        generate.assert_not_called()
+        build.assert_not_called()
+
+    def test_when_reuse_is_requested__a_missing_artifact_still_builds(
+        self, tmp_path: Path
+    ) -> None:
+        artifact_name = "torch_trace_collector-py3.12_torch2.9_src000000000000.so"
+        root_path = tmp_path / "src"
+        build_path = tmp_path / "cache" / "_build"
+        artifact_path = (
+            build_path / NativeToolFinder.sources_bin_subdir_name / artifact_name
+        )
+
+        finder = NativeToolFinder(
+            root_path,
+            artifact_name=artifact_name,
+            build_path=build_path,
+            reuse_built_artifact=True,
+        )
+        with patch.object(NativeToolFinder, "_generate_cmake", return_value=None):
+            with patch.object(
+                NativeToolFinder,
+                "_build_cmake",
+                side_effect=lambda: self.__create_file(artifact_path),
+            ):
+                assert finder.get_artifact_path() == artifact_path
+
     def test_cmake_commands_carry_the_configure_options_and_target(
         self, tmp_path: Path
     ) -> None:
