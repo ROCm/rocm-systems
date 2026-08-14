@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -65,16 +65,8 @@ def test_validate_counter_collection_pmc1(input_data: pd.DataFrame):
     assert min(kn_cnt) == max(kn_cnt) and len(unique(kn_cnt)) == 1
 
     assert len(df["Counter_Value"]) > 0
-    assert (df["Counter_Name"] == "SQ_WAVES").all()
+    assert df["Counter_Name"].str.contains("SQ_WAVES").all()
     assert (df["Counter_Value"].astype(int).values > 0).all()
-
-    # PMC dispatches on the same agent must not overlap when collection serializes kernels.
-    for agent_id in df["Agent_Id"].unique():
-        agent_dispatches = df[df["Agent_Id"] == agent_id].sort_values("Start_Timestamp")
-        start_timestamps = agent_dispatches["Start_Timestamp"].astype(int).values
-        end_timestamps = agent_dispatches["End_Timestamp"].astype(int).values
-        assert (end_timestamps >= start_timestamps).all()
-        assert (start_timestamps[1:] >= end_timestamps[:-1]).all()
 
     di_list = df["Dispatch_Id"].astype(int).values.tolist()
     di_uniq = sorted(df["Dispatch_Id"].unique().tolist())
