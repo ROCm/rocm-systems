@@ -309,7 +309,6 @@ public:
   virtual hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes,
                                         uint32_t* timeout, uint32_t* size_copied,
                                         void* dest_mem_addr, bool* is_spm_data_loss) const = 0;
-
   /// @brief Open anonymous file descriptor to enable events and read SMI events.
   /// @param[in] node_id Node ID to receive the SMI event from.
   /// @param[out] fd Anonymous file descriptor.
@@ -477,6 +476,11 @@ public:
   /// @return HSA_STATUS_SUCCESS if the driver successfully returns the queue save area information
   virtual hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const = 0;
 
+  /// @brief Sets the persisting GL2 cache size for a GPU node.
+  /// @param[in] node_id Node ID of the agent.
+  /// @param[in] cache_size The requested cache size in bytes.
+  /// @return HSA_STATUS_SUCCESS if the driver successfully sets the persisting cache size.
+  virtual hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) = 0;
 
   /// @brief Checks if the accelerator is ready to be used.
   /// @param[in] agent Agent to check the readiness of.

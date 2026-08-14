@@ -454,6 +454,7 @@ typedef struct _HaCacheProperties
     HSAuint32    CacheLatency;     // Cache latency in ns
     HsaCacheType CacheType;
     HSAuint32    SiblingMap[HSA_CPU_SIBLINGS];
+    HSAuint32    PersistingCacheSizeMax; //Maximum persisting cache size in L2 Cache topology.
 } HsaCacheProperties;
 
 

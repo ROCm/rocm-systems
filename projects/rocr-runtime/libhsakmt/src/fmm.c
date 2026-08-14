@@ -3640,6 +3640,17 @@ HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
+int hsakmt_fmm_get_drm_render_fd(HsaKFDContext *ctx, HSAuint32 node_id)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	int32_t index = gpu_mem_find_by_node_id(fmm_ctx, node_id);
+
+	if (index < 0)
+		return -1;
+
+	return fmm_ctx->gpu_mem[index].drm_render_fd;
+}
+
 HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(HsaKFDContext *ctx,
 			aperture_type_e aperture_type, HSAuint32 gpu_id,
 			HSAuint64 *aperture_base, HSAuint64 *aperture_limit)

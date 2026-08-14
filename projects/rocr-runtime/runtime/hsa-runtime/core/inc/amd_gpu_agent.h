@@ -342,6 +342,7 @@ class GpuAgent : public GpuAgentInt {
                            uint32_t private_segment_size, uint32_t group_segment_size,
                            bool metadata_queue, core::Queue** queue) override;
 
+  hsa_status_t SetAgentAttribute(hsa_agent_info_t attribute, void* value);
   // @brief Decrement GWS ref count.
   void GWSRelease();
 
@@ -776,6 +777,10 @@ class GpuAgent : public GpuAgentInt {
   // @brief Query the driver to get the cache properties.
   void InitCacheList();
 
+  // @brief Get the maximum persisting L2 cache size supported by this GPU.
+  // @return Maximum size in bytes, or 0 if not supported.
+  size_t GetMaxPersistingL2CacheSize() const;
+
   // @brief Create internal queues and blits.
   void InitDma();
 
@@ -1099,6 +1104,8 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_dim3_t cluster_max_dim_;
 
   size_t max_wave_scratch_;
+
+  size_t persisting_l2_cache_size_;
 
   std::atomic<bool> accelerator_ready_{false};
 
