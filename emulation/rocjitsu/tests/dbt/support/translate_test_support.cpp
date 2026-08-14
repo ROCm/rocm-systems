@@ -333,7 +333,6 @@ bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kin
                               diagnostic.message.find(message) != std::string::npos;
                      });
 }
-
 bool has_warning_at(const TranslatedCodeObject &result, DiagnosticKind kind,
                     std::string_view message, uint64_t guest_offset) {
   return std::any_of(result.diagnostics.begin(), result.diagnostics.end(),
@@ -544,8 +543,7 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernels_and_function_point
   return image;
 }
 
-std::vector<uint8_t>
-make_minimal_amdgpu_elf_with_two_kernel_descriptors(
+std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors(
     const std::vector<uint32_t> &text_words,
     std::optional<TestRuntimeTextReference> runtime_text_reference) {
   constexpr uint64_t text_offset = 0x100;

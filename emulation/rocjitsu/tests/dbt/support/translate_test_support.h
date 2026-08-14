@@ -7,6 +7,7 @@
 /// @brief Shared fixtures for CPU-only DBT translation tests.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/instruction.h"

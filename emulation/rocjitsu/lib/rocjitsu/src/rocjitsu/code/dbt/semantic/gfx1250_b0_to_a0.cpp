@@ -2415,8 +2415,8 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
     // These operand restrictions belong to the packed-f16 lowering alone: it
     // addresses the accumulator and destination one dword at a time and needs
     // an f32 source it can materialize. The f32 path re-encodes VDST, SRC0,
-    // SRC1, and SRC2 unchanged, so it must keep accepting whatever the source
-    // instruction already encoded.
+    // SRC1, and SRC2 unchanged, so it separately rejects accumulator selectors
+    // that the scaled form cannot represent.
     if ((source.src0 & 1u) != 0 || (source.src1 & 1u) != 0 || (source.vdst & 1u) != 0) {
       return ExpandResult::failed(
           "gfx1250 f16 K=128 WMMA matrix operands and destination are not even VGPR ranges");
@@ -2585,6 +2585,11 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
       return ExpandResult::failed("gfx1250 f16 K=128 WMMA SGPR-carrier guard is too large");
     }
     return ExpandResult::success(std::move(words));
+  }
+
+  if (source.src2 < kGfx1250InlineZero) {
+    return ExpandResult::failed(
+        "gfx1250 K=128 f32 WMMA scalar accumulator cannot be represented by the scaled form");
   }
 
   if (!gfx1250_k128_wmma_formats(inst.opcode(), matrix_a_fmt, matrix_b_fmt))

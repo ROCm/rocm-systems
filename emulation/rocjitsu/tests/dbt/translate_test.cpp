@@ -85,9 +85,9 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace {
 
+using test_support::append_elf_section_for_test;
 using test_support::decode_one;
 using test_support::enable_workgroup_id_x_sgpr;
-using test_support::append_elf_section_for_test;
 using test_support::find_section;
 using test_support::has_error_containing;
 using test_support::kKernelDescriptorSize;

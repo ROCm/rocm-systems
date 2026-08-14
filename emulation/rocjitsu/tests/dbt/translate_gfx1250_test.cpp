@@ -3643,15 +3643,16 @@ TEST(BinaryTranslatorE2E, RejectsAmbiguousRuntimeEntryClonedAcrossKernelScopes) 
   };
   for (const auto relocation : {rocjitsu::test_support::TestRuntimeTextRelocation::Abs64,
                                 rocjitsu::test_support::TestRuntimeTextRelocation::Relative64}) {
-    SCOPED_TRACE(relocation == rocjitsu::test_support::TestRuntimeTextRelocation::Abs64 ? "ABS64"
-                                                                                       : "RELATIVE64");
+    SCOPED_TRACE(relocation == rocjitsu::test_support::TestRuntimeTextRelocation::Abs64
+                     ? "ABS64"
+                     : "RELATIVE64");
     auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_two_kernel_descriptors(
         words, rocjitsu::test_support::TestRuntimeTextReference{
                    .relocation = relocation,
                    .target_text_offset = 2 * sizeof(uint32_t),
                });
-    rocjitsu::write_value_for_test<uint32_t>(image, offsetof(rocjitsu::Elf64_Ehdr, e_flags),
-                                             rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
+    rocjitsu::test_support::write_value_for_test<uint32_t>(
+        image, offsetof(rocjitsu::Elf64_Ehdr, e_flags), rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
     rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
     ASSERT_TRUE(source.is_valid());
 
@@ -3663,8 +3664,9 @@ TEST(BinaryTranslatorE2E, RejectsAmbiguousRuntimeEntryClonedAcrossKernelScopes) 
 
     EXPECT_FALSE(result.ok());
     EXPECT_EQ(result.elf_bytes, image);
-    EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ResourceLimit,
-                                               "relocated .text could not be materialized safely"));
+    EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
+        result, rocjitsu::DiagnosticKind::ResourceLimit,
+        "relocated .text could not be materialized safely"));
   }
 }
 
@@ -3696,8 +3698,8 @@ TEST(BinaryTranslatorE2E, PreservesUniqueRelocationBackedTextEntries) {
                                                 .relocation_type = test_case.relocation_type,
                                                 .target_text_offset = kReferencedEntry,
                                             });
-    rocjitsu::write_value_for_test<uint32_t>(image, offsetof(rocjitsu::Elf64_Ehdr, e_flags),
-                                             rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
+    rocjitsu::test_support::write_value_for_test<uint32_t>(
+        image, offsetof(rocjitsu::Elf64_Ehdr, e_flags), rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
     rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
     ASSERT_TRUE(source.is_valid());
 
@@ -3727,15 +3729,16 @@ TEST(BinaryTranslatorE2E, PreservesUniqueRelocationBackedTextEntries) {
     const uint64_t expected_vaddr = text->vaddr() + referenced_descriptor->entry_text_offset;
 
     const auto output_ehdr =
-        rocjitsu::read_elf_struct_for_test<rocjitsu::Elf64_Ehdr>(result.elf_bytes, 0);
-    const auto output_shdrs = rocjitsu::read_elf_array_for_test<rocjitsu::Elf64_Shdr>(
+        rocjitsu::test_support::read_elf_struct_for_test<rocjitsu::Elf64_Ehdr>(result.elf_bytes, 0);
+    const auto output_shdrs = rocjitsu::test_support::read_elf_array_for_test<rocjitsu::Elf64_Shdr>(
         result.elf_bytes, output_ehdr.e_shoff, output_ehdr.e_shnum);
     const auto rela = std::ranges::find_if(output_shdrs, [](const rocjitsu::Elf64_Shdr &section) {
       return section.sh_type == rocjitsu::SHT_RELA;
     });
     ASSERT_NE(rela, output_shdrs.end());
     const auto relocation_record =
-        rocjitsu::read_elf_struct_for_test<rocjitsu::Elf64_Rela>(result.elf_bytes, rela->sh_offset);
+        rocjitsu::test_support::read_elf_struct_for_test<rocjitsu::Elf64_Rela>(result.elf_bytes,
+                                                                               rela->sh_offset);
     EXPECT_EQ(rocjitsu::elf_reloc_type(relocation_record.r_info), test_case.relocation_type);
     if (test_case.fixture == rocjitsu::test_support::TestRuntimeTextRelocation::Relative64) {
       EXPECT_EQ(relocation_record.r_addend, static_cast<int64_t>(expected_vaddr));
@@ -3744,7 +3747,7 @@ TEST(BinaryTranslatorE2E, PreservesUniqueRelocationBackedTextEntries) {
 
     ASSERT_LT(rela->sh_link, output_shdrs.size());
     const auto &symtab = output_shdrs[rela->sh_link];
-    const auto symbols = rocjitsu::read_elf_array_for_test<rocjitsu::Elf64_Sym>(
+    const auto symbols = rocjitsu::test_support::read_elf_array_for_test<rocjitsu::Elf64_Sym>(
         result.elf_bytes, symtab.sh_offset, symtab.sh_size / sizeof(rocjitsu::Elf64_Sym));
     const uint32_t symbol_index = rocjitsu::elf_reloc_sym(relocation_record.r_info);
     ASSERT_LT(symbol_index, symbols.size());
@@ -8614,8 +8617,8 @@ TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
   EXPECT_FALSE(legacy_translator.supports_rewrite_discharge());
   constexpr auto selector_230 = cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 230, .sdst = 10});
   constexpr auto selector_231 = cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 231, .sdst = 10});
-  const auto low = rocjitsu::decode_one(selector_230[0], ROCJITSU_CODE_ARCH_GFX1250);
-  const auto high = rocjitsu::decode_one(selector_231[0], ROCJITSU_CODE_ARCH_GFX1250);
+  const auto low = rocjitsu::test_support::decode_one(selector_230[0], ROCJITSU_CODE_ARCH_GFX1250);
+  const auto high = rocjitsu::test_support::decode_one(selector_231[0], ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(low, nullptr);
   ASSERT_NE(high, nullptr);
   EXPECT_TRUE(translator.has_instruction_rewrite(*low));
@@ -8910,10 +8913,9 @@ TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaRejectsClamp) {
       "floating-point results"));
 }
 
-// The f32 lowering re-encodes VDST, SRC0, SRC1, and SRC2 unchanged, so the
-// operand shapes that the packed-f16 lowering cannot address must still
-// translate here. Narrowing this path would reject code objects that the
-// hardware accepts.
+// The f32 lowering re-encodes VDST, SRC0, SRC1, and SRC2 unchanged. Preserve
+// operand encodings that the packed-f16 lowering cannot address when the
+// scaled f32 form can still represent them.
 TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaAcceptsOperandsThePackedF16PathRejects) {
   struct OperandCase {
     const char *name;
@@ -8922,7 +8924,6 @@ TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaAcceptsOperandsThePackedF16PathRejec
   const std::array cases = {
       OperandCase{"odd_matrix_and_destination",
                   {.vdst = 55, .src0 = 256 + 17, .src1 = 256 + 33, .src2 = 256 + 49}},
-      OperandCase{"sgpr_accumulator", {.vdst = 54, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 8}},
       OperandCase{"nonzero_inline_accumulator",
                   {.vdst = 54, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 129}},
   };
@@ -8954,6 +8955,27 @@ TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaAcceptsOperandsThePackedF16PathRejec
     EXPECT_EQ(matrix.src1, test_case.fields.src1);
     EXPECT_EQ(matrix.src2, test_case.fields.src2);
   }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaRejectsScalarAccumulator) {
+  const auto source_wmma =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+                         {.vdst = 54, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 8});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
+      result, rocjitsu::DiagnosticKind::ExpandFailed,
+      "gfx1250 K=128 f32 WMMA scalar accumulator cannot be represented by the scaled form"));
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250LowersF16K128Fp8Bf8WmmaThroughF32Scratch) {
@@ -9727,7 +9749,7 @@ TEST(BinaryTranslatorE2E, Gfx1250DischargesEveryClusterLoadVariant) {
 
   for (const Case &test_case : cases) {
     SCOPED_TRACE(test_case.mnemonic);
-    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+    auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
         {test_case.words[0], test_case.words[1], test_case.words[2], kGfx1250SEndpgm});
     rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
     ASSERT_TRUE(source.is_valid());
