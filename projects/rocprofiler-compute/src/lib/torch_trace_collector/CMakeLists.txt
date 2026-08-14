@@ -211,7 +211,7 @@ set(CMAKE_REQUIRED_INCLUDES "${_ttc_saved_includes}")
 
 # --- torch-trace-collector library -------------------------------------------------
 # Usage requirements are PUBLIC so consumers inherit the torch/roctx includes,
-# the torch and synchronized libraries, and the compile definitions.
+# the torch, synchronized and gsl_assert libraries, and the compile definitions.
 # torch_python is not among them.
 set(_ttc_headers
     capture_buffer.h
@@ -235,7 +235,7 @@ target_include_directories(
 )
 target_link_libraries(
     torch-trace-collector
-    PUBLIC ${_torch_resolved_libs} ${ROCTX_LIB} synchronized
+    PUBLIC ${_torch_resolved_libs} ${ROCTX_LIB} synchronized gsl_assert
 )
 target_compile_features(torch-trace-collector PUBLIC cxx_std_17)
 target_compile_options(
