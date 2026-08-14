@@ -83,7 +83,8 @@ def test_parse_captures_symbol_virtual_address():
     assert parse_code_object_info(data)[0].symbols[0].virtual_address == 0x2040
 
 
-def test_parse_captures_virtual_address_instruction_and_comment():
+def test_parse_captures_virtual_address_instruction_and_source():
+    """Parse an instruction's virtual address, opcode, and source text."""
     data = make_code_obj_info([
         make_code_object(
             7,
@@ -101,7 +102,7 @@ def test_parse_captures_virtual_address_instruction_and_comment():
     assert disassemblies[0].symbols[0].instructions[0] == CodeObjectInstruction(
         virtual_address=0x2040,
         instruction="v_mov_b32",
-        comment="src.cpp:5",
+        source="src.cpp:5",
     )
 
 
