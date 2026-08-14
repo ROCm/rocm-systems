@@ -24,7 +24,7 @@
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 
-#include <rocprofiler-sdk/kernel_replay.h>
+#include <rocprofiler-sdk/experimental/kernel_replay.h>
 
 #include <memory>
 

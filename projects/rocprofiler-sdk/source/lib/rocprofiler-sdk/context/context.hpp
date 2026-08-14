@@ -33,8 +33,8 @@
 #include "lib/rocprofiler-sdk/spm/core.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
+#include <rocprofiler-sdk/experimental/kernel_replay.h>
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/kernel_replay.h>
 #include <rocprofiler-sdk/registration.h>
 
 #include <array>
