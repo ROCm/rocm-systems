@@ -8,7 +8,11 @@ import tempfile
 import pandas as pd
 import pytest
 
-from utils.file_io import create_df_kernel_top_stats, create_df_pmc
+from utils.file_io import (
+    create_df_kernel_top_stats,
+    create_df_pmc,
+    is_single_panel_config,
+)
 
 
 def _raw_pmc() -> pd.DataFrame:
@@ -194,3 +198,17 @@ def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
 
 def test_create_df_pmc_missing_file_returns_empty(tmp_path) -> None:
     assert create_df_pmc(str(tmp_path), kernel_verbose=0, verbose=0).empty
+
+
+@pytest.mark.misc
+def test_is_single_panel_config_accepts_shared_gfx115x_dir(tmp_path):
+    (tmp_path / "gfx115x").mkdir()
+
+    supported_archs = {
+        "gfx1150": "rdna35_point_1",
+        "gfx1151": "rdna35_halo",
+        "gfx1152": "rdna35_point_2",
+        "gfx1153": "rdna35_gorgon_point",
+    }
+
+    assert is_single_panel_config(str(tmp_path), supported_archs) is False

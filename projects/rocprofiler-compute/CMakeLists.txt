@@ -273,10 +273,10 @@ endif()
 # Import guard only works when calling main() directly (not in binary subprocess mode)
 if(NOT STANDALONEBINARY)
     add_test(
-        NAME test_import_guard
+        NAME test_conftest
         COMMAND
-            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_import_guard.xml
-            ${COV_OPTION} tests/test_import_guard.py ${WORKING_DIR_OPTION}
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_conftest.xml
+            ${COV_OPTION} tests/test_conftest.py ${WORKING_DIR_OPTION}
     )
 endif()
 
@@ -287,24 +287,24 @@ endif()
 add_test(
     NAME test_profile_kernel_execution
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m
-        kernel_execution --junitxml=tests/test_profile_kernel_execution.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_profile_kernel_execution.xml ${COV_OPTION}
+        tests/test_profile_kernel_execution.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_dispatch
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m dispatch
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_profile_dispatch.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        tests/test_profile_dispatch.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_sort
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m sort
-        --junitxml=tests/test_profile_sort.xml ${COV_OPTION} tests/test_profile_general.py
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_profile_sort.xml ${COV_OPTION} tests/test_profile_sort.py
         ${WORKING_DIR_OPTION}
 )
 
@@ -312,15 +312,15 @@ add_test(
     NAME test_profile_misc
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m misc
-        --junitxml=tests/test_profile_misc.xml ${COV_OPTION} tests/test_profile_general.py
+        --junitxml=tests/test_profile_misc.xml ${COV_OPTION} tests/test_profile_misc.py
         ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_path
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m path
-        --junitxml=tests/test_profile_path.xml ${COV_OPTION} tests/test_profile_general.py
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_profile_path.xml ${COV_OPTION} tests/test_profile_path.py
         ${WORKING_DIR_OPTION}
 )
 
@@ -329,7 +329,7 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m roofline_dir
         --junitxml=tests/test_profile_roofline_dir.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        tests/test_profile_roofline.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -337,7 +337,7 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m
         roofline_extra_options --junitxml=tests/test_profile_roofline_extra_options.xml
-        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        ${COV_OPTION} tests/test_profile_roofline.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -345,7 +345,7 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m roofline_bench
         --junitxml=tests/test_profile_roofline_bench.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        tests/test_profile_roofline.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -353,7 +353,7 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m roofline_plot
         --junitxml=tests/test_profile_roofline_plot.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        tests/test_profile_roofline.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -361,31 +361,31 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m
         roofline_validation --junitxml=tests/test_profile_roofline_validation.xml
-        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        ${COV_OPTION} tests/test_profile_roofline.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_section
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m section
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_profile_section.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        tests/test_profile_section.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_sets_func
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m sets_func
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_profile_sets_func.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        tests/test_profile_sets_func.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_live_attach_detach
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s -m
-        live_attach_detach --junitxml=tests/test_profile_live_attach_detach.xml
-        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s
+        --junitxml=tests/test_profile_live_attach_detach.xml ${COV_OPTION}
+        tests/test_profile_live_attach_detach.py ${WORKING_DIR_OPTION}
 )
 set_tests_properties(
     test_profile_live_attach_detach
@@ -398,7 +398,7 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s -m
         iteration_multiplexing_1
         --junitxml=tests/test_profile_iteration_multiplexing_1.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        tests/test_profile_iteration_multiplexing.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -407,7 +407,7 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s -m
         iteration_multiplexing_2
         --junitxml=tests/test_profile_iteration_multiplexing_2.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        tests/test_profile_iteration_multiplexing.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -416,16 +416,16 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s -m
         iteration_multiplexing_stochastic
         --junitxml=tests/test_profile_iteration_multiplexing_stochastic.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        tests/test_profile_iteration_multiplexing.py ${WORKING_DIR_OPTION}
 )
 
 if(MPI_CXX_COMPILER)
     add_test(
         NAME test_profile_multi_rank
         COMMAND
-            ${PYTHON_TEST_COMMAND} -m pytest -s -m multi_rank
+            ${PYTHON_TEST_COMMAND} -m pytest -s
             --junitxml=tests/test_profile_multi_rank.xml ${COV_OPTION}
-            tests/test_profile_general.py ${WORKING_DIR_OPTION}
+            tests/test_profile_multi_rank.py ${WORKING_DIR_OPTION}
     )
     set_tests_properties(
         test_profile_multi_rank
@@ -454,15 +454,15 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m torch_trace
         --junitxml=tests/test_profile_torch_trace.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        tests/test_profile_torch_trace.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_triton_trace
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m triton_trace
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_profile_triton_trace.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        tests/test_profile_triton_trace.py ${WORKING_DIR_OPTION}
 )
 
 set_tests_properties(
@@ -517,9 +517,9 @@ add_test(
 add_test(
     NAME test_L1_cache_counters
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m L1_cache
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_L1_cache_counters.xml ${COV_OPTION}
-        tests/test_TCP_counters.py ${WORKING_DIR_OPTION}
+        tests/test_l1_cache_counters.py ${WORKING_DIR_OPTION}
 )
 
 # ---------------------------
@@ -531,7 +531,7 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m
         num_xcds_spec_class --junitxml=tests/test_num_xcds_spec_class.xml ${COV_OPTION}
-        tests/test_gpu_specs.py ${WORKING_DIR_OPTION}
+        tests/test_num_xcds.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -539,7 +539,16 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m
         num_xcds_cli_output --junitxml=tests/test_num_xcds_cli_output.xml ${COV_OPTION}
-        tests/test_gpu_specs.py ${WORKING_DIR_OPTION}
+        tests/test_num_xcds.py ${WORKING_DIR_OPTION}
+)
+
+# Machine spec parsing and cache sizing — no GPU required
+add_test(
+    NAME test_specs
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_specs.xml ${COV_OPTION} tests/test_specs.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -555,11 +564,83 @@ add_test(
 # ---------------------------
 
 add_test(
-    NAME test_utils
+    NAME test_utils_common
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_utils.xml ${COV_OPTION} tests/test_utils.py
+        --junitxml=tests/test_utils_common.xml ${COV_OPTION} tests/test_utils_common.py
         ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_utils_analysis
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_analysis.xml ${COV_OPTION}
+        tests/test_utils_analysis.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_utils_profile
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_profile.xml ${COV_OPTION} tests/test_utils_profile.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_common
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_common.xml ${COV_OPTION} tests/test_common.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_amdsmi_interface
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_amdsmi_interface.xml ${COV_OPTION}
+        tests/test_amdsmi_interface.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_noise_clamper
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_noise_clamper.xml ${COV_OPTION} tests/test_noise_clamper.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_benchmark_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_benchmark_base.xml ${COV_OPTION}
+        tests/test_benchmark_base.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_analysis_cli
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_analysis_cli.xml ${COV_OPTION} tests/test_analysis_cli.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_pattern_matching
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_pattern_matching.xml ${COV_OPTION}
+        tests/test_pattern_matching.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_list_metrics_cli
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_list_metrics_cli.xml ${COV_OPTION}
+        tests/test_list_metrics_cli.py ${WORKING_DIR_OPTION}
 )
 
 # rocprofv3 avail library interface — no GPU required
@@ -612,26 +693,9 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-# Roofline benchmark kernel source contract — no GPU required
-add_test(
-    NAME test_benchmark_base
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_benchmark_base.xml ${COV_OPTION}
-        tests/test_benchmark_base.py ${WORKING_DIR_OPTION}
-)
-
 # -----------------------------------
 # Data imputation tests
 # -----------------------------------
-
-add_test(
-    NAME test_data_imputation
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_data_imputation.xml ${COV_OPTION}
-        tests/test_data_imputation.py ${WORKING_DIR_OPTION}
-)
 
 # -----------------------------------
 # Analysis database tests
@@ -642,6 +706,14 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_analysis_db.xml ${COV_OPTION} tests/test_analysis_db.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_analysis_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_analysis_base.xml ${COV_OPTION} tests/test_analysis_base.py
         ${WORKING_DIR_OPTION}
 )
 
@@ -674,11 +746,43 @@ add_test(
 # -----------------------------------
 
 add_test(
-    NAME test_metric_utils
+    NAME test_aggregation
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_metric_utils.xml ${COV_OPTION} tests/test_metric_utils.py
+        --junitxml=tests/test_aggregation.xml ${COV_OPTION} tests/test_aggregation.py
         ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_expression
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_expression.xml ${COV_OPTION} tests/test_expression.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_evaluation_pipeline
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_evaluation_pipeline.xml ${COV_OPTION}
+        tests/test_evaluation_pipeline.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_metric_evaluator
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_metric_evaluator.xml ${COV_OPTION}
+        tests/test_metric_evaluator.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_utils_counter_defs
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_counter_defs.xml ${COV_OPTION}
+        tests/test_utils_counter_defs.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -729,9 +833,17 @@ add_test(
         tests/test_pc_sampling_analysis.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_pc_sampling_analyze_cli
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_pc_sampling_analyze_cli.xml ${COV_OPTION}
+        tests/test_pc_sampling_analyze_cli.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_pc_sampling
-    test_pc_sampling_analysis
+    test_pc_sampling_analyze_cli
     PROPERTIES TIMEOUT 300 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
@@ -740,11 +852,35 @@ set_tests_properties(
 # -----------------------------------
 
 add_test(
-    NAME test_tui_components
+    NAME test_instant_button
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_tui_components.xml ${COV_OPTION} -m tui
-        tests/test_tui_components.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m tui
+        --junitxml=tests/test_instant_button.xml ${COV_OPTION}
+        tests/test_instant_button.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_menu_bar
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m tui
+        --junitxml=tests/test_menu_bar.xml ${COV_OPTION} tests/test_menu_bar.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_tui_utils
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m tui
+        --junitxml=tests/test_tui_utils.xml ${COV_OPTION} tests/test_tui_utils.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_collapsibles
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m tui
+        --junitxml=tests/test_collapsibles.xml ${COV_OPTION} tests/test_collapsibles.py
+        ${WORKING_DIR_OPTION}
 )
 
 # Build the roctx_recordfn pybind11 extension and its gtest.
@@ -756,11 +892,11 @@ endif()
 # -----------------------------------
 
 add_test(
-    NAME test_torch_trace_analysis
+    NAME test_rocpd_data
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_torch_trace_analysis.xml ${COV_OPTION}
-        tests/test_torch_trace_analysis.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_rocpd_data.xml ${COV_OPTION} tests/test_rocpd_data.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -797,6 +933,14 @@ add_test(
 # ---------------------------------------
 
 add_test(
+    NAME test_file_io
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_file_io.xml ${COV_OPTION} tests/test_file_io.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_utils_profile_csv
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
@@ -814,18 +958,6 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_csv_compression.xml ${COV_OPTION}
         tests/test_csv_compression.py ${WORKING_DIR_OPTION}
-)
-
-# -----------------------------------
-# Analyze base unit tests
-# -----------------------------------
-
-add_test(
-    NAME test_analysis_base
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_analysis_base.xml ${COV_OPTION} tests/test_analysis_base.py
-        ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -946,32 +1078,50 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling
         test_analyze_commands
         test_analyze_workloads
-        test_metric_utils
+        test_aggregation
+        test_expression
+        test_evaluation_pipeline
+        test_metric_evaluator
+        test_utils_counter_defs
         test_parser
         test_argparser
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
+        test_specs
         test_mi_gpu_spec
-        test_utils
-        test_mem_chart_gfx11
+        test_utils_common
+        test_utils_analysis
+        test_utils_profile
+        test_common
+        test_amdsmi_interface
+        test_noise_clamper
+        test_benchmark_base
+        test_analysis_cli
+        test_pattern_matching
+        test_list_metrics_cli
         test_mem_chart_gfx9
+        test_mem_chart_gfx11
         test_roofline_calc
         test_roofline_analyze
         test_roofline_main
-        test_data_imputation
-        test_tui_components
-        test_torch_trace_analysis
+        test_instant_button
+        test_menu_bar
+        test_tui_utils
+        test_collapsibles
+        test_rocpd_data
         test_torch_trace_coverage
         test_profile_torch_trace
         test_profile_triton_trace
         test_torch_cpp_loader
         test_inject_roctx_package
         test_analysis_db
+        test_analysis_base
         test_analysis_orm
         test_code_object_analysis
         test_source_snapshot_analysis
         test_pc_sampling_analysis
+        test_pc_sampling_analyze_cli
         test_pc_sampling_profile
         test_metrics_common
         test_metric_validation
@@ -980,10 +1130,10 @@ if(${ENABLE_COVERAGE})
         test_rocprofv3_avail_interface
         test_soc_base
         test_tty
+        test_file_io
         test_utils_profile_csv
         test_csv_compression
-        test_analysis_base
-        test_import_guard
+        test_conftest
         test_profile_iteration_multiplexing_1
         test_profile_iteration_multiplexing_2
         test_profile_iteration_multiplexing_stochastic

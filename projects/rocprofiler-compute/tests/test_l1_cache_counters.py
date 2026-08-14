@@ -27,7 +27,6 @@ def load_metrics(csv_file_path):
 _, soc = common.gpu_soc()
 
 
-@pytest.mark.L1_cache
 def test_L1_cache_counters(
     binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
 ):
