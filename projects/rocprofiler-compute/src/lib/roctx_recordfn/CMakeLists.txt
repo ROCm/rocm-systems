@@ -16,11 +16,6 @@ if(NOT _rcfn_standalone AND NOT ENABLE_TESTS)
     return()
 endif()
 
-# torch >= 2.15 headers use C++20 constructs (operator<=>, requires-clauses,
-# string_view::starts_with). Applies to this directory and tests/.
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
 # Honor TORCH_TRACE_PYTHON when provided; otherwise locate an interpreter.
 if(TORCH_TRACE_PYTHON)
     set(_rcfn_python "${TORCH_TRACE_PYTHON}")
@@ -159,6 +154,28 @@ find_path(
     PATH_SUFFIXES include
     REQUIRED
 )
+
+# Lowest standard the torch headers accept. Applies to this directory and tests/.
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_INCLUDES ${_torch_includes})
+# Compile only; the header pulls in inline code referencing unlinked torch symbols.
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+foreach(_std IN ITEMS 17 20)
+    set(CMAKE_REQUIRED_FLAGS "-std=c++${_std}")
+    check_cxx_source_compiles(
+        "#include <ATen/record_function.h>
+         int main() { return 0; }"
+        _rcfn_torch_cxx${_std}
+    )
+    if(_rcfn_torch_cxx${_std})
+        set(CMAKE_CXX_STANDARD ${_std})
+        set(CMAKE_CXX_STANDARD_REQUIRED ON)
+        break()
+    endif()
+endforeach()
+unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
+unset(CMAKE_REQUIRED_INCLUDES)
+unset(CMAKE_REQUIRED_FLAGS)
 
 add_library(${_so_name} MODULE roctx_recordfn.cpp)
 
