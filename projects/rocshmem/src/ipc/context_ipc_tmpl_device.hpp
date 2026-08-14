@@ -541,14 +541,13 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
       // integer division truncating value
       int chunk_size = ring_pWrk / PE_size;
       int seg_size = chunk_size * PE_size;
-      // seg_size = seg_size > nreduce ? nreduce : seg_size;
 
       // integer division truncating value
       int n_seg = nreduce / seg_size;
       // integer division rounding up
       int n_seg_up = (nreduce - 1) / seg_size + 1;
       // recalculate chunk_size
-      // chunk_size = seg_size / PE_size;
+      chunk_size = seg_size / PE_size;
 
       if (n_seg > 0) {
         internal_ring_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, n_seg,
