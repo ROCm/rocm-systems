@@ -101,10 +101,12 @@ namespace RcclUnitTesting
 
     // Device-data mode: a device-resident expected buffer for device-side validate.
     // Allocated only for collectives whose prep func builds expected on the GPU
-    // (currently AllToAll), so no other collective pays an extra device buffer.
+    // (AllToAll, AllReduce, ReduceScatter), so no other collective pays an extra
+    // device buffer.
     this->expectedOnDevice = false;
     if (UtDeviceDataEnabled() &&
-        (this->funcType == ncclCollAlltoAll || this->funcType == ncclCollAllReduce))
+        (this->funcType == ncclCollAlltoAll || this->funcType == ncclCollAllReduce
+         || this->funcType == ncclCollReduceScatter))
     {
       CHECK_CALL(this->expectedGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, false));
     }

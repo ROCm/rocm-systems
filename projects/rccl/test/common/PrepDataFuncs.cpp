@@ -279,6 +279,27 @@ namespace RcclUnitTesting
     size_t const numInputBytes  = collArgs.numInputElements * DataTypeToBytes(collArgs.dataType);
     size_t const numOutputBytes = collArgs.numOutputElements * DataTypeToBytes(collArgs.dataType);
 
+    // Device-data mode: build this rank's full input (totalRanks*N) on the GPU and the
+    // reduced expected SLICE for this rank directly on the GPU, mirroring the host loop
+    // below but with no host fill / reduce / D2H. ReduceScatter output[j] for this rank
+    // is reduce-over-ranks of the pattern at global index globalRank*numOutput + j, so we
+    // pass that startIdx to the reduced-pattern kernel. Standard reductions only; the
+    // scalar/custom-op path keeps the host reference below.
+    if (UtDeviceDataEnabled()
+        && UtDeviceDtypeSupported(collArgs.dataType)
+        && collArgs.numInputElements >= UtDeviceDataMinElements()
+        && collArgs.options.scalarMode < 0)
+    {
+      CHECK_CALL(collArgs.outputGpu.ClearGpuMem(numOutputBytes));
+      CHECK_CALL(collArgs.inputGpu.FillPatternDevice(collArgs.dataType, collArgs.numInputElements,
+                                                     collArgs.globalRank, 0));
+      CHECK_CALL(collArgs.expectedGpu.FillReducedPatternDevice(collArgs.dataType, collArgs.numOutputElements,
+                                                               collArgs.totalRanks, collArgs.options.redOp,
+                                                               (size_t)collArgs.globalRank * collArgs.numOutputElements));
+      collArgs.expectedOnDevice = true;
+      return TEST_SUCCESS;
+    }
+
     // Clear output for all ranks (done before filling input in case of in-place)
     CHECK_CALL(collArgs.outputGpu.ClearGpuMem(numOutputBytes));
 

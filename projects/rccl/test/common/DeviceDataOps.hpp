@@ -108,16 +108,22 @@ namespace RcclUnitTesting
 
   // Build the all-ranks reduction of the pattern for element idx, mirroring the host
   // loop: start from rank 0, accumulate ranks 1..totalRanks-1 with `op`, optional avg.
+  // out[i] = reduce over ranks of the pattern at index i (AllReduce expected).
+  // startIdx offsets the pattern's global element index so a caller can build the reduced
+  // expected for a sub-range: out[idx] = reduce over ranks of pattern at (startIdx + idx).
+  // AllReduce passes startIdx=0 (full buffer); ReduceScatter passes globalRank*numOutput
+  // to build only this rank's scattered slice.
   template <typename T>
-  __global__ void ExpectedReduceKernel(T* out, size_t n, int totalRanks, bool fp8, int op, bool isAvg)
+  __global__ void ExpectedReduceKernel(T* out, size_t n, int totalRanks, bool fp8, int op, bool isAvg, size_t startIdx)
   {
     size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
-    int vi = PatternValueI(fp8, 0, idx);
+    size_t gidx = startIdx + idx;
+    int vi = PatternValueI(fp8, 0, gidx);
     T acc = MakeVal<T>(vi, PatternValueF(vi));
     for (int r = 1; r < totalRanks; ++r)
     {
-      int v = PatternValueI(fp8, r, idx);
+      int v = PatternValueI(fp8, r, gidx);
       acc = AccStep<T>(op, acc, MakeVal<T>(v, PatternValueF(v)));
     }
     if (isAvg) acc = DivStep<T>(acc, totalRanks);
@@ -152,22 +158,23 @@ namespace RcclUnitTesting
     if (!m) atomicAdd(mismatches, 1ULL);
   }
 
-  __global__ void ExpectedReduceFp8(uint8_t* out, size_t n, int totalRanks, int op, bool isAvg, bool isE5m2)
+  __global__ void ExpectedReduceFp8(uint8_t* out, size_t n, int totalRanks, int op, bool isAvg, bool isE5m2, size_t startIdx)
   {
     size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
-    int vi = PatternValueI(true, 0, idx);
+    size_t gidx = startIdx + idx;
+    int vi = PatternValueI(true, 0, gidx);
     if (isE5m2)
     {
       rccl_bfloat8 acc = MakeVal<rccl_bfloat8>(vi, PatternValueF(vi));
-      for (int r = 1; r < totalRanks; ++r) { int v = PatternValueI(true, r, idx); acc = AccStep<rccl_bfloat8>(op, acc, MakeVal<rccl_bfloat8>(v, PatternValueF(v))); }
+      for (int r = 1; r < totalRanks; ++r) { int v = PatternValueI(true, r, gidx); acc = AccStep<rccl_bfloat8>(op, acc, MakeVal<rccl_bfloat8>(v, PatternValueF(v))); }
       if (isAvg) acc = DivStep<rccl_bfloat8>(acc, totalRanks);
       out[idx] = *reinterpret_cast<uint8_t*>(&acc);
     }
     else
     {
       rccl_float8 acc = MakeVal<rccl_float8>(vi, PatternValueF(vi));
-      for (int r = 1; r < totalRanks; ++r) { int v = PatternValueI(true, r, idx); acc = AccStep<rccl_float8>(op, acc, MakeVal<rccl_float8>(v, PatternValueF(v))); }
+      for (int r = 1; r < totalRanks; ++r) { int v = PatternValueI(true, r, gidx); acc = AccStep<rccl_float8>(op, acc, MakeVal<rccl_float8>(v, PatternValueF(v))); }
       if (isAvg) acc = DivStep<rccl_float8>(acc, totalRanks);
       out[idx] = *reinterpret_cast<uint8_t*>(&acc);
     }

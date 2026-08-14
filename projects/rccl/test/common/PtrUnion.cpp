@@ -108,7 +108,8 @@ namespace RcclUnitTesting
   ErrCode PtrUnion::FillReducedPatternDevice(ncclDataType_t const dataType,
                                              size_t         const numElements,
                                              int            const totalRanks,
-                                             ncclRedOp_t    const op)
+                                             ncclRedOp_t    const op,
+                                             size_t         const startIdx)
   {
     static bool s_redLogged = false;
     if (!s_redLogged)
@@ -127,13 +128,13 @@ namespace RcclUnitTesting
     {
       hipLaunchKernelGGL(ExpectedReduceFp8, dim3(blocks), dim3(threads), 0, 0,
                          (uint8_t*)this->ptr, numElements, totalRanks, tempOp, isAvg,
-                         dataType == ncclFloat8e5m2);
+                         dataType == ncclFloat8e5m2, startIdx);
     }
     else
     {
       RCCL_UT_DTYPE_DISPATCH(dataType,
         hipLaunchKernelGGL(ExpectedReduceKernel<T>, dim3(blocks), dim3(threads), 0, 0,
-                           (T*)this->ptr, numElements, totalRanks, fp8, tempOp, isAvg));
+                           (T*)this->ptr, numElements, totalRanks, fp8, tempOp, isAvg, startIdx));
     }
     CHECK_HIP(hipGetLastError());
     CHECK_HIP(hipDeviceSynchronize());

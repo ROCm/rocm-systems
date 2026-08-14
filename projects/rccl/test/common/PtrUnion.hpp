@@ -107,10 +107,13 @@ namespace RcclUnitTesting
     // Device-build the all-ranks reduction of the pattern into this (device) buffer,
     // mirroring PtrUnion::Reduce + DivideByInt. Used for AllReduce's expected in
     // device-data mode. Handles ncclSum/Prod/Max/Min/Avg (no scalar/bias/const).
+    // startIdx offsets the pattern's global element index (0 for AllReduce's full
+    // buffer; globalRank*numOutput for ReduceScatter's per-rank scattered slice).
     ErrCode FillReducedPatternDevice(ncclDataType_t const dataType,
                                      size_t         const numElements,
                                      int            const totalRanks,
-                                     ncclRedOp_t    const op);
+                                     ncclRedOp_t    const op,
+                                     size_t         const startIdx = 0);
 
     ErrCode Set(ncclDataType_t const dataType, int const idx, int valueI, double valueF);
     ErrCode Get(ncclDataType_t const dataType, int const idx, int& valueI, double& valueF) const;
