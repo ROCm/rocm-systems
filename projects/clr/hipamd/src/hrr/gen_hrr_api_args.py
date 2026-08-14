@@ -496,11 +496,16 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipExtStreamGetCUMask",
     # hipExtGetLinkTypeAndHopCount — output uint32_t* ptrs stale
     "hipExtGetLinkTypeAndHopCount",
-    # StreamWait/Write Value — void* ptr is stale device address (no alloc_map translation in generated shim)
+    # hipStreamWaitValue32/64 stay no-op because a wait can hang on replay: the
+    # condition is satisfied by whatever wrote the value at capture time, and if
+    # that writer is not itself replayed the wait never completes and blocks the
+    # replay. The void* ptr is not the problem here: it is named `ptr`, so the
+    # generated shim would translate it via ctx.translate_ptr like any other.
+    # hipStreamWriteValue32/64 are replayed instead: the void* ptr is translated
+    # via alloc_map (ctx.translate_ptr) and the stream via ctx.translate_stream.
+    # See SKIP_IF_UNMAPPED_PLAYBACK_APIS for the untranslatable-destination case.
     "hipStreamWaitValue32",
     "hipStreamWaitValue64",
-    "hipStreamWriteValue32",
-    "hipStreamWriteValue64",
     # hipStreamAttachMemAsync — void* dev_ptr stale
     "hipStreamAttachMemAsync",
     # hipGetStreamDeviceId — returns int not hipError_t (wrong return type cast)
@@ -649,6 +654,26 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipDrvGraphExecMemsetNodeSetParams",
     "hipDrvGraphMemcpyNodeGetParams",
     "hipDrvGraphMemcpyNodeSetParams",
+}
+
+# ---------------------------------------------------------------------------
+# Playback APIs whose recorded destination must resolve to a live allocation
+# before the real API is called: API name -> destination parameter name.
+# ---------------------------------------------------------------------------
+#
+# ctx.translate_ptr() returns nullptr when the recorded address is in neither
+# the alloc map nor the VMM reserved-VA map, for instance a write into memory
+# HRR does not track such as a framework sub-allocation carved out of a larger
+# hipMalloc. The stream-operation APIs reject a null ptr with
+# hipErrorInvalidValue (ihipStreamOperation checks it first), and
+# dispatch_event() treats any non-success handler return as fatal, so a single
+# untranslatable destination would abort the entire replay. Warn once and skip
+# the call instead, which is the unmapped-pointer contract the hand-written
+# playback_hipFree / playback_hipFreeAsync / playback_hipHostFree already use.
+# Slightly-wrong data beats no replay at all.
+SKIP_IF_UNMAPPED_PLAYBACK_APIS: Dict[str, str] = {
+    "hipStreamWriteValue32": "ptr",
+    "hipStreamWriteValue64": "ptr",
 }
 
 # ---------------------------------------------------------------------------
@@ -2031,6 +2056,25 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     is_alloc_free    = entry.name in _ALLOC_FREE_APIS
     is_hdl_create    = entry.name in _HANDLE_CREATE_APIS
     is_hdl_destroy   = entry.name in _HANDLE_DESTROY_APIS
+    skip_param       = SKIP_IF_UNMAPPED_PLAYBACK_APIS.get(entry.name)
+
+    # Translate the destination once up front and skip the call when the
+    # recorded address is in no map: returning an error here would abort the
+    # whole replay (see SKIP_IF_UNMAPPED_PLAYBACK_APIS). The live pointer is
+    # reused for the real call below, so there is no second lookup.
+    if skip_param:
+        lines.append(f"  void* _live_dst = ctx.translate_ptr(a->{skip_param});")
+        lines.append(f"  if (_live_dst == nullptr) {{")
+        lines.append(f"    static bool warned = false;")
+        lines.append(f"    if (!warned) {{")
+        lines.append(f"      warned = true;")
+        lines.append(f"      fprintf(stderr, \"[HRR] {entry.name}: recorded destination 0x%llx \"")
+        lines.append(f"              \"is not in the alloc map (memory HRR does not track); \"")
+        lines.append(f"              \"skipping this write. Results may differ from capture.\\n\",")
+        lines.append(f"              (unsigned long long)a->{skip_param});")
+        lines.append(f"    }}")
+        lines.append(f"    return hipSuccess;")
+        lines.append(f"  }}")
 
     # For alloc-free and handle-destroy APIs: grab the recorded key before the call
     if is_alloc_free:
@@ -2054,6 +2098,10 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         # For alloc-free: replace the pointer arg with the translated live ptr
         if is_alloc_free and name == _ALLOC_FREE_APIS[entry.name]:
             call_args.append("_live_ptr")
+            continue
+        # For skip-if-unmapped: reuse the destination translated above
+        if skip_param and name == skip_param:
+            call_args.append("_live_dst")
             continue
         # For handle-destroy: replace the handle arg with the live handle
         if is_hdl_destroy and name == _HANDLE_DESTROY_APIS[entry.name][0]:
@@ -2221,6 +2269,7 @@ def main() -> None:
         ("MANUAL_CAPTURE_APIS",  MANUAL_CAPTURE_APIS),
         ("MANUAL_PLAYBACK_APIS", MANUAL_PLAYBACK_APIS),
         ("NOOP_PLAYBACK_APIS",   NOOP_PLAYBACK_APIS),
+        ("SKIP_IF_UNMAPPED_PLAYBACK_APIS", set(SKIP_IF_UNMAPPED_PLAYBACK_APIS)),
         ("ERROR_STUB_PLAYBACK_APIS", ERROR_STUB_PLAYBACK_APIS),
         ("EXTRA_FIELDS",         set(EXTRA_FIELDS.keys())),
     ]:

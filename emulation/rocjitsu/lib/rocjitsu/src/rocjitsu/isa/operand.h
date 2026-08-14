@@ -7,7 +7,7 @@
 #ifndef ROCJITSU_ISA_OPERAND_H_
 #define ROCJITSU_ISA_OPERAND_H_
 
-#include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cassert>
@@ -24,6 +24,8 @@ namespace rocjitsu {
 template <typename Isa> class AmdgpuIsaOperand;
 
 namespace amdgpu {
+class ComputeUnitCore;
+class InstructionComputeUnitView;
 class RegisterAccess;
 class Wavefront;
 
@@ -83,6 +85,10 @@ public:
   Operand(int size_bits, int encoding_value)
       : size_bits_(size_bits), encoding_value_(encoding_value) {}
   virtual ~Operand() = default;
+
+  /// Validate encoding constraints deferred until the complete instruction is
+  /// decoded. Literal sentinels may replace their provisional operands first.
+  void validate_encoding() const;
 
   /// @brief Human-readable name for this operand (e.g. "v0", "s4", or a literal).
   virtual std::string name() const { return std::to_string(encoding_value_); }
@@ -298,6 +304,18 @@ public:
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 protected:
+  enum class EncodingError : uint8_t {
+    None,
+    InvalidSelector,
+    InvalidScalarRegisterSelector,
+    InvalidLaneSelector,
+    InvalidExecSelector,
+    InvalidVgprSourceSelector,
+    InvalidScalarSourceSelector,
+  };
+
+  void defer_encoding_error(EncodingError error) { encoding_error_ = error; }
+
   /// @brief Capability/role flags, set once at construction and never
   /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
   /// operands get their (reads_value, writable, is_vgpr) triple from
@@ -312,6 +330,7 @@ protected:
   bool reads_value_ = true;
   bool writable_ = true;
   bool fieldless_ = false;
+  EncodingError encoding_error_ = EncodingError::None;
 
 private:
   // Private SIMD fast-path backend for RegisterAccess.
@@ -501,8 +520,9 @@ public:
 /// (e.g. RISC-V) inherit directly from `IsaOperand` and use the base
 /// `Operand` defaults.
 ///
-/// The declaration remains in the core ISA layer because conventional targets
-/// and split model/execution targets share it. Execution-only definitions live
+/// This remains as the generator fallback for AMDGPU profiles that opt out of
+/// split execution sources. Built-in AMDGPU targets use `IsaOperand` plus a
+/// per-target execution table instead. Execution-only fallback definitions live
 /// in `isa_operand_simd_inl.h`.
 ///
 /// @tparam Isa AMDGPU arch ISA traits providing the SIMD helpers above.

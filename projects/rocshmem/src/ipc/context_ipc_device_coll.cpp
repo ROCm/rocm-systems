@@ -449,10 +449,10 @@ __device__ void IPCContext::alltoallmem_linear_wave(rocshmem_team_t team, void *
   // Have each PE put their designated data to the other PEs
   for (int j = 0; j < pe_size; j++) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    putmem_nbi_wave((static_cast<char *>(dst) + my_pe_in_team * nelems), 
+    putmem_nbi_wave((static_cast<char *>(dst) + my_pe_in_team * nelems),
                     (static_cast<const char *>(src) + j * nelems), nelems, dest_pe);
   }
-  if (is_thread_zero_in_block()) {
+  if (is_thread_zero_in_wave()) {
     quiet();
   }
   // wait until everyone has obtained their designated data
@@ -468,14 +468,14 @@ __device__ void IPCContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   size_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
-  int tid = get_flat_block_id();
-  // min(get_flat_block_size(), WF_SIZE)
+  // Use lane ID within the wave so any wave in a multi-wave WG works correctly.
+  int tid = get_flat_block_id() % WF_SIZE;
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    putmem_nbi((static_cast<char *>(dst) + my_pe_in_team * nelems), 
+    putmem_nbi((static_cast<char *>(dst) + my_pe_in_team * nelems),
                     (static_cast<const char *>(src) + j * nelems), nelems, dest_pe);
   }
   for (int j = tid; j < pe_size; j += step_size) {
@@ -486,7 +486,7 @@ __device__ void IPCContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   }
 
   // wait until everyone has obtained their designated data
-  for (int j = tid; j < pe_size; j+= step_size) {
+  for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
     long *sync_flag = &pSync[alltoall_pSync_offset + dest_pe];
@@ -497,7 +497,7 @@ __device__ void IPCContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
     pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
 
-  if (is_thread_zero_in_block()) {
+  if (is_thread_zero_in_wave()) {
     team_obj->alltoall_sequence_number++;
   }
 
