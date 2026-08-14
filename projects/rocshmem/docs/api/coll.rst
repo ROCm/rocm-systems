@@ -111,7 +111,9 @@ ROSHMEM_ALLTOALL
                  symmetric heap.
   :param source: Source address. Must be an address on the symmetric
                  heap.
-  :param nelems: Number of data blocks transferred per pair of PEs.
+  :param nelems: Number of elements transferred per pair of PEs (typed ``TYPENAME``
+                 variants); number of bytes transferred per pair of PEs
+                 (``alltoallmem_wave``).
   :returns:      None (``_wg`` variants). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
 
 **Description:**

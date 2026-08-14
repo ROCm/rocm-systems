@@ -11,7 +11,7 @@ Tile routines
 .. note::
 
    The tile API is currently only supported with the **IPC backend**. Attempting to
-   use these routines with other backends results in undefined behavior.
+   use these routines with other backends results in an error.
 
 The tile API provides tensor-aware data movement and collective operations that
 operate on multi-dimensional sub-regions (tiles) of symmetric-heap tensors.
@@ -21,9 +21,9 @@ Each function is available in three execution granularities:
 - ``_wave``: wave-granular — all threads in a wavefront collectively participate.
 - ``_wg``: workgroup-granular — all threads in the workgroup collectively participate.
 
-Context variants (``rocshmem_ctx_tile_*``) accept an explicit ``rocshmem_ctx_t``
-and, for collectives, a ``rocshmem_team_t``; non-context variants use the default
-context and team world.
+Context variants (``rocshmem_ctx_tile_*``) accept an explicit ``rocshmem_ctx_t``;
+non-context variants use the default context. All collective operations — context
+and non-context alike — take an explicit ``rocshmem_team_t`` parameter.
 
 All functions are templated on the tensor and coordinate types:
 
