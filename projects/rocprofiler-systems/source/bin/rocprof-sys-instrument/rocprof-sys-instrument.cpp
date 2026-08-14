@@ -2489,16 +2489,15 @@ main(int argc, char** argv)
     int code = -1;
     if(binary_rewrite)
     {
-        auto outdir = path::parent_path(outfile);
+        const auto outdir = path::parent_path(outfile);
         if(!outdir.empty())
         {
-            try
+            std::error_code ec;
+            std::filesystem::create_directories(outdir, ec);
+            if(ec)
             {
-                std::filesystem::create_directories(outdir);
-            } catch(const std::filesystem::filesystem_error& e)
-            {
-                errprintf(0, "Failed to create output directory '%s': %s\n",
-                          outdir.c_str(), e.code().message().c_str());
+                verbprintf(0, "Failed to create output directory '%s': %s\n",
+                           outdir.c_str(), ec.message().c_str());
             }
         }
 
