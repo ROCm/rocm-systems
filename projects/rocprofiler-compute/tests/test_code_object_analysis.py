@@ -9,6 +9,7 @@ import common
 from pc_sampling.code_object_analysis import (
     CodeObjectDisassembly,
     CodeObjectInstruction,
+    CodeObjectSymbol,
     load_code_object_disassemblies,
     parse_code_object_info,
 )
@@ -57,7 +58,7 @@ def test_parse_returns_one_entry_per_code_object():
     assert [d.code_object_id for d in disassemblies] == [1, 2]
 
 
-def test_parse_flattens_all_symbol_instructions():
+def test_parse_keeps_symbols_separate_with_their_own_instructions():
     data = make_code_obj_info([
         make_code_object(
             1,
@@ -70,8 +71,16 @@ def test_parse_flattens_all_symbol_instructions():
 
     disassemblies = parse_code_object_info(data)
 
-    # Both symbols' instructions are flattened into one per-object list.
-    assert len(disassemblies[0].instructions) == 3
+    assert [symbol.name for symbol in disassemblies[0].symbols] == ["a", "b"]
+    assert [len(symbol.instructions) for symbol in disassemblies[0].symbols] == [2, 1]
+
+
+def test_parse_captures_symbol_virtual_address():
+    data = make_code_obj_info([
+        make_code_object(1, [make_symbol("kern", [make_instruction(0x2040)])])
+    ])
+
+    assert parse_code_object_info(data)[0].symbols[0].virtual_address == 0x2040
 
 
 def test_parse_captures_virtual_address_instruction_and_comment():
@@ -89,11 +98,10 @@ def test_parse_captures_virtual_address_instruction_and_comment():
 
     disassemblies = parse_code_object_info(data)
 
-    assert disassemblies[0].instructions[0] == CodeObjectInstruction(
+    assert disassemblies[0].symbols[0].instructions[0] == CodeObjectInstruction(
         virtual_address=0x2040,
         instruction="v_mov_b32",
         comment="src.cpp:5",
-        kernel_name="kern",
     )
 
 
@@ -101,10 +109,19 @@ def test_parse_empty_dict_returns_empty_list():
     assert parse_code_object_info({}) == []
 
 
-def test_parse_code_object_without_symbols_yields_no_instructions():
+def test_parse_code_object_without_symbols_yields_no_symbols():
     data = make_code_obj_info([{"id": 7}])
     assert parse_code_object_info(data) == [
-        CodeObjectDisassembly(code_object_id=7, instructions=[])
+        CodeObjectDisassembly(code_object_id=7, symbols=[])
+    ]
+
+
+def test_parse_symbol_without_instructions_yields_empty_instruction_list():
+    data = make_code_obj_info([
+        make_code_object(7, [{"name": "kern", "virtual_address": 0x1000}])
+    ])
+    assert parse_code_object_info(data)[0].symbols == [
+        CodeObjectSymbol(name="kern", virtual_address=0x1000, instructions=[])
     ]
 
 

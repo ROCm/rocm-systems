@@ -2138,19 +2138,9 @@ def test_pc_sampling_analyze_database_output(
             # Only dispatched kernels' ISA is stored, so every line is attributed.
             attributed = conn.execute(
                 "SELECT COUNT(*) FROM compute_instruction_line il "
-                "JOIN compute_kernel k ON il.kernel_uuid = k.kernel_uuid"
-            ).fetchone()[0]
-            unattributed = conn.execute(
-                "SELECT COUNT(*) FROM compute_instruction_line "
-                "WHERE kernel_uuid IS NULL"
-            ).fetchone()[0]
-            # The (code object, offset) pair is unique across all lines.
-            duplicate_offsets = conn.execute(
-                "SELECT COUNT(*) FROM ("
-                "SELECT code_object_uuid, code_object_offset "
-                "FROM compute_instruction_line "
-                "GROUP BY code_object_uuid, code_object_offset "
-                "HAVING COUNT(*) > 1)"
+                "JOIN compute_kernel_symbol ks "
+                "ON il.kernel_symbol_uuid = ks.kernel_symbol_uuid "
+                "JOIN compute_kernel k ON ks.kernel_uuid = k.kernel_uuid"
             ).fetchone()[0]
             db_pc_sampling = pd.read_sql_query(
                 "SELECT kernel_name, offset, instruction, source, count, "
@@ -2171,12 +2161,9 @@ def test_pc_sampling_analyze_database_output(
         # Only sampled offsets carry a sample state; the dispatched kernels' full
         # disassembly is added as extra lines, so lines outnumber states.
         assert state_count == 14
-        assert line_count > state_count
+        assert line_count == 20
         # Un-dispatched ISA is never stored, so no line is left un-attributed.
         assert attributed == line_count
-        assert unattributed == 0
-        # No duplicate ISA: sampled offsets are not re-inserted.
-        assert duplicate_offsets == 0
         # inst_type is a per-sample class, so its counts sum to the sample total.
         assert state_total == 390
         assert inst_sample_total == state_total

@@ -1,4 +1,4 @@
-# Ruff and Tooling Rules — AI-Authoritative Reference
+# Ruff Rules — AI-Authoritative Reference
 
 > These rules summarize the project's automated linting and formatting requirements.
 > Canonical configuration: [`pyproject.toml`](../../pyproject.toml)

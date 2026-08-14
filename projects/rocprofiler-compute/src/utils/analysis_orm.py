@@ -3,12 +3,8 @@
 
 """SQLAlchemy ORM models and SQLite backend for the analysis database.
 
-The schema is documented visually in:
-    docs/data/analyze/analysis_data_dump_schema.png
-generated from its Mermaid source:
-    docs/data/analyze/analysis_data_dump_schema.mmd
-When changing the schema, update the .mmd file to match,
-then re-export the .png via draw.io.
+After changing a table, column, foreign key, or view, regenerate the diagrams
+under docs/data/analyze/ with tools/schema_visualizer.py and commit them.
 """
 
 import csv
@@ -42,7 +38,7 @@ from sqlalchemy.sql import Select
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "2.0.0"
+SCHEMA_VERSION = "2.1.0"
 
 
 Base = declarative_base()
@@ -156,8 +152,8 @@ class Kernel(Base):
     metric_values = relationship("KernelMetricValue", back_populates="kernel")
     # Kernel can have multiple roofline data points
     roofline_data_points = relationship("KernelRooflineData", back_populates="kernel")
-    # Kernel can have multiple sampled instruction lines
-    instruction_lines = relationship("InstructionLine", back_populates="kernel")
+    # Kernel is compiled into one symbol per code object that holds it
+    kernel_symbols = relationship("KernelSymbol", back_populates="kernel")
 
 
 class CodeObjectStore(Base):
@@ -175,39 +171,81 @@ class CodeObjectStore(Base):
 
     # Code object belongs to one workload
     workload = relationship("Workload", back_populates="code_object_stores")
-    # One code object owns many instruction lines
-    instruction_lines = relationship(
-        "InstructionLine", back_populates="code_object_store"
-    )
+    # One code object owns many kernel symbols
+    kernel_symbols = relationship("KernelSymbol", back_populates="code_object_store")
 
 
-class InstructionLine(Base):
-    __tablename__ = f"{PREFIX}instruction_line"
-    # A shared code object samples one offset under several kernels.
+class KernelSymbol(Base):
+    __tablename__ = f"{PREFIX}kernel_symbol"
+    # One symbol per kernel per code object, and one kernel per offset: an
+    # offset picks a single instruction, which lies in a single symbol.
     __table_args__ = (
-        UniqueConstraint("code_object_uuid", "code_object_offset", "kernel_uuid"),
+        UniqueConstraint("code_object_uuid", "kernel_uuid"),
+        UniqueConstraint("code_object_uuid", "code_object_offset"),
     )
 
-    instruction_uuid = Column(Integer, primary_key=True)
+    kernel_symbol_uuid = Column(Integer, primary_key=True)
     code_object_uuid = Column(
         Integer,
         ForeignKey(f"{PREFIX}code_object_store.code_object_uuid"),
         nullable=False,
     )
-    # Attributed per-sample to its dispatch's kernel via dispatch correlation.
     kernel_uuid = Column(
         Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
+    )
+    # Null for a code object whose ISA was skipped for want of a load_base.
+    code_object_offset = Column(Integer, nullable=True)
+
+    # Symbol belongs to one code object
+    code_object_store = relationship("CodeObjectStore", back_populates="kernel_symbols")
+    # Symbol is one compilation of one kernel
+    kernel = relationship("Kernel", back_populates="kernel_symbols")
+    # One symbol owns many instruction lines
+    instruction_lines = relationship("InstructionLine", back_populates="kernel_symbol")
+
+
+class InstructionTypeLookup(Base):
+    __tablename__ = f"{PREFIX}instruction_type_lookup"
+
+    instruction_type_lookup_uuid = Column(Integer, primary_key=True)
+    # Deduplicated: one row per distinct static instruction-type string.
+    text = Column(String, unique=True)
+
+    instruction_lines = relationship(
+        "InstructionLine", back_populates="instruction_type_lookup"
+    )
+
+
+class InstructionLine(Base):
+    __tablename__ = f"{PREFIX}instruction_line"
+    # One row per sampled or disassembled offset within a symbol.
+    __table_args__ = (UniqueConstraint("kernel_symbol_uuid", "code_object_offset"),)
+
+    instruction_uuid = Column(Integer, primary_key=True)
+    kernel_symbol_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}kernel_symbol.kernel_symbol_uuid"),
+        nullable=False,
+    )
+    # TODO: populate from the disassembled mnemonic. This is the static
+    # compiler class of the instruction at this offset (Matrix / Vector /
+    # Scalar / Branch), one value per line. Distinct from InstructionSample,
+    # which counts the issue state seen at each sample.
+    instruction_type_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}instruction_type_lookup.instruction_type_lookup_uuid"),
+        nullable=True,
     )
     code_object_offset = Column(Integer)
     comment = Column(Text)
     instruction = Column(Text)
 
-    # Instruction line belongs to one code object
-    code_object_store = relationship(
-        "CodeObjectStore", back_populates="instruction_lines"
+    # Instruction line belongs to one kernel symbol
+    kernel_symbol = relationship("KernelSymbol", back_populates="instruction_lines")
+    # Instruction line has at most one static instruction type
+    instruction_type_lookup = relationship(
+        "InstructionTypeLookup", back_populates="instruction_lines"
     )
-    # Instruction line is attributed to one kernel
-    kernel = relationship("Kernel", back_populates="instruction_lines")
     # An instruction line has at most one sampled state
     pc_sample_state = relationship(
         "PCSampleState", back_populates="instruction_line", uselist=False
@@ -226,6 +264,20 @@ class PCSampleState(Base):
     total_count = Column(Integer)
     issue_count = Column(Integer, nullable=True)
     stall_count = Column(Integer, nullable=True)
+    # TODO: populate from the popcount of record.exec_mask over the wave size
+    # (64 on CDNA, 32 or 64 on RDNA), averaged across the samples in this group.
+    active_thread_percent = Column(Float, nullable=True)
+    # TODO: populate from record.wave_cnt.
+    wave_occupancy_percent = Column(Float, nullable=True)
+    # TODO: populate from record.dispatch_id, resolved to its dispatch row.
+    # Blocked: this table aggregates samples grouped by
+    # (code_object_id, code_object_offset, kernel_id), a key that spans
+    # dispatches, so no single dispatch describes a row. Meaningful only once
+    # dispatch joins that group key, which multiplies row count by
+    # dispatches-per-kernel. Until then this stays null and never resolves.
+    dispatch_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}dispatch.dispatch_uuid"), nullable=True
+    )
 
     # State belongs to one instruction line
     instruction_line = relationship("InstructionLine", back_populates="pc_sample_state")
@@ -233,7 +285,7 @@ class PCSampleState(Base):
     stall_reasons = relationship(
         "PCSampleStallReason", back_populates="pc_sample_state"
     )
-    # State has many instruction-sample-type counts
+    # State has many issue-state counts
     instruction_samples = relationship(
         "InstructionSample", back_populates="pc_sample_state"
     )
@@ -279,7 +331,7 @@ class InstructionSampleLookup(Base):
     __tablename__ = f"{PREFIX}instruction_sample_lookup"
 
     instruction_sample_lookup_uuid = Column(Integer, primary_key=True)
-    # Deduplicated: one row per distinct instruction-type string.
+    # Deduplicated: one row per distinct issue-state string.
     text = Column(String, unique=True)
 
     instruction_samples = relationship(
@@ -288,6 +340,15 @@ class InstructionSampleLookup(Base):
 
 
 class InstructionSample(Base):
+    """Per-sample issue state, counted across the samples at one offset.
+
+    Holds the issue state seen each cycle a sample landed, so one offset
+    accumulates several rows: NO_INST, BRANCH_TAKEN vs BRANCH_NOT_TAKEN, and
+    DUAL_VALU vs VALU all vary sample to sample for one static instruction.
+    For that static instruction's own class see
+    InstructionLine.instruction_type_uuid.
+    """
+
     __tablename__ = f"{PREFIX}instruction_sample"
 
     instruction_sample_uuid = Column(Integer, primary_key=True)
@@ -662,10 +723,14 @@ class Database:
                 PCSampleState.instruction_uuid == InstructionLine.instruction_uuid,
             )
             .join(
-                CodeObjectStore,
-                InstructionLine.code_object_uuid == CodeObjectStore.code_object_uuid,
+                KernelSymbol,
+                InstructionLine.kernel_symbol_uuid == KernelSymbol.kernel_symbol_uuid,
             )
-            .join(Kernel, InstructionLine.kernel_uuid == Kernel.kernel_uuid)
+            .join(
+                CodeObjectStore,
+                KernelSymbol.code_object_uuid == CodeObjectStore.code_object_uuid,
+            )
+            .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
             # host_trap samples have no stall reasons, so the subquery is empty.
             .outerjoin(
                 stall_reason_json_subquery,
