@@ -6746,12 +6746,6 @@ VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
     src1 = Operand(32, OperandType::OPR_SIMM32,
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand::make_literal32(
-        32,
-        static_cast<uint32_t>(
-            reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3SdstEncVopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -6801,12 +6795,6 @@ VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     src1 = Operand(32, OperandType::OPR_SIMM32,
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand::make_literal32(
-        32,
-        static_cast<uint32_t>(
-            reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3SdstEncVopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -6856,12 +6844,6 @@ VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     src1 = Operand(32, OperandType::OPR_SIMM32,
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand::make_literal32(
-        32,
-        static_cast<uint32_t>(
-            reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3SdstEncVopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
