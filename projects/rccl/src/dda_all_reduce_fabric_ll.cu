@@ -30,23 +30,13 @@
 #include <cstdint>
 #include <utility>
 
-// Tier selection for the LL AllReduce lives here rather than in collectives.cc,
-// so that file has a single call site (ncclAllReduceDdaFabricLL) and does not
-// need to know that the tier has two variants.
-//
-// DDA_LL / DDA_LL_THRESHOLD are shared with the AllGather, AllToAll and
-// ReduceScatter LL tiers, so they stay defined in collectives.cc and are only
-// declared here. The two-shot knobs are AllReduce-only and are defined here.
 RCCL_PARAM_DECLARE(DdaLL);
-RCCL_PARAM_DECLARE(DdaLLThreshold);
 
-// Two-shot LL tier: transports one shard per rank instead of the whole message.
-// Left inert by default (threshold 0 matches no message) until its range is
-// tuned. Raising DDA_LL_TWOSHOT_THRESHOLD is what opts a run into it; setting
-// DDA_LL_THRESHOLD=0 alongside is what hands the same sizes over from the
-// one-shot tier.
-RCCL_PARAM(DdaLLTwoShot, "DDA_LL_TWOSHOT", 1);
-RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(0));
+// Total message size gates each LL tier, both also under DDA_LL. One-shot is tried
+// first, so <= 1 MiB takes one-shot and up to 16 MiB takes two-shot; past that the
+// message falls through to LL128/Simple. A threshold of 0 disables that tier.
+RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024);
+RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(16) * 1024 * 1024);
 
 namespace {
 
@@ -70,7 +60,7 @@ static inline size_t ddaLLArTwoShotScratchSize(int nRanks) {
 // lines the other is still polling an epoch later.
 static_assert(kDdaLLArTwoShotSlotStridePkts == kDdaLLArSlotStridePkts / 2,
               "LL all-reduce tiers share one scratch and epoch; \
-              keep LL-ts slot half of LL becuase the scratch is used in two phases");
+              keep LL-ts slot half of LL because the scratch is used in two phases");
 
 // Single source of the launch geometry: 1-D grid over 8-byte LL packets, capped
 // low (LL serves tiny messages where latency, not occupancy, dominates).
@@ -270,7 +260,8 @@ static bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* r
     return false;
   }
 
-  if (bytesPerRank > kDdaLLMaxBytes) {
+  // two copy phases
+  if (bytesPerRank * 2 > kDdaLLMaxBytes) {
     return false;
   }
 
@@ -287,13 +278,13 @@ static bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* r
 // DDA_LL_TWOSHOT_THRESHOLD.
 static bool ddaLLArOneShotSelected(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                    ncclDataType_t datatype, ncclRedOp_t op) {
-  return rcclParamDdaLL() != 0 && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLThreshold() &&
+  return rcclParamDdaLL() != 0 && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLOneShotThreshold() &&
          ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
 }
 
 static bool ddaLLArTwoShotSelected(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                    ncclDataType_t datatype, ncclRedOp_t op) {
-  return rcclParamDdaLLTwoShot() != 0 && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLTwoShotThreshold() &&
+  return rcclParamDdaLL() != 0 && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLTwoShotThreshold() &&
          ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
 }
 

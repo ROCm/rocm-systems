@@ -218,8 +218,7 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
 // Per-rank scratch slot capacity and hard per-rank cap (enforced in the
 // eligibility check); fixes the slot stride at compile time so the double-buffered
 // layout is identical on every rank and call. The effective size gate is the total
-// collected size (DDA_*_LL_THRESHOLD, see collectives.cc), so the actual
-// per-rank payload is <= total / nRanks and usually well under this cap.
+// collected size, so the actual per-rank payload is under the cap.
 // Footprint = 2 banks * nRanks * (kDdaLLMaxBytes * 2) for the 8B->16B
 // expansion; 256 MiB at 16 MiB for 4 ranks
 // TODO: instead of making it fixed, use the size based on scratch size
