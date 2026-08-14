@@ -3,11 +3,31 @@
 
 #include "rocjitsu/isa/operand.h"
 #include "simdojo/components/vector_reg.h"
+#include "util/except.h"
 
 #include <memory>
 #include <stdexcept>
 
 namespace rocjitsu {
+
+void Operand::validate_encoding() const {
+  switch (encoding_error_) {
+  case EncodingError::None:
+    return;
+  case EncodingError::InvalidSelector:
+    throw util::InvalidInst("invalid operand selector", "");
+  case EncodingError::InvalidScalarRegisterSelector:
+    throw util::InvalidInst("invalid scalar register selector", "");
+  case EncodingError::InvalidLaneSelector:
+    throw util::InvalidInst("invalid lane selector", "");
+  case EncodingError::InvalidExecSelector:
+    throw util::InvalidInst("invalid EXEC selector", "");
+  case EncodingError::InvalidVgprSourceSelector:
+    throw util::InvalidInst("invalid VGPR source selector", "");
+  case EncodingError::InvalidScalarSourceSelector:
+    throw util::InvalidInst("invalid scalar source selector", "");
+  }
+}
 
 std::optional<RegisterRef> Operand::to_register_ref() const { return std::nullopt; }
 

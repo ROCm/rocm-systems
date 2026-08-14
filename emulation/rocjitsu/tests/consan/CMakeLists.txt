@@ -138,6 +138,7 @@ function(rj_add_consan_hip_case)
         TIMEOUT
         PASS_REGEX
         FAIL_REGEX
+        EXPECTED_EXIT
     )
     set(_multi_value_args ENVIRONMENT)
     cmake_parse_arguments(
@@ -169,7 +170,7 @@ function(rj_add_consan_hip_case)
     # the focused default access-only and require barrier/atomic cases to opt in
     # explicitly below.
     set(_case_is_moi FALSE)
-    set(_case_is_record_replay FALSE)
+    set(_case_is_dense_runtime FALSE)
     set(_case_sets_barrier_tracking FALSE)
     set(_case_sets_atomic_tracking FALSE)
     set(_case_sets_runtime_sample_stride FALSE)
@@ -180,8 +181,11 @@ function(rj_add_consan_hip_case)
                 "^RJ_CONSAN_MODE=(record-replay|inline-shadow|sampled)$"
         )
             set(_case_is_moi TRUE)
-            if(_environment_entry STREQUAL "RJ_CONSAN_MODE=record-replay")
-                set(_case_is_record_replay TRUE)
+            if(
+                _environment_entry STREQUAL "RJ_CONSAN_MODE=record-replay"
+                OR _environment_entry STREQUAL "RJ_CONSAN_MODE=sampled"
+            )
+                set(_case_is_dense_runtime TRUE)
             endif()
         elseif(_environment_entry MATCHES "^RJ_CONSAN_MOI_TRACK_BARRIERS=")
             set(_case_sets_barrier_tracking TRUE)
@@ -200,11 +204,11 @@ function(rj_add_consan_hip_case)
         if(NOT _case_sets_atomic_tracking)
             list(APPEND _case_ENVIRONMENT "RJ_CONSAN_MOI_TRACK_ATOMICS=0")
         endif()
-        # Compact Record/Replay fixtures assert on a particular dispatch's
-        # records. Keep that semantic contract deterministic unless a test is
-        # explicitly exercising runtime sampling; production profile defaults
-        # remain covered by configuration tests and large-object validation.
-        if(_case_is_record_replay AND NOT _case_sets_runtime_sample_stride)
+        # Compact runtime fixtures assert on a particular dispatch's records.
+        # Keep that semantic contract deterministic unless a test explicitly
+        # supplies a sampling stride; production defaults remain covered by
+        # configuration tests and large-object validation.
+        if(_case_is_dense_runtime AND NOT _case_sets_runtime_sample_stride)
             list(
                 APPEND _case_ENVIRONMENT
                 "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
@@ -239,9 +243,18 @@ function(rj_add_consan_hip_case)
             "${CMAKE_CURRENT_BINARY_DIR}/consan-expected-${_case_pass_regex_id}.txt"
         )
         file(WRITE "${_case_pass_regex_file}" "${_case_PASS_REGEX}")
+        set(_case_checked_args
+            "-DRJ_EXPECTED_REGEX_FILE=${_case_pass_regex_file}"
+        )
+        if(_case_EXPECTED_EXIT)
+            list(
+                APPEND _case_checked_args
+                "-DRJ_EXPECTED_EXIT=${_case_EXPECTED_EXIT}"
+            )
+        endif()
         set(_case_command
             ${CMAKE_COMMAND}
-            "-DRJ_EXPECTED_REGEX_FILE=${_case_pass_regex_file}"
+            ${_case_checked_args}
             -P
             "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/run_checked_test.cmake"
             --
@@ -973,7 +986,7 @@ function(rj_add_consan_cdna_sim_cases)
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=inline-shadow"
             "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
-            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
             "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
             "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
@@ -1054,7 +1067,7 @@ function(rj_add_consan_cdna_sim_cases)
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=inline-shadow"
             "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
-            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
             "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
             "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
@@ -1105,6 +1118,13 @@ function(rj_add_consan_rdna4_b96_cases)
             list(GET _case_fields 0 _case_name)
             list(GET _case_fields 1 _case_filter)
             list(GET _case_fields 2 _case_diagnostic_policy)
+            if(_case_name STREQUAL "Ordered")
+                set(_case_track_barriers 1)
+                set(_case_max_patches 8)
+            else()
+                set(_case_track_barriers 0)
+                set(_case_max_patches 2)
+            endif()
             rj_add_consan_hip_case(
                 NAME "${_b96_PREFIX}.NativeB96${_engine_name}${_case_name}"
                 TARGET ${_b96_TARGET}
@@ -1117,14 +1137,14 @@ function(rj_add_consan_rdna4_b96_cases)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=${_engine_mode}"
                     "RJ_CONSAN_POLICY=strict"
-                    "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=${_case_track_barriers}"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "${_case_diagnostic_policy}"
                     "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_native_b96_aliasing_access_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
-                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_MAX_PATCHES=${_case_max_patches}"
             )
         endforeach()
     endforeach()
@@ -1355,8 +1375,6 @@ function(rj_add_consan_gfx1250_sim_cases)
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=record-replay"
-            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
-            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
             "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
             "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
@@ -1377,8 +1395,6 @@ function(rj_add_consan_gfx1250_sim_cases)
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE=sampled"
-            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
-            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
             "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
             "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
             "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
@@ -2240,8 +2256,6 @@ function(rj_add_consan_hip_tests)
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=record-replay"
-                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
-                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_dynamic_private_stack_test_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
@@ -2258,8 +2272,6 @@ function(rj_add_consan_hip_tests)
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=sampled"
-                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
-                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_dynamic_private_stack_test_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
@@ -2398,6 +2410,7 @@ function(rj_add_consan_hip_tests)
                 TIMEOUT 30
                 PASS_REGEX
                     "ConSan MOI exact snapshot unusable: incomplete=[1-9][0-9]* changed=0 malformed=0"
+                EXPECTED_EXIT 90
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=inline-shadow"
@@ -2913,9 +2926,6 @@ function(rj_add_consan_hip_tests)
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=sampled"
-                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
-                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
-                    "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_equivalent_lds_accesses_in_different_workgroups"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=4"
@@ -2994,6 +3004,7 @@ function(rj_add_consan_hip_tests)
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=sampled"
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=2"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"

@@ -172,7 +172,7 @@ TEST(ConSan, BarrierMoveCarriesSelectedEdgeIntoOwnedWholePairTrampoline) {
   EXPECT_FALSE(dry_run.composite_proof->removed_cache_non_resurrection_applicable);
 }
 
-TEST(ConSan, SyncSequencesPairLiteral32ButRejectLiteral64BarrierId) {
+TEST(ConSan, SyncSequencesRejectLiteralBarrierIdMarkers) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
@@ -184,14 +184,7 @@ TEST(ConSan, SyncSequencesPairLiteral32ButRejectLiteral64BarrierId) {
   };
   const ConSanResult literal32 =
       try_patch_consan(make_gfx1250_code_object(literal32_words), options);
-  ASSERT_TRUE(literal32.errors.empty())
-      << (literal32.errors.empty() ? "" : literal32.errors.front());
-  ASSERT_EQ(literal32.sync_sequences.size(), 1u);
-  EXPECT_EQ(literal32.sync_sequences[0].operation, ConSanSyncOperation::BarrierFull);
-  EXPECT_EQ(literal32.sync_sequences[0].barrier_operand_source,
-            ConSanBarrierSite::OperandSource::Literal32);
-  EXPECT_EQ(literal32.sync_sequences[0].barrier_id, -1);
-  EXPECT_EQ(literal32.sync_sequences[0].barrier_literal_value, 0xFFFFFFFFu);
+  EXPECT_TRUE(literal32.sync_sequences.empty());
 
   const std::array<uint32_t, 5> literal64_words = {
       0xBE804EFEu, 0xFFFFFFFFu, 0xFFFFFFFFu, // s_barrier_signal literal64
@@ -200,16 +193,7 @@ TEST(ConSan, SyncSequencesPairLiteral32ButRejectLiteral64BarrierId) {
   };
   const ConSanResult literal64 =
       try_patch_consan(make_gfx1250_code_object(literal64_words), options);
-  ASSERT_TRUE(literal64.errors.empty())
-      << (literal64.errors.empty() ? "" : literal64.errors.front());
-  ASSERT_EQ(literal64.sync_sequences.size(), 2u);
-  EXPECT_EQ(literal64.sync_sequences[0].operation, ConSanSyncOperation::BarrierSignal);
-  EXPECT_EQ(literal64.sync_sequences[0].barrier_operand_source,
-            ConSanBarrierSite::OperandSource::Literal64);
-  EXPECT_FALSE(literal64.sync_sequences[0].barrier_id);
-  EXPECT_EQ(literal64.sync_sequences[0].confidence, ConSanSemanticConfidence::Unsupported);
-  EXPECT_EQ(literal64.sync_sequences[1].operation, ConSanSyncOperation::BarrierWait);
-  EXPECT_EQ(literal64.sync_sequences[1].confidence, ConSanSemanticConfidence::Ambiguous);
+  EXPECT_TRUE(literal64.sync_sequences.empty());
 }
 
 TEST(ConSan, FaultBarrierIdScopeRewritesCompleteStaticLifecycleAsOneMutation) {
@@ -270,7 +254,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesCompleteStaticLifecycleAsOneMutation) {
   EXPECT_EQ(qualification.cluster_or_multi_device, ConSanQualificationEvidence::None);
 }
 
-TEST(ConSan, FaultBarrierIdScopeRewritesEveryLiteralLifecycleMember) {
+TEST(ConSan, FaultBarrierIdScopeRejectsLiteralLifecycleMembersAtDecode) {
   const std::array<uint32_t, 10> text_words = {
       0xBE8051FFu, 0x00000001u, // s_barrier_init literal32(1)
       0xBE8052FFu, 0x00000001u, // s_barrier_join literal32(1)
@@ -285,37 +269,9 @@ TEST(ConSan, FaultBarrierIdScopeRewritesEveryLiteralLifecycleMember) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  ASSERT_EQ(inventory.barrier_lifecycle_groups.size(), 1u);
-  ASSERT_TRUE(inventory.barrier_lifecycle_groups[0].admissible);
-  const auto barrier = std::ranges::find(inventory.sync_sequences, ConSanSyncOperation::BarrierFull,
-                                         &ConSanSyncSequence::operation);
-  ASSERT_NE(barrier, inventory.sync_sequences.end());
-
-  ConSanOptions options = inventory_options;
-  options.fault_dry_run = false;
-  options.fault_mutate_barrier_id_scope = true;
-  options.fault_barrier_sequence_identity = barrier->identity;
-  options.fault_barrier_target_id = 16;
-  options.fault_require_exactly_one = true;
-  const ConSanResult result = try_patch_consan(bytes, options);
-
-  ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
-  ASSERT_EQ(result.patches.size(), 5u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_TRUE(patched.is_valid());
-  const auto *text = reinterpret_cast<const uint32_t *>(patched.text_sections().front()->data());
-  EXPECT_EQ(text[0], text_words[0]);
-  EXPECT_EQ(text[1], 16u);
-  EXPECT_EQ(text[2], text_words[2]);
-  EXPECT_EQ(text[3], 16u);
-  EXPECT_EQ(text[4], 0xBE805290u);
-  EXPECT_EQ(text[5], text_words[5]);
-  EXPECT_EQ(text[6], 16u);
-  EXPECT_EQ(text[7], 0xBF940010u);
-  EXPECT_EQ(text[8], text_words[8]);
-  EXPECT_EQ(text[9], text_words[9]);
+  EXPECT_TRUE(inventory.barrier_lifecycle_groups.empty());
+  EXPECT_TRUE(inventory.sync_sequences.empty());
+  EXPECT_FALSE(inventory.modified);
 }
 
 TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) {
@@ -1160,7 +1116,7 @@ TEST(ConSan, FaultBarrierMoveDryRunReportsCompletingPairWithoutChangingBytes) {
   EXPECT_EQ(result.fault_plans[0].barrier_move_direction, ConSanBarrierMoveDirection::LegacyMarker);
 }
 
-TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequence) {
+TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequenceForValidRetarget) {
   const std::array<uint32_t, 3> text_words = {
       0xBE804EC1u, // s_barrier_signal -1
       0xBF94FFFFu, // s_barrier_wait -1
@@ -1182,7 +1138,7 @@ TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequence) {
   ConSanOptions options = inventory_options;
   options.fault_mutate_barrier_id_scope = true;
   options.fault_barrier_sequence_identity = inventory.sync_sequences[0].identity;
-  options.fault_barrier_target_id = -3;
+  options.fault_barrier_target_id = -2;
   options.fault_require_exactly_one = true;
   const ConSanResult result = try_patch_consan(bytes, options);
 
@@ -1199,9 +1155,9 @@ TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequence) {
   EXPECT_EQ(plan.logical_sequence_identity, inventory.sync_sequences[0].identity);
   EXPECT_EQ(plan.ordered_member_identities, inventory.sync_sequences[0].member_event_identities);
   EXPECT_EQ(plan.original_barrier_id, -1);
-  EXPECT_EQ(plan.target_barrier_id, -3);
+  EXPECT_EQ(plan.target_barrier_id, -2);
   EXPECT_EQ(plan.original_barrier_scope, ConSanBarrierSite::Scope::Workgroup);
-  EXPECT_EQ(plan.target_barrier_scope, ConSanBarrierSite::Scope::Cluster);
+  EXPECT_EQ(plan.target_barrier_scope, ConSanBarrierSite::Scope::Workgroup);
   const auto qualification = consan_barrier_mutation_qualification(
       "gfx1201", ConSanBarrierMutationForm::PairScopeCrossing);
   EXPECT_EQ(qualification.host, ConSanQualificationEvidence::Proven);
@@ -1223,7 +1179,7 @@ TEST(ConSan, FaultBarrierIdScopePairsBoundedSignalWaitWithInterveningInstruction
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_dry_run = true;
   options.fault_mutate_barrier_id_scope = true;
-  options.fault_barrier_target_id = -3;
+  options.fault_barrier_target_id = -2;
 
   const ConSanResult discovery = try_patch_consan(bytes, options);
   const auto sequence = std::ranges::find(
@@ -1265,7 +1221,7 @@ TEST(ConSan, FaultBarrierIdScopeDryRunRejectsInexactAndInvalidTargets) {
   ConSanOptions options = inventory_options;
   options.fault_mutate_barrier_id_scope = true;
   options.fault_require_exactly_one = true;
-  options.fault_barrier_target_id = -3;
+  options.fault_barrier_target_id = -2;
   const ConSanResult missing_identity = try_patch_consan(bytes, options);
   EXPECT_TRUE(missing_identity.fault_plans.empty());
   EXPECT_FALSE(missing_identity.errors.empty());
@@ -1305,7 +1261,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesInlinePairAsOneMutation) {
   ConSanOptions options = inventory_options;
   options.fault_dry_run = false;
   options.fault_mutate_barrier_id_scope = true;
-  options.fault_barrier_target_id = -3;
+  options.fault_barrier_target_id = -2;
   options.fault_barrier_sequence_identity = inventory.sync_sequences[0].identity;
   options.fault_require_exactly_one = true;
   const ConSanResult result = try_patch_consan(bytes, options);
@@ -1323,8 +1279,8 @@ TEST(ConSan, FaultBarrierIdScopeRewritesInlinePairAsOneMutation) {
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const auto *text = reinterpret_cast<const uint32_t *>(patched.text_sections().front()->data());
-  EXPECT_EQ(text[0], 0xBE804EC3u); // s_barrier_signal -3
-  EXPECT_EQ(text[1], 0xBF94FFFDu); // s_barrier_wait -3
+  EXPECT_EQ(text[0], 0xBE804EC2u); // s_barrier_signal -2
+  EXPECT_EQ(text[1], 0xBF94FFFEu); // s_barrier_wait -2
   EXPECT_EQ(text[2], text_words[2]);
   const auto qualification = consan_barrier_mutation_qualification(
       "gfx1201", ConSanBarrierMutationForm::PairScopeCrossing);
@@ -1332,7 +1288,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesInlinePairAsOneMutation) {
   EXPECT_EQ(qualification.live_gpu, ConSanQualificationEvidence::None);
 }
 
-TEST(ConSan, FaultBarrierIdScopePreservesLiteral32SignalEncoding) {
+TEST(ConSan, FaultBarrierIdScopeRejectsLiteralSignalMarkerAtDecode) {
   const std::array<uint32_t, 4> text_words = {
       0xBE804EFFu,
       0xFFFFFFFFu, // s_barrier_signal literal32(-1)
@@ -1344,29 +1300,8 @@ TEST(ConSan, FaultBarrierIdScopePreservesLiteral32SignalEncoding) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  ASSERT_EQ(inventory.sync_sequences.size(), 1u);
-
-  ConSanOptions options = inventory_options;
-  options.fault_dry_run = false;
-  options.fault_mutate_barrier_id_scope = true;
-  options.fault_barrier_target_id = -3;
-  options.fault_barrier_sequence_identity = inventory.sync_sequences[0].identity;
-  options.fault_require_exactly_one = true;
-  const ConSanResult result = try_patch_consan(bytes, options);
-
-  ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
-  EXPECT_TRUE(result.final_validation_passed);
-  ASSERT_EQ(result.patches.size(), 2u);
-  EXPECT_EQ(result.patches[0].original_size, 8u);
-  EXPECT_EQ(result.patches[1].original_size, 4u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_TRUE(patched.is_valid());
-  const auto *text = reinterpret_cast<const uint32_t *>(patched.text_sections().front()->data());
-  EXPECT_EQ(text[0], text_words[0]);
-  EXPECT_EQ(text[1], 0xFFFFFFFDu);
-  EXPECT_EQ(text[2], 0xBF94FFFDu);
-  EXPECT_EQ(text[3], text_words[3]);
+  EXPECT_TRUE(inventory.sync_sequences.empty());
+  EXPECT_FALSE(inventory.modified);
 }
 
 TEST(ConSan, FaultBarrierIdScopeExecutionRejectsUnsupportedForms) {

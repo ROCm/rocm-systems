@@ -10,10 +10,13 @@
 #include "rocjitsu/isa/operand.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -45,10 +48,38 @@ void note_special_state(ProbeClobberSummary &summary, RegClass cls) {
   }
 }
 
+std::optional<RegClass> special_class_from_name(std::string_view name) {
+  std::string lower(name);
+  std::ranges::transform(lower, lower.begin(),
+                         [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  const std::string_view normalized = lower;
+  if (normalized.starts_with("exec"))
+    return RegClass::EXEC;
+  if (normalized.starts_with("vcc"))
+    return RegClass::VCC;
+  if (normalized.starts_with("flat_scratch"))
+    return RegClass::FLAT_SCRATCH;
+  if (normalized == "scc" || normalized == "src_scc")
+    return RegClass::SCC;
+  if (normalized == "m0")
+    return RegClass::M0;
+  return std::nullopt;
+}
+
 // Flag the special-state class named by the generated structural operand ref.
 void note_operand(const Operand &op, ProbeClobberSummary &summary) {
-  if (auto ref = op.to_register_ref())
+  if (auto ref = op.to_register_ref()) {
     note_special_state(summary, ref->cls);
+    return;
+  }
+
+  // Fieldless architectural operands intentionally do not participate in
+  // ordinary def/use liveness. Generated is_register() still distinguishes
+  // them from immediates, so classify that narrow case by its display name.
+  if (op.is_register()) {
+    if (auto cls = special_class_from_name(op.name()))
+      note_special_state(summary, *cls);
+  }
 }
 
 // Scan every explicit operand and flag special-state register classes. This is

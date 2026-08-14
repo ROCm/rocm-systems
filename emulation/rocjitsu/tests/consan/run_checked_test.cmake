@@ -43,8 +43,16 @@ if(_stderr)
     message("${_stderr}")
 endif()
 
-if(NOT "${_result}" STREQUAL "0")
-    message(FATAL_ERROR "test command exited with ${_result}")
+if(DEFINED RJ_EXPECTED_EXIT)
+    set(_expected_result "${RJ_EXPECTED_EXIT}")
+else()
+    set(_expected_result "0")
+endif()
+if(NOT "${_result}" STREQUAL "${_expected_result}")
+    message(
+        FATAL_ERROR
+        "test command exited with ${_result}, expected ${_expected_result}"
+    )
 endif()
 
 set(_combined_output "${_stdout}\n${_stderr}")

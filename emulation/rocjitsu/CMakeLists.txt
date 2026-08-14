@@ -476,12 +476,12 @@ function(_rj_append_waitcheck_target_sources target)
     set(_rj_waitcheck_sources "${_rj_waitcheck_sources}" PARENT_SCOPE)
 endfunction()
 
-_rj_append_waitcheck_target_sources(rocjitsu_isa_cdna3)
-_rj_append_waitcheck_target_sources(rocjitsu_isa_cdna4)
-_rj_append_waitcheck_target_sources(rocjitsu_isa_rdna3)
-_rj_append_waitcheck_target_sources(rocjitsu_isa_rdna3_5)
-_rj_append_waitcheck_target_sources(rocjitsu_isa_rdna4)
-_rj_append_waitcheck_target_sources(rocjitsu_isa_gfx1250_model)
+_rj_append_waitcheck_target_sources(rocjitsu_isa_cdna3_model)
+_rj_append_waitcheck_target_sources(rocjitsu_isa_cdna4_model)
+_rj_append_waitcheck_target_sources(rocjitsu_isa_rdna3_model)
+_rj_append_waitcheck_target_sources(rocjitsu_isa_rdna3_5_model)
+_rj_append_waitcheck_target_sources(rocjitsu_isa_rdna4_model)
+_rj_append_waitcheck_target_sources(rocjitsu_isa_cdna5_model)
 
 # Generate the decode-only image's registry header from exactly the providers
 # whose private sources were collected above. Compile the checked-in
@@ -490,12 +490,12 @@ _rj_append_waitcheck_target_sources(rocjitsu_isa_gfx1250_model)
 rj_add_isa_target_registry(
     rocjitsu_waitcheck_isa_registry
     PROVIDERS
-        rocjitsu_isa_cdna3
-        rocjitsu_isa_cdna4
-        rocjitsu_isa_rdna3
-        rocjitsu_isa_rdna3_5
-        rocjitsu_isa_rdna4
-        rocjitsu_isa_gfx1250_model
+        rocjitsu_isa_cdna3_model
+        rocjitsu_isa_cdna4_model
+        rocjitsu_isa_rdna3_model
+        rocjitsu_isa_rdna3_5_model
+        rocjitsu_isa_rdna4_model
+        rocjitsu_isa_cdna5_model
 )
 
 add_library(rocjitsu_waitcheck_objects OBJECT ${_rj_waitcheck_sources})
@@ -608,6 +608,7 @@ add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Developer and test workflow tools.
 add_subdirectory(tools)
+add_subdirectory(fuzz/decode)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)
@@ -640,14 +641,31 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # The translator ships alongside the hook: both must resolve to the SAME
+    # shared object, or the cache identity they derive from it would differ and
+    # neither could read what the other wrote.
     install(
-        TARGETS hsa_hotswap_rocjitsu
+        TARGETS hsa_hotswap_rocjitsu rocjitsu_gfx1250_b0_to_a0
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    # rj_pretranslate ships because the tier it fills is only worth having if an
+    # image build or a post-install step can fill it.
+    install(
+        TARGETS rocjitsu_bin rj_pretranslate
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+    # And the wrapper ships with it. rj_pretranslate takes standalone code
+    # objects; the script is the only piece that knows how to find them inside
+    # fat binaries, offload bundles and KPACK archives, and the tool's own help
+    # text points at it. Installing one without the other leaves that pointer
+    # dangling and the deployed workflow with no entry point.
+    install(
+        PROGRAMS scripts/rocjitsu-pretranslate.py
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
 endif()
 
 # Config files and schemas: share/rocjitsu/

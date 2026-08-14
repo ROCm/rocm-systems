@@ -323,7 +323,6 @@ rocprofiler_add_integration_validate_test(
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
 if(attdecoder_FOUND
-   AND NOT ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS
    AND DEFINED rocm_version_NUMERIC_VERSION
    AND rocm_version_NUMERIC_VERSION GREATER_EQUAL 71400)
     rocprofiler_add_integration_execute_test(
@@ -349,6 +348,35 @@ if(attdecoder_FOUND
              ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/event_tracing
         FAIL_REGULAR_EXPRESSION "AssertionError")
 endif()
+
+set(ATT_NO_DETAIL_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-detail")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-no-detail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_NO_DETAIL_OUT_DIR} --att
+        --att-no-detail --output-format json --kernel-include-regex matrixTranspose --
+        $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-no-detail)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-no-detail
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_att_no_detail
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-no-detail
+    ARGS --att-no-detail-out-dir ${ATT_NO_DETAIL_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
 
 # Other SIMD file tests
 set(IS_DISABLED_OTHER_SIMD ON)

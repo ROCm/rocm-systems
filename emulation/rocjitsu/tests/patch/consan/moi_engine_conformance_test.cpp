@@ -218,7 +218,7 @@ TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppended
   const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250);
   std::vector<uint32_t> text_words(kTextWords, filler);
   text_words[18000u] = build_s_branch(/*simm16=*/8, ROCJITSU_CODE_ARCH_GFX1250);
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   constexpr std::array<size_t, kAccessCount> kStoreOffsets = {
       32u, 4000u, 8000u, 12000u, 16000u, 20000u, 24000u, 28000u, 32000u,
   };

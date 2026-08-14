@@ -2404,19 +2404,19 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
     uint16_t load_op = 0;
     switch (width_bits) {
     case 8:
-      load_op = gfx1250::kFlatLoadU8Vflat;
+      load_op = cdna5::kFlatLoadU8Vflat;
       break;
     case 16:
-      load_op = gfx1250::kFlatLoadU16Vflat;
+      load_op = cdna5::kFlatLoadU16Vflat;
       break;
     case 32:
-      load_op = gfx1250::kFlatLoadB32Vflat;
+      load_op = cdna5::kFlatLoadB32Vflat;
       break;
     case 64:
-      load_op = gfx1250::kFlatLoadB64Vflat;
+      load_op = cdna5::kFlatLoadB64Vflat;
       break;
     case 128:
-      load_op = gfx1250::kFlatLoadB128Vflat;
+      load_op = cdna5::kFlatLoadB128Vflat;
       break;
     default:
       return std::nullopt;

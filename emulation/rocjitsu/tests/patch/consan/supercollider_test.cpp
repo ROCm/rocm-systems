@@ -6,8 +6,8 @@
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 
 namespace rocjitsu {
 namespace {
@@ -1546,7 +1546,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesGfx1250VflatStore) {
       build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
   };
   constexpr auto store =
-      gfx1250::build_vflat(gfx1250::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+      cdna5::build_vflat(cdna5::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
   std::vector<uint32_t> function_words = {
       0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u,
@@ -1584,7 +1584,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesGfx1250VflatStore) {
   EXPECT_EQ(rewritten_words[2], store[1]);
   EXPECT_EQ(rewritten_words[3], store[2]);
   constexpr auto readback =
-      gfx1250::build_vflat(gfx1250::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 5, .vaddr = 0});
+      cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 5, .vaddr = 0});
   EXPECT_EQ(rewritten_words[5], readback[0]);
   EXPECT_EQ(rewritten_words[6], readback[1]);
   EXPECT_EQ(rewritten_words[7], readback[2]);
@@ -1592,7 +1592,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesGfx1250VflatStore) {
 
 TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250Wave64MaybeGroupReadback) {
   constexpr auto store =
-      gfx1250::build_vflat(gfx1250::kFlatStoreD16HiB8Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+      cdna5::build_vflat(cdna5::kFlatStoreD16HiB8Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
   std::vector<uint32_t> text_words = {
       0xBE8001EBu,              // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000080u, // v_mov_b32_e64 v0, 0
@@ -1640,7 +1640,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250Wave64MaybeGroupReadback)
   EXPECT_EQ(rewritten_words[5], *group_aperture_high);
   EXPECT_EQ(rewritten_words[6], *skip_non_group);
   constexpr auto readback =
-      gfx1250::build_vflat(gfx1250::kFlatLoadU8Vflat, {.saddr = 124, .vdst = 5, .vaddr = 0});
+      cdna5::build_vflat(cdna5::kFlatLoadU8Vflat, {.saddr = 124, .vdst = 5, .vaddr = 0});
   EXPECT_EQ(rewritten_words[7], readback[0]);
   EXPECT_EQ(rewritten_words[8], readback[1]);
   EXPECT_EQ(rewritten_words[9], readback[2]);
@@ -1660,7 +1660,7 @@ TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250Wave64MaybeGroupReadback)
 
 TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsLiveVccSavePairThroughVgprsInBothWaveModes) {
   constexpr auto store =
-      gfx1250::build_vflat(gfx1250::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+      cdna5::build_vflat(cdna5::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
   std::vector<uint32_t> text_words = {
       0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
       build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_GFX1250),
@@ -1765,7 +1765,7 @@ void append_rdna4_full_vgpr_pressure(std::vector<uint32_t> &words) {
 [[nodiscard]] std::vector<uint32_t>
 make_gfx1250_full_pressure_flat_store_words(bool append_endpgm = true) {
   constexpr auto store =
-      gfx1250::build_vflat(gfx1250::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+      cdna5::build_vflat(cdna5::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
   std::vector<uint32_t> words = {
       0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
       build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_GFX1250),
@@ -2098,14 +2098,13 @@ TEST(ConSan, Gfx1250FlatLoadCheckTrapSpillsLiveVccSavePairForFullAndHighHalfLoad
     uint16_t scalar_spill_vgpr;
   };
   constexpr std::array cases = {
+      LoadCase{"b32",
+               cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0}),
+               4u},
       LoadCase{
-          "b32",
-          gfx1250::build_vflat(gfx1250::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0}),
-          4u},
-      LoadCase{"d16_hi_b16",
-               gfx1250::build_vflat(gfx1250::kFlatLoadD16HiB16Vflat,
-                                    {.saddr = 124, .vdst = 2, .vaddr = 0}),
-               5u},
+          "d16_hi_b16",
+          cdna5::build_vflat(cdna5::kFlatLoadD16HiB16Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0}),
+          5u},
   };
   for (const auto &load_case : cases) {
     SCOPED_TRACE(load_case.name);
@@ -2174,7 +2173,7 @@ TEST(ConSan, Gfx1250FlatLoadCheckTrapSpillsLiveVccSavePairForFullAndHighHalfLoad
 
 TEST(ConSan, Gfx1250FlatB64CheckTrapRejectsOddAndAcceptsEvenTupleScratch) {
   constexpr auto load =
-      gfx1250::build_vflat(gfx1250::kFlatLoadB64Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0});
+      cdna5::build_vflat(cdna5::kFlatLoadB64Vflat, {.saddr = 124, .vdst = 2, .vaddr = 0});
   std::vector<uint32_t> text_words = {
       0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
       build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_GFX1250),
@@ -2250,7 +2249,7 @@ TEST(ConSan, Gfx950FlatCheckTrapFailsClosedWithoutDeadVccSavePair) {
 
 TEST(ConSan, Gfx1250SharedFlatVccSpillUsesAllOwnersCommonSgprAllocation) {
   constexpr auto store =
-      gfx1250::build_vflat(gfx1250::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+      cdna5::build_vflat(cdna5::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
   std::vector<uint32_t> helper_words = {
       0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
       build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_GFX1250),
@@ -2334,7 +2333,7 @@ TEST(ConSan, Gfx1250SharedFlatVccSpillUsesAllOwnersCommonSgprAllocation) {
 
 TEST(ConSan, Gfx1250SharedFlatDeadVccSaveSatisfiesEveryOwnerContinuation) {
   constexpr auto store =
-      gfx1250::build_vflat(gfx1250::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+      cdna5::build_vflat(cdna5::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
   const std::array<uint32_t, 7> helper_words = {
       0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
       build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_GFX1250),
@@ -2980,7 +2979,7 @@ TEST(ConSan, Gfx1100LdsCheckTrapUsesRdna3CompletionWait) {
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250VdsLoadInPlace) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   const std::array<uint32_t, 13> text_words = {
       load[0],
       load[1],
@@ -3019,13 +3018,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250VdsLoadInPlace) {
   const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
   EXPECT_EQ(rewritten_words[0], load[0]);
   EXPECT_EQ(rewritten_words[1], load[1]);
-  const auto duplicate = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 3});
+  const auto duplicate = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 3});
   EXPECT_EQ(rewritten_words[4], duplicate[0]);
   EXPECT_EQ(rewritten_words[5], duplicate[1]);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeEvenAlignsAutomaticGfx1250B64Scratch) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB64Vds, {.addr = 4, .vdst = 2});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB64Vds, {.addr = 4, .vdst = 2});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   text_words.insert(text_words.end(), 20u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3047,13 +3046,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeEvenAlignsAutomaticGfx1250B64Scratch) {
   EXPECT_TRUE(result.final_validation_passed);
 
   const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
-  constexpr auto duplicate = gfx1250::build_vds(gfx1250::kDsLoadB64Vds, {.addr = 4, .vdst = 6});
+  constexpr auto duplicate = cdna5::build_vds(cdna5::kDsLoadB64Vds, {.addr = 4, .vdst = 6});
   EXPECT_EQ(rewritten_words[4], duplicate[0]);
   EXPECT_EQ(rewritten_words[5], duplicate[1]);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250GuestVgprBankMode) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   constexpr uint32_t kSelectLowVgprBank = 0xBF860100u;
   constexpr uint32_t kSelectGuestVgprBank = 0xBF860001u;
   std::vector<uint32_t> text_words = {kSelectGuestVgprBank, load[0], load[1]};
@@ -3093,7 +3092,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250GuestVgprBankMode) {
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250LowBankAddressForHighBankLoad) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 2, .vdst = 2});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 2, .vdst = 2});
   constexpr uint32_t kSelectLowVgprBank = 0xBF864000u;
   constexpr uint32_t kSelectGuestVgprBank = 0xBF860040u;
   std::vector<uint32_t> text_words = {kSelectGuestVgprBank, load[0], load[1]};
@@ -3137,7 +3136,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250LowBankAddressForHighBankLoad)
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeComparesGfx1250LoadAcrossVgprBankBoundary) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 2, .vdst = 254});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 2, .vdst = 254});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   text_words.resize(48u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
@@ -3166,7 +3165,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeComparesGfx1250LoadAcrossVgprBankBoundary) {
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250TransposeLoadWithSymbolPadding) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadTr16B128Vds, {.addr = 2, .vdst = 4});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadTr16B128Vds, {.addr = 2, .vdst = 4});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   text_words.insert(text_words.end(), 48u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3190,7 +3189,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250TransposeLoadWithSymbolPadding)
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250U16VdsLoadInPlace) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadU16Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadU16Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   text_words.insert(text_words.end(), 10u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3217,13 +3216,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250U16VdsLoadInPlace) {
   const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
   EXPECT_EQ(rewritten_words[0], load[0]);
   EXPECT_EQ(rewritten_words[1], load[1]);
-  const auto duplicate = gfx1250::build_vds(gfx1250::kDsLoadU16Vds, {.addr = 2, .vdst = 3});
+  const auto duplicate = cdna5::build_vds(cdna5::kDsLoadU16Vds, {.addr = 2, .vdst = 3});
   EXPECT_EQ(rewritten_words[4], duplicate[0]);
   EXPECT_EQ(rewritten_words[5], duplicate[1]);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250I16VdsLoadInPlace) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadI16Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadI16Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   text_words.insert(text_words.end(), 10u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3243,13 +3242,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250I16VdsLoadInPlace) {
   EXPECT_TRUE(result.final_validation_passed);
 
   const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
-  const auto duplicate = gfx1250::build_vds(gfx1250::kDsLoadI16Vds, {.addr = 2, .vdst = 3});
+  const auto duplicate = cdna5::build_vds(cdna5::kDsLoadI16Vds, {.addr = 2, .vdst = 3});
   EXPECT_EQ(rewritten_words[4], duplicate[0]);
   EXPECT_EQ(rewritten_words[5], duplicate[1]);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250U8VdsLoadInPlace) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadU8Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadU8Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   text_words.insert(text_words.end(), 10u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3271,13 +3270,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250U8VdsLoadInPlace) {
   const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
   EXPECT_EQ(rewritten_words[0], load[0]);
   EXPECT_EQ(rewritten_words[1], load[1]);
-  const auto duplicate = gfx1250::build_vds(gfx1250::kDsLoadU8Vds, {.addr = 2, .vdst = 3});
+  const auto duplicate = cdna5::build_vds(cdna5::kDsLoadU8Vds, {.addr = 2, .vdst = 3});
   EXPECT_EQ(rewritten_words[4], duplicate[0]);
   EXPECT_EQ(rewritten_words[5], duplicate[1]);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250I8VdsLoadInPlace) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadI8Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadI8Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   text_words.insert(text_words.end(), 10u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3296,13 +3295,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250I8VdsLoadInPlace) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_TRUE(result.final_validation_passed);
   const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
-  constexpr auto duplicate = gfx1250::build_vds(gfx1250::kDsLoadI8Vds, {.addr = 2, .vdst = 3});
+  constexpr auto duplicate = cdna5::build_vds(cdna5::kDsLoadI8Vds, {.addr = 2, .vdst = 3});
   EXPECT_EQ(rewritten_words[4], duplicate[0]);
   EXPECT_EQ(rewritten_words[5], duplicate[1]);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250B96VdsLoadInPlace) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB96Vds, {.addr = 10, .vdst = 2});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB96Vds, {.addr = 10, .vdst = 2});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   text_words.insert(text_words.end(), 32u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3324,13 +3323,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250B96VdsLoadInPlace) {
   EXPECT_TRUE(result.kernels.front().lds_sites.front().supported_mvp);
   EXPECT_TRUE(result.final_validation_passed);
   const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
-  constexpr auto duplicate = gfx1250::build_vds(gfx1250::kDsLoadB96Vds, {.addr = 10, .vdst = 6});
+  constexpr auto duplicate = cdna5::build_vds(cdna5::kDsLoadB96Vds, {.addr = 10, .vdst = 6});
   EXPECT_EQ(rewritten_words[4], duplicate[0]);
   EXPECT_EQ(rewritten_words[5], duplicate[1]);
 }
 
 TEST(ConSan, LdsAddressFaultTracksGuestAfterGfx1250PrivateSpillPrologue) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   text_words.insert(text_words.end(), 24u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   for (uint16_t vgpr = 0; vgpr < 256; ++vgpr) {
@@ -3382,7 +3381,7 @@ TEST(ConSan, LdsAddressFaultTracksGuestAfterGfx1250PrivateSpillPrologue) {
 }
 
 TEST(ConSan, Gfx1250BankedLdsRelocationTracksGuestAfterScalarSpillPrologue) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   constexpr uint32_t kSelectGuestVgprBank = 0xBF860001u;
   std::vector<uint32_t> text_words = {kSelectGuestVgprBank, load[0], load[1]};
   for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
@@ -3424,12 +3423,12 @@ TEST(ConSan, Gfx1250BankedLdsRelocationTracksGuestAfterScalarSpillPrologue) {
   std::memcpy(relocated.data(),
               patched.text_sections().front()->data() + *patch->relocated_guest_instruction_offset,
               sizeof(relocated));
-  constexpr auto expected = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 8, .vdst = 1});
+  constexpr auto expected = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 8, .vdst = 1});
   EXPECT_EQ(relocated, expected);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250VdsStoreInPlace) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 2, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2, .data0 = 1});
   const std::array<uint32_t, 13> text_words = {
       store[0],
       store[1],
@@ -3463,13 +3462,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250VdsStoreInPlace) {
   const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
   EXPECT_EQ(rewritten_words[0], store[0]);
   EXPECT_EQ(rewritten_words[1], store[1]);
-  constexpr auto readback = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 3});
+  constexpr auto readback = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 3});
   EXPECT_EQ(rewritten_words[4], readback[0]);
   EXPECT_EQ(rewritten_words[5], readback[1]);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeReadsBackGfx1250B96VdsStore) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB96Vds, {.addr = 10, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB96Vds, {.addr = 10, .data0 = 1});
   std::vector<uint32_t> text_words = {store[0], store[1]};
   text_words.insert(text_words.end(), 32u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3489,13 +3488,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackGfx1250B96VdsStore) {
   EXPECT_TRUE(result.final_validation_passed);
 
   const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
-  constexpr auto readback = gfx1250::build_vds(gfx1250::kDsLoadB96Vds, {.addr = 10, .vdst = 4});
+  constexpr auto readback = cdna5::build_vds(cdna5::kDsLoadB96Vds, {.addr = 10, .vdst = 4});
   EXPECT_EQ(rewritten_words[4], readback[0]);
   EXPECT_EQ(rewritten_words[5], readback[1]);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B8VdsStoreBeforeComparingReadback) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB8Vds, {.addr = 2, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB8Vds, {.addr = 2, .data0 = 1});
   std::vector<uint32_t> text_words = {store[0], store[1]};
   text_words.insert(text_words.end(), 12u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3517,7 +3516,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B8VdsStoreBeforeComparingReadback)
   const auto rewritten_words = patched_words_at_file_offset<10>(result, 0x100);
   EXPECT_EQ(rewritten_words[0], store[0]);
   EXPECT_EQ(rewritten_words[1], store[1]);
-  constexpr auto readback = gfx1250::build_vds(gfx1250::kDsLoadU8Vds, {.addr = 2, .vdst = 3});
+  constexpr auto readback = cdna5::build_vds(cdna5::kDsLoadU8Vds, {.addr = 2, .vdst = 3});
   EXPECT_EQ(rewritten_words[4], readback[0]);
   EXPECT_EQ(rewritten_words[5], readback[1]);
   const auto mask = build_v_and_b32_e32_literal(4, 0xffu, 1, ROCJITSU_CODE_ARCH_GFX1250);
@@ -3528,7 +3527,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B8VdsStoreBeforeComparingReadback)
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeSelectsGfx1250HighByteStoreValue) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB8D16HiVds, {.addr = 2, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB8D16HiVds, {.addr = 2, .data0 = 1});
   std::vector<uint32_t> text_words = {store[0], store[1]};
   text_words.insert(text_words.end(), 14u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3548,7 +3547,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSelectsGfx1250HighByteStoreValue) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
   EXPECT_TRUE(result.final_validation_passed);
   const auto rewritten_words = patched_words_at_file_offset<11>(result, 0x100);
-  constexpr auto readback = gfx1250::build_vds(gfx1250::kDsLoadU8Vds, {.addr = 2, .vdst = 3});
+  constexpr auto readback = cdna5::build_vds(cdna5::kDsLoadU8Vds, {.addr = 2, .vdst = 3});
   EXPECT_EQ(rewritten_words[4], readback[0]);
   EXPECT_EQ(rewritten_words[5], readback[1]);
   const auto shift =
@@ -3563,7 +3562,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSelectsGfx1250HighByteStoreValue) {
 
 TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B16StoreValues) {
   const auto check = [](uint16_t store_op, bool high_half, std::string_view kernel_name) {
-    const auto store = gfx1250::build_vds(store_op, {.addr = 2, .data0 = 1});
+    const auto store = cdna5::build_vds(store_op, {.addr = 2, .data0 = 1});
     std::vector<uint32_t> text_words = {store[0], store[1]};
     text_words.insert(text_words.end(), 14u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
     text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3585,7 +3584,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B16StoreValues) {
     if (!result.modified)
       return;
     const auto rewritten_words = patched_words_at_file_offset<11>(result, 0x100);
-    const auto readback = gfx1250::build_vds(gfx1250::kDsLoadU16Vds, {.addr = 2, .vdst = 3});
+    const auto readback = cdna5::build_vds(cdna5::kDsLoadU16Vds, {.addr = 2, .vdst = 3});
     EXPECT_EQ(rewritten_words[4], readback[0]);
     EXPECT_EQ(rewritten_words[5], readback[1]);
     size_t mask_index = 7u;
@@ -3603,14 +3602,14 @@ TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B16StoreValues) {
     EXPECT_EQ(rewritten_words[mask_index + 1u], (*mask)[1]);
   };
 
-  check(gfx1250::kDsStoreB16Vds, false, "gfx1250_vds_store_b16");
-  check(gfx1250::kDsStoreB16D16HiVds, true, "gfx1250_vds_store_b16_d16_hi");
+  check(cdna5::kDsStoreB16Vds, false, "gfx1250_vds_store_b16");
+  check(cdna5::kDsStoreB16D16HiVds, true, "gfx1250_vds_store_b16_d16_hi");
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeSplitsGfx1250TwoAddressStoresAndReadbacks) {
   const auto check = [](uint16_t store_op, uint16_t element_dwords, uint8_t encoded_offset1,
                         uint16_t byte_offset1, uint8_t data1, std::string_view kernel_name) {
-    const auto store = gfx1250::build_vds(
+    const auto store = cdna5::build_vds(
         store_op, {.offset1 = encoded_offset1, .addr = 12, .data0 = 2, .data1 = data1});
     std::vector<uint32_t> text_words = {store[0], store[1]};
     text_words.insert(text_words.end(), 28u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
@@ -3644,23 +3643,23 @@ TEST(ConSan, ProbeLdsCheckTrapModeSplitsGfx1250TwoAddressStoresAndReadbacks) {
         patched.text_sections().front()->sectionOffset() + body_text_offset;
     const auto rewritten_words = patched_words_at_file_offset<10>(result, body_file_offset);
     const auto first_store =
-        gfx1250::build_vds(element_dwords == 1u ? gfx1250::kDsStoreB32Vds : gfx1250::kDsStoreB64Vds,
-                           {.addr = 12, .data0 = 2});
+        cdna5::build_vds(element_dwords == 1u ? cdna5::kDsStoreB32Vds : cdna5::kDsStoreB64Vds,
+                         {.addr = 12, .data0 = 2});
     const auto second_store =
-        gfx1250::build_vds(element_dwords == 1u ? gfx1250::kDsStoreB32Vds : gfx1250::kDsStoreB64Vds,
-                           {.offset0 = static_cast<uint8_t>(byte_offset1),
-                            .offset1 = static_cast<uint8_t>(byte_offset1 >> 8u),
-                            .addr = 12,
-                            .data0 = data1});
+        cdna5::build_vds(element_dwords == 1u ? cdna5::kDsStoreB32Vds : cdna5::kDsStoreB64Vds,
+                         {.offset0 = static_cast<uint8_t>(byte_offset1),
+                          .offset1 = static_cast<uint8_t>(byte_offset1 >> 8u),
+                          .addr = 12,
+                          .data0 = data1});
     const auto first_load =
-        gfx1250::build_vds(element_dwords == 1u ? gfx1250::kDsLoadB32Vds : gfx1250::kDsLoadB64Vds,
-                           {.addr = 12, .vdst = 8});
+        cdna5::build_vds(element_dwords == 1u ? cdna5::kDsLoadB32Vds : cdna5::kDsLoadB64Vds,
+                         {.addr = 12, .vdst = 8});
     const auto second_load =
-        gfx1250::build_vds(element_dwords == 1u ? gfx1250::kDsLoadB32Vds : gfx1250::kDsLoadB64Vds,
-                           {.offset0 = static_cast<uint8_t>(byte_offset1),
-                            .offset1 = static_cast<uint8_t>(byte_offset1 >> 8u),
-                            .addr = 12,
-                            .vdst = static_cast<uint8_t>(8u + element_dwords)});
+        cdna5::build_vds(element_dwords == 1u ? cdna5::kDsLoadB32Vds : cdna5::kDsLoadB64Vds,
+                         {.offset0 = static_cast<uint8_t>(byte_offset1),
+                          .offset1 = static_cast<uint8_t>(byte_offset1 >> 8u),
+                          .addr = 12,
+                          .vdst = static_cast<uint8_t>(8u + element_dwords)});
     const std::array<uint32_t, 10> expected = {
         first_store[0],
         first_store[1],
@@ -3676,18 +3675,16 @@ TEST(ConSan, ProbeLdsCheckTrapModeSplitsGfx1250TwoAddressStoresAndReadbacks) {
     EXPECT_EQ(rewritten_words, expected);
   };
 
-  check(gfx1250::kDsStore2addrB32Vds, 1, 66, 264, 7, "gfx1250_vds_store_2addr_b32");
-  check(gfx1250::kDsStore2addrB64Vds, 2, 34, 272, 4, "gfx1250_vds_store_2addr_b64");
-  check(gfx1250::kDsStore2addrStride64B32Vds, 1, 8, 2048, 7,
-        "gfx1250_vds_store_2addr_stride64_b32");
-  check(gfx1250::kDsStore2addrStride64B64Vds, 2, 8, 4096, 4,
-        "gfx1250_vds_store_2addr_stride64_b64");
+  check(cdna5::kDsStore2addrB32Vds, 1, 66, 264, 7, "gfx1250_vds_store_2addr_b32");
+  check(cdna5::kDsStore2addrB64Vds, 2, 34, 272, 4, "gfx1250_vds_store_2addr_b64");
+  check(cdna5::kDsStore2addrStride64B32Vds, 1, 8, 2048, 7, "gfx1250_vds_store_2addr_stride64_b32");
+  check(cdna5::kDsStore2addrStride64B64Vds, 2, 8, 4096, 4, "gfx1250_vds_store_2addr_stride64_b64");
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeSplitsLargeGfx1250TwoAddressOffsetsWithAddressScratch) {
   const auto store =
-      gfx1250::build_vds(gfx1250::kDsStore2addrStride64B64Vds,
-                         {.offset0 = 1, .offset1 = 255, .addr = 20, .data0 = 2, .data1 = 4});
+      cdna5::build_vds(cdna5::kDsStore2addrStride64B64Vds,
+                       {.offset0 = 1, .offset1 = 255, .addr = 20, .data0 = 2, .data1 = 4});
   std::vector<uint32_t> text_words = {store[0], store[1]};
   text_words.insert(text_words.end(), 48u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
@@ -3718,11 +3715,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeSplitsLargeGfx1250TwoAddressOffsetsWithAddress
       patched.text_sections().front()->sectionOffset() + body_text_offset;
   const auto body_prefix = patched_words_at_file_offset<13>(result, body_file_offset);
   const auto first_store =
-      gfx1250::build_vds(gfx1250::kDsStoreB64Vds, {.offset1 = 2, .addr = 20, .data0 = 2});
-  const auto second_store = gfx1250::build_vds(gfx1250::kDsStoreB64Vds, {.addr = 12, .data0 = 4});
+      cdna5::build_vds(cdna5::kDsStoreB64Vds, {.offset1 = 2, .addr = 20, .data0 = 2});
+  const auto second_store = cdna5::build_vds(cdna5::kDsStoreB64Vds, {.addr = 12, .data0 = 4});
   const auto first_load =
-      gfx1250::build_vds(gfx1250::kDsLoadB64Vds, {.offset1 = 2, .addr = 20, .vdst = 8});
-  const auto second_load = gfx1250::build_vds(gfx1250::kDsLoadB64Vds, {.addr = 12, .vdst = 10});
+      cdna5::build_vds(cdna5::kDsLoadB64Vds, {.offset1 = 2, .addr = 20, .vdst = 8});
+  const auto second_load = cdna5::build_vds(cdna5::kDsLoadB64Vds, {.addr = 12, .vdst = 10});
   const auto adjust =
       instrumentation::build_v_add_u32_literal(12, 12, 255u * 512u, 20, ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(adjust);
@@ -3746,7 +3743,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSplitsLargeGfx1250TwoAddressOffsetsWithAddress
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeSpillsGfx1250B8VdsStoreScratchWindow) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB8Vds, {.addr = 2, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB8Vds, {.addr = 2, .data0 = 1});
   std::vector<uint32_t> text_words = {store[0], store[1]};
   text_words.insert(text_words.end(), 28u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   for (uint16_t vgpr = 0; vgpr < 256; ++vgpr) {
@@ -6002,7 +5999,7 @@ TEST(ConSan, Rdna4DenseCheckTrapUsesCalledLocalFunctionHost) {
 TEST(ConSan, Gfx1250DenseCheckTrapUsesExplicitKeysAtScalarLimit) {
   constexpr size_t kSiteCount = 1025u;
   constexpr size_t kTextWords = 66000u;
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words(kTextWords, build_s_mov_b32(97, 97, ROCJITSU_CODE_ARCH_GFX1250));
   for (size_t site = 0; site < kSiteCount; ++site) {
     text_words[2u * site] = load[0];
@@ -6037,7 +6034,7 @@ TEST(ConSan, Gfx1250DenseCheckTrapUsesExplicitKeysAtScalarLimit) {
 }
 
 TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
     text_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
@@ -6135,7 +6132,7 @@ TEST(ConSan, Rdna4CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
 }
 
 TEST(ConSan, Gfx1250CheckTrapBorrowsAndPreservesS0WhenRuntimeDelayIsDisabled) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words = {load[0], load[1]};
   for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
     text_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
@@ -6173,7 +6170,7 @@ TEST(ConSan, Gfx1250CheckTrapBorrowsAndPreservesS0WhenRuntimeDelayIsDisabled) {
 }
 
 TEST(ConSan, Gfx1250SharedLdsVccSpillUsesAllOwnersCommonSgprAllocation) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> helper_words = {load[0], load[1]};
   for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
     helper_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
@@ -6259,7 +6256,7 @@ TEST(ConSan, Gfx1250SharedLdsVccSpillUsesAllOwnersCommonSgprAllocation) {
 }
 
 TEST(ConSan, Gfx1250SharedLdsDeadVccSaveSatisfiesEveryOwnerDescriptor) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> helper_words = {load[0], load[1]};
   for (uint16_t sgpr = 0; sgpr < 8u; ++sgpr)
     helper_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250));
@@ -6389,7 +6386,7 @@ TEST(ConSan, Rdna4InlineLdsDeadVccSaveUsesFixedSgprPoolWithoutGrowth) {
 }
 
 TEST(ConSan, Gfx1250SharedLdsAutoScratchUsesAllOwnersAndGrowsEveryDescriptor) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   const std::array<uint32_t, 2> helper_words = {load[0], load[1]};
 
   TwoKernelSharedFixtureOptions fixture;
@@ -6446,7 +6443,7 @@ TEST(ConSan, Gfx1250SharedLdsAutoScratchUsesAllOwnersAndGrowsEveryDescriptor) {
 }
 
 [[nodiscard]] std::vector<uint32_t> make_gfx1250_full_pressure_lds_load_words() {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> words = {load[0], load[1]};
   append_gfx1250_full_vgpr_pressure(words);
   return words;
@@ -6454,9 +6451,8 @@ TEST(ConSan, Gfx1250SharedLdsAutoScratchUsesAllOwnersAndGrowsEveryDescriptor) {
 
 [[nodiscard]] std::vector<uint8_t>
 make_gfx1250_two_full_pressure_lds_loads(uint32_t private_bytes) {
-  constexpr auto first_load = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 2, .vdst = 0});
-  constexpr auto second_load =
-      gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 18, .vdst = 16});
+  constexpr auto first_load = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 2, .vdst = 0});
+  constexpr auto second_load = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 18, .vdst = 16});
   std::vector<uint32_t> words(first_load.begin(), first_load.end());
   words.insert(words.end(), second_load.begin(), second_load.end());
   append_gfx1250_full_vgpr_pressure(words);
@@ -6556,8 +6552,8 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillUsesOneLayoutForEveryOwner) {
 }
 
 TEST(ConSan, Gfx1250OverlappingSharedLdsSpillsAccumulateEveryOwnerRequirement) {
-  constexpr auto load_ab = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 4, .vdst = 0});
-  constexpr auto load_bc = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 18, .vdst = 16});
+  constexpr auto load_ab = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 4, .vdst = 0});
+  constexpr auto load_bc = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 18, .vdst = 16});
   const auto make_full_pressure_helper = [](const auto &load) {
     std::vector<uint32_t> words(load.begin(), load.end());
     append_gfx1250_full_vgpr_pressure(words);
@@ -6836,10 +6832,8 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillCapacityFailureIsAccounted) {
 }
 
 TEST(ConSan, Gfx1250RejectedLdsSpillCandidateDoesNotGrowSelectedLayout) {
-  constexpr auto rejected_load =
-      gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 4, .vdst = 0});
-  constexpr auto selected_load =
-      gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 20, .vdst = 16});
+  constexpr auto rejected_load = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 4, .vdst = 0});
+  constexpr auto selected_load = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 20, .vdst = 16});
   std::vector<uint32_t> text_words = {
       0xBF850000u, // s_clause 0: the next instruction cannot be instrumented.
       rejected_load[0],
@@ -6889,7 +6883,7 @@ TEST(ConSan, Gfx1250RejectedLdsSpillCandidateDoesNotGrowSelectedLayout) {
 TEST(ConSan, Gfx1250SharedLdsFarBodyUsesScalarScratchDeadInEveryOwner) {
   constexpr size_t kHelperWords = 33020u;
   constexpr size_t kRelayWord = 16000u;
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> helper_words = {load[0], load[1]};
   helper_words.resize(kHelperWords, build_s_mov_b32(100u, 100u, ROCJITSU_CODE_ARCH_GFX1250));
   const auto relay_anchor = instrumentation::build_v_writelane_b32(
@@ -6973,7 +6967,7 @@ TEST(ConSan, Gfx1250SharedLdsFarBodyUsesScalarScratchDeadInEveryOwner) {
 TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   constexpr size_t kTextWords = 33000u;
   constexpr size_t kRelaySiteWord = 16000u;
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words(kTextWords,
                                    build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250));
   text_words[0] = load[0];
@@ -7070,7 +7064,7 @@ TEST(ConSan, Rdna4CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
 
 TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
   constexpr size_t kTextWords = 33010u;
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words(kTextWords,
                                    build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250));
   text_words[0] = load[0];
@@ -7113,7 +7107,7 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
 TEST(ConSan, Gfx1250LdsConvergenceMinimizesPromotedRelayReservoirOwners) {
   constexpr size_t kTextWords = 44020u;
   constexpr size_t kSecondSiteWord = 12000u;
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words(kTextWords,
                                    build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250));
   const auto place_full_scalar_pressure_site = [&](size_t word) {
@@ -7467,7 +7461,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreplansIslandsBeforeAppendedCursorDriftsOutOf
 TEST(ConSan, Gfx1250CheckTrapPreplansBranchFallbackBeforeReachableBodiesDrift) {
   constexpr size_t kSiteCount = 40u;
   constexpr size_t kTextWords = 32000u;
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> text_words(kTextWords,
                                    build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250));
   for (size_t i = 0; i < kSiteCount; ++i) {

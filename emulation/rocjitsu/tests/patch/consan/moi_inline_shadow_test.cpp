@@ -1935,7 +1935,7 @@ TEST(ConSanMoi, InlineShadowFallsBackToExternalMirrorWhenLocalMirrorDoesNotFit) 
 }
 
 TEST(ConSanMoi, InlineShadowUsesExternalMirrorForDynamicLdsKernel) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
@@ -2160,8 +2160,8 @@ TEST(ConSanMoi, InlineWorkgroupShadowPublishesVisibleEvidenceOncePerAccess) {
 }
 
 TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
-  constexpr auto store0 = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
-  constexpr auto store1 = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  constexpr auto store0 = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  constexpr auto store1 = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   const std::array<uint32_t, 5> text_words = {
       store0[0], store0[1], store1[0], store1[1], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
   };
@@ -2289,7 +2289,7 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
 
 TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowValidatesAtomicAccessCandidate) {
   constexpr auto atomic =
-      gfx1250::build_vds(gfx1250::kDsAddU32Vds, {.offset0 = 12u, .addr = 2u, .data0 = 1u});
+      cdna5::build_vds(cdna5::kDsAddU32Vds, {.offset0 = 12u, .addr = 2u, .data0 = 1u});
   const std::array<uint32_t, 3> text_words = {atomic[0], atomic[1],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "local_atomic_shadow");
@@ -2323,7 +2323,7 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowValidatesAtomicAccessCandidate) {
 
 TEST(ConSanMoi, Gfx1250InlineGlobalShadowUsesLiteralDispatchIdAtFullScalarPressure) {
   std::vector<uint32_t> text_words(800, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   text_words[0] = store[0];
   text_words[1] = store[1];
   text_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/106u, ROCJITSU_CODE_ARCH_GFX1250);
@@ -2539,7 +2539,7 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
   std::vector<uint32_t> text_words(800u, build_s_nop(0, arch));
   size_t cursor = 0u;
   if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
-    constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0u, .data0 = 0u});
+    constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0u, .data0 = 0u});
     text_words[cursor++] = store[0];
     text_words[cursor++] = store[1];
   } else {
@@ -2883,7 +2883,7 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughSelectedAnchorTails) {
 }
 
 TEST(ConSanMoi, Gfx1250InlineOddShadowSlotCountClearsOnlyItsValidityState) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
@@ -2934,7 +2934,7 @@ TEST(ConSanMoi, Gfx1250InlineOddShadowSlotCountClearsOnlyItsValidityState) {
 }
 
 TEST(ConSanMoi, Gfx1250InlineLargeLocalMirrorUsesFullExactCellsAndValidityState) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
@@ -3000,7 +3000,7 @@ TEST(ConSanMoi, Gfx1250InlineLargeLocalMirrorUsesFullExactCellsAndValidityState)
 }
 
 TEST(ConSanMoi, Gfx1250LargeFullLocalMirrorUsesDisjointTwoBitValidityState) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
@@ -3047,7 +3047,7 @@ TEST(ConSanMoi, Gfx1250LargeFullLocalMirrorUsesDisjointTwoBitValidityState) {
 }
 
 TEST(ConSanMoi, Gfx1250FullExactShadowValidatesAtomicTokenWithWorkgroupKey) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   const auto release = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
       ROCJITSU_CODE_ARCH_GFX1250);
@@ -3116,7 +3116,7 @@ TEST(ConSanMoi, Gfx1250FullExactShadowValidatesAtomicTokenWithWorkgroupKey) {
 }
 
 TEST(ConSanMoi, Gfx1250FullLocalShadowValidatesAtomicTokenWithPersistentWorkgroupKey) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   const auto release = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
       ROCJITSU_CODE_ARCH_GFX1250);
@@ -3170,8 +3170,8 @@ TEST(ConSanMoi, Gfx1250FullLocalShadowValidatesAtomicTokenWithPersistentWorkgrou
 
 TEST(ConSanMoi, Gfx1250FullExactShadowCoversEveryWideAccessCell) {
   constexpr auto store =
-      gfx1250::build_vds(gfx1250::kDsStore2addrB64Vds,
-                         {.offset0 = 0u, .offset1 = 1u, .addr = 0u, .data0 = 2u, .data1 = 4u});
+      cdna5::build_vds(cdna5::kDsStore2addrB64Vds,
+                       {.offset0 = 0u, .offset1 = 1u, .addr = 0u, .data0 = 2u, .data1 = 4u});
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
@@ -3212,9 +3212,9 @@ TEST(ConSanMoi, Gfx1250FullExactShadowCoversEveryWideAccessCell) {
   ASSERT_TRUE(paired_exchange);
   EXPECT_EQ(count_subsequence(body, *paired_exchange), 2u)
       << "each disjoint b64 range should have an exact cell-exchange loop";
-  const auto first_guest = gfx1250::build_vds(gfx1250::kDsStoreB64Vds, {.addr = 0u, .data0 = 2u});
+  const auto first_guest = cdna5::build_vds(cdna5::kDsStoreB64Vds, {.addr = 0u, .data0 = 2u});
   const auto second_guest =
-      gfx1250::build_vds(gfx1250::kDsStoreB64Vds, {.offset0 = 8u, .addr = 0u, .data0 = 4u});
+      cdna5::build_vds(cdna5::kDsStoreB64Vds, {.offset0 = 8u, .addr = 0u, .data0 = 4u});
   EXPECT_TRUE(contains_subsequence(body, first_guest));
   EXPECT_TRUE(contains_subsequence(body, second_guest));
   EXPECT_FALSE(contains_subsequence(body, store));
@@ -3223,8 +3223,8 @@ TEST(ConSanMoi, Gfx1250FullExactShadowCoversEveryWideAccessCell) {
 
 TEST(ConSanMoi, InlineShadowSplitsLargeGfx1250TwoAddressGuestAccess) {
   constexpr auto store =
-      gfx1250::build_vds(gfx1250::kDsStore2addrStride64B64Vds,
-                         {.offset0 = 1u, .offset1 = 255u, .addr = 0u, .data0 = 2u, .data1 = 4u});
+      cdna5::build_vds(cdna5::kDsStore2addrStride64B64Vds,
+                       {.offset0 = 1u, .offset1 = 255u, .addr = 0u, .data0 = 2u, .data1 = 4u});
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
@@ -3263,9 +3263,9 @@ TEST(ConSanMoi, InlineShadowSplitsLargeGfx1250TwoAddressGuestAccess) {
   const std::vector<uint32_t> body =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
   const auto first =
-      gfx1250::build_vds(gfx1250::kDsStoreB64Vds, {.offset1 = 2u, .addr = 0u, .data0 = 2u});
-  const auto second = gfx1250::build_vds(
-      gfx1250::kDsStoreB64Vds, {.addr = static_cast<uint8_t>(adjusted_address), .data0 = 4u});
+      cdna5::build_vds(cdna5::kDsStoreB64Vds, {.offset1 = 2u, .addr = 0u, .data0 = 2u});
+  const auto second = cdna5::build_vds(
+      cdna5::kDsStoreB64Vds, {.addr = static_cast<uint8_t>(adjusted_address), .data0 = 4u});
   EXPECT_TRUE(contains_subsequence(body, first));
   EXPECT_TRUE(contains_subsequence(body, second));
   EXPECT_FALSE(contains_subsequence(body, store));
@@ -4823,7 +4823,7 @@ TEST(ConSanMoi, InlineShadowProbeCanPatchTwoAppendedCaveSites) {
 TEST(ConSanMoi, Gfx1250InlineShadowDefersLoadBeforeAnchorIslandContinuation) {
   constexpr size_t kLargeTextWords = 33000u;
   constexpr size_t kOwnerWords = 65u;
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 4, .vdst = 8});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 4, .vdst = 8});
   const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250);
   std::vector<uint32_t> text_words(kLargeTextWords, filler);
   for (size_t site = 0; site < 8u; ++site) {
@@ -4872,7 +4872,7 @@ TEST(ConSanMoi, Gfx1250InlineShadowPreservesGuestVgprBankForDeferredLoad) {
   constexpr uint32_t kGuestMode = 0x40u;
   constexpr uint32_t kSelectLow = 0xBF864000u;
   constexpr uint32_t kRestoreGuest = 0xBF860040u;
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB128Vds, {.addr = 4, .vdst = 8});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB128Vds, {.addr = 4, .vdst = 8});
   std::vector<uint32_t> text_words = {0xBF860000u | kGuestMode, load[0], load[1]};
   text_words.resize(48u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
@@ -5555,7 +5555,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLarge
 }
 
 TEST(ConSanMoi, Gfx1250InlineBarrierEstablishesLowBankBeforeAdjacentGuestTransition) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
   const std::vector<uint32_t> text_words = {
       store[0],

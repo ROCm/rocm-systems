@@ -297,8 +297,7 @@ TEST(ConSan, LdsAddressFaultRequiresExplicitAllocatedReplacement) {
 }
 
 TEST(ConSan, Gfx1250TwoAddressLdsAccessIsNotAdvertisedForExactAddressRewrite) {
-  constexpr auto load =
-      gfx1250::build_vds(gfx1250::kDsLoad2addrStride64B32Vds, {.addr = 0, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoad2addrStride64B32Vds, {.addr = 0, .vdst = 1});
   const std::array<uint32_t, 3> words = {load[0], load[1],
                                          build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(words, "two_address_fault_inventory");

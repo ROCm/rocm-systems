@@ -36,7 +36,7 @@ static_assert(kGfx11MaxResidentWaveOwner + 1u <= consan_moi_exact_shadow::max_ow
 static_assert(kGfx12MaxResidentWaveOwner + 1u <= consan_moi_exact_shadow::max_owner);
 inline constexpr uint8_t kRdna4ScopeDevice = 2;
 inline constexpr uint32_t kRdna4VectorFlatNoSaddr = static_cast<uint32_t>(rdna4::OPR_SREG_NULL);
-inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(gfx1250::OPR_SREG_NULL);
+inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(cdna5::OPR_SREG_NULL);
 
 [[nodiscard]] constexpr uint32_t vector_flat_no_saddr(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)

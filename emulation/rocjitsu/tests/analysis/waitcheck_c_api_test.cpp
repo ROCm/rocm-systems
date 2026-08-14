@@ -3,7 +3,7 @@
 
 #include "../tools/waitcheck_fixture.h"
 #include "rocjitsu/analysis/rj_waitcheck.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 
 #include <gtest/gtest.h>
 

@@ -4,8 +4,8 @@
 #include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"

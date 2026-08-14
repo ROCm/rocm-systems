@@ -3827,6 +3827,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         }
       }
     }
+    if (patch_options.flavor == rocjitsu::ConSanFlavor::Moi &&
+        patch_options.moi_report_buffer_address && !patch_options.moi_report_dispatch_id) {
+      // Explicit report buffers are commonly installed immediately before a
+      // fixture's code object is loaded. Give their emitted records the same
+      // nonzero code-object identity used by automatic report buffers.
+      patch_options.moi_report_dispatch_id = code_object_reader.handle;
+    }
     std::optional<uint64_t> registered_auto_moi_report_generation;
     if (patch_options.flavor == rocjitsu::ConSanFlavor::Moi &&
         !patch_options.moi_report_buffer_address && config->moi_auto_report_buffer_size != 0) {

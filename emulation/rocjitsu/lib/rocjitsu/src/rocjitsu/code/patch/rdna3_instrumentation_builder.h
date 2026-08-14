@@ -6,10 +6,10 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/instruction_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/operand_types.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/operand_types.h"
 
 namespace rocjitsu {
 

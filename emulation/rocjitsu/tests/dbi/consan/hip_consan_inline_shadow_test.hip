@@ -768,19 +768,18 @@ __global__ __launch_bounds__(64) void padded_atomic_system_scope_ordered_lds_acc
   }
 }
 
-__global__ __launch_bounds__(64) void padded_atomic_collision_replaces_release(uint32_t *out,
-                                                                               uint32_t *counters,
-                                                                               uint32_t *flag) {
+__global__ __launch_bounds__(64) void padded_atomic_collision_replaces_release(
+    uint32_t *out, uint32_t *counters, uint32_t *flag, uint32_t primary, uint32_t replacement) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xFFFFu);
 
   if (tid == 0) {
     padded_ds_store_b32(lds_addr, 0xC0111DE1u);
-    release_flat_atomic(counters);
-    // The inline table has 64 entries. A 256-byte address delta therefore
-    // hashes to the same direct-mapped slot and replaces the first release.
-    release_flat_atomic(counters + 64);
+    release_flat_atomic(counters + primary);
+    // The host selects two distinct addresses that hash to the same slot in
+    // the 64-entry direct-mapped release table.
+    release_flat_atomic(counters + replacement);
     *flag = 1;
   }
 
@@ -788,7 +787,7 @@ __global__ __launch_bounds__(64) void padded_atomic_collision_replaces_release(u
     volatile uint32_t *volatile_flag = flag;
     while (*volatile_flag == 0) {
     }
-    const uint32_t old = acquire_flat_atomic(counters);
+    const uint32_t old = acquire_flat_atomic(counters + primary);
     out[0] = padded_ds_load_b32(lds_addr) ^ old;
   }
 }
@@ -943,17 +942,45 @@ void run_padded_atomic_ordered_lds_accesses(bool same_atomic_address, bool syste
 }
 
 void run_padded_atomic_collision_replaces_release() {
+  constexpr uint32_t kReleaseSlots = 64;
+  constexpr uint32_t kCounterCount = kReleaseSlots + 1;
   uint32_t *d_out = nullptr;
   uint32_t *d_counters = nullptr;
   uint32_t *d_flag = nullptr;
   HIP_ASSERT(hipMalloc(&d_out, sizeof(uint32_t)));
-  HIP_ASSERT(hipMalloc(&d_counters, 65 * sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&d_counters, kCounterCount * sizeof(uint32_t)));
   HIP_ASSERT(hipMalloc(&d_flag, sizeof(uint32_t)));
   HIP_ASSERT(hipMemset(d_out, 0, sizeof(uint32_t)));
-  HIP_ASSERT(hipMemset(d_counters, 0, 65 * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_counters, 0, kCounterCount * sizeof(uint32_t)));
   HIP_ASSERT(hipMemset(d_flag, 0, sizeof(uint32_t)));
 
-  padded_atomic_collision_replaces_release<<<1, 64>>>(d_out, d_counters, d_flag);
+  const auto release_slot = [](uintptr_t address) {
+    const uint32_t low = static_cast<uint32_t>(address);
+    const uint32_t high = static_cast<uint32_t>(address >> 32u);
+    uint32_t hash = (low >> 2u) ^ high;
+    hash ^= hash >> 16u;
+    hash ^= hash >> 8u;
+    hash ^= hash >> 4u;
+    hash *= 0x85ebca6bu;
+    return hash & (kReleaseSlots - 1u);
+  };
+  std::array<int32_t, kReleaseSlots> first_index{};
+  first_index.fill(-1);
+  uint32_t primary = 0;
+  uint32_t replacement = 0;
+  for (uint32_t index = 0; index < kCounterCount; ++index) {
+    const uint32_t slot = release_slot(reinterpret_cast<uintptr_t>(d_counters + index));
+    if (first_index[slot] >= 0) {
+      primary = static_cast<uint32_t>(first_index[slot]);
+      replacement = index;
+      break;
+    }
+    first_index[slot] = static_cast<int32_t>(index);
+  }
+  ASSERT_NE(primary, replacement);
+
+  padded_atomic_collision_replaces_release<<<1, 64>>>(d_out, d_counters, d_flag, primary,
+                                                      replacement);
   HIP_ASSERT(hipGetLastError());
   const hipError_t sync = hipDeviceSynchronize();
   ASSERT_EQ(sync, hipSuccess) << "HIP error: " << hipGetErrorString(sync);

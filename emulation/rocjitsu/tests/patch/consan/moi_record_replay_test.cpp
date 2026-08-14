@@ -1529,9 +1529,8 @@ TEST(ConSanMoi, AutoRecordReplayBarrierRecordsCapturedWorkgroupIdentity) {
 }
 
 TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfFinalZeroSizedSymbol) {
-  constexpr auto live_store =
-      gfx1250::build_vds(gfx1250::kDsStoreB16Vds, {.addr = 4u, .data0 = 5u});
-  constexpr auto dead_load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 6u, .vdst = 7u});
+  constexpr auto live_store = cdna5::build_vds(cdna5::kDsStoreB16Vds, {.addr = 4u, .data0 = 5u});
+  constexpr auto dead_load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 6u, .vdst = 7u});
   const std::array<uint32_t, 6> text_words = {
       live_store[0], live_store[1], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
       dead_load[0],  dead_load[1],  build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
@@ -1559,9 +1558,8 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfFinalZeroSizedSymbol) {
 }
 
 TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfBoundedZeroSizedSymbol) {
-  constexpr auto live_store =
-      gfx1250::build_vds(gfx1250::kDsStoreB16Vds, {.addr = 4u, .data0 = 5u});
-  constexpr auto dead_load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 6u, .vdst = 7u});
+  constexpr auto live_store = cdna5::build_vds(cdna5::kDsStoreB16Vds, {.addr = 4u, .data0 = 5u});
+  constexpr auto dead_load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 6u, .vdst = 7u});
   const std::array<uint32_t, 6> first_kernel_words = {
       live_store[0], live_store[1], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
       dead_load[0],  dead_load[1],  build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
@@ -1590,9 +1588,8 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfBoundedZeroSizedSymbol) {
 }
 
 TEST(ConSanMoi, RecordReplayDoesNotPruneExplicitSizedUnreachableTail) {
-  constexpr auto live_store =
-      gfx1250::build_vds(gfx1250::kDsStoreB16Vds, {.addr = 4u, .data0 = 5u});
-  constexpr auto dead_load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 6u, .vdst = 7u});
+  constexpr auto live_store = cdna5::build_vds(cdna5::kDsStoreB16Vds, {.addr = 4u, .data0 = 5u});
+  constexpr auto dead_load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 6u, .vdst = 7u});
   const std::array<uint32_t, 6> text_words = {
       live_store[0], live_store[1], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
       dead_load[0],  dead_load[1],  build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
@@ -2211,7 +2208,7 @@ TEST(ConSanMoi, Rdna4RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
 }
 
 TEST(ConSanMoi, Gfx1250RecordReplaySpillsDynamicStackAccessInBothWaveModes) {
-  constexpr auto guest = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0u, .data0 = 0u});
+  constexpr auto guest = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0u, .data0 = 0u});
   for (bool wave32 : {false, true}) {
     SCOPED_TRACE(wave32 ? "wave32" : "wave64");
     std::vector<uint32_t> text_words(guest.begin(), guest.end());
@@ -2872,7 +2869,7 @@ TEST(ConSanMoi, Cdna3PrivateEpochRecordReplayLoadsEntryOwner) {
 
 TEST(ConSanMoi, Gfx1250PrivateEpochAtomicAndFenceRecordsLoadEntryOwner) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
-  constexpr auto guest = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
+  constexpr auto guest = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
   const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true, /*scope=*/2, kArch);
   ASSERT_TRUE(atomic);
@@ -2940,7 +2937,7 @@ TEST(ConSanMoi, Gfx1250PrivateEpochAtomicAndFenceRecordsLoadEntryOwner) {
 
 TEST(ConSanMoi, Gfx1250PrivateOwnerSpillsBeginAfterCapturedState) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
-  constexpr auto guest = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
+  constexpr auto guest = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
   const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true, /*scope=*/2, kArch);
   ASSERT_TRUE(atomic);
@@ -3083,7 +3080,7 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerScalarSpillsBeginAfterCapturedState) {
 
 TEST(ConSanMoi, Gfx1250PrivateOwnerFallbackRetainsAtomicRecord) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
-  constexpr auto guest = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
+  constexpr auto guest = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
   const auto atomic = build_gfx1250_flat_atomic_add_u32(
       /*vaddr=*/4, /*vsrc=*/6, /*vdst=*/7, /*return_old_value=*/true, /*scope=*/2, kArch);
   ASSERT_TRUE(atomic);
@@ -3128,9 +3125,9 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerFallbackRetainsAtomicRecord) {
 
 TEST(ConSanMoi, UnrelatedDynamicStackKernelDoesNotDisablePrivateRecordReplayState) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
-  constexpr auto guest = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
+  constexpr auto guest = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
   constexpr auto unsupported_guest =
-      gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 8u, .data0 = 9u});
+      cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 8u, .data0 = 9u});
   std::vector<uint32_t> owner_words(320u, build_s_nop(0, kArch));
   std::ranges::copy(guest, owner_words.begin());
   owner_words.back() = build_s_endpgm(kArch);
@@ -3186,7 +3183,7 @@ TEST(ConSanMoi, UnrelatedDynamicStackKernelDoesNotDisablePrivateRecordReplayStat
 
 TEST(ConSanMoi, OwningDynamicStackKernelRejectsForcedPrivateRecordReplayState) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
-  constexpr auto guest = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
+  constexpr auto guest = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 2u, .data0 = 3u});
   std::vector<uint32_t> text_words(320u, build_s_nop(0, kArch));
   std::ranges::copy(guest, text_words.begin());
   text_words.back() = build_s_endpgm(kArch);
@@ -5699,8 +5696,8 @@ TEST(ConSanMoi, RecordReplayReservedRelaySpaceComposesWithBarrierEpochs) {
 
 TEST(ConSanMoi, RecordReplayAllowsScratchBetweenDisjointGfx1250StoreTuples) {
   constexpr auto store =
-      gfx1250::build_vds(gfx1250::kDsStore2addrB64Vds,
-                         {.offset0 = 0u, .offset1 = 1u, .addr = 0u, .data0 = 29u, .data1 = 38u});
+      cdna5::build_vds(cdna5::kDsStore2addrB64Vds,
+                       {.offset0 = 0u, .offset1 = 1u, .addr = 0u, .data0 = 29u, .data1 = 38u});
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
@@ -5738,9 +5735,9 @@ TEST(ConSanMoi, RecordReplayAllowsScratchBetweenDisjointGfx1250StoreTuples) {
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> body =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
-  const auto first = gfx1250::build_vds(gfx1250::kDsStoreB64Vds, {.addr = 0u, .data0 = 29u});
+  const auto first = cdna5::build_vds(cdna5::kDsStoreB64Vds, {.addr = 0u, .data0 = 29u});
   const auto second =
-      gfx1250::build_vds(gfx1250::kDsStoreB64Vds, {.offset0 = 8u, .addr = 0u, .data0 = 38u});
+      cdna5::build_vds(cdna5::kDsStoreB64Vds, {.offset0 = 8u, .addr = 0u, .data0 = 38u});
   EXPECT_TRUE(contains_subsequence(body, first));
   EXPECT_TRUE(contains_subsequence(body, second));
   EXPECT_FALSE(contains_subsequence(body, store));
@@ -5749,8 +5746,8 @@ TEST(ConSanMoi, RecordReplayAllowsScratchBetweenDisjointGfx1250StoreTuples) {
 
 TEST(ConSanMoi, RecordReplaySplitsLargeGfx1250TwoAddressOffsetsWithPlannedScratch) {
   constexpr auto store =
-      gfx1250::build_vds(gfx1250::kDsStore2addrStride64B64Vds,
-                         {.offset0 = 1u, .offset1 = 255u, .addr = 0u, .data0 = 2u, .data1 = 4u});
+      cdna5::build_vds(cdna5::kDsStore2addrStride64B64Vds,
+                       {.offset0 = 1u, .offset1 = 255u, .addr = 0u, .data0 = 2u, .data1 = 4u});
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
@@ -5789,9 +5786,9 @@ TEST(ConSanMoi, RecordReplaySplitsLargeGfx1250TwoAddressOffsetsWithPlannedScratc
   const std::vector<uint32_t> body =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
   const auto first =
-      gfx1250::build_vds(gfx1250::kDsStoreB64Vds, {.offset1 = 2u, .addr = 0u, .data0 = 2u});
-  const auto second = gfx1250::build_vds(
-      gfx1250::kDsStoreB64Vds, {.addr = static_cast<uint8_t>(adjusted_address), .data0 = 4u});
+      cdna5::build_vds(cdna5::kDsStoreB64Vds, {.offset1 = 2u, .addr = 0u, .data0 = 2u});
+  const auto second = cdna5::build_vds(
+      cdna5::kDsStoreB64Vds, {.addr = static_cast<uint8_t>(adjusted_address), .data0 = 4u});
   EXPECT_TRUE(contains_subsequence(body, first));
   EXPECT_TRUE(contains_subsequence(body, second));
   EXPECT_FALSE(contains_subsequence(body, store));
@@ -7810,11 +7807,9 @@ TEST(ConSanMoi, Gfx1250AtomicRecordPatchesOrderedFlatAtomic) {
 }
 
 TEST(ConSanMoi, Gfx1250RecordReplayMaterializesSignedFlatAccessOffset) {
-  constexpr auto load = gfx1250::build_vflat(gfx1250::kFlatLoadB128Vflat,
-                                             {.saddr = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL),
-                                              .vdst = 8,
-                                              .vaddr = 4,
-                                              .ioffset = 16});
+  constexpr auto load = cdna5::build_vflat(
+      cdna5::kFlatLoadB128Vflat,
+      {.saddr = static_cast<uint8_t>(cdna5::OPR_SREG_NULL), .vdst = 8, .vaddr = 4, .ioffset = 16});
   const std::array<uint32_t, 8> text_words = {
       0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
       build_v_mov_b32_e32(/*vdst=*/4, /*src=*/0, ROCJITSU_CODE_ARCH_GFX1250),
@@ -7891,9 +7886,9 @@ TEST(ConSanMoi, Gfx1250WaveScopeAtomicIsTypedNotApplicable) {
 }
 
 TEST(ConSanMoi, Gfx1250IsolatedLdsReleaseIsRetainedWithAccessReplay) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 4u, .data0 = 5u});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 4u, .data0 = 5u});
   constexpr auto atomic =
-      gfx1250::build_vds(gfx1250::kDsAddU32Vds, {.offset0 = 12u, .addr = 2u, .data0 = 1u});
+      cdna5::build_vds(cdna5::kDsAddU32Vds, {.offset0 = 12u, .addr = 2u, .data0 = 1u});
   const std::array<uint32_t, 6> text_words = {
       store[0],  store[1],  0xBFC90000u, // s_wait_storecnt_dscnt 0
       atomic[0], atomic[1], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};

@@ -34,6 +34,7 @@ options.
 * :doc:`cli`
 * :doc:`standalone-gui` (experimental feature)
 * :doc:`tui` (experimental feature)
+* :doc:`optiq` (graphical application)
 
 .. note::
 

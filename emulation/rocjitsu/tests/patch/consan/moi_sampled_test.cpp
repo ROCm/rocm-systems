@@ -282,7 +282,7 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
 
 TEST(ConSanMoi, Gfx1250DirectSampledProbePassesFinalValidation) {
   std::vector<uint32_t> text_words(600, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   text_words[0] = store[0];
   text_words[1] = store[1];
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
@@ -651,8 +651,8 @@ TEST(ConSanMoi, DirectSampledProbeRequiresCapacityForEveryLdsAccessRange) {
 
 TEST(ConSanMoi, DirectSampledSplitsLargeGfx1250TwoAddressGuestAccess) {
   constexpr auto store =
-      gfx1250::build_vds(gfx1250::kDsStore2addrStride64B64Vds,
-                         {.offset0 = 1u, .offset1 = 255u, .addr = 0u, .data0 = 2u, .data1 = 4u});
+      cdna5::build_vds(cdna5::kDsStore2addrStride64B64Vds,
+                       {.offset0 = 1u, .offset1 = 255u, .addr = 0u, .data0 = 2u, .data1 = 4u});
   const std::array<uint32_t, 3> text_words = {
       store[0],
       store[1],
@@ -691,9 +691,9 @@ TEST(ConSanMoi, DirectSampledSplitsLargeGfx1250TwoAddressGuestAccess) {
   const std::vector<uint32_t> body =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
   const auto first =
-      gfx1250::build_vds(gfx1250::kDsStoreB64Vds, {.offset1 = 2u, .addr = 0u, .data0 = 2u});
-  const auto second = gfx1250::build_vds(
-      gfx1250::kDsStoreB64Vds, {.addr = static_cast<uint8_t>(adjusted_address), .data0 = 4u});
+      cdna5::build_vds(cdna5::kDsStoreB64Vds, {.offset1 = 2u, .addr = 0u, .data0 = 2u});
+  const auto second = cdna5::build_vds(
+      cdna5::kDsStoreB64Vds, {.addr = static_cast<uint8_t>(adjusted_address), .data0 = 4u});
   EXPECT_TRUE(contains_subsequence(body, first));
   EXPECT_TRUE(contains_subsequence(body, second));
   EXPECT_FALSE(contains_subsequence(body, store));
@@ -903,9 +903,9 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesSampledAccessAndOrderingMetadata)
 }
 
 TEST(ConSanMoi, Gfx1250SampledPublishesIsolatedLdsReleaseOrdering) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 4u, .data0 = 5u});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 4u, .data0 = 5u});
   constexpr auto atomic =
-      gfx1250::build_vds(gfx1250::kDsAddU32Vds, {.offset0 = 12u, .addr = 2u, .data0 = 1u});
+      cdna5::build_vds(cdna5::kDsAddU32Vds, {.offset0 = 12u, .addr = 2u, .data0 = 1u});
   const std::array<uint32_t, 6> words = {
       store[0],  store[1],  0xBFC90000u, // s_wait_storecnt_dscnt 0
       atomic[0], atomic[1], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
@@ -3296,7 +3296,7 @@ TEST(ConSanMoi, DirectSampledProbeSpillsFiveVgprsInAppendedCave) {
 
 TEST(ConSanMoi, Gfx1250DynamicStackSampledStoreSpillsAcrossGuestOperands) {
   std::vector<uint32_t> words(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 4u, .data0 = 3u});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 4u, .data0 = 3u});
   words[8] = store[0];
   words[9] = store[1];
   words[96] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(8u), ROCJITSU_CODE_ARCH_GFX1250);
@@ -3391,7 +3391,7 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledSpillPlansScalarStateBeforeVgprGrowth) {
 
 TEST(ConSanMoi, Gfx1250DynamicStackSampledLoadRejectsGuestOperandSpillOverlap) {
   std::vector<uint32_t> words(128u, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 4u, .vdst = 3u});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 4u, .vdst = 3u});
   words[8] = load[0];
   words[9] = load[1];
   words[96] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(8u), ROCJITSU_CODE_ARCH_GFX1250);
@@ -3677,7 +3677,7 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
 
 TEST(ConSanMoi, Gfx1250RuntimeSamplingUsesLiteralDispatchIdAtFullScalarPressure) {
   std::vector<uint32_t> text_words(800, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   text_words[0] = store[0];
   text_words[1] = store[1];
   text_words[2] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/106u, ROCJITSU_CODE_ARCH_GFX1250);
@@ -3797,7 +3797,7 @@ TEST(ConSanMoi, DirectSampledProbeCanCheckPriorSlotInKernel) {
 
 TEST(ConSanMoi, Gfx1250SampledFastGatesKeepThousandPackedSitesReachable) {
   constexpr uint32_t kSiteCount = 1000;
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   std::vector<uint32_t> text_words;
   text_words.reserve(2u * kSiteCount + 1u);
   for (uint32_t i = 0; i < kSiteCount; ++i) {
@@ -5033,7 +5033,7 @@ TEST(ConSanMoi, Gfx1250SampledAccessDenseHostRejectsTransientSgprReferencesAndFa
   const uint32_t router_reference =
       build_s_mov_b32(/*sdst=*/80, /*ssrc0=*/80, ROCJITSU_CODE_ARCH_GFX1250);
   std::vector<uint32_t> words(128u, router_reference);
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   for (uint32_t index = 0u; index < kAccessCount; ++index) {
     words[8u + 2u * index] = store[0];
     words[9u + 2u * index] = store[1];
@@ -5363,7 +5363,7 @@ TEST(ConSanMoi, SampledOwnerAbiFailureRemainsApplicableAndFailsLowering) {
 
 TEST(ConSanMoi, SampledQualifiedBarrierAdmitsLongStraightLinePair) {
   std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   words[0] = store[0];
   words[1] = store[1];
   words[300] = 0xBE804EC1u; // s_barrier_signal -1
@@ -5493,7 +5493,7 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledRejectsMissingEntryPrologueScratch) {
 
 TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
   std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   words[0] = store[0];
   words[1] = store[1];
   words[400] = 0xBE804EC1u; // s_barrier_signal -1
@@ -5530,7 +5530,7 @@ TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
 
 TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {
   std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   words[0] = store[0];
   words[1] = store[1];
   words[400] = 0xBE804EC1u; // s_barrier_signal -1
@@ -5625,7 +5625,7 @@ TEST(ConSanMoi, Gfx1250SampledBarriersPartitionRelayWindowsAcrossLargeKernel) {
 
 TEST(ConSanMoi, Gfx1250SampledClusterBarrierPublishesClusterScope) {
   std::vector<uint32_t> words(540, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
   words[0] = store[0];
   words[1] = store[1];
   const auto bypass_signal = build_s_cbranch_scc1(/*offset_dwords=*/1, ROCJITSU_CODE_ARCH_GFX1250);
@@ -5677,7 +5677,7 @@ TEST(ConSanMoi, Gfx1250SampledClusterBarrierPublishesClusterScope) {
 
 TEST(ConSanMoi, Gfx1250SampledComposesWithAdjacentClusterBarrierDrop) {
   std::vector<uint32_t> words(43, build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 1, .data0 = 2});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 1, .data0 = 2});
   words[21] = store[0];
   words[22] = store[1];
   const auto bypass_signal = build_s_cbranch_scc1(/*offset_dwords=*/1, ROCJITSU_CODE_ARCH_GFX1250);
@@ -5688,7 +5688,7 @@ TEST(ConSanMoi, Gfx1250SampledComposesWithAdjacentClusterBarrierDrop) {
   words[26] = 0xBFC60000u; // s_wait_dscnt 0
   words[27] = 0xBE804EC1u; // s_barrier_signal -1
   words[33] = 0xBF94FFFFu; // s_barrier_wait -1
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 1, .vdst = 2});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 1, .vdst = 2});
   words[34] = load[0];
   words[35] = load[1];
   words[42] = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);

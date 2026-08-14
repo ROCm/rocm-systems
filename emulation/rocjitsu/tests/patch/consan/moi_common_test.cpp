@@ -658,7 +658,7 @@ TEST(ConSanMoi, Cdna4HeterogeneousOwnersKeepUsableComponentAcrossMoiEngines) {
 }
 
 TEST(ConSanMoi, Gfx1250Wave32DescriptorUsesSixteenVgprGranules) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   const std::array<uint32_t, 3> text_words = {store[0], store[1],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   const std::vector<uint8_t> bytes =
@@ -688,8 +688,7 @@ TEST(ConSanMoi, Cdna3Wave64DescriptorUsesEightVgprGranules) {
 }
 
 TEST(ConSanMoi, Gfx1250TwoAddressLoadScratchAvoidsCompleteDestinationPair) {
-  constexpr auto load =
-      gfx1250::build_vds(gfx1250::kDsLoad2addrStride64B32Vds, {.addr = 0, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoad2addrStride64B32Vds, {.addr = 0, .vdst = 1});
   const std::array<uint32_t, 3> text_words = {load[0], load[1],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "two_address_load");
@@ -817,11 +816,11 @@ void expect_moi_engines_admit_native_b96_accesses(
 
 TEST(ConSanMoi, Gfx1250MoiEnginesAdmitNativeB96Accesses) {
   constexpr auto store =
-      gfx1250::build_vds(gfx1250::kDsStoreB96Vds, {.offset0 = 12, .addr = 0, .data0 = 1});
+      cdna5::build_vds(cdna5::kDsStoreB96Vds, {.offset0 = 12, .addr = 0, .data0 = 1});
   constexpr auto load =
-      gfx1250::build_vds(gfx1250::kDsLoadB96Vds, {.offset0 = 12, .addr = 0, .vdst = 4});
+      cdna5::build_vds(cdna5::kDsLoadB96Vds, {.offset0 = 12, .addr = 0, .vdst = 4});
   constexpr auto aliasing_load =
-      gfx1250::build_vds(gfx1250::kDsLoadB96Vds, {.offset0 = 12, .addr = 0, .vdst = 0});
+      cdna5::build_vds(cdna5::kDsLoadB96Vds, {.offset0 = 12, .addr = 0, .vdst = 0});
   constexpr std::array<NativeB96Access, 3> accesses = {
       NativeB96Access{store, "ds_store_b96", false},
       NativeB96Access{load, "ds_load_b96", false},
@@ -835,8 +834,8 @@ TEST(ConSanMoi, Gfx1250MoiEnginesAdmitNativeB96Accesses) {
 }
 
 TEST(ConSanMoi, Gfx1250RelaxedLdsAtomicIsAccessButNotSynchronization) {
-  constexpr auto atomic = gfx1250::build_vds(
-      gfx1250::kDsCmpstoreRtnB32Vds, {.offset0 = 12, .addr = 0, .data0 = 1, .data1 = 2, .vdst = 3});
+  constexpr auto atomic = cdna5::build_vds(
+      cdna5::kDsCmpstoreRtnB32Vds, {.offset0 = 12, .addr = 0, .data0 = 1, .data1 = 2, .vdst = 3});
   const std::array<uint32_t, 3> text_words = {atomic[0], atomic[1],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "relaxed_lds_atomic");
@@ -2364,7 +2363,7 @@ TEST(ConSanMoi, AutoReportInventoryCountsAdmittedLogicalRangesBeforeAllocation) 
 
 TEST(ConSanMoi, Gfx1250AutoReportUsesRuntimeApertureForDescriptorOpaqueLds) {
   constexpr uint32_t kRuntimeLdsBytes = 96u * 1024u;
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   const std::array<uint32_t, 3> text_words = {store[0], store[1],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   const std::vector<uint8_t> bytes =
@@ -2388,7 +2387,7 @@ TEST(ConSanMoi, Gfx1250AutoReportUsesRuntimeApertureForDescriptorOpaqueLds) {
 }
 
 TEST(ConSanMoi, Gfx1250AutoReportCoversFullApertureForDynamicLds) {
-  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 1});
   const std::array<uint32_t, 3> text_words = {store[0], store[1],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   constexpr std::string_view kernel_name = "dynamic_lds_auto_report";

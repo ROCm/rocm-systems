@@ -3872,7 +3872,7 @@ TEST(ConSanMoi, Gfx1250InlineAtomicOrdersReleaseAndAcquire) {
   ASSERT_EQ(result.kernels.front().atomic_sites.size(), 2u);
   EXPECT_TRUE(
       std::ranges::all_of(result.kernels.front().atomic_sites, [](const ConSanAtomicSite &site) {
-        return site.raw_saddr == static_cast<uint32_t>(gfx1250::OPR_SREG_NULL) &&
+        return site.raw_saddr == static_cast<uint32_t>(cdna5::OPR_SREG_NULL) &&
                site.raw_scope == 2u && site.raw_ioffset == 0;
       }));
   EXPECT_TRUE(std::ranges::any_of(result.resource_plans, [](const auto &plan) {

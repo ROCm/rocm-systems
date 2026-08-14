@@ -6,11 +6,11 @@
 #include "rocjitsu/analysis/waitcheck.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -246,7 +246,7 @@ TEST(WaitcheckTest, ReachableGfx1250DecodePreservesFourWordInstruction) {
 
 [[nodiscard]] rdna4::Sop1MachineInst s_barrier_signal_isfirst(uint32_t barrier_id) {
   auto inst = std::bit_cast<rdna4::Sop1MachineInst>(0xBE804F00U);
-  inst.ssrc0 = barrier_id;
+  inst.ssrc0 = barrier_id + 128u;
   return inst;
 }
 

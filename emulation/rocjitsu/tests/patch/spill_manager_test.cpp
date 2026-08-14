@@ -3,13 +3,14 @@
 
 #include "rocjitsu/code/patch/spill_manager.h"
 
+#include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/patch/cdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/rdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
@@ -1239,7 +1240,8 @@ TEST(SpillManager, IntegrationFromLiveBefore) {
   std::vector<BasicBlock *> scope;
   for (const auto &b : blocks)
     scope.push_back(b.get());
-  LivenessAnalysis liveness{KernelBlockScope(scope)};
+  const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
+  LivenessAnalysis liveness{KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec)};
   const RegisterSet &live = liveness.live_before(*probe);
   ASSERT_FALSE(live.none()) << "expected at least one live register at probe site";
 

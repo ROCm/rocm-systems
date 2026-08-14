@@ -3,7 +3,7 @@
 
 #include "rocjitsu/code/patch/instruction_sequence.h"
 
-#include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 #include <utility>

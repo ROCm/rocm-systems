@@ -105,6 +105,7 @@ protected:
 
   static void activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool);
   static void deactivate_pool();
+  static void validate_instruction_operands(const Instruction &inst);
 
   Pool pool_;
 };
@@ -120,6 +121,8 @@ public:
   Instruction *decode(const rj_code_binary_inst_t *inst) override {
     ScopedIsaExecutionBackend scope(execution_backend_);
     auto result = Isa::Decoder::decode(inst);
+    if (result)
+      validate_instruction_operands(*result);
     return result.release();
   }
 

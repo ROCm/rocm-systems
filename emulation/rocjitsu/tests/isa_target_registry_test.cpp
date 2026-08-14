@@ -349,6 +349,16 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   const IsaTargetDescriptor *gfx1201_enum = registry.find(ROCJITSU_CODE_TARGET_GFX1201);
   ASSERT_NE(gfx1201_enum, nullptr);
   EXPECT_EQ(gfx1201_enum->id, "rdna4");
+  const IsaTargetDescriptor *gfx1100 = registry.find("gfx1100");
+  ASSERT_NE(gfx1100, nullptr);
+  EXPECT_EQ(gfx1100->id, "rdna3");
+  const IsaGpuTargetDescription *gfx1100_elf =
+      registry.find_gpu_target_by_elf_machine(EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  ASSERT_NE(gfx1100_elf, nullptr);
+  EXPECT_EQ(gfx1100_elf->public_id, ROCJITSU_CODE_TARGET_GFX1100);
+  const IsaTargetDescriptor *gfx1151 = registry.find(ROCJITSU_CODE_TARGET_GFX1151);
+  ASSERT_NE(gfx1151, nullptr);
+  EXPECT_EQ(gfx1151->id, "rdna3_5");
   EXPECT_NE(Decoder::create(registry, "gfx942"), nullptr);
   EXPECT_NE(Decoder::create(registry, ROCJITSU_CODE_ARCH_CDNA3), nullptr);
   EXPECT_EQ(registry.find("rv32i"), nullptr);

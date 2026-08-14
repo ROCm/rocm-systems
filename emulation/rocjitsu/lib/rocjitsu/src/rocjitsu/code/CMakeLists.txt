@@ -7,13 +7,16 @@ rj_add_object_library(rocjitsu_code
     basic_block.cpp
     executable.cpp
     file_io.cpp
+    kernel_descriptor_scan.cpp
     kernel_symbol.cpp
     major_image_ownership.cpp
     relocation_function_table.cpp
     rj_code.cpp
+    builders/instruction_builder.cpp
     dbt/binary_translator.cpp
     dbt/legalization/gfx1250_b0_to_a0.cpp
     dbt/rj_code_translate.cpp
+    dbt/scoped_cfg_edges.cpp
     dbt/hazard_tracker.cpp
     dbt/kernel_descriptor_translator.cpp
     dbt/lane_permutation.cpp
@@ -35,7 +38,6 @@ rj_add_object_library(rocjitsu_code
     patch/code_object_patcher.cpp
     patch/kernarg_extension.cpp
     patch/kernel_text_layout.cpp
-    patch/instruction_builder.cpp
     patch/instruction_sequence.cpp
     patch/instrumentor.cpp
     patch/probe_callable.cpp

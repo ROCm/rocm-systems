@@ -118,6 +118,7 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
                                      rj_code_inst_list_t **inst_list) {
   if (!obj || !obj->co || !inst_list)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *inst_list = nullptr;
 
   auto *decoder = create_decoder_for_target(target_id);
   if (!decoder)
@@ -185,6 +186,7 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
                                             rj_code_basic_block_list_t **list) {
   if (!obj || !obj->co || !list)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *list = nullptr;
 
   auto *decoder = create_decoder_for_target(target_id);
   if (!decoder)
@@ -194,10 +196,13 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
   if (arch == ROCJITSU_CODE_ARCH_INVALID)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto owned = std::make_unique<rj_code_basic_block_list_t>();
-  owned->blocks = BasicBlock::build(*obj->co, *decoder, arch);
-
-  *list = owned.release();
+  try {
+    auto owned = std::make_unique<rj_code_basic_block_list_t>();
+    owned->blocks = BasicBlock::build(*obj->co, *decoder, arch);
+    *list = owned.release();
+  } catch (const util::InvalidInst &) {
+    return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+  }
   return ROCJITSU_STATUS_SUCCESS;
 }
 

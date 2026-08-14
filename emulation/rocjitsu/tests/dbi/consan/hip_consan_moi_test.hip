@@ -697,7 +697,7 @@ moi_native_b96_aliasing_access_for_instrumentation(uint32_t lds_addr, uint32_t *
   constexpr uint32_t kNew1 = 0x2468ACE0u;
   constexpr uint32_t kNew2 = 0xA5A55A5Au;
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
-  if (tid < 32) {
+  if (tid < (barrier_ordered ? 1u : 32u)) {
     // Keep the data tuple and address in fixed, nonoverlapping VGPRs so this
     // emits the native three-dword store on both RDNA4 targets.
     asm volatile("v_mov_b32 v4, %0\n\t"

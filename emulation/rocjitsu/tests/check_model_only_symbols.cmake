@@ -17,7 +17,7 @@ endif()
 
 set(_forbidden_symbols
     "::execute_impl("
-    "_exec("
+    "::execution_backend()"
     "rocjitsu::amdgpu::ComputeUnitCore"
     "ds_calculate_addresses("
     "flat_calculate_addresses("
@@ -33,13 +33,43 @@ foreach(_forbidden IN LISTS _forbidden_symbols)
     endif()
 endforeach()
 
-# Keep the denylist from passing vacuously if the model objects disappear from
-# the final link.
-set(_required_symbol "rocjitsu::gfx1250::Decoder::decode(unsigned int const*)")
-string(FIND "${_symbols}" "${_required_symbol}" _match)
-if(_match EQUAL -1)
+# Execution-backed Operand helpers consistently end in `_exec`; match that
+# method suffix specifically so analysis helpers such as
+# `instruction_defines_exec` do not trip the model-only boundary.
+string(REGEX MATCH "Operand::[^\n]*_exec\\(" _operand_exec_match "${_symbols}")
+if(_operand_exec_match)
     message(
         FATAL_ERROR
-        "model-only binary is missing model symbol: ${_required_symbol}"
+        "model-only binary contains execution-backed Operand symbol: ${_operand_exec_match}"
     )
+endif()
+
+# Keep the denylist from passing vacuously if the model objects disappear from
+# the final link. Aggregate consumers provide a comma-separated architecture
+# list; existing cdna5-only checks retain their decoder-symbol assertion.
+if(REQUIRED_MODEL_ARCHES)
+    string(REPLACE "," ";" _required_arches "${REQUIRED_MODEL_ARCHES}")
+    foreach(_arch IN LISTS _required_arches)
+        set(_required_symbol
+            "rocjitsu::${_arch}::create_model_target_decoder()"
+        )
+        string(FIND "${_symbols}" "${_required_symbol}" _match)
+        if(_match EQUAL -1)
+            message(
+                FATAL_ERROR
+                "model-only binary is missing model symbol: ${_required_symbol}"
+            )
+        endif()
+    endforeach()
+else()
+    set(_required_symbol
+        "rocjitsu::cdna5::Decoder::decode(unsigned int const*)"
+    )
+    string(FIND "${_symbols}" "${_required_symbol}" _match)
+    if(_match EQUAL -1)
+        message(
+            FATAL_ERROR
+            "model-only binary is missing model symbol: ${_required_symbol}"
+        )
+    endif()
 endif()

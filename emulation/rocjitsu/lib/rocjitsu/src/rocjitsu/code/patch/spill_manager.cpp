@@ -4,9 +4,9 @@
 #include "rocjitsu/code/patch/spill_manager.h"
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/cdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/rdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "util/bit.h"

@@ -26,6 +26,16 @@ unless both revisions are set so the corresponding translation profile can be
 selected. For every other target the machine ID identifies the silicon, so
 these fields stay `unspecified`.
 
+For either execution backend, `host_gpu_id: 0` selects the first `host_isa`
+match in the effective ROCm-visible device order for that backend's topology.
+The launcher applies
+`ROCR_VISIBLE_DEVICES` first, including numeric reordering and UUID prefixes,
+then `HIP_VISIBLE_DEVICES` or its `CUDA_VISIBLE_DEVICES` fallback. It atomically
+publishes the config path and resolved KFD GPU ID in the per-invocation handoff,
+so the KFD interposer and HSA hook consume one choice without a private
+environment variable. Set a nonzero `host_gpu_id` to pin a particular GPU; the
+launcher rejects the pin if standard ROCm visibility settings hide that device.
+
 ## High Level Flow
 
 User:
@@ -61,9 +71,15 @@ Underneath:
    keeps applications that choose the first GPU on the guest path while leaving
    the host agent alive for execution.
 
-   If `ROCR_VISIBLE_DEVICES` is set, the launcher expands it so the selected
-   host ordinal and appended guest ordinal both remain visible to ROCR before
-   the HSA hook applies this public shadowing.
+   If `ROCR_VISIBLE_DEVICES` is set, the launcher preserves its selected order
+   and expands it with the appended guest ordinal so both sides remain visible
+   internally before the HSA hook applies public shadowing. Because CLR applies
+   `HIP_VISIBLE_DEVICES` or `CUDA_VISIBLE_DEVICES` after HSA agent iteration,
+   the launcher normalizes an existing client selector to equivalent numeric
+   ordinals after ROCR filtering. This keeps host UUID selection meaningful
+   after the host's public identity is replaced by the guest. OpenCL's
+   `GPU_DEVICE_ORDINAL` remains owned by the client runtime and is not used to
+   choose the DBT host.
 
 2. Guest-facing discovery stays guest-shaped.
 
@@ -150,6 +166,32 @@ public identity:   guest agent, guest ISA, guest name, guest memory pools
 execution identity: host agent, host queues, host memory backing, host code object
 ```
 
+### When the mapping cannot be resolved
+
+If DBT is enabled but discovery cannot pair a guest agent with the configured
+host — no topology node for the configured `gpu_id`, ROCR never published both
+agents, or only one agent satisfies both roles — the hook must not let the
+application reach real silicon untranslated. It fails closed in two layers:
+
+- `hsa_iterate_agents` suppresses every **GPU** agent and returns success with
+  the CPU agents still published. A GPU client sees a well-formed empty device
+  list rather than an enumeration error, which HIP/CLR reports as a fatal ROCR
+  init failure instead of "no device". CPU agents pass through because host
+  fine-grained pools, `hsa_amd_memory_lock`, and host-side copies need them and
+  none of them can execute a guest kernel.
+- The five GPU-only execution entry points (`hsa_queue_create`,
+  `hsa_amd_queue_intercept_create`, `hsa_executable_load_agent_code_object`,
+  `hsa_amd_agent_set_async_scratch_limit`, `hsa_amd_agent_preload`) return
+  `HSA_STATUS_ERROR_INVALID_AGENT`. Enumeration alone is not enough: a handle
+  cached before discovery failed, or one held by a co-loaded tool, still reaches
+  them. The query, pool, and copy hooks are deliberately **not** guarded — they
+  routinely take CPU agents, and with no queue and no loaded code object there
+  is no dispatch for them to enable.
+
+One case this cannot close: a tool listed *before* rocjitsu in `HSA_TOOLS_LIB`
+holds the pre-patch table and never sees either layer. A tool loaded after
+rocjitsu goes through the patched table and is covered.
+
 ## Known Limits and Follow-Ups
 
 - File-backed HSA code-object readers are not translated in the MVP. Add a way
@@ -157,6 +199,17 @@ execution identity: host agent, host queues, host memory backing, host code obje
   Today the hook prints a warning when such a reader is created, and guest loads
   without registered memory bytes fail rather than retrying an incompatible
   original ELF.
+- `librocjitsu_hooks.so` and the gfx1250 B0/A0 hotswap hook
+  (`libhsa_hotswap_rocjitsu.so`) are mutually exclusive in `HSA_TOOLS_LIB`.
+  Both patch the same four code-object entries of the HSA core API table
+  (`hsa_code_object_reader_create_from_file`,
+  `hsa_code_object_reader_create_from_memory`, `hsa_executable_destroy`,
+  `hsa_executable_load_agent_code_object`), so whichever tool ROCR loads
+  second wraps the first one's wrappers. Nothing enforces or detects that
+  order: it follows only the order of names in `HSA_TOOLS_LIB`, and neither
+  library exports `HSA_AMD_TOOL_PRIORITY` to pin its slot. Load exactly one
+  of them. The supported launch path does this for you — `rocjitsu` *sets*
+  `HSA_TOOLS_LIB` to the DBT hook rather than appending to it.
 - `HSA_TOOLS_DISABLE_REGISTER=1` is a workaround. The better design is a
   rocprofiler-register API-table interposer that applies the same shadowing
   before rocprofiler validates HSA agents.

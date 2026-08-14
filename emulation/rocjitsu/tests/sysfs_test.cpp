@@ -12,6 +12,8 @@
 #include "rocjitsu/kmd/linux/sysfs.h"
 
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -24,6 +26,7 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -200,6 +203,211 @@ TEST(SysfsTopologyDebugCapabilityTest, DefaultDebugPropMatchesHardware) {
     ASSERT_TRUE(props.count("debug_prop"));
     EXPECT_EQ(props["debug_prop"], e.debug_prop);
   }
+}
+
+// The address-watch register count is the one capability field a debugger acts
+// on numerically rather than as a flag: rocdbgapi recovers it as 1<<TOTALBITS
+// (os_driver_kfd.cpp) and refuses to insert more watchpoints than that. Every
+// captured dump reads TOTALBITS 2 for the driver's num_of_watch_points = 4, so
+// the derived topology must too -- packing the count itself would claim sixteen
+// registers the simulated ASIC does not have.
+TEST(SysfsTopologyDebugCapabilityTest, DefaultWatchPointCountMatchesHardware) {
+  for (const auto &e : kDebugCapExpectations) {
+    if (e.capability == 0)
+      continue; // no captured real-hardware reference for this GFXIP
+    SCOPED_TRACE(e.name);
+
+    Sysfs sysfs;
+    std::string topology_dir = sysfs.generate(make_gpu_info(e.gfx_target_version));
+    ASSERT_FALSE(topology_dir.empty());
+
+    auto props = read_properties(topology_dir + "/nodes/1/properties");
+    ASSERT_TRUE(props.count("capability"));
+    const auto cap = static_cast<uint32_t>(props["capability"]);
+
+    EXPECT_TRUE(cap & HSA_CAP_WATCH_POINTS_SUPPORTED);
+    EXPECT_TRUE(e.capability & HSA_CAP_WATCH_POINTS_SUPPORTED);
+
+    const uint32_t total_bits =
+        (cap & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) >> HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT;
+    EXPECT_EQ(total_bits, (e.capability & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) >>
+                              HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT);
+    EXPECT_EQ(1u << total_bits, kmd::kNumWatchPoints);
+  }
+}
+
+// KFD reports array_count per node, not per XCC: node_show() emits
+// node_props.array_count * NUM_XCC while simd_arrays_per_engine and
+// cu_per_simd_array stay per-XCC. Both gfx942 configs model MI300X, whose
+// captured sysfs reads array_count 32 / simd_arrays_per_engine 1 /
+// cu_per_simd_array 10 at num_xcc 8, so the generated topology must match it
+// exactly — a debugger divides these back out to recover shader engines.
+//
+// Both are checked, not just the _kmd one. Several representations multiply out
+// to the same 40 CUs per XCD (4 engines of two 5-CU arrays reaches it just as
+// well as 4 engines of one 10-CU array), so a config can satisfy every product
+// this suite checks and still publish node properties no MI300X ever reports.
+// Two configs for one part have to describe it the same way, or the debugger's
+// view depends on which one the run happened to load.
+TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
+  const std::string config_dir = CONFIG_DIR;
+  constexpr const char *kMi300xConfigs[] = {"gfx942_cdna3_kmd.json", "gfx942_cdna3.json"};
+
+  for (const char *cfg : kMi300xConfigs) {
+    SCOPED_TRACE(cfg);
+    auto loaded = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema);
+    ASSERT_TRUE(loaded.device.present);
+    const uint32_t num_xcc = loaded.soc()->num_xcds();
+    ASSERT_EQ(num_xcc, 8u);
+
+    Sysfs sysfs;
+    std::string topology_dir = sysfs.generate(gpu_info_from_config(loaded.device, num_xcc));
+    ASSERT_FALSE(topology_dir.empty());
+
+    auto props = read_properties(topology_dir + "/nodes/1/properties");
+    ASSERT_TRUE(props.count("array_count"));
+    // Fatal: the derivation below divides by this, and operator[] would silently
+    // insert a zero for a renamed or dropped property.
+    ASSERT_TRUE(props.count("simd_arrays_per_engine"));
+    ASSERT_NE(props["simd_arrays_per_engine"], 0u);
+    EXPECT_EQ(props["array_count"], 32u);
+    EXPECT_EQ(props["simd_arrays_per_engine"], 1u);
+    EXPECT_EQ(props["cu_per_simd_array"], 10u);
+    EXPECT_EQ(props["num_xcc"], num_xcc);
+
+    // The same dump reads simd_count 1216, i.e. 304 of the 320 CUs the array
+    // geometry above holds: MI300X is harvested, and KFD publishes the physical
+    // arrays with the active SIMD total beside them. Pinned to the capture
+    // rather than to the product, because the product is what the part is not.
+    // Both configs are checked here for the same reason the geometry is --
+    // kfd_debug.c copies this field into the debugger's device entry verbatim,
+    // so a pair that disagrees reports one part two ways.
+    EXPECT_EQ(props["simd_count"], 1216u);
+    EXPECT_EQ(props["simd_per_cu"], 4u);
+
+    // What libhsakmt derives from those: NumShaderBanks = array_count /
+    // simd_arrays_per_engine, i.e. the node's total shader engines.
+    EXPECT_EQ(props["array_count"] / props["simd_arrays_per_engine"],
+              num_xcc * loaded.soc()->xcd(0)->num_shader_engines());
+  }
+}
+
+// Every shipped config must describe the machine it actually simulates.
+//
+// num_shader_engines is the per-XCC shader-engine count, so it has to equal the
+// SoC's own se[] count -- KFD's array_count is derived from it, not stored in
+// it. And the CU geometry the topology advertises has to multiply back out to
+// the declared simd_count, or a runtime sizing scratch and CWSR from the
+// reported CU count provisions for a machine the simulator does not have.
+//
+// simd_count itself can only be bounded here, not derived -- the shortfall on a
+// harvested part is a fact about the silicon. What can be checked is that every
+// config modelling the same part carries the same one, which is done below.
+//
+// \NPI new GPU: a config added to configs/ is picked up here automatically.
+TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
+  const std::filesystem::path config_dir = CONFIG_DIR;
+  unsigned checked = 0;
+
+  // One part may ship as several configs -- a KMD capture, a sibling that models
+  // more of the SoC, a multi-GPU variant -- and they have to advertise the same
+  // machine. Keyed by the part, first config seen wins and the rest are compared
+  // against it.
+  struct PartGeometry {
+    std::string config;
+    uint32_t simd_count;
+    uint32_t num_shader_engines;
+    uint32_t arrays_per_engine;
+    uint32_t num_cu_per_sh;
+    uint32_t simd_per_cu;
+    uint32_t num_xcc;
+  };
+  std::unordered_map<std::string, PartGeometry> parts;
+
+  for (const auto &entry : std::filesystem::directory_iterator(config_dir)) {
+    if (entry.path().extension() != ".json")
+      continue;
+    const std::string name = entry.path().filename().string();
+    // DBT guest configs describe a synthetic node with no SoC behind it; their
+    // geometry is validated by validate_guest_device_geometry() at load time.
+    if (name.rfind("guest_", 0) == 0)
+      continue;
+    SCOPED_TRACE(name);
+
+    auto loaded = config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema);
+    if (!loaded.device.present || loaded.soc() == nullptr)
+      continue;
+    ++checked;
+
+    const uint32_t num_xcc = loaded.soc()->num_xcds();
+    ASSERT_NE(num_xcc, 0u);
+    EXPECT_EQ(loaded.device.num_shader_engines, loaded.soc()->xcd(0)->num_shader_engines())
+        << "num_shader_engines must be the SoC's shader-engine count, not the array count";
+
+    // Shader arrays partition an engine's CUs, so the CU total is
+    // engines * arrays/engine * CUs/array, per XCC and then across XCCs.
+    const uint32_t arrays_per_engine = loaded.device.num_shader_arrays_per_engine;
+    ASSERT_NE(arrays_per_engine, 0u);
+    const uint64_t cus = static_cast<uint64_t>(loaded.device.num_shader_engines) *
+                         arrays_per_engine * loaded.device.num_cu_per_sh * num_xcc;
+
+    // Against the SoC, not against the device block. Deriving the CU total from
+    // the config and then checking the config's own simd_count against it only
+    // catches a config that contradicts itself -- both sides come from the same
+    // declaration, so it passes for any config whose numbers multiply out,
+    // however unlike the machine underneath. The whole point of this test is
+    // the comparison with what the simulator instantiates.
+    uint64_t soc_cus = 0;
+    for (uint32_t xcd_index = 0; xcd_index < num_xcc; ++xcd_index) {
+      const auto *xcd = loaded.soc()->xcd(xcd_index);
+      ASSERT_NE(xcd, nullptr);
+      for (uint32_t se_index = 0; se_index < xcd->num_shader_engines(); ++se_index)
+        soc_cus += xcd->shader_engine(se_index)->num_compute_units();
+    }
+    EXPECT_EQ(cus, soc_cus) << "the advertised CU geometry is not the machine the simulator runs: "
+                            << cus << " advertised vs " << soc_cus << " instantiated";
+
+    // Harvested parts ship with fewer active CUs than the array geometry holds
+    // (MI300X reports 304 of 320), so the advertised simd_count may be lower --
+    // never higher, which would mean SIMDs with nowhere to live.
+    const uint64_t simds = soc_cus * loaded.device.simd_per_cu;
+    EXPECT_LE(loaded.device.simd_count, simds)
+        << "simd_count exceeds the simulated CU geometry: " << soc_cus << " CUs * "
+        << loaded.device.simd_per_cu << " SIMDs";
+
+    // That bound is all a lone config can be held to -- how far below the array
+    // geometry a harvested part sits is a property of the part, not something
+    // any product here can derive. So simd_count is carried alongside the
+    // geometry instead: every config for one part must agree on all of it.
+    // Nothing downstream reconciles a disagreement. sysfs publishes the loaded
+    // config's simd_count as the node property and debug_device_snapshot()
+    // copies it into the debugger's device entry, so two configs for one GPU
+    // that differ here report that GPU's active-SIMD count two ways depending
+    // on which one the run happened to load.
+    const PartGeometry geometry{name,
+                                loaded.device.simd_count,
+                                loaded.device.num_shader_engines,
+                                arrays_per_engine,
+                                loaded.device.num_cu_per_sh,
+                                loaded.device.simd_per_cu,
+                                num_xcc};
+    const std::string part =
+        std::to_string(loaded.device.gfx_target_version) + " " + loaded.device.marketing_name;
+    const auto [it, inserted] = parts.emplace(part, geometry);
+    if (!inserted) {
+      const PartGeometry &first = it->second;
+      SCOPED_TRACE("same part as " + first.config + " (" + part + ")");
+      EXPECT_EQ(geometry.simd_count, first.simd_count)
+          << "configs for one part disagree on the active SIMD count";
+      EXPECT_EQ(geometry.num_shader_engines, first.num_shader_engines);
+      EXPECT_EQ(geometry.arrays_per_engine, first.arrays_per_engine);
+      EXPECT_EQ(geometry.num_cu_per_sh, first.num_cu_per_sh);
+      EXPECT_EQ(geometry.simd_per_cu, first.simd_per_cu);
+      EXPECT_EQ(geometry.num_xcc, first.num_xcc);
+    }
+  }
+
+  EXPECT_GE(checked, 5u) << "expected the shipped device configs to be discovered";
 }
 
 // Loading a shipped config for a real GPU must make the synthetic topology

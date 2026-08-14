@@ -12,15 +12,15 @@ namespace rocjitsu {
 namespace {
 
 TEST(ConSan, InventoriesGfx1250VflatRawFields) {
-  constexpr auto store = gfx1250::build_vflat(gfx1250::kFlatStoreB128Vflat, {.saddr = 124,
-                                                                             .nv = 1,
-                                                                             .scale_offset = 1,
-                                                                             .sve = 1,
-                                                                             .scope = 2,
-                                                                             .th = 3,
-                                                                             .vsrc = 7,
-                                                                             .vaddr = 5,
-                                                                             .ioffset = 0xFFFFFC});
+  constexpr auto store = cdna5::build_vflat(cdna5::kFlatStoreB128Vflat, {.saddr = 124,
+                                                                         .nv = 1,
+                                                                         .scale_offset = 1,
+                                                                         .sve = 1,
+                                                                         .scope = 2,
+                                                                         .th = 3,
+                                                                         .vsrc = 7,
+                                                                         .vaddr = 5,
+                                                                         .ioffset = 0xFFFFFC});
   const std::array<uint32_t, 4> text_words = {store[0], store[1], store[2],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   ConSanOptions options;
@@ -32,7 +32,7 @@ TEST(ConSan, InventoriesGfx1250VflatRawFields) {
   ASSERT_EQ(result.kernels.size(), 1u);
   ASSERT_EQ(result.kernels.front().flat_sites.size(), 1u);
   const ConSanFlatSite &site = result.kernels.front().flat_sites.front();
-  EXPECT_EQ(site.raw_op, gfx1250::kFlatStoreB128Vflat);
+  EXPECT_EQ(site.raw_op, cdna5::kFlatStoreB128Vflat);
   EXPECT_EQ(site.raw_saddr, 124u);
   EXPECT_EQ(site.raw_vaddr, 5u);
   EXPECT_EQ(site.raw_vsrc, 7u);
@@ -43,12 +43,12 @@ TEST(ConSan, InventoriesGfx1250VflatRawFields) {
 }
 
 TEST(ConSan, RecoversGfx1250DirectCallOwnerForSharedVflatHelper) {
-  constexpr auto call = gfx1250::build_sopk(gfx1250::kSCallI64Sopk, {.simm16 = 1, .sdst = 30});
+  constexpr auto call = cdna5::build_sopk(cdna5::kSCallI64Sopk, {.simm16 = 1, .sdst = 30});
   const std::array<uint32_t, 2> kernel_words = {call[0],
                                                 build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   constexpr auto store =
-      gfx1250::build_vflat(gfx1250::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
-  constexpr auto return_to_caller = gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1, {.ssrc0 = 30});
+      cdna5::build_vflat(cdna5::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+  constexpr auto return_to_caller = cdna5::build_sop1(cdna5::kSSetPcI64Sop1, {.ssrc0 = 30});
   const std::array<uint32_t, 4> function_words = {store[0], store[1], store[2],
                                                   return_to_caller[0]};
   ConSanOptions options;
@@ -67,17 +67,17 @@ TEST(ConSan, RecoversGfx1250DirectCallOwnerForSharedVflatHelper) {
 }
 
 TEST(ConSan, RecoversGfx1250WideLiteralIndirectCallOwnerForSharedVflatHelper) {
-  constexpr auto get_pc = gfx1250::build_sop1(gfx1250::kSGetPcI64Sop1, {.sdst = 0});
+  constexpr auto get_pc = cdna5::build_sop1(cdna5::kSGetPcI64Sop1, {.sdst = 0});
   constexpr auto add_pc =
-      gfx1250::build_sop2(gfx1250::kSAddNcU64Sop2, {.ssrc0 = 0, .ssrc1 = 254, .sdst = 0});
-  constexpr auto call = gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = 0, .sdst = 30});
+      cdna5::build_sop2(cdna5::kSAddNcU64Sop2, {.ssrc0 = 0, .ssrc1 = 254, .sdst = 0});
+  constexpr auto call = cdna5::build_sop1(cdna5::kSSwapPcI64Sop1, {.ssrc0 = 0, .sdst = 30});
   // The local function starts at byte 24. s_get_pc_i64 produces byte 4, so the
   // literal delta is 20 bytes.
   const std::array<uint32_t, 6> kernel_words = {
       get_pc[0], add_pc[0], 20, 0, call[0], build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   constexpr auto store =
-      gfx1250::build_vflat(gfx1250::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
-  constexpr auto return_to_caller = gfx1250::build_sop1(gfx1250::kSSetPcI64Sop1, {.ssrc0 = 30});
+      cdna5::build_vflat(cdna5::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+  constexpr auto return_to_caller = cdna5::build_sop1(cdna5::kSSetPcI64Sop1, {.ssrc0 = 30});
   const std::array<uint32_t, 4> function_words = {store[0], store[1], store[2],
                                                   return_to_caller[0]};
   ConSanOptions options;
@@ -96,7 +96,7 @@ TEST(ConSan, RecoversGfx1250WideLiteralIndirectCallOwnerForSharedVflatHelper) {
 }
 
 TEST(ConSan, Gfx1250SuperColliderPreflightAllowsInventoriedCacheOperations) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   const std::array<uint32_t, 9> text_words = {
       load[0],
       load[1],
@@ -124,9 +124,9 @@ TEST(ConSan, Gfx1250SuperColliderPreflightAllowsInventoriedCacheOperations) {
 }
 
 TEST(ConSan, Gfx1250PreflightIgnoresRegisterLaneBpermute) {
-  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   constexpr auto bpermute =
-      gfx1250::build_vds(gfx1250::kDsBpermuteB32Vds, {.addr = 3, .data0 = 4, .vdst = 5});
+      cdna5::build_vds(cdna5::kDsBpermuteB32Vds, {.addr = 3, .data0 = 4, .vdst = 5});
   const std::array<uint32_t, 5> text_words = {load[0], load[1], bpermute[0], bpermute[1],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)};
   ConSanOptions options;
@@ -1478,38 +1478,38 @@ struct FlatD16LoadForm {
 };
 
 constexpr std::array<FlatD16LoadForm, 6> kFlatD16LoadForms = {{
-    {{rdna4::kFlatLoadD16U8Vflat, gfx1250::kFlatLoadD16U8Vflat, cdna3::kFlatLoadUbyteD16Flat,
+    {{rdna4::kFlatLoadD16U8Vflat, cdna5::kFlatLoadD16U8Vflat, cdna3::kFlatLoadUbyteD16Flat,
       cdna4::kFlatLoadUbyteD16Flat, rdna3::kFlatLoadD16U8Flat},
      {"flat_load_d16_u8", "flat_load_d16_u8", "flat_load_ubyte_d16", "flat_load_ubyte_d16",
       "flat_load_d16_u8"},
      8,
      ConSanFlatSubwordPlacement::Low16},
-    {{rdna4::kFlatLoadD16I8Vflat, gfx1250::kFlatLoadD16I8Vflat, cdna3::kFlatLoadSbyteD16Flat,
+    {{rdna4::kFlatLoadD16I8Vflat, cdna5::kFlatLoadD16I8Vflat, cdna3::kFlatLoadSbyteD16Flat,
       cdna4::kFlatLoadSbyteD16Flat, rdna3::kFlatLoadD16I8Flat},
      {"flat_load_d16_i8", "flat_load_d16_i8", "flat_load_sbyte_d16", "flat_load_sbyte_d16",
       "flat_load_d16_i8"},
      8,
      ConSanFlatSubwordPlacement::Low16},
-    {{rdna4::kFlatLoadD16B16Vflat, gfx1250::kFlatLoadD16B16Vflat, cdna3::kFlatLoadShortD16Flat,
+    {{rdna4::kFlatLoadD16B16Vflat, cdna5::kFlatLoadD16B16Vflat, cdna3::kFlatLoadShortD16Flat,
       cdna4::kFlatLoadShortD16Flat, rdna3::kFlatLoadD16B16Flat},
      {"flat_load_d16_b16", "flat_load_d16_b16", "flat_load_short_d16", "flat_load_short_d16",
       "flat_load_d16_b16"},
      16,
      ConSanFlatSubwordPlacement::Low16},
-    {{rdna4::kFlatLoadD16HiU8Vflat, gfx1250::kFlatLoadD16HiU8Vflat, cdna3::kFlatLoadUbyteD16HiFlat,
+    {{rdna4::kFlatLoadD16HiU8Vflat, cdna5::kFlatLoadD16HiU8Vflat, cdna3::kFlatLoadUbyteD16HiFlat,
       cdna4::kFlatLoadUbyteD16HiFlat, rdna3::kFlatLoadD16HiU8Flat},
      {"flat_load_d16_hi_u8", "flat_load_d16_hi_u8", "flat_load_ubyte_d16_hi",
       "flat_load_ubyte_d16_hi", "flat_load_d16_hi_u8"},
      8,
      ConSanFlatSubwordPlacement::High16},
-    {{rdna4::kFlatLoadD16HiI8Vflat, gfx1250::kFlatLoadD16HiI8Vflat, cdna3::kFlatLoadSbyteD16HiFlat,
+    {{rdna4::kFlatLoadD16HiI8Vflat, cdna5::kFlatLoadD16HiI8Vflat, cdna3::kFlatLoadSbyteD16HiFlat,
       cdna4::kFlatLoadSbyteD16HiFlat, rdna3::kFlatLoadD16HiI8Flat},
      {"flat_load_d16_hi_i8", "flat_load_d16_hi_i8", "flat_load_sbyte_d16_hi",
       "flat_load_sbyte_d16_hi", "flat_load_d16_hi_i8"},
      8,
      ConSanFlatSubwordPlacement::High16},
-    {{rdna4::kFlatLoadD16HiB16Vflat, gfx1250::kFlatLoadD16HiB16Vflat,
-      cdna3::kFlatLoadShortD16HiFlat, cdna4::kFlatLoadShortD16HiFlat, rdna3::kFlatLoadD16HiB16Flat},
+    {{rdna4::kFlatLoadD16HiB16Vflat, cdna5::kFlatLoadD16HiB16Vflat, cdna3::kFlatLoadShortD16HiFlat,
+      cdna4::kFlatLoadShortD16HiFlat, rdna3::kFlatLoadD16HiB16Flat},
      {"flat_load_d16_hi_b16", "flat_load_d16_hi_b16", "flat_load_short_d16_hi",
       "flat_load_short_d16_hi", "flat_load_d16_hi_b16"},
      16,
@@ -1524,23 +1524,23 @@ struct FlatSubwordStoreForm {
 };
 
 constexpr std::array<FlatSubwordStoreForm, 4> kFlatSubwordStoreForms = {{
-    {{rdna4::kFlatStoreB8Vflat, gfx1250::kFlatStoreB8Vflat, cdna3::kFlatStoreByteFlat,
+    {{rdna4::kFlatStoreB8Vflat, cdna5::kFlatStoreB8Vflat, cdna3::kFlatStoreByteFlat,
       cdna4::kFlatStoreByteFlat, rdna3::kFlatStoreB8Flat},
      {"flat_store_b8", "flat_store_b8", "flat_store_byte", "flat_store_byte", "flat_store_b8"},
      8,
      ConSanFlatSubwordPlacement::Low16},
-    {{rdna4::kFlatStoreB16Vflat, gfx1250::kFlatStoreB16Vflat, cdna3::kFlatStoreShortFlat,
+    {{rdna4::kFlatStoreB16Vflat, cdna5::kFlatStoreB16Vflat, cdna3::kFlatStoreShortFlat,
       cdna4::kFlatStoreShortFlat, rdna3::kFlatStoreB16Flat},
      {"flat_store_b16", "flat_store_b16", "flat_store_short", "flat_store_short", "flat_store_b16"},
      16,
      ConSanFlatSubwordPlacement::Low16},
-    {{rdna4::kFlatStoreD16HiB8Vflat, gfx1250::kFlatStoreD16HiB8Vflat,
-      cdna3::kFlatStoreByteD16HiFlat, cdna4::kFlatStoreByteD16HiFlat, rdna3::kFlatStoreD16HiB8Flat},
+    {{rdna4::kFlatStoreD16HiB8Vflat, cdna5::kFlatStoreD16HiB8Vflat, cdna3::kFlatStoreByteD16HiFlat,
+      cdna4::kFlatStoreByteD16HiFlat, rdna3::kFlatStoreD16HiB8Flat},
      {"flat_store_d16_hi_b8", "flat_store_d16_hi_b8", "flat_store_byte_d16_hi",
       "flat_store_byte_d16_hi", "flat_store_d16_hi_b8"},
      8,
      ConSanFlatSubwordPlacement::High16},
-    {{rdna4::kFlatStoreD16HiB16Vflat, gfx1250::kFlatStoreD16HiB16Vflat,
+    {{rdna4::kFlatStoreD16HiB16Vflat, cdna5::kFlatStoreD16HiB16Vflat,
       cdna3::kFlatStoreShortD16HiFlat, cdna4::kFlatStoreShortD16HiFlat,
       rdna3::kFlatStoreD16HiB16Flat},
      {"flat_store_d16_hi_b16", "flat_store_d16_hi_b16", "flat_store_short_d16_hi",
@@ -1568,7 +1568,7 @@ std::vector<uint8_t> make_group_flat_load_code_object(const FlatSubwordTarget &t
     break;
   }
   case ROCJITSU_CODE_ARCH_GFX1250: {
-    const auto load = gfx1250::build_vflat(opcode, {.saddr = 124, .vdst = 2, .vaddr = 0});
+    const auto load = cdna5::build_vflat(opcode, {.saddr = 124, .vdst = 2, .vaddr = 0});
     text_words.insert(text_words.end(), load.begin(), load.end());
     break;
   }
@@ -1636,7 +1636,7 @@ std::vector<uint8_t> make_group_flat_d16_store_code_object(const FlatSubwordTarg
     break;
   }
   case ROCJITSU_CODE_ARCH_GFX1250: {
-    const auto store = gfx1250::build_vflat(opcode, {.saddr = 124, .vsrc = 2, .vaddr = 0});
+    const auto store = cdna5::build_vflat(opcode, {.saddr = 124, .vsrc = 2, .vaddr = 0});
     text_words.insert(text_words.end(), store.begin(), store.end());
     break;
   }
@@ -1699,8 +1699,8 @@ std::vector<uint32_t> expected_group_flat_store_readback(const FlatSubwordTarget
   }
   case ROCJITSU_CODE_ARCH_GFX1250: {
     const uint16_t opcode =
-        memory_width_bits == 8u ? gfx1250::kFlatLoadU8Vflat : gfx1250::kFlatLoadU16Vflat;
-    const auto load = gfx1250::build_vflat(
+        memory_width_bits == 8u ? cdna5::kFlatLoadU8Vflat : cdna5::kFlatLoadU16Vflat;
+    const auto load = cdna5::build_vflat(
         opcode, {.saddr = 124, .vdst = static_cast<uint8_t>(scratch_vgpr), .vaddr = 0});
     return {load.begin(), load.end()};
   }
@@ -3239,7 +3239,7 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   EXPECT_EQ(site.addr_vgpr, 2u);
   EXPECT_EQ(site.data_vgpr, 4u);
   EXPECT_EQ(site.dst_vgpr, 2u);
-  EXPECT_EQ(site.raw_saddr, static_cast<uint32_t>(gfx1250::OPR_SREG_NULL));
+  EXPECT_EQ(site.raw_saddr, static_cast<uint32_t>(cdna5::OPR_SREG_NULL));
   EXPECT_EQ(site.raw_vaddr, 2u);
   EXPECT_EQ(site.raw_vsrc, 4u);
   EXPECT_EQ(site.raw_vdst, 2u);
@@ -3500,10 +3500,10 @@ TEST(ConSan, SyncSequencesRejectAdjacentBarrierPairWithMismatchedIds) {
   EXPECT_EQ(result.sync_sequences[1].confidence, ConSanSemanticConfidence::Ambiguous);
 }
 
-TEST(ConSan, SyncInventoryDecodesClusterAndNamedWorkgroupBarrierScopes) {
+TEST(ConSan, SyncInventoryDecodesTrapAndNamedWorkgroupBarrierIds) {
   const std::array<uint32_t, 5> text_words = {
-      0xBE804EC3u, // s_barrier_signal -3
-      0xBF94FFFDu, // s_barrier_wait -3
+      0xBE804EC2u, // s_barrier_signal -2
+      0xBF94FFFEu, // s_barrier_wait -2
       0xBE804E81u, // s_barrier_signal 1
       0xBF940001u, // s_barrier_wait 1
       0xBFB00000u, // s_endpgm
@@ -3515,8 +3515,8 @@ TEST(ConSan, SyncInventoryDecodesClusterAndNamedWorkgroupBarrierScopes) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.sync_sequences.size(), 2u);
   ASSERT_TRUE(result.sync_sequences[0].barrier_id);
-  EXPECT_EQ(*result.sync_sequences[0].barrier_id, -3);
-  EXPECT_EQ(result.sync_sequences[0].barrier_scope, ConSanBarrierSite::Scope::Cluster);
+  EXPECT_EQ(*result.sync_sequences[0].barrier_id, -2);
+  EXPECT_EQ(result.sync_sequences[0].barrier_scope, ConSanBarrierSite::Scope::Workgroup);
   EXPECT_EQ(result.sync_sequences[0].operation, ConSanSyncOperation::BarrierFull);
   ASSERT_TRUE(result.sync_sequences[1].barrier_id);
   EXPECT_EQ(*result.sync_sequences[1].barrier_id, 1);
@@ -3668,18 +3668,13 @@ TEST(ConSan, SyncInventoryClassifiesGfx1250BarrierLifecycleWithoutOrderingClaims
   EXPECT_EQ(result.sync_sequences[2].memory_role, ConSanSyncMemoryRole::AcquireRelease);
 }
 
-TEST(ConSan, SyncInventoryPreservesGfx1250BarrierOperandEncodingForms) {
-  constexpr uint64_t kLiteral64 = 0x9ABCDEF012345678ull;
-  const std::array<uint32_t, 9> text_words = {
+TEST(ConSan, SyncInventoryPreservesGfx1250ValidBarrierOperandEncodingForms) {
+  const std::array<uint32_t, 5> text_words = {
       0xBE805181u, // s_barrier_init 1
       0xBE80517Du, // s_barrier_init m0
-      0xBE8051FFu,
-      0xFFFFFFFDu, // s_barrier_init literal32(-3)
-      0xBE8052FEu,
-      static_cast<uint32_t>(kLiteral64),
-      static_cast<uint32_t>(kLiteral64 >> 32u), // s_barrier_join literal64
-      0xBF951234u,                              // s_barrier_leave raw simm16 0x1234
-      0xBFB00000u,                              // s_endpgm
+      0xBE8051C3u, // s_barrier_init -3
+      0xBF951234u, // s_barrier_leave raw simm16 0x1234
+      0xBFB00000u, // s_endpgm
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
@@ -3688,7 +3683,7 @@ TEST(ConSan, SyncInventoryPreservesGfx1250BarrierOperandEncodingForms) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.kernels.size(), 1u);
   const auto &sites = result.kernels.front().barrier_sites;
-  ASSERT_EQ(sites.size(), 5u);
+  ASSERT_EQ(sites.size(), 4u);
 
   EXPECT_EQ(sites[0].size, 4u);
   EXPECT_EQ(sites[0].operand_source, ConSanBarrierSite::OperandSource::Immediate);
@@ -3700,37 +3695,23 @@ TEST(ConSan, SyncInventoryPreservesGfx1250BarrierOperandEncodingForms) {
   EXPECT_EQ(sites[1].raw_operand_selector, 125u);
   EXPECT_FALSE(sites[1].barrier_id);
 
-  EXPECT_EQ(sites[2].size, 8u);
-  EXPECT_EQ(sites[2].operand_source, ConSanBarrierSite::OperandSource::Literal32);
-  EXPECT_EQ(sites[2].raw_operand_selector, 255u);
-  EXPECT_EQ(sites[2].literal_width_bits, 32u);
-  EXPECT_EQ(sites[2].literal_value, 0xFFFFFFFDu);
+  EXPECT_EQ(sites[2].size, 4u);
+  EXPECT_EQ(sites[2].operand_source, ConSanBarrierSite::OperandSource::Immediate);
+  EXPECT_EQ(sites[2].raw_operand_selector, 195u);
   EXPECT_EQ(sites[2].barrier_id, -3);
   EXPECT_EQ(sites[2].scope, ConSanBarrierSite::Scope::Cluster);
 
-  EXPECT_EQ(sites[3].size, 12u);
-  EXPECT_EQ(sites[3].operand_source, ConSanBarrierSite::OperandSource::Literal64);
-  EXPECT_EQ(sites[3].raw_operand_selector, 254u);
-  EXPECT_EQ(sites[3].literal_width_bits, 64u);
-  EXPECT_EQ(sites[3].literal_value, kLiteral64);
+  EXPECT_EQ(sites[3].size, 4u);
+  EXPECT_EQ(sites[3].operation, ConSanBarrierSite::Operation::Leave);
+  EXPECT_EQ(sites[3].raw_simm16, 0x1234u);
   EXPECT_FALSE(sites[3].barrier_id);
-  EXPECT_EQ(sites[3].scope, ConSanBarrierSite::Scope::Unknown);
-
-  EXPECT_EQ(sites[4].size, 4u);
-  EXPECT_EQ(sites[4].operation, ConSanBarrierSite::Operation::Leave);
-  EXPECT_EQ(sites[4].raw_simm16, 0x1234u);
-  EXPECT_FALSE(sites[4].barrier_id);
 
   ASSERT_EQ(result.sync_events.size(), sites.size());
   EXPECT_EQ(result.sync_events[2].barrier_operand_source,
-            ConSanBarrierSite::OperandSource::Literal32);
-  EXPECT_EQ(result.sync_events[2].barrier_raw_operand_selector, 255u);
-  EXPECT_EQ(result.sync_events[2].barrier_literal_width_bits, 32u);
-  EXPECT_EQ(result.sync_events[2].barrier_literal_value, 0xFFFFFFFDu);
-  EXPECT_EQ(result.sync_events[3].barrier_operand_source,
-            ConSanBarrierSite::OperandSource::Literal64);
-  EXPECT_EQ(result.sync_events[3].barrier_literal_value, kLiteral64);
-  EXPECT_EQ(result.sync_events[4].barrier_raw_simm16, 0x1234u);
+            ConSanBarrierSite::OperandSource::Immediate);
+  EXPECT_EQ(result.sync_events[2].barrier_raw_operand_selector, 195u);
+  EXPECT_EQ(result.sync_events[2].barrier_id, -3);
+  EXPECT_EQ(result.sync_events[3].barrier_raw_simm16, 0x1234u);
   for (const ConSanSyncEvent &event : result.sync_events) {
     EXPECT_EQ(event.confidence, ConSanSemanticConfidence::Unsupported);
     EXPECT_FALSE(event.participant_count);
@@ -3850,13 +3831,13 @@ TEST(ConSan, SyncInventoryRejectsLifecycleWithoutJoinOrFixedZeroLeave) {
 }
 
 TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
-  const std::array<uint32_t, 10> text_words = {
-      0xBE8051FFu, 0x00000001u, // s_barrier_init literal32(1)
-      0xBE8052FFu, 0x00000001u, // s_barrier_join literal32(1)
-      0xBE805281u,              // s_barrier_join 1
-      0xBE804EFFu, 0x00000001u, // s_barrier_signal literal32(1)
-      0xBF940001u,              // s_barrier_wait 1
-      0xBF950000u,              // s_barrier_leave
+  const std::array<uint32_t, 7> text_words = {
+      0xBE805181u, // s_barrier_init 1
+      0xBE805281u, // s_barrier_join 1
+      0xBE805281u, // s_barrier_join 1
+      0xBE804E81u, // s_barrier_signal 1
+      0xBF940001u, // s_barrier_wait 1
+      0xBF950000u, // s_barrier_leave
       0xBFB00000u,
   };
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words);
@@ -3934,17 +3915,8 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
     expect_invalid(wrong_shape);
   }
 
-  ConSanResult wrong_encoding_class = valid;
-  uint32_t literal_init_word = 0;
-  std::memcpy(&literal_init_word, wrong_encoding_class.elf_bytes.data() + text_file_offset,
-              sizeof(literal_init_word));
-  literal_init_word = (literal_init_word & ~0xffu) | (128u + 16u);
-  std::memcpy(wrong_encoding_class.elf_bytes.data() + text_file_offset, &literal_init_word,
-              sizeof(literal_init_word));
-  expect_invalid(wrong_encoding_class);
-
   ConSanResult wrong_member_size = valid;
-  wrong_member_size.patches.front().original_size = sizeof(uint32_t);
+  wrong_member_size.patches.front().original_size = 2u * sizeof(uint32_t);
   expect_invalid(wrong_member_size);
 
   // A consistent cluster target would pass simple equality checks, but it is
@@ -3979,7 +3951,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
   // validation, not merely unaccounted-byte detection, proves it remains the
   // pristine fixed-zero instruction.
   ConSanResult changed_leave = valid;
-  const uint64_t leave_offset = 8u * sizeof(uint32_t);
+  const uint64_t leave_offset = 5u * sizeof(uint32_t);
   uint32_t nonzero_leave = 0xBF950001u;
   std::memcpy(changed_leave.elf_bytes.data() + text_file_offset + leave_offset, &nonzero_leave,
               sizeof(nonzero_leave));
@@ -3997,7 +3969,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
 
   ConSanResult unaccounted = valid;
   uint32_t changed_endpgm = build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250);
-  std::memcpy(unaccounted.elf_bytes.data() + text_file_offset + 9u * sizeof(uint32_t),
+  std::memcpy(unaccounted.elf_bytes.data() + text_file_offset + 6u * sizeof(uint32_t),
               &changed_endpgm, sizeof(changed_endpgm));
   const std::vector<std::string> accounting_errors =
       validate_consan_modified_elf(bytes, unaccounted);

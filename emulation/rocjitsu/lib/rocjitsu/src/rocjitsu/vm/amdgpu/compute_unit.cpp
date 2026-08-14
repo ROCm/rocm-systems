@@ -9,7 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -114,7 +114,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3, rdna3::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA4, rdna4::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_GFX1250, cdna5::Isa);
   default:
     break;
   }
@@ -144,6 +144,16 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
     return nullptr;
   assert(free_wf_slot_count_ > 0 && "free wavefront slot count is inconsistent");
 
+  return dispatch_wf_at(static_cast<uint32_t>(slot), wg_id, pc, num_sgprs, num_vgprs, dispatch_id);
+}
+
+Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
+                                           uint32_t num_sgprs, uint32_t num_vgprs,
+                                           uint32_t dispatch_id) {
+  assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
+  if (wf_id >= config_.num_wf_slots || !wfs_[wf_id]->is_halted())
+    return nullptr;
+
   int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
   if (sgpr_base < 0)
     return nullptr;
@@ -169,7 +179,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
     scalar_cache_dispatch_prepared_ = true;
   }
 
-  auto *wf = wfs_[slot].get();
+  auto *wf = wfs_[wf_id].get();
   wf->wg_id_ = wg_id;
   wf->set_dispatch_id(dispatch_id);
   wf->pc = pc;
@@ -185,13 +195,13 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   wf->state_ = WfState::RUNNING;
   wf->set_ready_cycle(cycle_counter_);
   wf->trace_inst_count_ = 0;
-  free_wf_slot_bits_[slot / 64u] &= ~(uint64_t{1} << (slot % 64u));
+  free_wf_slot_bits_[wf_id / 64u] &= ~(uint64_t{1} << (wf_id % 64u));
   --free_wf_slot_count_;
 
   std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + num_sgprs, wf);
   fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgpr_allocation_block_size(), wf);
 
-  util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", slot,
+  util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", wf_id,
                    " pc=0x", std::hex, pc, std::dec, " wg=", wg_id, " pid=", wf->process_id());
 
   schedule_work();
@@ -559,7 +569,7 @@ ROCJITSU_CU_INSTANTIATE(rdna2::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna3::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna3_5::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna4::Isa);
-ROCJITSU_CU_INSTANTIATE(gfx1250::Isa);
+ROCJITSU_CU_INSTANTIATE(cdna5::Isa);
 
 #undef ROCJITSU_CU_INSTANTIATE
 

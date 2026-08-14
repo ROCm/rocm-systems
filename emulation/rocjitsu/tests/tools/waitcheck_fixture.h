@@ -7,7 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/amdgpu_elf.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 
 #include <array>
 #include <bit>

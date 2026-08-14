@@ -731,8 +731,8 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
     return std::nullopt;
 
   const uint16_t op =
-      load ? (plan.element_dwords == 1u ? gfx1250::kDsLoadB32Vds : gfx1250::kDsLoadB64Vds)
-           : (plan.element_dwords == 1u ? gfx1250::kDsStoreB32Vds : gfx1250::kDsStoreB64Vds);
+      load ? (plan.element_dwords == 1u ? cdna5::kDsLoadB32Vds : cdna5::kDsLoadB64Vds)
+           : (plan.element_dwords == 1u ? cdna5::kDsStoreB32Vds : cdna5::kDsStoreB64Vds);
   std::vector<uint32_t> words;
   words.reserve(plan.access_word_count());
   const auto append_access = [&](uint32_t byte_offset, uint16_t data_vgpr) -> bool {
@@ -749,7 +749,7 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
     } else {
       immediate = static_cast<uint16_t>(byte_offset);
     }
-    gfx1250::VdsBuilderFields fields{
+    cdna5::VdsBuilderFields fields{
         .offset0 = static_cast<uint8_t>(immediate),
         .offset1 = static_cast<uint8_t>(immediate >> 8u),
         .addr = static_cast<uint8_t>(effective_address_vgpr),
@@ -758,7 +758,7 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
       fields.vdst = static_cast<uint8_t>(data_vgpr);
     else
       fields.data0 = static_cast<uint8_t>(data_vgpr);
-    const auto access = gfx1250::build_vds(op, fields);
+    const auto access = cdna5::build_vds(op, fields);
     words.insert(words.end(), access.begin(), access.end());
     return true;
   };

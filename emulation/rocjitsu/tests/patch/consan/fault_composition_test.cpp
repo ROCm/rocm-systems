@@ -334,7 +334,7 @@ TEST(ConSan, PerturbationEmissionPrefersLocalCaveAndReservesMultipleAppendedBodi
   EXPECT_EQ(local.elf_bytes.size(), local_bytes.size());
 
   const std::array<uint32_t, 5> two_pair_words = {
-      0xBE804EC3u, 0xBF94FFFDu, 0xBE804E81u, 0xBF940001u, 0xBFB00000u,
+      0xBE804EC2u, 0xBF94FFFEu, 0xBE804E81u, 0xBF940001u, 0xBFB00000u,
   };
   options.sc_perturb_max = 2;
   options.sc_perturb_required_count = 2;
@@ -824,7 +824,7 @@ TEST(ConSan, PerturbationAcceptsExactOrderedCasWithoutStaticFlatProvenance) {
 
 TEST(ConSan, PerturbationHostControlsAreStableExactAndFailClosed) {
   const std::array<uint32_t, 5> two_pair_words = {
-      0xBE804EC3u, 0xBF94FFFDu, // cluster barrier -3
+      0xBE804EC2u, 0xBF94FFFEu, // trap barrier -2
       0xBE804E81u, 0xBF940001u, // workgroup barrier 1
       0xBFB00000u,
   };
@@ -927,7 +927,7 @@ TEST(ConSan, PerturbationControlsAreBoundedAndRequiredCountFailsClosed) {
   EXPECT_FALSE(stale.modified);
 
   const std::array<uint32_t, 5> two_pair_words = {
-      0xBE804EC3u, 0xBF94FFFDu, // cluster barrier -3
+      0xBE804EC2u, 0xBF94FFFEu, // trap barrier -2
       0xBE804E81u, 0xBF940001u, // workgroup barrier 1
       0xBFB00000u,
   };

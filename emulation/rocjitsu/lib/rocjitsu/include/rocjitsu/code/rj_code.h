@@ -335,7 +335,10 @@ typedef struct rj_code_inst_list_t rj_code_inst_list_t;
 /// @param[in] obj Code object to decode instructions from.
 /// @param[in] target_id Target architecture for decoding.
 /// @param[out] inst_list Handle to the newly created instruction list (refcount = 0).
-/// @returns ROCJITSU_STATUS_SUCCESS on success.
+/// @retval ROCJITSU_STATUS_SUCCESS Instruction list was created successfully.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL or the target is
+/// unsupported.
+/// @retval ROCJITSU_STATUS_ERROR An instruction could not be decoded.
 RJ_API_EXPORT rj_status_t rj_code_inst_list_create(rj_code_object_t *obj,
                                                    rj_code_target_id_t target_id,
                                                    rj_code_inst_list_t **inst_list);
@@ -368,7 +371,10 @@ typedef struct rj_code_basic_block_t rj_code_basic_block_t;
 /// @param[in] obj Code object to analyze.
 /// @param[in] target_id Target architecture for decoding.
 /// @param[out] list Handle to the newly created basic block list (refcount = 0; caller owns it).
-/// @returns ROCJITSU_STATUS_SUCCESS on success.
+/// @retval ROCJITSU_STATUS_SUCCESS Basic block list was created successfully.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL or the target is
+/// unsupported.
+/// @retval ROCJITSU_STATUS_ERROR An instruction could not be decoded.
 RJ_API_EXPORT rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj,
                                                           rj_code_target_id_t target_id,
                                                           rj_code_basic_block_list_t **list);

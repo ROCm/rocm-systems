@@ -8,7 +8,7 @@
 #define ROCJITSU_VM_AMDGPU_WAVEFRONT_H_
 
 #include "rocjitsu/base/api.h"
-#include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
@@ -287,6 +287,10 @@ public:
   bool dx10_clamp() const { return (mode_raw_ & DX10_CLAMP_BIT) != 0; }
   bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
   bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }
+  uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
+  uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
+  uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
+  uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> 6) & 0x3u; }
   uint32_t gpr_idx_offset() const { return m0_ & 0xFF; }
   uint32_t gpr_idx_mode() const { return (m0_ >> 8) & 0xF; }
 

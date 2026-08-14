@@ -8,7 +8,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -3195,6 +3195,15 @@ private:
     return static_cast<int64_t>(static_cast<int32_t>(op->encoding_value()));
   }
 
+  [[nodiscard]] static std::optional<int64_t> first_barrier_id(const Instruction &inst) {
+    const Operand *op = inst.src_operand(0);
+    if (!op)
+      return std::nullopt;
+    if (const auto value = op->const_value())
+      return static_cast<int64_t>(*value);
+    return static_cast<int64_t>(static_cast<int32_t>(op->encoding_value()));
+  }
+
   [[nodiscard]] static bool is_xcnt_drain(const Instruction &inst,
                                           bool immediately_after_mode_setreg = false) {
     if ((inst.flags() &
@@ -3439,14 +3448,20 @@ private:
       if (auto ref = op->to_register_ref())
         expand_vgpr_msb_ref(du.uses, *ref, *op, state, arch);
     }
-    inst.implicit_uses(du.uses);
+    RegisterSet implicit_uses;
+    inst.implicit_uses(implicit_uses);
+    // D16 memory loads preserve the opposite half for liveness, but the two
+    // asynchronous half writes do not consume one another at issue time.
+    if (const auto partial = partial_d16_load_def(inst, arch))
+      implicit_uses.erase(partial->reg);
+    du.uses |= implicit_uses;
     return du;
   }
 
   static void clear_matching_barrier_scc_write(PendingState &state, const Instruction &inst) {
     if (inst.mnemonic() != "s_barrier_wait")
       return;
-    const auto barrier_id = first_operand_value(inst);
+    const auto barrier_id = first_barrier_id(inst);
     if (!barrier_id)
       return;
 
@@ -3909,7 +3924,7 @@ private:
       if (!uses_legacy_waitcnt(arch))
         events.push_back({WaitCounterKind::Km, WaitEventKind::SccWrite, TrackedRegisterSource::None,
                           true, true, false, RegisterRef{RegClass::SCC, 0, 1},
-                          first_operand_value(inst)});
+                          first_barrier_id(inst)});
       return events;
     }
 

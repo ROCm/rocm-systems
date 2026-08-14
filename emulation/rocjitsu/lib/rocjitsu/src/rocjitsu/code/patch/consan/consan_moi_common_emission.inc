@@ -781,8 +781,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   }
 
   const uint16_t op =
-      load ? (element_dwords == 1u ? gfx1250::kDsLoadB32Vds : gfx1250::kDsLoadB64Vds)
-           : (element_dwords == 1u ? gfx1250::kDsStoreB32Vds : gfx1250::kDsStoreB64Vds);
+      load ? (element_dwords == 1u ? cdna5::kDsLoadB32Vds : cdna5::kDsLoadB64Vds)
+           : (element_dwords == 1u ? cdna5::kDsStoreB32Vds : cdna5::kDsStoreB64Vds);
   std::vector<uint32_t> words;
   const auto append_access = [&](const ConSanMoiAccessRange &range, uint16_t data_vgpr) {
     uint16_t address_vgpr = replay_address_vgpr;
@@ -800,7 +800,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     } else {
       immediate = static_cast<uint16_t>(range.static_byte_offset);
     }
-    gfx1250::VdsBuilderFields fields{
+    cdna5::VdsBuilderFields fields{
         .offset0 = static_cast<uint8_t>(immediate),
         .offset1 = static_cast<uint8_t>(immediate >> 8u),
         .addr = static_cast<uint8_t>(address_vgpr),
@@ -809,7 +809,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       fields.vdst = static_cast<uint8_t>(data_vgpr);
     else
       fields.data0 = static_cast<uint8_t>(data_vgpr);
-    const auto access = gfx1250::build_vds(op, fields);
+    const auto access = cdna5::build_vds(op, fields);
     words.insert(words.end(), access.begin(), access.end());
     return true;
   };

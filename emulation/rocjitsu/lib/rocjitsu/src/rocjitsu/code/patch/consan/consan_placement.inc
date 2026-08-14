@@ -312,7 +312,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
   const uint16_t opcode =
-      arch == ROCJITSU_CODE_ARCH_GFX1250 ? gfx1250::kSWaitDscntSopp : rdna4::kSWaitDscntSopp;
+      arch == ROCJITSU_CODE_ARCH_GFX1250 ? cdna5::kSWaitDscntSopp : rdna4::kSWaitDscntSopp;
   return build_sopp_encoding(arch, opcode, count);
 }
 

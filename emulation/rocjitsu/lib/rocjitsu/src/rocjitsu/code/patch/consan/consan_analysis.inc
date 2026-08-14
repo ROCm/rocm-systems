@@ -828,8 +828,8 @@ void invalidate_scratch_components_for_scalar_writes(const Instruction &inst,
     saddr = raw.saddr;
     ioffset = raw.ioffset;
   } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-             instruction_bytes.size() == sizeof(gfx1250::VscratchMachineInst)) {
-    gfx1250::VscratchMachineInst raw{};
+             instruction_bytes.size() == sizeof(cdna5::VscratchMachineInst)) {
+    cdna5::VscratchMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
     encoding = raw.encoding;
     vaddr = raw.vaddr;
@@ -986,8 +986,8 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       lane_selector = static_cast<uint32_t>(raw.src1);
     } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-               instruction_bytes.size() >= sizeof(gfx1250::Vop3MachineInst)) {
-      gfx1250::Vop3MachineInst raw{};
+               instruction_bytes.size() >= sizeof(cdna5::Vop3MachineInst)) {
+      cdna5::Vop3MachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       lane_selector = static_cast<uint32_t>(raw.src1);
     }
@@ -1775,8 +1775,8 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
     else if (raw.seg == 2u)
       site.address_space_hint = ConSanFlatAddressSpaceHint::Global;
   } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-             instruction_bytes.size() >= sizeof(gfx1250::VflatMachineInst)) {
-    gfx1250::VflatMachineInst raw{};
+             instruction_bytes.size() >= sizeof(cdna5::VflatMachineInst)) {
+    cdna5::VflatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
     site.raw_op = static_cast<uint32_t>(raw.op);
     site.raw_saddr = static_cast<uint32_t>(raw.saddr);
@@ -1871,10 +1871,10 @@ void record_ordinary_memory_site(const Instruction &inst, ConSanKernelInfo &kern
   if (mnemonic.starts_with("buffer_")) {
     if (arch != ROCJITSU_CODE_ARCH_GFX1250) {
       site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture;
-    } else if (instruction_bytes.size() != sizeof(gfx1250::VbufferMachineInst)) {
+    } else if (instruction_bytes.size() != sizeof(cdna5::VbufferMachineInst)) {
       site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
     } else {
-      gfx1250::VbufferMachineInst raw{};
+      cdna5::VbufferMachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       site.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
       site.raw_scope = static_cast<uint32_t>(raw.scope);
@@ -2028,28 +2028,28 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
     }
   } else if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
     if (mnemonic.starts_with("ds_") &&
-        instruction_bytes.size() >= sizeof(gfx1250::VdsMachineInst)) {
-      gfx1250::VdsMachineInst raw{};
+        instruction_bytes.size() >= sizeof(cdna5::VdsMachineInst)) {
+      cdna5::VdsMachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       fill_ds_atomic_raw(site, raw);
     } else if (mnemonic.starts_with("flat_atomic") &&
-               instruction_bytes.size() >= sizeof(gfx1250::VflatMachineInst)) {
-      gfx1250::VflatMachineInst raw{};
+               instruction_bytes.size() >= sizeof(cdna5::VflatMachineInst)) {
+      cdna5::VflatMachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       fill_flat_like_atomic_raw(site, raw);
     } else if (mnemonic.starts_with("global_atomic") &&
-               instruction_bytes.size() >= sizeof(gfx1250::VglobalMachineInst)) {
-      gfx1250::VglobalMachineInst raw{};
+               instruction_bytes.size() >= sizeof(cdna5::VglobalMachineInst)) {
+      cdna5::VglobalMachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       fill_flat_like_atomic_raw(site, raw);
     } else if (mnemonic.starts_with("scratch_atomic") &&
-               instruction_bytes.size() >= sizeof(gfx1250::VscratchMachineInst)) {
-      gfx1250::VscratchMachineInst raw{};
+               instruction_bytes.size() >= sizeof(cdna5::VscratchMachineInst)) {
+      cdna5::VscratchMachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       fill_flat_like_atomic_raw(site, raw);
     } else if (mnemonic.starts_with("buffer_atomic") &&
-               instruction_bytes.size() >= sizeof(gfx1250::VbufferMachineInst)) {
-      gfx1250::VbufferMachineInst raw{};
+               instruction_bytes.size() >= sizeof(cdna5::VbufferMachineInst)) {
+      cdna5::VbufferMachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       fill_buffer_atomic_raw(site, raw);
     }

@@ -692,27 +692,27 @@ TEST(InstructionBuilder, BuildGfx1250FlatLoadB32) {
 }
 
 TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
-  constexpr auto expected_cmpswap = gfx1250::build_vflat(
-      gfx1250::kFlatAtomicCmpswapB32Vflat, {.saddr = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL),
-                                            .vdst = 10,
-                                            .scope = 2,
-                                            .th = 1,
-                                            .vsrc = 10,
-                                            .vaddr = 8});
-  constexpr auto expected_swap = gfx1250::build_vflat(
-      gfx1250::kFlatAtomicSwapB64Vflat, {.saddr = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL),
-                                         .vdst = 10,
-                                         .scope = 2,
-                                         .th = 1,
-                                         .vsrc = 10,
-                                         .vaddr = 8});
-  constexpr auto expected_add = gfx1250::build_vflat(
-      gfx1250::kFlatAtomicAddU64Vflat, {.saddr = static_cast<uint8_t>(gfx1250::OPR_SREG_NULL),
-                                        .vdst = 10,
-                                        .scope = 2,
-                                        .th = 1,
-                                        .vsrc = 10,
-                                        .vaddr = 8});
+  constexpr auto expected_cmpswap = cdna5::build_vflat(
+      cdna5::kFlatAtomicCmpswapB32Vflat, {.saddr = static_cast<uint8_t>(cdna5::OPR_SREG_NULL),
+                                          .vdst = 10,
+                                          .scope = 2,
+                                          .th = 1,
+                                          .vsrc = 10,
+                                          .vaddr = 8});
+  constexpr auto expected_swap = cdna5::build_vflat(
+      cdna5::kFlatAtomicSwapB64Vflat, {.saddr = static_cast<uint8_t>(cdna5::OPR_SREG_NULL),
+                                       .vdst = 10,
+                                       .scope = 2,
+                                       .th = 1,
+                                       .vsrc = 10,
+                                       .vaddr = 8});
+  constexpr auto expected_add = cdna5::build_vflat(
+      cdna5::kFlatAtomicAddU64Vflat, {.saddr = static_cast<uint8_t>(cdna5::OPR_SREG_NULL),
+                                      .vdst = 10,
+                                      .scope = 2,
+                                      .th = 1,
+                                      .vsrc = 10,
+                                      .vaddr = 8});
 
   EXPECT_EQ(
       build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(8, 10, 10, true, 2, ROCJITSU_CODE_ARCH_GFX1250),
@@ -744,8 +744,8 @@ TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
   const auto readfirstlane =
       build_v_readfirstlane_b32(/*sdst=*/78, /*vsrc=*/90, ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(readfirstlane);
-  constexpr auto expected_readfirstlane = gfx1250::build_vop1(
-      gfx1250::kVReadfirstlaneB32Vop1, {.src0 = vector_source_vgpr(90), .vdst = 78});
+  constexpr auto expected_readfirstlane = cdna5::build_vop1(
+      cdna5::kVReadfirstlaneB32Vop1, {.src0 = vector_source_vgpr(90), .vdst = 78});
   EXPECT_EQ(*readfirstlane, expected_readfirstlane[0]);
 
   const auto cell_offset = build_v_add_u64_signed_i24(/*address_vgpr=*/8, /*displacement=*/16,
@@ -758,12 +758,12 @@ TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
   ASSERT_NE(offset_wait, nullptr);
   ASSERT_NE(offset_high, nullptr);
   EXPECT_EQ(std::string_view(offset_low->mnemonic()), "v_add_co_u32");
-  constexpr auto expected_offset_low = gfx1250::build_vop3_sdst_enc(
-      gfx1250::kVAddCoU32Vop3SdstEnc, {.vdst = 8,
-                                       .sdst = 106,
-                                       .src0 = scalar_positive_inline_u32(16),
-                                       .src1 = vector_source_vgpr(8),
-                                       .src2 = scalar_positive_inline_u32(0)});
+  constexpr auto expected_offset_low = cdna5::build_vop3_sdst_enc(
+      cdna5::kVAddCoU32Vop3SdstEnc, {.vdst = 8,
+                                     .sdst = 106,
+                                     .src0 = scalar_positive_inline_u32(16),
+                                     .src1 = vector_source_vgpr(8),
+                                     .src2 = scalar_positive_inline_u32(0)});
   EXPECT_EQ((*cell_offset)[0], expected_offset_low[0]);
   EXPECT_EQ((*cell_offset)[1], expected_offset_low[1]);
   EXPECT_EQ((*cell_offset)[2], build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250));
