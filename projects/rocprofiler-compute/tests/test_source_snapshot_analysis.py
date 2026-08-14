@@ -4,14 +4,33 @@
 """Unit tests for pc_sampling.source_snapshot_analysis."""
 
 import hashlib
+import os
+from pathlib import Path
+from typing import Optional
 
+import common
 import pytest
 
+from pc_sampling import source_snapshot_analysis
 from pc_sampling.source_snapshot_analysis import (
+    WorkloadSourceSnapshot,
     parse_source_frames,
     read_source_file_digest_and_lines,
+    resolve_export_path,
     resolve_snapshot_path,
 )
+
+
+def create_source_snapshot(
+    source_snapshot_directory: Path,
+    original_source_path: Path,
+    contents: bytes = b"",
+) -> Path:
+    """Create and return a snapshot file for an absolute source path."""
+    snapshot_path = source_snapshot_directory / original_source_path.relative_to("/")
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_bytes(contents)
+    return snapshot_path
 
 
 @pytest.mark.parametrize(
@@ -89,3 +108,200 @@ def test_read_source_file_digest_and_lines_replaces_undecodable_bytes(tmp_path):
     # The digest covers the raw bytes, so it still identifies the file version.
     assert digest == hashlib.md5(b"caf\xe9\n").hexdigest()
     assert lines == {1: "caf\ufffd"}
+
+
+def make_workload_source_snapshot(
+    workload_path: Path,
+    snapshot_contents_by_absolute_path: dict[str, bytes],
+    exported_absolute_paths: Optional[tuple[str, ...]] = None,
+) -> WorkloadSourceSnapshot:
+    """Populate a workload's snapshot and describe what to export from it."""
+    for absolute_path, contents in snapshot_contents_by_absolute_path.items():
+        create_source_snapshot(workload_path / "src", Path(absolute_path), contents)
+
+    if exported_absolute_paths is None:
+        exported_absolute_paths = tuple(snapshot_contents_by_absolute_path)
+    return WorkloadSourceSnapshot(
+        workload_path=workload_path,
+        workload_name=workload_path.parent.name,
+        workload_sub_name=workload_path.name,
+        absolute_source_paths=exported_absolute_paths,
+    )
+
+
+def test_resolve_export_path_mirrors_absolute_path(tmp_path):
+    """An exported file keeps the absolute path the database records for it."""
+    assert resolve_export_path(tmp_path, "/home/u/app/vcopy.cpp") == (
+        tmp_path / "home" / "u" / "app" / "vcopy.cpp"
+    )
+
+
+@pytest.mark.parametrize(
+    ("snapshot_contents_by_absolute_path", "expected_exported_files"),
+    [
+        pytest.param(
+            {"/home/u/app/kernel.cpp": b"kernel source\n"},
+            {Path("home/u/app/kernel.cpp"): b"kernel source\n"},
+            id="single_file",
+        ),
+        pytest.param(
+            {
+                "/home/u/app/src/kernel.cpp": b"kernel source\n",
+                "/home/u/app/include/kernel.hpp": b"header source\n",
+            },
+            {
+                Path("home/u/app/src/kernel.cpp"): b"kernel source\n",
+                Path("home/u/app/include/kernel.hpp"): b"header source\n",
+            },
+            id="shared_ancestor_is_not_stripped",
+        ),
+        pytest.param(
+            {
+                "/home/u/app/kernel.cpp": b"kernel source\n",
+                "/opt/rocm/include/runtime.hpp": b"runtime header\n",
+            },
+            {
+                Path("home/u/app/kernel.cpp"): b"kernel source\n",
+                Path("opt/rocm/include/runtime.hpp"): b"runtime header\n",
+            },
+            id="unrelated_roots",
+        ),
+    ],
+)
+def test_export_source_snapshot_files_mirrors_absolute_paths(
+    tmp_path,
+    snapshot_contents_by_absolute_path,
+    expected_exported_files,
+):
+    """Lay every export out under the absolute path recorded for the file.
+
+    Adding a file must not move the others, so the layout cannot depend on
+    what the workload as a whole happens to reference.
+    """
+    workload_source_snapshot = make_workload_source_snapshot(
+        tmp_path / "vector_copy" / "MI300X_A1",
+        snapshot_contents_by_absolute_path,
+    )
+    csv_result_directory = tmp_path / "csv_result"
+
+    source_snapshot_analysis.export_source_snapshot_files(
+        workload_source_snapshots=[workload_source_snapshot],
+        csv_result_directory=csv_result_directory,
+    )
+
+    workload_export_directory = (
+        csv_result_directory / "source" / "vector_copy" / "MI300X_A1"
+    )
+    assert (
+        common.read_binary_file_tree(workload_export_directory)
+        == expected_exported_files
+    )
+
+
+def test_export_source_snapshot_files_copies_only_referenced_paths(tmp_path):
+    """Leave a snapshot file no source row names out of the export."""
+    workload_source_snapshot = make_workload_source_snapshot(
+        tmp_path / "vector_copy" / "MI300X_A1",
+        {
+            "/home/u/app/kernel.cpp": b"kernel source\n",
+            "/home/u/app/unreferenced.cpp": b"unreferenced source\n",
+        },
+        exported_absolute_paths=("/home/u/app/kernel.cpp",),
+    )
+    csv_result_directory = tmp_path / "csv_result"
+
+    source_snapshot_analysis.export_source_snapshot_files(
+        workload_source_snapshots=[workload_source_snapshot],
+        csv_result_directory=csv_result_directory,
+    )
+
+    workload_export_directory = (
+        csv_result_directory / "source" / "vector_copy" / "MI300X_A1"
+    )
+    assert common.read_binary_file_tree(workload_export_directory) == {
+        Path("home/u/app/kernel.cpp"): b"kernel source\n"
+    }
+
+
+def test_export_source_snapshot_files_keeps_workloads_apart(tmp_path):
+    """Two workloads holding the same absolute path each keep their own copy."""
+    workload_source_snapshots = [
+        make_workload_source_snapshot(
+            tmp_path / workload_name / "MI300X_A1",
+            {"/home/u/app/kernel.cpp": contents},
+        )
+        for workload_name, contents in (
+            ("first_workload", b"first source\n"),
+            ("second_workload", b"second source\n"),
+        )
+    ]
+    csv_result_directory = tmp_path / "csv_result"
+
+    source_snapshot_analysis.export_source_snapshot_files(
+        workload_source_snapshots=workload_source_snapshots,
+        csv_result_directory=csv_result_directory,
+    )
+
+    assert common.read_binary_file_tree(csv_result_directory / "source") == {
+        Path("first_workload/MI300X_A1/home/u/app/kernel.cpp"): b"first source\n",
+        Path("second_workload/MI300X_A1/home/u/app/kernel.cpp"): b"second source\n",
+    }
+
+
+def test_export_source_snapshot_files_is_quiet_for_workload_without_sources(
+    tmp_path,
+    monkeypatch,
+):
+    """A workload with no source rows exports nothing and warns about nothing.
+
+    Every workload profiled without PC sampling lands here, so it is the
+    ordinary case rather than one worth reporting.
+    """
+    warning_messages = []
+    monkeypatch.setattr(
+        source_snapshot_analysis,
+        "console_warning",
+        warning_messages.append,
+        raising=False,
+    )
+    workload_source_snapshot = make_workload_source_snapshot(
+        tmp_path / "vector_copy" / "MI300X_A1",
+        {},
+    )
+    csv_result_directory = tmp_path / "csv_result"
+
+    source_snapshot_analysis.export_source_snapshot_files(
+        workload_source_snapshots=[workload_source_snapshot],
+        csv_result_directory=csv_result_directory,
+    )
+
+    assert warning_messages == []
+    assert not (csv_result_directory / "source").exists()
+
+
+def test_export_source_snapshot_files_leaves_exports_writable(tmp_path):
+    """A read-only snapshot file must not export a read-only copy.
+
+    Preserving the mode would make a rerun into the same folder fail for a
+    user who cannot overwrite their own export.
+    """
+    workload_path = tmp_path / "vector_copy" / "MI300X_A1"
+    workload_source_snapshot = make_workload_source_snapshot(
+        workload_path,
+        {"/home/u/app/kernel.cpp": b"kernel source\n"},
+    )
+    snapshot_path = resolve_snapshot_path(workload_path, "/home/u/app/kernel.cpp")
+    snapshot_path.chmod(0o444)
+    csv_result_directory = tmp_path / "csv_result"
+
+    source_snapshot_analysis.export_source_snapshot_files(
+        workload_source_snapshots=[workload_source_snapshot],
+        csv_result_directory=csv_result_directory,
+    )
+
+    exported_path = resolve_export_path(
+        csv_result_directory / "source" / "vector_copy" / "MI300X_A1",
+        "/home/u/app/kernel.cpp",
+    )
+    assert exported_path.read_bytes() == b"kernel source\n"
+    assert os.access(exported_path, os.W_OK)

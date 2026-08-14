@@ -291,6 +291,7 @@ class OmniAnalyze_Base:
 
         # ensure absolute path
         seen_paths: set[str] = set()
+        seen_workload_names: set[tuple[str, ...]] = set()
         for dir_info in args.path:
             full_path = Path(dir_info[0]).absolute().resolve()
             dir_info[0] = str(full_path)
@@ -304,6 +305,17 @@ class OmniAnalyze_Base:
             if dir_info[0] in seen_paths:
                 console_error("analysis", "You cannot provide the same path twice.")
             seen_paths.add(dir_info[0])
+
+            # The pair names the workload's row and its source export folder.
+            workload_name = full_path.parts[-2:]
+            if workload_name in seen_workload_names:
+                console_error(
+                    "analysis",
+                    f"{full_path} reuses the workload name "
+                    f"{'/'.join(workload_name)}. Paths must differ in their "
+                    "last two components.",
+                )
+            seen_workload_names.add(workload_name)
 
         self._profiling_config: dict[str, Any] = file_io.load_profiling_config(
             args.path[0][0]
