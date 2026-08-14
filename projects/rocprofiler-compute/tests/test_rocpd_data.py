@@ -19,11 +19,7 @@ from utils.utils_analysis import (
     process_ml_api_trace_output,
     write_ml_api_trace_consolidated_csv,
 )
-from utils.utils_profile import (
-    _augment_marker_csv,
-    _parse_function_backend,
-    save_ml_api_trace_inputs,
-)
+from utils.utils_profile import save_ml_api_trace_inputs
 
 GUID = "abc-1234-def"
 
@@ -450,110 +446,6 @@ def test_ml_api_trace_output_same_for_rocpd_and_csv():
 
 
 # ---- Backend column unpacking in save_ml_api_trace_inputs ----
-
-
-def test_parse_function_backend_untagged_is_unknown():
-    """Untagged rows surface as Backend='unknown'."""
-    clean, backend = _parse_function_backend("torch.empty:#1@linear.py:109")
-    assert clean == "torch.empty:#1@linear.py:109"
-    assert backend == "unknown"
-
-
-def test_parse_function_backend_tagged_torch_is_stripped():
-    """Tagged single-frame markers expose backend and lose the suffix."""
-    clean, backend = _parse_function_backend(
-        "nn.Module.MyModel.forward:#1@train.py:42|torch"
-    )
-    assert clean == "nn.Module.MyModel.forward:#1@train.py:42"
-    assert backend == "torch"
-
-
-def test_parse_function_backend_tagged_triton_leaf():
-    """Row-level suffix attributes the entire wire to its producing backend."""
-    clean, backend = _parse_function_backend(
-        "torch.compile.fn/triton.CompiledKernel.foo:#1@a.py:1/#1@b.py:2|triton"
-    )
-    assert clean == ("torch.compile.fn/triton.CompiledKernel.foo:#1@a.py:1/#1@b.py:2")
-    assert backend == "triton"
-
-
-def test_parse_function_backend_aten_leaf_is_unknown():
-    """Untagged ATen leaf surfaces as Backend='unknown'."""
-    clean, backend = _parse_function_backend(
-        "nn.Module.X.forward/aten::add:#1@m.py:9/#1@aten:0"
-    )
-    assert clean == "nn.Module.X.forward/aten::add:#1@m.py:9/#1@aten:0"
-    assert backend == "unknown"
-
-
-def test_parse_function_backend_edge_cases():
-    """Bogus suffix, empty string, and None all fall back to 'unknown'."""
-    assert _parse_function_backend("op|bogus") == ("op|bogus", "unknown")
-    assert _parse_function_backend("") == ("", "unknown")
-    assert _parse_function_backend(None) == ("", "unknown")
-
-
-def test_augment_marker_csv_untagged_row_warns(tmp_path, monkeypatch):
-    """Untagged rows are tagged 'unknown' and emit a warning."""
-    from utils import utils_profile
-
-    src = tmp_path / "src_marker_api_trace.csv"
-    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv"
-    pd.DataFrame({"Function": ["aten::sum"]}).to_csv(src, index=False)
-
-    warnings: list[tuple] = []
-    monkeypatch.setattr(utils_profile, "console_warning", lambda *a: warnings.append(a))
-
-    _augment_marker_csv(str(src), str(dst))
-
-    out_df = pd.read_csv(dst)
-    assert out_df["Function"].tolist() == ["aten::sum"]
-    assert out_df["Backend"].tolist() == ["unknown"]
-    assert warnings, "untagged rows must emit a warning"
-    assert any("unknown" in str(a) for a in warnings[0])
-
-
-def test_augment_marker_csv_adds_backend_column(tmp_path):
-    """End-to-end: tagged + untagged rows survive copy; Backend is populated."""
-    src = tmp_path / "src_marker_api_trace.csv"
-    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv"
-
-    src_df = pd.DataFrame({
-        "Domain": ["MARKER_CORE_RANGE_API"] * 3,
-        "Function": [
-            "nn.Module.X.forward:#1@a.py:1|torch",
-            "triton.CompiledKernel.k:#1@b.py:2|triton",
-            "torch.empty:#1@c.py:3",
-        ],
-        "Correlation_Id": [1, 2, 3],
-        "Start_Timestamp": [100, 200, 300],
-        "End_Timestamp": [150, 250, 350],
-    })
-    src_df.to_csv(src, index=False)
-
-    _augment_marker_csv(str(src), str(dst))
-
-    out_df = pd.read_csv(dst)
-    assert "Backend" in out_df.columns
-    assert out_df["Backend"].tolist() == ["torch", "triton", "unknown"]
-    assert out_df["Function"].tolist() == [
-        "nn.Module.X.forward:#1@a.py:1",
-        "triton.CompiledKernel.k:#1@b.py:2",
-        "torch.empty:#1@c.py:3",
-    ]
-    for col in ("Domain", "Correlation_Id", "Start_Timestamp", "End_Timestamp"):
-        assert col in out_df.columns
-
-
-def test_augment_marker_csv_handles_unknown_schema(tmp_path):
-    """A CSV without a Function column copies verbatim instead of corrupting."""
-    src = tmp_path / "src.csv"
-    dst = tmp_path / "dst.csv"
-    src.write_text("Foo,Bar\n1,2\n3,4\n", encoding="utf-8")
-
-    _augment_marker_csv(str(src), str(dst))
-
-    assert dst.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
 
 
 def test_process_ml_api_trace_output_defaults_backend_for_untagged(tmp_path):

@@ -12,13 +12,43 @@ import pytest
 
 from utils.tty import (
     convert_time_columns,
+    format_duration,
+    format_node_stats,
     format_table_output,
     has_time_data,
+    print_operator_node,
     show_all,
+    show_call_tree,
+    show_operator_summary,
+)
+from utils.utils_analysis import (
+    CallTreeNode,
+    KernelStats,
+    build_call_trees,
+    build_operator_summary,
 )
 from utils.utils_common import is_gfx115x
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
+
+_OPERATOR_SUMMARY_COLUMNS = [
+    "Operator",
+    "Location",
+    "Calls",
+    "Dispatches",
+    "Dispatches_Per_Call",
+    "Total_GPU",
+    "Pct_Total_GPU",
+    "Mean_Per_Call",
+    "Mean_Per_Dispatch",
+    "Min_Dispatch",
+    "Max_Dispatch",
+]
+
+
+def _build_summary_from_dataframe(rows):
+    call_trees = build_call_trees(pd.DataFrame(rows))
+    return build_operator_summary(call_trees)
 
 
 def make_args() -> argparse.Namespace:
@@ -429,3 +459,195 @@ def test_format_table_output_dispatches_memory_chart_renderer(
         else "rendered CDNA memory chart"
     )
     assert content == f"{return_value}\n"
+
+
+def test_format_duration_microseconds_below_threshold():
+    assert format_duration(0.005) == "5.00 us"
+
+
+def test_format_duration_milliseconds_above_threshold():
+    assert format_duration(1.5) == "1.50 ms"
+
+
+def test_format_duration_boundary_value_is_milliseconds():
+    assert format_duration(0.01) == "0.01 ms"
+
+
+def test_format_duration_none_renders_na():
+    assert format_duration(None) == "N/A"
+
+
+def test_format_duration_nan_renders_na():
+    assert format_duration(float("nan")) == "N/A"
+
+
+def test_format_node_stats_omits_calls_when_no_invocation_ids():
+    node = CallTreeNode(name="x")
+    node.kernel_launches = 1
+    node.total_duration_ms = 1.0
+    node.mean_dispatch_ns = 1_000_000.0
+    node.min_dispatch_ns = 1_000_000.0
+    node.max_dispatch_ns = 1_000_000.0
+    rendered = format_node_stats(node)
+    assert "calls:" not in rendered
+    assert "dispatches: 1" in rendered
+    assert "total: 1.00 ms" in rendered
+
+
+def test_format_node_stats_includes_calls_when_invocation_ids_present():
+    node = CallTreeNode(name="x")
+    node.invocation_ids.add("ctx1")
+    node.invocation_ids.add("ctx2")
+    node.kernel_launches = 4
+    node.total_duration_ms = 2.0
+    node.mean_dispatch_ns = 500_000.0
+    node.min_dispatch_ns = 500_000.0
+    node.max_dispatch_ns = 500_000.0
+    rendered = format_node_stats(node)
+    assert "calls: 2" in rendered
+    assert "dispatches: 4" in rendered
+
+
+def test_format_node_stats_renders_na_when_dispatch_stats_missing():
+    node = CallTreeNode(name="x")
+    node.kernel_launches = 0
+    rendered = format_node_stats(node)
+    assert "dispatch_mean: N/A" in rendered
+    assert "dispatch_min: N/A" in rendered
+    assert "dispatch_max: N/A" in rendered
+
+
+def test_show_call_tree_prints_location_and_stats(capsys):
+    root = CallTreeNode(name="main.py:10")
+    root.kernel_launches = 1
+    root.total_duration_ms = 0.5
+    child = CallTreeNode(name="op_a")
+    child.kernel_launches = 1
+    child.total_duration_ms = 0.5
+    child.kernels["kern"] = KernelStats(launches=1, total_duration_ns=500_000.0)
+    root.children["op_a"] = child
+    show_call_tree({"main.py:10": root})
+    output = capsys.readouterr().out
+    assert "main.py:10" in output
+    assert "dispatches: 1" in output
+    assert "kern" in output
+
+
+def test_show_call_tree_sorted_by_duration(capsys):
+    root_a = CallTreeNode(name="a.py:1")
+    root_a.total_duration_ms = 10.0
+    root_a.kernel_launches = 1
+    root_b = CallTreeNode(name="b.py:1")
+    root_b.total_duration_ms = 20.0
+    root_b.kernel_launches = 2
+    show_call_tree({"a.py:1": root_a, "b.py:1": root_b})
+    output = capsys.readouterr().out
+    assert output.index("b.py:1") < output.index("a.py:1")
+
+
+def test_show_call_tree_kernel_id_printed(capsys):
+    root = CallTreeNode(name="f.py:1")
+    root.kernel_launches = 1
+    root.total_duration_ms = 1.0
+    child = CallTreeNode(name="op")
+    child.kernel_launches = 1
+    child.total_duration_ms = 1.0
+    child.kernels["kern_x"] = KernelStats(
+        launches=1, total_duration_ns=1_000_000.0, kernel_id=42
+    )
+    root.children["op"] = child
+    show_call_tree({"f.py:1": root})
+    output = capsys.readouterr().out
+    assert "(id 42)" in output
+
+
+def test_print_operator_node_branching_shows_stats(capsys):
+    node = CallTreeNode(name="branch")
+    node.kernel_launches = 2
+    node.total_duration_ms = 5.0
+    node.kernels["k1"] = KernelStats(launches=1, total_duration_ns=2_500_000.0)
+    node.kernels["k2"] = KernelStats(launches=1, total_duration_ns=2_500_000.0)
+    print_operator_node(node)
+    output = capsys.readouterr().out
+    assert "dispatches: 2" in output
+    assert "k1" in output
+    assert "k2" in output
+
+
+def test_print_operator_node_non_branching_omits_stats(capsys):
+    node = CallTreeNode(name="single")
+    node.kernel_launches = 1
+    node.total_duration_ms = 1.0
+    node.kernels["k1"] = KernelStats(launches=1, total_duration_ns=1_000_000.0)
+    print_operator_node(node)
+    output = capsys.readouterr().out
+    lines = output.strip().split("\n")
+    assert "└─ single" in lines[0]
+    assert "dispatches" not in lines[0]
+
+
+def test_print_operator_node_long_kernel_wraps(capsys):
+    node = CallTreeNode(name="single")
+    node.kernel_launches = 1
+    node.total_duration_ms = 1.0
+    long_kernel_name = "K" * 220
+    node.kernels[long_kernel_name] = KernelStats(
+        launches=1,
+        total_duration_ns=1_000_000.0,
+        kernel_id=7,
+    )
+    print_operator_node(node)
+    output_lines = capsys.readouterr().out.splitlines()
+    assert any("└─ single" in line for line in output_lines)
+    kernel_lines = [
+        line for line in output_lines if "(id 7)" in line or line.startswith("   ")
+    ]
+    assert any(line.startswith("   └─ ") for line in kernel_lines)
+    wrapped_kernel_lines = [
+        line
+        for line in kernel_lines
+        if line.startswith("   ") and not line.startswith("   └─ ")
+    ]
+    assert wrapped_kernel_lines
+    assert not any(line.strip().startswith("(id 7)") for line in output_lines)
+
+
+# ---------------------------------------------------------------------------
+# show_operator_summary
+# ---------------------------------------------------------------------------
+
+
+def test_show_operator_summary_empty_prints_no_dispatches_message(capsys):
+    show_operator_summary(pd.DataFrame(columns=_OPERATOR_SUMMARY_COLUMNS))
+    output = capsys.readouterr().out
+    assert "no operators with recorded dispatches" in output
+
+
+def test_show_operator_summary_renders_per_cell_unit_suffix(capsys):
+    summary = _build_summary_from_dataframe([
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 2_000_000,
+        }
+    ])
+    show_operator_summary(summary)
+    output = capsys.readouterr().out
+    assert "ms" in output or "us" in output
+    assert "Operator" in output
+    assert "Total" in output
+
+
+def test_show_operator_summary_renders_na_for_nan_cells(capsys):
+    root = CallTreeNode(name="f.py:1")
+    op = CallTreeNode(name="op")
+    op.kernel_launches = 1
+    op.total_duration_ms = 0.0
+    op.invocation_ids.add("ctx")
+    root.children["op"] = op
+    summary = build_operator_summary({"f.py:1": root})
+    show_operator_summary(summary)
+    output = capsys.readouterr().out
+    assert "N/A" in output
