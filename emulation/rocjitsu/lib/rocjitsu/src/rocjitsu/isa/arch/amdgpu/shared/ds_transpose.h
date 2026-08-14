@@ -12,7 +12,9 @@
 /// matrix instructions.
 ///
 /// TR_B8 uses byte-level transpose with groups of 4 consecutive lanes.
-/// TR_B16 transposes 16-bit elements within groups of 8 consecutive lanes.
+/// TR_B16 on a wave64 B64 load (CDNA4 ds_read_b64_tr_b16) is a 4x16-lane
+/// halfword transpose with stride-4 source lanes; other TR_B16 loads
+/// transpose 16-bit elements within groups of 8 consecutive lanes.
 
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 
@@ -71,8 +73,13 @@ inline void transpose_b64(std::vector<uint8_t> &response_data, uint32_t num_elem
 
 /// @brief TR_B16: 16-bit element transpose.
 ///
-/// Groups of 8 source lanes, each reading 8 halfwords. Destination lane
-/// `group_start + halfword_index` receives that halfword from each source lane.
+/// Wave64 B64 (CDNA4 ds_read_b64_tr_b16): 4x16-lane halfword transpose within
+/// each 16-lane group. Destination lane `l` halfword `n` comes from source lane
+/// `((l & ~0xf) | ((l >> 2) & 3)) + 4 * n`, halfword `l & 3`.
+///
+/// Otherwise (B128): groups of 8 source lanes, each reading 8 halfwords.
+/// Destination lane `group_start + halfword_index` receives that halfword from
+/// each source lane.
 inline void transpose_b16(std::vector<uint8_t> &response_data, uint32_t num_elems,
                           uint32_t wf_size) {
   constexpr uint32_t lanes_per_half = 32;
@@ -83,6 +90,25 @@ inline void transpose_b16(std::vector<uint8_t> &response_data, uint32_t num_elem
   const uint32_t num_halves = (wf_size > lanes_per_half) ? 2u : 1u;
 
   std::vector<uint8_t> output(response_data.size(), 0);
+
+  if (halfwords_per_source_lane == 4 && wf_size == 64) {
+    for (uint32_t dest_lane = 0; dest_lane < wf_size; ++dest_lane) {
+      const uint32_t source_halfword = dest_lane & 3;
+      const uint32_t source_base = (dest_lane & ~0xfu) | ((dest_lane >> 2) & 3);
+      for (uint32_t halfword_index = 0; halfword_index < halfwords_per_source_lane;
+           ++halfword_index) {
+        const uint32_t source_lane = source_base + 4 * halfword_index;
+        const uint32_t source_offset = source_lane * bytes_per_lane_total + source_halfword * 2;
+        const uint32_t dest_offset = dest_lane * bytes_per_lane_total + halfword_index * 2;
+
+        if (source_offset + 2 <= response_data.size() && dest_offset + 2 <= output.size())
+          std::memcpy(&output[dest_offset], &response_data[source_offset], 2);
+      }
+    }
+
+    response_data = std::move(output);
+    return;
+  }
 
   for (uint32_t half_index = 0; half_index < num_halves; ++half_index) {
     const uint32_t lane_base = half_index * lanes_per_half;
