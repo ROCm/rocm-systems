@@ -177,125 +177,32 @@ Discover, inspect, and apply a preset as follows:
 Available presets
 --------------------
 
-Each built-in preset enables a different combination of tracing, profiling, sampling, and domains, tuned for a specific workload scenario. Presets are grouped below by category.
-
-General
-~~~~~~~
-
-General-purpose presets suited to most profiling scenarios:
+Each built-in preset enables a different combination of tracing, profiling, sampling, and domains, tuned for a specific workload scenario:
 
 .. list-table::
    :header-rows: 1
-   :widths: 15 30 10 12 15 18
+   :widths: 18 22 40 20
 
-   * - Preset
+   * - Category
+     - Presets
      - Best for
-     - Tracing
-     - Profiling
-     - Sampling
-     - Notable domains
-   * - ``balanced``
-     - General-purpose profiling needing both tracing and sampling
-     - ON
-     - ON
-     - CPU @ 50 Hz
-     - GPU metrics
-     - OFF
-     - —
-   * - ``detailed``
-     - Deep analysis with full system visibility
-     - ON
-     - ON
-     - CPU (all)
-     - GPU metrics
-
-GPU
-~~~
-Presets focused on GPU workloads, device metrics, and kernel tracing:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 15 30 10 12 15 18
-
-   * - Preset
-     - Best for
-     - Tracing
-     - Profiling
-     - Sampling
-     - Notable domains
-   * - ``trace-gpu``
-     - OFF
-     - ROCm, GPU metrics
-   * - ``workload-trace``
-     - AI/ML training, GPU-accelerated HPC, long-running GPU workloads
-     - ON (2 GB buffer)
-     - ON
-     - OFF
-     - MPI, RCCL, ROCm, GPU, rocpd output
-     - OFF
-     - VALUUtilization, Occupancy
-
-HPC
-~~~
-
-Presets tuned for MPI, OpenMP, and other HPC workloads:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 15 30 10 12 15 18
-
-   * - Preset
-     - Best for
-     - Tracing
-     - Profiling
-     - Sampling
-     - Notable domains
-   * - ``trace-hpc``
-     - MPI/OpenMP/HPC applications with hardware counter collection
-     - ON
-     - ON
-     - OFF
-     - MPI, OpenMP, Kokkos, RCCL, PAPI, ROCm, GPU
-   * - ``trace-openmp``
-     - OpenMP applications using target directives on AMD GPUs
-     - ON
-     - OFF
-     - OFF
-     - OpenMP, ROCm
-   * - ``profile-mpi``
-     - Analyzing MPI communication patterns and latency across ranks
-     - OFF
-     - ON (flat)
-     - OFF
-     - MPI only (no GPU)
-
-Tracing
-~~~~~~~
-
-Presets focused on full system API tracing:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 15 30 10 12 15 18
-
-   * - Preset
-     - Best for
-     - Tracing
-     - Profiling
-     - Sampling
-     - Notable domains
-   * - ``sys-trace``
-     - Full system API visibility for debugging runtime-layer interactions
-     - ON
-     - ON
-     - OFF
-     - HIP, HSA, ROCTx, RCCL
-   * - ``runtime-trace``
-     - Runtime-level API tracing without low-level HSA/compiler internals
-     - ON
-     - ON
-     - OFF
-     - HIP runtime (no compiler/HSA internals)
+     - See also
+   * - General
+     - ``balanced``, ``profile-only``, ``detailed``
+     - Most profiling scenarios; minimal-overhead production profiling; in-depth full-system analysis
+     - :ref:`using-preset-profiles-general`
+   * - GPU and workload
+     - ``trace-gpu``, ``workload-trace``, ``trace-hw-counters``
+     - GPU device activity; AI/ML, HPC, and GPU-accelerated training; hardware counter collection
+     - :ref:`using-preset-profiles-gpu-workload`
+   * - HPC
+     - ``trace-hpc``, ``trace-openmp``, ``profile-mpi``
+     - MPI/OpenMP/Kokkos applications; OpenMP target offload; MPI communication latency analysis
+     - :ref:`using-preset-profiles-hpc`
+   * - API tracing
+     - ``sys-trace``, ``runtime-trace``
+     - Full system API visibility; runtime-only API tracing
+     - :ref:`using-preset-profiles-api-tracing`
 
 For the exact configuration behind a preset, run ``rocprof-sys-run --explain=<name>``. For domain flags, configuration export, and custom presets, see :doc:`../how-to/using-preset-profiles`.
 
