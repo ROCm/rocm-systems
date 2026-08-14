@@ -1607,21 +1607,43 @@ TEST_F(NetSocketTests, TestIflushAlwaysFails) {
 
 // AICOMRCCL-1894: the libvirt bridge interface must be considered LAST in the
 // bootstrap TCP interface auto-selection. libvirt names its default network
-// bridge virbr0 (virbr1, ...); such bridges relay host<->container traffic and
-// cannot reach a remote node, so ncclFindInterfaces() must (a) exclude virbr*
-// from the general candidate set and (b) never auto-pick a virbr* interface
-// while any other interface exists. This mirrors upstream NVIDIA/nccl
-// src/misc/socket.cc (the "^docker,lo,virbr" primary pick, with "virbr" only as
-// the final fallback after docker and lo). Deterministic and GPU-free: it only
-// enumerates the host's interfaces via the socket layer's own matcher.
+// bridge virbr0 (virbr1, ...); such bridges serve host-to-VM (virtual machine)
+// traffic and cannot reach a remote node, so ncclFindInterfaces() must (a)
+// exclude virbr* from the general candidate set and (b) never auto-pick a
+// virbr* interface while any other interface exists (see the "^docker,lo,virbr"
+// primary pick and the "virbr" final fallback in src/misc/socket.cc).
+// Deterministic and GPU-free: it only enumerates the host's interfaces via the
+// socket layer's own matcher.
 TEST(NetBootstrapInterfaceTest, VirbrConsideredLast) {
   constexpr int kMaxIfs = 16;
   constexpr int kNameSz = MAX_IF_NAME_SIZE;
-  const int family = ncclEnvSocketFamily();
 
-  // The auto-selection path must not be pinned to a user-forced interface.
-  unsetenv("NCCL_SOCKET_IFNAME");
-  unsetenv("NCCL_COMM_ID");
+  // Save/restore the process-global env this test touches so we neither pin the
+  // auto-selection path to a user-forced interface/family nor leak state into
+  // other tests in the same binary.
+  struct EnvGuard {
+    const char* name;
+    std::string saved;
+    bool had;
+    explicit EnvGuard(const char* n) : name(n) {
+      const char* v = getenv(n);
+      had = (v != nullptr);
+      if (had) saved = v;
+      unsetenv(n);
+    }
+    ~EnvGuard() {
+      if (had) setenv(name, saved.c_str(), 1);
+      else unsetenv(name);
+    }
+  };
+  EnvGuard guardIfname("NCCL_SOCKET_IFNAME");
+  EnvGuard guardCommId("NCCL_COMM_ID");
+  EnvGuard guardFamily("NCCL_SOCKET_FAMILY");
+
+  // Resolve the socket family only after NCCL_SOCKET_FAMILY has been cleared, so
+  // the probes are not forced to IPv6 -- which can legitimately return zero
+  // interfaces on an IPv4-only host and make this test flaky.
+  const int family = ncclEnvSocketFamily();
 
   auto nameAt = [](const char* names, int i) {
     return std::string(names + static_cast<size_t>(i) * kNameSz);
