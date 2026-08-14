@@ -126,23 +126,33 @@ agent_replay_mutex(rocprofiler_agent_id_t agent_id)
     return *mtx;
 }
 
+template <typename TryDrainFn>
+void
+replay_wait_or_fatal(TryDrainFn&& try_drain_once, std::string_view what)
+{
+    static constexpr int drain_slices = 5;
+    static constexpr int max_slices   = 12;
+
+    for(int i = 0; i < max_slices; ++i)
+    {
+        if(try_drain_once()) return;
+        ROCP_WARNING << fmt::format(
+            "kernel replay: still waiting for {} (~{}s elapsed)", what, (i + 1) * drain_slices);
+    }
+    ROCP_FATAL << fmt::format(
+        "kernel replay: {} did not drain after ~{}s", what, max_slices * drain_slices);
+}
+
 // Drain a queue's in-flight async completion handler(s) during replay. Unlike Queue::sync()'s
 // teardown use (warn once and proceed), a replay pass must NOT proceed while a handler is still
 // running: PASS-EXIT, the tool's continue-decision, restore(), and the next submit would race the
 // handler that is still emitting records, releasing signals, and dropping correlation-id refs.
-// sync() blocks up to one ~5s slice and reports whether the queue drained. Loop to extend the
-// bound to ~12 slices (~60s) with progress logs, then abort loudly (beta feature) rather than
-// hang forever or silently proceed on a genuinely stuck handler.
+// Each sync() call blocks up to one ~5s slice and reports whether the queue drained.
 void
 replay_drain_or_fatal(const Queue& queue)
 {
-    constexpr int kMaxSlices = 12;
-    for(int i = 0; i < kMaxSlices; ++i)
-        if(queue.sync()) return;
-    ROCP_FATAL << fmt::format(
-        "kernel replay: async completion handler(s) failed to drain ({} still active after ~{}s)",
-        queue.active_async_packets(),
-        kMaxSlices * 5);
+    replay_wait_or_fatal([&]() { return queue.sync(); },
+                         "this queue's async completion handler(s)");
 }
 
 // Drain every queue on `agent` before snapshotting, WITHOUT holding the queue-map lock across the
@@ -1021,11 +1031,22 @@ WriteInterceptor(const void* packets,
             hsa_signal_t drain_signal = null_hsa_signal;
             Queue::create_signal(0, &drain_signal, /*use_pool=*/false);
             {
+                using namespace std::chrono_literals;
+
                 auto drain_pkts = packet_vector_t{};
                 CreateBarrierPacket(nullptr, &drain_signal, drain_pkts);
                 writer(drain_pkts.data(), drain_pkts.size());
-                core.hsa_signal_wait_scacquire_fn(
-                    drain_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+                replay_wait_or_fatal(
+                    [&]() {
+                        return core.hsa_signal_wait_scacquire_fn(
+                                   drain_signal,
+                                   HSA_SIGNAL_CONDITION_EQ,
+                                   0,
+                                   std::chrono::nanoseconds{5s}.count(),
+                                   HSA_WAIT_STATE_BLOCKED) == 0;
+                    },
+                    "this queue's prior GPU work");
             }
 
             // Agent-wide drain. Sibling queues on this agent can have kernels in flight that mutate
@@ -1429,12 +1450,15 @@ Queue::destroy_signal(pooled_signal_t* signal)
 bool
 Queue::sync() const
 {
+    using namespace std::chrono_literals;
+
     if(_active_kernels.handle == 0u) return true;
 
-    constexpr auto timeout_hint =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{5});
-    auto _value = _core_api.hsa_signal_wait_relaxed_fn(
-        _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, timeout_hint.count(), HSA_WAIT_STATE_BLOCKED);
+    const auto _value = _core_api.hsa_signal_wait_relaxed_fn(_active_kernels,
+                                                             HSA_SIGNAL_CONDITION_EQ,
+                                                             0,
+                                                             std::chrono::nanoseconds{5s}.count(),
+                                                             HSA_WAIT_STATE_BLOCKED);
 
     ROCP_WARNING_IF(_value != 0) << fmt::format(
         "Timeout while waiting for queue sync: {} kernels still active", _value);
