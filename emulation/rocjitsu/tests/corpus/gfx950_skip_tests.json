@@ -17,6 +17,9 @@
     "kernels.gfx950.rocblas.rocblas_sgemm.large_2048x2048"
   ],
   "llama": [
+    "llama.gfx950.backend_ops.FLASH_ATTN_EXT.2b8c93acdf59",
+    "llama.gfx950.backend_ops.FLASH_ATTN_EXT.da5c646e799e",
+    "llama.gfx950.backend_ops.FLASH_ATTN_EXT.e024795e26c2",
     "llama.gfx950.backend_ops.LIGHTNING_INDEXER.28d7def07117",
     "llama.gfx950.backend_ops.MUL_MAT.462ccb738b08",
     "llama.gfx950.backend_ops.MUL_MAT.5a436936375c",

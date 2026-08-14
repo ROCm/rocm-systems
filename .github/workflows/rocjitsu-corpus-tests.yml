@@ -335,7 +335,8 @@ jobs:
         run: |
 
           python3 \
-            "${ROCJITSU_CORPUS_SUPPORT_DIR}/validate-gfx-corpus-skip-tests.py"
+            "${ROCJITSU_CORPUS_SUPPORT_DIR}/validate-gfx-corpus-skip-tests.py" \
+            --corpus-directory "${ROCJITSU_CORPUS_DIR}"
 
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
@@ -358,6 +359,22 @@ jobs:
           )
           bash "${ROCJITSU_CORPUS_SUPPORT_DIR}/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
           exit "${corpus_test_status}"
+
+      - name: Upload corpus test diagnostics
+        if: ${{ always() && matrix.name == 'release' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: corpus-test-diagnostics-${{ matrix.name }}
+          path: |
+            ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx942
+            ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx950
+            ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx1100
+            ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx1201
+            ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/gfx1250
+            ${{ env.ROCJITSU_CORPUS_DIR }}/.pytest-artifacts/junit
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Compare plain and translated gfx1250 simulator runs
         if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}

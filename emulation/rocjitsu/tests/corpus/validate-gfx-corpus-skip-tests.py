@@ -3,24 +3,30 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Check that documented corpus skips and counts match the skip-list JSON.
+"""Check documented corpus skips against JSON and the pinned corpus.
 
 Usage:
-  python validate-gfx-corpus-skip-tests.py
+  python validate-gfx-corpus-skip-tests.py --corpus-directory PATH
 """
 
 from __future__ import annotations
 
+import argparse
 from collections import Counter
 import json
+import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 TARGET_HEADING = re.compile(r"^## (?P<target>gfx\d+)$")
 CATEGORY_HEADING = re.compile(r"^### (?P<category>.+): (?P<count>\d+)$")
 TEST_ENTRY = re.compile(r"^- `(?P<test>[^`]+)`(?: .*)?$")
 SKIP_FILE_NAME = re.compile(r"^(?P<target>gfx\d+)_skip_tests\.json$")
+COLLECTED_CASE = re.compile(
+    r"^tests/test_corpus\.py::test_corpus_case\[(?P<test>[^]]+)](?:@.*)?$"
+)
 
 
 def load_documented_tests(
@@ -90,7 +96,9 @@ def load_documented_tests(
     return flattened, errors
 
 
-def load_json_tests(directory: Path) -> tuple[dict[str, list[str]], list[str]]:
+def load_json_tests(
+    directory: Path,
+) -> tuple[dict[str, dict[str, list[str]]], list[str]]:
     tests_by_target = {}
     errors = []
 
@@ -111,7 +119,7 @@ def load_json_tests(directory: Path) -> tuple[dict[str, list[str]], list[str]]:
             errors.append(f"{path}: top-level value must be an object")
             continue
 
-        target_tests = []
+        target_tests = {}
         for suite, tests in payload.items():
             if not isinstance(suite, str) or not isinstance(tests, list):
                 errors.append(f"{path}: each suite must contain a list")
@@ -119,22 +127,124 @@ def load_json_tests(directory: Path) -> tuple[dict[str, list[str]], list[str]]:
             if not all(isinstance(test, str) for test in tests):
                 errors.append(f"{path}: suite {suite!r} contains a non-string test")
                 continue
-            target_tests.extend(tests)
+            target_tests[suite] = tests
+            expected_prefix = f"{suite}.{target}."
+            for test in tests:
+                if not test.startswith(expected_prefix):
+                    errors.append(
+                        f"{path}: suite {suite!r} selector {test!r} must start "
+                        f"with {expected_prefix!r}"
+                    )
         tests_by_target[target] = target_tests
 
     return tests_by_target, errors
+
+
+def flatten_json_tests(
+    tests_by_target: dict[str, dict[str, list[str]]],
+) -> dict[str, list[str]]:
+    return {
+        target: [test for tests in suites.values() for test in tests]
+        for target, suites in tests_by_target.items()
+    }
+
+
+def collect_corpus_cases(
+    corpus_directory: Path,
+    tests_by_target: dict[str, dict[str, list[str]]],
+) -> tuple[dict[str, set[str]], list[str]]:
+    collected = {}
+    errors = []
+    test_file = corpus_directory / "tests" / "test_corpus.py"
+    if not test_file.is_file():
+        return {}, [f"{corpus_directory}: tests/test_corpus.py does not exist"]
+
+    for target, suites in sorted(tests_by_target.items()):
+        command = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/test_corpus.py",
+            "--collect-only",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--target",
+            target,
+            "--suite",
+            ",".join(suites),
+        ]
+        result = subprocess.run(
+            command,
+            cwd=corpus_directory,
+            check=False,
+            capture_output=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            text=True,
+        )
+        if result.returncode != 0:
+            details = (result.stdout + result.stderr).strip()
+            errors.append(
+                f"{corpus_directory}: pytest collection failed for {target}"
+                + (f":\n{details}" if details else "")
+            )
+            continue
+
+        target_cases = {
+            match.group("test")
+            for line in result.stdout.splitlines()
+            if (match := COLLECTED_CASE.fullmatch(line.strip())) is not None
+        }
+        if not target_cases:
+            errors.append(f"{corpus_directory}: pytest collected no cases for {target}")
+            continue
+        collected[target] = target_cases
+
+    return collected, errors
+
+
+def validate_collected_cases(
+    tests_by_target: dict[str, dict[str, list[str]]],
+    collected_by_target: dict[str, set[str]],
+) -> list[str]:
+    errors = []
+    for target, suites in sorted(tests_by_target.items()):
+        if target not in collected_by_target:
+            continue
+        collected = collected_by_target[target]
+        for suite, selectors in suites.items():
+            for selector in selectors:
+                if selector not in collected:
+                    errors.append(
+                        f"{target}: {suite!r} selector does not match a collected "
+                        f"corpus case: {selector}"
+                    )
+    return errors
 
 
 def duplicate_tests(tests: list[str]) -> list[str]:
     return sorted(test for test, count in Counter(tests).items() if count > 1)
 
 
-def main() -> int:
+def parse_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--corpus-directory",
+        type=Path,
+        default=Path.cwd(),
+        help="Pinned rocjitsu-test-corpus checkout (default: current directory)",
+    )
+    return parser.parse_args(arguments)
+
+
+def main(arguments: list[str] | None = None) -> int:
+    args = parse_arguments(arguments)
     directory = Path(__file__).resolve().parent
     document = directory / "gfx-corpus-skip-tests.md"
     documented, errors = load_documented_tests(document)
-    skip_lists, json_errors = load_json_tests(directory)
+    skip_lists_by_suite, json_errors = load_json_tests(directory)
     errors.extend(json_errors)
+    skip_lists = flatten_json_tests(skip_lists_by_suite)
 
     documented_targets = set(documented)
     json_targets = set(skip_lists)
@@ -170,6 +280,12 @@ def main() -> int:
                 f"JSON lists {len(json_tests)}"
             )
 
+    collected, collection_errors = collect_corpus_cases(
+        args.corpus_directory.resolve(), skip_lists_by_suite
+    )
+    errors.extend(collection_errors)
+    errors.extend(validate_collected_cases(skip_lists_by_suite, collected))
+
     if errors:
         print("\n".join(f"error: {error}" for error in errors), file=sys.stderr)
         return 1
@@ -179,7 +295,7 @@ def main() -> int:
         count = len(skip_lists[target])
         total += count
         print(f"{target}: {count} tests")
-    print(f"All {total} skip tests match the documented entries and counts.")
+    print(f"All {total} skip tests match the documentation and pinned corpus cases.")
     return 0
 
 

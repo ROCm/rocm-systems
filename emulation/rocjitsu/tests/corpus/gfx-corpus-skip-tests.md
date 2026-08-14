@@ -23,12 +23,11 @@ Classification buckets:
 
 ## Observation revisions
 
-The classifications below were collected using these revisions.
+The classifications below were collected with these revisions and SDKs.
 
-| component | revision |
-| --- | --- |
-| ROCjitsu | `547818c822dc267cc8d2971798127ad421a2916c` |
-| `rocjitsu-test-corpus` | `a1c3a1df8c87e46557ad505d111faa15d21a6efb` |
+| ROCjitsu revision | `rocjitsu-test-corpus` revision | `ROCM_SDK_VERSION` |
+| --- | --- | --- |
+| `28fb310dbaaf91fea5ed69ead4878841d2602862` | `a1c3a1df8c87e46557ad505d111faa15d21a6efb` | `10.1.0a20260812` |
 
 ## gfx942
 
@@ -89,8 +88,9 @@ The classifications below were collected using these revisions.
 
 - `iree.gfx942.e2e.pack_i8.static_pack_vnni_lhs_large`
 
-### long-running test: 3
+### long-running test: 4
 
+- `cts.gfx942.fpsan.fpsan_amdgcn_math_test`
 - `llama.gfx942.backend_ops.MUL_MAT_ID.4c6f0c369254`
 - `llama.gfx942.backend_ops.MUL_MAT_ID.501e10751a9a`
 - `llama.gfx942.backend_ops.MUL_MAT_ID.dbedbadd142a`
@@ -106,7 +106,7 @@ The classifications below were collected using these revisions.
 
 ## gfx950
 
-### functional failure: 25
+### functional failure: 28
 
 - `cts.gfx950.fpsan.fpsan_amdgcn_math_extra_test`
 - `cts.gfx950.fpsan.fpsan_atomic_test`
@@ -117,6 +117,9 @@ The classifications below were collected using these revisions.
 - `cts.gfx950.fpsan.fpsan_mfma_gfx950_scaled_test`
 - `cts.gfx950.fpsan.fpsan_mfma_gfx950_smfmac_test`
 - `cts.gfx950.fpsan.fpsan_mfma_gfx950_test`
+- `llama.gfx950.backend_ops.FLASH_ATTN_EXT.2b8c93acdf59`
+- `llama.gfx950.backend_ops.FLASH_ATTN_EXT.da5c646e799e`
+- `llama.gfx950.backend_ops.FLASH_ATTN_EXT.e024795e26c2`
 - `llama.gfx950.backend_ops.MUL_MAT.5a436936375c`
 - `llama.gfx950.backend_ops.MUL_MAT.9f4865116d4b`
 - `llama.gfx950.backend_ops.MUL_MAT.b3d523cee895`
@@ -202,9 +205,11 @@ The classifications below were collected using these revisions.
 - `llama.gfx1100.backend_ops.FLASH_ATTN_EXT.e5e7712c889c`
 - `llama.gfx1100.backend_ops.FLASH_ATTN_EXT.eb5de146e0b8`
 
-### long-running test: 2
+### long-running test: 4
 
 - `cts.gfx1100.fpsan.fpsan_amdgcn_ldexp_test`
+- `cts.gfx1100.fpsan.fpsan_amdgcn_math_test`
+- `cts.gfx1100.fpsan.fpsan_wmma_gfx11_acc16_test`
 - `cts.gfx1100.fpsan.fpsan_wmma_gfx11_tied_bf16_test`
 
 ### possible hang or freeze: 8
@@ -365,8 +370,10 @@ The classifications below were collected using these revisions.
 - `kernels.gfx1201.rocblas.rocblas_sgemm.square_8x8`
 - `kernels.gfx1201.rocblas.rocblas_sgemm.tiny_2x2x3`
 
-### long-running test: 1
+### long-running test: 3
 
+- `cts.gfx1201.fpsan.fpsan_amdgcn_math_dot4_test`
+- `cts.gfx1201.fpsan.fpsan_amdgcn_math_test`
 - `llama.gfx1201.backend_ops.MUL_MAT_ID.dbedbadd142a`
 
 ### possible hang or freeze: 6
@@ -387,11 +394,21 @@ The classifications below were collected using these revisions.
 
 ### functional failure: 29
 
-- `cts.gfx1250.fpsan.fpsan_amdgcn_bf16_trans_test`
 - `cts.gfx1250.fpsan.fpsan_amdgcn_ldexp_test`
 - `cts.gfx1250.fpsan.fpsan_amdgcn_math_extra_test`
 - `cts.gfx1250.fpsan.fpsan_amdgcn_math_test`
 - `cts.gfx1250.fpsan.fpsan_atomic_test`
+- `cts.gfx1250.fpsan.fpsan_cvt_scalef32_pk_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_hip_device_test`
+- `cts.gfx1250.fpsan.fpsan_swmmac_16x16x128_fp8_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_swmmac_16x16x64_16_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_wmma_16x16x128_f8f6f4_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_wmma_16x16x128_fp8_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_wmma_16x16x32_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_wmma_16x16x64_fp8_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_wmma_32x16x128_f4_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_wmma_scale_f8f6f4_gfx1250_test`
+- `cts.gfx1250.fpsan.fpsan_amdgcn_bf16_trans_test`
 - `cts.gfx1250.fpsan.fpsan_classify_test`
 - `cts.gfx1250.fpsan.fpsan_cvt_f16_fp8_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_cvt_fp8_e5m3_gfx1250_test`
@@ -400,21 +417,11 @@ The classifications below were collected using these revisions.
 - `cts.gfx1250.fpsan.fpsan_cvt_fp8_sr_test`
 - `cts.gfx1250.fpsan.fpsan_cvt_fp8_test`
 - `cts.gfx1250.fpsan.fpsan_cvt_scale_unpack_gfx1250_test`
-- `cts.gfx1250.fpsan.fpsan_cvt_scalef32_pk_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_cvt_sr_pack_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_cvt_sr_pk_f16_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_cvt_test`
-- `cts.gfx1250.fpsan.fpsan_hip_device_test`
-- `cts.gfx1250.fpsan.fpsan_swmmac_16x16x128_fp8_gfx1250_test`
-- `cts.gfx1250.fpsan.fpsan_swmmac_16x16x64_16_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_wave_test`
-- `cts.gfx1250.fpsan.fpsan_wmma_16x16x128_f8f6f4_gfx1250_test`
-- `cts.gfx1250.fpsan.fpsan_wmma_16x16x128_fp8_gfx1250_test`
-- `cts.gfx1250.fpsan.fpsan_wmma_16x16x32_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_wmma_16x16x4_gfx1250_test`
-- `cts.gfx1250.fpsan.fpsan_wmma_16x16x64_fp8_gfx1250_test`
-- `cts.gfx1250.fpsan.fpsan_wmma_32x16x128_f4_gfx1250_test`
-- `cts.gfx1250.fpsan.fpsan_wmma_scale_f8f6f4_gfx1250_test`
 - `cts.gfx1250.fpsan.fpsan_xlane_test`
 
 ### flaky: 1

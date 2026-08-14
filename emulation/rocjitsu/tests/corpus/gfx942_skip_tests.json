@@ -4,6 +4,7 @@
   ],
   "cts": [
     "cts.gfx942.fpsan.fpsan_amdgcn_math_extra_test",
+    "cts.gfx942.fpsan.fpsan_amdgcn_math_test",
     "cts.gfx942.fpsan.fpsan_atomic_test",
     "cts.gfx942.fpsan.fpsan_hip_device_test",
     "cts.gfx942.fpsan.fpsan_mfma_cdna3_bf16_16x16x4_test",
