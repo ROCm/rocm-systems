@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "gsl_assert.h"
 #include "stack_entry.h"
 #include "stats.h"
 #include "synchronized.hpp"
@@ -113,6 +114,7 @@ public:
                 auto it = shard.snapshots.find(key);
                 if (it == shard.snapshots.end())
                     return false;
+                Expects(shard.lru_idx.find(key) != shard.lru_idx.end());
                 *out_stack = std::move(it->second);
                 shard.snapshots.erase(it);
                 lru_remove(shard, key);
@@ -146,6 +148,8 @@ public:
     }
 
 private:
+    // Every key in snapshots also holds a place in lru_order and an iterator to
+    // it in lru_idx, so eviction always has a key to remove.
     struct Shard
     {
         std::unordered_map<SnapshotKey, std::vector<StackEntry>>          snapshots;
@@ -175,8 +179,9 @@ private:
 
     static void evict_oldest(Shard& shard)
     {
-        if (shard.lru_order.empty())
-            return;
+        // save() evicts until the shard is under its cap, so an empty order
+        // would not terminate.
+        Expects(!shard.lru_order.empty());
         const SnapshotKey oldest = shard.lru_order.front();
         shard.lru_order.pop_front();
         shard.lru_idx.erase(oldest);

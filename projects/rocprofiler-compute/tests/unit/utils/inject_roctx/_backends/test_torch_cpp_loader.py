@@ -198,9 +198,14 @@ def test_fingerprint_inputs_cover_every_build_input():
     missing = declared - input_names
     assert not missing, f"build inputs absent from the fingerprint: {sorted(missing)}"
 
-    # None of these is a compiled source, so none is reachable from
-    # add_library. The module includes synchronized.hpp from the shared utils.
-    for required in ("CMakeLists.txt", "probe_torch.py", "synchronized.hpp"):
+    # None of these is a compiled source, so none is reachable from add_library.
+    # The module includes synchronized.hpp and gsl_assert.h from the shared utils.
+    for required in (
+        "CMakeLists.txt",
+        "probe_torch.py",
+        "synchronized.hpp",
+        "gsl_assert.h",
+    ):
         assert required in input_names, f"{required} is not a fingerprint input"
 
 

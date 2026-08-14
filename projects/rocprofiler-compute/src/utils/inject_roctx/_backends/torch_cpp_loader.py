@@ -31,6 +31,7 @@ _SO_SOURCE_DIR = _NATIVE_SOURCE_DIR / "torch_trace_collector"
 _SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
 _SHARED_UTILS_HEADERS = (
     _NATIVE_SOURCE_DIR / "utils" / "synchronized" / "synchronized.hpp",
+    _NATIVE_SOURCE_DIR / "utils" / "gsl_assert" / "gsl_assert.h",
 )
 
 _INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
