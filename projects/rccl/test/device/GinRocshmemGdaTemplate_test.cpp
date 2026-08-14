@@ -10,7 +10,7 @@
 // specializations, so this suite unit-tests the GDA AllToAll device path
 // without a live network.
 //
-// The real rocshmem::QueuePair device methods (put_nbi/atomic_add/quiet) are
+// The real rocshmem::QueuePair device methods (put_nbi/atomic_nofetch/quiet) are
 // only declared in queue_pair_device.h (defined in rocSHMEM device bitcode).
 // This translation unit supplies inline stub definitions so the suite links
 // against no librocshmem device code, mirroring how Suite H shadows the SDMA
@@ -35,9 +35,9 @@
 
 // --------------------------------------------------------------------------
 // Stub definitions for rocshmem::QueuePair device methods.
-//   put_nbi   : byte-copy laddr -> raddr (observe data landing at remote VA)
-//   atomic_add: atomic add into the remote signal word (observe signal deliver)
-//   quiet     : bump a device-global call counter (observe completion sync)
+//   put_nbi       : byte-copy laddr -> raddr (observe data landing at remote VA)
+//   atomic_nofetch: atomic add into the remote signal word (observe signal deliver)
+//   quiet         : bump a device-global call counter (observe completion sync)
 // Non-RDC build: these must be defined in the same TU as the kernels that
 // (via the inlined template) call them.
 // --------------------------------------------------------------------------
@@ -53,10 +53,13 @@ __device__ void QueuePair::put_nbi(void* raddr, uint32_t /*rkey*/, const void* l
   for (size_t i = 0; i < length; ++i) d[i] = s[i];
 }
 
-__device__ void QueuePair::atomic_add(void* raddr, uint32_t /*rkey*/, int64_t value, ActiveWFInfo& /*wf_info*/,
-                                      bool /*fence*/) {
-  if (raddr == nullptr) return;
-  atomicAdd(reinterpret_cast<unsigned long long*>(raddr), static_cast<unsigned long long>(value));
+// Matches queue_pair_device.h: atomic_nofetch(void* dest, uint32_t rkey, int64_t
+// value, int64_t cond, ActiveWFInfo&). The template's signal path calls this
+// (gin_rocshmem_gda.h:54,101); cond/rkey are unused by the byte-accurate stub.
+__device__ void QueuePair::atomic_nofetch(void* dest, uint32_t /*rkey*/, int64_t value, int64_t /*cond*/,
+                                          ActiveWFInfo& /*wf_info*/) {
+  if (dest == nullptr) return;
+  atomicAdd(reinterpret_cast<unsigned long long*>(dest), static_cast<unsigned long long>(value));
 }
 
 __device__ void QueuePair::quiet(ActiveWFInfo& /*wf_info*/) {
@@ -318,7 +321,12 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_SignalAndCounter) {
   EXPECT_EQ(ctr[1], 1ULL);
 }
 
-// G7: thread-scope fence branch (required==system && given>required) still puts.
+// G7: weaker-given-scope path (required=system, given=block) still completes the
+// put. NOTE: the template's fence guard is `(required==system && given>required)`;
+// since `system` is the maximum cuda::thread_scope, that branch is never taken
+// (here or anywhere). This guard is a pre-existing convention shared by all GIN
+// backends (anvil_sdma, gdaki, rocshmem_gda) and is tracked for a separate,
+// coordinated fix -- so this case only asserts the data lands, not that a fence ran.
 __global__ void kernelPutScopeFence(GdaHarness* h) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
@@ -331,7 +339,7 @@ __global__ void kernelPutScopeFence(GdaHarness* h) {
       false, nullptr, cuda::thread_scope_system, cuda::thread_scope_block);
 }
 
-TEST_F(GinRocshmemGdaTemplateTest, Put_ThreadScopeFence) {
+TEST_F(GinRocshmemGdaTemplateTest, Put_WeakerGivenScopeStillPuts) {
   constexpr int kN = 8;
   std::vector<uint8_t> pat(kN);
   for (int i = 0; i < kN; ++i) pat[static_cast<size_t>(i)] = static_cast<uint8_t>(0x11 * (i + 1));
