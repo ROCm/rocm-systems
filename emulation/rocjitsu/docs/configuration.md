@@ -56,7 +56,7 @@ The example above is intentionally minimal and single-threaded.
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned) |
-| `exec_mode` | string | `"functional"` or `"cycle"` |
+| `exec_mode` | string | `"functional"` or `"clocked"` |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
 ### Simulation threading
