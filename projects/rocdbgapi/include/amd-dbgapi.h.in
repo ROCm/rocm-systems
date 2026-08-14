@@ -6220,9 +6220,9 @@ typedef uint64_t amd_dbgapi_segment_address_t;
  * local address spaces.
  *
  * \param[in] wave_id The wave that is using the address.  If the \p
- * address_space is ::AMD_DBGAPI_ADDRESS_SPACE_GLOBAL then \p wave_id may be
- * ::AMD_DBGAPI_WAVE_NONE, as the address space does not depend on the active
- * wave, in which case \p process_id is used.
+ * source_address_space_id is ::AMD_DBGAPI_ADDRESS_SPACE_GLOBAL then \p wave_id
+ * may be ::AMD_DBGAPI_WAVE_NONE, as the address space does not depend on the
+ * active wave, in which case \p process_id is used.
  *
  * \param[in] lane_id The lane of the \p wave_id that is using the address.  If
  * the \p address_space does not depend on the active lane then this may be
