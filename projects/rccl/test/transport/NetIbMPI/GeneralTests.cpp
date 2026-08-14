@@ -1003,14 +1003,26 @@ TEST_F(NetIbMPITest, RapidConnectDisconnect) {
         return out;
     };
 
-    auto countNonEmptyLines = [](const std::string& text) -> int {
+    // Count only RDMA objects owned by THIS process so a co-tenant test churning
+    // QPs/CQs/MRs/PDs between the before/after snapshots cannot cause a spurious leak
+    // failure under a parallel (--jobs>1) run. `rdma resource show` lines carry
+    // " pid <N> "; if our PID appears, count only our lines, else fall back to a
+    // system-wide count (mirrors CaptureRdmaResources() in NetIbMPITestBase.hpp).
+    const std::string rdmaPidFilter = " pid " + std::to_string(getpid()) + " ";
+    auto countNonEmptyLines = [&rdmaPidFilter](const std::string& text) -> int {
         std::istringstream iss(text);
         std::string line;
-        int count = 0;
+        int count = 0, owned = 0;
+        bool sawPid = false;
         while (std::getline(iss, line)) {
-            if (!line.empty()) count++;
+            if (line.empty()) continue;
+            count++;
+            if (line.find(rdmaPidFilter) != std::string::npos) {
+                owned++;
+                sawPid = true;
+            }
         }
-        return count;
+        return sawPid ? owned : count;
     };
 
     auto readRdmaResourceCounts = [&]() -> RdmaResourceCounts {

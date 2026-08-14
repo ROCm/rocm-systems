@@ -1141,7 +1141,7 @@
           "test_filter": "AlltoAll.OutOfPlaceGraph*",
           "env_variables": {
             "NCCL_DEBUG": "TRACE",
-            "NCCL_DEBUG_FILE": "cdcvg.dbg",
+            "NCCL_DEBUG_FILE": "cdcvg.%h.%p.dbg",
             "NCCL_DEBUG_SUBSYS": "INIT,COLL,P2P,SHM,NET,GRAPH,TUNING,ENV,ALLOC,CALL,PROXY,NVLS,BOOTSTRAP,REG,PROFILE,RAS,VERBS"
           }
         }
@@ -3800,21 +3800,18 @@
   "test_suites": [
     {
       "name": "NET - Device Count Mismatch (AICOMRCCL-1213)",
-      "serial_only": true,
       "description": "Per-rank Net device-count mismatch detection and NCCL_IGNORE_NET_MISMATCH abort (single node, 2 ranks)",
       "config": "net_device_count_mismatch",
       "enabled": true
     },
     {
       "name": "SHM Tests - Complete Suite",
-      "serial_only": true,
       "description": "All shared memory transport tests (single node)",
       "config": "shm_comprehensive",
       "enabled": true
     },
     {
       "name": "P2P Tests - Complete Suite",
-      "serial_only": true,
       "description": "All peer-to-peer transport tests (single node)",
       "config": "p2p_comprehensive",
       "enabled": true
@@ -3840,28 +3837,24 @@
     },
     {
       "name": "NET IB - Initialization Tests",
-      "serial_only": true,
       "description": "InfiniBand plugin initialization and device enumeration",
       "config": "net_ib_initialization",
       "enabled": true
     },
     {
       "name": "NET IB - Device Properties",
-      "serial_only": true,
       "description": "InfiniBand device property queries",
       "config": "net_ib_properties",
       "enabled": true
     },
     {
       "name": "NET IB - Connection Setup",
-      "serial_only": true,
       "description": "InfiniBand connection lifecycle and rapid reconnect tests",
       "config": "net_ib_connection",
       "enabled": true
     },
     {
       "name": "NET IB - Memory Registration",
-      "serial_only": true,
       "description": "InfiniBand memory registration tests",
       "config": "net_ib_memory",
       "enabled": true
@@ -3882,14 +3875,12 @@
     },
     {
       "name": "NET IB - vNIC Merge Disabled Guard",
-      "serial_only": true,
       "description": "Exercises the makeVDevice merge-disabled guard under NCCL_IB_MERGE_NICS=0",
       "config": "net_ib_merge_disabled",
       "enabled": true
     },
     {
       "name": "NET IB - vNIC Validation",
-      "serial_only": true,
       "description": "makeVDevice/CheckVProps validation and topology error paths (bounds, dedup, cross-NUMA, rail-local)",
       "config": "net_ib_vnic_validation",
       "enabled": true
@@ -3941,7 +3932,6 @@
     },
     {
       "name": "Net Plugin Reload",
-      "serial_only": true,
       "description": "AICOMRCCL-1534: custom NCCL_NET_PLUGIN reloads after comm destroy",
       "config": "net_plugin_reload",
       "enabled": true
@@ -3954,14 +3944,12 @@
     },
     {
       "name": "Debug and Logging Tests",
-      "serial_only": true,
       "description": "Tests for debug output and logging functionality",
       "config": "debug_tests",
       "enabled": true
     },
     {
       "name": "AltRsmi Tests - Complete Suite",
-      "serial_only": true,
       "description": "All Alternative RSMI tests using public API only",
       "config": "alt_rsmi_tests",
       "enabled": true
@@ -4056,7 +4044,6 @@
     },
     {
       "name": "NET IB - Fault Injection Ops Unit (fake ibv_context)",
-      "serial_only": true,
       "description": "Pure-unit coverage of the ops-overload mechanism via a fabricated ibv_context: inner guard branches and shim error paths. Single-rank (runs under the MPI launcher but uses no MPI communication, no RDMA, no hardware)",
       "config": "fault_inject_ops_unit",
       "enabled": true
@@ -4098,14 +4085,12 @@
     },
     {
       "name": "NET IB - Stress Multi-QP Split",
-      "serial_only": true,
       "description": "Multi-QP striping with split alignment boundaries",
       "config": "net_ib_stress_multi_qp_split",
       "enabled": true
     },
     {
       "name": "NET IB - Stress Multi-QP NoSplit",
-      "serial_only": true,
       "description": "Multi-QP no-split (nDataQps) path",
       "config": "net_ib_stress_multi_qp_nosplit",
       "enabled": true
@@ -4119,14 +4104,12 @@
     },
     {
       "name": "NET IB - Stress AR Threshold",
-      "serial_only": true,
       "description": "Adaptive routing threshold boundary tests",
       "config": "net_ib_stress_ar",
       "enabled": true
     },
     {
       "name": "NET IB - Stress Inline CTS",
-      "serial_only": true,
       "description": "CTS inline send boundary tests",
       "config": "net_ib_stress_inline",
       "enabled": true
@@ -4356,14 +4339,12 @@
     },
     {
       "name": "nccl4py Build Smoke",
-      "serial_only": true,
       "description": "uv/CMake nccl4py wheel build + CPU smoke pytest modules; self-skips without cmake/uv/librccl.so",
       "config": "nccl4py_build_smoke",
       "enabled": true
     },
     {
       "name": "IR Device Tests",
-      "serial_only": true,
       "description": "librccl_device.bc (IR) device-API tests via pytest harness; builds artifacts on demand and self-skips when prerequisites are missing",
       "config": "ir_device",
       "enabled": true
