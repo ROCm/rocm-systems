@@ -26,11 +26,12 @@ jobs:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
     steps:
-      # Self-hosted runner workspace can be left with root-owned files by other jobs/containers.
+      # Runner workspace can retain root-owned files from other container jobs; this job has
+      # no host sudo access, so use a throwaway root container (docker is already required
+      # here for build-and-test) to clear it instead.
       - name: Clean workspace
         run: |
-          sudo rm -rf "$GITHUB_WORKSPACE" || true
-          mkdir -p "$GITHUB_WORKSPACE"
+          docker run --rm -v "$GITHUB_WORKSPACE":/workspace alpine find /workspace -mindepth 1 -delete
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -69,10 +70,9 @@ jobs:
 
     steps:
       # Container runs as root, so clean any root-owned leftovers before checkout.
+      # GITHUB_WORKSPACE is a bind-mounted directory, not just its contents.
       - name: Clean workspace
-        run: |
-          rm -rf "$GITHUB_WORKSPACE" || true
-          mkdir -p "$GITHUB_WORKSPACE"
+        run: find "$GITHUB_WORKSPACE" -mindepth 1 -delete
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
