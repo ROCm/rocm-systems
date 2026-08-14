@@ -164,6 +164,7 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FI
       RDC_FI_GPU_VIS_VRAM_TOTAL,       RDC_FI_GPU_VIS_VRAM_USED,      RDC_FI_GPU_VIS_VRAM_FREE,
       RDC_FI_GPU_GTT_TOTAL,            RDC_FI_GPU_GTT_USED,           RDC_FI_GPU_GTT_FREE,
       RDC_FI_GPU_GFX_BUSY_INST,        RDC_FI_GPU_VCN_BUSY_INST,      RDC_FI_GPU_JPEG_BUSY_INST,
+      RDC_FI_GPU_CU_OCCUPANCY,         RDC_FI_GPU_CU_OCCUPANCY_PERCENT,
       RDC_FI_ECC_CORRECT_TOTAL,        RDC_FI_ECC_UNCORRECT_TOTAL,
       RDC_FI_ECC_SDMA_CE,              RDC_FI_ECC_SDMA_UE,            RDC_FI_ECC_GFX_CE,
       RDC_FI_ECC_GFX_UE,               RDC_FI_ECC_MMHUB_CE,           RDC_FI_ECC_MMHUB_UE,

@@ -130,7 +130,7 @@
     {"dme": "GPU_AFID_ERRORS", "rdc": null, "status": "missing", "reason": "P3: needs investigation"},
     {"dme": "GPU_VIOLATION_LOW_UTILIZATION_ACCUMULATED", "rdc": null, "status": "missing", "reason": "P3: needs investigation"},
     {"dme": "GPU_VIOLATION_LOW_UTILIZATION_PERCENTAGE", "rdc": null, "status": "missing", "reason": "P3: needs investigation"},
-    {"dme": "GPU_PROCESS_CU_OCCUPANCY", "rdc": null, "status": "missing", "reason": "P3: needs investigation"},
+    {"dme": "GPU_PROCESS_CU_OCCUPANCY", "rdc": "RDC_FI_GPU_CU_OCCUPANCY", "status": "mapped", "note": "RDC aggregates per-GPU (sum over processes); DME reports per process"},
     {"dme": "GPU_PROF_CPC_CPC_STAT_BUSY", "rdc": "RDC_FI_PROF_CPC_CPC_STAT_BUSY", "status": "mapped"},
     {"dme": "GPU_PROF_CPC_CPC_STAT_IDLE", "rdc": "RDC_FI_PROF_CPC_CPC_STAT_IDLE", "status": "mapped"},
     {"dme": "GPU_PROF_CPC_CPC_STAT_STALL", "rdc": "RDC_FI_PROF_CPC_CPC_STAT_STALL", "status": "mapped"},

@@ -243,6 +243,11 @@ typedef enum {
   RDC_FI_GPU_GFX_BUSY_INST,         //!< Instantaneous GFX busy percentage
   RDC_FI_GPU_VCN_BUSY_INST,         //!< Instantaneous VCN busy percentage
   RDC_FI_GPU_JPEG_BUSY_INST,        //!< Instantaneous JPEG busy percentage
+  RDC_FI_GPU_CU_OCCUPANCY,          //!< Compute units occupied, summed over all processes on the
+                                    // GPU. Instantaneous wave-count snapshot from KFD, not a
+                                    // time average - see the note in the user guide.
+  RDC_FI_GPU_CU_OCCUPANCY_PERCENT,  //!< RDC_FI_GPU_CU_OCCUPANCY as a percentage of the GPU's
+                                    // compute units. Matches `amd-smi monitor --process` CU%.
 
   /**
    * @brief GPU page related fields
