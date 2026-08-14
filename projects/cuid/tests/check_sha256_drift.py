@@ -46,14 +46,32 @@ def strip_comments(src: str) -> str:
     return re.sub(r"/\*.*?\*/", "", src, flags=re.S)
 
 
-def member_bodies(path: Path) -> dict[str, str]:
-    """Map sha256::<name> -> body text, for every member defined in the file."""
+def member_bodies(path: Path) -> dict[tuple[str, str], str]:
+    """Map (name, signature) -> body text, for every member defined in the file.
+
+    The signature includes the parameter list and any trailing cv/ref
+    qualifiers, so overloads (e.g. two sha256::update()) get distinct keys
+    instead of colliding on the member name alone.
+    """
     src = strip_comments(path.read_text(encoding="utf-8"))
-    bodies: dict[str, str] = {}
+    bodies: dict[tuple[str, str], str] = {}
     for match in re.finditer(r"\bsha256::(\w+)\s*\(", src):
-        open_brace = src.find("{", match.end())
+        name = match.group(1)
+
+        depth, idx = 1, match.end()
+        while idx < len(src) and depth > 0:
+            if src[idx] == "(":
+                depth += 1
+            elif src[idx] == ")":
+                depth -= 1
+            idx += 1
+        params_end = idx
+
+        open_brace = src.find("{", params_end)
         if open_brace < 0:
             continue
+        signature = re.sub(r"\s+", "", src[match.end() - 1 : open_brace])
+
         depth, idx = 0, open_brace
         while idx < len(src):
             if src[idx] == "{":
@@ -63,7 +81,7 @@ def member_bodies(path: Path) -> dict[str, str]:
                 if depth == 0:
                     break
             idx += 1
-        bodies.setdefault(match.group(1), src[open_brace + 1 : idx])
+        bodies.setdefault((name, signature), src[open_brace + 1 : idx])
     return bodies
 
 
@@ -89,20 +107,23 @@ def main() -> int:
     copy = member_bodies(copy_path)
 
     if not upstream or not copy:
-        print("error: parsed no sha256:: members; the extractor needs updating", file=sys.stderr)
+        print(
+            "error: parsed no sha256:: members; the extractor needs updating",
+            file=sys.stderr,
+        )
         return 2
 
     problems: list[str] = []
 
     missing = sorted(set(upstream) - set(copy))
     if missing:
-        problems.append(
-            f"{COPY} is missing member(s) present upstream: {', '.join(missing)}"
-        )
+        names = ", ".join(f"{name}{sig}" for name, sig in missing)
+        problems.append(f"{COPY} is missing member(s) present upstream: {names}")
 
-    for name in sorted(set(upstream) & set(copy)):
-        if normalise(upstream[name], drop_allowed=True) != normalise(copy[name], False):
-            problems.append(f"sha256::{name}() differs between the two copies")
+    for key in sorted(set(upstream) & set(copy)):
+        if normalise(upstream[key], drop_allowed=True) != normalise(copy[key], False):
+            name, sig = key
+            problems.append(f"sha256::{name}{sig} differs between the two copies")
 
     if problems:
         print("SHA-256 implementations have drifted apart:\n", file=sys.stderr)
@@ -115,7 +136,9 @@ def main() -> int:
         )
         return 1
 
-    print(f"sha256 copies agree: {len(set(upstream) & set(copy))} member functions checked")
+    print(
+        f"sha256 copies agree: {len(set(upstream) & set(copy))} member functions checked"
+    )
     return 0
 
 

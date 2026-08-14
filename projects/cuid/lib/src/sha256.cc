@@ -181,6 +181,11 @@ void sha256::reset() {
 }
 
 void sha256_digest(const uint8_t* data, size_t data_len, uint8_t out[SHA256_DIGEST_SIZE]) {
+  if (!out) return;
+  if (!data && data_len > 0) {
+    secure_zero(out, SHA256_DIGEST_SIZE);
+    return;
+  }
   sha256 h;
   if (data_len > 0) h.update(data, data_len);
   const auto d = h.digest();

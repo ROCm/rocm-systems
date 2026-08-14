@@ -114,6 +114,14 @@ cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(key_length), vali
 
   key = new uint8_t[key_length];
   key_file_stream.read(reinterpret_cast<char*>(key), key_length);
+  if (key_file_stream.gcount() != static_cast<std::streamsize>(key_length)) {
+    std::cerr << "Error reading key file" << std::endl;
+    delete[] key;
+    key = nullptr;
+    key_len = key_length;
+    key_file_stream.close();
+    return;
+  }
   key_file_stream.close();
 
   valid = true;

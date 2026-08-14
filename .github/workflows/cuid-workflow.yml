@@ -5,6 +5,7 @@ on:
     branches: [develop]
     paths:
       - 'projects/cuid/**'
+      - 'projects/rocprofiler-sdk/source/lib/common/sha256.cpp'
       - '.github/workflows/cuid-workflow.yml'
   workflow_dispatch:
 
@@ -18,6 +19,24 @@ env:
   ROCM_DIR: /opt/rocm
 
 jobs:
+  sha256-drift-check:
+    name: SHA-256 Drift Check
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/cuid/tests/check_sha256_drift.py
+            projects/cuid/lib/src/sha256.cc
+            projects/rocprofiler-sdk/source/lib/common/sha256.cpp
+          sparse-checkout-cone-mode: false
+
+      - name: Check for sha256 drift
+        run: python3 projects/cuid/tests/check_sha256_drift.py
+
   build-and-test:
     name: Build and Test
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
