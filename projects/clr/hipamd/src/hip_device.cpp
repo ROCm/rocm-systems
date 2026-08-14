@@ -603,7 +603,12 @@ hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-#if defined(_WIN32)
+  if (IS_LINUX) {
+    // The LUID is a Windows/DXGI adapter concept; unsupported elsewhere and the
+    // output parameters are left untouched.
+    HIP_RETURN(hipErrorNotSupported);
+  }
+
   auto* deviceHandle = g_devices[device]->devices()[0];
   const auto& info = deviceHandle->info();
 
@@ -615,11 +620,6 @@ hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_
   *deviceNodeMask = info.luidDeviceNodeMask_;
 
   HIP_RETURN(hipSuccess);
-#else
-  // The LUID is a Windows/DXGI adapter concept; unsupported elsewhere and the
-  // output parameters are left untouched.
-  HIP_RETURN(hipErrorNotSupported);
-#endif
 }
 
 // ================================================================================================
@@ -807,16 +807,11 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.gpuDirectRDMASupported = 0;
   deviceProps.gpuDirectRDMAFlushWritesOptions = 0;
   deviceProps.gpuDirectRDMAWritesOrdering = 0;
-#if defined(_WIN32)
-  // The LUID is only meaningful on Windows.
+  // The LUID is a Windows/DXGI adapter concept; the backend reports a zero LUID
+  // and zero node mask on platforms without a WDDM adapter.
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[0]) = info.luidLowPart_;
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[sizeof(uint32_t)]) = info.luidHighPart_;
   deviceProps.luidDeviceNodeMask = info.luidDeviceNodeMask_;
-#else
-  // Elsewhere report an all-zero luid and zero node mask.
-  ::memset(deviceProps.luid, 0, sizeof(deviceProps.luid));
-  deviceProps.luidDeviceNodeMask = 0;
-#endif
 
   deviceProps.sparseHipArraySupported = 0;
   deviceProps.timelineSemaphoreInteropSupported = 0;
