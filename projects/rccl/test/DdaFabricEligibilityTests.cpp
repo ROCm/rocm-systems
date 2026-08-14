@@ -349,6 +349,178 @@ TEST_F(DdaFabricEligibilityTest, AllReduce_InvalidDatatypeDispatch)
 }
 
 // ---------------------------------------------------------------------------
+// AllReduce LL
+//
+// One gate fronts both LL tiers: ncclAllReduceDdaFabricLLEligible reports
+// whether the one-shot or the two-shot variant claims the message. Both are
+// enabled by DDA_LL and each carries its own threshold on the total message
+// size, with one-shot tested first.
+//
+// These run under the default parameter values -- DDA_LL=1, a 1 MiB
+// DDA_LL_ONESHOT_THRESHOLD and a 16 MiB DDA_LL_TWOSHOT_THRESHOLD -- so sizes
+// above 1 MiB and up to 16 MiB are claimed by the two-shot tier, which is what
+// makes the tier split observable from here. They deliberately do not setenv:
+// RCCL_PARAM caches on first read, and the NCCL_NO_CACHE opt-out is resolved once
+// per process, so a test that changed a threshold would depend on being the first
+// in the binary to touch it. Two guards stay out of reach as a result:
+// kDdaLLMaxBytes sits above the one-shot threshold, and the two-shot half-slot
+// bound needs a shard past kDdaLLMaxBytes / 2, so both are masked by the
+// thresholds and belong to a multi-rank run.
+// ---------------------------------------------------------------------------
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_NullComm)
+{
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        nullptr, sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_MissingBootstrap)
+{
+    mockComm_.comm.bootstrap = nullptr;
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_MissingFabricResources)
+{
+    mockComm_.setFabricResourcesPresent(false);
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_MissingScratch)
+{
+    mockComm_.comm.ddaScratch = nullptr;
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_ZeroCount)
+{
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 0, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_UnsupportedOp)
+{
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclProd));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_UnsupportedDatatype)
+{
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclInt32, ncclSum));
+}
+
+// Both tiers store a 16-byte LL line at a time, so one-shot requires the message
+// to be a multiple of 16 bytes and two-shot requires that of each shard. One float
+// is 4 bytes, so a single element satisfies neither.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_UnalignedBytes)
+{
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1, ncclFloat32, ncclSum));
+}
+
+// 8 bytes is a whole number of 8-byte payload packets but not a whole number of
+// 16-byte lines, so it is the size that separates the line rule from the packet
+// rule: one-shot rejects it on bytes % 16, and two-shot on a 1-byte shard.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_PacketButNotLineMultiple)
+{
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 2, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_TooFewRanks)
+{
+    mockComm_.comm.nRanks = 1;
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_TooManyRanks)
+{
+    mockComm_.comm.nRanks = meta::comms::kDdaMaxNranks + 1;
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_MinRanksEligible)
+{
+    mockComm_.comm.nRanks = 2;
+    EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+// The staging footprint scales with nRanks, so the widest comm is also the one
+// that has to still fit the scratch.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_MaxRanksEligible)
+{
+    mockComm_.comm.nRanks = meta::comms::kDdaMaxNranks;
+    EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_ScratchTooSmall)
+{
+    mockComm_.comm.ddaScratchBytes = 8;
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_EligibleFloat32)
+{
+    EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_EligibleFloat16)
+{
+    EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8, ncclFloat16, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_EligibleBfloat16)
+{
+    EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8, ncclBfloat16, ncclSum));
+}
+
+// 262144 floats is exactly the default 1 MiB DDA_LL_ONESHOT_THRESHOLD, which the
+// tier takes with <=.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_AtOneShotThresholdEligible)
+{
+    EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 262144, ncclFloat32, ncclSum));
+}
+
+// 262176 floats is 1 MiB + 128 bytes: past the one-shot threshold, so one-shot
+// cannot be what accepts it, and a multiple of 16 * nRanks so the shard satisfies
+// the two-shot shape rules. Accepting it is the two-shot tier serving the range
+// above the one-shot threshold.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_TwoShotClaimsPastOneShotThreshold)
+{
+    EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 262176, ncclFloat32, ncclSum));
+}
+
+// 4194304 floats is exactly the default 16 MiB DDA_LL_TWOSHOT_THRESHOLD, the top
+// of the LL range, which the tier takes with <=.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_AtTwoShotThresholdEligible)
+{
+    EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4194304, ncclFloat32, ncclSum));
+}
+
+// 128 bytes past the two-shot threshold: neither tier claims it and the message
+// falls through to LL128 / Simple.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_PastBothThresholds)
+{
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4194336, ncclFloat32, ncclSum));
+}
+
+// ---------------------------------------------------------------------------
 // AllToAll
 // ---------------------------------------------------------------------------
 
