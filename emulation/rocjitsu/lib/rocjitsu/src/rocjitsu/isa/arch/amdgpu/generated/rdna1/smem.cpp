@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx10_cache_flags.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna1 {
@@ -33,6 +34,12 @@ SLoadDwordSmem::SLoadDwordSmem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSLoadDwordSmem(const MachineInst *opcode) {
+  return std::make_unique<SLoadDwordSmem>(opcode);
+}
+} // namespace detail
+
 SLoadDwordx2Smem::SLoadDwordx2Smem(const MachineInst *inst)
     : Smem("s_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SLoadDwordx2Smem)),
@@ -47,6 +54,12 @@ SLoadDwordx2Smem::SLoadDwordx2Smem(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSLoadDwordx2Smem(const MachineInst *opcode) {
+  return std::make_unique<SLoadDwordx2Smem>(opcode);
+}
+} // namespace detail
 
 SLoadDwordx4Smem::SLoadDwordx4Smem(const MachineInst *inst)
     : Smem("s_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
@@ -63,6 +76,12 @@ SLoadDwordx4Smem::SLoadDwordx4Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSLoadDwordx4Smem(const MachineInst *opcode) {
+  return std::make_unique<SLoadDwordx4Smem>(opcode);
+}
+} // namespace detail
+
 SLoadDwordx8Smem::SLoadDwordx8Smem(const MachineInst *inst)
     : Smem("s_load_dwordx8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SLoadDwordx8Smem)),
@@ -77,6 +96,12 @@ SLoadDwordx8Smem::SLoadDwordx8Smem(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSLoadDwordx8Smem(const MachineInst *opcode) {
+  return std::make_unique<SLoadDwordx8Smem>(opcode);
+}
+} // namespace detail
 
 SLoadDwordx16Smem::SLoadDwordx16Smem(const MachineInst *inst)
     : Smem("s_load_dwordx16", reinterpret_cast<const OpEncoding *>(inst),
@@ -93,6 +118,12 @@ SLoadDwordx16Smem::SLoadDwordx16Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSLoadDwordx16Smem(const MachineInst *opcode) {
+  return std::make_unique<SLoadDwordx16Smem>(opcode);
+}
+} // namespace detail
+
 SScratchLoadDwordSmem::SScratchLoadDwordSmem(const MachineInst *inst)
     : Smem("s_scratch_load_dword", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SScratchLoadDwordSmem)),
@@ -107,6 +138,12 @@ SScratchLoadDwordSmem::SScratchLoadDwordSmem(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSScratchLoadDwordSmem(const MachineInst *opcode) {
+  return std::make_unique<SScratchLoadDwordSmem>(opcode);
+}
+} // namespace detail
 
 SScratchLoadDwordx2Smem::SScratchLoadDwordx2Smem(const MachineInst *inst)
     : Smem("s_scratch_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
@@ -123,6 +160,12 @@ SScratchLoadDwordx2Smem::SScratchLoadDwordx2Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSScratchLoadDwordx2Smem(const MachineInst *opcode) {
+  return std::make_unique<SScratchLoadDwordx2Smem>(opcode);
+}
+} // namespace detail
+
 SScratchLoadDwordx4Smem::SScratchLoadDwordx4Smem(const MachineInst *inst)
     : Smem("s_scratch_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SScratchLoadDwordx4Smem)),
@@ -137,6 +180,12 @@ SScratchLoadDwordx4Smem::SScratchLoadDwordx4Smem(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSScratchLoadDwordx4Smem(const MachineInst *opcode) {
+  return std::make_unique<SScratchLoadDwordx4Smem>(opcode);
+}
+} // namespace detail
 
 SBufferLoadDwordSmem::SBufferLoadDwordSmem(const MachineInst *inst)
     : Smem("s_buffer_load_dword", reinterpret_cast<const OpEncoding *>(inst),
@@ -153,6 +202,12 @@ SBufferLoadDwordSmem::SBufferLoadDwordSmem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSBufferLoadDwordSmem(const MachineInst *opcode) {
+  return std::make_unique<SBufferLoadDwordSmem>(opcode);
+}
+} // namespace detail
+
 SBufferLoadDwordx2Smem::SBufferLoadDwordx2Smem(const MachineInst *inst)
     : Smem("s_buffer_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBufferLoadDwordx2Smem)),
@@ -167,6 +222,12 @@ SBufferLoadDwordx2Smem::SBufferLoadDwordx2Smem(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSBufferLoadDwordx2Smem(const MachineInst *opcode) {
+  return std::make_unique<SBufferLoadDwordx2Smem>(opcode);
+}
+} // namespace detail
 
 SBufferLoadDwordx4Smem::SBufferLoadDwordx4Smem(const MachineInst *inst)
     : Smem("s_buffer_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
@@ -183,6 +244,12 @@ SBufferLoadDwordx4Smem::SBufferLoadDwordx4Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSBufferLoadDwordx4Smem(const MachineInst *opcode) {
+  return std::make_unique<SBufferLoadDwordx4Smem>(opcode);
+}
+} // namespace detail
+
 SBufferLoadDwordx8Smem::SBufferLoadDwordx8Smem(const MachineInst *inst)
     : Smem("s_buffer_load_dwordx8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBufferLoadDwordx8Smem)),
@@ -197,6 +264,12 @@ SBufferLoadDwordx8Smem::SBufferLoadDwordx8Smem(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSBufferLoadDwordx8Smem(const MachineInst *opcode) {
+  return std::make_unique<SBufferLoadDwordx8Smem>(opcode);
+}
+} // namespace detail
 
 SBufferLoadDwordx16Smem::SBufferLoadDwordx16Smem(const MachineInst *inst)
     : Smem("s_buffer_load_dwordx16", reinterpret_cast<const OpEncoding *>(inst),
@@ -213,6 +286,12 @@ SBufferLoadDwordx16Smem::SBufferLoadDwordx16Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSBufferLoadDwordx16Smem(const MachineInst *opcode) {
+  return std::make_unique<SBufferLoadDwordx16Smem>(opcode);
+}
+} // namespace detail
+
 SGl1InvSmem::SGl1InvSmem(const MachineInst *inst)
     : Smem("s_gl1_inv", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SGl1InvSmem)) {
@@ -220,12 +299,24 @@ SGl1InvSmem::SGl1InvSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSGl1InvSmem(const MachineInst *opcode) {
+  return std::make_unique<SGl1InvSmem>(opcode);
+}
+} // namespace detail
+
 SDcacheInvSmem::SDcacheInvSmem(const MachineInst *inst)
     : Smem("s_dcache_inv", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SDcacheInvSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSDcacheInvSmem(const MachineInst *opcode) {
+  return std::make_unique<SDcacheInvSmem>(opcode);
+}
+} // namespace detail
 
 SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
     : Smem("s_memtime", reinterpret_cast<const OpEncoding *>(inst),
@@ -236,6 +327,12 @@ SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSMemtimeSmem(const MachineInst *opcode) {
+  return std::make_unique<SMemtimeSmem>(opcode);
+}
+} // namespace detail
+
 SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
     : Smem("s_memrealtime", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SMemrealtimeSmem)),
@@ -244,6 +341,12 @@ SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSMemrealtimeSmem(const MachineInst *opcode) {
+  return std::make_unique<SMemrealtimeSmem>(opcode);
+}
+} // namespace detail
 
 SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
     : Smem("s_atc_probe", reinterpret_cast<const OpEncoding *>(inst),
@@ -259,6 +362,12 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSAtcProbeSmem(const MachineInst *opcode) {
+  return std::make_unique<SAtcProbeSmem>(opcode);
+}
+} // namespace detail
+
 SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
     : Smem("s_atc_probe_buffer", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAtcProbeBufferSmem)),
@@ -273,6 +382,12 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSAtcProbeBufferSmem(const MachineInst *opcode) {
+  return std::make_unique<SAtcProbeBufferSmem>(opcode);
+}
+} // namespace detail
+
 SGetWaveidInWorkgroupSmem::SGetWaveidInWorkgroupSmem(const MachineInst *inst)
     : Smem("s_get_waveid_in_workgroup", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SGetWaveidInWorkgroupSmem)),
@@ -281,6 +396,12 @@ SGetWaveidInWorkgroupSmem::SGetWaveidInWorkgroupSmem(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSGetWaveidInWorkgroupSmem(const MachineInst *opcode) {
+  return std::make_unique<SGetWaveidInWorkgroupSmem>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna1
 } // namespace rocjitsu
