@@ -495,15 +495,24 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    // Kernel replay does not support HIP graph launches. Warn once (rather than skipping silently)
-    // when a graph launch is seen under an active replay context; a graph with no other consumers
-    // runs un-replayed via the fast path below, and a graph that reaches the replay gate is a hard
-    // error (see the ROCP_FATAL_IF there).
-    if(has_kernel_replay && graph_launch_active)
+    if(has_kernel_replay)
     {
-        static std::atomic<bool> _warned_graph_replay{false};
-        if(!_warned_graph_replay.exchange(true, std::memory_order_relaxed))
-            ROCP_WARNING << fmt::format("kernel replay: HIP graph launches are not supported");
+        if(graph_launch_active)
+        {
+            static std::atomic<bool> _warned_graph_replay{false};
+            if(!_warned_graph_replay.exchange(true, std::memory_order_relaxed))
+                ROCP_WARNING << "kernel replay: HIP graph launches are not supported";
+        }
+        else if(pkt_count != 1)
+        {
+            static std::atomic<bool> _warned_multi_packet{false};
+            if(!_warned_multi_packet.exchange(true, std::memory_order_relaxed))
+                ROCP_WARNING << fmt::format(
+                    "kernel replay: only single-packet dispatch submissions are replayed. A "
+                    "submission of {} packets ({} dispatches) ran once without replay",
+                    pkt_count,
+                    num_dispatch_packets);
+        }
     }
 
     // Fast path: graph_launch is the only reason we're here. Increment the per-launch
