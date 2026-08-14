@@ -49,7 +49,6 @@ global: amd_dbgapi_classify_instruction;
 @AMD_DBGAPI_NAME@_0.62 {
 global: amd_dbgapi_address_class_get_info;
         amd_dbgapi_address_space_get_info;
-        amd_dbgapi_convert_address_space;
         amd_dbgapi_prefetch_register;
         amd_dbgapi_read_register;
         amd_dbgapi_watchpoint_get_info;
@@ -105,3 +104,7 @@ global:	amd_dbgapi_address_dependency;
 @AMD_DBGAPI_NAME@_0.80 {
 global: amd_dbgapi_process_get_info;
 } @AMD_DBGAPI_NAME@_0.79;
+
+@AMD_DBGAPI_NAME@_0.81 {
+global: amd_dbgapi_convert_address_space;
+} @AMD_DBGAPI_NAME@_0.80;
