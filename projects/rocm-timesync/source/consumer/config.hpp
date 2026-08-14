@@ -13,7 +13,7 @@ struct ts_db_influx_t {
     // TODO: credentials, etc.
 };
 
-using ts_db_config_t = std::variant<ts_db_influx_t>;
+using ts_db_config_t = std::variant<std::monostate, ts_db_influx_t>;
 
 struct ts_config_t {
     ts_db_config_t db;

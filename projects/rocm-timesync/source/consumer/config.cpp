@@ -11,12 +11,9 @@ ts_config_t LoadConfig(const std::string filename)
     if (!std::filesystem::exists(filename))
         return cfg;
 
-    bool have_db{false};
     auto root = YAML::LoadFile(filename);
     if (auto p = root["db"])
     {
-        have_db = true;
-
         if (auto q = p["influx"])
         {
             auto& db = cfg.db.emplace<ts_db_influx_t>();
@@ -27,7 +24,7 @@ ts_config_t LoadConfig(const std::string filename)
     }
 
     // default cache size without a db is unlimited
-    if (!have_db)
+    if (std::holds_alternative<std::monostate>(cfg.db))
         cfg.cache.max_entries_per_gpu = -1;
 
     if (auto q = root["cache"])
