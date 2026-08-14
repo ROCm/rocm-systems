@@ -191,6 +191,15 @@ Examples:
             default=10,
             help="PostgreSQL connect + statement timeout in seconds for --db-push (default: 10)."
         )
+        self.parser.add_argument(
+            '-j', '--jobs',
+            type=int,
+            default=1,
+            help="Number of test entries to run concurrently within a suite (default: 1 = "
+                 "serial, behavior unchanged). >1 dispatches entries through a bounded thread "
+                 "pool (each thread = one test process), overlapping their per-process init. "
+                 "PROTOTYPE: immediate --rerun-failed is disabled in parallel mode."
+        )
 
     def parse_arguments(self):
         """Parse command-line arguments"""

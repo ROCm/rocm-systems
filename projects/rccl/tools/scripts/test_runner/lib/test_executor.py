@@ -1689,6 +1689,12 @@ class TestExecutor:
             print(f"WARNING: No tests defined for test suite '{suite_name}'")
             return []
 
+        # Parallel prototype: with --jobs > 1, dispatch this suite's entries through a
+        # bounded thread pool so their per-process init overlaps. Default (jobs==1)
+        # falls through to the unchanged serial path below.
+        if getattr(self.args, "jobs", 1) and self.args.jobs > 1:
+            return self._run_test_suite_parallel(suite_config, suite_name, tests)
+
         results = []
         skipped_count = 0
         should_stop = False  # Track if we should stop due to rerun failure
@@ -1786,6 +1792,114 @@ class TestExecutor:
 
         if self.args.verbose and skipped_count > 0:
             print(f"  Skipped {skipped_count} test(s) due to filters")
+
+        return results
+
+    def _is_serial_only(self, test, suite_config):
+        """
+        True if an entry must run SERIALLY (never co-tenanted), independent of rank count.
+        An explicit `serial_only` flag (test- or suite-level) wins. Otherwise classify the
+        contention-prone categories by binary/name/suite text:
+          - NET/IB tests    -> IB HCA fabric contention (QP create/destroy races)
+          - SMI tests       -> rocm-smi / amd-smi device-enumeration races
+          - rccl-tests perf -> bandwidth co-tenancy skew
+        These are exactly the categories observed to flake under --jobs>1 co-tenancy.
+        """
+        if test.get("serial_only") or suite_config.get("serial_only"):
+            return True
+        binary = str(test.get("binary", suite_config.get("binary", ""))).lower()
+        name = str(test.get("name", "")).lower()
+        filt = str(test.get("test_filter", "")).lower()
+        suite = str(suite_config.get("suite_details", {}).get("name", "")).lower()
+        hay = " ".join((binary, name, filt, suite))
+        if "netib" in hay or "net ib" in hay or "net_ib" in hay:   # NET/IB fabric
+            return True
+        if "rsmi" in hay or "amdsmi" in hay or "amd-smi" in hay:     # SMI monitoring
+            return True
+        if "rccl-tests" in binary or "perf" in suite:               # perf bandwidth
+            return True
+        return False
+
+    def _run_test_suite_parallel(self, suite_config, suite_name, tests):
+        """
+        PROTOTYPE parallel executor for one suite: run entries concurrently in a
+        bounded thread pool (each thread blocks in run_test -> one test process),
+        overlapping their per-process init. Applies the same name/skip-mpi filters
+        as the serial path; result accumulation is guarded by a lock so the summary
+        stays correct. Immediate --rerun-failed is intentionally not handled here.
+        """
+        import concurrent.futures
+        import threading
+
+        # Same pre-dispatch filtering the serial loop applies.
+        runnable = []
+        skipped_count = 0
+        for test in tests:
+            test_name = test.get("name")
+            if self.args.test_name and not glob_filter_matches(test_name, self.args.test_name):
+                skipped_count += 1
+                continue
+            test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
+            is_auto_ranks = isinstance(test_ranks, str) and test_ranks.strip().lower() == "auto"
+            is_mpi_test = is_auto_ranks or (not isinstance(test_ranks, str) and test_ranks > 1)
+            if self.args.skip_mpi_check and is_mpi_test:
+                skipped_count += 1
+                continue
+            runnable.append(test)
+
+        # Co-tenancy scope: an entry runs concurrently only if it needs <=3 ranks AND is
+        # not a contention-prone category. >=4-rank (and "auto") entries oversubscribe the
+        # 8-GPU node; NET/IB tests contend on the IB HCA and SMI tests perturb each other's
+        # monitoring reads -> those run SERIALLY regardless of rank. (See _is_serial_only.)
+        parallel_entries, serial_entries = [], []
+        for test in runnable:
+            tr = test.get("num_ranks", suite_config.get("num_ranks", 1))
+            is_auto = isinstance(tr, str) and tr.strip().lower() == "auto"
+            try:
+                nranks = 999 if is_auto else int(tr)
+            except (ValueError, TypeError):
+                nranks = 999
+            if nranks <= 3 and not self._is_serial_only(test, suite_config):
+                parallel_entries.append(test)
+            else:
+                serial_entries.append(test)
+
+        jobs = self.args.jobs
+        print(f"\n[parallel] suite '{suite_name}': {len(parallel_entries)} parallel(<=3-rank compute) + "
+              f"{len(serial_entries)} serial(>=4-rank / NET-IB / SMI / perf) entries, jobs={jobs}"
+              f"{f', {skipped_count} filtered' if skipped_count else ''}")
+
+        lock = threading.Lock()
+        results = []
+
+        def _accumulate(test, res):
+            with lock:
+                results.append(res)
+                self.test_names.append(test.get("name"))
+                self.test_results.append(res["result"])
+                self.test_durations.append(res["duration"])
+                self.test_suites.append(suite_name)
+                if self.emit_enabled:
+                    record = dict(res)
+                    record["suite"] = suite_name
+                    record["test_name"] = test.get("name")
+                    self.test_records.append(record)
+
+        # 1) Compute entries concurrently.
+        if parallel_entries:
+            def _worker(test):
+                res = self.run_test(test, suite_config)
+                _accumulate(test, res)
+                return res
+            with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
+                futures = [ex.submit(_worker, t) for t in parallel_entries]
+                for f in concurrent.futures.as_completed(futures):
+                    f.result()  # surface any worker exception
+
+        # 2) MPI/whole-node entries serially (one at a time).
+        for test in serial_entries:
+            res = self.run_test(test, suite_config)
+            _accumulate(test, res)
 
         return results
 
