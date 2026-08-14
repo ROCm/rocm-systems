@@ -14,7 +14,6 @@
 #include <array>
 #include <string>
 #include <string_view>
-#include <sys/stat.h>
 #include <unordered_map>
 
 using settings = ::tim::settings;
@@ -403,17 +402,6 @@ remove(std::string inp, const std::set<std::string>& entries)
         }
     }
     return inp;
-}
-
-//--------------------------------------------------------------------------------------//
-
-bool
-file_exists(const std::string& _fname)
-{
-    struct stat _buffer;
-    if(stat(_fname.c_str(), &_buffer) == 0)
-        return (S_ISREG(_buffer.st_mode) != 0 || S_ISLNK(_buffer.st_mode) != 0);
-    return false;
 }
 
 //--------------------------------------------------------------------------------------//
