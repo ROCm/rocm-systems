@@ -25,8 +25,7 @@ struct ThreadState
     std::vector<std::unique_ptr<c10::DebugInfoGuard>> guards;
 };
 
-// The calling thread's state. Each thread walks its own marker stack, so this
-// state is per-thread where process_state() is per-process.
+// The calling thread's state. Each thread walks its own marker stack.
 inline ThreadState& thread_state()
 {
     static thread_local ThreadState state;
