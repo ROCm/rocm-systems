@@ -43,7 +43,9 @@
 #include <cstring>
 #include <cinttypes>
 #include <cstddef>
+#include <atomic>
 
+#include "util/atomic_helpers.h"
 #include "impl/wddm/queue.h"
 #include "impl/registers.h"
 
@@ -63,6 +65,11 @@ extern wsl::thunk::GpuMemory* GetGpuMemoryFromAddress(void* memory_address);
 
 namespace wsl {
 namespace thunk {
+
+// Format value in a VENDOR_SPECIFIC AQL packet's ven_hdr identifying a PM4
+// indirect-buffer packet (amd_aql_pm4_ib). A VENDOR_SPECIFIC slot is only fully
+// published once ven_hdr holds this; until then the body is still being written.
+static constexpr uint16_t AMD_AQL_FORMAT_PM4_IB = 0x1;
 
 hsa_status_t WDDMQueue::SwsInit(void) {
   if (!device->CreateSyncobj(&syncobj, &sync_addr)) return HSA_STATUS_ERROR;
@@ -868,7 +875,6 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
 }
 
 hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* packet) {
-  constexpr uint32_t AMD_AQL_FORMAT_PM4_IB = 0x1;
   assert(packet->ven_hdr == AMD_AQL_FORMAT_PM4_IB);
 
   uint8_t op = (packet->ib_jump_cmd[0] >> PM4_OPCODE_SHIFT) & 0xff;
@@ -965,13 +971,21 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
 
   ib_size = i;
   cmdbuf_aql_frame_write_index++;
+  // Clear ven_hdr on consume so a recycled slot can't transiently read a stale
+  // PM4-IB format before the next producer republishes its body.
+  packet->ven_hdr = 0;
   packet->header = HSA_PACKET_TYPE_INVALID;
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
   uint16_t* packet = (uint16_t*)((char*)ring + (cmdbuf_aql_frame_write_index % ring_size) * 64);
-  uint16_t header = (*packet >> HSA_PACKET_HEADER_TYPE);
+  // Acquire-load the header to pair with the producer's release publication so
+  // the packet body is fully visible before we read it; a plain read races the
+  // producer's burst commit (it bumps the write index before the slot body is
+  // visible) and yields a half-published packet.
+  uint16_t header =
+      (rocr::atomic::Load(packet, std::memory_order_acquire) >> HSA_PACKET_HEADER_TYPE);
   header &= (1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1;
   hsa_kernel_dispatch_packet_t* aql_packet = (hsa_kernel_dispatch_packet_t*)packet;
   hsa_status_t ret;
@@ -999,6 +1013,13 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
       BarrierGenericAqlToPm4((char*)ib_start_addr, (hsa_barrier_and_packet_t*)aql_packet, true);
       break;
     case HSA_PACKET_TYPE_VENDOR_SPECIFIC:
+      // A burst commit makes the producer bump the write index before the new
+      // slot's body is fully visible: the header can already read VENDOR_SPECIFIC
+      // (type 0, which passes the INVALID gate) while ven_hdr still holds the slot's
+      // stale value. Treat that as not-yet-published and retry next iteration,
+      // exactly like an INVALID packet.
+      if (((amd_aql_pm4_ib*)aql_packet)->ven_hdr != AMD_AQL_FORMAT_PM4_IB)
+        return HSA_STATUS_SUCCESS;
       VendorSpecificAqlToPm4((char*)ib_start_addr, (amd_aql_pm4_ib*)aql_packet);
       break;
     case HSA_PACKET_TYPE_INVALID:

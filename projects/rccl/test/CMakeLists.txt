@@ -26,6 +26,15 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/test_generate_device_table.py"
   )
 
+  # CPU-only generator unit test: guards src/device/ce_reduce/generate.py's
+  # per-instantiation TU splitting (ce_reduce_impl.h.in / ce_reduce_launcher.cpp.in
+  # template expansion). Needs no GPU and no built library.
+  add_test(
+    NAME rccl-generate-ce-reduce
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
+  )
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
@@ -152,6 +161,19 @@ if(BUILD_TESTS)
     dl
     fmt::fmt-header-only
   )
+
+  # Link libs for the host-only micro-test binary (test/host). Deliberately no
+  # HIP runtime on the link line, so any un-shimmed HIP API call surfaces as an
+  # undefined-symbol link error instead of silently binding to libamdhip64.so.
+  # HIP's *compile* requirements (device intrinsics, gfx codegen, headers) are
+  # applied in test/host/CMakeLists.txt via $<TARGET_PROPERTY:hip::*,...> (a
+  # CMake 3.16-safe stand-in for $<COMPILE_ONLY:hip::*>, which needs 3.27).
+  set(MICRO_TEST_LINK_LIBS
+    ${GTEST_BOTH_LIBRARIES}
+    Threads::Threads
+    dl
+    fmt::fmt-header-only
+  )
   if(OPENMP_TESTS_ENABLED)
     list(APPEND RCCL_COMMON_LINK_LIBS "${OpenMP_CXX_FLAGS}")
   endif()
@@ -197,6 +219,7 @@ if(BUILD_TESTS)
     DdaIpcTests.cpp
     NetPluginReloadTests.cpp
     plugin/net_reload_plugin.cpp
+    ProfilerPluginCloseTests.cpp
     CpuAffinityTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
@@ -233,8 +256,8 @@ if(BUILD_TESTS)
   # Create rccl-UnitTests binary
   add_executable(rccl-UnitTests ${TEST_SOURCE_FILES})
 
-  # AICOMRCCL-1534: net_reload_plugin.cpp is compiled into rccl-UnitTests and loaded
-  # in-process via NCCL_NET_PLUGIN=STATIC_PLUGIN (dlopen(NULL)), so no external .so.
+  # AICOMRCCL-1534 / net-plugin assignment tests: net_reload_plugin.cpp is compiled into
+  # rccl-UnitTests and loaded in-process via NCCL_NET_PLUGIN=STATIC_PLUGIN (dlopen(NULL)).
   # Scope its headers to the file so the generic example headers don't shadow others.
   set_source_files_properties(plugin/net_reload_plugin.cpp PROPERTIES
     INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/net/example/nccl)
@@ -242,7 +265,25 @@ if(BUILD_TESTS)
   # dlsym(dlopen(NULL), ...) only finds symbols present in the dynamic symbol table;
   # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
   target_link_options(rccl-UnitTests PRIVATE
-    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v10")
+    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12")
+
+  # A real shared library, unlike the net plugin above: ProfilerPluginCloseTests checks
+  # that RCCL unloads an external profiler plugin, so it needs a separately loadable
+  # object. It lands beside rccl-UnitTests in the build tree and is installed beside it
+  # too, so the test can find it by name relative to its own executable.
+  add_library(rccl-test-profiler-stub SHARED plugin/profiler_stub_plugin.cpp)
+  add_dependencies(rccl-UnitTests rccl-test-profiler-stub)
+  target_compile_definitions(rccl-UnitTests PRIVATE
+    RCCL_TEST_PROFILER_STUB_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-stub>")
+
+  # The test suite also runs from an install: TheRock CI executes the packaged
+  # rccl-UnitTests with no build tree present, so the stub has to ship with it.
+  # Deliberately not rocm_install(): that sends libraries to the library directory and
+  # adds them to the package export set, while this stub has to ship beside the test
+  # binaries that rocm_install() puts in CMAKE_INSTALL_BINDIR.
+  install(TARGETS rccl-test-profiler-stub
+    LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT tests)
 
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
@@ -261,6 +302,7 @@ if(BUILD_TESTS)
       device/TestOp128.cpp
       device/GinDeviceTests.cpp
       device/GinAnvilIpcDevice_test.cpp
+      device/HierarchicalShuffleTests.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -360,6 +402,8 @@ if(BUILD_TESTS)
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
+      CeAllReduceEligibilityTests.cpp
+      CeAlltoAllvEligibilityTests.cpp
       EnqueueTests.cpp
       LL128RegVariantKernelTests.cpp
       IpcsocketTests.cpp
@@ -764,5 +808,10 @@ if(BUILD_TESTS)
     COMPONENT tests
     RENAME "CTestTestfile.cmake"
   )
+
+  # Host-only micro-test binaries (rccl-UnitTestsMicro). The host/ CMakeLists
+  # is dual-mode: under BUILD_TESTS it builds only the in-RCCL-build micro-test
+  # target and returns; invoked standalone it builds rccl-HostUnitTests too.
+  add_subdirectory(host)
 
 endif()

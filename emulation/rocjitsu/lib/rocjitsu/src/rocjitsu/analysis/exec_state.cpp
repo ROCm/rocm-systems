@@ -28,7 +28,7 @@ enum class ExecWrite : uint8_t {
   Narrowing, ///< Writes EXEC some other way -> Unknown.
 };
 
-[[nodiscard]] bool writes_exec(const Instruction &inst) {
+[[nodiscard]] bool writes_execution_mask(const Instruction &inst) {
   // Two complementary signals: the WRITES_EXEC flag covers instructions whose
   // semantics always write EXEC (s_*_saveexec, s_wrexec, v_cmpx), while an EXEC
   // destination operand covers the generic move case (`s_mov_b64 exec, ...`),
@@ -145,7 +145,7 @@ enum class Combinator { Other, Copy, Or };
 /// AND-style writes (incl. `s_and_saveexec exec, -1`, where `exec & -1 == exec`)
 /// and writes of any other value fall through to `Narrowing`.
 [[nodiscard]] ExecWrite classify(const Instruction &inst, uint32_t wave_size) {
-  if (!writes_exec(inst))
+  if (!writes_execution_mask(inst))
     return ExecWrite::None;
   const ExecWriteExtent ext = exec_write_extent(inst, wave_size);
   if (ext.disjoint)
