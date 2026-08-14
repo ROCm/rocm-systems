@@ -130,14 +130,13 @@ static inline ncclResult_t ncclSideStreamAcquire(int cudaDev, int priority = 0) 
   pthread_mutex_lock(&sideStreamLock);
   if (auto it = sideStream.find(key); it != sideStream.end()) {
     it->second.refCount++;
-    INFO(NCCL_ALLOC, "Side stream %p dev %d busid %lx prio %d inc count to %ld",
-      it->second.stream, cudaDev, busId, priority, it->second.refCount);
+    INFO(NCCL_ALLOC, "Side stream %p dev %d busid %lx prio %d inc count to %ld", it->second.stream, cudaDev, busId,
+         priority, it->second.refCount);
   } else {
     cudaStream_t stream;
     CUDACHECKGOTO(cudaStreamCreateWithPriority(&stream, cudaStreamNonBlocking, priority), res, fail);
     sideStream.emplace(key, ncclSideStream{stream, 1});
-    INFO(NCCL_ALLOC, "Created side stream %p dev %d busid %lx prio %d",
-      stream, cudaDev, busId, priority);
+    INFO(NCCL_ALLOC, "Created side stream %p dev %d busid %lx prio %d", stream, cudaDev, busId, priority);
   }
 fail:
   pthread_mutex_unlock(&sideStreamLock);
@@ -155,13 +154,13 @@ static inline ncclResult_t ncclSideStreamRelease(int cudaDev, int priority = 0) 
   pthread_mutex_lock(&sideStreamLock);
   if (auto it = sideStream.find(key); it != sideStream.end()) {
     if (--it->second.refCount == 0) {
-      INFO(NCCL_ALLOC, "Destroyed side stream %p dev %d busid %lx prio %d",
-        it->second.stream, cudaDev, busId, priority);
+      INFO(NCCL_ALLOC, "Destroyed side stream %p dev %d busid %lx prio %d", it->second.stream, cudaDev, busId,
+           priority);
       CUDACHECKGOTO(cudaStreamDestroy(it->second.stream), res, fail);
       sideStream.erase(it);
     } else {
-      INFO(NCCL_ALLOC, "Side stream %p dev %d busid %lx prio %d dec count to %ld",
-        it->second.stream, cudaDev, busId, priority, it->second.refCount);
+      INFO(NCCL_ALLOC, "Side stream %p dev %d busid %lx prio %d dec count to %ld", it->second.stream, cudaDev, busId,
+           priority, it->second.refCount);
     }
   }
 fail:
@@ -171,7 +170,7 @@ fail:
 
 // Return the cached side stream for the current device+priority, or nullptr if
 // no scope is currently active (caller then uses a local fallback stream).
-static inline ncclResult_t getSideStream(cudaStream_t *stream, int priority = 0) {
+static inline ncclResult_t getSideStream(cudaStream_t* stream, int priority = 0) {
   int cudaDev;
   int64_t busId;
   CUDACHECK(cudaGetDevice(&cudaDev));
@@ -200,7 +199,9 @@ struct ncclSideStreamScope {
   explicit ncclSideStreamScope(int cudaDev, int priority = 0) : dev(cudaDev), prio(priority), active(false) {
     if (ncclSideStreamAcquire(dev, prio) == ncclSuccess) active = true;
   }
-  ~ncclSideStreamScope() { if (active) ncclSideStreamRelease(dev, prio); }
+  ~ncclSideStreamScope() {
+    if (active) ncclSideStreamRelease(dev, prio);
+  }
   ncclSideStreamScope(const ncclSideStreamScope&) = delete;
   ncclSideStreamScope& operator=(const ncclSideStreamScope&) = delete;
 };
