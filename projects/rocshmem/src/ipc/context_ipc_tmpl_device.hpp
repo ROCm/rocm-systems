@@ -411,14 +411,13 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
       internal_putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
                     reinterpret_cast<void *>(&dst[off_send + off_seg]),
                     chunk_size * sizeof(T), send_pe);
-
+      fence(send_pe);
       if (is_thread_zero_in_block()) {
         wait_val = seg + 100;
-        fence(send_pe);
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
-      detail::atomic::threadfence<detail::atomic::memory_scope_system, 
+      detail::atomic::threadfence<detail::atomic::memory_scope_system,
                              detail::atomic::memory_order_acquire>();
       __syncthreads();
 
@@ -432,13 +431,15 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
       putmem_nbi_wg(reinterpret_cast<void *>(&dst[off_send + off_seg]),
                     reinterpret_cast<void *>(&dst[off_send + off_seg]),
                     chunk_size * sizeof(T), send_pe);
-
+      __syncthreads();
+      fence(send_pe);
       if (is_thread_zero_in_block()) {
-        wait_val = seg + 10;
-        fence(send_pe);
+        wait_val = seg + 100;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
+      detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                             detail::atomic::memory_order_acquire>();
 
       __syncthreads();
     }
@@ -489,7 +490,7 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
       
-      detail::atomic::threadfence<detail::atomic::memory_scope_system, 
+      detail::atomic::threadfence<detail::atomic::memory_scope_system,
                              detail::atomic::memory_order_acquire>();
 
       for (int j = wf_tid; j < chunk_size; j += WF_SIZE) {
@@ -510,6 +511,8 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
+      detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                             detail::atomic::memory_order_acquire>();
     }
   }
 
@@ -547,7 +550,7 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
       // integer division rounding up
       int n_seg_up = (nreduce - 1) / seg_size + 1;
       // recalculate chunk_size
-      chunk_size = seg_size / PE_size;
+      // chunk_size = seg_size / PE_size;
 
       if (n_seg > 0) {
         internal_ring_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, n_seg,
