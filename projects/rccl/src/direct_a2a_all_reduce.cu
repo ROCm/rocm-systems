@@ -20,11 +20,31 @@
 #include <cstddef>
 
 RCCL_PARAM(DirectA2aEnable, "DIRECT_A2A_ENABLE", 0);
+RCCL_PARAM(DirectA2aOneShotThreshold, "DIRECT_A2A_ONESHOT_THRESHOLD",
+           RCCL_DIRECT_A2A_DEFAULT_ONESHOT_THRESHOLD_BYTES);
 
 namespace {
 
 constexpr int kDirectA2aThreads = 256;
 constexpr int kDirectA2aMaxBlocks = 256;
+static_assert(RCCL_DIRECT_A2A_DEFAULT_ONESHOT_THRESHOLD_BYTES <= RCCL_DIRECT_A2A_MAX_BYTES,
+              "DIRECT_A2A one-shot threshold must not exceed its maximum message size");
+static_assert(RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES <= RCCL_DIRECT_A2A_MAX_BYTES,
+              "DIRECT_A2A two-rank maximum must not exceed its global maximum message size");
+
+size_t directA2aMaxBytes(int nRanks) {
+  return nRanks == 2 ? RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES : RCCL_DIRECT_A2A_MAX_BYTES;
+}
+
+size_t directA2aOneShotThreshold(int nRanks) {
+  // With two ranks, ReduceScatter + AllGather moves the same total bytes as
+  // one-shot but adds a second P2P phase, so two-shot is never selected.
+  if (nRanks == 2) return RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES;
+
+  const int64_t configured = rcclParamDirectA2aOneShotThreshold();
+  if (configured <= 0) return 0;
+  return std::min<size_t>((size_t)configured, directA2aMaxBytes(nRanks));
+}
 
 template <typename T>
 __global__ void directA2aSumKernel(const T* __restrict__ scratch, T* __restrict__ recvbuff, size_t count, int nRanks) {
@@ -47,6 +67,123 @@ ncclResult_t launchDirectA2aSum(void* scratch, void* recvbuff, size_t count, int
   return ncclSuccess;
 }
 
+ncclResult_t launchDirectA2aSumByType(void* scratch, void* recvbuff, size_t count, int nRanks,
+                                      ncclDataType_t datatype, cudaStream_t stream) {
+  switch (datatype) {
+  case ncclFloat16:
+    return launchDirectA2aSum<half>(scratch, recvbuff, count, nRanks, stream);
+  case ncclBfloat16:
+    return launchDirectA2aSum<bf16>(scratch, recvbuff, count, nRanks, stream);
+  case ncclFloat32:
+    return launchDirectA2aSum<float>(scratch, recvbuff, count, nRanks, stream);
+  default:
+    return ncclInvalidArgument;
+  }
+}
+
+size_t directA2aChunkCount(size_t count, int nRanks, int chunk) {
+  return count / (size_t)nRanks + ((size_t)chunk < count % (size_t)nRanks ? 1 : 0);
+}
+
+size_t directA2aChunkOffset(size_t count, int nRanks, int chunk) {
+  const size_t base = count / (size_t)nRanks;
+  return (size_t)chunk * base + std::min<size_t>((size_t)chunk, count % (size_t)nRanks);
+}
+
+ncclResult_t directA2aOneShot(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                              ncclComm* comm, cudaStream_t stream) {
+  const size_t bytes = count * ncclTypeSize(datatype);
+  ncclResult_t ret = ncclSuccess;
+
+  void* selfSlot = static_cast<char*>(comm->directA2aScratch) + (size_t)comm->rank * bytes;
+  CUDACHECK(cudaMemcpyAsync(selfSlot, sendbuff, bytes, cudaMemcpyDeviceToDevice, stream));
+
+  rccl::Recorder::instance().skip(true);
+  ret = ncclGroupStart();
+  if (ret == ncclSuccess) {
+    for (int peer = 0; peer < comm->nRanks && ret == ncclSuccess; ++peer) {
+      if (peer == comm->rank) continue;
+      ret = ncclSend(sendbuff, count, datatype, peer, comm, stream);
+      if (ret == ncclSuccess) {
+        void* peerSlot = static_cast<char*>(comm->directA2aScratch) + (size_t)peer * bytes;
+        ret = ncclRecv(peerSlot, count, datatype, peer, comm, stream);
+      }
+    }
+    ncclResult_t groupEndResult = ncclGroupEnd();
+    if (ret == ncclSuccess) ret = groupEndResult;
+  }
+  rccl::Recorder::instance().skip(false);
+  NCCLCHECK(ret);
+
+  INFO(NCCL_COLL, "AllReduce: taking standalone DIRECT_A2A one-shot path: rank=%d/%d count=%zu datatype=%d bytes=%zu",
+       comm->rank, comm->nRanks, count, (int)datatype, bytes);
+  return launchDirectA2aSumByType(comm->directA2aScratch, recvbuff, count, comm->nRanks, datatype, stream);
+}
+
+ncclResult_t directA2aTwoShot(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                              ncclComm* comm, cudaStream_t stream) {
+  const size_t typeSize = ncclTypeSize(datatype);
+  const size_t bytes = count * typeSize;
+  const size_t ownedCount = directA2aChunkCount(count, comm->nRanks, comm->rank);
+  const size_t ownedOffset = directA2aChunkOffset(count, comm->nRanks, comm->rank);
+  const size_t ownedBytes = ownedCount * typeSize;
+  char* scratch = static_cast<char*>(comm->directA2aScratch);
+  void* reducedShard = scratch + (size_t)comm->nRanks * ownedBytes;
+  ncclResult_t ret = ncclSuccess;
+
+  // ReduceScatter: every rank sends each peer the shard owned by that peer,
+  // while receiving all contributions for its own shard into rank-indexed slots.
+  void* selfSlot = scratch + (size_t)comm->rank * ownedBytes;
+  const char* sendBytes = static_cast<const char*>(sendbuff);
+  CUDACHECK(cudaMemcpyAsync(selfSlot, sendBytes + ownedOffset * typeSize, ownedBytes,
+                            cudaMemcpyDeviceToDevice, stream));
+
+  rccl::Recorder::instance().skip(true);
+  ret = ncclGroupStart();
+  if (ret == ncclSuccess) {
+    for (int peer = 0; peer < comm->nRanks && ret == ncclSuccess; ++peer) {
+      if (peer == comm->rank) continue;
+      const size_t peerCount = directA2aChunkCount(count, comm->nRanks, peer);
+      const size_t peerOffset = directA2aChunkOffset(count, comm->nRanks, peer);
+      ret = ncclSend(sendBytes + peerOffset * typeSize, peerCount, datatype, peer, comm, stream);
+      if (ret == ncclSuccess) {
+        ret = ncclRecv(scratch + (size_t)peer * ownedBytes, ownedCount, datatype, peer, comm, stream);
+      }
+    }
+    ncclResult_t groupEndResult = ncclGroupEnd();
+    if (ret == ncclSuccess) ret = groupEndResult;
+  }
+
+  if (ret == ncclSuccess) {
+    ret = launchDirectA2aSumByType(scratch, reducedShard, ownedCount, comm->nRanks, datatype, stream);
+  }
+
+  // AllGather: publish the reduced local shard and place each peer's shard
+  // directly into its final offset. Self is copied locally to avoid self P2P.
+  if (ret == ncclSuccess) ret = ncclGroupStart();
+  if (ret == ncclSuccess) {
+    for (int peer = 0; peer < comm->nRanks && ret == ncclSuccess; ++peer) {
+      if (peer == comm->rank) continue;
+      const size_t peerCount = directA2aChunkCount(count, comm->nRanks, peer);
+      const size_t peerOffset = directA2aChunkOffset(count, comm->nRanks, peer);
+      ret = ncclSend(reducedShard, ownedCount, datatype, peer, comm, stream);
+      if (ret == ncclSuccess) {
+        ret = ncclRecv(static_cast<char*>(recvbuff) + peerOffset * typeSize, peerCount, datatype, peer, comm, stream);
+      }
+    }
+    ncclResult_t groupEndResult = ncclGroupEnd();
+    if (ret == ncclSuccess) ret = groupEndResult;
+  }
+  rccl::Recorder::instance().skip(false);
+  NCCLCHECK(ret);
+
+  CUDACHECK(cudaMemcpyAsync(static_cast<char*>(recvbuff) + ownedOffset * typeSize, reducedShard, ownedBytes,
+                            cudaMemcpyDeviceToDevice, stream));
+  INFO(NCCL_COLL, "AllReduce: taking standalone DIRECT_A2A two-shot path: rank=%d/%d count=%zu datatype=%d bytes=%zu",
+       comm->rank, comm->nRanks, count, (int)datatype, bytes);
+  return ncclSuccess;
+}
+
 } // namespace
 
 ncclResult_t rcclDirectA2aAllReduceCommInit(ncclComm* comm) {
@@ -57,7 +194,11 @@ ncclResult_t rcclDirectA2aAllReduceCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  const size_t scratchBytes = (size_t)comm->nRanks * RCCL_DIRECT_A2A_MAX_BYTES;
+  const size_t oneShotScratchBytes = (size_t)comm->nRanks * directA2aOneShotThreshold(comm->nRanks);
+  const size_t maxTwoShotChunkBytes =
+    (directA2aMaxBytes(comm->nRanks) + (size_t)comm->nRanks - 1) / (size_t)comm->nRanks + sizeof(double);
+  const size_t twoShotScratchBytes = ((size_t)comm->nRanks + 1) * maxTwoShotChunkBytes;
+  const size_t scratchBytes = std::max(oneShotScratchBytes, twoShotScratchBytes);
   ncclResult_t res = ncclCudaMalloc(&comm->directA2aScratch, scratchBytes, comm->memManager);
   if (res != ncclSuccess) {
     comm->directA2aScratch = nullptr;
@@ -94,9 +235,15 @@ bool rcclDirectA2aAllReduceEligible(ncclComm* comm, size_t count, ncclDataType_t
   if (datatype != ncclFloat16 && datatype != ncclBfloat16 && datatype != ncclFloat32) return false;
 
   const size_t typeSize = ncclTypeSize(datatype);
-  if (count > RCCL_DIRECT_A2A_MAX_BYTES / typeSize) return false;
+  if (count > directA2aMaxBytes(comm->nRanks) / typeSize) return false;
   const size_t bytes = count * typeSize;
-  return (size_t)comm->nRanks * bytes <= comm->directA2aScratchBytes;
+  if (bytes <= directA2aOneShotThreshold(comm->nRanks)) {
+    return (size_t)comm->nRanks * bytes <= comm->directA2aScratchBytes;
+  }
+
+  const size_t maxChunkCount = (count + (size_t)comm->nRanks - 1) / (size_t)comm->nRanks;
+  const size_t maxChunkBytes = maxChunkCount * typeSize;
+  return ((size_t)comm->nRanks + 1) * maxChunkBytes <= comm->directA2aScratchBytes;
 }
 
 ncclResult_t rcclDirectA2aAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -104,41 +251,8 @@ ncclResult_t rcclDirectA2aAllReduce(const void* sendbuff, void* recvbuff, size_t
   if (!rcclDirectA2aAllReduceEligible(comm, count, datatype, op)) return ncclInvalidUsage;
 
   const size_t bytes = count * ncclTypeSize(datatype);
-  ncclResult_t ret = ncclSuccess;
-
-  // Stage the local contribution directly. Only remote peers participate in
-  // the P2P batch, avoiding a self Send/Recv task and its special-case batching.
-  void* selfSlot = static_cast<char*>(comm->directA2aScratch) + (size_t)comm->rank * bytes;
-  CUDACHECK(cudaMemcpyAsync(selfSlot, sendbuff, bytes, cudaMemcpyDeviceToDevice, stream));
-
-  rccl::Recorder::instance().skip(true);
-  ret = ncclGroupStart();
-  if (ret == ncclSuccess) {
-    for (int peer = 0; peer < comm->nRanks && ret == ncclSuccess; ++peer) {
-      if (peer == comm->rank) continue;
-      ret = ncclSend(sendbuff, count, datatype, peer, comm, stream);
-      if (ret == ncclSuccess) {
-        void* peerSlot = static_cast<char*>(comm->directA2aScratch) + (size_t)peer * bytes;
-        ret = ncclRecv(peerSlot, count, datatype, peer, comm, stream);
-      }
-    }
-    ncclResult_t groupEndResult = ncclGroupEnd();
-    if (ret == ncclSuccess) ret = groupEndResult;
+  if (bytes <= directA2aOneShotThreshold(comm->nRanks)) {
+    return directA2aOneShot(sendbuff, recvbuff, count, datatype, comm, stream);
   }
-  rccl::Recorder::instance().skip(false);
-  NCCLCHECK(ret);
-
-  INFO(NCCL_COLL, "AllReduce: taking standalone DIRECT_A2A path: rank=%d/%d count=%zu datatype=%d bytes=%zu",
-       comm->rank, comm->nRanks, count, (int)datatype, bytes);
-
-  switch (datatype) {
-  case ncclFloat16:
-    return launchDirectA2aSum<half>(comm->directA2aScratch, recvbuff, count, comm->nRanks, stream);
-  case ncclBfloat16:
-    return launchDirectA2aSum<bf16>(comm->directA2aScratch, recvbuff, count, comm->nRanks, stream);
-  case ncclFloat32:
-    return launchDirectA2aSum<float>(comm->directA2aScratch, recvbuff, count, comm->nRanks, stream);
-  default:
-    return ncclInvalidArgument;
-  }
+  return directA2aTwoShot(sendbuff, recvbuff, count, datatype, comm, stream);
 }

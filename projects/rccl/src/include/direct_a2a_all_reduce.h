@@ -12,7 +12,9 @@
 
 struct ncclComm;
 
-constexpr size_t RCCL_DIRECT_A2A_MAX_BYTES = 1ULL << 20;
+constexpr size_t RCCL_DIRECT_A2A_DEFAULT_ONESHOT_THRESHOLD_BYTES = 1ULL << 16;
+constexpr size_t RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES = 1ULL << 22;
+constexpr size_t RCCL_DIRECT_A2A_MAX_BYTES = 1ULL << 23;
 constexpr int RCCL_DIRECT_A2A_MIN_RANKS = 2;
 constexpr int RCCL_DIRECT_A2A_MAX_RANKS = 4;
 
@@ -25,7 +27,8 @@ ncclResult_t rcclDirectA2aAllReduceCommFini(struct ncclComm* comm);
 // separately reject grouped, implicit-order and graph-captured launches.
 bool rcclDirectA2aAllReduceEligible(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op);
 
-// Full-mesh one-shot AllReduce implemented as batched P2P exchange into the
-// per-comm scratch buffer followed by a standalone local reduction kernel.
+// Two-rank AllReduce uses one-shot through its rank-specific maximum. Other
+// supported rank counts use one-shot for small messages and two-shot
+// ReduceScatter + AllGather for larger messages.
 ncclResult_t rcclDirectA2aAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                     ncclRedOp_t op, struct ncclComm* comm, cudaStream_t stream);

@@ -44,9 +44,29 @@ TEST_F(DirectA2aAllReduceEligibilityTest, EligibleSupportedTypes) {
 TEST_F(DirectA2aAllReduceEligibilityTest, EligibleRankAndSizeBoundaries) {
   comm_.nRanks = comm_.nNodes = RCCL_DIRECT_A2A_MIN_RANKS;
   EXPECT_TRUE(rcclDirectA2aAllReduceEligible(
-    &comm_, RCCL_DIRECT_A2A_MAX_BYTES / sizeof(float), ncclFloat32, ncclSum));
+    &comm_, RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES / sizeof(float), ncclFloat32, ncclSum));
+  EXPECT_FALSE(rcclDirectA2aAllReduceEligible(
+    &comm_, RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES / sizeof(float) + 1, ncclFloat32, ncclSum));
   comm_.nRanks = comm_.nNodes = 3;
-  EXPECT_TRUE(rcclDirectA2aAllReduceEligible(&comm_, 256, ncclFloat32, ncclSum));
+  EXPECT_TRUE(rcclDirectA2aAllReduceEligible(
+    &comm_, RCCL_DIRECT_A2A_MAX_BYTES / sizeof(float), ncclFloat32, ncclSum));
+}
+
+TEST_F(DirectA2aAllReduceEligibilityTest, SupportsOneShotAndUnevenTwoShotCounts) {
+  const size_t oneShotCount = RCCL_DIRECT_A2A_DEFAULT_ONESHOT_THRESHOLD_BYTES / sizeof(float);
+  EXPECT_TRUE(rcclDirectA2aAllReduceEligible(&comm_, oneShotCount, ncclFloat32, ncclSum));
+  EXPECT_TRUE(rcclDirectA2aAllReduceEligible(&comm_, oneShotCount + 1, ncclFloat32, ncclSum));
+  EXPECT_NE((oneShotCount + 1) % (size_t)comm_.nRanks, 0);
+}
+
+TEST_F(DirectA2aAllReduceEligibilityTest, TwoRanksUseOneShotThroughFourMiB) {
+  comm_.nRanks = comm_.nNodes = 2;
+  const size_t count = RCCL_DIRECT_A2A_TWO_RANK_MAX_BYTES / sizeof(float);
+  comm_.directA2aScratchBytes = (size_t)comm_.nRanks * count * sizeof(float) - 1;
+  EXPECT_FALSE(rcclDirectA2aAllReduceEligible(&comm_, count, ncclFloat32, ncclSum));
+
+  comm_.directA2aScratchBytes++;
+  EXPECT_TRUE(rcclDirectA2aAllReduceEligible(&comm_, count, ncclFloat32, ncclSum));
 }
 
 TEST_F(DirectA2aAllReduceEligibilityTest, RejectsNullCommAndMissingResources) {
@@ -103,6 +123,12 @@ TEST_F(DirectA2aAllReduceEligibilityTest, RejectsUnsupportedOperationAndDatatype
 TEST_F(DirectA2aAllReduceEligibilityTest, RejectsInsufficientScratch) {
   comm_.directA2aScratchBytes = comm_.nRanks * 256 * sizeof(float) - 1;
   EXPECT_FALSE(rcclDirectA2aAllReduceEligible(&comm_, 256, ncclFloat32, ncclSum));
+
+  reset();
+  const size_t count = RCCL_DIRECT_A2A_DEFAULT_ONESHOT_THRESHOLD_BYTES / sizeof(float) + 1;
+  const size_t maxChunkCount = (count + (size_t)comm_.nRanks - 1) / (size_t)comm_.nRanks;
+  comm_.directA2aScratchBytes = ((size_t)comm_.nRanks + 1) * maxChunkCount * sizeof(float) - 1;
+  EXPECT_FALSE(rcclDirectA2aAllReduceEligible(&comm_, count, ncclFloat32, ncclSum));
 }
 
 } // namespace RcclUnitTesting
