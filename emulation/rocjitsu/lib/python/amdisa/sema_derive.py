@@ -14,7 +14,7 @@ Covers scalar semantic classes:
   scalar_bitcmp, scalar_saveexec, scalar_mov, scalar_cmov
 
 Covers vector ALU + cmp semantic classes:
-  vector_mov, vector_unary, vector_binop, vector_ternary,
+  vector_mov, vector_unary, pseudo_scalar_unary, vector_binop, vector_ternary,
   vector_cmp, vector_cmpx, vector_cmp_class, vector_cmpx_class,
   vector_add_co, vector_cndmask, vector_readfirstlane, vector_readlane,
   vector_writelane, vector_swap, vector_fmaak, vector_fmamk
@@ -1119,6 +1119,25 @@ class _VectorUnary(_ScalarDeriver):
         return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
 
+@_register('pseudo_scalar_unary')
+class _PseudoScalarUnary(_ScalarDeriver):
+    """VALU unary expression that executes once on SGPRs and ignores EXEC."""
+
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        ty = _dtype_to_sema(sem.data_type)
+        src0 = _cast(_src(0, ty), ty)
+        call_name = f'pseudo_scalar_{sem.operation}_{sem.data_type}'
+        result = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.B32,
+            call_name=call_name,
+            children=(_id(call_name), src0),
+        )
+        body = _assign(_cast(_dst(0), SemaType.B32), result)
+        return SemaBlock(sem.name, ExecModel.SCALAR, body)
+
+
 @_register('vector_binop')
 class _VectorBinop(_ScalarDeriver):
     @staticmethod
@@ -1907,6 +1926,41 @@ class _DsAtomic(_ScalarDeriver):
                     _cast(_src(1), elem_ty),
                 ),
             ),
+        ]
+        body = SemaNode(SemaNodeKind.SEQ, children=tuple(stmts))
+        return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+
+@_register('ds_atomic2')
+class _DsAtomic2(_ScalarDeriver):
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        elem_ty = _elem_type(sem.elem_size)
+        op = sem.operation or 'swap'
+        addr0 = _addr_call(
+            'CalcDsAddr', _cast(_src(0), SemaType.U32), _id('OFFSET0', SemaType.U32)
+        )
+        addr1 = _addr_call(
+            'CalcDsAddr', _cast(_src(0), SemaType.U32), _id('OFFSET1', SemaType.U32)
+        )
+
+        def atomic_swap(addr_name: str, source_index: int) -> SemaNode:
+            return SemaNode(
+                SemaNodeKind.CALL,
+                ty=elem_ty,
+                call_name=f'atomic_{op}',
+                children=(
+                    _id(f'atomic_{op}'),
+                    _id(addr_name, SemaType.U32),
+                    _cast(_src(source_index), elem_ty),
+                ),
+            )
+
+        stmts = [
+            _assign(_id('addr0', SemaType.U32), addr0),
+            _assign(_id('addr1', SemaType.U32), addr1),
+            _assign(_cast(_dst(0), elem_ty), atomic_swap('addr0', 1)),
+            _assign(_cast(_dst(1), elem_ty), atomic_swap('addr1', 2)),
         ]
         body = SemaNode(SemaNodeKind.SEQ, children=tuple(stmts))
         return SemaBlock(sem.name, ExecModel.VECTOR, body)

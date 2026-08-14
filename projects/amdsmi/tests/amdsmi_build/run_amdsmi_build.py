@@ -148,10 +148,7 @@ def _bootstrap_python():
     if pkg_mgr == "apt":
         try:
             # Keep stdout quiet but let stderr surface install diagnostics.
-            subprocess.check_call(
-                ["apt-get", "update"],
-                stdout=subprocess.DEVNULL,
-            )
+            subprocess.check_call(["apt-get", "update"], stdout=subprocess.DEVNULL)
         except subprocess.CalledProcessError:
             pass
     for pkgs in pkg_candidates:
@@ -172,8 +169,7 @@ def _bootstrap_python():
         sys.exit("ERROR: could not find a Python 3.7+ interpreter after install")
     try:
         subprocess.check_call(
-            ["alternatives", "--set", "python3", new_py],
-            stdout=subprocess.DEVNULL,
+            ["alternatives", "--set", "python3", new_py], stdout=subprocess.DEVNULL
         )
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         link = "/usr/bin/python3"
@@ -442,8 +438,10 @@ def install_build_prereqs(cfg: "RunnerConfig") -> None:
     ship cmake on PATH. This step installs cmake/gcc/g++/make on demand so
     the cmake-configure step doesn't die with FileNotFoundError.
     """
-    if shutil.which("cmake") and shutil.which("make") and (
-        shutil.which("gcc") or shutil.which("cc")
+    if (
+        shutil.which("cmake")
+        and shutil.which("make")
+        and (shutil.which("gcc") or shutil.which("cc"))
     ):
         return
 
@@ -490,16 +488,7 @@ def install_build_prereqs(cfg: "RunnerConfig") -> None:
         )
     elif cfg.package_manager == "zypper":
         run_command(
-            [
-                "zypper",
-                "--non-interactive",
-                "install",
-                "cmake",
-                "gcc",
-                "gcc-c++",
-                "make",
-                "git",
-            ],
+            ["zypper", "--non-interactive", "install", "cmake", "gcc", "gcc-c++", "make", "git"],
             name="zypper-install-prereqs",
             retries=cfg.retries,
             log_dir=cfg.log_dir,
@@ -562,20 +551,11 @@ def install_netlink_deps(cfg: "RunnerConfig") -> None:
             cmd += ["--noplugins", "--nogpgcheck"]
         cmd += ["libnl3-devel", "libmnl-devel"]
         run_command(
-            cmd,
-            name=f"{installer}-install-netlink",
-            retries=cfg.retries,
-            log_dir=cfg.log_dir,
+            cmd, name=f"{installer}-install-netlink", retries=cfg.retries, log_dir=cfg.log_dir
         )
     elif cfg.package_manager == "zypper":
         run_command(
-            [
-                "zypper",
-                "--non-interactive",
-                "install",
-                "libnl3-devel",
-                "libmnl-devel",
-            ],
+            ["zypper", "--non-interactive", "install", "libnl3-devel", "libmnl-devel"],
             name="zypper-install-netlink",
             retries=cfg.retries,
             log_dir=cfg.log_dir,
@@ -718,12 +698,7 @@ def build_amdsmi(cfg: "RunnerConfig") -> None:
         env["QA_RPATHS"] = str(0x0010 | 0x0002)
         print(f"QA_RPATHS set to {env['QA_RPATHS']}")
 
-    cmake_args = [
-        "cmake",
-        str(cfg.project_dir),
-        "-DBUILD_TESTS=ON",
-        "-DENABLE_ESMI_LIB=ON",
-    ]
+    cmake_args = ["cmake", str(cfg.project_dir), "-DBUILD_TESTS=ON", "-DENABLE_ESMI_LIB=ON"]
     run_command(
         cmake_args,
         name="cmake-configure",
@@ -875,9 +850,7 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
 
     # Verify installation: CLI version + Python import/init/shutdown under the
     # interpreter the module was actually installed for. The system package
-    # installs amdsmi/ into a specific interpreter's site-packages, and the
-    # amd-smi CLI shebang is pinned to that same interpreter (see
-    # py-interface/CMakeLists.txt + amdsmi_cli/CMakeLists.txt). We must verify
+    # installs amdsmi/ into a specific interpreter's site-packages, so verify
     # against THAT interpreter, not a bare /usr/bin/python3: this harness itself
     # repoints /usr/bin/python3 via `alternatives` when it has to bootstrap a
     # newer python on an old base image (e.g. el8's 3.6), so /usr/bin/python3 at
@@ -891,9 +864,15 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
         if cli_target and cli_target.exists():
             first_line = cli_target.read_text(errors="replace").splitlines()[:1]
             if first_line and first_line[0].startswith("#!"):
-                interp = first_line[0][2:].strip().split()[0]
-                if interp and Path(interp).exists():
-                    verify_python = interp
+                tokens = first_line[0][2:].strip().split()
+                interp = tokens[0] if tokens else ""
+                # "#!/usr/bin/env python3" names the interpreter in the second
+                # token; the first is env itself.
+                if os.path.basename(interp) == "env" and len(tokens) > 1:
+                    interp = tokens[1]
+                resolved = interp if Path(interp).exists() else shutil.which(interp)
+                if resolved:
+                    verify_python = resolved
     except (OSError, IndexError):
         pass
     print(f"Verifying import under interpreter: {verify_python}")
@@ -905,10 +884,7 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
         "amdsmi.amdsmi_shut_down(); "
         "print('init/shutdown ok')"
     )
-    verify_commands = [
-        [str(rocm_binary), "version"],
-        [system_python, "-c", import_smoke],
-    ]
+    verify_commands = [[str(rocm_binary), "version"], [system_python, "-c", import_smoke]]
     for idx, verify_cmd in enumerate(verify_commands, start=1):
         try:
             run_command(verify_cmd, name=f"verify-{idx}", retries=1, log_dir=cfg.log_dir)
@@ -940,25 +916,6 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
         log_dir=cfg.log_dir,
     )
 
-    smoke_test = (
-        "import amdsmi\n"
-        "print('PASS: import amdsmi OK')\n"
-        "amdsmi.amdsmi_init()\n"
-        "print('PASS: amdsmi_init() OK')\n"
-        "devs = amdsmi.amdsmi_get_processor_handles()\n"
-        "print('PASS: Found %d device(s)' % len(devs))\n"
-        "amdsmi.amdsmi_shut_down()\n"
-        "print('PASS: amdsmi_shut_down() OK')\n"
-        "print('=== Wheel verification passed ===')\n"
-    )
-    run_command(
-        ["python3", "-c", smoke_test],
-        name="wheel-smoke-test",
-        cwd=Path("/tmp"),
-        retries=1,
-        log_dir=cfg.log_dir,
-    )
-
     run_command(
         ["python3", "-m", "pip", "show", "amdsmi"],
         name="pip-show-amdsmi",
@@ -974,6 +931,10 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
     # unconditionally precedes site-packages, so leaving it set would test the
     # environment's path config rather than the package. A bare interpreter
     # (no PYTHONPATH) is the real scripting scenario where pip must win.
+    # This check is hardware-independent and runs before the GPU smoke test
+    # below, so it executes even on GPU-less runners (manylinux, containers)
+    # where amdsmi_init() would otherwise fail first and mask a wrong-path
+    # install.
     priority_check = (
         "import os, subprocess, amdsmi\n"
         "out = subprocess.check_output(['python3', '-m', 'pip', 'show', 'amdsmi'], text=True)\n"
@@ -999,6 +960,114 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
         log_dir=cfg.log_dir,
     )
 
+    # GPU-dependent smoke test: initialize the library and enumerate devices.
+    # Skip cleanly when no GPU/driver is present so packaging-only runners are
+    # not failed by the absence of hardware.
+    smoke_test = (
+        "import amdsmi\n"
+        "try:\n"
+        "    amdsmi.amdsmi_init()\n"
+        "except amdsmi.AmdSmiException as e:\n"
+        "    print('SKIP: amdsmi_init() failed (no GPU/driver?): %s' % e)\n"
+        "    raise SystemExit(0)\n"
+        "print('PASS: amdsmi_init() OK')\n"
+        "devs = amdsmi.amdsmi_get_processor_handles()\n"
+        "print('PASS: Found %d device(s)' % len(devs))\n"
+        "amdsmi.amdsmi_shut_down()\n"
+        "print('PASS: amdsmi_shut_down() OK')\n"
+        "print('=== Wheel GPU smoke test passed ===')\n"
+    )
+    run_command(
+        ["python3", "-c", smoke_test],
+        name="wheel-smoke-test",
+        cwd=Path("/tmp"),
+        retries=1,
+        log_dir=cfg.log_dir,
+    )
+
+
+def verify_soname_distinct(cfg: "RunnerConfig") -> None:
+    """Assert the system and wheel libraries keep distinct SONAMEs.
+
+    Runs the standalone SONAME conflict check against the build tree. Only
+    meaningful when the wheel library was built (BUILD_PYTHON_WHEEL=ON), so a
+    build tree without libamd_smi_python.so is skipped rather than failed.
+    """
+    wheel_libs = list(cfg.build_dir.glob("**/libamd_smi_python.so.*"))
+    if not wheel_libs:
+        print("Skipping SONAME conflict check: no wheel library in the build tree")
+        return
+
+    test_script = cfg.project_dir / "tests" / "run_amdsmi_pkg_conflict_test.py"
+    run_command(
+        ["python3", str(test_script), "--build-root", str(cfg.build_dir)],
+        name="pkg-conflict-soname",
+        retries=1,
+        log_dir=cfg.log_dir,
+    )
+
+
+def verify_dual_copy(cfg: "RunnerConfig") -> None:
+    """Assert the system package's two module copies are byte-identical.
+
+    The DEB/RPM installs amdsmi into both site-packages and share/amd_smi. Only
+    runs when the share/amd_smi copy exists (system package installed), skipping
+    on a wheel-only install where there is a single copy.
+    """
+    rocm_path = os.environ.get("ROCM_PATH") or os.environ.get("ROCM_HOME") or "/opt/rocm"
+    share_copy = Path(rocm_path) / "share" / "amd_smi" / "amdsmi"
+    if not share_copy.is_dir():
+        print(f"Skipping dual-copy check: {share_copy} not present")
+        return
+
+    test_script = cfg.project_dir / "tests" / "run_amdsmi_dual_copy_test.py"
+    run_command(
+        ["python3", str(test_script)], name="dual-copy-guard", retries=1, log_dir=cfg.log_dir
+    )
+
+
+def verify_cpack_paths(cfg: "RunnerConfig", artifact: Path) -> None:
+    """Assert the built package ships the amdsmi module on an import path."""
+    test_script = cfg.project_dir / "tests" / "run_amdsmi_cpack_path_test.py"
+    run_command(
+        ["python3", str(test_script), str(artifact)],
+        name="cpack-path-check",
+        retries=1,
+        log_dir=cfg.log_dir,
+    )
+
+
+def verify_python_versions(cfg: "RunnerConfig") -> None:
+    """Run the loader contract tests under multiple Python interpreters."""
+    test_script = cfg.project_dir / "tests" / "run_amdsmi_python_versions_test.py"
+    cmd = ["python3", str(test_script)]
+    if cfg.python_interpreters:
+        cmd += ["--interpreters"] + cfg.python_interpreters.split(",")
+    run_command(cmd, name="python-versions", retries=1, log_dir=cfg.log_dir)
+
+
+def verify_upgrade_downgrade(cfg: "RunnerConfig", new_artifact: Path) -> None:
+    """Exercise the deb/rpm upgrade and downgrade path from a prior package."""
+    if not cfg.upgrade_from:
+        print("Skipping upgrade/downgrade check: no --upgrade-from package given")
+        return
+    test_script = cfg.project_dir / "tests" / "run_amdsmi_upgrade_downgrade_test.py"
+    run_command(
+        [
+            "python3",
+            str(test_script),
+            "--old-package",
+            str(cfg.upgrade_from),
+            "--new-package",
+            str(new_artifact),
+            "--package-manager",
+            cfg.package_manager,
+        ],
+        name="upgrade-downgrade",
+        retries=1,
+        log_dir=cfg.log_dir,
+    )
+
 
 @dataclass
 class RunnerConfig:
@@ -1019,6 +1088,8 @@ class RunnerConfig:
     qa_rpaths: bool
     skip_build: bool
     skip_install: bool
+    upgrade_from: "Optional[Path]"
+    python_interpreters: "Optional[str]"
 
 
 def parse_args() -> RunnerConfig:
@@ -1067,6 +1138,18 @@ def parse_args() -> RunnerConfig:
     )
     parser.add_argument("--skip-install", action="store_true", help="Skip package installation")
     parser.add_argument(
+        "--upgrade-from",
+        type=Path,
+        default=None,
+        help="Prior-version .deb/.rpm to test the upgrade/downgrade path against",
+    )
+    parser.add_argument(
+        "--python-interpreters",
+        default=None,
+        help="Comma-separated interpreters for the Python-version loader tests "
+        "(default: discovered python3.6..3.14)",
+    )
+    parser.add_argument(
         "--no-autodetect",
         action="store_true",
         help="Disable auto-detection of OS profile from /etc/os-release",
@@ -1079,9 +1162,7 @@ def parse_args() -> RunnerConfig:
 
     project_dir = find_project_dir(args.project_dir)
     build_dir = args.build_dir or project_dir / "build"
-    package_manager = detect_package_manager(
-        args.package_manager or profile.get("package_manager")
-    )
+    package_manager = detect_package_manager(args.package_manager or profile.get("package_manager"))
     package_format = detect_package_format(
         package_manager, args.package_format or profile.get("package_format")
     )
@@ -1106,11 +1187,15 @@ def parse_args() -> RunnerConfig:
         os_label=os_label,
         refresh_apt=not args.no_apt_update,
         debian10_sources=args.debian10_sources or profile.get("debian10_sources", False),
-        skip_setuptools_upgrade=args.skip_setuptools_upgrade or profile.get("skip_setuptools_upgrade", False),
-        install_more_itertools=args.install_more_itertools or profile.get("install_more_itertools", False),
+        skip_setuptools_upgrade=args.skip_setuptools_upgrade
+        or profile.get("skip_setuptools_upgrade", False),
+        install_more_itertools=args.install_more_itertools
+        or profile.get("install_more_itertools", False),
         qa_rpaths=args.qa_rpaths or profile.get("qa_rpaths", False),
         skip_build=args.skip_build,
         skip_install=args.skip_install,
+        upgrade_from=args.upgrade_from,
+        python_interpreters=args.python_interpreters,
     )
 
 
@@ -1152,11 +1237,18 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             details.append(f"#### {stage}\n\n" + _fenced(content))
             print(f"FAILED: {stage}")
 
-    # 2. amd-smi command test logs -- logged but non-fatal
+    # 2. amd-smi command test logs -- logged but non-fatal. The workflow
+    # appends "Error code: <rc>" (space + digit, same line) only on a real
+    # non-zero exit. The CLI's debug logging also prints an unsupported-feature
+    # status code, but wrapped onto the next line ("Error code:\n\t2 | ..."),
+    # so restrict the match to a same-line digit to skip that benign noise.
+    import re as _re
+
+    err_code_re = _re.compile(r"Error code:[ \t]*\d")
     cmd_fails: List[str] = []
     for log in sorted(results_dir.glob("amd-smi_*.log")):
         log_text = log.read_text(encoding="utf-8", errors="replace")
-        if any(token in log_text for token in ("Traceback", "AmdSmiException", "Error code:")):
+        if "Traceback" in log_text or "AmdSmiException" in log_text or err_code_re.search(log_text):
             cmd_fails.append(log.stem.replace("amd-smi_", ""))
     if cmd_fails:
         joined = " ".join(cmd_fails)
@@ -1169,15 +1261,16 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
         gtest_fails = text.count("[  FAILED  ]")
         if gtest_fails > 0:
             failures.append(f"AMDSMI Tests ({gtest_fails})")
-            details.append(
-                f"#### AMDSMI Tests \u2014 {gtest_fails} failure(s)\n\n" + _fenced(text)
-            )
+            details.append(f"#### AMDSMI Tests \u2014 {gtest_fails} failure(s)\n\n" + _fenced(text))
 
     # 4. Python test outputs
-    import re as _re
-
     fail_re = _re.compile(r"^(FAIL|ERROR):", _re.MULTILINE)
-    for test_file in ("integration_test_output.txt", "unit_test_output.txt", "perf_test_output.txt"):
+    for test_file in (
+        "integration_test_output.txt",
+        "unit_test_output.txt",
+        "perf_test_output.txt",
+        "abi_compat_output.txt",
+    ):
         full = results_dir / test_file
         if not full.exists():
             continue
@@ -1186,9 +1279,7 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
         if py_fails > 0:
             name = test_file.replace("_output.txt", "").replace("_", " ")
             failures.append(f"{name} ({py_fails})")
-            details.append(
-                f"#### {name} \u2014 {py_fails} failure(s)\n\n" + _fenced(text)
-            )
+            details.append(f"#### {name} \u2014 {py_fails} failure(s)\n\n" + _fenced(text))
 
     # 5. example test results (segfault detection)
     crash_re = _re.compile(r"segfault|SIGSEGV|abort", _re.IGNORECASE)
@@ -1207,9 +1298,7 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
     # transient amd-smi CLI flakes do not fail the whole job.
     cmd_summary = ""
     if cmd_fails:
-        cmd_summary = (
-            f"\n\n:warning: Command tests (non-fatal): `{' '.join(cmd_fails)}`\n"
-        )
+        cmd_summary = f"\n\n:warning: Command tests (non-fatal): `{' '.join(cmd_fails)}`\n"
 
     if failures:
         header = [
@@ -1322,6 +1411,52 @@ def main() -> None:
     print(f"Build artifact: {artifact}")
     _write_result(cfg.test_results_dir, "build_result.txt", f"BUILD PASSED\nArtifact: {artifact}")
 
+    # 5b. Package ships the module on an import path (no install needed)
+    try:
+        verify_cpack_paths(cfg, artifact)
+    except CommandError as exc:
+        _write_result(
+            cfg.test_results_dir,
+            "cpack_path_result.txt",
+            f"CPACK PATH CHECK FAILED: {exc.name} exited {exc.code}\n\n"
+            f"Log ({exc.log_path}):\n{read_log(exc.log_path)}",
+        )
+        report_and_raise("CPACK PATH CHECK", exc)
+    _write_result(cfg.test_results_dir, "cpack_path_result.txt", "CPACK PATH CHECK PASSED")
+
+    # 5c. Loader behaves identically across supported Python versions
+    try:
+        verify_python_versions(cfg)
+    except CommandError as exc:
+        _write_result(
+            cfg.test_results_dir,
+            "python_versions_result.txt",
+            f"PYTHON VERSIONS FAILED: {exc.name} exited {exc.code}\n\n"
+            f"Log ({exc.log_path}):\n{read_log(exc.log_path)}",
+        )
+        report_and_raise("PYTHON VERSIONS", exc)
+    _write_result(cfg.test_results_dir, "python_versions_result.txt", "PYTHON VERSIONS PASSED")
+
+    # 5d. Upgrade/downgrade from a prior package (only when one is provided).
+    # Deliberately ahead of the install/wheel stages: `pip install` puts the
+    # wheel under /usr/local, which precedes the deb/rpm site-packages path for
+    # `import amdsmi`, so running this afterwards would verify the wheel on
+    # every transition instead of the package actually being upgraded.
+    if not cfg.skip_install and cfg.upgrade_from:
+        try:
+            verify_upgrade_downgrade(cfg, artifact)
+        except CommandError as exc:
+            _write_result(
+                cfg.test_results_dir,
+                "upgrade_downgrade_result.txt",
+                f"UPGRADE/DOWNGRADE FAILED: {exc.name} exited {exc.code}\n\n"
+                f"Log ({exc.log_path}):\n{read_log(exc.log_path)}",
+            )
+            report_and_raise("UPGRADE/DOWNGRADE", exc)
+        _write_result(
+            cfg.test_results_dir, "upgrade_downgrade_result.txt", "UPGRADE/DOWNGRADE PASSED"
+        )
+
     # 6. Install
     if not cfg.skip_install:
         try:
@@ -1351,6 +1486,34 @@ def main() -> None:
             )
             report_and_raise("VERIFY WHEEL", exc)
         _write_result(cfg.test_results_dir, "verify_wheel_result.txt", "VERIFY WHEEL PASSED")
+
+    # 8. SONAME distinctness (system vs wheel library)
+    if not cfg.skip_install:
+        try:
+            verify_soname_distinct(cfg)
+        except CommandError as exc:
+            _write_result(
+                cfg.test_results_dir,
+                "pkg_conflict_result.txt",
+                f"SONAME CHECK FAILED: {exc.name} exited {exc.code}\n\n"
+                f"Log ({exc.log_path}):\n{read_log(exc.log_path)}",
+            )
+            report_and_raise("SONAME CHECK", exc)
+        _write_result(cfg.test_results_dir, "pkg_conflict_result.txt", "SONAME CHECK PASSED")
+
+    # 9. Dual-copy drift guard (system package installs the module twice)
+    if not cfg.skip_install:
+        try:
+            verify_dual_copy(cfg)
+        except CommandError as exc:
+            _write_result(
+                cfg.test_results_dir,
+                "dual_copy_result.txt",
+                f"DUAL COPY CHECK FAILED: {exc.name} exited {exc.code}\n\n"
+                f"Log ({exc.log_path}):\n{read_log(exc.log_path)}",
+            )
+            report_and_raise("DUAL COPY CHECK", exc)
+        _write_result(cfg.test_results_dir, "dual_copy_result.txt", "DUAL COPY CHECK PASSED")
 
     print("AMDSMI workflow complete")
 

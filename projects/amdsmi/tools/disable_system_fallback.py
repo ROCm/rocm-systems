@@ -22,14 +22,22 @@ def main(argv: List[str]) -> None:
     if len(argv) != 2:
         sys.exit(f"usage: {argv[0]} <staged amdsmi_wrapper.py>")
     path = pathlib.Path(argv[1])
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
+
+    # A rebuild reuses the already-flipped staged copy (copy_if_different does
+    # not re-copy an unchanged source), so treat an already-disabled flag as a
+    # no-op instead of failing.
+    if ANCHOR not in text and text.count(REPLACEMENT) == 1:
+        print(f"[disable_system_fallback] {path}: already disabled, nothing to do")
+        return
+
     count = text.count(ANCHOR)
     if count != 1:
         sys.exit(
             f"expected exactly one '{ANCHOR}' in {path}, found {count}; "
             "refusing to build a wheel with an ambiguous loader fallback flag"
         )
-    path.write_text(text.replace(ANCHOR, REPLACEMENT, 1))
+    path.write_text(text.replace(ANCHOR, REPLACEMENT, 1), encoding="utf-8")
     print(f"[disable_system_fallback] {path}: system library fallback disabled for wheel")
 
 

@@ -51,11 +51,83 @@ struct IndirectCallFixup {
   /// be replaced with a direct transfer window — an unconstrained path would be
   /// redirected to a concrete target it never dynamically reaches.
   bool source_incomplete = false;
+  /// @brief True when the recovery range contains an `s_wait_xcnt` the replacement
+  /// must reproduce. The canonical builder overwrites the whole range and writes
+  /// the same SGPR pair the drain was ordering, so dropping the wait would let the
+  /// pair be rewritten while an operation still has the old value in flight.
+  bool source_requires_xcnt_drain = false;
   uint16_t source_return_sreg = 0;           ///< Low SGPR receiving the return PC for calls.
   uint64_t target_getpc_offset = 0;          ///< Relocated offset of the s_getpc_b64 producer.
   uint64_t target_recovery_begin_offset = 0; ///< Relocated first byte of replaceable builder code.
   uint64_t target_recovery_end_offset = 0;   ///< Relocated one-past-end byte of builder code.
 };
+
+/// @brief One statically discovered `s_getpc_b64`-rooted PC-relative address producer.
+///
+/// @details A recovered indirect branch is only one consumer of a getpc builder.
+/// The same construct materializes function pointers that are copied, spilled,
+/// or passed as arguments before they reach a dynamic transfer. DBT relocates
+/// `.text`, so every such builder that is copied verbatim keeps its original
+/// delta and therefore computes `new_pc + old_delta` — a stale address. Reporting
+/// every builder lets the translator prove the complementary property: that no
+/// stale PC-derived value can exist in a kernel scope at all.
+///
+/// One record is produced per `s_getpc_b64` instruction, whether or not the pass
+/// could follow it. @ref resolved distinguishes the two cases.
+struct PcAddressBuilder {
+  uint64_t source_getpc_offset = 0;          ///< Source offset of the s_getpc_b64 producer.
+  uint64_t source_recovery_begin_offset = 0; ///< First source byte of replaceable builder code.
+  uint64_t source_recovery_end_offset = 0;   ///< One-past-end source byte of builder code.
+  /// Text-relative byte offset the builder leaves in its SGPR pair at
+  /// @ref source_recovery_end_offset. Signed because an unrelocatable data
+  /// reference can compute an address below the section.
+  int64_t source_target_offset = 0;
+  uint16_t source_sreg = 0; ///< Low SGPR of the pair the builder writes.
+  /// @brief True when the pass followed this getpc to a single concrete offset.
+  ///
+  /// False means an unmodeled write reached the pair before any stable point,
+  /// or two incompatible values were observed for the same producer. Such a
+  /// producer cannot be made relocation-correct and must clear any whole-scope
+  /// relocation invariant that depends on it.
+  bool resolved = false;
+  /// @brief True when [source_recovery_begin_offset, source_recovery_end_offset)
+  /// holds only the builder's own arithmetic, with no unrelated instruction
+  /// between steps. The relocation patcher rewrites that interval as one
+  /// contiguous run and NOPs the remainder, so a non-contiguous range would
+  /// erase an intervening instruction. A non-contiguous producer cannot back a
+  /// whole-scope relocation invariant even though its final value is known.
+  bool contiguous = true;
+  /// @brief True when two observations of this producer disagreed on its value.
+  ///
+  /// Distinct from a cleared @ref resolved, which also covers a producer this
+  /// pass simply never followed to a setpc. A poisoned producer is one no single
+  /// delta rewrite can satisfy, so a caller reasoning about whether every code
+  /// address is relocated must fail closed on it rather than defer to another
+  /// analysis that happened to track the same getpc.
+  bool poisoned = false;
+
+  friend bool operator==(const PcAddressBuilder &, const PcAddressBuilder &) = default;
+};
+
+/// @brief Whether an AMDGPU physical VGPR is callee-saved by the ABI.
+///
+/// @details A callee-saved VGPR keeps its value across a call, so a value stashed
+/// there is still the caller's after the callee returns. @p phys_vgpr is the
+/// resolved physical index; gfx1250 VGPR_MSB banking can push it past 255, and the
+/// ABI table only covers v0-v255, so a banked register above that range is not
+/// proven callee-saved and reports false. The default device and graphics
+/// conventions share this VGPR set, so unlike the SGPR rule below no explicit
+/// intersection is necessary.
+[[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr);
+
+/// @brief Whether an SGPR is preserved by every AMDGPU calling convention the
+/// translator may encounter for a device function.
+///
+/// @details Code objects do not record whether a particular helper uses the
+/// default device convention or the graphics convention. This predicate uses
+/// their intersection, so an unsummarized call cannot preserve a stale value
+/// merely because one convention saves the register.
+[[nodiscard]] bool is_callee_saved_sgpr(uint16_t sgpr);
 
 /// @brief Discover concrete targets for statically-built setpc/swappc consumers.
 ///
@@ -83,10 +155,16 @@ struct IndirectCallFixup {
 /// @param arch ISA architecture used for scalar instruction matching.
 /// @param extra_leaders Additional known block starts, usually kernel entries.
 /// @param entry_policy Whether predecessorless blocks are inferred to be external entries.
+/// @param pc_builders Optional sink for every discovered PC-relative address
+///        producer, sorted by `source_getpc_offset`. Populated only when the
+///        section actually contains a recoverable indirect consumer, because a
+///        section with no dynamic transfer has no stale-PC branch hazard to
+///        prove anything about.
 /// @returns Recovered indirect branch/call metadata.
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders = {},
-    ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless);
+    ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
+    std::vector<PcAddressBuilder> *pc_builders = nullptr);
 
 } // namespace rocjitsu

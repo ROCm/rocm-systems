@@ -89,19 +89,8 @@ rm_logrotateConfig() {
 
 case "$1" in
   ( remove | upgrade)
-    # remove old gpuv-smi symlink
+    # remove old gpuv-smi symlink on both remove and upgrade
     rm -f @CPACK_PACKAGING_INSTALL_PREFIX@/bin/gpuv-smi &> /dev/null
-    echo "Removing AMDSMI Lib Packages..."
-    rm_ldconfig
-    echo "ldconfig removed"
-    rm_leftovers
-    echo "leftovers removed"
-    rm_logFolder
-    echo "log folder removed"
-    rm_rocm_tests_dir
-    echo "rocm tests directory removed"
-    rm_logrotateConfig
-    echo "logrotate configuration removed"
   ;;
   ( purge )
   ;;
@@ -109,3 +98,14 @@ case "$1" in
     exit 0
   ;;
 esac
+
+if [ "$1" = "remove" ]; then
+  # only on a full remove -- on upgrade these would delete the incoming
+  # package's ldconfig entry, logs, test dir and logrotate config
+  echo "Removing AMDSMI Lib Packages..."
+  rm_ldconfig
+  rm_leftovers
+  rm_logFolder
+  rm_rocm_tests_dir
+  rm_logrotateConfig
+fi

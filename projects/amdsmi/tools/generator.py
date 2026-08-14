@@ -18,6 +18,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import os
+import re
 import argparse
 import tempfile
 import shutil
@@ -106,6 +107,42 @@ def write_file(full_path_file_name, contents):
     with os.fdopen(fh, "w") as new_file:
         for line in contents:
             new_file.write(f"{line}\n")
+
+    shutil.copymode(full_path_file_name, abs_path)
+    os.remove(full_path_file_name)
+    shutil.move(abs_path, full_path_file_name)
+
+
+def insert_layout_ms(full_path_file_name):
+    # Python 3.14 deprecates the implicit ctypes layout when _pack_ is set
+    # (becomes an error in 3.19). _layout_ = 'ms' keeps the MSVC-compatible
+    # layout that packed structs already used pre-3.14, so the ABI is unchanged.
+    fh, abs_path = tempfile.mkstemp()
+    standalone = re.compile(r"^(\s*)(\S+)\._pack_ = ")
+    inline = re.compile(r"^(\s+)_pack_ = ")
+    pack_count = 0
+    layout_count = 0
+    with os.fdopen(fh, "w", encoding="UTF-8") as new_file:
+        with open(full_path_file_name, "r", encoding="UTF-8") as old_file:
+            for line in old_file:
+                new_file.write(line)
+                if "._pack_ = " in line or line.lstrip().startswith("_pack_ = "):
+                    pack_count += 1
+                m = standalone.match(line)
+                if m:
+                    layout_count += 1
+                    new_file.write(f"{m.group(1)}{m.group(2)}._layout_ = 'ms'\n")
+                    continue
+                mi = inline.match(line)
+                if mi:
+                    layout_count += 1
+                    new_file.write(f"{mi.group(1)}_layout_ = 'ms'\n")
+
+    if pack_count != layout_count:
+        raise RuntimeError(
+            f"_layout_ insertion missed a _pack_ style: found {pack_count} "
+            f"_pack_ lines but added {layout_count} _layout_ lines"
+        )
 
     shutil.copymode(full_path_file_name, abs_path)
     os.remove(full_path_file_name)
@@ -204,7 +241,7 @@ def main():
 # ---------------------------------------------------------------------------
 # Dynamic library loading
 # ---------------------------------------------------------------------------
-# This wrapper supports two self-contained install paths:
+# This wrapper supports three self-contained install paths:
 #
 #   1. pip wheel
 #      The wheel ships ``libamd_smi_python.so`` next to this file.
@@ -215,23 +252,21 @@ def main():
 #      ``/opt/rocm/lib`` so the dynamic linker resolves the SONAME
 #      ``libamd_smi.so.<SOVERSION>`` without further help.
 #
-# A user installs ONE of those two packages. We never combine paths
-# from both -- no ROCM_HOME / ROCM_PATH ladders, no walking up to a
+#   3. relocatable ROCm tree (TheRock rocm-sdk wheels, portable tarball)
+#      Wrapper at ``<root>/share/amd_smi/amdsmi/``, library at
+#      ``<root>/lib/<SONAME>`` -- resolved by fixed relative path.
+#
+# A user installs ONE of these packages. We never combine paths
+# from them -- no ROCM_HOME / ROCM_PATH ladders, no walking up to a
 # ROCm root, no LD_LIBRARY_PATH probing. ``AMDSMI_LIB_OVERRIDE`` stays
 # as a single-purpose escape hatch for ABI tests that need to load an
 # alternate .so explicitly.
 # ---------------------------------------------------------------------------
 
-_libraries = {{}}
 
-
-# Versioned SONAME the SYSTEM package ships (case 3 below). This is always
-# libamd_smi.so.<major> -- the name the rpm/deb installs and the dynamic linker
-# resolves -- regardless of which library THIS wrapper was generated against.
-# It must NOT be derived from the -l build library: when the wrapper is
-# generated for the wheel (-l libamd_smi_python.so), the system fallback still
-# has to name the system lib, not the wheel-private libamd_smi_python.so (which
-# the system package never ships). The major matches src/CMakeLists.txt
+# SONAME the system rpm/deb ships and the relocatable tree names. Always the
+# system lib, never the wheel-private libamd_smi_python.so, even when the
+# wrapper is generated with -l libamd_smi_python.so. Major = src/CMakeLists.txt
 # SOVERSION (= AMDSMI_LIB_VERSION_MAJOR in amdsmi.h).
 _AMDSMI_LIB_SONAME = "libamd_smi.so.{soname_major}"
 
@@ -250,7 +285,8 @@ def _load_library():
     Order:
       1. ``AMDSMI_LIB_OVERRIDE`` env var (ABI-test escape hatch).
       2. ``libamd_smi_python.so`` next to this file (pip wheel).
-      3. SONAME via the dynamic linker (system rpm / deb); skipped when
+      3. ``<root>/lib/<SONAME>`` relative to this file (relocatable ROCm tree).
+      4. SONAME via the dynamic linker (system rpm / deb); skipped when
          _AMDSMI_ALLOW_SYSTEM_FALLBACK is False (pip wheel).
     \"\"\"
     mode = getattr(ctypes, "RTLD_LOCAL", 0)
@@ -268,6 +304,20 @@ def _load_library():
             "bundled libamd_smi_python.so is missing from this amdsmi wheel; "
             "refusing to fall back to a system libamd_smi.so"
         )
+
+    # Relocatable ROCm tree: <root>/lib/<SONAME>, one fixed location relative
+    # to this file, tried before the bare-SONAME linker lookup (not a search).
+    # amdsmi_interface.py resolves librocm-core.so the same way. A
+    # present-but-unloadable file (missing deps) must not shadow the system
+    # linker lookup, so fall through on OSError.
+    here = Path(__file__).resolve()
+    if len(here.parents) > 3:
+        relocatable = here.parents[3] / "lib" / _AMDSMI_LIB_SONAME
+        if relocatable.exists():
+            try:
+                return ctypes.CDLL(str(relocatable), mode=mode), str(relocatable)
+            except OSError:
+                pass
 
     return ctypes.CDLL(_AMDSMI_LIB_SONAME, mode=mode), _AMDSMI_LIB_SONAME
 
@@ -476,6 +526,8 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
             output_file_array = output_file_array[:-1]
 
         write_file(output_file, output_file_array)
+
+    insert_layout_ms(output_file)
 
 
 if __name__ == "__main__":
