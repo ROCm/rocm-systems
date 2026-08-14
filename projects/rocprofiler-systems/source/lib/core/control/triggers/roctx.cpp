@@ -11,14 +11,15 @@
 #include <spdlog/fmt/ranges.h>
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
 
 namespace rocprofsys::control::triggers
 {
-roctx::roctx(session& sess, std::string_view trace_regions)
-: m_session{ sess }
+roctx::roctx(std::shared_ptr<session> sess, std::string_view trace_regions)
+: m_session{ std::move(sess) }
 {
     if(!trace_regions.empty())
     {
@@ -34,10 +35,10 @@ roctx::roctx(session& sess, std::string_view trace_regions)
     }
 
     m_should_write.store(compute_should_write(), std::memory_order_relaxed);
-    sess.register_trigger(trigger_name, compute_action());
+    m_session->register_trigger(trigger_name, compute_action());
 }
 
-roctx::~roctx() { m_session.unregister_trigger(trigger_name); }
+roctx::~roctx() { m_session->unregister_trigger(trigger_name); }
 
 void
 roctx::on_range_start(std::uint64_t range_id, const char* message)
@@ -150,6 +151,6 @@ void
 roctx::refresh_state()
 {
     m_should_write.store(compute_should_write(), std::memory_order_relaxed);
-    m_session.set_action(trigger_name, compute_action());
+    m_session->set_action(trigger_name, compute_action());
 }
 }  // namespace rocprofsys::control::triggers

@@ -113,7 +113,8 @@ std::atomic<bool>  rocprofsys_finalization_done{ false };
 auto               _timemory_manager  = tim::manager::instance();
 auto               _timemory_settings = tim::settings::shared_instance();
 
-control::session g_control_session;
+std::shared_ptr<control::session> g_control_session =
+    std::make_shared<control::session>();
 
 void
 set_metadata_process_start_timestamp(std::int64_t _ts)
@@ -694,9 +695,9 @@ rocprofsys_init_tooling_hidden(void)
             });
             // clang-format on
             for(auto& sub : subscribers)
-                g_control_session.subscribe(std::move(sub));
+                g_control_session->subscribe(std::move(sub));
 
-            g_control_session.force_initial_pause();
+            g_control_session->force_initial_pause();
         }
 
         state::process::set(
@@ -932,7 +933,7 @@ rocprofsys_finalize_hidden(void)
         rocprofiler_sdk::shutdown();
 
         LOG_DEBUG("Shutting down control session...");
-        g_control_session.shutdown();
+        g_control_session->shutdown();
 
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
@@ -1048,7 +1049,7 @@ rocprofsys_finalize_hidden(void)
     rocprofiler_sdk::shutdown();
 
     LOG_DEBUG("Shutting down control session...");
-    g_control_session.shutdown();
+    g_control_session->shutdown();
 
     LOG_DEBUG("Stopping and destroying instrumentation bundles...");
     auto* _bundles = instrumentation_bundles::get();

@@ -99,10 +99,10 @@ using rocprofiler_sdk::default_sdk_externals;
 using rocprofiler_sdk::sdk_tracing_config;
 using rocprofiler_sdk::wrapper;
 
-using tool_agent_vec_t                         = std::vector<tool_agent>;
-client_data*                    tool_data      = new client_data{};
-std::shared_ptr<roctx_client<>> g_roctx_client = {};
-control::session*               g_session      = nullptr;
+using tool_agent_vec_t                           = std::vector<tool_agent>;
+client_data*                      tool_data      = new client_data{};
+std::shared_ptr<roctx_client<>>   g_roctx_client = {};
+std::shared_ptr<control::session> g_session      = {};
 
 std::atomic<bool> tool_fini_done{ false };
 std::atomic<bool> tool_init_done{ false };
@@ -2788,7 +2788,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                 .perfetto_annotations   = config::get_perfetto_annotations(),
                 .selected_trace_regions = roctx_traced_regions,
             };
-            g_roctx_client = std::make_shared<roctx_client<>>(*g_session, roctx_config);
+            g_roctx_client = std::make_shared<roctx_client<>>(g_session, roctx_config);
         }
     }
 
@@ -2892,9 +2892,9 @@ flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
 }  // namespace
 
 void
-bind_session(control::session& sess)
+bind_session(std::shared_ptr<control::session> sess)
 {
-    g_session = &sess;
+    g_session = std::move(sess);
 }
 
 void
