@@ -197,7 +197,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-hsa-multiqueue-plus-pmc
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input --pmc
-            SQ_WAVES -o out -- $<TARGET_FILE:vector-ops>
+            SQ_WAVES -o pmc -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
@@ -215,7 +215,7 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED rocprofv3-test-att-hsa-multiqueue-plus-pmc
     DISCOVERY_ARGS -k test_counter_collection_with_att
     ARGS --att-pmc-input
-         ${CMAKE_CURRENT_BINARY_DIR}/vector-ops-trace/cmd_input/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/vector-ops-trace/cmd_input/pmc_results.json
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
 # Check for conflict PMC + activity

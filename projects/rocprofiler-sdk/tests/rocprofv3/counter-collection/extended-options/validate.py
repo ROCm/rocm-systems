@@ -62,17 +62,18 @@ def _validate_counter_rows(rows):
     assert all(float(row["Counter_Value"]) >= 0.0 for row in rows)
     assert any(float(row["Counter_Value"]) > 0.0 for row in rows)
 
-    by_agent = defaultdict(list)
+    # counter collection serializes kernels, so dispatches on one agent never overlap.
+    # Keying on dispatch id keeps multi-counter runs to one interval per dispatch.
+    intervals_by_agent = defaultdict(dict)
     for row in rows:
-        start = int(row["Start_Timestamp"])
-        end = int(row["End_Timestamp"])
-        assert end >= start
-        by_agent[row["Agent_Id"]].append((start, end))
-    for intervals in by_agent.values():
-        intervals.sort()
+        intervals_by_agent[row["Agent_Id"]][int(row["Dispatch_Id"])] = (
+            int(row["Start_Timestamp"]),
+            int(row["End_Timestamp"]),
+        )
+    for intervals in intervals_by_agent.values():
+        ordered = sorted(intervals.values())
         assert all(
-            next_start >= end
-            for (_, end), (next_start, _) in zip(intervals, intervals[1:])
+            next_start >= end for (_, end), (next_start, _) in zip(ordered, ordered[1:])
         )
 
 
