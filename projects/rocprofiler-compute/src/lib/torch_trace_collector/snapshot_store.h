@@ -5,13 +5,13 @@
 
 #include "stack_entry.h"
 #include "stats.h"
+#include "synchronized.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <list>
-#include <mutex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -62,6 +62,8 @@ struct std::hash<torch_trace_collector::detail::SnapshotKey>
 namespace torch_trace_collector::detail
 {
 
+using rocprofiler_compute_tool::common::synchronized_t;
+
 // Sharded store mapping an autograd node to a forward-stack snapshot, with
 // per-shard LRU eviction.
 class SnapshotStore
@@ -77,76 +79,81 @@ public:
 
     void save(std::int64_t seq_nr, std::uint64_t thread_id, const std::vector<StackEntry>& stack)
     {
-        const SnapshotKey           key   = {seq_nr, thread_id};
-        Shard&                      shard = shard_for(key);
-        std::lock_guard<std::mutex> guard(shard.mutex);
-        auto                        it = shard.snapshots.find(key);
-        if (it != shard.snapshots.end())
-        {
-            // Nested forward ops can report the same sequence number; the most
-            // recent save wins.
-            it->second = stack;
-            lru_touch(shard, key);
-            inc(g_stats.snapshots_overwritten);
-            inc(g_stats.snapshots_saved);
-            return;
-        }
-        while (shard.snapshots.size() >= kShardSoftCap)
-        {
-            evict_oldest(shard);
-        }
-        shard.snapshots.emplace(key, stack);
-        lru_touch(shard, key);
-        inc(g_stats.snapshots_saved);
+        const SnapshotKey key = {seq_nr, thread_id};
+        shard_for(key).wlock(
+            [&](Shard& shard)
+            {
+                auto it = shard.snapshots.find(key);
+                if (it != shard.snapshots.end())
+                {
+                    // Nested forward ops can report the same sequence number; the
+                    // most recent save wins.
+                    it->second = stack;
+                    lru_touch(shard, key);
+                    inc(g_stats.snapshots_overwritten);
+                    inc(g_stats.snapshots_saved);
+                    return;
+                }
+                while (shard.snapshots.size() >= kShardSoftCap)
+                {
+                    evict_oldest(shard);
+                }
+                shard.snapshots.emplace(key, stack);
+                lru_touch(shard, key);
+                inc(g_stats.snapshots_saved);
+            });
     }
 
     bool consume(std::int64_t seq_nr, std::uint64_t thread_id, std::vector<StackEntry>* out_stack)
     {
-        const SnapshotKey           key   = {seq_nr, thread_id};
-        Shard&                      shard = shard_for(key);
-        std::lock_guard<std::mutex> guard(shard.mutex);
-        auto                        it = shard.snapshots.find(key);
-        if (it == shard.snapshots.end())
-            return false;
-        *out_stack = std::move(it->second);
-        shard.snapshots.erase(it);
-        lru_remove(shard, key);
-        inc(g_stats.snapshots_consumed);
-        return true;
+        const SnapshotKey key = {seq_nr, thread_id};
+        return shard_for(key).wlock(
+            [&](Shard& shard)
+            {
+                auto it = shard.snapshots.find(key);
+                if (it == shard.snapshots.end())
+                    return false;
+                *out_stack = std::move(it->second);
+                shard.snapshots.erase(it);
+                lru_remove(shard, key);
+                inc(g_stats.snapshots_consumed);
+                return true;
+            });
     }
 
-    std::size_t pending()
+    std::size_t pending() const
     {
         std::size_t total = 0;
-        for (auto& shard : shards_)
+        for (const auto& guarded_shard : shards_)
         {
-            std::lock_guard<std::mutex> guard(shard.mutex);
-            total += shard.snapshots.size();
+            total += guarded_shard.rlock([](const Shard& shard) { return shard.snapshots.size(); });
         }
         return total;
     }
 
     void clear()
     {
-        for (auto& shard : shards_)
+        for (auto& guarded_shard : shards_)
         {
-            std::lock_guard<std::mutex> guard(shard.mutex);
-            shard.snapshots.clear();
-            shard.lru_order.clear();
-            shard.lru_idx.clear();
+            guarded_shard.wlock(
+                [](Shard& shard)
+                {
+                    shard.snapshots.clear();
+                    shard.lru_order.clear();
+                    shard.lru_idx.clear();
+                });
         }
     }
 
 private:
     struct Shard
     {
-        std::mutex                                                        mutex;
         std::unordered_map<SnapshotKey, std::vector<StackEntry>>          snapshots;
         std::list<SnapshotKey>                                            lru_order;
         std::unordered_map<SnapshotKey, std::list<SnapshotKey>::iterator> lru_idx;
     };
 
-    Shard& shard_for(const SnapshotKey& key) { return shards_[shard_index(key)]; }
+    synchronized_t<Shard>& shard_for(const SnapshotKey& key) { return shards_[shard_index(key)]; }
 
     static void lru_remove(Shard& shard, const SnapshotKey& key)
     {
@@ -177,7 +184,7 @@ private:
         inc(g_stats.snapshots_dropped);
     }
 
-    std::array<Shard, kNumShards> shards_;
+    std::array<synchronized_t<Shard>, kNumShards> shards_;
 };
 
 inline SnapshotStore g_snapshots;

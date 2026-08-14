@@ -3,22 +3,22 @@
 
 #pragma once
 
-#include <ATen/record_function.h>
+#include "synchronized.hpp"
 
-#include <atomic>
-#include <mutex>
+#include <ATen/record_function.h>
 
 namespace torch_trace_collector::detail
 {
 
+using rocprofiler_compute_tool::common::synchronized_t;
+
 // Global RecordFunction callback registration state.
 struct InstallState
 {
-    std::atomic<at::CallbackHandle> handle{at::INVALID_CALLBACK_HANDLE};
-    std::atomic<bool>               installed{false};
-    std::mutex                      mutex;
+    at::CallbackHandle handle    = at::INVALID_CALLBACK_HANDLE;
+    bool               installed = false;
 };
 
-inline InstallState g_install;
+inline synchronized_t<InstallState> g_install;
 
 }  // namespace torch_trace_collector::detail

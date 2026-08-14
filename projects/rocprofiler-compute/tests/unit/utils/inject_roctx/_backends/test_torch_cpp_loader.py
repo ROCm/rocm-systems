@@ -147,9 +147,15 @@ def test_probe_output_matches_cmake_field_order():
 
 
 def torch_trace_collector_module_sources():
-    """The module's C++ source and header files, from the fingerprint inputs."""
+    """The module's own C++ source and header files, from the fingerprint inputs.
+
+    The inputs also carry shared headers from outside the module directory, so
+    the parent is part of the filter.
+    """
     return sorted(
-        p for p in inject_roctx_loader._FINGERPRINT_INPUTS if p.suffix in (".cpp", ".h")
+        p
+        for p in inject_roctx_loader._FINGERPRINT_INPUTS
+        if p.suffix in (".cpp", ".h") and p.parent == inject_roctx_loader._SO_SOURCE_DIR
     )
 
 
@@ -192,8 +198,9 @@ def test_fingerprint_inputs_cover_every_build_input():
     missing = declared - input_names
     assert not missing, f"build inputs absent from the fingerprint: {sorted(missing)}"
 
-    # Neither is a compiled source, so neither is reachable from add_library.
-    for required in ("CMakeLists.txt", "probe_torch.py"):
+    # None of these is a compiled source, so none is reachable from
+    # add_library. The module includes synchronized.hpp from the shared utils.
+    for required in ("CMakeLists.txt", "probe_torch.py", "synchronized.hpp"):
         assert required in input_names, f"{required} is not a fingerprint input"
 
 

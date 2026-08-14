@@ -211,8 +211,8 @@ set(CMAKE_REQUIRED_INCLUDES "${_ttc_saved_includes}")
 
 # --- torch-trace-collector library -------------------------------------------------
 # Usage requirements are PUBLIC so consumers inherit the torch/roctx includes,
-# the torch libraries, and the DebugInfoKind flag. torch_python is not among
-# them.
+# the torch and synchronized libraries, and the compile definitions.
+# torch_python is not among them.
 set(_ttc_headers
     capture_buffer.h
     capture_control.h
@@ -233,7 +233,10 @@ target_include_directories(
     torch-trace-collector
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${_torch_includes} ${ROCTX_INCLUDE_DIR}
 )
-target_link_libraries(torch-trace-collector PUBLIC ${_torch_resolved_libs} ${ROCTX_LIB})
+target_link_libraries(
+    torch-trace-collector
+    PUBLIC ${_torch_resolved_libs} ${ROCTX_LIB} synchronized
+)
 target_compile_features(torch-trace-collector PUBLIC cxx_std_17)
 target_compile_options(
     torch-trace-collector

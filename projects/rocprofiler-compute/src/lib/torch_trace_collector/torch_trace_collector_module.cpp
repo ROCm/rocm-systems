@@ -21,7 +21,7 @@ namespace torch_trace_collector::detail
 pybind11::dict dump_stats()
 {
     pybind11::dict stats_dict;
-    stats_dict["installed"]             = g_install.installed.load();
+    stats_dict["installed"]             = is_installed();
     stats_dict["pushes"]                = g_stats.pushes.load();
     stats_dict["pops"]                  = g_stats.pops.load();
     stats_dict["user_scope_pushes"]     = g_stats.user_scope_pushes.load();
