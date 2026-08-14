@@ -31,13 +31,22 @@ What works on WSL2
   fit. This was verified on a gfx11-class GPU under WSL2 with a four-counter
   collection (``SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE SQ_INSTS_VALU``): all four
   counters were reported with no PM4 command-buffer overflow.
+* **Advanced Thread Trace (ATT)**: supported when the ``rocprof-trace-decoder``
+  library is available. ATT capture uses the same DXG path as hardware counter
+  collection; the captured shader-data stream is decoded by an
+  externally-provided ``librocprof-trace-decoder.so`` that ROCprofiler-SDK does
+  not build. Point rocprofv3 at it with ``--att-library-path`` or the
+  ``ROCPROF_ATT_LIBRARY_PATH`` environment variable. The build locates the
+  decoder for the ATT tests via ``ROCPROFILER_SDK_TRACE_DECODER_ROOT`` (an
+  extra find hint), falling back to ``${ROCM_PATH}/lib``; when it is not found
+  the ATT tests are skipped.
 
 Known limitations
 ==================
 
-* **PC sampling and Advanced Thread Trace (ATT)**: the software/decode layers
-  build and pass their unit tests, but the end-to-end paths require KFD
-  features that are not available on WSL2 and are therefore disabled.
+* **PC sampling**: the software/decode layers build and pass their unit tests,
+  but the end-to-end path requires KFD features that are not available on WSL2
+  and is therefore disabled.
 * **SPM (Streaming Performance Monitor)**: not available; the gfx11-class
   counter database does not expose SPM-capable counters.
 

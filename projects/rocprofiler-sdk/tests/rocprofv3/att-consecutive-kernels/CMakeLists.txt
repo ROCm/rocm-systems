@@ -41,11 +41,13 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 
 find_package(rocprofiler-sdk REQUIRED)
 
+# ROCPROFILER_SDK_TRACE_DECODER_ROOT lets an externally-built rocprof-trace-decoder be
+# located without installing it under ${ROCM_PATH} (e.g. a standalone decoder build dir).
 find_library(
     attdecoder_LIBRARY
     NAMES rocprof-trace-decoder
-    HINTS ${ROCM_PATH}
-    PATHS ${ROCM_PATH}
+    HINTS ${ROCPROFILER_SDK_TRACE_DECODER_ROOT} ${ROCM_PATH}
+    PATHS ${ROCPROFILER_SDK_TRACE_DECODER_ROOT} ${ROCM_PATH}
     PATH_SUFFIXES lib)
 
 if(attdecoder_LIBRARY)

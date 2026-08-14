@@ -59,11 +59,13 @@ target_link_libraries(
 
 add_test(NAME thread-trace-sample COMMAND $<TARGET_FILE:thread-trace-sample>)
 
+# ROCPROFILER_SDK_TRACE_DECODER_ROOT lets an externally-built rocprof-trace-decoder be
+# located without installing it under ${ROCM_PATH} (e.g. a standalone decoder build dir).
 find_library(
     attdecoder_LIBRARY
     NAMES rocprof-trace-decoder
-    HINTS ${ROCM_PATH}
-    PATHS ${ROCM_PATH}
+    HINTS ${ROCPROFILER_SDK_TRACE_DECODER_ROOT} ${ROCM_PATH}
+    PATHS ${ROCPROFILER_SDK_TRACE_DECODER_ROOT} ${ROCM_PATH}
     PATH_SUFFIXES lib)
 
 if(attdecoder_LIBRARY)
@@ -76,6 +78,14 @@ find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
 set(IS_DISABLED ON)
 if(attdecoder_FOUND)
     set(IS_DISABLED OFF)
+endif()
+
+# WSL/DXG exposes no /dev/kfd; the standalone sample selects the KFD agent enumerator and
+# cannot seed rocprofiler agents there (the rocprofv3 tool path via LD_PRELOAD is
+# unaffected, and ATT capture/decode is covered by the integration tests).
+rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
+if(NOT _KFD_AVAILABLE)
+    set(IS_DISABLED ON)
 endif()
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV)
