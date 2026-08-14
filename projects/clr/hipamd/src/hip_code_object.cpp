@@ -538,6 +538,7 @@ hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int d
     std::scoped_lock lock(sclock_);
     if (*(module) == nullptr) {
      IHIP_RETURN_ONFAIL(DigestFatBinary(module_to_hostModule_[module], *module));
+    }
   } else {
     // Module was nullptr
     return hipErrorInvalidDeviceFunction;
