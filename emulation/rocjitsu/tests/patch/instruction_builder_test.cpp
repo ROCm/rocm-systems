@@ -16,6 +16,11 @@
 namespace rocjitsu {
 namespace {
 
+TEST(InstructionBuilder, Sop2SetsEncodingPrefix) {
+  const uint32_t word = build_s_lshl_b32(1, 2, 3, ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ((word >> 30) & 0x3u, 0x2u);
+}
+
 // SOPP semantics under test:
 //   target = branch_pc + 4 + simm16 * 4
 // Inverted:
