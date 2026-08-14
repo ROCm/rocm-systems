@@ -26,7 +26,12 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 
+#include <fmt/format.h>
 #include <hsa/hsa.h>
+
+#include <new>
+#include <optional>
+#include <string_view>
 
 namespace rocprofiler
 {
@@ -51,27 +56,54 @@ Snapshot::snap()
     auto inventory = memory_tracker::snap_inventory();
 
     blocks_.clear();
+    ok_ = true;
     blocks_.reserve(inventory.size());
 
-    for(const auto& [ptr, size] : inventory)
-    {
-        if(size == 0) continue;
+    auto capture = [&](void* gpu_addr, size_t size, std::string_view what) -> bool {
+        if(size == 0) return true;
 
         mem_block blk;
-        blk.gpu_addr = ptr;
-        blk.host_copy.resize(size);
-
-        if(dma_copy(blk.host_copy.data(), ptr, size) != HSA_STATUS_SUCCESS)
+        blk.gpu_addr = gpu_addr;
+        try
         {
-            ROCP_WARNING << "replay snapshot: device->host copy failed for region " << ptr;
-            continue;
+            blk.host_copy.resize(size);
+        } catch(const std::bad_alloc&)
+        {
+            ROCP_WARNING << fmt::format("kernel-replay snapshot: host allocation of {} bytes "
+                                        "failed for {} {} (memory pressure)",
+                                        size,
+                                        what,
+                                        gpu_addr);
+            return false;
+        }
+
+        if(dma_copy(blk.host_copy.data(), gpu_addr, size) != HSA_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << fmt::format(
+                "kernel-replay snapshot: device->host copy failed for {} {} ({}B)",
+                what,
+                gpu_addr,
+                size);
+            return false;
         }
 
         blocks_.push_back(std::move(blk));
+        return true;
+    };
+
+    for(const auto& [ptr, size] : inventory)
+    {
+        if(!capture(ptr, size, "region"))
+        {
+            ok_ = false;
+            blocks_.clear();
+            return 0;
+        }
     }
 
-    ROCP_INFO << "replay snapshot: captured " << blocks_.size() << "/" << inventory.size()
-              << " regions";
+    ROCP_INFO << fmt::format("kernel-replay snapshot: captured {}/{} regions",
+                             blocks_.size(),
+                             inventory.size());
     return blocks_.size();
 }
 
@@ -81,15 +113,31 @@ Snapshot::restore()
     size_t ok = 0;
     for(const auto& blk : blocks_)
     {
-        if(dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size()) != HSA_STATUS_SUCCESS)
+        const auto status = memory_tracker::restore_tracked_region(
+            blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
+
+        if(!status)
         {
-            ROCP_WARNING << "replay restore: host->device copy failed for region " << blk.gpu_addr;
+            ROCP_WARNING << fmt::format(
+                "kernel-replay restore: skipping region {} ({}B) that is no longer live",
+                blk.gpu_addr,
+                blk.host_copy.size());
             continue;
         }
+
+        if(*status != HSA_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << fmt::format(
+                "kernel-replay restore: host->device copy failed for region {} ({}B)",
+                blk.gpu_addr,
+                blk.host_copy.size());
+            continue;
+        }
+
         ++ok;
     }
 
-    ROCP_INFO << "replay restore: restored " << ok << "/" << blocks_.size() << " regions";
+    ROCP_INFO << fmt::format("kernel-replay restore: restored {}/{} regions", ok, blocks_.size());
     return ok;
 }
 }  // namespace memory_snapshot

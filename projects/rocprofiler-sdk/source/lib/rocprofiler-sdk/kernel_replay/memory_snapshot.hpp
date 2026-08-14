@@ -60,8 +60,13 @@ public:
 
     bool empty() const { return blocks_.empty(); }
 
+    // false => capture was incomplete (host memory pressure or a failed copy). The caller must
+    // decline replay rather than restore a partial snapshot.
+    bool ok() const { return ok_; }
+
 private:
     std::vector<mem_block> blocks_;
+    bool                   ok_ = true;
 };
 }  // namespace memory_snapshot
 }  // namespace kernel_replay

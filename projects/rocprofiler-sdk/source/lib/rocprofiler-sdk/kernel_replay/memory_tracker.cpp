@@ -22,6 +22,8 @@
 
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
@@ -135,6 +137,18 @@ snap_inventory()
 {
     auto _lk = std::shared_lock<std::shared_mutex>{inventory_mutex()};
     return inventory();
+}
+
+std::optional<hsa_status_t>
+restore_tracked_region(void* gpu_addr, const void* host_copy, size_t size)
+{
+    auto _lk = std::shared_lock<std::shared_mutex>{inventory_mutex()};
+    auto itr = inventory().find(gpu_addr);
+    if(itr == inventory().end() || itr->second < size) return std::nullopt;
+
+    auto* core = hsa::get_core_table();
+    if(!core || !core->hsa_memory_copy_fn) return HSA_STATUS_ERROR;
+    return core->hsa_memory_copy_fn(gpu_addr, host_copy, size);
 }
 
 void
