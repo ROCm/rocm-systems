@@ -6,6 +6,7 @@ set(PACKAGE_OUTPUT_DIR
     ${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages/rocprofiler_sdk)
 
 if(NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/trace_processor_shell.linux_clang_release)
+    rocprofiler_sdk_wallclock_ms(_trace_shell_dl_t0)
     file(
         DOWNLOAD
         https://github.com/jrmadsen/perfetto-trace-processor-shell/releases/download/v0.0.4/trace_processor_shell.linux_clang_release
@@ -13,7 +14,22 @@ if(NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/trace_processor_shell.linux_clang_rele
         EXPECTED_MD5 c25390cd99aa96622e328efa6699c6c6
         INACTIVITY_TIMEOUT 30
         TIMEOUT 300
+        STATUS _trace_shell_dl_status
+        LOG _trace_shell_dl_log
         SHOW_PROGRESS)
+    rocprofiler_sdk_wallclock_ms(_trace_shell_dl_t1)
+    math(EXPR _trace_shell_dl_elapsed
+         "${_trace_shell_dl_t1} - ${_trace_shell_dl_t0}")
+    list(GET _trace_shell_dl_status 0 _trace_shell_dl_code)
+    list(GET _trace_shell_dl_status 1 _trace_shell_dl_msg)
+    message(
+        STATUS
+            "[config-timing] trace_processor_shell download took ${_trace_shell_dl_elapsed} ms (status ${_trace_shell_dl_code}: ${_trace_shell_dl_msg})"
+        )
+    if(NOT _trace_shell_dl_code EQUAL 0)
+        message(STATUS "[config-timing] trace_processor_shell download log:\n"
+                       "${_trace_shell_dl_log}")
+    endif()
     configure_file(
         ${CMAKE_CURRENT_BINARY_DIR}/trace_processor_shell.linux_clang_release
         ${PACKAGE_OUTPUT_DIR}/pytest_utils/trace_processor_shell

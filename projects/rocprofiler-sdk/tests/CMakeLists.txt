@@ -52,62 +52,85 @@ find_package(Python3 REQUIRED)
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocprofiler_sdk_pytest REQUIRED)
 
+# [config-timing] capture the wall-clock start of test configuration so we can report
+# the total time and attribute it to individual subdirectories below
+rocprofiler_sdk_wallclock_ms(ROCPROFILER_SDK_TESTS_CONFIG_START_MS)
+
 # get the gfx architectures that are present on the system
 rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
 
 # configure python module <BINARY_DIR>/rocprofiler_sdk/pytest_utils
-add_subdirectory(pytest-packages)
+rocprofiler_sdk_timed_add_subdirectory(pytest-packages)
 
 # common utilities
-add_subdirectory(common)
+rocprofiler_sdk_timed_add_subdirectory(common)
 
 # unit-test subdirectory only exists in rocprofiler-sdk-tests package
-add_subdirectory(unit-tests)
+rocprofiler_sdk_timed_add_subdirectory(unit-tests)
 
 # tool libraries used for data collection during integration tests
-add_subdirectory(tools)
+rocprofiler_sdk_timed_add_subdirectory(tools)
 
 # libraries used by integration test applications
-add_subdirectory(lib)
+rocprofiler_sdk_timed_add_subdirectory(lib)
 
 # applications used by integration tests
-add_subdirectory(bin)
+rocprofiler_sdk_timed_add_subdirectory(bin)
 
 # validation tests
-add_subdirectory(kernel-tracing)
-add_subdirectory(async-copy-tracing)
-add_subdirectory(rocshmem-trace)
-add_subdirectory(hsa-memory-allocation)
-add_subdirectory(scratch-memory-tracing)
-add_subdirectory(c-tool)
-add_subdirectory(thread-trace)
-add_subdirectory(pc_sampling)
-add_subdirectory(hip-graph-tracing)
-add_subdirectory(counter-collection)
-add_subdirectory(openmp-tools)
-add_subdirectory(rocdecode)
-add_subdirectory(rocjpeg)
-add_subdirectory(hipfile)
-add_subdirectory(hip-host-tracing)
-add_subdirectory(code-object-multi-threaded)
-add_subdirectory(spm)
+rocprofiler_sdk_timed_add_subdirectory(kernel-tracing)
+rocprofiler_sdk_timed_add_subdirectory(async-copy-tracing)
+rocprofiler_sdk_timed_add_subdirectory(rocshmem-trace)
+rocprofiler_sdk_timed_add_subdirectory(hsa-memory-allocation)
+rocprofiler_sdk_timed_add_subdirectory(scratch-memory-tracing)
+rocprofiler_sdk_timed_add_subdirectory(c-tool)
+rocprofiler_sdk_timed_add_subdirectory(thread-trace)
+rocprofiler_sdk_timed_add_subdirectory(pc_sampling)
+rocprofiler_sdk_timed_add_subdirectory(hip-graph-tracing)
+rocprofiler_sdk_timed_add_subdirectory(counter-collection)
+rocprofiler_sdk_timed_add_subdirectory(openmp-tools)
+rocprofiler_sdk_timed_add_subdirectory(rocdecode)
+rocprofiler_sdk_timed_add_subdirectory(rocjpeg)
+rocprofiler_sdk_timed_add_subdirectory(hipfile)
+rocprofiler_sdk_timed_add_subdirectory(hip-host-tracing)
+rocprofiler_sdk_timed_add_subdirectory(code-object-multi-threaded)
+rocprofiler_sdk_timed_add_subdirectory(spm)
 
 # environment variable tests
-add_subdirectory(environment)
+rocprofiler_sdk_timed_add_subdirectory(environment)
 
 # rocpd validation tests
-add_subdirectory(rocpd)
-add_subdirectory(rocpd-api)
+rocprofiler_sdk_timed_add_subdirectory(rocpd)
+rocprofiler_sdk_timed_add_subdirectory(rocpd-api)
 
 # rocattach validation tests
-add_subdirectory(rocattach)
+rocprofiler_sdk_timed_add_subdirectory(rocattach)
 
 # rocprofv3 validation tests
-add_subdirectory(rocprofv3)
+rocprofiler_sdk_timed_add_subdirectory(rocprofv3)
 
 # late-start tracing validation tests
-add_subdirectory(late-start-tracing)
+rocprofiler_sdk_timed_add_subdirectory(late-start-tracing)
 
 # python bindings
-add_subdirectory(python-bindings)
-add_subdirectory(rocprofv3-avail)
+rocprofiler_sdk_timed_add_subdirectory(python-bindings)
+rocprofiler_sdk_timed_add_subdirectory(rocprofv3-avail)
+
+# [config-timing] report the total configure wall-clock time and the aggregate cost of
+# the repeated rocminfo invocations so the dispatched CI run pinpoints the bottleneck
+rocprofiler_sdk_wallclock_ms(ROCPROFILER_SDK_TESTS_CONFIG_END_MS)
+math(EXPR ROCPROFILER_SDK_TESTS_CONFIG_ELAPSED_MS
+     "${ROCPROFILER_SDK_TESTS_CONFIG_END_MS} - ${ROCPROFILER_SDK_TESTS_CONFIG_START_MS}"
+     )
+get_property(ROCPROFILER_SDK_ROCMINFO_TOTAL_MS GLOBAL
+             PROPERTY ROCPROFILER_SDK_ROCMINFO_TOTAL_MS)
+get_property(ROCPROFILER_SDK_ROCMINFO_CALL_COUNT GLOBAL
+             PROPERTY ROCPROFILER_SDK_ROCMINFO_CALL_COUNT)
+message(
+    STATUS
+        "[config-timing] rocprofiler-sdk-tests configure took ${ROCPROFILER_SDK_TESTS_CONFIG_ELAPSED_MS} ms total"
+    )
+message(
+    STATUS
+        "[config-timing] rocminfo was invoked ${ROCPROFILER_SDK_ROCMINFO_CALL_COUNT} time(s) for a cumulative ${ROCPROFILER_SDK_ROCMINFO_TOTAL_MS} ms"
+    )

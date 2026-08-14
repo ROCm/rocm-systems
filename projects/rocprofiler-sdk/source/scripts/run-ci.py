@@ -381,7 +381,9 @@ def generate_dashboard_script(args):
             dashboard_submit(PARTS Coverage RETURN_VALUE _submit_ret)
         endif()
 
-        handle_error("Testing" _test_ret)
+        if("TEST" IN_LIST STAGES)
+            handle_error("Testing" _test_ret)
+        endif()
 
         dashboard_submit(PARTS Done RETURN_VALUE _submit_ret)
         """
