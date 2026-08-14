@@ -180,7 +180,7 @@ uint64_t PerfTimer::MeasureTSCFreqHz() {
   uint64_t tscIntervalTicks = tscTicksEnd - tscTicksBegin;
   return (tscIntervalTicks * 10 + (coarseIntervalNs / 2)) / coarseIntervalNs;
 #elif defined(__powerpc__)
-  return __ppc_get_timebase_freq() / 100000000;
+  return (__ppc_get_timebase_freq() + 50000000) / 100000000;
 #else
 #error "Unsupported architecture"
 #endif
