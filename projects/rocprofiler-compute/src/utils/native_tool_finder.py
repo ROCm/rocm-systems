@@ -12,6 +12,11 @@ from utils.utils_common import capture_subprocess_output
 class NativeToolFinder:
     """Locate an artifact of the native tool project, building it from the source
     tree when no installed copy is present.
+
+    ``reuse_built_artifact`` accepts an artifact already present in the build
+    directory instead of running cmake again. It is sound only for artifacts
+    whose name identifies the sources they were built from, since an artifact
+    with a name-independent identity may be stale.
     """
 
     sources_dir_name = "lib"
@@ -35,6 +40,7 @@ class NativeToolFinder:
         configure_options: tuple[str, ...] = (),
         cmake_executable: str = "cmake",
         search_installed: bool = True,
+        reuse_built_artifact: bool = False,
     ) -> None:
         console_debug(f"Searching for {artifact_name}.")
         console_debug(f"ROCm Compute root directory: {root_path}")
@@ -51,11 +57,14 @@ class NativeToolFinder:
         self.configure_options = tuple(configure_options)
         self.cmake_executable = cmake_executable
         self.search_installed = search_installed
+        self.reuse_built_artifact = reuse_built_artifact
 
     def get_artifact_path(self) -> Path:
         artifact_path = (
             self.__find_installed_artifact() if self.search_installed else None
         )
+        if not artifact_path and self.reuse_built_artifact:
+            artifact_path = self.__find_built_artifact()
         if not artifact_path:
             artifact_path = self.__build_artifact()
         if not artifact_path:
