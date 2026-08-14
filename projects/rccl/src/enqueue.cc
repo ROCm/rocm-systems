@@ -98,11 +98,6 @@ constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize =
 
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
 NCCL_PARAM(SymCeThreshold, "SYM_CE_THRESHOLD", 8 * 1024 * 1024);
-// DIRECT_A2A fans each AllReduce payload out to every remote rank. Keep it on
-// latency-sensitive messages by default and let larger collectives use a
-// bandwidth-oriented algorithm. Set RCCL_DIRECT_A2A_MAX_BYTES=-1 to remove
-// the size limit.
-RCCL_PARAM(DirectA2aMaxBytes, "DIRECT_A2A_MAX_BYTES", 1 << 20);
 
 // Returns maximum kernel stack size of all CUDA kernels
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
@@ -2433,17 +2428,6 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
         (!nvlsSupport || (info->func != ncclFuncAllReduce && comm->localRanks > NCCL_MAX_NVLS_ARITY)))
       continue;
     if (a == NCCL_ALGO_NVLS && collNetSupport != 1 && comm->nNodes > 1) continue;
-    // [RCCL] DIRECT_A2A is an AllReduce-only latency algorithm. Its full-mesh
-    // fan-out amplifies transport pressure for large payloads, so exclude it
-    // above the configurable threshold and let the cost table select Ring (or
-    // another enabled algorithm). A negative threshold means unlimited.
-    if (a == NCCL_ALGO_DIRECT_A2A) {
-      int64_t maxBytes = rcclParamDirectA2aMaxBytes();
-      if (info->func != ncclFuncAllReduce || !comm->directA2aSupport ||
-          (maxBytes >= 0 && nBytes > (size_t)maxBytes)) {
-        continue;
-      }
-    }
     /* Tree reduceScatter doesn't support scaling yet */
     if (a == NCCL_ALGO_PAT && info->func == ncclFuncReduceScatter &&
         (info->opDev.op == ncclDevPreMulSum || info->opDev.op == ncclDevSumPostDiv))
@@ -2585,12 +2569,6 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
     if (maxNChannels > 0) {
       nc = std::min(maxNChannels, nc);
     }
-  } else if (info->algorithm == NCCL_ALGO_DIRECT_A2A) {
-    // [RCCL] DIRECT_A2A: 1 channel for latency-bound small messages, 2
-    // channels for large ones to split the (nranks-1)x fan-out traffic across
-    // two kernel/proxy thread groups. Mesh connectors are set up on
-    // graphs[DIRECT_A2A]->nChannels (2) channels.
-    nc = (nBytes >= (1 << 20)) ? comm->graphs[NCCL_ALGO_DIRECT_A2A].nChannels : 1;
   } else {
     rcclUpdateThreadThreshold(comm, nBytes, info, threadThreshold);
     INFO(NCCL_TUNING, "pre-adjustment threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
@@ -2840,7 +2818,6 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
               info->algorithm == NCCL_ALGO_NVLS_TREE      ? ncclPatternNvlsTree :
               info->algorithm == NCCL_ALGO_COLLNET_DIRECT ? ncclPatternCollnetDirect :
               info->algorithm == NCCL_ALGO_COLLNET_CHAIN  ? ncclPatternCollnetChain :
-              info->algorithm == NCCL_ALGO_DIRECT_A2A     ? ncclPatternMesh :
               info->algorithm == NCCL_ALGO_TREE           ? ncclPatternTreeUpDown :
                                                             ncclPatternRingTwice;
     break;
@@ -2969,7 +2946,6 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
   case ncclPatternPipelineFrom:
   case ncclPatternPipelineTo:
   case ncclPatternCollnetChain:
-  case ncclPatternMesh:
     nstepsPerLoop = nchunksPerLoop = 1;
     break;
   case ncclPatternNvls:
@@ -3100,10 +3076,6 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
   case ncclPatternTreeUpDown:
   case ncclPatternNvlsTree:
     proxyOp->nPeers = (NCCL_MAX_TREE_ARITY - 1) * 2;
-    break;
-  case ncclPatternMesh:
-    // [RCCL] DIRECT_A2A: one connection per mesh peer in each direction
-    proxyOp->nPeers = comm->nRanks - 1;
     break;
   case ncclPatternCollnetChain:
   case ncclPatternCollnetDirect:

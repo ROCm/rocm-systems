@@ -174,7 +174,6 @@ struct ncclChannel {
   struct ncclRing ring;
   int* devRingUserRanks;
   struct ncclTree tree;
-  struct ncclMesh mesh;
 
   struct ncclTree collnetChain;
   struct ncclDirect collnetDirect;
@@ -646,6 +645,11 @@ struct ncclComm {
   uint32_t* ddaLLEpochDev;
   int ddaLLEpochLen;
 
+  // Standalone gfx1151 DIRECT_A2A receive staging. Each rank owns one
+  // contiguous slot per peer; grouped P2P fills the slots before local reduce.
+  void* directA2aScratch;
+  size_t directA2aScratchBytes;
+
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;
   struct channelMasks* connectRecv;
@@ -816,9 +820,6 @@ struct ncclComm {
   int nvlsRegSupport;
   /* sharable NVLS resource. */
   struct ncclNvlsSharedRes* nvlsResources;
-
-  // [RCCL] DIRECT_A2A (one-hop all-to-all over full-mesh net) support
-  int directA2aSupport;
 
   // pools backed by comm->memPermanent
   struct ncclMemoryPool memPool_ncclTaskBcast;

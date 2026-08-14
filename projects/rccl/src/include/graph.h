@@ -176,7 +176,6 @@ ncclResult_t ncclTopoSearchInit(struct ncclTopoSystem* system);
 #define NCCL_TOPO_PATTERN_RING 4 // Ring
 #define NCCL_TOPO_PATTERN_NVLS 5 // NVLS+SHARP and NVLS+Tree
 #define NCCL_TOPO_PATTERN_COLLNET_DIRECT 6 // Collnet Direct
-#define NCCL_TOPO_PATTERN_MESH 7 // [RCCL] Full-mesh direct all-to-all (DIRECT_A2A)
 struct ncclTopoGraph {
   // Input / output
   int id; // ring : 0, tree : 1, collnet : 2, nvls : 3, collnetDirect : 4
@@ -201,9 +200,6 @@ struct ncclTopoGraph {
   char treeBase[NCCL_TOPO_MAX_NODES][NCCL_TOPO_MAX_NODES * 4];
 };
 ncclResult_t ncclTopoCompute(struct ncclTopoSystem* system, struct ncclTopoGraph* graph);
-
-// [RCCL] DIRECT_A2A mesh graph (src/graph/mesh.cc)
-ncclResult_t ncclTopoComputeMesh(struct ncclTopoSystem* system, struct ncclTopoGraph* graph);
 
 ncclResult_t ncclTopoPrintGraph(struct ncclTopoSystem* system, struct ncclTopoGraph* graph);
 ncclResult_t ncclTopoDumpGraphs(struct ncclTopoSystem* system, int ngraphs, struct ncclTopoGraph** graphs);

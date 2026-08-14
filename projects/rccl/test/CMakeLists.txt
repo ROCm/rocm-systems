@@ -367,6 +367,7 @@ if(BUILD_TESTS)
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
       DdaAlltoAllThresholdTests.cpp
+      DirectA2aAllReduceEligibilityTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
       EnqueueTests.cpp

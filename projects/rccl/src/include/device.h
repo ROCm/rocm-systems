@@ -296,16 +296,6 @@ struct ncclTree {
   int down[NCCL_MAX_TREE_ARITY];
 };
 
-// [RCCL] Full-mesh peer list for the DIRECT_A2A allreduce algorithm: every
-// rank talks to every other rank in one hop. peers[] holds the fan-in/fan-out
-// peer ranks (ascending), nPeers <= NCCL_MAX_MESH_PEERS.
-#define NCCL_MAX_MESH_PEERS 7
-struct ncclMesh {
-  int nPeers;                       // nranks - 1, capped at NCCL_MAX_MESH_PEERS
-  int rankIx;                       // this rank's index in the mesh
-  int peers[NCCL_MAX_MESH_PEERS+1]; // all ranks except self, ascending, -1 terminated
-};
-
 #define NCCL_MAX_DIRECT_ARITY 7
 struct ncclDirect {
   int depth;
@@ -594,7 +584,6 @@ struct alignas(16) ncclDevChannel {
   struct ncclDirect collnetDirect;
   struct ncclTree binTree;
   struct ncclNvls nvls;
-  struct ncclMesh mesh;
   uint32_t* workFifoDone; // Location of done counter, device writes index+1 of last work processed
   uint64_t workCounter;
 };

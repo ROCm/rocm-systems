@@ -28,6 +28,7 @@ set(SRC_FILES
   mem_manager.cc
   debug.cc
   dev_runtime.cc
+  direct_a2a_all_reduce.cu
   dda_all_reduce_ipc.cu
   dda_reduce_scatter_ipc.cu
   dda_all_gather_ipc.cu
@@ -97,7 +98,6 @@ set(SRC_FILES
   device/symmetric/reduce_scatter_gin.cuh
   device/symmetric/tma_ptx.cuh
   graph/connect.cc
-  graph/mesh.cc
   graph/paths.cc
   graph/rings.cc
   graph/rings.h
@@ -154,6 +154,7 @@ set(SRC_FILES
   include/core.h
   include/cpuset.h
 # include/cudawrap.h
+  include/direct_a2a_all_reduce.h
   include/dda_all_reduce.h
   include/dda_reduce_scatter.h
   include/dda_all_gather.h
@@ -734,6 +735,7 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "collectives\\.cc$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "direct_a2a_all_reduce\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")

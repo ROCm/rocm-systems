@@ -66,34 +66,6 @@ fail:
   goto exit;
 }
 
-// [RCCL] DIRECT_A2A: connect every rank to all of its mesh peers (all other
-// ranks) in one hop. Connector slot 0 is shared with ring/tree; peers that
-// are already connected (e.g. ring neighbours) are skipped by
-// ncclTransportP2pConnect thanks to the per-connector `connected` flag.
-ncclResult_t ncclTransportMeshConnect(struct ncclComm* comm) {
-  ncclResult_t ret = ncclSuccess;
-  if (comm && comm->nRanks > 1 && comm->directA2aSupport) {
-    // Only connect the channels the mesh graph admitted after accounting for
-    // the NET plugin's comm budget. Every channel costs one send and one recv
-    // comm per peer.
-    int nMeshChannels = comm->nChannels < comm->graphs[NCCL_ALGO_DIRECT_A2A].nChannels
-      ? comm->nChannels : comm->graphs[NCCL_ALGO_DIRECT_A2A].nChannels;
-    for (int c = 0; c < nMeshChannels; c++) {
-      struct ncclChannel* channel = comm->channels + c;
-      if (channel->mesh.nPeers == 0) continue;
-      NCCLCHECKGOTO(ncclTransportP2pConnect(comm, c,
-          channel->mesh.nPeers, channel->mesh.peers,
-          channel->mesh.nPeers, channel->mesh.peers, 0), ret, fail);
-    }
-    NCCLCHECKGOTO(ncclTransportP2pSetup(comm, &comm->graphs[NCCL_ALGO_DIRECT_A2A], 0), ret, fail);
-    INFO(NCCL_INIT, "Connected DIRECT_A2A mesh (%d peers, %d channels)", comm->nRanks - 1, nMeshChannels);
-  }
-exit:
-  return ret;
-fail:
-  goto exit;
-}
-
 ncclResult_t ncclTransportPatConnect(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
   if (comm && comm->nRanks > 1) {

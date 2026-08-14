@@ -1834,15 +1834,6 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
             NCCLCHECK(proxyState->ncclNet->isend(resources->netSendComm, buff, size, resources->tpRank,
                                                  sub->sendMhandle, phandle, requestPtr));
             if (*requestPtr != NULL) {
-              if (args->algorithm == NCCL_ALGO_DIRECT_A2A) {
-                INFO(NCCL_INIT,
-                  "ODL_TASK event=SUBMIT dir=TX rank=%d op=%llu ch=%d peer=%d step=%llu baseStep=%llu nsteps=%d comm=%p req=%p size=%d",
-                  proxyState->tpRank, (unsigned long long)args->opCount,
-                  sub->channelId, resources->tpRemoteRank,
-                  (unsigned long long)sub->transmitted,
-                  (unsigned long long)(sub->base + sub->transmitted),
-                  sub->nsteps, resources->netSendComm, *requestPtr, size);
-              }
               ncclProfilerRecordProxyDiagState(s, args, ncclProxyDiagKernelCopyReady, 0, 0,
                                                NCCL_PROXY_DIAG_FLAG_TIMESTAMP | NCCL_PROXY_DIAG_FLAG_COUNTER_SKIP);
               TRACE(NCCL_NET,
@@ -1865,18 +1856,8 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
         int done;
         int size;
         int buffSlot = (sub->base + sub->done) % NCCL_STEPS;
-        void* completedRequest = sub->requests[buffSlot];
-        NCCLCHECK(proxyState->ncclNet->test(completedRequest, &done, &size));
+        NCCLCHECK(proxyState->ncclNet->test(sub->requests[buffSlot], &done, &size));
         if (done) {
-          if (args->algorithm == NCCL_ALGO_DIRECT_A2A) {
-            INFO(NCCL_INIT,
-              "ODL_TASK event=COMPLETE dir=TX rank=%d op=%llu ch=%d peer=%d step=%llu baseStep=%llu nsteps=%d comm=%p req=%p size=%d",
-              proxyState->tpRank, (unsigned long long)args->opCount,
-              sub->channelId, resources->tpRemoteRank,
-              (unsigned long long)sub->done,
-              (unsigned long long)(sub->base + sub->done),
-              sub->nsteps, resources->netSendComm, completedRequest, size);
-          }
           // Make sure size is reset to -1 before we update the head.
           connFifo[buffSlot].size = -1;
           std::atomic_thread_fence(std::memory_order_seq_cst);
@@ -2031,21 +2012,6 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
         NCCLCHECK(proxyState->ncclNet->irecv(resources->netRecvComm, subCount, ptrs, sizes, tags, mhandles, phandles,
                                              requestPtr));
         if (*requestPtr) {
-          if (args->algorithm == NCCL_ALGO_DIRECT_A2A) {
-            for (int i = 0; i < subCount; i++) {
-              struct ncclProxySubArgs* traceSub = subGroup + i;
-              struct recvNetResources* traceResources =
-                (struct recvNetResources*)traceSub->connection->transportResources;
-              INFO(NCCL_INIT,
-                "ODL_TASK event=SUBMIT dir=RX rank=%d op=%llu ch=%d peer=%d step=%llu baseStep=%llu nsteps=%d comm=%p req=%p size=%d",
-                proxyState->tpRank, (unsigned long long)args->opCount,
-                traceSub->channelId, traceResources->tpRemoteRank,
-                (unsigned long long)traceSub->posted,
-                (unsigned long long)(traceSub->base + traceSub->posted),
-                traceSub->nsteps, traceResources->netRecvComm, *requestPtr,
-                sizes[i]);
-            }
-          }
           subGroup->recvRequestsCache[step % NCCL_STEPS] = *requestPtr;
           subGroup->recvRequestsSubCount = subCount;
           for (int i = 0; i < subGroup->groupSize; i++) {
@@ -2075,24 +2041,8 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
         int sizes[NCCL_PROXY_MAX_SUBS];
         void* mhandles[NCCL_PROXY_MAX_SUBS];
         for (int i = 0; i < NCCL_PROXY_MAX_SUBS; i++) sizes[i] = 0;
-        void* completedRequest = subGroup->requests[step % NCCL_STEPS];
-        NCCLCHECK(proxyState->ncclNet->test(completedRequest, &done, sizes));
+        NCCLCHECK(proxyState->ncclNet->test(subGroup->requests[step % NCCL_STEPS], &done, sizes));
         if (done) {
-          if (args->algorithm == NCCL_ALGO_DIRECT_A2A) {
-            for (int i = 0; i < subGroup->groupSize; i++) {
-              struct ncclProxySubArgs* traceSub = subGroup + i;
-              struct recvNetResources* traceResources =
-                (struct recvNetResources*)traceSub->connection->transportResources;
-              INFO(NCCL_INIT,
-                "ODL_TASK event=COMPLETE dir=RX rank=%d op=%llu ch=%d peer=%d step=%llu baseStep=%llu nsteps=%d comm=%p req=%p size=%d",
-                proxyState->tpRank, (unsigned long long)args->opCount,
-                traceSub->channelId, traceResources->tpRemoteRank,
-                (unsigned long long)traceSub->received,
-                (unsigned long long)(traceSub->base + traceSub->received),
-                traceSub->nsteps, traceResources->netRecvComm,
-                completedRequest, sizes[i]);
-            }
-          }
           int needFlush = 0;
           int totalSize = 0;
           for (int i = 0; i < NCCL_PROXY_MAX_SUBS; i++) totalSize += sizes[i];

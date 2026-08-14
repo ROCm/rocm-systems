@@ -105,45 +105,6 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
   }
 }
 
-// [RCCL] One-hop direct all-to-all allreduce (NCCL_ALGO_DIRECT_A2A) for
-// full-mesh net topologies, modeled after JACCL's mesh allreduce: every
-// rank fans its slice out to all peers in a single step and reduces all
-// received slices plus its own into the output. There is no
-// reduce-scatter/allgather phase split and no multi-hop forwarding, so the
-// communication latency is a single network hop instead of 2*(nranks-1).
-template <typename T, typename RedOp, typename Proto, int RCCLMetadata>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && !defined(__gfx1250__)
-__device__ void runDirectA2A(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#else
-__device__ __attribute__((noinline)) void runDirectA2A(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#endif
-  ncclMesh* mesh = &ncclShmem.channel.mesh;
-
-  ssize_t size;
-  ssize_t gridOffset;
-  ssize_t channelCount;
-  ssize_t chunkCount;
-  ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
-
-  // Fan-in/fan-out over all mesh peers (mesh->peers is -1 terminated, so
-  // the runtime fan is derived from the list itself).
-  Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_MESH_PEERS, NCCL_MAX_MESH_PEERS>, /*Direct=*/1, Proto, 0, false,
-             RCCLMetadata, Pipeline, USE_ACC>
-    prims(tid, nthreads, mesh->peers, mesh->peers, work->sendbuff, work->recvbuff, work->redOpArg, 0, work->connIndex,
-          work->connIndex, work);
-
-  for (ssize_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
-    ssize_t remCount = channelCount - elemOffset;
-    ssize_t offset = gridOffset + elemOffset;
-    int nelem = (int)min(chunkCount, remCount);
-
-    // Single hop: push our slice to every peer, then reduce every peer's
-    // slice (plus our own) into the output buffer.
-    prims.directSend(offset, offset, nelem);
-    prims.recvReduceCopy(offset, offset, nelem, /*postOp=*/false);
-  }
-}
-
 template <typename T, typename RedOp, typename Proto>
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && !defined(__gfx1250__)
 __device__ void runTreeUpDown(int tid, int nthreads, struct ncclDevWorkColl* work) {
@@ -899,28 +860,5 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_LL128
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
     // See the LL128 ring note above; add_unroll.sh forwards UserRegMode.
     runARTreeLL128<T, RedOp>(tid, nthreads, work);
-  }
-};
-
-// [RCCL] DIRECT_A2A (one-hop all-to-all over full-mesh net)
-template<typename T, typename RedOp>
-struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_DIRECT_A2A, NCCL_PROTO_SIMPLE> {
-  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    using Proto = ProtoSimple<1, 1>;
-    runDirectA2A<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work);
-  }
-};
-
-template<typename T, typename RedOp>
-struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_DIRECT_A2A, NCCL_PROTO_LL> {
-  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runDirectA2A<T, RedOp, ProtoLL, RCCL_METADATA_EMPTY>(tid, nthreads, work);
-  }
-};
-
-template<typename T, typename RedOp>
-struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_DIRECT_A2A, NCCL_PROTO_LL128> {
-  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runDirectA2A<T, RedOp, ProtoLL128, RCCL_METADATA_EMPTY>(tid, nthreads, work);
   }
 };

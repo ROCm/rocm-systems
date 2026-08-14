@@ -77,6 +77,7 @@
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
 #include "dda_all_reduce.h"
+#include "direct_a2a_all_reduce.h"
 #include "ipc_init.h"
 #include "fabric_init.h"
 #include <cpuid.h>
@@ -106,7 +107,7 @@ const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"AllGather",    "AllReduce", 
                                                    "AlltoAllvGda", "Broadcast", "Reduce",        "ReduceScatter",
                                                    "SendRecv"}; // Increased numFunc by 1 for AlltollvGda
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = {"Tree",     "Ring", "CollNetDirect", "CollNetChain", "NVLS",
-                                                "NVLSTree", "PAT",  "DIRECT_A2A"};
+                                                "NVLSTree", "PAT"};
 const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = {"LL", "LL128", "Simple"};
 const char* ncclDevRedOpStr[ncclNumDevRedOps] = {"Sum", "Prod", "MinMax", "PreMulSum", "SumPostDiv"};
 const char* ncclTypeStr[ncclNumTypes] = {"_i8", "_u8", "_i32", "_u32", "_i64", "_u64", "_f16", "_f32", "_f64", "_b16"};
@@ -126,10 +127,6 @@ NCCL_PARAM(NumRmaCtx, "NUM_RMA_CTX", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(MaxP2pPeers, "P2P_MAX_PEERS", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(SetCpuStackSize, "SET_CPU_STACK_SIZE", 1);
 NCCL_PARAM(MultiRankGpuEnable, "MULTI_RANK_GPU_ENABLE", 0);
-// [RCCL] Opt-in switch for the DIRECT_A2A allreduce algorithm (one-hop direct
-// all-to-all over full-mesh net topologies, e.g. USB4/TB interconnects).
-// Disabled by default until validated on-cluster.
-RCCL_PARAM(DirectA2aEnable, "DIRECT_A2A_ENABLE", 0);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 extern int64_t ncclParamPatEnable();
@@ -448,6 +445,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
   /* commFree() should not involve any sync among ranks. */
   if (comm == NULL) return ncclSuccess;
 
+  NCCLCHECK(rcclDirectA2aAllReduceCommFini(comm));
   NCCLCHECK(ncclCeFinalize(comm));
 
   // tempBuff is allocated per-communicator for direct ReduceScatter on gfx950.
@@ -631,15 +629,7 @@ static ncclResult_t dmaBufSupported(struct ncclComm* comm) {
   CUCHECK(cuDeviceGet(&dev, comm->cudaDev));
   // Query device to see if DMA-BUF support is available
   (void)CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, dev));
-  if (flag == 0) {
-    // [RCCL] The DMA_BUF device attribute can report 0 on consumer APUs
-    // (gfx115x) even when ROCr exports hsa_amd_portable_export_dmabuf and the
-    // kernel supports DMA-BUF (both verified by rocmLibraryInit()). Trust the
-    // ROCr/kernel checks instead of the device attribute.
-    if (pfn_hsa_amd_portable_export_dmabuf == NULL) return ncclInternalError;
-    INFO(NCCL_INIT, "DMA-BUF device attribute reports 0 on GPU device %d; proceeding based on ROCr runtime support",
-         comm->cudaDev);
-  }
+  if (flag == 0) return ncclInternalError;
   INFO(NCCL_INIT, "DMA-BUF is available on GPU device %d", comm->cudaDev);
   return ncclSuccess;
 #else
@@ -695,6 +685,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->ddaFabricMaxBlocks = 0;
   comm->ddaLLEpochDev = nullptr;
   comm->ddaLLEpochLen = 0;
+  comm->directA2aScratch = nullptr;
+  comm->directA2aScratchBytes = 0;
 
   comm->rank = rank;
   comm->nRanks = ndev;
@@ -959,7 +951,6 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
     tmpCommAndChans.channels[c].collnetDirect = comm->channels[c].collnetDirect;
     tmpCommAndChans.channels[c].binTree = comm->channels[c].binTree;
     tmpCommAndChans.channels[c].nvls = comm->channels[c].nvls;
-    tmpCommAndChans.channels[c].mesh = comm->channels[c].mesh;
 
     if (comm->channels[c].ring.userRanks != nullptr) {
       NCCLCHECKGOTO(ncclCudaMemcpyAsync(tmpCommAndChans.channels[c].ring.userRanks, comm->channels[c].ring.userRanks,
@@ -1177,18 +1168,6 @@ static ncclResult_t setupChannel(struct ncclComm* comm, int channelId, int rank,
     ring->userRanks[i] = ringRanks[(i + ixRank) % nranks];
     ring->rankToIndex[ring->userRanks[i]] = i;
   }
-
-  // [RCCL] DIRECT_A2A mesh peers: every rank talks to every other rank in one
-  // hop. Filled unconditionally (cheap); connectors are only set up when
-  // comm->directA2aSupport is set.
-  struct ncclMesh* mesh = &comm->channels[channelId].mesh;
-  mesh->rankIx = rank;
-  mesh->nPeers = 0;
-  for (int r = 0; r < nranks && mesh->nPeers < NCCL_MAX_MESH_PEERS; r++) {
-    if (r == rank) continue;
-    mesh->peers[mesh->nPeers++] = r;
-  }
-  mesh->peers[mesh->nPeers] = -1;
   return ncclSuccess;
 }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -1392,9 +1371,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   struct ncclTopoGraph* collNetChainGraph = &comm->graphs[NCCL_ALGO_COLLNET_CHAIN];
   struct ncclTopoGraph* collNetDirectGraph = &comm->graphs[NCCL_ALGO_COLLNET_DIRECT];
   struct ncclTopoGraph* nvlsGraph = &comm->graphs[NCCL_ALGO_NVLS];
-  struct ncclTopoGraph* meshGraph = &comm->graphs[NCCL_ALGO_DIRECT_A2A];
   struct ncclTopoGraph* graphs[NCCL_NUM_ALGORITHMS] = {treeGraph, ringGraph, collNetDirectGraph, collNetChainGraph,
-                                                       nvlsGraph, nvlsGraph, treeGraph, meshGraph};
+                                                       nvlsGraph, nvlsGraph, treeGraph};
 
   struct graphInfo {
     int pattern;
@@ -1635,15 +1613,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   comm->topo->skipPresetTopoMatching = !uniformRanksPerHost(comm, nranks);
 
-  // [RCCL] Determine DIRECT_A2A support: opt-in via RCCL_DIRECT_A2A_ENABLE,
-  // one GPU per node (nRanks == nNodes), and a usable net. Full-mesh
-  // connectivity itself is validated by ncclTopoComputeMesh below.
-  comm->directA2aSupport = 0;
-  if (rcclParamDirectA2aEnable() && nranks >= 2 &&
-      nranks == nNodes && nranks <= NCCL_MAX_MESH_PEERS + 1) {
-    comm->directA2aSupport = 1;
-  }
-
   timers[TIMER_INIT_GRAPHS] = clockNano();
   // Get rings and trees
   memset(ringGraph, 0, sizeof(struct ncclTopoGraph));
@@ -1707,21 +1676,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   if (comm->nvlsSupport) {
     NCCLCHECKGOTO(ncclTopoCompute(comm->topo, nvlsGraph), ret, fail);
     NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, nvlsGraph), ret, fail);
-  }
-
-  // [RCCL] DIRECT_A2A mesh graph. ncclTopoComputeMesh caps the channel count
-  // using the NET plugin's maxComms budget because every channel needs one
-  // send and one recv comm for every remote rank.
-  memset(meshGraph, 0, sizeof(struct ncclTopoGraph));
-  meshGraph->id = 5;
-  meshGraph->pattern = NCCL_TOPO_PATTERN_MESH;
-  meshGraph->minChannels = 1;
-  meshGraph->maxChannels = 2;
-  if (comm->directA2aSupport) {
-    NCCLCHECKGOTO(ncclTopoComputeMesh(comm->topo, meshGraph), ret, fail);
-    // [RCCL] Skip ncclTopoPrintGraph for the mesh graph: it resolves graph
-    // intra ranks against local-only GPU nodes and spuriously warns on
-    // multi-node setups. ncclTopoComputeMesh logs the essentials itself.
   }
   timers[TIMER_INIT_GRAPHS] = clockNano() - timers[TIMER_INIT_GRAPHS];
 
@@ -2108,7 +2062,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
   if (graphs[NCCL_ALGO_COLLNET_CHAIN]->nChannels == 0) comm->config.collnetEnable = 0;
   if (graphs[NCCL_ALGO_NVLS]->nChannels == 0) comm->nvlsSupport = comm->nvlsChannels = 0;
-  if (graphs[NCCL_ALGO_DIRECT_A2A]->nChannels == 0) comm->directA2aSupport = 0;
 
   if (comm->nvlsSupport) {
     NCCLCHECKGOTO(ncclNvlsTuning(comm), ret, fail);
@@ -2246,11 +2199,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
     // Connect Trees
     NCCLCHECKGOTO(ncclTransportTreeConnect(comm), ret, fail);
-
-    // [RCCL] Connect DIRECT_A2A mesh (all-to-all net connectors, one hop)
-    if (comm->directA2aSupport) {
-      NCCLCHECKGOTO(ncclTransportMeshConnect(comm), ret, fail);
-    }
 
     // Connect PAT only for communicators with 1 GPU per node and PAT enabled
     if (comm->maxLocalRanks == 1 && (ncclParamPatEnable() || comm->forcePatEnable)) {
@@ -2768,6 +2716,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
 
   if (!job->parent && !job->isGrow) {
+    NCCLCHECKGOTO(rcclDirectA2aAllReduceCommInit(comm), res, fail);
     if (ncclDdaUseFabricPath(comm)) {
       NCCLCHECKGOTO(ncclDdaFabricCommInit(comm), res, fail);
     } else if (comm->nNodes == 1 && comm->nRanks == 8) {

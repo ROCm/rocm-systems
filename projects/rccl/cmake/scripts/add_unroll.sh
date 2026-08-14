@@ -27,8 +27,6 @@ if [[ "$HIP_FILE" =~ .*/src/device/.*\.h ]]; then
   perl -0777 -pi -e 's/(runRing<T.*?)((,[\s\\]*(true|false))?>\()/\1, USE_ACC, COLL_UNROLL\2/sg' "$HIP_FILE"
   perl -pi -e 's/(runTreeUpDown<T.*?)>\(/\1, USE_ACC, COLL_UNROLL>(/' "$HIP_FILE"
   perl -pi -e 's/(runTreeSplit<T.*?)>\(/\1, USE_ACC, COLL_UNROLL>(/' "$HIP_FILE"
-  # [RCCL] DIRECT_A2A kernel: same USE_ACC/COLL_UNROLL/Pipeline injection as runRing
-  perl -pi -e 's/(runDirectA2A<T.*?)((, (true|false))?>\()/\1, USE_ACC, COLL_UNROLL\2/g' "$HIP_FILE"
 
   perl -pi -e 's/(runTreeSplit<T, RedOp, (ProtoLL|ProtoLL128), USE_ACC, COLL_UNROLL.*?)>/\1, 0>/' "$HIP_FILE"
   perl -pi -e 's/(runTreeUpDown<T, RedOp, (ProtoLL|ProtoLL128), USE_ACC, COLL_UNROLL.*?)>/\1, 0>/' "$HIP_FILE"
@@ -39,9 +37,6 @@ if [[ "$HIP_FILE" =~ .*/src/device/.*\.h ]]; then
   perl -pi -e 's/(runRing<T, RedOp, Proto, USE_ACC, COLL_UNROLL.*?)>/\1, Pipeline>/' "$HIP_FILE"
   perl -pi -e 's/(runTreeSplit<T, RedOp, Proto, USE_ACC, COLL_UNROLL.*?)>/\1, Pipeline>/' "$HIP_FILE"
   perl -pi -e 's/(runTreeUpDown<T, RedOp, Proto, USE_ACC, COLL_UNROLL.*?)>/\1, Pipeline>/' "$HIP_FILE"
-  # [RCCL] DIRECT_A2A: LL/LL128 get Pipeline=0, SIMPLE gets Pipeline (same as runRing)
-  perl -pi -e 's/(runDirectA2A<T, RedOp, (ProtoLL|ProtoLL128), RCCL_METADATA_EMPTY, USE_ACC, COLL_UNROLL.*?)>/\1, 0>/' "$HIP_FILE"
-  perl -pi -e 's/(runDirectA2A<T, RedOp, Proto, RCCL_METADATA_EMPTY, USE_ACC, COLL_UNROLL.*?)>/\1, Pipeline>/' "$HIP_FILE"
   sed -i "s/\\(struct RunWorkBatch<ncclFunc[^>]*\\)>*/\\1, USE_ACC, COLL_UNROLL, Pipeline, UserRegMode>/" "$HIP_FILE"
   sed -i "s/\\(RunWorkColl<[^,]*,[^,]*,[^,]*,[^,]*,[^>]*\\)>/\\1, USE_ACC, COLL_UNROLL, Pipeline, UserRegMode>/" "$HIP_FILE"
 

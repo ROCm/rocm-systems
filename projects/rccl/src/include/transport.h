@@ -164,8 +164,6 @@ ncclResult_t ncclCollnetDeregBuffer(struct ncclComm* comm, struct ncclProxyConne
 
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm);
 ncclResult_t ncclTransportTreeConnect(struct ncclComm* comm);
-// [RCCL] DIRECT_A2A: connect every rank to all mesh peers (one hop)
-ncclResult_t ncclTransportMeshConnect(struct ncclComm* comm);
 ncclResult_t ncclTransportPatConnect(struct ncclComm* comm);
 
 ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTopoGraph* graphs[]);
