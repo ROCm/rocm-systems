@@ -101,10 +101,10 @@ def write_otf2(importData, config):
     try:
         import otf2
         from otf2.enums import LocationType, LocationGroupType, RegionRole, Paradigm
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
-            "otf2 module not found. Conversion to OTF2 format is not possible. Please install it using 'pip install otf2'\n"
-        )
+            "otf2 module not found. Please install it using 'pip install otf2' to convert to OTF2 format"
+        ) from e
 
     timer_resolution = 1_000_000_000
     trace_dir = getattr(config, "output_path", "./otf_traces")

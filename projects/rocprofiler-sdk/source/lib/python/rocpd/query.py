@@ -75,10 +75,10 @@ def export_sqlite_query(
 
         try:
             import pandas as pd
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
-                "pandas module not found. Output to other formats requires pandas. Please install it using 'pip install pandas'\n"
-            )
+                "pandas module not found. Please install it using 'pip install pandas' to export to other formats"
+            ) from e
 
         # 1) Run the query via pandas
         df = pd.read_sql_query(query, conn, params=params)
