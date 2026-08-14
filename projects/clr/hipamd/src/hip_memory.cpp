@@ -3242,14 +3242,15 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
 
     if (isIndirect) {
-      // Indirect requires heterogeneous memory types (H<->D).
+      // Indirect requires SDMA-accessible operands (device memory or pinned/
+      // registered host memory). Device<->device (same device or peer) is the
+      // primary use case; host<->device is also supported. Only pageable host
+      // (which has no amd::Memory) is rejected.
       switch (type) {
         case hipCopyBuffer:
         case hipCopyBufferSDMA:
         case hipCopyBufferP2P: {
-          amd::Memory* sMem = srcMemories[i];
-          amd::Memory* dMem = dstMemories[i];
-          if (sMem == nullptr || dMem == nullptr || getMemoryType(sMem) == getMemoryType(dMem)) {
+          if (srcMemories[i] == nullptr || dstMemories[i] == nullptr) {
             if (failIdx != nullptr) *failIdx = i;
             return hipErrorNotSupported;
           }
