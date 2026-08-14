@@ -466,11 +466,9 @@ def print_sriov_warning(vf_gpus):
     devices = ", ".join(f"{bdf} ({name})" for bdf, name in vf_gpus)
     print(
         f"WARNING: SR-IOV virtual function GPU(s) detected: {devices}.\n"
-        "         hipFile's fast path is not available on GPU virtual functions; "
-        "I/O will\n"
-        "         fall back to the slower compatibility path. The fast path "
-        "requires a\n"
-        "         GPU physical function (PF).",
+        "hipFile's fast path is not available on GPU virtual functions; "
+        "I/O will fall back to the slower compatibility path. The fast path "
+        "requires a GPU physical function (PF).",
         file=sys.stderr,
     )
 
