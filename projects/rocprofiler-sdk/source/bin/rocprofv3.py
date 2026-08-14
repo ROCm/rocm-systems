@@ -1221,6 +1221,12 @@ For attachment profiling of running processes:
         help="Serialize all kernels, not just the traced ones.",
     )
 
+    add_parser_bool_argument(
+        att_options,
+        "--att-no-detail",
+        help="Collect occupancy data without instruction-level detail.",
+    )
+
     return (parser.parse_args(rocp_args), app_args)
 
 
@@ -1738,21 +1744,6 @@ def run(app_args, args, **kwargs):
             "hipfile_trace",
         ):
             setattrifnone(args, itr, True)
-
-    # OMPT is a rocpd-only trace: it is written to the rocpd database and exported to
-    # other formats via `rocpd convert`; the direct csv/json/pftrace/otf2 emitters do
-    # not contain OMPT records. This runs after the --sys-trace/--runtime-trace folds
-    # have resolved args.ompt_trace, which honors an explicit --ompt-trace=false. If
-    # OMPT tracing is effectively enabled but rocpd was not requested, add it so OMPT
-    # data is not silently dropped, and warn the user.
-    if bool(getattr(args, "ompt_trace", None)) and "rocpd" not in args.output_format:
-        warning(
-            "--ompt-trace: OMPT data is only emitted to the 'rocpd' output format; "
-            "the requested output format(s) {fmts} will not contain OMPT records. "
-            "Adding 'rocpd' to --output-format -- use `rocpd convert` to export OMPT "
-            "to csv/pftrace/otf2.".format(fmts=", ".join(args.output_format))
-        )
-        args.output_format.append("rocpd")
 
     update_env(
         "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
@@ -2287,6 +2278,12 @@ def run(app_args, args, **kwargs):
             update_env(
                 "ROCPROF_ATT_PARAM_SERIALIZE_ALL",
                 args.att_serialize_all,
+                overwrite=True,
+            )
+        if args.att_no_detail:
+            update_env(
+                "ROCPROF_ATT_PARAM_NO_DETAIL",
+                args.att_no_detail,
                 overwrite=True,
             )
         if args.att_gpu_index:
