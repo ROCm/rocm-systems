@@ -720,12 +720,12 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   const auto [hip_error, func] = [&]() -> std::pair<hipError_t, hipFunction_t> {
     hipFunction_t f;
     const hipError_t err = PlatformState::Instance().StatCO().GetFunc(&f, hostFunction, deviceId);
-      
+
     // Propagate specific invalid code object errors
     if (err == hipErrorInvalidKernelFile ||
         err == hipErrorInvalidDeviceFunction ||
         err == hipErrorInvalidImage ||
-        err == hipErrorNotSupported) {
+        err == hipErrorNotSupported) {  // ROCM_KPACK_ENABLED=OFF
       return {err, nullptr};
     }
     // If successful lookup with valid function, use it
@@ -733,7 +733,7 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
       return {hipSuccess, f};
     }
 
-      // Fallback: assume it's a hip function type
+    // Fallback: assume it's a hip function type
     return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
   }();
 

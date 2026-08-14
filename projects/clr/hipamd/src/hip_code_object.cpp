@@ -537,11 +537,7 @@ hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int d
   if (module != nullptr) {
     std::scoped_lock lock(sclock_);
     if (*(module) == nullptr) {
-      hipError_t err = DigestFatBinary(module_to_hostModule_[module], *module);
-      if (err != hipSuccess) {
-        return err;
-      }
-    }
+     IHIP_RETURN_ONFAIL(DigestFatBinary(module_to_hostModule_[module], *module));
   } else {
     // Module was nullptr
     return hipErrorInvalidDeviceFunction;
