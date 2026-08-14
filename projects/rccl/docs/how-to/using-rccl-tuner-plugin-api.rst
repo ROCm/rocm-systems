@@ -1,6 +1,6 @@
 .. meta::
-   :description: Use the RCCL Tuner plugin API to customize algorithm, protocol, and channel selection for collective operations on AMD GPUs.
-   :keywords: RCCL, ROCm, tuner plugin, NCCL_TUNER_PLUGIN, ncclTuner_v1_t, algorithm selection, protocol selection, AMD Instinct
+   :description: Use the RCCL Tuner plugin API to customize algorithm, protocol, and channel selection for collective operations on AMD Instinct GPUs.
+   :keywords: RCCL, ROCm, tuner plugin, NCCL_TUNER_PLUGIN, ncclTuner_v1_t, getCollInfo, algorithm selection, protocol selection, channel count, AMD Instinct, libnccl-tuner.so
 
 .. _using-rccl-tuner-plugin:
 
@@ -23,7 +23,7 @@ The following usage notes are relevant when using the RCCL Tuner plugin API:
 *  ``getCollInfo`` is called for each collective invocation per communicator, so special care
    must be taken to avoid introducing excessive latency.
 *  The supported RCCL algorithms are ``NCCL_ALGO_TREE``, and ``NCCL_ALGO_RING``.
-*  The supported RCCL protocols are ``NCCL_PROTO_SIMPLE``, ``NCCL_PROTO_LL`` and ``NCCL_PROTO_LL128``.
+*  The supported RCCL protocols are ``NCCL_PROTO_SIMPLE``, ``NCCL_PROTO_LL``, and ``NCCL_PROTO_LL128``.
 
    *  Until support is present for network collectives, use the example in the ``pluginGetCollInfo`` API implementation
       to ignore other algorithms as follows:

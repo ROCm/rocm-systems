@@ -1,11 +1,12 @@
 .. meta::
    :description: Learn how RCCL's Simple, LL, and LL128 protocols control data packetization, synchronization, and bandwidth efficiency for collective operations on AMD GPUs.
-   :keywords: RCCL, protocol, Simple protocol, LL protocol, LL128, low latency, NCCL_PROTO, bandwidth efficiency, memory fence, collective communication, ROCm
+   :keywords: RCCL, protocol, Simple protocol, LL protocol, LL128, low latency, NCCL_PROTO, RCCL_OVERRIDE_PROTO, bandwidth efficiency, memory fence, threadfence, gfx942, MI300X, gfx950, collective communication, ROCm
 
 .. _collective-protocols:
 
+*****************************
 Collective protocols in RCCL
-==============================
+*****************************
 
 When RCCL moves data between GPUs, it uses a **protocol** to control how that
 data is packetized and how the receiver knows when data has arrived. The choice
@@ -24,7 +25,7 @@ diagnosing unexpected performance, interpreting ``NCCL_DEBUG`` output, and
 knowing when to override the default selection.
 
 The core problem: ordering the flag after the data
-----------------------------------------------------
+==================================================
 
 All three protocols solve the same fundamental problem. Consider a GPU sending
 a payload to another GPU and then writing a flag to signal that the payload is
@@ -38,7 +39,7 @@ reasons.
 **Compile-time reordering.** Languages with weakly ordered memory models —
 including C++11, HIP, and CUDA — permit the compiler to reorder independent
 stores. If the flag write is not explicitly ordered after the payload writes,
-the compiler may emit the flag store first, allowing the receiver to observe
+the compiler might emit the flag store first, allowing the receiver to observe
 the flag before the data it protects.
 
 The fix is an explicit memory fence instruction between the last payload write
@@ -46,15 +47,15 @@ and the flag write. In HIP, this is ``__threadfence()``. RCCL inserts this
 fence in the Simple protocol kernel to enforce store ordering.
 
 **Runtime reordering.** Even with a correct fence in the compiled code,
-hardware can still reorder memory operations in flight. Stores may be buffered
+hardware can still reorder memory operations in flight. Stores might be buffered
 in L2 caches, PCIe switches, or the data fabric and arrive at the destination
 in a different order than they were issued. On some GPU-to-GPU paths, the
-payload stores may drain through a different route than the flag store,
+payload stores might drain through a different route than the flag store,
 allowing the flag to arrive first.
 
 The fix depends on the transport involved. For intra-node transfers over xGMI,
 cache coherence is maintained by the fabric. For PCIe and network paths, an
-explicit cache flush or non-temporal store may be required before the flag
+explicit cache flush or non-temporal store might be required before the flag
 write.
 
 **Multi-device and multi-node coherency.** When data crosses a network
@@ -72,7 +73,7 @@ the flag inside the same atomic write as the data, eliminating the ordering
 problem entirely.
 
 Simple protocol
-----------------
+===============
 
 The Simple protocol sends a large payload as a contiguous chunk followed by a
 single completion flag. The receiver polls the flag; when it is set, the
@@ -101,7 +102,7 @@ hardware. It is also the only protocol available when the hardware does not
 support the atomic transaction sizes required by LL or LL128.
 
 LL (Low Latency) protocol
---------------------------
+=========================
 
 The LL protocol eliminates the fence-and-flag ordering problem by packing the
 data and its completion flag into a single indivisible atomic write. Because
@@ -146,7 +147,7 @@ atomic transaction size varies by architecture and memory path (xGMI vs PCIe
 vs network). RCCL's tuning model encodes these constraints per GPU generation.
 
 LL128 protocol
----------------
+==============
 
 LL128 is a hybrid protocol that extends the LL approach to 128-byte aligned
 atomic writes, achieving a much higher data efficiency while retaining the
@@ -211,7 +212,7 @@ If 128-byte atomics are not supported for a given path, RCCL silently falls
 back to LL or Simple rather than producing an error.
 
 Protocol summary
------------------
+================
 
 The following table summarizes the key properties of all three protocols:
 
@@ -241,7 +242,7 @@ The following table summarizes the key properties of all three protocols:
      - Medium messages
 
 How RCCL selects a protocol
------------------------------
+===========================
 
 Protocol selection is performed jointly with algorithm selection at each
 collective launch by the function ``getAlgoInfo()`` in
@@ -268,7 +269,7 @@ those algorithms offload work to network infrastructure that cannot participate
 in the flag-based synchronization model.
 
 Algorithm-protocol availability
----------------------------------
+===============================
 
 .. list-table::
    :header-rows: 1
@@ -304,7 +305,7 @@ Algorithm-protocol availability
      - No
 
 Override protocol selection
-----------------------------
+===========================
 
 Protocol selection is automatic and uses the tuning model's best estimate.
 You should not need to override it in production. The following variables are
@@ -317,7 +318,7 @@ provided for diagnosis and performance investigation.
    * - Variable
      - Effect
    * - ``NCCL_PROTO=LL,LL128,Simple``
-     - Restricts the set of protocols the tuning model may choose from.
+     - Restricts the set of protocols the tuning model can choose from.
        Accepts a comma-separated list. The model re-runs over the enabled
        set and still picks the best combination. This is a debug variable;
        forcing a single protocol for all message sizes will degrade
@@ -339,7 +340,7 @@ provided for diagnosis and performance investigation.
    and always remove it before production runs.
 
 Related topics
----------------
+==============
 
 - :doc:`Collective algorithms in RCCL <./collective-algorithms>` — how
   algorithm selection interacts with protocol selection

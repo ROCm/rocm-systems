@@ -1,17 +1,17 @@
 .. meta::
-   :description: RCCL is a stand-alone library that provides multi-GPU and multi-node collective communication primitives optimized for AMD GPUs
-   :keywords: RCCL, ROCm, library, API
+   :description: RCCL library specification covering communicator, collective, point-to-point, fault tolerance, memory, and group semantics APIs with full Doxygen signatures.
+   :keywords: RCCL, ROCm, library specification, ncclComm_t, ncclCommInitRank, ncclCommAbort, ncclCommShrink, ncclCommGrow, ncclCommSuspend, ncclGroupStart, ncclResult_t, ncclDataType_t, ncclRedOp_t
 
 .. _library-specification:
 
-============================
+**************************
 RCCL library specification
-============================
+**************************
 
-This document provides details of the API library. 
+This document provides details of the API library.
 
 Communicator functions
-----------------------
+======================
 
 .. doxygenfunction:: ncclGetUniqueId
 
@@ -30,7 +30,7 @@ Communicator functions
 .. doxygenfunction:: ncclCommUserRank
 
 Fault tolerance and communicator management
--------------------------------------------
+===========================================
 
 These functions let applications detect failures and recover by resizing or
 rebuilding communicators. See :ref:`fault-tolerance` for usage guidance.
@@ -52,7 +52,7 @@ rebuilding communicators. See :ref:`fault-tolerance` for usage guidance.
 .. _communicator-suspend-resume:
 
 Communicator suspend and resume
--------------------------------
+================================
 
 These functions release and reacquire the resources held by a communicator
 that is temporarily idle, and report per-communicator memory statistics. They
@@ -79,7 +79,7 @@ of each affected communicator synchronize.
 .. doxygenfunction:: ncclCommMemStats
 
 Collective communication operations
------------------------------------
+=====================================
 
 Collective communication operations must be called separately for each communicator in a communicator clique.
 
@@ -110,7 +110,7 @@ Since they may perform inter-CPU synchronization, each call has to be done from 
 .. doxygenfunction:: ncclAllToAll
 
 Group semantics
----------------
+===============
 When managing multiple GPUs from a single thread, and since NCCL collective
 calls may perform inter-CPU synchronization, we need to "group" calls for
 different ranks/devices into a single call.
@@ -130,14 +130,14 @@ of ncclGroupStart/ncclGroupEnd.
 .. doxygenfunction:: ncclGroupEnd
 
 Library functions
------------------
+=================
 
 .. doxygenfunction:: ncclGetVersion
 
 .. doxygenfunction:: ncclGetErrorString
 
 Types
------
+=====
 
 There are few data structures that are internal to the library. The pointer types to these
 structures are given below. The user would need to use these types to create handles and pass them
@@ -150,7 +150,7 @@ between different library functions.
 
 
 Enumerations
-------------
+============
 
 This section provides all the enumerations used.
 

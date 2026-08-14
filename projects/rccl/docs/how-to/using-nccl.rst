@@ -1,6 +1,6 @@
 .. meta::
    :description: Use the NCCL Net plugin API to integrate custom network transports with RCCL. Covers versioned structs, connection lifecycle, and async send and receive.
-   :keywords: RCCL, ROCm, NCCL Net plugin, librccl-net.so, ncclNet_v6_t, InfiniBand, RoCE, network transport, GPUDirect RDMA
+   :keywords: RCCL, ROCm, NCCL Net plugin, librccl-net.so, ncclNet_v6_t, ncclNet_v6, InfiniBand, RoCE, network transport, GPUDirect RDMA, collNet, isend, irecv, struct versioning
 
 .. _using-nccl:
 
@@ -13,7 +13,7 @@ topic describes the NCCL Net plugin API and explains how to implement a network 
 
 Plugins implement the NCCL network API and decouple NCCL binary builds, which are built against a
 particular version of the GPU stack (such as NVIDIA CUDA), from the network code, which is built against a
-particular version of the networking stack. Using this method, you can easily integrate any CUDA version
+particular version of the networking stack. Using this method, you can integrate any CUDA version
 with any network stack version.
 
 NCCL network plugins are packaged as a shared library called ``librccl-net.so``. The shared library
@@ -59,7 +59,7 @@ algorithm to accelerate inter-node reductions in allReduce.
 Header management
 ------------------
 
-To help users effortlessly build plugins, plugins should copy the ``ncclNet_vX`` definitions
+To help users build plugins, plugins should copy the ``ncclNet_vX`` definitions
 they support to their list of internal includes. An example is shown in ``plugins/net/example/``, which stores
 all headers in the ``nccl/`` directory and provides thin layers to implement old versions on top
 of newer ones.
@@ -154,7 +154,7 @@ To close the connections, NCCL calls ``closeListen`` to close the object returne
 ``closeSend`` to close the object returned by ``connect``, and ``closeRecv`` to close the object returned
 by ``accept``.
 
-API Functions
+API functions
 -------------
 
 The RCCL Tuner plugin API provides the following interface for initialization, connection management, and
@@ -251,14 +251,14 @@ side.
    It should return ``ncclSuccess``, setting ``recvComm`` to ``NULL``. NCCL will keep calling ``accept``
    again until it succeeds.
 
-*  ``closeListen`` / ``closeSend`` / ``closeRecv`` - When a ``listenComm``, ``sendComm``, or ``recvComm`` object is no longer
+*  ``closeListen``, ``closeSend``, or ``closeRecv`` - When a ``listenComm``, ``sendComm``, or ``recvComm`` object is no longer
    needed, NCCL calls ``closeListen``, ``closeSend``, or ``closeRecv`` to free the associated resources.
 
 Communication
 ^^^^^^^^^^^^^
 
 Communication is handled using the asynchronous send and receive operations: ``isend``, ``irecv``, and ``test``.
-To support RDMA capabilities, buffer registration and flush functions are provided.
+To support Remote Direct Memory Access (RDMA) capabilities, buffer registration and flush functions are provided.
 
 To keep track of asynchronous send, receive, and flush operations, requests are returned to NCCL,
 then queried using ``test``. Each ``sendComm`` or ``recvComm`` must be able to handle

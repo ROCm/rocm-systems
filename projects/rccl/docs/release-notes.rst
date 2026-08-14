@@ -1,11 +1,12 @@
 .. meta::
-   :description: RCCL release notes covering NCCL compatibility, new features, resolved issues, and known issues for each ROCm release.
-   :keywords: RCCL, NCCL compatibility, release notes, ROCm, collective communication, changelog
+   :description: RCCL release notes covering NCCL API compatibility, new features, resolved issues, and known issues for each ROCm release version.
+   :keywords: RCCL, NCCL compatibility, release notes, ROCm 7, changelog, compatibility matrix, gfx942, gfx950, MI300X, MI350, AllReduce, ncclCommGrow, symmetric memory
 
 .. _rccl-release-notes:
 
+******************
 RCCL release notes
-==================
+******************
 
 RCCL (ROCm Collective Communication Library) is AMD's implementation of the
 NCCL (NVIDIA Collective Communications Library) API. Each RCCL release targets
@@ -15,7 +16,10 @@ can run on AMD hardware with no source-level changes.
 The table below maps each ROCm release to the corresponding RCCL version and
 the NCCL version or versions it is compatible with.
 
-.. list-table:: RCCL to NCCL compatibility matrix
+RCCL to NCCL compatibility matrix
+===================================
+
+.. list-table::
    :header-rows: 1
    :widths: 20 20 60
 
@@ -131,14 +135,14 @@ the NCCL version or versions it is compatible with.
 ----
 
 RCCL 2.30.4 for ROCm 7.14.0
------------------------------
+============================
 
 This release adds compatibility with NCCL 2.30.4, 2.29.7, and 2.28.9, and
 introduces a new Python API, symmetric-memory kernels for MI450, and a proxy
 diagnostics framework.
 
 Added
-^^^^^
+-----
 
 - NCCL compatibility: 2.30.4, 2.29.7, 2.28.9.
 - ``proxytrace`` profiler plugin and core proxy-diagnostics hooks
@@ -159,7 +163,7 @@ Added
 - ``RCCL host API`` pull-in from NCCL 2.30.
 
 Changed
-^^^^^^^
+-------
 
 - WarpSpeed auto mode enabled for grow communicators.
 - Hierarchical AllGather now enabled by default for multi-node. Algorithm
@@ -173,7 +177,7 @@ Changed
   NVIDIA-specific and does not apply to AMD hardware.
 
 Removed
-^^^^^^^
+-------
 
 - NPKit profiling support (``ENABLE_NPKIT`` build option, related headers,
   device and proxy instrumentation, ``--npkit-enable`` install flag). Use the
@@ -184,7 +188,7 @@ Removed
   the profiler plugin API instead.
 
 Resolved issues
-^^^^^^^^^^^^^^^
+---------------
 
 - Fixed ``ncclCommGrow`` channel-count divergence causing incorrect collective
   routing.
@@ -210,7 +214,7 @@ Resolved issues
   longer needed and has been removed.
 
 Known issues
-^^^^^^^^^^^^
+------------
 
 - On gfx90a (MI210, MI250, MI250X) with ROCm 7.13 or later, per-launch
   scratch-memory reclaim in the runtime degrades RCCL performance. Set
@@ -221,13 +225,13 @@ Known issues
 ----
 
 RCCL 2.28.3 for ROCm 7.13
----------------------------
+==========================
 
 This release adds CAST network transport for AMD AINIC hardware, a built-in
 CSV tuner, and multi-node hierarchical AllGather for MI350.
 
 Added
-^^^^^
+-----
 
 - CAST network transport (``ncclNetCast`` / ``net_ib_cast``) for AMD AINIC
   (AMD Integrated Network Interface Controller) hardware.
@@ -251,7 +255,7 @@ Added
   (force enable).
 
 Changed
-^^^^^^^
+-------
 
 - Removed MSCCL and MSCCL++ collective integration. The legacy
   ``mscclLoadAlgo``, ``mscclRunAlgo``, and ``mscclUnloadAlgo`` APIs remain as
@@ -267,7 +271,7 @@ Changed
 - Algorithm set to Ring for Navi4x (gfx1100/gfx1101) AllReduce.
 
 Resolved issues
-^^^^^^^^^^^^^^^
+---------------
 
 - Fixed ``netOverride`` being skipped when rail-optimized trees are enabled.
 - Fixed RCCL Inspector plugin teardown segfault/hang and collective-count
@@ -282,13 +286,13 @@ Resolved issues
 ----
 
 RCCL 2.28.3 for ROCm 7.12
----------------------------
+==========================
 
 This release adds AMD AINIC support, Direct ReduceScatter, and WarpSpeed for
 single-node AllGather and ReduceScatter.
 
 Added
-^^^^^
+-----
 
 - gfx1151 (Strix-Halo) GPU target support.
 - AMD AINIC support in the RCCL default internal network plugin.
@@ -302,7 +306,7 @@ Added
   amd-smi).
 
 Changed
-^^^^^^^
+-------
 
 - GPU Direct RDMA (remote direct memory access) mode selection now prefers
   peermem over DMAbuf by default. ``NCCL_DMABUF_ENABLE`` now defaults to
@@ -314,7 +318,7 @@ Changed
 - ``NCCL_LAUNCH_ORDER_IMPLICIT`` replaces ``RCCL_ENABLE_CONTEXT_TRACKING``.
 
 Resolved issues
-^^^^^^^^^^^^^^^
+---------------
 
 - Fixed shutdown ordering race condition and use-after-free crash in proxy
   cleanup.
@@ -327,7 +331,7 @@ Resolved issues
 - Fixed memory leaks (ROCM-1721, ROCM-1722).
 
 Known issues
-^^^^^^^^^^^^
+------------
 
 - The upstream one-sided RMA (remote memory access) subsystem (``src/rma``) is
   unverified at scale on ROCm.
@@ -345,13 +349,13 @@ Known issues
 ----
 
 RCCL 2.28.3 for ROCm 7.11
----------------------------
+==========================
 
 This release adds NCCL 2.28.3 compatibility, a new ``ncclAllReduceWithBias``
 API, a collective latency profiler, and WarpSpeed auto mode.
 
 Known issues
-^^^^^^^^^^^^
+------------
 
 - AllToAllv and AllToAll for a single GPU is hanging.
 - AllGather regression for small message sizes (less than 1 MB) due to the
@@ -360,7 +364,7 @@ Known issues
 - Profiler plugin needs to be verified.
 
 Added
-^^^^^
+-----
 
 - NCCL compatibility: 2.28.3.
 - ``ncclAllReduceWithBias`` API for fused AllReduce with elementwise
@@ -381,7 +385,7 @@ Added
   256 MB.
 
 Changed
-^^^^^^^
+-------
 
 - PIX and PXB treated as equivalent GDR distances for more consistent topology
   detection.
@@ -394,7 +398,7 @@ Changed
   unsupported on current hardware.
 
 Resolved issues
-^^^^^^^^^^^^^^^
+---------------
 
 - Fixed missing memory fence in the LL protocol for gfx950 causing collective
   hangs.
@@ -410,35 +414,35 @@ Resolved issues
 ----
 
 RCCL 2.27.7 for ROCm 7.2.0
------------------------------
+===========================
 
 Minor behavioral change and performance fix for gfx950.
 
 Changed
-^^^^^^^
+-------
 
 - RCCL fatal error messages are now printed by default. Suppress with
   ``NCCL_DEBUG=NONE``.
 - Disabled ``reduceCopyPacks`` pipelining for gfx950.
 
 Known issues
-^^^^^^^^^^^^
+------------
 
 - AllToAllv/AllToAll for single GPU is hanging.
 
 ----
 
 RCCL 2.27.7 for ROCm 7.1.1
------------------------------
+===========================
 
 Resolved issues
-^^^^^^^^^^^^^^^
+---------------
 
 - Fixed crash when using the librccl-profiler plugin with AllToAll after the
   2.27 update.
 
 Changed
-^^^^^^^
+-------
 
 - P2P batching with ``RCCL_P2P_BATCH_ENABLE=1`` is limited to 32 nodes or
   fewer.
@@ -446,13 +450,13 @@ Changed
 ----
 
 RCCL 2.27.7 for ROCm 7.1.0
------------------------------
+===========================
 
 This release adds NCCL 2.27.7 compatibility and several new environment
 variables for P2P and IB tuning.
 
 Added
-^^^^^
+-----
 
 - NCCL compatibility: 2.27.7.
 - ``RCCL_IB_QPS_PER_P2P``: sets the number of queue pairs (QPs) per
@@ -467,13 +471,13 @@ Added
   RCCL's internal ``threadThreshold``-based adjustments.
 
 Changed
-^^^^^^^
+-------
 
 - MSCCL++ is now disabled by default. Use ``--enable-mscclpp`` in
   ``rccl/install.sh`` to enable it (replaces ``--disable-mscclpp``).
 
 Optimized
-^^^^^^^^^
+---------
 
 - Batched P2P operations for improved small-message performance in AllToAll
   and AllGather.
@@ -482,7 +486,7 @@ Optimized
   ReduceScatter.
 
 Known issues
-^^^^^^^^^^^^
+------------
 
 - Symmetric memory kernels are disabled pending CUMEM enablement work.
 - ROCm versions earlier than 6.4.0 require ``HSA_NO_SCRATCH_RECLAIM=1``.
@@ -490,13 +494,13 @@ Known issues
 ----
 
 RCCL 2.26.6 for ROCm 7.0.0
------------------------------
+===========================
 
 This release adds NCCL compatibility up to 2.26.6, gfx950 support, and
 multiple new tuning APIs.
 
 Added
-^^^^^
+-----
 
 - NCCL compatibility: 2.23.4, 2.24.3, 2.25.1, 2.26.6.
 - New GPU target: gfx950.
@@ -514,14 +518,14 @@ Added
   ``rcclSetPipelining``.
 
 Changed
-^^^^^^^
+-------
 
 - Default 112 channels for single-node with 8× gfx950.
 - LL/LL128 usage ranges for AllReduce, AllGather, and ReduceScatter are now
   part of architecture-specific tuning models.
 
 Resolved issues
-^^^^^^^^^^^^^^^
+---------------
 
 - Resolved issue when using more than 64 channels in the same ``ncclGroup()``
   call with multiple collectives.
@@ -532,39 +536,39 @@ Resolved issues
 - Fixed segmentation fault in ``ncclCommSplit`` with MSCCL enabled.
 
 Optimized
-^^^^^^^^^
+---------
 
 - FP8 Sum operation now upcast to FP16 for improved performance.
 
 Known issues
-^^^^^^^^^^^^
+------------
 
 - ROCm versions earlier than 6.4.0 require ``HSA_NO_SCRATCH_RECLAIM=1``.
 
 ----
 
 RCCL 2.22.3 for ROCm 6.4.2
------------------------------
+===========================
 
 Added
-^^^^^
+-----
 
 - LL128 protocol support on gfx942.
 
 ----
 
 RCCL 2.22.3 for ROCm 6.4.1
------------------------------
+===========================
 
 Resolved issues
-^^^^^^^^^^^^^^^
+---------------
 
 - Fixed accuracy issue in MSCCLPP ``allreduce7`` kernel in graph mode.
 - Fixed IntraNet performance.
 - Fixed rare hang due to proxy thread synchronization issue.
 
 Known issues
-^^^^^^^^^^^^
+------------
 
 - ``ncclCommSplit`` with MSCCL enabled can cause a segmentation fault on some
   GPU configurations. Workaround: ``export RCCL_MSCCL_ENABLE=0``.
@@ -574,13 +578,13 @@ Known issues
 ----
 
 RCCL 2.22.3 for ROCm 6.4.0
------------------------------
+===========================
 
 This release adds NCCL 2.22.3 compatibility and rail-optimized tree support for
 MI300.
 
 Added
-^^^^^
+-----
 
 - NCCL compatibility: 2.22.3.
 - ``RCCL_SOCKET_REUSEADDR`` and ``RCCL_SOCKET_LINGER`` environment parameters.
@@ -589,7 +593,7 @@ Added
 - ``--log-trace`` flag in ``install.sh``.
 
 Changed
-^^^^^^^
+-------
 
 - Rail-optimized tree algorithm for MI300 series, requiring all 8 GPUs per
   node. Disable with ``RCCL_DISABLE_RAIL_TREES=1``.
@@ -599,13 +603,13 @@ Changed
 ----
 
 RCCL 2.21.5 for ROCm 6.3.0
------------------------------
+===========================
 
 This release adds NCCL 2.21.5 compatibility, MSCCL++ integration for gfx942,
 and CPX mode for MI300X.
 
 Added
-^^^^^
+-----
 
 - NCCL compatibility: 2.21.5.
 - MSCCL++ integration for AllReduce and AllGather on gfx942.
@@ -615,7 +619,7 @@ Added
 - ``NCCL_RINGS_REMAP`` environment variable for NIC ID remapping.
 
 Changed
-^^^^^^^
+-------
 
 - Increased channel count for MI300X multi-node.
 - MSCCL enabled for single-process multi-threaded contexts.
@@ -625,13 +629,13 @@ Changed
 ----
 
 RCCL 2.20.5 for ROCm 6.2.0
------------------------------
+===========================
 
 This release adds NCCL 2.20.5 and 2.19.4 compatibility, FP8 support, and
 ROC-TX host-side profiling.
 
 Added
-^^^^^
+-----
 
 - NCCL compatibility: 2.20.5, 2.19.4.
 - Support for FP8 and ``rccl_bfloat8`` data types.
@@ -639,13 +643,13 @@ Added
 - Static build support.
 
 Changed
-^^^^^^^
+-------
 
 - ``rccl_bfloat16`` replaced with ``hip_bfloat16``.
 - NVTX (NVIDIA Tools Extension) code enabled in RCCL.
 
 Known issues
-^^^^^^^^^^^^
+------------
 
 - On systems running Linux kernel 6.8.0 (such as Ubuntu 24.04), DMA
   (direct memory access) transfers between the GPU and NIC are disabled,
@@ -656,7 +660,7 @@ Known issues
 ----
 
 Earlier releases
------------------
+================
 
 The following releases are documented for historical reference. Each maps to the
 NCCL version shown in parentheses.

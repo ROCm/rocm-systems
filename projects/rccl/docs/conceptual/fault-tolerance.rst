@@ -1,12 +1,12 @@
 .. meta::
-   :description: Learn how RCCL handles errors and supports fault tolerance for multi-GPU and multi-node collective communication on AMD GPUs.
-   :keywords: RCCL, ROCm, fault tolerance, error handling, ncclCommAbort, ncclCommShrink, ncclCommGrow, ncclCommRevoke, non-blocking communicator, AMD Instinct
+   :description: Learn how RCCL handles errors and supports fault tolerance for multi-GPU and multi-node collective communication on AMD Instinct GPUs.
+   :keywords: RCCL, ROCm, fault tolerance, error handling, ncclCommAbort, ncclCommShrink, ncclCommGrow, ncclCommRevoke, ncclCommSuspend, ncclCommResume, non-blocking communicator, ncclResult_t, AMD Instinct
 
 .. _fault-tolerance:
 
-***************************
+***********************
 Fault tolerance in RCCL
-***************************
+***********************
 
 Large-scale jobs running across many AMD GPUs and nodes must survive failures
 such as a network link going down, an ECC error, a node crash, or a process that

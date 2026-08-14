@@ -1,9 +1,8 @@
 .. meta::
    :description: RCCL usage tips covering peer-to-peer transport, symmetric memory, CPU affinity, MI200 and MI300X performance tuning, and communicator suspend and resume.
-   :keywords: RCCL, ROCm, peer-to-peer, symmetric memory, MI300X, MI200, CPX mode, NPS4, NCCL_MIN_NCHANNELS, communicator suspend, HSA_NO_SCRATCH_RECLAIM
+   :keywords: RCCL, ROCm, peer-to-peer, symmetric memory, xGMI, MI300X, MI200, gfx90a, gfx942, CPX mode, NPS4, NCCL_MIN_NCHANNELS, NCCL_IGNORE_CPU_AFFINITY, communicator suspend, HSA_NO_SCRATCH_RECLAIM, WarpSpeed, PyTorch
 
 .. _rccl-usage-tips:
-
 
 *****************************************
 RCCL configuration options and usage tips
@@ -47,7 +46,7 @@ Whether a communicator can use symmetric memory is decided once at
 ``ncclCommInitRank`` time. The prerequisites are:
 
 - All local ranks are **peer-to-peer capable** with each other (on AMD
-  GPUs this means they are on the same host over PCIe or XGMI,
+  GPUs this means they are on the same host over PCIe or xGMI,
   or are reachable through a Multi-Node Infinity Fabric clique).
 - Virtual Memory Management is enabled (``NCCL_CUMEM_ENABLE=1``).
 - Symmetric windows are enabled (``NCCL_WIN_ENABLE=1``, the default).
@@ -147,7 +146,7 @@ NPS4 and CPX partition modes
 ----------------------------
 
 The term compute partitioning modes, or Modular Chiplet Platform (MCP), refers to the
-logical partitioning of XCDs into devices in the ROCm stack. The names are
+logical partitioning of compute dies (XCDs) into devices in the ROCm stack. The names are
 derived from the number of logical partitions that are created out of the eight
 XCDs. In the default mode, SPX (Single Partition X-celerator), all eight XCDs are
 viewed as a single logical compute element, meaning that the :doc:`amd-smi <amdsmi:index>`
@@ -160,7 +159,7 @@ Both the MI300X and MI350X support SPX and CPX compute partitioning modes.
 While compute partitioning modes change the space on which you can assign work
 to compute units, the memory partitioning modes (known as Non-Uniform Memory
 Access (NUMA) Per Socket (NPS)) change the number of NUMA domains that a device
-exposes. In other words, it changes the number of HBM stacks which are
+exposes. In other words, it changes the number of High Bandwidth Memory (HBM) stacks which are
 accessible to a compute unit, and therefore the size of its memory space. However,
 for the MI300X and MI350X, the number of memory partitions must be less than or equal to
 the number of compute partitions. On the MI300X, NPS4 (viewing pairs of HBM stacks as a
@@ -238,11 +237,11 @@ the same OAM) on the MI300X.
 Here are the benchmark results for in-place (where the output buffer is used as
 the input buffer) and out-of-place allreduce bus bandwidth.
 
-.. figure:: ../data/how-to/rccl-usage-tips/in-place_allreduce.png
+.. figure:: ../images/in-place_allreduce.png
     :alt: In-place allreduce benchmark results
     :align: center
 
-.. figure:: ../data/how-to/rccl-usage-tips/out-of-place_allreduce.png
+.. figure:: ../images/out-of-place_allreduce.png
     :alt: Out-of-place allreduce benchmark results
     :align: center
 

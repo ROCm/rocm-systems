@@ -1,11 +1,12 @@
 .. meta::
    :description: Learn how RCCL detects AMD GPU hardware, builds topology-aware ring and tree orderings, selects protocols, and tunes collective performance per architecture.
-   :keywords: RCCL, hardware tuning, MI300X, MI350, XGMI, ring algorithm, tuning model, Rome models, rail-optimized topology, LL128, Simple protocol, gfx942, gfx950, ROCm
+   :keywords: RCCL, hardware tuning, MI300X, MI350, MI200, gfx942, gfx950, gfx90a, xGMI, ring algorithm, tuning model, Rome models, rail-optimized topology, LL128, Simple protocol, ROCm, topology fingerprinting
 
 .. _hardware-specific-optimizations:
 
+****************************************
 Hardware-specific optimizations in RCCL
-=========================================
+****************************************
 
 RCCL does not apply a single generic algorithm to all hardware. At
 communicator initialization, it detects the GPU architecture, fingerprints the
@@ -15,7 +16,7 @@ subsequent collective call. This page explains how that process works and what
 it means in practice for each supported AMD GPU generation.
 
 Why hardware-aware tuning matters
------------------------------------
+==================================
 
 Collective communication performance is determined by two physical limits: the
 latency of a single hop and the bandwidth of the slowest link in the
@@ -30,10 +31,10 @@ right table at initialization time based on the detected GPU architecture and
 topology.
 
 Architecture detection and tuning index assignment
-----------------------------------------------------
+===================================================
 
 When ``ncclCommInitRank`` runs, RCCL queries the HIP runtime for each GPU's
-architecture string (for example ``gfx942`` or ``gfx950``) via
+architecture string (for example ``gfx942`` or ``gfx950``) using
 ``src/misc/archinfo.cc`` and maps it to a **tuning index**. That index selects
 one entry from the array of hardware-specific tuning models defined in
 ``src/graph/tuning.cc``.
@@ -65,7 +66,7 @@ controls the specific latency and bandwidth constants used for algorithm and
 protocol selection for the lifetime of that communicator.
 
 What a tuning model contains
------------------------------
+=============================
 
 Each entry in the tuning model array holds the following fields, all of which
 are empirically measured on real hardware:
@@ -74,7 +75,7 @@ are empirically measured on real hardware:
   PCIe, network).
 - **bwRatio** — the fraction of raw link bandwidth that each algorithm and
   protocol combination actually achieves in practice (for example, Ring + Simple
-  may reach 97% of raw link bandwidth for large messages on MI300X).
+  might reach 97% of raw link bandwidth for large messages on MI300X).
 - **tree/ringCorrectionFactor** — size-bucketed multipliers that account for
   real-world deviations from the analytic model, such as memory system effects
   and GPU overhead.
@@ -92,7 +93,7 @@ launch:
 The algorithm-and-protocol combination with the lowest estimated time is chosen.
 
 Topology fingerprinting and Rome models
------------------------------------------
+========================================
 
 Architecture detection gives RCCL the per-hop constants, but not the
 interconnect wiring between GPUs and NICs. That wiring determines which ring and
@@ -119,7 +120,7 @@ algorithm to derive ring and tree orderings, using the architecture-based tuning
 index for the cost model.
 
 Intra-node interconnects: xGMI and PCIe
------------------------------------------
+=========================================
 
 Intra-node GPU communication uses one of two physical transports:
 
@@ -134,7 +135,7 @@ latency are substantially lower than xGMI, so ring and tree orderings are
 constructed to minimize the number of PCIe hops.
 
 MI300X single-node topology (gfx942)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+--------------------------------------
 
 A standard MI300X node contains 8 GPUs in a **fully connected mesh**: every GPU
 has a direct xGMI link to each of the other 7 GPUs. Each link operates at a raw
@@ -153,7 +154,7 @@ pre-computed ring orderings for known MI300X platform configurations to avoid
 solving this at runtime.
 
 MI350 single-node topology (gfx950)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+--------------------------------------
 
 MI350 nodes (gfx950) use the same fully connected xGMI mesh topology as MI300X
 but with updated link speeds and GPU-internal architecture changes. The tuning
@@ -167,9 +168,9 @@ MI350 hardware. Key differences from the MI300X tuning:
 - P2P batching is disabled by default on MI350 to avoid contention.
 
 MI200 series (gfx90a)
-^^^^^^^^^^^^^^^^^^^^^^^
+-----------------------
 
-MI200 series GPUs (AMD Instinct MI210, MI250, MI250X) use xGMI Gen 2 links with
+MI200 series GPUs (AMD Instinct™ MI210, MI250, MI250X) use xGMI Gen 2 links with
 a lower per-link bandwidth than MI300X. RCCL tuning index 0 applies to this
 family with constants calibrated for the MI200 mesh bandwidth. On ROCm 7.13 and
 later, a known issue causes per-launch scratch-memory reclaim to degrade RCCL
@@ -177,18 +178,18 @@ performance on gfx90a. Setting ``HSA_NO_SCRATCH_RECLAIM=1`` restores expected
 performance.
 
 Multi-node topologies and NIC placement
------------------------------------------
+=========================================
 
 Inter-node communication adds the NIC as a third actor alongside the GPU and
 CPU. RCCL models the NIC placement in the Rome model records and uses it to
 build rings that minimize the number of xGMI hops between a GPU and its
-associated NIC. In a naïve configuration, data may travel across several xGMI
+associated NIC. In a naïve configuration, data might travel across several xGMI
 hops from one GPU to reach the NIC attached to another GPU on the same node.
 A topology-aware ring ordering keeps each GPU's traffic on its directly attached
 NIC.
 
 Rail-optimized topologies
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+---------------------------
 
 In a **rail-optimized network**, NIC 1 from every node connects to Switch 1, NIC
 2 from every node connects to Switch 2, and so on. This contrasts with a classic
@@ -214,7 +215,7 @@ between NIC rail assignments so that intra-node xGMI traffic and inter-node NIC
 traffic do not interfere.
 
 Protocols and their hardware dependencies
--------------------------------------------
+==========================================
 
 RCCL's three wire protocols have hardware-specific behavior that affects which
 GPUs can use them.
@@ -279,20 +280,20 @@ table-driven analytical cost model that applies pre-measured constants. RCCL
 does not profile live traffic to adjust its choices.
 
 The end-to-end tuning flow
-----------------------------
+===========================
 
 The following sequence summarizes how RCCL arrives at an algorithm, protocol,
 and channel count for each collective launch:
 
 **At communicator initialization (once per communicator):**
 
-1. Detect GPU architecture via ``rcclGetTuningIndexForArch`` and select a
+1. Detect GPU architecture using ``rcclGetTuningIndexForArch`` and select a
    tuning model index.
 2. Fingerprint the live hardware and search for a matching Rome model. On a
    match, load the hand-optimized ring/tree orderings and any tuning overrides
    from the model's ``options`` string.
-3. Build bandwidth and latency matrices via ``ncclTopoTuneModel``.
-4. Load the external tuner plugin, if one is configured via
+3. Build bandwidth and latency matrices using ``ncclTopoTuneModel``.
+4. Load the external tuner plugin, if one is configured using
    ``NCCL_TUNER_PLUGIN``.
 
 **At each collective launch:**
@@ -307,7 +308,7 @@ and channel count for each collective launch:
    ``RCCL_OVERRIDE_PROTO``) and launch the kernel.
 
 Architecture-specific environment variables
---------------------------------------------
+============================================
 
 The following environment variables allow you to override or inspect
 hardware-specific tuning decisions. Most are diagnostic or advanced-tuning
@@ -354,7 +355,7 @@ tools; use them with care in production.
        entries before RCCL picks the minimum.
 
 Related topics
----------------
+===============
 
 - :doc:`Collective operations in RCCL <./collective-operations>` — algorithm and
   protocol concepts explained from first principles
@@ -364,4 +365,3 @@ Related topics
   RCCL runtime knobs
 - :doc:`RCCL release notes <../release-notes>` — per-release changes to
   hardware support, tuning models, and default channel counts
-

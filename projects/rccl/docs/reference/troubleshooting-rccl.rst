@@ -1,12 +1,12 @@
 .. meta::
-   :description: Troubleshoot RCCL by collecting system information, isolating issues, and running microbenchmarks to diagnose functional and performance problems.
-   :keywords: RCCL, ROCm, troubleshooting, NCCL_DEBUG, amd-smi, rccl-tests, TransferBench, RCCL Replayer, debug, AMD Instinct
+   :description: Troubleshoot RCCL by collecting system information, isolating issues, and running microbenchmarks to diagnose functional or performance problems.
+   :keywords: RCCL, ROCm, troubleshooting, NCCL_DEBUG, amd-smi, rocminfo, rccl-tests, TransferBench, RCCL Replayer, debug, AMD Instinct, NIC mismatch, NCCL_IGNORE_NET_MISMATCH
 
 .. _troubleshooting-rccl:
 
-***************
-Troubleshooting
-***************
+********************
+Troubleshooting RCCL
+********************
 
 This topic explains the steps to troubleshoot functional and performance issues with RCCL.
 While debugging, collect the output from the commands in this guide. This data
@@ -17,7 +17,7 @@ can be used as supporting information when submitting an issue report to AMD.
 System information
 =============================
 
-Collect this information about the ROCm version, GPU/accelerator, platform, and configuration.
+Collect this information about the ROCm version, GPU or accelerator, platform, and configuration.
 
 *  Verify the ROCm version. This might be a release version or a
    mainline or staging version. Use this command to display the version:
@@ -214,7 +214,7 @@ transport setup as an obscure connection or timeout failure.
 
 During communicator initialization RCCL now gathers each rank's local NET device
 count and compares them. When they differ, rank 0 logs the offending ranks and
-the min/max counts, for example:
+the minimum and maximum counts, for example:
 
 .. code:: shell
 
@@ -234,6 +234,6 @@ equivalent ``NCCL_IGNORE_COLLNET_MISMATCH``):
       NCCL WARN Detected mixed local Net device counts across ranks (min 1, max 2). Set NCCL_IGNORE_NET_MISMATCH=1 to continue.
 
 If you hit this warning, verify that every rank selects the same set of NICs
-(consistent ``NCCL_SOCKET_IFNAME`` / ``NCCL_IB_HCA``) and that all nodes expose
+(consistent ``NCCL_SOCKET_IFNAME`` or ``NCCL_IB_HCA``) and that all nodes expose
 the same NIC count. Set ``NCCL_IGNORE_NET_MISMATCH=0`` in CI or bring-up to turn a
 heterogeneous-NIC misconfiguration into an immediate, explicit failure.

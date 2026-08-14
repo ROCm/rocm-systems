@@ -1,6 +1,6 @@
 .. meta::
    :description: Build the RCCL library from source using the install script or CMake on Linux with ROCm. Covers prerequisites, GPU targets, and package installation.
-   :keywords: RCCL, ROCm, build from source, CMake, install script, GPU targets, gfx942, gfx950, HIP, AMD Instinct
+   :keywords: RCCL, ROCm, build from source, CMake, install.sh, install script, GPU targets, gfx942, gfx950, gfx90a, HIP, AMD Instinct, monorepo, rocm-systems
 
 .. _building-from-source:
 
@@ -232,7 +232,7 @@ The RCCL unit test names follow this format:
     CollectiveCall.[Type of test]
 
 Filtering of the RCCL unit tests can be done using environment variables
-and by passing the ``--gtest_filter`` command line flag:
+and by passing the ``--gtest_filter`` command-line flag:
 
 .. code-block:: shell
 

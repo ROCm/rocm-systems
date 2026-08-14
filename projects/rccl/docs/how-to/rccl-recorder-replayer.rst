@@ -1,11 +1,12 @@
 .. meta::
-   :description: Use the RCCL Recorder to capture collective logs and the RCCL Replayer to reproduce and debug RCCL workloads on AMD GPUs.
-   :keywords: RCCL, recorder, replayer, RcclReplayer, RCCL_REPLAY_FILE, collective replay, debugging, ROCm
+   :description: Use the RCCL Recorder to capture collective call logs and the RCCL Replayer to reproduce and debug RCCL workloads on AMD GPUs.
+   :keywords: RCCL, recorder, replayer, RcclReplayer, RCCL_REPLAY_FILE, collective replay, debugging, ROCm, MPI, binary log, JSON, rcclReplayer, RCCL_LOG_LEVEL
 
 .. _rccl-recorder-replayer:
 
+***********************************
 Use the RCCL Recorder and Replayer
-====================================
+***********************************
 
 The RCCL Recorder and Replayer are two complementary debugging tools:
 
@@ -21,16 +22,17 @@ The RCCL Recorder and Replayer are two complementary debugging tools:
   and measure collective bandwidth without running the full workload.
 
 Prerequisites
--------------
+=============
 
-- ROCm is installed.
+- ROCm is installed. See :doc:`Install RCCL <../install/installation>` for
+  more information.
 - RCCL is installed or built from source. See
   :doc:`Build RCCL from source <../install/building-installing>`.
 - MPI is installed (Open MPI or MPICH). The Replayer requires the same number
   of MPI processes and the same node layout as the original recorded job.
 
 Record a workload with the RCCL Recorder
-------------------------------------------
+=========================================
 
 The Recorder is part of the RCCL library and requires no build step. To enable
 it, set ``RCCL_REPLAY_FILE`` to the base path for the output log files before
@@ -68,7 +70,7 @@ to write; JSON files are easier to inspect with standard tools.
    export RCCL_REPLAY_FILE=/path/to/logs/myrun.json
 
 Control log verbosity
-^^^^^^^^^^^^^^^^^^^^^^^
+---------------------
 
 The ``RCCL_LOG_LEVEL`` variable controls which calls are recorded:
 
@@ -90,7 +92,7 @@ The ``RCCL_LOG_LEVEL`` variable controls which calls are recorded:
    export RCCL_LOG_LEVEL=1
 
 HIP graph support
-^^^^^^^^^^^^^^^^^^
+-----------------
 
 The Recorder is compatible with HIP graph capture. Calls made inside a graph
 capture are deferred using a HIP graph host node callback and written to the log
@@ -98,7 +100,7 @@ when the graph is executed, so the log reflects execution order rather than
 submission order.
 
 Log file format
-^^^^^^^^^^^^^^^^
+---------------
 
 Each record in a binary log is a fixed-size 160-byte ``rcclApiCall`` struct
 containing:
@@ -122,7 +124,7 @@ The JSON format uses a custom line-per-call layout:
                device : <n>, captured : <n>, graphID : <n> ]]
 
 Build the RCCL Replayer
-------------------------
+========================
 
 The Replayer is located in the RCCL source tree under
 ``projects/rccl/tools/RcclReplayer/``. It is not included in the installed
@@ -143,7 +145,7 @@ The Makefile also accepts ``ROCM_DIR`` (default ``/opt/rocm``) and ``RCCL_DIR``
 This produces the ``rcclReplayer`` executable in the current directory.
 
 Replay a recorded workload
----------------------------
+===========================
 
 The Replayer must be launched with the same number of MPI processes and the
 same node layout as the original job. It automatically discovers the log files
@@ -170,19 +172,17 @@ and discovers the per-rank files automatically.
 
 .. note::
 
-   ``RCCL_REPLAY_FILE`` is automatically unset by the Replayer at startup to
+   - ``RCCL_REPLAY_FILE`` is automatically unset by the Replayer at startup to
    prevent the replay run from recording itself.
 
-   Depending on your MPI library, you may need to adjust flags such as
+   - Depending on your MPI library, you might need to adjust flags such as
    ``--bind-to numa`` or ``--mca pml ucx``. Check the output of your MPI
    implementation's ``mpirun --help`` for options relevant to your cluster.
 
 What the Replayer does
-^^^^^^^^^^^^^^^^^^^^^^^
+----------------------
 
-The Replayer operates in two sequential phases:
-
-**Parse phase.** The Replayer reads every call in each rank's log file and
+The Replayer reads every call in each rank's log file and
 builds:
 
 - A device memory map that tracks each buffer's base address, size, and the
@@ -196,7 +196,7 @@ builds:
 MPI is used to exchange communicator information across all ranks so that
 ``ncclCommInitRank`` can be called with consistent parameters.
 
-**Replay phase.** The Replayer re-executes every call from the log in order,
+The Replayer then re-executes every call from the log in order,
 using dummy send and receive buffers of the correct size and type. It handles
 the full RCCL API surface including:
 
@@ -209,14 +209,14 @@ the full RCCL API surface including:
   ``ncclCommAbort``.
 - Memory operations: ``ncclMemAlloc``, ``ncclMemFree``.
 - User-buffer registration: ``ncclCommRegister``, ``ncclCommDeregister``.
-- HIP graph capture and replay via ``hipStreamBeginCapture``,
+- HIP graph capture and replay using ``hipStreamBeginCapture``,
   ``hipStreamEndCapture``, ``hipGraphInstantiate``, and ``hipGraphLaunch``.
 
 At the end of the run, the Replayer reports elapsed time and bus bandwidth for
 each replayed collective call.
 
 Convert and inspect log files
-------------------------------
+==============================
 
 The ``replay_log_converter.py`` script (in the same directory as the Replayer)
 converts between binary and JSON formats and provides utilities for comparing
@@ -246,10 +246,10 @@ This lets you diff two sanitized logs from different runs to isolate behavioral
 changes.
 
 Typical debugging workflows
------------------------------
+============================
 
 Reproduce a hang or incorrect result
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-------------------------------------
 
 #. Set ``RCCL_REPLAY_FILE`` and run the failing workload to capture a log.
 #. Replay the log with the Replayer on the same hardware.
@@ -259,7 +259,7 @@ Reproduce a hang or incorrect result
    commit.
 
 Compare performance across RCCL versions
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-----------------------------------------
 
 #. Record a production workload once with the current RCCL version.
 #. Replay the same log against an older or newer ``librccl.so`` by adjusting
@@ -267,7 +267,7 @@ Compare performance across RCCL versions
 #. Compare the per-collective bandwidth reported by the Replayer across versions.
 
 Diff two runs for behavioral changes
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+--------------------------------------
 
 #. Record both runs with ``RCCL_REPLAY_FILE=/path/myrun.json``.
 #. Sanitize both logs with ``replay_log_converter.py --sanitize --no-timestamp``.
@@ -275,7 +275,7 @@ Diff two runs for behavioral changes
    layouts changed between runs.
 
 Environment variable reference
---------------------------------
+===============================
 
 .. list-table::
    :header-rows: 1
@@ -292,7 +292,7 @@ Environment variable reference
        logs all APIs including informational calls.
 
 Related topics
----------------
+==============
 
 - :doc:`Run RCCL-Tests <./running-rccl-tests>` — benchmark collectives without
   recording a workload first

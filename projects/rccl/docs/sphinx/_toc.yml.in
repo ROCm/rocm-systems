@@ -18,11 +18,13 @@ subtrees:
 
 - caption: Tutorials
   entries:
-  - file: tutorials/your-first-rccl-program
-    title: Your first RCCL program
+  - file: tutorials/create-a-rccl-program
+    title: Create a RCCL program
 
 - caption: How to
   entries:
+  - file: how-to/rccl-usage-tips
+    title: Configure RCCL
   - file: how-to/running-rccl-tests
     title: Run RCCL-Tests
   - file: how-to/rccl-recorder-replayer
@@ -31,8 +33,6 @@ subtrees:
     title: Use the RCCL Tuner plugin
   - file: how-to/using-nccl
     title: Use the NCCL Net plugin
-  - file: how-to/rccl-usage-tips
-    title: Configure RCCL
 
 - caption: Conceptual
   entries:

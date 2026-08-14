@@ -1,11 +1,12 @@
 .. meta::
-   :description: Learn about RCCL, AMD's collective communication library for multi-GPU and multi-node workloads on ROCm, and how it relates to NCCL.
-   :keywords: RCCL, ROCm, collective communication, multi-GPU, NCCL, distributed training, AllReduce, AllGather, AMD GPU
+   :description: Learn about RCCL, AMD's collective communication library for multi-GPU and multi-node workloads on ROCm, and how it compares to NCCL.
+   :keywords: RCCL, ROCm, collective communication, multi-GPU, multi-node, NCCL, distributed training, AllReduce, AllGather, ReduceScatter, xGMI, InfiniBand, ncclComm_t, AMD Instinct
 
 .. _what-is:
 
+*************
 What is RCCL?
-=============
+*************
 
 The ROCm Communication Collectives Library (RCCL, pronounced "rickle") is
 AMD's open-source library for collective communication across multiple GPUs
@@ -18,7 +19,7 @@ implements an identical API, so applications that already use NCCL can run on
 AMD hardware without source changes.
 
 What RCCL does
---------------
+==============
 
 RCCL provides the communication primitives that parallel and distributed
 workloads need to coordinate data across GPUs. It handles two broad categories
@@ -43,7 +44,7 @@ explanation of what each operation does and how the communicator model works,
 see :doc:`Collective operations in RCCL <./conceptual/collective-operations>`.
 
 Why RCCL is useful
-------------------
+==================
 
 Training large neural networks or running large-scale simulations requires
 distributing data and model state across many GPUs. Without a library like
@@ -69,30 +70,30 @@ TensorFlow-ROCm can offload all communication to RCCL and get near-peak
 interconnect bandwidth without application-level tuning.
 
 Who should use RCCL
--------------------
+===================
 
 RCCL is the right choice for you if you are:
 
-- **Running distributed deep learning** on AMD GPUs. RCCL integrates
+- Running distributed deep learning on AMD GPUs. RCCL integrates
   directly with PyTorch (via ``torch.distributed``), JAX, and
   TensorFlow-ROCm. You likely use RCCL already without calling it directly.
 
-- **Building a distributed framework or runtime** on ROCm. RCCL exposes a
+- Building a distributed framework or runtime on ROCm. RCCL exposes a
   C API that you can call from any language or runtime that supports C
   foreign-function interfaces.
 
-- **Porting a NCCL-based application to AMD hardware**. Because RCCL is
+- Porting a NCCL-based application to AMD hardware. Because RCCL is
   API-compatible with NCCL, a recompile against ``librccl.so`` is usually
   all that is required.
 
-- **Developing or benchmarking MPI-based HPC applications** that need
+- Developing or benchmarking Message Passing Interface (MPI)-based HPC applications that need
   high-performance GPU-aware collectives alongside MPI.
 
 RCCL is not a user-facing machine learning tool. You interact with it through
 a framework or by linking against the library directly in your own code.
 
 How RCCL works
---------------
+==============
 
 When you initialize a communicator, RCCL performs topology discovery to build
 a complete model of the hardware — which GPUs can communicate directly over
@@ -118,7 +119,7 @@ trade-offs it makes, see
 :doc:`Collective algorithms in RCCL <./conceptual/collective-algorithms>`.
 
 NCCL compatibility
-------------------
+==================
 
 RCCL tracks NCCL closely. Each RCCL release declares compatibility with one or
 more NCCL versions, meaning the API, behavior, and environment variables from
@@ -137,7 +138,7 @@ For the full compatibility history, see the
    differences where they are relevant.
 
 Related topics
---------------
+==============
 
 - :doc:`Install RCCL <./install/installation>` — get RCCL running on your system
 - :doc:`Build RCCL from source <./install/building-installing>` — build options and CMake configuration

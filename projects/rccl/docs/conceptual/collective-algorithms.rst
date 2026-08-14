@@ -1,11 +1,12 @@
 .. meta::
-   :description: Learn how RCCL selects between ring, tree, hierarchical, CollNet, PAT, and DDA algorithms for collective operations on AMD GPUs.
-   :keywords: RCCL, ring algorithm, tree algorithm, hierarchical algorithm, CollNet, PAT, DDA, collective communication, AllReduce, algorithm selection, ROCm, tuning
+   :description: Learn how RCCL selects between ring, tree, hierarchical, CollNet, PAT, and DDA algorithms for collective operations on AMD Instinct GPUs.
+   :keywords: RCCL, ring algorithm, tree algorithm, hierarchical algorithm, CollNet, PAT, DDA, collective communication, AllReduce, algorithm selection, ROCm, tuning, gfx942, MI300X, cost model, NCCL_ALGO, xGMI
 
 .. _collective-algorithms:
 
+******************************
 Collective algorithms in RCCL
-==============================
+******************************
 
 RCCL does not use a single algorithm for all collective operations. For each
 collective call, RCCL evaluates several candidate algorithms and selects the
@@ -15,7 +16,7 @@ trade-offs it makes is the foundation for diagnosing unexpected performance and
 for tuning workloads that push the edges of the default heuristics.
 
 How RCCL chooses an algorithm
--------------------------------
+=============================
 
 At communicator initialization, RCCL builds latency and bandwidth matrices from
 its hardware-specific tuning models. For every collective launch, it evaluates
@@ -38,7 +39,7 @@ total data; an algorithm that is bandwidth-optimal wins at large sizes even if
 it takes more steps.
 
 Default algorithm assignments
--------------------------------
+=============================
 
 RCCL's default algorithm selection (when ``NCCL_ALGO=Ring/Tree``) maps
 collectives to algorithms as follows:
@@ -82,7 +83,7 @@ configurations and scenarios. These are described in
 `Advanced algorithms`_ below.
 
 Ring algorithm
----------------
+==============
 
 The ring algorithm arranges all participating GPUs in a logical ring. Each GPU
 simultaneously sends data to its successor and receives data from its
@@ -125,7 +126,7 @@ only sees algBw.
 **On switch-based topologies** (such as NVSwitch in NVIDIA systems or a
 top-of-rack switch), any permutation of GPUs forms a valid ring that uses the
 full switch bandwidth, because all traffic passes through the same switch fabric.
-On a **fully connected point-to-point topology** (such as the AMD Instinct
+On a **fully connected point-to-point topology** (such as the AMD Instinct™
 MI300X xGMI mesh, where every GPU has a direct link to every other GPU),
 finding rings that do not collide on any link is a combinatorial problem. RCCL
 solves this at initialization using pre-computed ring orderings stored in the
@@ -134,7 +135,7 @@ non-colliding rings — one per xGMI link — and runs them in parallel as separ
 channels, achieving approximately 7 × 46 GB/s ≈ 322 GB/s per-GPU bandwidth.
 
 Tree algorithm
----------------
+==============
 
 The tree algorithm reduces data along a binary reduction tree in ``log₂(N)``
 steps, rather than the *N−1* steps that ring requires. This dramatically reduces
@@ -203,7 +204,7 @@ traffic from concentrating on a single switch rail, which would create a
 bottleneck on the first-tier switches.
 
 Hierarchical algorithm
------------------------
+======================
 
 The hierarchical algorithm decomposes a flat communicator into two levels:
 
@@ -237,7 +238,7 @@ back to the flat ring algorithm, or to ``1`` to force hierarchical regardless of
 node count.
 
 CollNet algorithm
-------------------
+=================
 
 CollNet (Collective Network) offloads the reduction to network infrastructure
 that supports in-network computing — for example, a SHARP-enabled InfiniBand
@@ -257,7 +258,7 @@ network fabric explicitly supports in-network compute and RCCL can detect it at
 initialization.
 
 PAT algorithm
---------------
+=============
 
 PAT (Port-Aggregated Topology) aggregates bandwidth across multiple NIC ports to
 serve traffic patterns that would saturate a single port. Rather than routing all
@@ -268,7 +269,7 @@ PAT is currently enabled for single-GPU-per-node configurations and is used as
 the inter-node phase of hierarchical AllGather and ReduceScatter.
 
 Advanced algorithms
---------------------
+===================
 
 RCCL implements additional algorithms that go beyond the default Ring/Tree
 selection. These are hardware-specific and require explicit enablement.
@@ -309,7 +310,7 @@ selection. These are hardware-specific and require explicit enablement.
      - Yes
 
 DDA (Direct Data Access) algorithm
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-----------------------------------
 
 DDA is a symmetric-memory algorithm for single-node AllReduce, AllGather, and
 ReduceScatter. It exploits the xGMI fully connected topology: rather than passing
@@ -325,7 +326,7 @@ single-node configurations.
 Enable DDA with ``RCCL_DDA_ENABLE=1``.
 
 Direct algorithm
-^^^^^^^^^^^^^^^^^
+----------------
 
 The Direct algorithm is the default for AllToAll and is also supported for
 ReduceScatter in multi-node configurations. Each GPU posts send and receive
@@ -334,7 +335,7 @@ tree or ring. This is efficient when every GPU has data for every other GPU
 and the network can handle many simultaneous flows.
 
 One-shot and two-shot algorithms
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+--------------------------------
 
 For single-node small-message AllReduce, AllGather, ReduceScatter, and AllToAll,
 RCCL supports one-shot and two-shot variants that reduce the number of kernel
@@ -352,7 +353,7 @@ and two-shot AllReduce deliver 2–4× speedup over the default ring algorithm f
 messages below ~8 MB.
 
 Protocol interaction with algorithm selection
-----------------------------------------------
+=============================================
 
 Algorithm selection and protocol selection are independent decisions that RCCL
 makes jointly. The same ring pattern can execute under the Simple, LL, or LL128
@@ -370,7 +371,7 @@ For a detailed explanation of how the protocols work at the wire level, see
 :doc:`Hardware-specific optimizations <./hardware-specific-optimizations>`.
 
 Override algorithm selection
-------------------------------
+============================
 
 Use the following environment variables to override RCCL's automatic selection.
 These are primarily diagnostic tools; forcing a sub-optimal algorithm for all
@@ -403,7 +404,7 @@ message sizes will degrade performance.
        communicator initialization.
 
 Related topics
----------------
+==============
 
 - :doc:`Collective operations in RCCL <./collective-operations>` — what each
   collective does and the communicator model

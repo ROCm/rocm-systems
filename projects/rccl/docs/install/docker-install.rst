@@ -1,12 +1,12 @@
 .. meta::
    :description: Run RCCL using Docker on AMD GPUs — build the Docker image from Dockerfile.ubuntu and launch a container with rccl-tests for benchmarking collectives.
-   :keywords: RCCL, ROCm, Docker, container, rccl-tests, AMD GPU, all_reduce_perf, MPI
+   :keywords: RCCL, ROCm, Docker, container, Dockerfile, Ubuntu, rccl-tests, AMD GPU, AMD Instinct, all_reduce_perf, MPI, benchmarking, collective communication
 
 .. _install-docker:
 
-***********************
+*********************
 Run RCCL using Docker
-***********************
+*********************
 
 To use Docker to run RCCL, Docker must already be installed on the system.
 To build the Docker image and run the container, follow these steps.
