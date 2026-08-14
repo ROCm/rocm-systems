@@ -33,6 +33,7 @@
 #include "gfx9/gfx9token.h" // gfx9::Reg, gfx9::RegCs
 #include "mi400/mi400token.h"
 #include "quick_scan_export.hpp"
+#include "record_emitter.hpp"
 
 //#define GET_TIMING
 
@@ -514,13 +515,21 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     if (!trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
+    RecordFilter filter{};
+    {
+        auto decoder = HandleData::get_read_handle(handle);
+        if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+        filter = decoder->record_filter;
+    }
+    RecordEmitter records{trace_callback, userdata, filter};
+
     rocprofiler_thread_trace_decoder_status_t status;
     if (gfxip == 9)
-        status = process_events_gfx9<true>(local, raw, ntokens, header_skip, trace_callback, userdata);
+        status = process_events_gfx9<true>(local, raw, ntokens, header_skip, RecordEmitter::callback, &records);
     else if (gfxip != 0)
-        status = process_events_gfx12<true>(local, raw, ntokens, header_skip, trace_callback, userdata);
+        status = process_events_gfx12<true>(local, raw, ntokens, header_skip, RecordEmitter::callback, &records);
     else
-        status = process_events_none(local, raw, ntokens, header_skip, trace_callback, userdata);
+        status = process_events_none(local, raw, ntokens, header_skip, RecordEmitter::callback, &records);
 
     TIMING(t4);
 

@@ -16,6 +16,20 @@ rocprofiler capture filenames before constructing explicit `CodeObject` values.
 If exactly one code object has no inferred ID, these samples use ID `0`.
 Multiple unnamed code objects are rejected because their IDs are ambiguous.
 
+## Markers
+
+The examples under `samples/markers/` consume decoded marker records directly
+from the Python API:
+
+```bash
+PYTHONPATH=python python3 samples/markers/print_markers.py \
+  captures/*.att \
+  captures/*_code_object_id_*.out
+```
+
+See `samples/markers/README.md` for folded-stack, payload, and Perfetto
+examples.
+
 ## ISA Hotspots
 
 Print the top 30 instructions by `latency + idle`:

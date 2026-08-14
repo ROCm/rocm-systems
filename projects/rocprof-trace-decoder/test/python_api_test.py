@@ -9,6 +9,7 @@ from rocprof_trace_decoder import (
     Decoder,
     DecoderStatus,
     InstCategory,
+    RecordType,
     __version__,
 )
 
@@ -30,6 +31,17 @@ def main() -> int:
         status = decoder.status_string(DecoderStatus.SUCCESS)
         if not status:
             raise RuntimeError("Decoder returned an empty SUCCESS status string")
+        decoder.set_record_filter(
+            [RecordType.MARKER, RecordType.SHADERDATA],
+            immediate=[RecordType.MARKER],
+        )
+        try:
+            decoder.set_record_filter(immediate=[RecordType.MARKER])
+        except ValueError:
+            pass
+        else:
+            raise RuntimeError("record filter accepted immediate types without an explicit record set")
+        decoder.set_record_filter()
 
     return 0
 

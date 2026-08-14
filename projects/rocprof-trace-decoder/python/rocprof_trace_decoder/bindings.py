@@ -14,6 +14,10 @@ from .records import (
     Event,
     EventPayload,
     Instruction,
+    Marker,
+    MarkerFlags,
+    MarkerKind,
+    MarkerRecordKind,
     Occupancy,
     OtherSimdInstruction,
     Pc,
@@ -124,6 +128,25 @@ class _ShaderData(ctypes.Structure):
     ]
 
 
+class _Marker(ctypes.Structure):
+    _fields_ = [
+        ("size", ctypes.c_uint64),
+        ("shaderdata", _ShaderData),
+        ("kernel_entry", _PcInfo),
+        ("code_object_id", ctypes.c_uint64),
+        ("name", ctypes.c_char_p),
+        ("source_location", ctypes.c_char_p),
+        ("marker_id", ctypes.c_uint32),
+        ("record_kind", ctypes.c_uint32),
+        ("marker_kind", ctypes.c_uint32),
+        ("marker_flags", ctypes.c_uint32),
+        ("payload_index", ctypes.c_uint32),
+        ("payload_count", ctypes.c_uint32),
+        ("delay", ctypes.c_int32),
+        ("reserved", ctypes.c_uint32),
+    ]
+
+
 class _OtherSimdInstruction(ctypes.Structure):
     _fields_ = [
         ("size", ctypes.c_uint64),
@@ -181,6 +204,22 @@ class _Dispatch(ctypes.Structure):
 
 class _Handle(ctypes.Structure):
     _fields_ = [("handle", ctypes.c_uint64)]
+
+
+class _RecordRequest(ctypes.Structure):
+    _fields_ = [
+        ("size", ctypes.c_uint64),
+        ("type", ctypes.c_int),
+        ("flags", ctypes.c_uint32),
+    ]
+
+
+class _RecordFilter(ctypes.Structure):
+    _fields_ = [
+        ("size", ctypes.c_uint64),
+        ("records", ctypes.POINTER(_RecordRequest)),
+        ("record_count", ctypes.c_uint64),
+    ]
 
 
 _TRACE_CB = ctypes.CFUNCTYPE(
@@ -367,6 +406,12 @@ class Decoder:
         ]
         lib.rocprof_trace_decoder_set_se_data_callback.restype = ctypes.c_int
 
+        lib.rocprof_trace_decoder_set_record_filter.argtypes = [
+            _Handle,
+            ctypes.POINTER(_RecordFilter),
+        ]
+        lib.rocprof_trace_decoder_set_record_filter.restype = ctypes.c_int
+
         lib.rocprof_trace_decoder_parse.argtypes = [
             _Handle,
             ctypes.c_void_p,
@@ -488,6 +533,52 @@ class Decoder:
         self._ensure_open()
         status = self._lib.rocprof_trace_decoder_codeobj_unload(self._handle, load_id)
         self._check(status)
+
+    def set_record_filter(
+        self,
+        record_types: Iterable[RecordType] | None = None,
+        *,
+        immediate: Iterable[RecordType] = (),
+    ) -> None:
+        """Select callback record types and their delivery mode.
+
+        ``record_types=None`` restores the native default of every record type
+        enabled with pooled delivery. Types omitted from an explicit iterable
+        are disabled. Immediate delivery is supported for marker, shaderdata,
+        occupancy, and realtime records.
+        """
+        self._ensure_open()
+        immediate_types = {RecordType(value) for value in immediate}
+        if record_types is None:
+            if immediate_types:
+                raise ValueError("immediate record types require an explicit record filter")
+            self._check(self._lib.rocprof_trace_decoder_set_record_filter(self._handle, None))
+            return
+
+        selected = [RecordType(value) for value in record_types]
+        if not immediate_types.issubset(selected):
+            raise ValueError("immediate record types must also be selected")
+        array_type = _RecordRequest * len(selected)
+        requests = array_type(
+            *[
+                _RecordRequest(
+                    ctypes.sizeof(_RecordRequest),
+                    int(record_type),
+                    int(record_type in immediate_types),
+                )
+                for record_type in selected
+            ]
+        )
+        record_filter = _RecordFilter(
+            ctypes.sizeof(_RecordFilter),
+            ctypes.cast(requests, ctypes.POINTER(_RecordRequest)) if selected else None,
+            len(selected),
+        )
+        self._check(
+            self._lib.rocprof_trace_decoder_set_record_filter(
+                self._handle, ctypes.byref(record_filter)
+            )
+        )
 
     def parse_file(
         self,
@@ -633,6 +724,9 @@ class Decoder:
         if record_type == RecordType.DISPATCH:
             ptr = ctypes.cast(events, ctypes.POINTER(_Dispatch))
             return [_convert_dispatch(ptr[i]) for i in range(size)]
+        if record_type == RecordType.MARKER:
+            ptr = ctypes.cast(events, ctypes.POINTER(_Marker))
+            return [_convert_marker(ptr[i]) for i in range(size)]
         return []
 
 
@@ -731,6 +825,29 @@ def _convert_shaderdata(c: _ShaderData) -> ShaderData:
     )
 
 
+def _decode_optional(value: bytes | None) -> str | None:
+    return value.decode("utf-8", errors="replace") if value else None
+
+
+def _convert_marker(c: _Marker) -> Marker:
+    return Marker(
+        size=int(c.size),
+        shaderdata=_convert_shaderdata(c.shaderdata),
+        kernel_entry=_pc(c.kernel_entry),
+        code_object_id=int(c.code_object_id),
+        name=_decode_optional(c.name),
+        source_location=_decode_optional(c.source_location),
+        marker_id=int(c.marker_id),
+        record_kind=MarkerRecordKind(int(c.record_kind)),
+        marker_kind=MarkerKind(int(c.marker_kind)),
+        marker_flags=MarkerFlags(int(c.marker_flags)),
+        payload_index=int(c.payload_index),
+        payload_count=int(c.payload_count),
+        delay=int(c.delay),
+        reserved=int(c.reserved),
+    )
+
+
 def _convert_other_simd(c: _OtherSimdInstruction) -> OtherSimdInstruction:
     return OtherSimdInstruction(
         size=int(c.size),
@@ -808,6 +925,8 @@ def _append_batch(
         records.other_simd.extend(batch)  # type: ignore[arg-type]
     elif record_type == RecordType.DISPATCH:
         records.dispatches.extend(batch)  # type: ignore[arg-type]
+    elif record_type == RecordType.MARKER:
+        records.markers.extend(batch)  # type: ignore[arg-type]
 
 
 def merge_records(dst: TraceRecords, src: TraceRecords) -> TraceRecords:
@@ -824,6 +943,7 @@ def merge_records(dst: TraceRecords, src: TraceRecords) -> TraceRecords:
     dst.realtime.extend(src.realtime)
     dst.other_simd.extend(src.other_simd)
     dst.dispatches.extend(src.dispatches)
+    dst.markers.extend(src.markers)
     dst.batches.extend(src.batches)
     return dst
 

@@ -116,6 +116,7 @@ if(BUILD_INTEGRATION_TESTS)
     set(PYTHON_API_PY ${CMAKE_CURRENT_SOURCE_DIR}/python_api_test.py)
     set(CODEGEN_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/codegen_test.py)
     set(ATT_TOOL_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/att_tool_test.py)
+    set(MARKER_SAMPLES_TEST_PY ${CMAKE_CURRENT_SOURCE_DIR}/marker_samples_test.py)
 
     set(LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(SANITIZED_LIB_PATH ${CMAKE_BINARY_DIR}/lib/librocprof-trace-decoder-sanitized${CMAKE_SHARED_LIBRARY_SUFFIX})
@@ -155,6 +156,10 @@ if(BUILD_INTEGRATION_TESTS)
     add_test(NAME att-marker-clock-correction COMMAND ${Python3_EXECUTABLE} ${ATT_TOOL_TEST_PY})
     set_tests_properties(att-marker-clock-correction PROPERTIES TIMEOUT 30 LABELS "integration-tests" ENVIRONMENT
                                                                 "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+
+    add_test(NAME marker-api-samples COMMAND ${Python3_EXECUTABLE} ${MARKER_SAMPLES_TEST_PY})
+    set_tests_properties(marker-api-samples PROPERTIES TIMEOUT 30 LABELS "integration-tests" ENVIRONMENT
+                                                       "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
 
     if(DEFINED ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR)
         configure_file(python_api_install_test.cmake.in python_api_install_test.cmake @ONLY)

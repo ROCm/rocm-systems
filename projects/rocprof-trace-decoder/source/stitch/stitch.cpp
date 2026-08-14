@@ -381,14 +381,14 @@ void insert_gfx12_barrier_wait(WaveDataInternal& wave, const barrier_list_t& bar
 void Stitcher::setgfxip(uint64_t _gfxip)
 {
     this->gfxip = _gfxip;
-    std::call_once(gfx_flag, callback, RADT(GFXIP), reinterpret_cast<void*>(_gfxip), 0, cbdata);
+    if (records().enabled(RADT(GFXIP)))
+        std::call_once(gfx_flag, [&]() { records().emit(RADT(GFXIP), reinterpret_cast<void*>(_gfxip), 0); });
 }
 
 void Stitcher::stitch(WaveDataInternal& wave)
 {
     assert(gfxip != 0);
-    auto EmitWarning = [&](rocprofiler_thread_trace_decoder_info_t info)
-    { callback(RADT(INFO), (void*) &info, 1, cbdata); };
+    auto EmitWarning = [&](rocprofiler_thread_trace_decoder_info_t info) { records().emit(RADT(INFO), info); };
 
     if (wave.callbackComplete) return;
     wave.callbackComplete = true;
@@ -416,11 +416,5 @@ void Stitcher::stitch(WaveDataInternal& wave)
     if (!wave.bIsComplete)
         for (auto& inst : wave.instructions) wave.end_time = std::max(wave.end_time, inst.time + inst.duration + 4);
 
-    callback(RADT(WAVE), (void*) &wave, 1, cbdata);
+    records().emit(RADT(WAVE), wave);
 }
-
-Stitcher::Stitcher(
-    std::shared_ptr<ICodeServicer> service, rocprof_trace_decoder_trace_callback_t _callback, void* _cbdata
-) :
-codeobj_service(service), callback(_callback), cbdata(_cbdata)
-{}

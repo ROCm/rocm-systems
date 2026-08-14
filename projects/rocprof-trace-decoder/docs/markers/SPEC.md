@@ -12,11 +12,9 @@ The system consists of:
 
 - **`libsqttinstrumentpass.so`** -- LLVM pass plugin loaded via `-fpass-plugin=`
 - **`markers.hpp`** -- Device-side header for user markers
-- **`sqtt_flamegraph.py`** -- Post-processing tool: reads SQTT traces and
-  `.sqtt_funcmap` sections to generate flamegraphs
-- **`sqtt_perfetto.py`** -- Post-processing tool: exports SQTT traces as
-  Chrome JSON for viewing in the Perfetto UI (per-wave timelines)
-- **`sqtt_decode_funcmap.py`** -- Post-build tool to extract the ID-to-name map
+- **Marker callback records** -- Decoder-side rolling marker and payload API
+- **`samples/markers/`** -- Small Python API examples for printing markers,
+  folded stacks, payloads, and Perfetto export
 
 ## Building
 
@@ -535,10 +533,11 @@ Point markers (`sqtt_marker_point()` and `sqtt_marker_data()`) record an event
 without pushing or popping the call stack. **They are dropped by the flamegraph
 tool** -- a point event has no meaningful cycle attribution (start/end are the
 same instant), so attributing synthetic weight to it would distort the time
-visualization. Inspect point events via `sqtt_decode_funcmap.py` and the raw
-shaderdata records. `sqtt_marker_data()` emits the point marker header followed
-by one raw payload record; decoders skip that payload as part of the header
-using the marker's `R:id:extra_payload_count=1` metadata.
+visualization. Inspect point events through
+`ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER` or
+`samples/markers/print_markers.py`. `sqtt_marker_data()` emits the point marker
+header followed by one raw payload record; the decoder emits that payload as a
+marker payload record using the header's `R:id:extra_payload_count=1` metadata.
 
 ### Named marker processing
 
@@ -601,54 +600,7 @@ packing; `sqtt_funcmap_payloads` contains nonzero payload counts. Readers that
 do not know these optional tables can continue using the unchanged
 `sqtt_funcmap` rows. For a packed row, an absent payload count means zero.
 
-### Extracting the funcmap
-
-**Method 1: `sqtt_decode_funcmap.py` (recommended)**
-
-```bash
-# Extract code object from the fat binary first
-hipcc --offload-arch=gfx942 ... -o my_app
-# The code object is embedded; extract it:
-roc-obj-extract my_app -o my_app.co
-
-# Decode the funcmap
-python3 scripts/sqtt_decode_funcmap.py my_app.co --demangle
-```
-
-Output:
-```
-  Type        ID               Vaddr  Name
-  ----       ---               -----  ----
-kernel         -  0x0000000000001000  _Z8kernelAi  @ kernel.hip:80
-  user         1                   -  load_input
-  user         2                   -  compute_start
-  func         3  0x0000000000001200  _Z4syncv  @ kernel.hip:42
-  func         4                   -  _Z12helper_funcv  @ helper.hpp:17  (inlined)
- point         5                   -  barrier_signal
- point         6                   -  barrier_wait
- point         7                   -  barrier
- point         8                   -  vmem_load
- point         9                   -  vmem_store
-```
-
-With address tracing, each memory op has its own entry with source location.
-When the op is reached through inlining, the source location is an inline
-chain (innermost first, then outward call sites separated by ` -> `):
-```
-  wave_size: 64
- point         1                   -  addr_trace_load  @ hip_runtime.h:264 -> kernel.hip:59
- point         2                   -  addr_trace_load  @ kernel.hip:59
- point         3                   -  addr_trace_lds_store  @ kernel.hip:59
- point         4                   -  addr_trace_lds_load  @ kernel.hip:45
- point         5                   -  addr_trace_lds_store  @ kernel.hip:45
- point         6                   -  addr_trace_lds_load  @ kernel.hip:49
- point         7                   -  addr_trace_store  @ kernel.hip:62
-```
-
-The script uses `llvm-objcopy --dump-section` (preferred) or `llvm-readelf -p`
-as fallback. It also resolves ELF virtual addresses via `llvm-nm`.
-
-**Method 2: Manual extraction**
+### Inspecting the funcmap manually
 
 ```bash
 # Dump the raw section
@@ -658,73 +610,48 @@ llvm-objcopy --dump-section=.sqtt_funcmap=/dev/stdout my_app.co
 llvm-readelf -p .sqtt_funcmap my_app.co
 ```
 
-### Generating flamegraphs from SQTT traces
+### Generating folded stacks from SQTT traces
 
-**`sqtt_flamegraph.py`** reads rocprofv3 `--att` output (shaderdata JSON,
-occupancy JSON, code objects) and generates interactive SVG flamegraphs:
+The folded-stack sample consumes public marker records:
 
 ```bash
 # Capture a trace
 rocprofv3 --att -d trace_output -- ./my_app
 
-# Generate flamegraph (folded stacks to stdout, SVG to disk)
-python3 scripts/sqtt_flamegraph.py trace_output/ --demangle --show
+PYTHONPATH=python python3 samples/markers/flamegraph.py \
+    trace_output/*.att trace_output/*_code_object_id_*.out
 ```
 
-Each `ui_*` directory under the trace output is treated as an independent
-time domain (SQTT time resets between collections). Folded stack counts are
-merged after per-directory processing.
-
-The flamegraph shows:
+The folded output includes:
 - User marker scopes (`sqtt_marker_enter`/`sqtt_marker_exit` pairs)
 - Auto-instrumented function entry/exit
 
-Point markers (barriers, memory ops, user points) are **not** rendered --
-they have no meaningful cycle attribution. Use `sqtt_decode_funcmap.py`,
-the raw shaderdata records, or the Perfetto exporter (next section) to
-inspect them.
+Point markers are not assigned stack weight because they have no duration. Use
+the print or Perfetto samples to inspect them.
 
 ### Exporting traces to Perfetto
 
-**`sqtt_perfetto.py`** converts SQTT shaderdata into the Chrome JSON
-Trace Event Format, viewable at <https://ui.perfetto.dev>:
+The Perfetto sample converts public marker records into Chrome JSON Trace Event
+Format:
 
 ```bash
-# One *.perfetto.json per ui_* (sibling-of-source by default)
-python3 scripts/sqtt_perfetto.py trace_output/ --demangle
-
-# Collect outputs into one directory; convert cycles to ns
-python3 scripts/sqtt_perfetto.py trace_output/ -o /tmp/perfetto_out \
-    --clock-rate-ghz 2.1
+PYTHONPATH=python python3 samples/markers/perfetto.py -d /tmp/perfetto_out \
+    trace_output/*.att trace_output/*_code_object_id_*.out
 ```
-
-Each `ui_*` directory becomes a separate file -- each is its own SQTT
-time domain and we don't fake offsets across collections. Inside a file:
-
-- `pid` = `dispatch_id` -- one Perfetto "process" per dispatch
-- `tid` = `(cu << 20) | (simd << 16) | (wave_id << 8) | instance` --
-  one thread per wave instance, named `CU{cu}/SIMD{simd}/W{wid}#{inst}`
-- Function entry/exit pairs render as duration slices (`B`/`E`)
-- Point markers render as instant events (`i`) with thread scope
-- Categories: `sqtt.function`, `sqtt.user`, `sqtt.point`
-
-Without `--clock-rate-ghz`, timestamps are SQTT cycles labelled as ns --
-proportions and orderings are correct but absolute values are nominal.
 
 ### Decoding markers from SQTT trace data
 
-When reading an SQTT trace buffer, each `s_ttracedata` / `s_ttracedata_imm`
-token appears as a user data marker in the trace. To decode:
+The decoder associates shaderdata with the active wave generation, selects the
+funcmap through the wave's code object, and emits marker callbacks:
 
 ```python
-def decode_marker(val: int) -> dict:
-    """Decode a 32-bit SQTT marker value."""
-    return {
-        "exit_prev": bool(val & 0x1),
-        "enter":     bool(val & 0x2),
-        "id":        val >> 2,
-        "raw":       val,
-    }
+from rocprof_trace_decoder import Decoder
+
+with Decoder() as decoder:
+    decoder.load_code_object(code_object, load_id, 0, len(code_object))
+    records = decoder.parse(att_data, isa=code_index)
+    for marker in records.markers:
+        print(marker.name, marker.marker_flags, marker.shaderdata.time)
 ```
 
 The marker type (function, user, point) is determined by looking up the ID
@@ -734,10 +661,9 @@ in the funcmap, not from encoding bits.
 
 1. **Compile** with the pass plugin and desired env vars
 2. **Capture** an SQTT trace (via `rocprofv3 --att`)
-3. **Generate** flamegraph: `python3 scripts/sqtt_flamegraph.py trace_dir/ --demangle`
-4. Or **export to Perfetto**: `python3 scripts/sqtt_perfetto.py trace_dir/ --demangle`
-5. Or: **Extract** the code object, **read** `.sqtt_funcmap`, and **decode**
-   trace tokens manually using the bit layout above
+3. **Load** matching code objects into the decoder
+4. **Parse** ATT data and consume `records.markers`
+5. Use `samples/markers/` for folded stacks, payload JSON, or Perfetto output
 
 ---
 
@@ -1033,8 +959,8 @@ which is a byte offset into LDS (source lane ID * 4). These intrinsics are
 
 ### Decoder integration
 
-Address trace blocks are extracted from the record stream by a preprocessing
-step (`preprocess_records()` in `sqtt_data.py`) before `build_stacks()` runs.
+Address trace blocks are represented by a decoded marker header followed by
+marker payload records.
 
 Because SQTT hardware captures `s_ttracedata` from all active waves into a
 single time-ordered buffer, records from concurrent waves are interleaved.
@@ -1042,7 +968,7 @@ The decoder demultiplexes records by `(cu, simd, wave_id)` before parsing
 address blocks, ensuring each wave's multi-record sequence (header + exec +
 addresses) is processed contiguously.
 
-For each wave's record stream, the decoder:
+For each wave's marker payload stream, a protocol consumer:
 
 1. Recognizes address trace headers by resolving the marker ID against the
    funcmap and checking for the `addr_trace_` prefix
@@ -1054,7 +980,6 @@ For each wave's record stream, the decoder:
 4. Filters addresses by the EXEC mask, keeping only active lanes
 5. For buffer ops, reconstructs addresses: `base + soffset + voffset[lane]`
 
-The flamegraph builder never sees address trace records. The memory trace tool
-(`sqtt_memory_trace.py`) consumes the extracted `AddressTrace` objects and
-outputs JSON with per-lane addresses, source locations, and hierarchical
-summaries for analysis.
+`samples/markers/address_trace.py` demonstrates protocol-specific address
+reconstruction, EXEC filtering, and stride output using public marker payload
+records.

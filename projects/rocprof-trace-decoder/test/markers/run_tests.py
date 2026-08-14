@@ -56,11 +56,13 @@ INCLUDE_DIR = os.path.join(PROJECT_ROOT, "include", "rocprof_trace_decoder", "cx
 TEST_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "auto.cpp")
 ADDR_TRACE_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "addr_trace.cpp")
 MARKER_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "marker.cpp")
-SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
 
-# Add scripts/ to path for find_llvm_tool
-sys.path.insert(0, SCRIPTS_DIR)
-from sqtt_data import find_llvm_tool
+def find_llvm_tool(name: str):
+    """Find an LLVM tool, preferring ROCm installations."""
+    for path in (f"/opt/rocm/llvm/bin/{name}", f"/opt/rocm/lib/llvm/bin/{name}"):
+        if os.path.isfile(path):
+            return path
+    return shutil.which(name)
 
 
 def find_hipcc():
@@ -638,14 +640,6 @@ TESTS = [
         "expect_funcmap": [],
         "reject_funcmap": [],
     },
-    # --- Python tooling self-tests (no compilation required) ---
-    {
-        "name": "perfetto_exporter_self_test",
-        "desc": "sqtt_perfetto.py emits well-formed B/E/i/M events on synthetic input",
-        "env": {},
-        "mode": "tool_self_test",
-        "tool": "sqtt_perfetto.py",
-    },
 ]
 
 
@@ -747,18 +741,6 @@ def run_test(test: dict, hipcc: str, verbose: bool) -> TestResult:
                 for pat in test.get("expect_stderr", []):
                     if not re.search(pat, r.stderr):
                         result.fail(f"Missing stderr pattern: {pat}")
-
-            elif mode == "tool_self_test":
-                # Run a scripts/*.py self-test (no compilation, no rocprofv3).
-                # Used to validate Python helpers in isolation.
-                tool = os.path.join(SCRIPTS_DIR, test["tool"])
-                r = subprocess.run(
-                    [sys.executable, tool, "--self-test"],
-                    capture_output=True, text=True, timeout=30)
-                if r.returncode != 0:
-                    result.fail(f"Self-test failed (exit {r.returncode})")
-                    if verbose:
-                        result.fail(f"stderr: {r.stderr[-500:]}")
 
             elif mode == "ir_no_plugin":
                 ir_path = os.path.join(tmpdir, f"{test['name']}.ll")
@@ -943,26 +925,23 @@ def main():
             print(f"No tests match filter '{args.filter}'")
             sys.exit(1)
 
-    needs_hipcc = any(t["mode"] != "tool_self_test" for t in tests)
-
-    hipcc = find_hipcc() if needs_hipcc else None
-    if needs_hipcc and not hipcc:
+    hipcc = find_hipcc()
+    if not hipcc:
         print("ERROR: hipcc not found", file=sys.stderr)
         sys.exit(1)
 
-    if needs_hipcc and not os.path.isfile(TEST_SOURCE):
+    if not os.path.isfile(TEST_SOURCE):
         print(f"ERROR: test source not found: {TEST_SOURCE}", file=sys.stderr)
         sys.exit(1)
 
-    if needs_hipcc:
-        # Build pass plugin
-        print("Building pass plugin...", end="  ", flush=True)
-        ok, err = build_pass()
-        if not ok:
-            print("FAIL")
-            print(err, file=sys.stderr)
-            sys.exit(1)
-        print("OK")
+    # Build pass plugin
+    print("Building pass plugin...", end="  ", flush=True)
+    ok, err = build_pass()
+    if not ok:
+        print("FAIL")
+        print(err, file=sys.stderr)
+        sys.exit(1)
+    print("OK")
 
     # Run tests
     results: list[TestResult] = []

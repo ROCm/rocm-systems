@@ -73,16 +73,6 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT devel)
 
-set(TTD_MARKER_SCRIPTS
-    ${TTD_PROJECT_SOURCE_DIR}/scripts/sqtt_data.py ${TTD_PROJECT_SOURCE_DIR}/scripts/sqtt_decode_funcmap.py
-    ${TTD_PROJECT_SOURCE_DIR}/scripts/sqtt_flamegraph.py ${TTD_PROJECT_SOURCE_DIR}/scripts/sqtt_memory_trace.py
-    ${TTD_PROJECT_SOURCE_DIR}/scripts/sqtt_perfetto.py)
-
-install(
-    PROGRAMS ${TTD_MARKER_SCRIPTS}
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT runtime)
-
 install(
     DIRECTORY ${TTD_PROJECT_SOURCE_DIR}/docs/markers/
     DESTINATION ${CMAKE_INSTALL_DOCDIR}/markers

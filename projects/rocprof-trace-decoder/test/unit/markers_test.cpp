@@ -25,7 +25,6 @@
 #include "SQTTConfig.h"
 #include "SQTTPass.h"
 #include "SQTTTarget.h"
-#include "rocprof_trace_decoder/cxx/markers.hpp"
 
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/IR/Constants.h"
@@ -564,25 +563,6 @@ protected:
     LLVMContext ctx;
     std::unique_ptr<Module> module = makeModule(ctx);
 };
-
-TEST(MarkerPublicHeader, HostScopeConfigParsesMasks)
-{
-    ScopedEnv wave("SQTT_SCOPE_WAVE", "0x5");
-    ScopedEnv simd("SQTT_SCOPE_SIMD", "-1");
-    ScopedEnv cu("SQTT_SCOPE_CU", "bad");
-    ScopedEnv wg("SQTT_SCOPE_WG", std::nullopt);
-
-    EXPECT_EQ(sqtt::parse_env_mask("SQTT_SCOPE_WAVE", 0), 0x5u);
-    EXPECT_EQ(sqtt::parse_env_mask("SQTT_SCOPE_SIMD", 0), 0xFFFFFFFFu);
-    EXPECT_EQ(sqtt::parse_env_mask("SQTT_SCOPE_CU", 0x3), 0x3u);
-    EXPECT_EQ(sqtt::parse_env_mask("SQTT_SCOPE_WG", 0x9), 0x9u);
-
-    sqtt::ScopeConfig config = sqtt::ScopeConfig::from_env();
-    EXPECT_EQ(config.wave_mask, 0x5u);
-    EXPECT_EQ(config.simd_mask, 0xFFFFFFFFu);
-    EXPECT_EQ(config.cu_mask, 0x3u);
-    EXPECT_EQ(config.wg_mask, 0xFFFFFFFFu);
-}
 
 TEST(MarkerConfig, ParsesEnvironmentAndRejectsConflictingModes)
 {

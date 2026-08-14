@@ -109,8 +109,8 @@ hipcc -DSQTT_ENABLED=1 \
 
 ### Automatic memory operation markers
 
-Insert point markers around groups of global/buffer/flat memory operations
-(LDS and private/scratch are excluded):
+Insert point markers around groups of global/buffer/flat memory operations,
+including atomics (LDS and private/scratch are excluded):
 
 ```bash
 SQTT_INSTRUMENT_MEMORY=2:5 \
@@ -123,14 +123,15 @@ Format: `N:M` where N = number of memory ops per marker, M = max instruction
 gap between ops in the same sequence. `2:5` means "emit one marker per 2 ops,
 sequence breaks if gap > 5 instructions." With N=1, every memory op gets its
 own marker. Separate IDs are used for loads (`vmem_load`) and stores
-(`vmem_store`). Loads and stores are never mixed in the same group — a
-load/store transition always splits the sequence.
+(`vmem_store`); atomics use store markers. Loads and stores are never mixed in
+the same group — a load/store transition always splits the sequence.
 
 ### Memory address tracing
 
-Dump per-lane virtual addresses for every memory operation into the trace
-stream. Each memory op gets a unique marker ID with source location, enabling
-cache line utilization analysis, stride detection, and coalescing analysis:
+Dump per-lane addresses for qualifying global/flat, buffer, LDS, atomic, and
+DS permute operations into the trace stream. Each operation gets a unique
+marker ID with source location, enabling cache line utilization analysis,
+stride detection, and coalescing analysis:
 
 ```bash
 SQTT_TRACE_ADDRESSES=memory \
@@ -165,8 +166,8 @@ Analyze address traces after capture:
 
 ```bash
 rocprofv3 --att -d trace_output -- ./my_app
-python3 scripts/sqtt_memory_trace.py trace_output/ -o addresses.json
-python3 scripts/sqtt_memory_trace.py trace_output/ --summary
+PYTHONPATH=python python3 samples/markers/address_trace.py \
+    --summary -o addresses.json trace_output
 ```
 
 The trace protocol emits a header marker, the EXEC mask, and then
@@ -174,9 +175,9 @@ per-lane addresses for all lanes. When at least one qualifying operation is
 traced, the funcmap records the wave size as `W:64` or `W:32`, and address-trace
 header IDs get `R:ID:extra_payload_count=N` metadata for the number of following
 payload records. Markers without an `R:` row have an implicit count of zero. The
-decoder filters by the EXEC mask to report only active lanes. The parser
-demultiplexes interleaved records from concurrent waves by grouping on `(cu,
-simd, wave_id)` before parsing each wave's address block.
+rolling decoder associates each header and payload with its wave generation.
+Consumers reconstruct addresses and apply the EXEC mask using the documented
+payload protocol.
 
 Any marker with `extra_payload_count > 0`, including address blocks and
 `sqtt_marker_data()`, requires `SQTT_SHADER_CLOCK_BITS=0`. Shader-clock
@@ -205,6 +206,7 @@ hipcc -DSQTT_ENABLED=1 \
 sqtt_marker_enter("my_scope");      // push scope
 sqtt_marker_exit("my_scope");       // pop scope
 sqtt_marker_point("checkpoint");    // point event (no push/pop)
+sqtt_marker_data("sample", value);  // point event + one raw 32-bit payload
 
 // Numeric markers (sched_barrier(0) on each side; pass plugin adds the
 // SQTT_MEM_BARRIER-controlled boundary on top)
@@ -246,8 +248,10 @@ The pass:
    scope/point/data marker kind
 3. Fuses adjacent exit+enter pairs into single `s_ttracedata` instructions
    with `exit_prev=true`, halving the overhead for scope transitions
-4. Replaces each call with `s_ttracedata` + scope checks
-5. Records `U:ID:name` entries in the `.sqtt_funcmap` section
+4. Replaces each call with a marker header plus scope checks; data markers add
+   one raw payload record
+5. Records scope markers as `U:ID:name`, point/data markers as `P:ID:name`,
+   and data payloads with `R:ID:extra_payload_count=1` in `.sqtt_funcmap`
 
 If you forget to load the pass plugin, you get a linker error
 ("undefined reference to `__sqtt_named_marker_enter`") -- no silent miscompilation.
@@ -284,8 +288,8 @@ directly via `getenv()`.
 | `SQTT_SCOPE_WG` | hex bitmask or `-1` | `-1` (all) | Which workgroups emit markers. WG 0-31, bits [31:0]. |
 | `SQTT_INSTRUMENT_FUNCTIONS` | `N` or `cost:N` | off | Instrument device functions exceeding threshold. `20` = instruction count > 20. `cost:100` = weighted cost > 100. |
 | `SQTT_INSTRUMENT_BARRIERS` | `0`, `1` | `0` | Instrument barriers. Consecutive signal+wait pairs fuse to a single marker. |
-| `SQTT_INSTRUMENT_MEMORY` | `N:M` | off | Instrument memory ops. N = ops per marker, M = max gap. `2:5` = 1 marker per 2 ops, sequence breaks at gap > 5. Covers global, buffer, flat (not LDS/scratch). |
-| `SQTT_TRACE_ADDRESSES` | `memory`, `lds`, or both | off | Trace per-lane virtual addresses. Mutually exclusive with `SQTT_INSTRUMENT_MEMORY`. `memory` = flat/global (AS=0/1) and buffer, `lds` = LDS (AS=3). Expensive. |
+| `SQTT_INSTRUMENT_MEMORY` | `N:M` | off | Instrument memory ops. N = ops per marker, M = max gap. `2:5` = 1 marker per 2 ops, sequence breaks at gap > 5. Covers global, buffer, flat, and atomics (not LDS/scratch); atomics use store markers. |
+| `SQTT_TRACE_ADDRESSES` | `memory`, `lds`, or `memory,lds` | off | Trace per-lane addresses. Mutually exclusive with `SQTT_INSTRUMENT_MEMORY`. `memory` covers flat/global (AS=0/1), buffer operations, and atomics; `lds` covers LDS operations, LDS atomics, and DS permutes. Expensive. |
 | `SQTT_MEM_BARRIER` | `none` / `asm` / `fence` (or `0` / `1` / `2`) | `fence` | Reordering boundary planted around every marker. `fence` (default) emits `fence syncscope("workgroup") acq_rel` tagged with AMDGPU local/LDS synchronization metadata, anchoring markers against optimizer and scheduler movement without marker-generated global cache invalidation. `asm` plants an empty `~{memory}` inline asm (IR/MIR-only constraint, no machine code). `none` disables both. Default favors marker accuracy; opt down for tight kernels. |
 | `SQTT_SHADER_CLOCK_BITS` | unsigned integer | `0` | Number of gfx12 marker header high bits reserved for shader clock. Set a nonzero value to enable packing; it is invalid with any payload-bearing marker. |
 | `SQTT_SHADER_CLOCK_SHIFT` | unsigned integer | `4` | Source bit offset in the shader-clock low word for the packed field. |
@@ -392,43 +396,30 @@ hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/libsqttinstrumentpass.so \
 rocprofv3 --att -d trace -- ./auto
 ```
 
-## Decoding the function map
+## Decoding markers
 
-Auto-instrumented binaries contain a `.sqtt_funcmap` section mapping IDs to
-function names. Extract it from the code object:
+The decoder resolves `.sqtt_funcmap` entries while parsing and emits public
+marker records containing names, source locations, code-object provenance, and
+declared payloads:
 
 ```bash
-# Extract code object from the binary
-llvm-objdump --offloading my_kernel
-
-# Decode the function map (resolves ELF vaddrs)
-python3 scripts/sqtt_decode_funcmap.py my_kernel.0.hipv4-amdgcn-amd-amdhsa--gfx942
-
-# With demangled names
-python3 scripts/sqtt_decode_funcmap.py my_kernel.0.hipv4-amdgcn-amd-amdhsa--gfx942 --demangle
+PYTHONPATH=python python3 samples/markers/print_markers.py \
+    trace/*.att trace/*_code_object_id_*.out
 ```
 
 Example output:
 
 ```
-  Type        ID     Extra               Vaddr  Name
-  ----       ---     -----               -----  ----
-kernel         -         0  0x0000000000001900  my_kernel(float*, int)
-  user         1         0                   -  load_phase
-  user         2         0                   -  compute_phase
-  func         3         0  0x0000000000001000  do_work(float)
- point         4         0                   -  barrier_signal
- point         5         0                   -  barrier_wait
- point         6         0                   -  barrier
+== trace/trace_0.att ==
+        1024 cu=0 simd=0 wave=3 id=1 kind=2 flags=new-wave,enter load_phase
+        1088 cu=0 simd=0 wave=3 id=1 kind=2 flags=exit load_phase
+        1104 cu=0 simd=0 wave=3 id=4 kind=3 flags=- checkpoint
 ```
 
-With address tracing, the funcmap also contains per-op entries with source
-locations and a wave size entry:
+Payload-bearing markers are emitted as additional records:
 
 ```
-  wave_size: 64
- point         1       130                   -  addr_trace_load@my_kernel.hip:10
- point         2       130                   -  addr_trace_store@my_kernel.hip:12
+        1120 cu=0 simd=0 wave=3 payload[0/1]=0x0000002a payload_value
 ```
 
 ### Weighted cost model

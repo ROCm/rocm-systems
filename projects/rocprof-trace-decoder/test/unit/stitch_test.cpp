@@ -24,11 +24,41 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+using rocprof_trace_decoder::codeobj::Funcmap;
+using rocprof_trace_decoder::codeobj::FuncmapEntry;
+using rocprof_trace_decoder::codeobj::FuncmapEntryKind;
+
+void addMarker(Funcmap& funcmap, FuncmapEntryKind kind, uint32_t id, const char* name, uint32_t payload_count = 0)
+{
+    auto entry = std::make_shared<FuncmapEntry>();
+    entry->kind = kind;
+    entry->id = id;
+    entry->name = name;
+    entry->extra_payload_count = payload_count;
+    funcmap.entries.push_back(entry);
+    funcmap.by_id.emplace(id, entry);
+}
+
+rocprofiler_thread_trace_decoder_shaderdata_t markerShaderdata(
+    int64_t time, uint32_t value, uint8_t cu = 0, uint8_t simd = 0, uint8_t wave_id = 0
+)
+{
+    return {.time = time, .value = value, .cu = cu, .simd = simd, .wave_id = wave_id};
+}
+
 // Mock ICodeServicer for testing
 class MockCodeServicer : public ICodeServicer
 {
 public:
     MOCK_METHOD(assemblyLine, GetInstruction, (pcinfo_t addr, int gfxip), (override));
+
+    const rocprof_trace_decoder::codeobj::Funcmap* GetFuncmap(uint64_t code_object_id) override
+    {
+        auto it = funcmaps.find(code_object_id);
+        return it == funcmaps.end() ? nullptr : it->second;
+    }
+
+    std::unordered_map<uint64_t, const rocprof_trace_decoder::codeobj::Funcmap*> funcmaps{};
 };
 
 // Test callback to capture Stitcher output
@@ -38,6 +68,8 @@ struct TestCallbackData
     std::vector<uint64_t> record_sizes;
     uint64_t gfxip_received = 0;
     int wave_count = 0;
+    std::vector<rocprofiler_thread_trace_decoder_shaderdata_t> shaderdata;
+    std::vector<rocprofiler_thread_trace_decoder_marker_t> markers;
 };
 
 rocprofiler_thread_trace_decoder_status_t test_callback(
@@ -52,6 +84,16 @@ rocprofiler_thread_trace_decoder_status_t test_callback(
         cbdata->gfxip_received = reinterpret_cast<uint64_t>(data);
     else if (type == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE)
         cbdata->wave_count++;
+    else if (type == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA)
+    {
+        auto* records = static_cast<rocprofiler_thread_trace_decoder_shaderdata_t*>(data);
+        cbdata->shaderdata.insert(cbdata->shaderdata.end(), records, records + size);
+    }
+    else if (type == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER)
+    {
+        auto* records = static_cast<rocprofiler_thread_trace_decoder_marker_t*>(data);
+        cbdata->markers.insert(cbdata->markers.end(), records, records + size);
+    }
 
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
@@ -127,6 +169,146 @@ TEST_F(StitcherTest, StitchEmptyWave)
 
     EXPECT_EQ(cbdata.wave_count, 1);
     EXPECT_TRUE(wave.callbackComplete);
+}
+
+TEST_F(StitcherTest, RollingMarkerStreamUsesWaveFuncmapAndPayloadState)
+{
+    Funcmap funcmap{};
+    addMarker(funcmap, FuncmapEntryKind::UserScope, 1, "scope");
+    addMarker(funcmap, FuncmapEntryKind::Point, 2, "value", 1);
+    mock_service->funcmaps.emplace(7, &funcmap);
+
+    Stitcher stitcher(mock_service, test_callback, &cbdata);
+    pcinfo_t kernel{0x100, 7};
+    stitcher.markerWaveStart(0, 1, 2, kernel);
+    std::vector<rocprofiler_thread_trace_decoder_shaderdata_t> shaderdata{};
+
+    auto emit = [&](const auto& record)
+    {
+        stitcher.records().append(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, shaderdata, record);
+        stitcher.processShaderdata(record);
+    };
+    emit(markerShaderdata(11, (1u << 2) | 2u, 0, 1, 2));
+    emit(markerShaderdata(12, 2u << 2, 0, 1, 2));
+    emit(markerShaderdata(13, 0xDEADBEEFu, 0, 1, 2));
+    emit(markerShaderdata(14, 1u, 0, 1, 2));
+    stitcher.markerWaveEnd(0, 1, 2, kernel);
+    stitcher.records().flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, shaderdata);
+    stitcher.flushMarkers();
+
+    ASSERT_EQ(cbdata.shaderdata.size(), 4u);
+    ASSERT_EQ(cbdata.markers.size(), 4u);
+
+    EXPECT_EQ(cbdata.markers[0].marker_id, 1u);
+    EXPECT_STREQ(cbdata.markers[0].name, "scope");
+    EXPECT_EQ(
+        cbdata.markers[0].marker_flags,
+        ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_ENTER | ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE
+    );
+    EXPECT_EQ(cbdata.markers[0].kernel_entry.code_object_id, 7u);
+    EXPECT_EQ(cbdata.markers[0].code_object_id, 7u);
+
+    EXPECT_EQ(cbdata.markers[1].marker_id, 2u);
+    EXPECT_EQ(cbdata.markers[1].payload_count, 1u);
+    EXPECT_EQ(cbdata.markers[2].record_kind, ROCPROFILER_THREAD_TRACE_DECODER_MARKER_RECORD_PAYLOAD);
+    EXPECT_EQ(cbdata.markers[2].payload_index, 0u);
+    EXPECT_EQ(cbdata.markers[2].shaderdata.value, 0xDEADBEEFu);
+
+    EXPECT_EQ(cbdata.markers[3].marker_id, 1u);
+    EXPECT_EQ(cbdata.markers[3].marker_flags, ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_EXIT_PREVIOUS);
+    EXPECT_EQ(cbdata.markers[3].delay, 0);
+}
+
+TEST_F(StitcherTest, MarkerOnlyImmediateFilterSuppressesRawShaderdata)
+{
+    Funcmap funcmap{};
+    addMarker(funcmap, FuncmapEntryKind::Point, 3, "point");
+    mock_service->funcmaps.emplace(9, &funcmap);
+
+    RecordFilter filter{};
+    filter.clear();
+    filter.set(
+        ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_IMMEDIATE
+    );
+
+    Stitcher stitcher(mock_service, test_callback, &cbdata, filter);
+    stitcher.markerWaveStart(0, 0, 0, pcinfo_t{0x20, 9});
+    auto shader = markerShaderdata(2, 3u << 2);
+    std::vector<rocprofiler_thread_trace_decoder_shaderdata_t> shaderdata{};
+    stitcher.records().append(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, shaderdata, shader);
+    stitcher.processShaderdata(shader);
+
+    EXPECT_TRUE(cbdata.shaderdata.empty());
+    ASSERT_EQ(cbdata.markers.size(), 1u);
+    EXPECT_EQ(cbdata.record_sizes.back(), 1u);
+}
+
+TEST_F(StitcherTest, MarkerStreamReplaysAfterResolutionAndMarksEachWaveGeneration)
+{
+    Funcmap funcmap{};
+    addMarker(funcmap, FuncmapEntryKind::Point, 4, "point");
+    mock_service->funcmaps.emplace(12, &funcmap);
+
+    Stitcher stitcher(mock_service, test_callback, &cbdata);
+
+    stitcher.markerWaveStart(1, 2, 3, pcinfo_t{0x200, 0});
+    stitcher.processShaderdata(markerShaderdata(11, 4u << 2, 1, 2, 3));
+    EXPECT_TRUE(cbdata.markers.empty());
+    stitcher.markerWaveEnd(1, 2, 3, pcinfo_t{0x200, 0});
+    stitcher.processShaderdata(markerShaderdata(15, 4u << 2, 1, 2, 3));
+    stitcher.markerWaveStart(1, 2, 3, pcinfo_t{0x20, 12});
+
+    CSRegisterHandler registers;
+    registers.table_from_start.write().insert(address_range_t{0x100, 0x200, 12});
+    stitcher.markerResolveAll(registers);
+
+    stitcher.processShaderdata(markerShaderdata(21, 4u << 2, 1, 2, 3));
+    stitcher.flushMarkers();
+
+    ASSERT_EQ(cbdata.markers.size(), 3u);
+    EXPECT_NE(cbdata.markers[0].marker_flags & ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE, 0u);
+    EXPECT_EQ(cbdata.markers[1].marker_flags & ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE, 0u);
+    EXPECT_NE(cbdata.markers[2].marker_flags & ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE, 0u);
+}
+
+TEST_F(StitcherTest, PacketLossStopsMarkerDecodingForCurrentWaveGeneration)
+{
+    Funcmap funcmap{};
+    addMarker(funcmap, FuncmapEntryKind::Point, 5, "point");
+    mock_service->funcmaps.emplace(13, &funcmap);
+
+    Stitcher stitcher(mock_service, test_callback, &cbdata);
+    stitcher.markerWaveStart(0, 0, 0, pcinfo_t{0x10, 13});
+    stitcher.processShaderdata(markerShaderdata(2, 5u << 2));
+    stitcher.markerPacketLoss();
+    stitcher.processShaderdata(markerShaderdata(3, 5u << 2));
+    stitcher.flushMarkers();
+
+    ASSERT_EQ(cbdata.markers.size(), 1u);
+    EXPECT_EQ(cbdata.markers[0].shaderdata.time, 2);
+}
+
+TEST_F(StitcherTest, InterleavedWavesResolveSameMarkerIdInDifferentCodeObjects)
+{
+    Funcmap first{};
+    Funcmap second{};
+    addMarker(first, FuncmapEntryKind::Point, 6, "first");
+    addMarker(second, FuncmapEntryKind::Point, 6, "second");
+    mock_service->funcmaps.emplace(21, &first);
+    mock_service->funcmaps.emplace(22, &second);
+
+    Stitcher stitcher(mock_service, test_callback, &cbdata);
+    stitcher.markerWaveStart(0, 0, 1, pcinfo_t{0x10, 21});
+    stitcher.markerWaveStart(0, 0, 2, pcinfo_t{0x20, 22});
+    stitcher.processShaderdata(markerShaderdata(2, 6u << 2, 0, 0, 2));
+    stitcher.processShaderdata(markerShaderdata(3, 6u << 2, 0, 0, 1));
+    stitcher.flushMarkers();
+
+    ASSERT_EQ(cbdata.markers.size(), 2u);
+    EXPECT_STREQ(cbdata.markers[0].name, "second");
+    EXPECT_EQ(cbdata.markers[0].code_object_id, 22u);
+    EXPECT_STREQ(cbdata.markers[1].name, "first");
+    EXPECT_EQ(cbdata.markers[1].code_object_id, 21u);
 }
 
 TEST_F(StitcherTest, StitchDoesNotCallbackTwice)

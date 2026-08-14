@@ -56,6 +56,10 @@ static_assert(
     sizeof(rocprofiler_thread_trace_decoder_dispatch_t) == 80,
     "Unexpected rocprofiler_thread_trace_decoder_dispatch_t size"
 );
+static_assert(
+    sizeof(rocprofiler_thread_trace_decoder_marker_t) == 104,
+    "Unexpected rocprofiler_thread_trace_decoder_marker_t size"
+);
 
 #define RADT(x) ROCPROFILER_THREAD_TRACE_DECODER_RECORD_##x
 
@@ -66,8 +70,17 @@ static_assert(
 class CodeService : public ICodeServicer
 {
 public:
+    using FuncmapResolver =
+        const rocprof_trace_decoder::codeobj::Funcmap* (*) (uint64_t code_object_id, void* userdata);
+
     CodeService() = delete;
-    CodeService(rocprof_trace_decoder_isa_callback_t isa_str, void* _userdata) : isa_cb(isa_str), userdata(_userdata)
+    CodeService(
+        rocprof_trace_decoder_isa_callback_t isa_str,
+        void* _userdata,
+        FuncmapResolver _funcmap_resolver = nullptr,
+        void* _funcmap_userdata = nullptr
+    ) :
+    isa_cb(isa_str), userdata(_userdata), funcmap_resolver(_funcmap_resolver), funcmap_userdata(_funcmap_userdata)
     {
         memory_copy.resize(64);
     };
@@ -101,9 +114,16 @@ public:
         return isa;
     };
 
+    const rocprof_trace_decoder::codeobj::Funcmap* GetFuncmap(uint64_t code_object_id) override
+    {
+        return funcmap_resolver ? funcmap_resolver(code_object_id, funcmap_userdata) : nullptr;
+    }
+
 private:
     rocprof_trace_decoder_isa_callback_t const isa_cb;
     void* const userdata;
+    FuncmapResolver funcmap_resolver;
+    void* funcmap_userdata;
     std::string memory_copy;
 };
 
@@ -115,7 +135,10 @@ static rocprofiler_thread_trace_decoder_status_t parse_data_impl(
     rocprof_trace_decoder_se_data_callback_t se_data_callback,
     rocprof_trace_decoder_trace_callback_t trace_callback,
     rocprof_trace_decoder_isa_callback_t isa_callback,
-    void* cbdata
+    void* cbdata,
+    const RecordFilter& record_filter,
+    CodeService::FuncmapResolver funcmap_resolver = nullptr,
+    void* funcmap_userdata = nullptr
 )
 {
     uint8_t* buffer = nullptr;
@@ -124,11 +147,9 @@ static rocprofiler_thread_trace_decoder_status_t parse_data_impl(
 
     std::once_flag rt_freq_flag{};
 
-    auto EmitWarning = [&](rocprofiler_thread_trace_decoder_info_t info)
-    { trace_callback(RADT(INFO), (void*) &info, 1, cbdata); };
-
-    auto _isa = std::make_shared<CodeService>(isa_callback, cbdata);
-    Stitcher stitcher{_isa, trace_callback, cbdata};
+    auto _isa = std::make_shared<CodeService>(isa_callback, cbdata, funcmap_resolver, funcmap_userdata);
+    Stitcher stitcher{_isa, trace_callback, cbdata, record_filter};
+    auto EmitWarning = [&](rocprofiler_thread_trace_decoder_info_t info) { stitcher.records().emit(RADT(INFO), info); };
 
     while (remaining && buffer_size && buffer)
     {
@@ -142,9 +163,11 @@ static rocprofiler_thread_trace_decoder_status_t parse_data_impl(
         auto& perf = ret.perfevents;
 
         if (ret.realtime_frequency != 0)
-            std::call_once(rt_freq_flag, trace_callback, RADT(RT_FREQUENCY), &ret.realtime_frequency, 1, cbdata);
+            std::call_once(
+                rt_freq_flag, [&]() { stitcher.records().emit(RADT(RT_FREQUENCY), ret.realtime_frequency); }
+            );
 
-        if (!perf.empty()) trace_callback(RADT(PERFEVENT), (void*) perf.data(), perf.size(), cbdata);
+        if (!perf.empty()) stitcher.records().emit(RADT(PERFEVENT), perf.data(), perf.size());
         perf.clear();
 
         remaining = se_data_callback(&buffer, &buffer_size, cbdata);
@@ -168,6 +191,24 @@ std::atomic<uint64_t> g_handle_counter{1};
 // is opaque from here. The COMGR_DISABLED gate now means "no disasm backend
 // at all" — when LLVM is selected, this is enabled.
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
+const rocprof_trace_decoder::codeobj::Funcmap* handle_funcmap_callback(uint64_t code_object_id, void* userdata)
+{
+    if (!userdata) return nullptr;
+    const auto& hd = *static_cast<ReadLock<HandleData>*>(userdata);
+    if (!hd.valid()) return nullptr;
+
+    auto decoder = hd->decoder_read();
+    if (!decoder.valid()) return nullptr;
+    try
+    {
+        return &decoder->getFuncmap(code_object_id);
+    }
+    catch (...)
+    {
+        return nullptr;
+    }
+}
+
 rocprofiler_thread_trace_decoder_status_t comgr_isa_callback(
     char* isa_instruction,
     uint64_t* isa_memory_size,
@@ -332,6 +373,43 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_record_filter(
+    rocprof_trace_decoder_handle_t handle, const rocprofiler_thread_trace_decoder_record_filter_t* filter
+)
+{
+    auto hd = HandleData::get_write_handle(handle);
+    if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (!filter)
+    {
+        hd->record_filter.reset();
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+    }
+    if (filter->size < sizeof(*filter) ||
+        filter->record_count > static_cast<uint64_t>(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST) ||
+        (filter->record_count != 0 && !filter->records))
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    RecordFilter next{};
+    next.clear();
+    for (uint64_t i = 0; i < filter->record_count; ++i)
+    {
+        const auto& request = filter->records[i];
+        if (request.size != sizeof(request) || !RecordFilter::valid(request.type))
+            return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+        if (next.isEnabled(request.type)) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+        constexpr uint32_t supported = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_IMMEDIATE;
+        if ((request.flags & ~supported) != 0 ||
+            ((request.flags & supported) != 0 && !RecordFilter::supportsImmediate(request.type)))
+            return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+        next.set(request.type, request.flags);
+    }
+
+    hd->record_filter = next;
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+}
+
 // COMGR-dependent functions
 
 // V1 API: stateless 4-arg parse, no handle management
@@ -345,7 +423,8 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     if (!se_data_callback || !trace_callback || !isa_callback)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
+    RecordFilter record_filter{};
+    return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata, record_filter);
 }
 
 // V2 API: handle-based with built-in code object management
@@ -444,7 +523,9 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     try
     {
-        return parse_data_impl(se_adapter, parse_trace_adapter, parse_isa_adapter, &ctx);
+        return parse_data_impl(
+            se_adapter, parse_trace_adapter, parse_isa_adapter, &ctx, hd->record_filter, handle_funcmap_callback, &hd
+        );
     }
     catch (...)
     {
@@ -506,7 +587,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     try
     {
-        return parse_data_impl(se_adapter, parse_trace_adapter, parse_isa_adapter, &ctx);
+        return parse_data_impl(se_adapter, parse_trace_adapter, parse_isa_adapter, &ctx, hd->record_filter);
     }
     catch (...)
     {

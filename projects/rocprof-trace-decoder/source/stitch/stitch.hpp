@@ -29,6 +29,8 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+#include "record_emitter.hpp"
+#include "rocprof_trace_decoder/cxx/funcmap.hpp"
 #include "rocprof_trace_decoder/rocprof_trace_decoder.h"
 #include "trace_parser.hpp"
 #include "trie.h"
@@ -53,6 +55,7 @@ class ICodeServicer
 {
 public:
     virtual assemblyLine GetInstruction(pcinfo_t addr, int gfxip) = 0;
+    virtual const rocprof_trace_decoder::codeobj::Funcmap* GetFuncmap(uint64_t) { return nullptr; }
     virtual ~ICodeServicer(){};
 };
 
@@ -133,11 +136,18 @@ typedef std::vector<std::pair<int, pcinfo_t>> barrier_list_t;
 // Exposed for unit testing
 void insert_gfx12_barrier_wait(WaveDataInternal& wave, const barrier_list_t& barriers);
 
+class MarkerStream;
+
 class Stitcher
 {
 public:
-    Stitcher(std::shared_ptr<ICodeServicer> service, rocprof_trace_decoder_trace_callback_t _callback, void* cbdata);
-    virtual ~Stitcher() = default;
+    Stitcher(
+        std::shared_ptr<ICodeServicer> service,
+        rocprof_trace_decoder_trace_callback_t _callback,
+        void* cbdata,
+        const RecordFilter& record_filter = {}
+    );
+    virtual ~Stitcher();
 
     virtual void stitch(class WaveDataInternal& wave);
     std::vector<assemblyLinePtr> raw_code;
@@ -148,22 +158,28 @@ public:
         return gfxip;
     }
 
+    RecordEmitter& records() { return record_emitter; }
+    const RecordEmitter& records() const { return record_emitter; }
+
     void sendOtherSimd(std::vector<att_other_simd_t>& vec)
     {
-        sendVec(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD, vec);
+        records().flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD, vec);
     }
-    void sendShaderdata(std::vector<att_shader_data_t>& vec)
-    {
-        sendVec(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, vec);
-    }
+    void processShaderdata(const att_shader_data_t& record);
     void sendRealtime(std::vector<att_decoder_realtime_t>& vec)
     {
-        sendVec(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME, vec);
+        records().flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME, vec);
     };
     void sendOccupancy(std::vector<occupancy_info_t>& vec)
     {
-        sendVec(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY, vec);
+        records().flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY, vec);
     };
+    void markerWaveStart(uint8_t cu, uint8_t simd, uint8_t wave_id, pcinfo_t kernel_entry);
+    void markerWaveEnd(uint8_t cu, uint8_t simd, uint8_t wave_id, pcinfo_t kernel_entry);
+    void markerResolveAll(CSRegisterHandler& registers);
+    void markerPacketLoss();
+    void flushMarkers();
+
     void sendEvent(
         rocprofiler_thread_trace_decoder_event_type_t type,
         int64_t time,
@@ -174,6 +190,7 @@ public:
         bool per_pipe
     )
     {
+        if (!records().enabled(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT)) return;
         rocprofiler_thread_trace_decoder_event_t event{};
         event.size = sizeof(rocprofiler_thread_trace_decoder_event_t);
         event.time = time;
@@ -184,33 +201,25 @@ public:
         event.payload.raw = payload;
         if (per_pipe) event.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE;
         if (bop) event.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP;
-        callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &event, 1, cbdata);
+        records().emit(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, event);
     };
     void sendDispatch(CSRegisterHandler& csregister, int64_t time, uint8_t me, uint8_t pipe)
     {
+        if (!records().enabled(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH)) return;
         auto event = csregister.PopulateDispatch(time, me, pipe);
 
-        callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH, &event, 1, cbdata);
+        records().emit(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH, event);
     };
 
 private:
     std::pair<size_t, barrier_list_t> stitchWave(class WaveDataInternal& wave);
 
-    template <typename Type>
-    void sendVec(rocprofiler_thread_trace_decoder_record_type_t type, std::vector<Type>& record)
-    {
-        callback(type, record.data(), record.size(), cbdata);
-        record.clear();
-    };
-
     std::shared_ptr<ICodeServicer> codeobj_service{};
     std::unordered_map<int, int> jumps{};
     std::unique_ptr<PCTranslator> pctranslator{nullptr};
+    RecordEmitter record_emitter;
+    std::unique_ptr<MarkerStream> marker_stream{};
 
     std::once_flag stitch_flag{}, incomp_flag{}, gfx_flag{};
-
-    rocprof_trace_decoder_trace_callback_t callback{};
-
-    void* const cbdata;
     uint64_t gfxip = 0;
 };
