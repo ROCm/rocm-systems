@@ -10,6 +10,7 @@
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
 #include "core/agent.hpp"
@@ -172,7 +173,7 @@ ensure_initialization(bool _offset, std::int64_t _glob_n, std::int64_t _offset_n
 void
 finalization_handler()
 {
-    if(get_state() == State::Active) rocprofsys_finalize();
+    if(state::process::get() == state::process::Active) rocprofsys_finalize();
 }
 
 auto
@@ -327,12 +328,12 @@ rocprofsys_set_env_hidden(const char* env_name, const char* env_val)
 
     rocprofsys::set_env(env_name, env_val, 0);
 
-    if(_success && get_state() >= State::Init)
+    if(_success && state::process::get() >= state::process::Init)
     {
         LOG_WARNING(
             "rocprofsys_set_env(\"{}\", \"{}\") called after rocprof-sys was "
             "initialized. state = {}. This environment variable will have no effect",
-            env_name, env_val, static_cast<int>(get_state()));
+            env_name, env_val, static_cast<int>(state::process::get()));
     }
 }
 
@@ -455,7 +456,7 @@ rocprofsys_set_mpi_hidden(bool use)
 
     _set_mpi_called = true;
 
-    if(use && get_state() == State::PreInit)
+    if(use && state::process::get() == state::process::PreInit)
     {
         rocprofsys::set_env(env_vars::USE_PID, "ON", 1);
     }
@@ -464,13 +465,13 @@ rocprofsys_set_mpi_hidden(bool use)
         trait::runtime_enabled<mpi_gotcha_t>::set(false);
     }
 
-    if(get_state() >= State::Init)
+    if(state::process::get() >= state::process::Init)
     {
         LOG_WARNING(
             "rocprofsys_set_mpi(use={}) called after rocprof-sys was "
             "initialized. state = {}. MPI support may not be properly initialized. Use "
             "ROCPROFSYS_USE_MPIP=ON and ROCPROFSYS_USE_PID=ON to ensure full support",
-            use, static_cast<int>(get_state()));
+            use, static_cast<int>(state::process::get()));
     }
 
     rocprofsys_preinit_hidden();
@@ -503,24 +504,24 @@ rocprofsys_init_library_hidden()
 
     if(_debug_init)
     {
-        LOG_DEBUG("State is {}...", std::to_string(get_state()));
+        LOG_DEBUG("State is {}...", state::process::get());
     }
 
-    if(get_state() != State::PreInit)
+    if(state::process::get() != state::process::PreInit)
     {
         throw std::runtime_error(
-            fmt::format("State is not PreInit :: {}", std::to_string(get_state())));
+            fmt::format("State is not PreInit :: {}", state::process::get()));
     }
 
-    if(get_state() != State::PreInit) return;
+    if(state::process::get() != state::process::PreInit) return;
     if(rocprofsys_init_library_done.exchange(true)) return;
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(_debug_init)
     {
-        LOG_DEBUG("State is {}. Setting to {}...", std::to_string(get_state()),
-                  std::to_string(State::Init));
+        LOG_DEBUG("State is {}. Setting to {}...", state::process::get(),
+                  state::process::Init);
         LOG_DEBUG("Calling backtrace once so that the one-time call of malloc in "
                   "glibc's backtrace() occurs...");
     }
@@ -531,12 +532,14 @@ rocprofsys_init_library_hidden()
         (void) _ss;
     }
 
-    set_state(State::Init);
+    state::process::set(state::process::Init);
 
-    if(get_state() != State::Init)
+    if(state::process::get() != state::process::Init)
     {
-        throw std::runtime_error(fmt::format("set_state(State::Init) failed. state is {}",
-                                             std::to_string(get_state())));
+        throw std::runtime_error(
+            fmt::format("state::process::set(state::process::Init) failed. state "
+                        "is {}",
+                        state::process::get()));
     }
 
     if(_debug_init)
@@ -584,25 +587,25 @@ rocprofsys_init_tooling_hidden(void)
 
     if(_debug_init)
     {
-        LOG_DEBUG("State is {}...", std::to_string(get_state()));
+        LOG_DEBUG("State is {}...", state::process::get());
     }
 
-    if(get_state() != State::PreInit) return false;
+    if(state::process::get() != state::process::PreInit) return false;
 
     pid_t expected = 0;
     if(!rocprofsys_init_tooling_done.compare_exchange_strong(expected, getpid()))
         return false;
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    if(get_state() == State::Init)
+    if(state::process::get() == state::process::Init)
     {
         throw std::runtime_error(
             fmt::format("{} called after rocprofsys_init_library() was explicitly called",
                         __FUNCTION__));
     }
 
-    LOG_DEBUG("Instrumentation mode: {}", std::to_string(config::get_mode()));
+    LOG_DEBUG("Instrumentation mode: {}", config::get_mode());
 
     if(_debug_init)
     {
@@ -620,7 +623,7 @@ rocprofsys_init_tooling_hidden(void)
 
     auto _dtor = scope::destructor{ []() {
         // if set to finalized, don't continue
-        if(get_state() > State::Active) return;
+        if(state::process::get() > state::process::Active) return;
 
         rocprofsys_preinit_cache();
 
@@ -660,7 +663,7 @@ rocprofsys_init_tooling_hidden(void)
             sampling::unblock_signals();
         }
         get_main_bundle()->start();
-        LOG_DEBUG("State: {} -> State::Active", std::to_string(get_state()));
+        LOG_DEBUG("State: {} -> state::process::Active", state::process::get());
 
         {
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -704,7 +707,8 @@ rocprofsys_init_tooling_hidden(void)
             trace_controller->force_initial_pause();
         }
 
-        set_state(State::Active);  // set to active as very last operation
+        state::process::set(
+            state::process::Active);  // set to active as very last operation
     } };
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -819,11 +823,11 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
     }
 
     // always the first
-    (void) get_state();
+    (void) state::process::get();
     (void) tracing::push_count();
     (void) tracing::pop_count();
 
-    if(get_state() >= State::Init)
+    if(state::process::get() >= state::process::Init)
     {
         if(std::string_view{ _mode } != "trace" && std::string_view{ _mode } != "Trace")
         {
@@ -832,20 +836,19 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
                 "called after rocprof-sys was initialized. state = {}. Mode-based "
                 "settings (via -M <MODE> passed to rocprof-sys exe) may not be "
                 "properly configured.",
-                _mode, std::to_string(_is_binary_rewrite), _argv0,
-                std::to_string(get_state()));
+                _mode, std::to_string(_is_binary_rewrite), _argv0, state::process::get());
         }
     }
 
     tracing::get_finalization_functions().emplace_back([_argv0_c]() {
-        if(get_state() != State::Active)
+        if(state::process::get() != state::process::Active)
         {
             throw std::runtime_error(
                 fmt::format("Finalizer function for popping main invoked in non-active "
                             "state :: state = {}",
-                            std::to_string(get_state())));
+                            state::process::get()));
         }
-        if(get_state() == State::Active)
+        if(state::process::get() == state::process::Active)
         {
             auto _name = (_argv0_c) ? std::string{ _argv0_c } : config::get_exe_name();
             // if main hasn't been popped yet, pop it
@@ -856,7 +859,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
 
     std::atexit([]() {
         // if active (not already finalized) then we should finalize
-        if(get_state() == State::Active) rocprofsys_finalize_hidden();
+        if(state::process::get() == state::process::Active) rocprofsys_finalize_hidden();
     });
 
     set_metadata_process_start_timestamp(comp::wall_clock::record());
@@ -916,12 +919,12 @@ rocprofsys_finalize_hidden(void)
     threading::remove_callback(&ensure_initialization);
 
     bool _is_child = is_child_process();
-    set_thread_state(ThreadState::Completed);
+    state::thread::set(state::thread::Completed);
 
     // return if not active
-    if(get_state() != State::Active)
+    if(state::process::get() != state::process::Active)
     {
-        LOG_DEBUG("State = {}. Finalization skipped", std::to_string(get_state()));
+        LOG_DEBUG("State = {}. Finalization skipped", state::process::get());
         return;
     }
 
@@ -929,7 +932,7 @@ rocprofsys_finalize_hidden(void)
 
     if(_is_child)
     {
-        set_state(State::Finalized);
+        state::process::set(state::process::Finalized);
 
         // Flush buffered traces in case of child process
 
@@ -973,7 +976,7 @@ rocprofsys_finalize_hidden(void)
         }
     }
 
-    set_state(State::Finalized);
+    state::process::set(state::process::Finalized);
 
     push_enable_sampling_on_child_threads(false);
     set_sampling_on_all_future_threads(false);
@@ -1118,7 +1121,7 @@ rocprofsys_finalize_hidden(void)
     // if they are still running (e.g. thread-pool still alive), the
     // thread-specific data will be wrong if try to stop them from
     // the main thread.
-    auto _thr_verbose = (config::get_use_causal()) ? 1 : 0;
+    const bool _thr_verbose = config::get_use_causal() || config::get_verbose() > 0;
     if(thread_data<thread_bundle_t>::get())
     {
         for(auto& itr : *thread_data<thread_bundle_t>::get())
@@ -1129,7 +1132,7 @@ rocprofsys_finalize_hidden(void)
                 std::string _msg = itr->as_string();
                 auto        _pos = _msg.find(">>>  ");
                 if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-                if(_thr_verbose >= 0)
+                if(_thr_verbose)
                 {
                     LOG_INFO("{}", _msg);
                 }
@@ -1212,7 +1215,7 @@ rocprofsys_finalize_hidden(void)
             for(auto& itr : _maps)
             {
                 auto&& _path = itr.pathname;
-                if(!_path.empty() && _path.at(0) != '[' && filepath::exists(_path))
+                if(!_path.empty() && _path.at(0) != '[' && path::is_regular_file(_path))
                     _libs.emplace(_path);
             }
             ar(tim::cereal::make_nvp("memory_maps_files", _libs),
@@ -1320,7 +1323,7 @@ rocprofsys_reset_for_reattach_hidden(void)
     rocprofsys_init_library_done.store(false);
     rocprofsys_init_tooling_done.store(0);
     ::rocprofsys::reset_database_path_memo();
-    ::rocprofsys::reset_state();
+    ::rocprofsys::state::process::reset();
 }
 
 //======================================================================================//

@@ -10,9 +10,11 @@
 #include "rocjitsu/isa/operand.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -54,24 +56,30 @@ void note_special_state(ProbeClobberSummary &summary, RegClass cls) {
 // present. We map the display name ("exec_lo", "m0", "vcc", ...), until
 // operands expose their special RegClass structurally.
 //
-// NOTE: this only sees *explicit* operands. Implicit special-state writes (e.g.
-// SCC from scalar ALU, VCC from v_cmp, EXEC from v_cmpx) have no operand and are
-// not modeled by the decoder, so they remain invisible here. SCC is exempt from
-// concern because the trampoline envelope always save/restores it.
+// NOTE: this sees any write the decoder exposes as a named operand, including
+// special-state results some ops write to a named "vcc"/"exec" dst. A truly
+// operand-less def (e.g. SCC from scalar ALU) stays invisible; SCC is covered by
+// the envelope's save/restore, and EXEC/VCC by the trampoline's unconditional
+// preserve.
+//
+// Matching is case-insensitive: operand display names are lowercase on some
+// arches (CDNA2) but uppercase on others (CDNA4: "EXEC_LO", "M0", ...).
 // TODO: drop this name fallback once the operand-type modeling work lands.
 std::optional<RegClass> special_class_from_name(std::string_view name) {
-  auto starts_with = [&](std::string_view prefix) {
-    return name.substr(0, prefix.size()) == prefix;
-  };
+  std::string lower(name);
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  const std::string_view n = lower;
+  auto starts_with = [&](std::string_view prefix) { return n.substr(0, prefix.size()) == prefix; };
   if (starts_with("exec"))
     return RegClass::EXEC; // exec, exec_lo, exec_hi
   if (starts_with("vcc"))
     return RegClass::VCC; // vcc, vcc_lo, vcc_hi
   if (starts_with("flat_scratch"))
     return RegClass::FLAT_SCRATCH; // flat_scratch_lo/hi/all
-  if (name == "m0")
+  if (n == "m0")
     return RegClass::M0;
-  if (name == "scc" || name == "src_scc")
+  if (n == "scc" || n == "src_scc")
     return RegClass::SCC;
   return std::nullopt;
 }

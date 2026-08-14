@@ -601,6 +601,8 @@ class Device : public NullDevice {
     //! Cached hardware doorbell (UC MMIO), only set when DEBUG_CLR_DIRECT_DOORBELL is enabled.
     volatile uint64_t* doorbellPtr = nullptr;
     bool deviceMemRingBuf = false;
+    //! Largest barrier-bit slot shared by every VirtualGPU using this physical queue.
+    std::shared_ptr<std::atomic<uint64_t>> largestAqlBarrierBitSlot;
   };
 
   //! Acquire HSA queue. This method can create a new HSA queue or
@@ -832,7 +834,7 @@ class Device : public NullDevice {
   struct SdmaEngineAllocator {
     amd::Monitor lock_;  //!< Protects the allocation state
     std::unordered_map<VirtualGPU*, uint32_t> vgpu_to_engine_;  //!< VirtualGPU -> engine mask
-    std::atomic<uint32_t> next_rr_engine_{0};  //!< Simple RR counter for future use
+    std::atomic<uint32_t> next_rr_engine_{0};  //!< RR counter for sdma engine selection
     const Device& device_;  //!< Reference to parent device for accessing masks
 
     SdmaEngineAllocator(const Device& device) : device_(device) {}

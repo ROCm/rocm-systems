@@ -1602,6 +1602,17 @@
           "name": "CE_AlltoAll_3Ranks",
           "description": "AlltoAll CE correctness with odd (non-power-of-two) rank count",
           "test_filter": "CeMPI_AlltoAll.ThreeRanks"
+        },
+        {
+          "name": "CE_AllReduce_3Ranks",
+          "description": "AllReduce CE correctness with odd (non-power-of-two) rank count",
+          "test_filter": "CeMPI_AllReduce.ThreeRanks"
+        },
+        {
+          "name": "CE_AllReduce_Pipelined_3Ranks",
+          "description": "AllReduce CE multi-chunk pipeline at a non-power-of-two rank count: 256 MiB / 3 is not 16B-aligned, so slotChunkBytes < maxChunkBytes and the shard ends in a partial tail chunk, covering the stride rounding alongside slot recycling and the drain loop",
+          "test_filter": "CeMPI_AllReduce.PipelinedMultiChunk",
+          "timeout": 300
         }
       ]
     },
@@ -1659,7 +1670,10 @@
         {
           "name": "CE_AlltoAll_8Ranks",
           "description": "AlltoAll CE correctness — default production topology (8 ranks)",
-          "test_filter": "CeMPI_AlltoAll.EightRanks"
+          "test_filter": "CeMPI_AlltoAll.EightRanks",
+          "env_variables": {
+            "RCCL_DDA_ENABLE": "0"
+          }
         },
         {
           "name": "CE_Scatter_8Ranks",
@@ -1670,6 +1684,22 @@
           "name": "CE_Gather_8Ranks",
           "description": "Gather CE correctness, root=0 — default production topology (8 ranks)",
           "test_filter": "CeMPI_Gather.EightRanksRoot0"
+        },
+        {
+          "name": "CE_AllReduce_8Ranks",
+          "description": "AllReduce CE correctness — default production topology (8 ranks)",
+          "test_filter": "CeMPI_AllReduce.EightRanks"
+        },
+        {
+          "name": "CE_AllReduce_LargeMessage_8Ranks",
+          "description": "AllReduce CE correctness on a large single-shot message (8 ranks)",
+          "test_filter": "CeMPI_AllReduce.LargeMessage"
+        },
+        {
+          "name": "CE_AllReduce_Pipelined_8Ranks",
+          "description": "AllReduce CE multi-chunk pipeline at a power-of-two rank count: 512 MiB yields 4 chunks per shard with no tail, covering slot recycling and the drain loop where slotChunkBytes == maxChunkBytes",
+          "test_filter": "CeMPI_AllReduce.PipelinedMultiChunk",
+          "timeout": 300
         }
       ]
     },
@@ -2521,6 +2551,22 @@
         }
       ]
     },
+    "ce_allreduce_graph_latch": {
+      "extends": "perf_base",
+      "num_nodes": 1,
+      "timeout": 120,
+      "env_variables": {
+        "RCCL_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "AllReduce_CE_GraphThenEager_4MB_32MB",
+          "description": "CE AllReduce graph latch regression: captured (-G 2) then eager AllReduce, CE-eligible sizes (4MB-32MB). A latch bug corrupts data or hangs; timeout turns a hang into a fast failure.",
+          "command_args": "-b 4M -e 32M -f 2 -g 1 -n 5 -w 2 -c 1 -G 2 -o sum",
+          "timeout": 90
+        }
+      ]
+    },
     "device_api_symmetric": {
       "extends": "perf_base",
       "command_args": "-b 8 -e 1G -f 2 -g 1 -n 5 -w 2 -c 1 -R 2",
@@ -3000,6 +3046,12 @@
       "name": "rccl-tests - Default Collectives",
       "description": "All collectives (all_reduce, reduce, reduce_scatter, all_gather, broadcast, alltoall, scatter, gather, sendrecv) at three message sizes (1 KiB, 64 MiB, 1 GiB), all datatypes (-d all), and all operations (-o all) for reduction collectives",
       "config": "default_collectives",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - CE AllReduce Graph Latch",
+      "description": "Regression for the CE AllReduce graph-capture latch: captured AllReduce immediately followed by eager AllReduce on the same comm, at CE-eligible sizes",
+      "config": "ce_allreduce_graph_latch",
       "enabled": true
     },
     {
