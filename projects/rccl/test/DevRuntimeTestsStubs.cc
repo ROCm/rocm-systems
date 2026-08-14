@@ -36,7 +36,10 @@
 int                          ncclDebugLevel = 0;
 uint64_t                     ncclDebugMask  = 0;
 thread_local int             ncclDebugNoWarn = 0;
-hipMemAllocationHandleType   ncclCuMemHandleType = hipMemHandleTypeNone;
+// Use POSIX-FD handles so the single-rank success path takes the no-export /
+// reuse-local branch in symMemory{Export,ImportAndMap}SegmentHandle (no real
+// shareable-handle export/import needed).
+hipMemAllocationHandleType   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
 thread_local int             ncclGroupDepth = 0;
 thread_local ncclResult_t    ncclGroupError = ncclSuccess;
@@ -210,4 +213,74 @@ extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsa
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
                                                         ncclDevResourceRequirements_t*) {
   return ncclSuccess;
+}
+
+// ---------------------------------------------------------------------------
+// Fake HIP VMM driver API, backed by ordinary host memory.
+//
+// dev_runtime.cc drives the CUDA/HIP driver VMM API (hipMemAddressReserve /
+// hipMemMap / ...) which needs a real GPU. Here we replace just those calls
+// with host-memory equivalents so symMemoryObtain runs to completion on a plain
+// CPU. HIDDEN visibility is essential: it satisfies dev_runtime's references
+// without exporting these names, so libamdhip64's own internal calls still bind
+// to the real driver (no process-wide interposition).
+// ---------------------------------------------------------------------------
+#define HIP_FAKE /* default visibility: this binary does not link librccl */
+
+// A reserved VA range is just a host allocation; the "handle" is an opaque tag.
+HIP_FAKE hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*, unsigned long long) {
+  void* p = nullptr;
+  if (alignment < sizeof(void*)) alignment = sizeof(void*);
+  // Round size up to alignment for posix_memalign correctness.
+  size_t asize = (size + alignment - 1) & ~(alignment - 1);
+  if (asize == 0) asize = alignment;
+  if (posix_memalign(&p, alignment, asize) != 0) return hipErrorOutOfMemory;
+  *ptr = p;
+  return hipSuccess;
+}
+HIP_FAKE hipError_t hipMemAddressFree(void* devPtr, size_t) {
+  free(devPtr);
+  return hipSuccess;
+}
+HIP_FAKE hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t, const hipMemAllocationProp*,
+                                 unsigned long long) {
+  if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  return hipSuccess;
+}
+HIP_FAKE hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAllocationProp*,
+                                                   hipMemAllocationGranularity_flags) {
+  if (granularity) *granularity = 4096;
+  return hipSuccess;
+}
+HIP_FAKE hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
+                                                           hipMemGenericAllocationHandle_t) {
+  if (prop) {
+    *prop = hipMemAllocationProp{};
+    prop->location.type = hipMemLocationTypeDevice;
+  }
+  return hipSuccess;
+}
+HIP_FAKE hipError_t hipMemExportToShareableHandle(void*, hipMemGenericAllocationHandle_t,
+                                                  hipMemAllocationHandleType, unsigned long long) {
+  return hipSuccess;
+}
+HIP_FAKE hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* handle, void*,
+                                                    hipMemAllocationHandleType) {
+  if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  return hipSuccess;
+}
+HIP_FAKE hipError_t hipMemMap(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+  return hipSuccess;
+}
+HIP_FAKE hipError_t hipMemSetAccess(void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; }
+HIP_FAKE hipError_t hipMemUnmap(void*, size_t) { return hipSuccess; }
+HIP_FAKE hipError_t hipMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
+HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void*) {
+  if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  return hipSuccess;
+}
+HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+  if (pbase) *pbase = dptr;
+  if (psize) *psize = 0;
+  return hipSuccess;
 }
