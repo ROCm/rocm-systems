@@ -1,13 +1,13 @@
 /*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
- * Host-only micro-tests for src/dev_runtime.cc.
+ * Host-only tests for src/dev_runtime.cc.
  *
  * This translation unit #includes the (hipified) dev_runtime.cc source
  * directly so it can reach the file-static symMemory* helpers. It links no
  * librccl.so; every dependency the source references is satisfied by no-op
  * stubs in DevRuntimeTestsStubs.cc (including host-memory fakes for the HIP
- * VMM driver API). See the rccl-microtest conventions.
+ * VMM driver API).
  *************************************************************************/
 
 #include DEV_RUNTIME_CC_PATH
@@ -49,32 +49,8 @@ protected:
   }
 };
 
-// Prove symMemoryObtain is reachable and runs to success on a plain host,
-// returning an owned ncclDevrMemory linked into the memHead list. This asserts
-// only the observable ownership contract (mem linked into memHead), not the
-// underlying reference-count mechanism, so it holds under both the RCCL counted
-// model and upstream's unconditional-destroy model.
-TEST_F(SymMemoryObtainTest, ObtainSucceeds) {
-  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
-  void* userAddr = reinterpret_cast<void*>(0x100000);
-  const size_t size = 4096;
-
-  struct ncclDevrMemory* mem = nullptr;
-  ncclResult_t ret =
-    symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, size, /*winFlags=*/0, &mem);
-
-  ASSERT_EQ(ret, ncclSuccess);
-  ASSERT_NE(mem, nullptr);
-  EXPECT_EQ(comm->devrState.memHead, mem);
-}
-
 // Regression guard for the window memory leak. Obtaining then destroying the
-// memory must run the free path, which unlinks mem from devrState.memHead. This
-// asserts the observable release contract rather than any reference-count
-// internals, so it holds under an unconditional destroy (as adopted from
-// upstream NCCL) and would equally hold under a counted drop-to-zero model.
-// Observing memHead is safe: on the free path mem is freed, so we must not
-// dereference it afterwards.
+// memory must run the free path, which unlinks mem from devrState.memHead.
 TEST_F(SymMemoryObtainTest, DestroyFreesMemory) {
   hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   void* userAddr = reinterpret_cast<void*>(0x100000);
@@ -99,8 +75,7 @@ TEST_F(SymMemoryObtainTest, DestroyFreesMemory) {
 // must drain those leftovers before freeing the LSA flat VA reservation. This
 // test drives the *real* init/finalize lifecycle (ncclDevrInitOnce pairs with
 // ncclDevrFinalize) so the state is self-consistent, then asserts the drain
-// empties memHead. The drain calls symMemoryDestroy unconditionally, giving
-// AICOMRCCL-835 its first direct coverage.
+// empties memHead.
 class DevrFinalizeDrainTest : public ::testing::Test {
 protected:
   std::unique_ptr<ncclComm> commStorage;
