@@ -373,7 +373,7 @@ TEST_F(HostApiTest, GraphCaptureReplayPutWait)
         else
             FillSentinel(dstBuf, kTransferSize, 0);
 
-        MPI_Barrier(MPI_COMM_WORLD);
+        ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
         ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, stream));
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
@@ -383,12 +383,12 @@ TEST_F(HostApiTest, GraphCaptureReplayPutWait)
     }
 
     hipError_t destroyRes = hipGraphExecDestroy(graphExec);
-    graphExec = nullptr;
     ASSERT_MPI_EQ(hipSuccess, destroyRes);
+    graphExec = nullptr;
 
     destroyRes = hipGraphDestroy(graph);
-    graph = nullptr;
     ASSERT_MPI_EQ(hipSuccess, destroyRes);
+    graph = nullptr;
 
     TEST_INFO("G1 rank %d: GraphCaptureReplayPutWait passed.", myRank);
 }

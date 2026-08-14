@@ -4305,6 +4305,10 @@
       "name": "Host API Graph Capture - Proxy",
       "description": "Two-node proxy graph capture and repeated replay for PutSignal/WaitSignal",
       "config": "host_api_graph_proxy",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
       "enabled": true
     },
     {
