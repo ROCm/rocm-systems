@@ -366,6 +366,62 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
   EXPECT_EQ(xcd->shader_engine(0)->compute_unit(0)->config().functional_quantum, 7u);
 }
 
+TEST(ConfigLoaderTest, ExecModeClockedStringSelectsClockedMode) {
+  const char *json = R"({
+    "max_ticks": 1000,
+    "num_threads": 1,
+    "exec_mode": "clocked",
+    "vm": { "arch": "cdna3" },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" }
+        ]
+      }
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(loaded.exec_mode, simdojo::ExecMode::CLOCKED);
+}
+
+TEST(ConfigLoaderTest, ComputeUnitFunctionalQuantumUsesDeclarativeValue) {
+  const char *json = R"({
+    "max_ticks": 1000,
+    "num_threads": 1,
+    "vm": { "arch": "cdna3" },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" },
+          {
+            "name": "xcd0", "type": "xcd",
+            "children": [
+              { "name": "l2", "type": "l2_cache" },
+              { "name": "cp", "type": "command_processor" },
+              {
+                "name": "se0", "type": "shader_engine",
+                "children": [{
+                  "name": "cu0", "type": "compute_unit",
+                  "config": [{ "key": "functional_quantum", "value": "37" }]
+                }]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  EXPECT_EQ(cu->functional_quantum(), 37u);
+}
+
 TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
   const char *json = R"({
     "max_ticks": 5000,
@@ -1303,43 +1359,49 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   EXPECT_TRUE(restored_wf->fp16_ovfl());
 }
 
-TEST(CApiTest, CreateAndDestroyFromString) {
-  const char *json = R"({"max_ticks":10000,"num_threads":1,
+std::string functional_dispatch_threads_config(uint32_t threads) {
+  return R"({"max_ticks":1000,"num_threads":1,"exec_mode":"functional",
+    "cpu_dispatch_threads":)" +
+         std::to_string(threads) + R"(,
     "vm":{"arch":"cdna3"},
-    "topology":{
-      "root":{
-        "name":"soc","type":"soc",
-        "children":[
-          {"name":"vram","type":"gpu_memory"},
-          {"name":"xcd0","type":"xcd","children":[
-            {"name":"l2","type":"l2_cache"},
-            {"name":"cp","type":"command_processor"},
-            {"name":"se0","type":"shader_engine","children":[
-              {"name":"cu[0:1]","type":"compute_unit","config":[
-                {"key":"num_wf_slots","value":"10"},
-                {"key":"sgprs_per_wf","value":"104"},
-                {"key":"vgprs_per_wf","value":"256"},
-                {"key":"lds_size_kb","value":"64"}
-              ]}
-            ]}
-          ]}
-        ]
-      },
-      "links":[
-        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
-        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
-      ]
-    }
-  })";
-  rj_vm_t *handle = nullptr;
-  EXPECT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
-  ASSERT_NE(handle, nullptr);
-  rj_vm_destroy(handle);
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd[0:2]","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"}
+      ]}
+    ]}}})";
+}
+
+TEST(CApiTest, FunctionalDispatchThreadsPropagateExplicitAndAutoValues) {
+  auto run_case = [](uint32_t configured, std::optional<uint32_t> expected) {
+    const std::string json = functional_dispatch_threads_config(configured);
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    ASSERT_NE(raw, nullptr);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
+
+    uint32_t cp_count = 0;
+    handle->soc->for_each_cp([&](auto *cp) {
+      ++cp_count;
+      if (expected) {
+        EXPECT_EQ(cp->dispatch_threads(), *expected);
+      } else {
+        EXPECT_GE(cp->dispatch_threads(), 1u);
+        EXPECT_LE(cp->dispatch_threads(), 32u);
+      }
+    });
+    EXPECT_EQ(cp_count, 2u);
+  };
+
+  run_case(/*configured=*/7, /*expected=*/7);
+  run_case(/*configured=*/0, /*expected=*/std::nullopt);
 }
 
 TEST(CApiTest, ClockedDispatchStaysEventDriven) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
-    "exec_mode":"clocked",
+    "exec_mode":"clocked","cpu_dispatch_threads":8,
     "vm":{"arch":"cdna3"},
     "topology":{
       "root":{
@@ -1436,6 +1498,59 @@ TEST(CApiTest, CheckpointRoundTrip) {
   int active = 1;
   EXPECT_EQ(rj_vm_step(restored.get(), &active), ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(restored_cu->num_wfs(), 0u);
+}
+
+TEST(CApiTest, CheckpointRoundTripPreservesFunctionalDispatchControls) {
+  const char *json = R"({
+    "max_ticks":10000,"num_threads":1,"exec_mode":"functional",
+    "cpu_dispatch_threads":3,"soc_dispatch":true,
+    "vm":{"arch":"cdna3"},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd[0:2]","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu0","type":"compute_unit","config":[
+            {"key":"num_wf_slots","value":"10"},
+            {"key":"sgprs_per_wf","value":"104"},
+            {"key":"vgprs_per_wf","value":"256"},
+            {"key":"lds_size_kb","value":"64"},
+            {"key":"functional_quantum","value":"37"}
+          ]}
+        ]}
+      ]}
+    ]}}})";
+
+  auto source_config = write_temp_config(json);
+  rj_vm_t *raw_source = nullptr;
+  ASSERT_EQ(rj_vm_create(source_config.path().c_str(), RJ_VM_MODE_DEFAULT, &raw_source),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_source, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
+
+  EXPECT_EQ(source->soc->dispatch_threads(), 3u);
+  EXPECT_TRUE(source->soc->soc_dispatch());
+  EXPECT_EQ(source->soc->xcd(0)->shader_engine(0)->compute_unit(0)->config().functional_quantum,
+            37u);
+
+  test::ScopedTempFile checkpoint("rocjitsu-c-api-checkpoint-controls-");
+  ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint.path().c_str(), 42),
+            ROCJITSU_STATUS_SUCCESS);
+
+  rj_vm_t *raw_restored = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(checkpoint.path().c_str(), &raw_restored),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_restored, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(raw_restored, &rj_vm_destroy);
+
+  EXPECT_EQ(restored->soc->dispatch_threads(), 3u);
+  EXPECT_TRUE(restored->soc->soc_dispatch());
+  EXPECT_EQ(restored->soc->xcd(0)->shader_engine(0)->compute_unit(0)->config().functional_quantum,
+            37u);
+  auto *primary = restored->soc->xcd(0)->command_processor();
+  EXPECT_EQ(restored->soc->assign_queue_cp(), primary);
+  EXPECT_EQ(restored->soc->assign_queue_cp(), primary);
 }
 
 TEST(CApiTest, RejectsMalformedCheckpoints) {

@@ -651,6 +651,8 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
   LoadedConfig result;
   result.engine_config = engine_config_from_fb(fb_config);
   result.exec_mode = exec_mode_from_fb(fb_config);
+  result.cpu_dispatch_threads = fb_config->cpu_dispatch_threads();
+  result.soc_dispatch = fb_config->soc_dispatch();
 
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   if (fb_config->vm() && fb_config->vm()->arch())

@@ -56,6 +56,8 @@ The example above is intentionally minimal and single-threaded.
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned) |
+| `cpu_dispatch_threads` | int | Shared CPU CU-dispatch worker budget per SoC in functional mode (0 = auto: hardware threads, capped at 32; 1 = serial) |
+| `soc_dispatch` | bool | Consolidate cross-XCD dispatch onto each SoC's primary CP for single-stream multi-XCD work distribution; requires `num_threads: 1` |
 | `exec_mode` | string | `"functional"` or `"cycle"` |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
@@ -73,6 +75,18 @@ Partition assignment follows one global XCD ordering across the SoCs and is
 deliberately locality-agnostic. For example, two 8-XCD GPUs permit up to 16
 partitions, while `num_threads: 4` assigns XCDs from both GPUs to each
 partition.
+
+`cpu_dispatch_threads` controls how much accepted CU work can execute in
+parallel on host threads; it does not change which SPI or CU accepts the
+next workgroup.
+
+`soc_dispatch` controls which command processor (CP) accepts queues for
+a SoC. With `false`, queues are assigned round-robin across XCD CPs, so
+each dispatch is limited to the CUs visible to the CP on its assigned
+XCD. With `true`, all queues use the primary CP (`xcd[0].cp`). During
+initialization, the primary CP is given the other XCDs' SPIs, CUs, and
+L2 caches, so a single large dispatch can spread workgroups across all
+XCDs while each CU still uses its own XCD-local L2 path.
 
 ### Topology
 

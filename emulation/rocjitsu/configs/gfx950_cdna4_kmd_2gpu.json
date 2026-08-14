@@ -1,6 +1,7 @@
 {
   "max_ticks": 0,
   "num_threads": 1,
+  "cpu_dispatch_threads": 1,
   "exec_mode": "functional",
   "vm": {
     "arch": "cdna4",

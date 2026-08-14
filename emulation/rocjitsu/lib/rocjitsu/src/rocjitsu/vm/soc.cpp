@@ -12,6 +12,44 @@
 
 namespace rocjitsu {
 
+void SoC::consolidate_dispatch_to_primary() {
+  if (soc_dispatch_ || xcds_.size() <= 1)
+    return;
+  auto *primary = xcds_[0]->command_processor();
+  if (!primary)
+    return;
+  // Register every other XCD's CUs and L2s with the primary CP.
+  // add_compute_unit repoints each CU's command processor to the primary, so
+  // workgroup-completion notifications route to the single dispatcher's
+  // completion tracker. Each CU keeps its own XCD's L2 for memory traffic; the
+  // primary CP owns every L2 for cache maintenance and SDMA invalidation.
+  for (size_t i = 1; i < xcds_.size(); ++i) {
+    auto *x = xcds_[i];
+    if (auto *l2 = x->l2_cache())
+      primary->add_l2_cache(l2);
+    for (uint32_t s = 0; s < x->num_shader_engines(); ++s) {
+      auto *se = x->shader_engine(s);
+      for (uint32_t c = 0; c < se->num_compute_units(); ++c)
+        primary->add_compute_unit(se->compute_unit(c));
+    }
+  }
+
+  // Interleave SPIs by XCD so the CP's persistent SPI round-robin reaches
+  // another XCD before returning to the next shader engine on the first XCD.
+  std::vector<amdgpu::ShaderProcessorInput *> dispatch_spis;
+  uint32_t max_shader_engines = 0;
+  for (auto *x : xcds_)
+    max_shader_engines = std::max(max_shader_engines, x->num_shader_engines());
+  for (uint32_t s = 0; s < max_shader_engines; ++s) {
+    for (auto *x : xcds_) {
+      if (s < x->num_shader_engines())
+        dispatch_spis.push_back(&x->shader_engine(s)->spi());
+    }
+  }
+  primary->set_dispatch_spis(std::move(dispatch_spis));
+  soc_dispatch_ = true;
+}
+
 void SoC::set_memory(amdgpu::GpuMemory *m) {
   memory_ = m;
   // Create a standalone HBM controller for the config-loader path where the
@@ -130,6 +168,9 @@ void SoC::flush_all() {
 }
 
 void SoC::initialize() {
+  if (soc_dispatch_requested_)
+    consolidate_dispatch_to_primary();
+
   if (iods_.empty()) {
     // No IOD modeling: wire each L2's req port directly to the standalone HBM controller.
     // Create the HBM controller lazily if set_memory() was called but the

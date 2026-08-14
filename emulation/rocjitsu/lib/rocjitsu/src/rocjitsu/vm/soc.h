@@ -114,9 +114,23 @@ public:
   amdgpu::CommandProcessor *assign_queue_cp() {
     if (xcds_.empty())
       return nullptr;
+    // Single-global-dispatcher mode: all queues land on the primary CP, which
+    // owns every XCD's CUs and fans a single dispatch across all of them (and
+    // their separate L2s), modeling MI300X SPX hardware work distribution.
+    if (soc_dispatch_)
+      return xcds_[0]->command_processor();
     uint32_t idx = next_xcd_assignment_++ % static_cast<uint32_t>(xcds_.size());
     return xcds_[idx]->command_processor();
   }
+
+  /// @brief Request single-global-dispatcher mode (config soc_dispatch). Applied
+  /// during initialize() once the topology is built.
+  void set_soc_dispatch(bool enable) { soc_dispatch_requested_ = enable; }
+  bool soc_dispatch() const { return soc_dispatch_; }
+
+  /// @brief Give the primary CP every XCD's SPIs/CUs so one dispatch spreads
+  /// its workgroups across all XCDs (opt-in via config soc_dispatch). Idempotent.
+  void consolidate_dispatch_to_primary();
 
   /// @brief Apply a function to all XCD command processors.
   ///
@@ -183,6 +197,8 @@ private:
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;
   std::atomic<uint32_t> next_xcd_assignment_{0};
+  bool soc_dispatch_requested_ = false; ///< Config requested single-global-dispatcher mode.
+  bool soc_dispatch_ = false;           ///< Active single-global-dispatcher mode.
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   std::vector<amdgpu::Xcd *> xcds_;
