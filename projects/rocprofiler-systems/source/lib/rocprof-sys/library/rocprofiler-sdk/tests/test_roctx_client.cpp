@@ -103,12 +103,12 @@ TEST_F(roctx_client_test, constructor_creates_controller)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ .pause_resume_enabled   = true,
-                                             .use_perfetto           = true,
-                                             .use_timemory           = true,
-                                             .perfetto_annotations   = false,
-                                             .selected_trace_regions = "TestRegion" };
-    rocprofsys::control::session     session;
+    const roctx_client_config config{ .pause_resume_enabled   = true,
+                                      .use_perfetto           = true,
+                                      .use_timemory           = true,
+                                      .perfetto_annotations   = false,
+                                      .selected_trace_regions = "TestRegion" };
+    auto                      session = std::make_shared<rocprofsys::control::session>();
     roctx_client<mock_marker_policy> client(session, config);
 }
 
@@ -116,12 +116,12 @@ TEST_F(roctx_client_test, constructor_without_region_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ .pause_resume_enabled   = true,
-                                             .use_perfetto           = true,
-                                             .use_timemory           = true,
-                                             .perfetto_annotations   = false,
-                                             .selected_trace_regions = "" };
-    rocprofsys::control::session     session;
+    const roctx_client_config config{ .pause_resume_enabled   = true,
+                                      .use_perfetto           = true,
+                                      .use_timemory           = true,
+                                      .perfetto_annotations   = false,
+                                      .selected_trace_regions = "" };
+    auto                      session = std::make_shared<rocprofsys::control::session>();
     roctx_client<mock_marker_policy> client(session, config);
     EXPECT_FALSE(client.get_trigger().filter_active());
 }
@@ -130,12 +130,12 @@ TEST_F(roctx_client_test, constructor_with_region_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ .pause_resume_enabled   = true,
-                                             .use_perfetto           = true,
-                                             .use_timemory           = true,
-                                             .perfetto_annotations   = false,
-                                             .selected_trace_regions = "Region 1" };
-    rocprofsys::control::session     session;
+    const roctx_client_config config{ .pause_resume_enabled   = true,
+                                      .use_perfetto           = true,
+                                      .use_timemory           = true,
+                                      .perfetto_annotations   = false,
+                                      .selected_trace_regions = "Region 1" };
+    auto                      session = std::make_shared<rocprofsys::control::session>();
     roctx_client<mock_marker_policy> client(session, config);
     EXPECT_TRUE(client.get_trigger().filter_active());
 }
@@ -144,12 +144,12 @@ TEST_F(roctx_client_test, should_write_no_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ .pause_resume_enabled   = true,
-                                             .use_perfetto           = true,
-                                             .use_timemory           = true,
-                                             .perfetto_annotations   = false,
-                                             .selected_trace_regions = "" };
-    rocprofsys::control::session     session;
+    const roctx_client_config config{ .pause_resume_enabled   = true,
+                                      .use_perfetto           = true,
+                                      .use_timemory           = true,
+                                      .perfetto_annotations   = false,
+                                      .selected_trace_regions = "" };
+    auto                      session = std::make_shared<rocprofsys::control::session>();
     roctx_client<mock_marker_policy> client(session, config);
     EXPECT_TRUE(client.get_trigger().should_write_markers());
 }
@@ -158,12 +158,12 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ .pause_resume_enabled   = true,
-                                             .use_perfetto           = true,
-                                             .use_timemory           = true,
-                                             .perfetto_annotations   = false,
-                                             .selected_trace_regions = "Region 1" };
-    rocprofsys::control::session     session;
+    const roctx_client_config config{ .pause_resume_enabled   = true,
+                                      .use_perfetto           = true,
+                                      .use_timemory           = true,
+                                      .perfetto_annotations   = false,
+                                      .selected_trace_regions = "Region 1" };
+    auto                      session = std::make_shared<rocprofsys::control::session>();
     roctx_client<mock_marker_policy> client(session, config);
     EXPECT_FALSE(client.get_trigger().should_write_markers());
 }
@@ -187,7 +187,8 @@ protected:
     int start_count = 0;
     int stop_count  = 0;
 
-    rocprofsys::control::session m_session;
+    std::shared_ptr<rocprofsys::control::session> m_session =
+        std::make_shared<rocprofsys::control::session>();
 
     /// Create a client and subscribe callback counters on its session.
     /// Uses pause_resume_enabled=true with no backends (perfetto/timemory off)
@@ -202,8 +203,8 @@ protected:
 
         auto client = std::make_unique<roctx_client_t>(m_session, config);
 
-        auto& ctrl = client->get_session();
-        ctrl.subscribe(
+        const auto& ctrl = client->get_session();
+        ctrl->subscribe(
             { [this]() { stop_count++; }, [this]() { start_count++; }, "test_counters" });
 
         return client;
@@ -539,7 +540,7 @@ TEST_F(roctx_client_control_test, shutdown_clears_state)
     client->get_trigger().on_range_start(1, "Region 1");
     EXPECT_TRUE(client->get_trigger().should_write_markers());
 
-    ctrl.shutdown();
+    ctrl->shutdown();
 
     EXPECT_TRUE(client->get_trigger().filter_active());
     EXPECT_TRUE(client->get_trigger().should_write_markers());
@@ -740,7 +741,8 @@ protected:
     int start_count = 0;
     int stop_count  = 0;
 
-    rocprofsys::control::session m_session;
+    std::shared_ptr<rocprofsys::control::session> m_session =
+        std::make_shared<rocprofsys::control::session>();
 
     std::unique_ptr<roctx_client_t> make_client(const std::string& regions)
     {
@@ -752,8 +754,8 @@ protected:
 
         auto client = std::make_unique<roctx_client_t>(m_session, config);
 
-        auto& ctrl = client->get_session();
-        ctrl.subscribe(
+        const auto& ctrl = client->get_session();
+        ctrl->subscribe(
             { [this]() { stop_count++; }, [this]() { start_count++; }, "test_counters" });
 
         return client;
