@@ -8,6 +8,7 @@
 
 #include <cstring>
 
+#include "algorithms/CollCommon.h"
 #include "archinfo.h"
 #include "collectives.h"
 #include "comm.h"
@@ -36,6 +37,13 @@ inline bool testRcclDdaAlltoAllThresholdEnabled(
       kDdaAlltoAllGfx942ThresholdBytes,
       kDdaAlltoAllGfx950ThresholdBytes,
       kDdaAlltoAllGfx1250ThresholdBytes);
+}
+
+// Mirrors dda_alltoall_ipc.cu: in-kernel staging copy on single-block launches only.
+// The fabric path always stages via a pre-kernel memcpy.
+inline bool testAlltoAllUsesInKernelStagingCopy(size_t countPerRank, ncclDataType_t datatype) {
+  const size_t bytesPerRank = countPerRank * static_cast<size_t>(ncclTypeSize(datatype));
+  return meta::comms::ddaAlltoAllSingleBlockGrid(bytesPerRank, /* typeSize= */ 1);
 }
 
 inline size_t testAlltoAllDdaIpcStagingBytes(size_t count, int nRanks, size_t typeSize) {
@@ -67,5 +75,11 @@ struct DdaAlltoAllMockComm
 constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
     kDdaAlltoAllGfx942ThresholdBytes /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
+
+// 4 KiB/rank float32: single-block grid on 8-rank IPC launch (in-kernel copy path).
+constexpr size_t kAlltoAllFloat32CountAt4KbPerRank = 1024;
+
+// 8 KiB/rank float32: multi-block grid (pre-kernel memcpy path).
+constexpr size_t kAlltoAllFloat32CountAt8KbPerRank = 2048;
 
 } // namespace RcclUnitTesting
