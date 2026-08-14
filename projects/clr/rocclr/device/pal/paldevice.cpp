@@ -624,13 +624,13 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.availableVGPRs_ = palProp.gfxipProperties.shaderCore.numAvailableVgprs;
   info_.sgprsPerSimd_ = palProp.gfxipProperties.shaderCore.sgprsPerSimd;
   info_.availableRegistersPerCU_ = info_.vgprsPerSimd_ * info_.simdPerCU_ * info_.wavefrontWidth_;
+#if IS_WINDOWS
   info_.luidLowPart_ = palProp.osProperties.luidLowPart;
   info_.luidHighPart_ = palProp.osProperties.luidHighPart;
+#endif
   // Node mask = this device's index within its adapter (LUID). Devices sharing a
-  // LUID form a linked adapter; a standalone adapter reports 0x1. The LUID is
-  // zero on platforms without a WDDM adapter, where the node mask stays 0.
-  if ((pal_device != nullptr) &&
-      ((palProp.osProperties.luidLowPart != 0) || (palProp.osProperties.luidHighPart != 0))) {
+  // LUID form a linked adapter; a standalone adapter reports 0x1.
+  if (pal_device != nullptr) {
     uint32_t luidNodeIndex = 0;
     for (uint32_t i = 0; (i < gNumDevices) && (gDeviceList[i] != pal_device); ++i) {
       Pal::DeviceProperties siblingProps = {};
