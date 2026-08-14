@@ -118,12 +118,23 @@ discover_module_variables(hsa_agent_t agent)
 device_snapshot_t
 snap(hsa_agent_t agent)
 {
-    const auto inventory = memory_tracker::snap_inventory(agent);
-
     device_snapshot_t out{};
-    out.blocks.reserve(inventory.size());
 
-    // Capture one region (device->host) into the snapshot. Returns false on any failure: a host
+    const auto [inventory, module_vars] = [&]() {
+        try
+        {
+            auto inventory   = memory_tracker::snap_inventory(agent);
+            auto module_vars = discover_module_variables(agent);
+
+            out.blocks.reserve(inventory.size() + module_vars.size());
+            return std::pair{std::move(inventory), std::move(module_vars)};
+        } catch(const std::bad_alloc&)
+        {
+            ROCP_FATAL << "kernel-replay snapshot: out of memory reserving metadata";
+        }
+    }();
+
+    // Capture one region (device->host) into the snapshot. Returns false on failure: a host
     // allocation failure under memory pressure (resize throws bad_alloc) or a failed DMA copy.
     // Either leaves the snapshot incomplete, so the caller must decline replay rather than restore
     // partial state.
@@ -173,7 +184,7 @@ snap(hsa_agent_t agent)
     // Module-scope variables (__device__ / __constant__ globals) live in the loaded executable's
     // data segment, not in the allocation tracker, so capture them here too. Restored via the same
     // per-block host->device copy as tracked allocations (see restore()).
-    for(const auto& var : discover_module_variables(agent))
+    for(const auto& var : module_vars)
     {
         if(!capture(var.gpu_addr, var.size, "module variable", /*from_tracker=*/false))
         {
