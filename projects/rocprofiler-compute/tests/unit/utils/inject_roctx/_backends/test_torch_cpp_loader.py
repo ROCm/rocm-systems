@@ -110,7 +110,7 @@ def test_source_fingerprint_is_length_delimited(tmp_path, monkeypatch):
 
 
 def test_probe_output_matches_cmake_field_order():
-    """The probe prints the seven fields CMake reads by index.
+    """The probe prints the eight fields CMake reads by index.
 
     ``CMakeLists.txt`` reads each value with ``list(GET ... <n> ...)``, so the
     line order is part of the contract.
@@ -130,7 +130,7 @@ def test_probe_output_matches_cmake_field_order():
     assert result.returncode == 0, result.stderr
 
     lines = result.stdout.splitlines()
-    assert len(lines) == 7, f"probe printed {len(lines)} lines, CMake reads 7"
+    assert len(lines) == 8, f"probe printed {len(lines)} lines, CMake reads 8"
     assert lines[0] == str(sys.version_info.major)
     assert lines[1] == str(sys.version_info.minor)
     assert lines[2], "torch version (index 2) is empty"
@@ -138,6 +138,7 @@ def test_probe_output_matches_cmake_field_order():
     assert lines[4], "torch library dirs (index 4) are empty"
     assert lines[5].endswith("/lib"), f"unexpected wheel lib dir {lines[5]!r}"
     assert lines[6] == inject_roctx_loader._source_fingerprint()
+    assert lines[7] in ("0", "1"), f"unexpected C++11 ABI flag {lines[7]!r}"
 
 
 # ---------------------------------------------------------------------------
