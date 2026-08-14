@@ -383,12 +383,14 @@ TEST_F(HostApiTest, GraphCaptureReplayPutWait)
     }
 
     hipError_t destroyRes = hipGraphExecDestroy(graphExec);
+    if(destroyRes == hipSuccess)
+        graphExec = nullptr;
     ASSERT_MPI_EQ(hipSuccess, destroyRes);
-    graphExec = nullptr;
 
     destroyRes = hipGraphDestroy(graph);
+    if(destroyRes == hipSuccess)
+        graph = nullptr;
     ASSERT_MPI_EQ(hipSuccess, destroyRes);
-    graph = nullptr;
 
     TEST_INFO("G1 rank %d: GraphCaptureReplayPutWait passed.", myRank);
 }
