@@ -741,6 +741,14 @@ add_test(
         tests/unit/pc_sampling/test_source_snapshot_analysis.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_per_kernel_isa_export
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_per_kernel_isa_export.xml ${COV_OPTION}
+        tests/unit/pc_sampling/test_per_kernel_isa_export.py ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # Metrics unit tests
 # -----------------------------------
