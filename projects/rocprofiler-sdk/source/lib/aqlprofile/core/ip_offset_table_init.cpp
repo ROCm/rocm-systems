@@ -69,8 +69,9 @@ public:
                 if(auto gfxip_prefix = gfxip.substr(0, 5);
                    gfxip_prefix == "gfx10" || gfxip_prefix == "gfx11" || gfxip_prefix == "gfx12")
                 {
-                    table = navi_ip_offset_table_discovery_sysfs(agent_info->domain,
-                                                                 agent_info->bdf_id);
+                    /*table = navi_ip_offset_table_discovery_sysfs(agent_info->domain,
+                                                                 agent_info->bdf_id);*/
+                    table = nullptr;
                     if(!table) table = sienna_cichlid_reg_base_init();
                 }
             }
