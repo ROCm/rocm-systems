@@ -162,8 +162,7 @@ __host__ int IPCHostContext::test(T *ivars, int cmp, T val) {
 template <typename T>
 __host__ void IPCHostContext::wait_until(T *ivars, int cmp, T val) {
   if (is_ipc_non_mpi()) {
-    while (!test<T>(ivars, cmp, val)) {
-    }
+    while (!test<T>(ivars, cmp, val)) {}
     return;
   }
   host_interface->wait_until<T>(ivars, cmp, val, context_window_info);
