@@ -71,7 +71,7 @@ ncclResult_t ncclNetSocketInit(void** ctx, uint64_t commId, ncclNetCommConfig_t*
           memcpy(&ncclNetSocketDevs[i].addr, addrs + i, sizeof(union ncclSocketAddress));
           NCCLCHECK(ncclNetSocketGetPciPath(ncclNetSocketDevs[i].devName, &ncclNetSocketDevs[i].pciPath));
           snprintf(line + strlen(line), MAX_LINE_LEN - strlen(line), " [%d]%s:%s", i, names + i * MAX_IF_NAME_SIZE,
-                   ncclSocketToString(&addrs[i], addrline));
+                   ncclSocketToString(&addrs[i], addrline, sizeof(addrline)));
         }
         line[MAX_LINE_LEN] = '\0';
         INFO(NCCL_INIT | NCCL_NET, "NET/Socket : Using%s", line);
@@ -633,7 +633,7 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
              "network is in a healthy state, "
              "there may be a mismatch in collective sizes or environment settings (e.g. NCCL_PROTO, NCCL_ALGO) between "
              "ranks",
-             ncclSocketToString(&addr, line), senderSize, r->size);
+             ncclSocketToString(&addr, line, sizeof(line)), senderSize, r->size);
         return ncclInvalidUsage;
       }
       // copy to the data buffer if we have received some inline data already

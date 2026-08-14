@@ -1862,7 +1862,7 @@ void* ncclProxyService(void* _args) {
   // RCCL: log the proxy listening socket address (diagnostic).
   {
     char line[SOCKET_NAME_MAXLEN + 1];
-    INFO(NCCL_INIT, "proxy listening socket at %s", ncclSocketToString(&proxyState->listenSock->addr, line));
+    INFO(NCCL_INIT, "proxy listening socket at %s", ncclSocketToString(&proxyState->listenSock->addr, line, sizeof(line)));
   }
 
   while (stop == PROXY_RUNNING || npeers > 0) {

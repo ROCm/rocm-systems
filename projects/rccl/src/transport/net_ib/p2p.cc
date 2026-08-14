@@ -335,7 +335,7 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
       union ncclSocketAddress addr;
       ncclSocketGetAddr(&comm->base.sock, &addr);
       WARN("NET/IB : req %d/%d tag %x peer %s posted incorrect receive info: size %ld addr %lx rkeys[0]=%x", r, nreqs,
-           tag, ncclSocketToString(&addr, line), slots[r].size, slots[r].addr, slots[r].rkeys[0]);
+           tag, ncclSocketToString(&addr, line, sizeof(line)), slots[r].size, slots[r].addr, slots[r].rkeys[0]);
       return ncclInternalError;
     }
 
@@ -820,7 +820,7 @@ static ncclResult_t ncclIbLogCompletionWithError(struct ncclIbNetCommBase* commB
   char sockStr[SOCKET_NAME_MAXLEN + 1];
   union ncclSocketAddress addr;
   ncclSocketGetAddr(&commBase->sock, &addr);
-  ncclSocketToString(&addr, sockStr);
+  ncclSocketToString(&addr, sockStr, sizeof(sockStr));
   char* hcaName = devBase->pd->context->device->name;
   WARN("NET/IB: Got completion from peer %s with status=%s(%d) opcode=%s(%d) vendor_err=%u %s%s%s%s hca %s", sockStr,
        ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->vendor_err,
@@ -847,7 +847,7 @@ static inline ncclResult_t ncclIbCompletionEventProcess(struct ncclIbNetCommBase
   TRACE(NCCL_NET,
         "Got completion from peer %s with status=%d opcode=%d len=%u wr_id=%lu r=%p type=%d events={%d,%d,%d,%d}, "
         "devIndex=%d",
-        ncclSocketToString(&addr, line), wc->status, wc->opcode, wc->byte_len, wc->wr_id, req, req->type,
+        ncclSocketToString(&addr, line, sizeof(line)), wc->status, wc->opcode, wc->byte_len, wc->wr_id, req, req->type,
         req->events[0], req->events[1], req->events[2], req->events[3], devIndex);
 #endif
 

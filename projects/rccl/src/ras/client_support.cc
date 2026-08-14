@@ -179,7 +179,7 @@ ncclResult_t rasClientInitSocket() {
                     (addr.sa.sa_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6))),
                "bind", ret, fail);
   SYSCHECKGOTO(listen(rasClientListeningSocket, 16384), "listen", ret, fail);
-  INFO(NCCL_INIT | NCCL_RAS, "RAS client listening socket at %s", ncclSocketToString(&addr, rasLine));
+  INFO(NCCL_INIT | NCCL_RAS, "RAS client listening socket at %s", ncclSocketToString(&addr, rasLine, sizeof(rasLine)));
 exit:
   return ret;
 fail:
@@ -1271,16 +1271,16 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
               INFO(NCCL_RAS,
                    "RAS overflow of auxPeersBuf: nPeersBuf %d, rasPeerIdx %d (%s), collPeerIdx %d -- "
                    "internal error?",
-                   nPeersBuf, rasPeerIdx, ncclSocketToString(&rasPeers[rasPeerIdx].addr, rasLine), collPeerIdx);
+                   nPeersBuf, rasPeerIdx, ncclSocketToString(&rasPeers[rasPeerIdx].addr, rasLine, sizeof(rasLine)), collPeerIdx);
             }
           }
           TRACE(NCCL_RAS, "RAS rasPeerIdx %d (%s) is missing from coll->peers; dead %d", rasPeerIdx,
-                ncclSocketToString(&rasPeers[rasPeerIdx].addr, rasLine), dead);
+                ncclSocketToString(&rasPeers[rasPeerIdx].addr, rasLine, sizeof(rasLine)), dead);
           rasPeerIdx++;
         } else { // cmp > 0
           // Process not found in rasPeers -- shouldn't happen, unless during a race?
           INFO(NCCL_RAS, "RAS failed to find coll->peer[%d] (%s) in rasPeers -- internal error?", collPeerIdx,
-               ncclSocketToString(coll->peers + collPeerIdx, rasLine));
+               ncclSocketToString(coll->peers + collPeerIdx, rasLine, sizeof(rasLine)));
           collPeerIdx++;
         } // cmp > 0
       } // for (rasPeerIdx, collPeerIdx)

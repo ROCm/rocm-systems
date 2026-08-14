@@ -111,7 +111,7 @@ static inline bool rcclMatchSubnetV4(struct in_addr local, struct in_addr remote
 }
 #endif
 
-const char* ncclSocketToString(const union ncclSocketAddress* addr, char* buf, const int numericHostForm = 1);
+const char* ncclSocketToString(const union ncclSocketAddress* addr, char* buf, size_t bufLen, const int numericHostForm = 1);
 ncclResult_t ncclSocketGetAddrFromString(union ncclSocketAddress* ua, const char* ip_port_pair);
 ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress* localAddr,
                                           union ncclSocketAddress* remoteAddr, int ifNameMaxSize, int* found);

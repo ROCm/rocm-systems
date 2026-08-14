@@ -756,7 +756,7 @@ ncclResult_t ncclGinIbProxyTest(void* collComm, void* request, int* done) {
       char line[SOCKET_NAME_MAXLEN + 1];
       char* hcaName = devBase->pd->context->device->name;
       WARN("NET/IB/GIN: Got completion from peer %s with status=%d opcode=%d len=%u vendor err %u (%s)%s%s%s%s hca %s",
-           ncclSocketToString(&addr, line), wc[i].status, wc[i].opcode, wc[i].byte_len, wc[i].vendor_err,
+           ncclSocketToString(&addr, line, sizeof(line)), wc[i].status, wc[i].opcode, wc[i].byte_len, wc[i].vendor_err,
            ncclIbReqTypeStr[req->type], localGidStr ? " localGid " : "", localGidString,
            remoteGidStr ? " remoteGids" : "", remoteGidString, hcaName);
       return ncclRemoteError;

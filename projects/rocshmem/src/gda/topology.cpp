@@ -257,6 +257,10 @@ namespace rocshmem
                                   int&        version)
   {
     char const* deviceName = ibv.get_device_name(context->device);
+    if (deviceName == nullptr || strchr(deviceName, '/') != nullptr) {
+      LOG_ERROR("Invalid IB device name");
+      return -1;
+    }
     char gidRoceVerStr[16]      = {};
     char roceTypePath[PATH_MAX] = {};
     snprintf(roceTypePath, sizeof(roceTypePath),
