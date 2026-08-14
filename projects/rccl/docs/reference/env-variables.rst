@@ -1,33 +1,35 @@
 .. meta::
-   :description: RCCL is a stand-alone library that provides multi-GPU and multi-node collective communication primitives optimized for AMD GPUs
-   :keywords: RCCL, ROCm, library, API, reference, environment variable, environment
+   :description: Reference for all RCCL environment variables, grouped by function: configuration, logging, algorithm control, network, and testing.
+   :keywords: RCCL, ROCm, environment variables, NCCL_DEBUG, NCCL_ALGO, NCCL_PROTO, NCCL_IB_HCA, NCCL_CUMEM_ENABLE, NCCL_LAUNCH_ORDER_IMPLICIT, RCCL_IB_SPLIT_DATA_THRESHOLD, configuration, tuning
 
 .. _env-variables:
 
-********************************************************************
+**************************
 RCCL environment variables
-********************************************************************
+**************************
 
 This section describes the most important RCCL environment variables,
 which are grouped by functionality.
 
 Configuration and setup
-========================
+=======================
 
 The configuration and setup environment variables for RCCL are collected
 in the following table.
 
 .. list-table::
     :header-rows: 1
-    :widths: 40,60
+    :widths: 38 22 40
 
     * - **Environment variable**
+      - **Default value**
       - **Values**
 
     * - | ``NCCL_CONF_FILE``
         | Specifies the path to the RCCL configuration file.
-      - | String path to configuration file
-        | Default: ``~/.rccl.conf`` or ``/etc/rccl.conf``
+      - | Unset
+      - | String path to a configuration file.
+        | Default: ``~/.rccl.conf`` if present, otherwise ``/etc/rccl.conf``.
 
     * - | ``NCCL_IBVERBS_LIB``
         | Specifies the libibverbs shared object that RCCL loads at runtime for
@@ -42,15 +44,17 @@ in the following table.
 
     * - | ``NCCL_HOSTID``
         | Sets the host identifier for multi-node communication.
-      - | String value for host identification
-        | Used for host hash generation
+      - | Unset
+      - | String value for host identification.
+        | Used for host hash generation.
 
     * - | ``NCCL_BOOTSTRAP_BIDIR_ALLGATHER``
         | Enables the bidirectional ring AllGather (N/2 steps) on the socket OOB path
           during bootstrap. The unidirectional ring (N-1 steps) is kept as a fallback.
           Has no effect when net OOB is in use.
+      - | ``1``
       - | ``0``: Force unidirectional ring.
-        | ``1``: Force bidirectional ring (default).
+        | ``1``: Force bidirectional ring.
 
     * - | ``NCCL_CUMEM_ENABLE``
         | Enables cuMem virtual memory management (VMM) for RCCL allocations,
@@ -66,14 +70,14 @@ in the following table.
     * - | ``NCCL_MIN_CTAS``
         | Minimum number of CTAs (channels) used for a collective. Overrides
           the ``minCTAs`` field of ``ncclConfig_t``.
-      - | Positive integer (values ``<= 0`` are ignored).
-        | Default: unset (uses the RCCL default).
+      - | Unset
+      - | Positive integer. Values ``<= 0`` are ignored.
 
     * - | ``NCCL_MAX_CTAS``
         | Maximum number of CTAs (channels) used for a collective. Overrides
           the ``maxCTAs`` field of ``ncclConfig_t``.
-      - | Positive integer (values ``<= 0`` are ignored).
-        | Default: unset (uses the RCCL default).
+      - | Unset
+      - | Positive integer. Values ``<= 0`` are ignored.
 
 Logging and debugging
 =====================
@@ -83,63 +87,76 @@ in the following table.
 
 .. list-table::
     :header-rows: 1
-    :widths: 35,65
+    :widths: 38 22 40
 
     * - **Environment variable**
+      - **Default value**
       - **Values**
 
     * - | ``NCCL_DEBUG``
-        | Controls debug logging in RCCL for troubleshooting and monitoring collective communication operations. 
-      - | These are the logging levels in RCCL set via ``NCCL_DEBUG``. Each logging level contains all logging for levels below it. The default logging level is ``ERROR``.
+        | Controls debug logging in RCCL for troubleshooting and monitoring collective communication operations.
+      - | ``ERROR``
+      - | Each logging level includes all output from levels below it.
         |
         | ``NONE``: No logging is printed.
-        | ``ERROR``: These messages report when a fatal condition has occurred in RCCL and the operation can't continue.
-        | ``VERSION``: ``librccl`` version info is printed during the initialization phase.
-        | ``WARN``: Prints warnings about unusual conditions that could lead to unexpected results.
-        | ``INFO``: Prints standard logging messages about status and operations performed.
+        | ``ERROR``: Fatal conditions that prevent the operation from continuing.
+        | ``VERSION``: Prints ``librccl`` version info during initialization.
+        | ``WARN``: Unusual conditions that could lead to unexpected results.
+        | ``INFO``: Standard status and operation messages.
         | ``ABORT``: Unused.
-        | ``TRACE``: Prints trace-level logging of function calls and parameters. Only active when ``librccl`` is built using ``ENABLE_TRACE``.
+        | ``TRACE``: Trace-level logging of function calls and parameters.
+          Only active when ``librccl`` is built with ``ENABLE_TRACE``.
 
     * - | ``NCCL_DEBUG_SUBSYS``
         | Controls which subsystems generate debug output.
-      - | These are the logging subsystems set via ``NCCL_DEBUG_SUBSYS``. These can be set as a comma-separated list, and can be inverted using the ``^`` prefix. The default subsystem set is ``INIT``, ``BOOTSTRAP``, and ``ENV``.
+      - | ``INIT,BOOTSTRAP,ENV``
+      - | Comma-separated list of subsystem names. Prefix a name with ``^`` to
+          exclude it.
         |
-        | ``INIT``: Prints during the initialization phase.
-        | ``COLL``: Prints during execution of collectives.
-        | ``P2P``: Prints logs related to peer-to-peer setup or communication.
-        | ``SHM``: Prints logs related to shared memory.
-        | ``NET``: Prints logs related to network setup or communication.
-        | ``GRAPH``: Prints logs related to parsing the topology of the network.
-        | ``TUNING``: Prints logs related to the tuner plugin.
-        | ``ENV``: Prints logs related to environment variables.
-        | ``ALLOC``: Prints logs related to memory allocation.
-        | ``CALL``: Prints logs for function calls (``TRACE`` only).
-        | ``PROXY``: Prints logs related to the proxy thread.
-        | ``NVLS``: Not valid for AMD/RCCL.
-        | ``BOOTSTRAP``: Prints logs related to the bootstrapping phase of initialization.
-        | ``REG``: Prints logs related to registration and deregistration of transport initialization.
-        | ``PROFILE``: Prints logs related to the profiling/timing info.
-        | ``RAS``: Prints logs related to RAS.
-        | ``VERBS``: Prints logs related to IB/Verbs.
-        | ``DESTROY``: Prints logs related to communicator/plugin teardown (destroy, abort, revoke, plugin unload).
-        | ``ALL``: Activates all logging subsystems.
+        | ``INIT``: Initialization phase.
+        | ``COLL``: Collective execution.
+        | ``P2P``: Peer-to-peer setup or communication.
+        | ``SHM``: Shared memory.
+        | ``NET``: Network setup or communication.
+        | ``GRAPH``: Topology parsing.
+        | ``TUNING``: Tuner plugin.
+        | ``ENV``: Environment variables.
+        | ``ALLOC``: Memory allocation.
+        | ``CALL``: Function calls (``TRACE`` only).
+        | ``PROXY``: Proxy thread.
+        | ``NVLS``: Not valid for AMD or RCCL.
+        | ``BOOTSTRAP``: Bootstrapping phase of initialization.
+        | ``REG``: Registration and deregistration of transport initialization.
+        | ``PROFILE``: Profiling and timing info.
+        | ``RAS``: RAS-related logs.
+        | ``VERBS``: InfiniBand Verbs.
+        | ``DESTROY``: Communicator and plugin teardown.
+        | ``ALL``: All logging subsystems.
 
     * - | ``NCCL_WARN_ENABLE_DEBUG_INFO``
         | Converts all ``WARN`` level logs to ``INFO`` level logs.
-      - | ``0``: Default value. Variable is not enabled.
-        | ``1``: Enable the variable.
+      - | ``0``
+      - | ``0``: Disabled.
+        | ``1``: Enabled.
 
     * - | ``NCCL_DEBUG_TIMESTAMP_LEVELS``
-        | The timestamp levels for ``NCCL_DEBUG``.
-      - | A set of ``NCCL_DEBUG`` levels can have a timestamp prepended set as a comma-separated list which can be inverted using the ``^`` prefix. The default set is ``WARN``.
+        | The debug levels that include a timestamp prefix in their log output.
+      - | ``WARN``
+      - | Comma-separated list of ``NCCL_DEBUG`` level names. Prefix a name
+          with ``^`` to exclude it.
 
     * - | ``NCCL_DEBUG_TIMESTAMP_FORMAT``
-        | The timestamp format for ``NCCL_DEBUG``.
-      - | Set the format of the timestamp in ``printf`` style. The default format is ``"[%F %T] "``.
+        | The timestamp format for ``NCCL_DEBUG`` output.
+      - | ``"[%F %T] "``
+      - | Format string in ``printf`` style.
 
     * - | ``NCCL_DEBUG_FILE``
         | Write logs to a file rather than ``stdout``.
-      - | The filename can be formatted using ``%h`` for hostname, ``%p`` for pid, and ``%%`` to escape the ``%`` character. It is recommended to use ``%p`` to output to individual files per pid to avoid mixing or potentially overwriting the output. Example usage: ``NCCL_DEBUG_FILE=debugfile.%h.%p``
+      - | Unset
+      - | Filename string. Supports format specifiers:
+          ``%h`` for hostname, ``%p`` for PID, ``%%`` to escape ``%``.
+        | Use ``%p`` to write separate files per process and avoid mixed output.
+        | Example: ``NCCL_DEBUG_FILE=debugfile.%h.%p``
 
 Algorithm and protocol control
 ==============================
@@ -149,20 +166,25 @@ collected in the following table.
 
 .. list-table::
     :header-rows: 1
-    :widths: 40,60
+    :widths: 38 22 40
 
     * - **Environment variable**
+      - **Default value**
       - **Values**
 
     * - | ``NCCL_ALGO``
-        | Forces specific algorithm selection for collectives.
-      - | Algorithm name string
-        | Used to override automatic algorithm selection
+        | Restricts automatic algorithm selection to the specified set.
+          Re-runs the cost model over the enabled algorithms.
+      - | Unset
+      - | Algorithm name string: ``Ring``, ``Tree``, ``CollNet``.
+        | Multiple values accepted as a comma-separated list.
 
     * - | ``NCCL_PROTO``
-        | Forces specific protocol selection for communication.
-      - | Protocol name string
-        | Used to override automatic protocol selection
+        | Restricts automatic protocol selection to the specified set.
+          Re-runs the cost model over the enabled protocols.
+      - | Unset
+      - | Protocol name string: ``LL``, ``LL128``, ``Simple``.
+        | Multiple values accepted as a comma-separated list.
 
 Network and topology
 ====================
@@ -172,40 +194,44 @@ in the following table.
 
 .. list-table::
     :header-rows: 1
-    :widths: 40,60
+    :widths: 38 22 40
 
     * - **Environment variable**
+      - **Default value**
       - **Values**
 
     * - | ``NCCL_IB_HCA``
-        | Specifies InfiniBand device:port to use.
-      - | Device specification string
-        | Prefix with ``^`` for exclusion, ``=`` for exact match
+        | Specifies which InfiniBand device:port to use.
+      - | Unset
+      - | Device specification string.
+        | Prefix with ``^`` for exclusion, ``=`` for exact match.
 
     * - | ``NCCL_IB_GID_INDEX``
         | Defines the Global ID index used in RoCE mode.
-      - | Integer value (default: ``-1``)
-        | See InfiniBand ``show_gids`` command for valid values
+      - | ``-1``
+      - | Integer value. See the InfiniBand ``show_gids`` command for valid values.
 
     * - | ``NCCL_PXN_C2C``
         | Allows PXN routing through a C2C link to reach a NIC attached to a
           peer GPU. The C2C path is NVIDIA-specific and is not currently
           applicable on AMD hardware.
-      - | ``0``: Disabled (default).
+      - | ``0``
+      - | ``0``: Disabled.
         | ``1``: Enabled.
 
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
-      - | Interface prefix string or list
-        | Multiple prefixes separated by ``,``
-        | Prefix with ``^`` for exclusion, ``=`` for exact match
-        | Example: ``eth`` (all eth interfaces), ``=eth0`` (exact match)
+      - | Unset
+      - | Interface prefix string or comma-separated list.
+        | Prefix with ``^`` for exclusion, ``=`` for exact match.
+        | Example: ``eth`` (all eth interfaces), ``=eth0`` (exact match).
 
     * - | ``NCCL_SOCKET_FAMILY``
-        | Forces IPv4/IPv6 interface selection.
-      - | ``AF_INET``: Force IPv4
-        | ``AF_INET6``: Force IPv6
-        | Unset: Use first available
+        | Forces IPv4 or IPv6 interface selection.
+      - | Unset
+      - | ``AF_INET``: Force IPv4.
+        | ``AF_INET6``: Force IPv6.
+        | Unset: Use first available.
 
     * - | ``NCCL_IGNORE_NET_MISMATCH``
         | Controls what happens when ranks report a different number of local
@@ -213,16 +239,20 @@ in the following table.
           each rank's local NET device count and compares the minimum and maximum
           across the communicator. A mismatch usually means the job was launched
           with an inconsistent NIC selection (for example, an uneven
-          ``NCCL_SOCKET_IFNAME``/``NCCL_IB_HCA`` per rank, or nodes with different
-          NIC counts), which otherwise surfaces later as obscure transport
-          failures. See :ref:`heterogeneous-nic-counts`.
-      - | ``1``: Detect and continue, logging the mismatch at ``INFO`` level (default).
-        | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch.
+          ``NCCL_SOCKET_IFNAME`` or ``NCCL_IB_HCA`` per rank, or nodes with
+          different NIC counts), which otherwise surfaces later as obscure
+          transport failures. See :ref:`heterogeneous-nic-counts`.
+      - | ``1``
+      - | ``1``: Detect and continue, logging the mismatch at ``INFO`` level.
+        | ``0``: Fail initialization with ``ncclSystemError`` and a warning on
+          the mismatch.
 
     * - | ``NCCL_IGNORE_COLLNET_MISMATCH``
         | Same as ``NCCL_IGNORE_NET_MISMATCH`` but for the number of local CollNet
           devices reported by each rank.
-      - | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch (default).
+      - | ``0``
+      - | ``0``: Fail initialization with ``ncclSystemError`` and a warning on
+          the mismatch.
         | ``1``: Detect and continue, logging the mismatch at ``INFO`` level.
 
     * - | ``NCCL_IB_MERGE_NICS``
@@ -260,24 +290,27 @@ in the following table.
 
     * - | ``NCCL_NETDEVS_POLICY``
         | Controls how many of a GPU's locally reachable NICs are used on the
-        | network path for ``send``, ``recv``, and ``all-to-all``. The policy
-        | governs per-channel NIC selection (``ncclTopoGetLocalNet``); the
-        | per-peer network channel count is still bounded by available NIC
-        | bandwidth.
-        | Any unset, malformed, or out-of-range value falls back to ``AUTO``.
-      - | ``AUTO`` (default): use ``ceil(localNetCount / localGpuCount)`` NICs,
-        | dividing the local NICs across the GPUs that share them.
-        | ``ALL``: use every locally reachable NIC.
-        | ``MAX:N``: use at most ``N`` NICs (clamped to the number reachable);
-        | ``N`` must be a positive integer.
+          network path for ``send``, ``recv``, and ``all-to-all``. The policy
+          governs per-channel NIC selection (``ncclTopoGetLocalNet``); the
+          per-peer network channel count is still bounded by available NIC
+          bandwidth. Any unset, malformed, or out-of-range value falls back to
+          ``AUTO``.
+      - | ``AUTO``
+      - | ``AUTO``: Use ``ceil(localNetCount / localGpuCount)`` NICs, dividing
+          the local NICs across the GPUs that share them.
+        | ``ALL``: Use every locally reachable NIC.
+        | ``MAX:N``: Use at most ``N`` NICs (clamped to the number reachable);
+          ``N`` must be a positive integer.
 
     * - | ``RCCL_IB_SPLIT_DATA_THRESHOLD``
         | Minimum message size (in bytes) before the payload is split across
-        | multiple NICs/QPs.
-        | Smaller messages use one QP for data to reduce latency.
-        | This variable can be leveraged when NIC Fusion (``NCCL_NET_MERGE_LEVEL``) and/or data splitting on QPs (``NCCL_IB_SPLIT_DATA_ON_QPS``) is enabled.
-      - | Integer value in bytes (default: ``128``)
-        | ``N``: Split only when message size >= N bytes
+          multiple NICs or QPs. Smaller messages use one QP for data to reduce
+          latency. This variable can be used when NIC Fusion
+          (``NCCL_NET_MERGE_LEVEL``) or data splitting on QPs
+          (``NCCL_IB_SPLIT_DATA_ON_QPS``) is enabled.
+      - | ``128``
+      - | Integer value in bytes.
+        | ``N``: Split only when message size >= N bytes.
 
     * - | ``NCCL_NCHANNELS_PER_NET_PEER``
         | Sets the number of channels used per network (remote) peer.
@@ -291,19 +324,19 @@ in the following table.
         | with ``ncclInvalidArgument`` at communicator initialization.
 
     * - | ``NCCL_RINGS``
-        | Defines custom ring topology.
-      - | Ring topology specification string
-        | Overrides automatic topology detection
+        | Defines custom ring topology, overriding automatic topology detection.
+      - | Unset
+      - | Ring topology specification string.
 
     * - | ``RCCL_TREES``
         | Defines custom tree topology.
-      - | Tree topology specification string
-        | Alternative to ring topology
+      - | Unset
+      - | Tree topology specification string.
 
     * - | ``NCCL_RINGS_REMAP``
         | Controls ring remapping for specific topologies.
-      - | Remapping specification string
-        | Used with Rome 4P2H topology
+      - | Unset
+      - | Remapping specification string. Used with Rome 4P2H topology.
 
 Development and testing (advanced)
 ==================================
@@ -314,27 +347,31 @@ intended for debugging and development purposes.
 
 .. list-table::
     :header-rows: 1
-    :widths: 40,60
+    :widths: 38 22 40
 
     * - **Environment variable**
+      - **Default value**
       - **Values**
 
     * - | ``CUDA_LAUNCH_BLOCKING``
         | Controls CUDA kernel launch blocking behavior.
-      - | ``0``: Non-blocking launches
-        | ``1`` or non-zero: Blocking launches
+      - | ``0``
+      - | ``0``: Non-blocking launches.
+        | ``1`` or any non-zero value: Blocking launches.
 
     * - | ``NCCL_COMM_ID``
         | Enables multi-process mode in test applications.
-      - | Any non-empty value enables multi-process mode
-        | Used with test executables for distributed testing
+      - | Unset
+      - | Any non-empty value enables multi-process mode.
+        | Used with test executables for distributed testing.
 
     * - | ``NCCL_DISABLE_MEM_MANAGER``
         | Disables the internal RCCL memory manager. This is an internal
           parameter intended for testing and debugging only. When the memory
           manager is disabled, ``ncclCommSuspend``, ``ncclCommResume``, and
           ``ncclCommMemStats`` return ``ncclInvalidUsage``.
-      - | ``0``: Memory manager enabled (default).
+      - | ``0``
+      - | ``0``: Memory manager enabled.
         | ``1``: Memory manager disabled.
 
     * - | ``NCCL_NO_CACHE``
@@ -346,11 +383,11 @@ intended for debugging and development purposes.
           parsed once on first use, so it must be set before RCCL reads any
           parameters. ``NCCL_NO_CACHE`` itself is always cached and cannot
           be listed.
-      - | Unset (default): all parameters are cached after first read.
+      - | Unset
+      - | Unset: All parameters are cached after first read.
         | Comma-separated list of parameter names (for example,
-          ``NCCL_DEBUG,NCCL_ALGO``): disable caching for those keys only.
-        | ``ALL``: disable caching for every parameter except
-          ``NCCL_NO_CACHE``.
+          ``NCCL_DEBUG,NCCL_ALGO``): Disable caching for those keys only.
+        | ``ALL``: Disable caching for every parameter except ``NCCL_NO_CACHE``.
 
 Multi-communicator ordering
 ===========================
@@ -361,16 +398,18 @@ application adds explicit synchronization between streams.
 
 .. list-table::
     :header-rows: 1
-    :widths: 40,60
+    :widths: 38 22 40
 
     * - **Environment variable**
+      - **Default value**
       - **Values**
 
     * - | ``NCCL_LAUNCH_ORDER_IMPLICIT``
         | Serializes RCCL operations across different communicators on the
-        | same device according to their host-side launch sequence. This
-        | provides deterministic execution order for multi-communicator
-        | workloads such as chained collectives where one operation's
-        | output feeds into the next.
-      - | ``0``: Disabled (default).
+          same device according to their host-side launch sequence. This
+          provides deterministic execution order for multi-communicator
+          workloads such as chained collectives where one operation's
+          output feeds into the next.
+      - | ``0``
+      - | ``0``: Disabled.
         | ``1``: Enabled. Operations execute in host launch order.

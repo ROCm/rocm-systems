@@ -1,6 +1,6 @@
 .. meta::
-   :description: Instruction on how to install the RCCL library for collective communication primitives using prebuilt packages
-   :keywords: RCCL, ROCm, library, API, install
+   :description: Install RCCL, AMD's collective communication library, using prebuilt ROCm packages or the ROCm technology preview on Linux.
+   :keywords: RCCL, ROCm, install, apt, dnf, zypper, amdrocm, TheRock, rccl-dev, package manager, Linux, collective communication
 
 .. _install:
 
@@ -23,7 +23,7 @@ For advanced workflows, source builds, or custom configurations, see
    ROCm is transitioning to a new packaging scheme. The package names you use
    depend on which ROCm release stream you are installing:
 
-   * **ROCm 7.2 and earlier (production):** packages use the ``rccl`` /
+   * **ROCm 7.2 and earlier (production):** packages use the ``rccl`` or
      ``rccl-dev`` naming scheme and are installed from the production ROCm
      repositories. See :ref:`install-rocm`.
    * **ROCm 7.13.0 technology preview (built with TheRock):** packages use the

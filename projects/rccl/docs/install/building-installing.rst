@@ -1,12 +1,12 @@
 .. meta::
-   :description: Information on how to build the RCCL library from source code
-   :keywords: RCCL, ROCm, library, API, build, install
+   :description: Build the RCCL library from source using the install script or CMake on Linux with ROCm. Covers prerequisites, GPU targets, and package installation.
+   :keywords: RCCL, ROCm, build from source, CMake, install.sh, install script, GPU targets, gfx942, gfx950, gfx90a, HIP, AMD Instinct, monorepo, rocm-systems
 
 .. _building-from-source:
 
-*************************
-Building RCCL from source
-*************************
+***********************
+Build RCCL from source
+***********************
 
 To build RCCL as part of the ROCm Core SDK, see `TheRock build instructions
 <https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
@@ -42,7 +42,7 @@ For ROCm installation instructions, see the :doc:`ROCm installation guide <rocm-
 Use the `install.sh helper script <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/install.sh>`_,
 located in the ``projects/rccl`` directory of the rocm-systems repository,
 to build and install RCCL with a single command. It uses hard-coded configurations that can be specified directly
-when using cmake. However, it's a great way to get started quickly and provides an
+when using cmake. However, it is a great way to get started quickly and provides an
 example of how to build and install RCCL.
 
 Run the install script
@@ -135,7 +135,7 @@ The RCCL build and installation helper script options are as follows:
     To target specific GPUs and potentially reduce the build time, use ``--amdgpu_targets`` along with
     a semicolon (``;``) separated string list of the GPU targets.
 
-Building the library using CMake
+Build the library using CMake
 ================================
 
 RCCL has moved from the standalone ``ROCm/rccl`` repository into the
@@ -200,7 +200,7 @@ to ``CMAKE_INSTALL_PREFIX``, for example:
     CMake builds the component in debug mode unless ``DCMAKE_BUILD_TYPE`` is specified.
 
 
-Building the RCCL package and install package:
+Build the RCCL package and install package:
 ----------------------------------------------
 
 After you have cloned the repository and built the library as described in the previous section,
@@ -217,7 +217,7 @@ use this command to build the package on Debian-based distros:
    The RCCL package install process requires ``sudo`` or root access because it creates a directory
    named ``rccl`` in ``/opt/rocm/``. This is an optional step. RCCL can be used directly by including the path containing ``librccl.so``.
 
-Testing RCCL
+Test RCCL
 ============
 
 The RCCL unit tests are implemented using the Googletest framework in RCCL. These unit tests require Googletest 1.10
@@ -232,7 +232,7 @@ The RCCL unit test names follow this format:
     CollectiveCall.[Type of test]
 
 Filtering of the RCCL unit tests can be done using environment variables
-and by passing the ``--gtest_filter`` command line flag:
+and by passing the ``--gtest_filter`` command-line flag:
 
 .. code-block:: shell
 

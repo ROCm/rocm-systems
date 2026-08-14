@@ -1,6 +1,6 @@
 .. meta::
-   :description: RCCL is a stand-alone library that provides multi-GPU and multi-node collective communication primitives optimized for AMD GPUs
-   :keywords: RCCL, ROCm, library, API
+   :description: Full Doxygen API reference for RCCL, AMD's collective communication library for multi-GPU and multi-node workloads on ROCm.
+   :keywords: RCCL, ROCm, API reference, Doxygen, ncclAllReduce, ncclAllGather, ncclReduceScatter, ncclBroadcast, ncclSend, ncclRecv, collective communication, AMD GPU
 
 .. _api-library:
 

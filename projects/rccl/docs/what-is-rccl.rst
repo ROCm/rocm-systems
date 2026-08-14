@@ -1,31 +1,148 @@
 .. meta::
-   :description: RCCL is a stand-alone library that provides multi-GPU and multi-node collective communication primitives optimized for AMD GPUs
-   :keywords: RCCL, ROCm, library, API
+   :description: Learn about RCCL, AMD's collective communication library for multi-GPU and multi-node workloads on ROCm, and how it compares to NCCL.
+   :keywords: RCCL, ROCm, collective communication, multi-GPU, multi-node, NCCL, distributed training, AllReduce, AllGather, ReduceScatter, xGMI, InfiniBand, ncclComm_t, AMD Instinct
 
 .. _what-is:
 
-******************
+*************
 What is RCCL?
-******************
+*************
 
-The ROCm Communication Collectives Library (RCCL) includes multi-GPU and
-multi-node collective communication primitives optimized for AMD GPUs.
-It implements routines such as ``all-reduce``, ``all-gather``, ``reduce``,
-``broadcast``, ``reduce-scatter``, ``gather``, ``scatter``, ``all-to-allv``,
-and ``all-to-all``, as well as direct point-to-point (GPU-to-GPU) send
-and receive operations. It is optimized to achieve high bandwidth
-on platforms using PCIe and xGMI and networking using InfiniBand Verbs or TCP/IP
-sockets. RCCL supports an arbitrary number of GPUs installed in a single node
-or multiple nodes and can be used in either
-single- or multi-process (for example, MPI) applications.
+The ROCm Communication Collectives Library (RCCL, pronounced "rickle") is
+AMD's open-source library for collective communication across multiple GPUs
+and multiple nodes. It is the primary communication backbone for distributed
+workloads on AMD hardware — from multi-GPU training runs on a single server
+to large-scale cluster jobs spanning hundreds of nodes.
 
-The collective operations are implemented using ring and tree algorithms and have been optimized
-for throughput and latency by leveraging topology awareness, high-speed interconnects,
-and RDMA-based collectives. For best performance, small operations can be either
-batched into larger operations or aggregated through the API.
+RCCL is forked from the NVIDIA Collective Communications Library (NCCL) and
+implements an identical API, so applications that already use NCCL can run on
+AMD hardware without source changes.
 
-RCCL uses PCIe and xGMI high-speed interconnects for intra-node communication
-as well as InfiniBand, RoCE, and TCP/IP for inter-node communication.
-It supports an arbitrary number of GPUs installed in a single-node or
-multi-node platform and can easily integrate into
-single- or multi-process (for example, MPI) applications.
+What RCCL does
+==============
+
+RCCL provides the communication primitives that parallel and distributed
+workloads need to coordinate data across GPUs. It handles two broad categories
+of operations:
+
+**Collective operations** involve all participating GPUs simultaneously:
+
+- ``AllReduce`` — reduce a tensor across all GPUs and distribute the result
+- ``AllGather`` — gather data from all GPUs and give every GPU the full tensor
+- ``ReduceScatter`` — reduce across all GPUs and scatter the result
+- ``Broadcast`` — send data from one GPU to all others
+- ``Reduce`` — reduce across all GPUs and collect the result on one GPU
+- ``AllToAll`` and ``AllToAllv`` — exchange distinct data between every pair of GPUs
+- ``Gather`` and ``Scatter`` — collect or distribute data at a root GPU
+
+**Point-to-point operations** transfer data directly between two GPUs:
+
+- ``Send`` and ``Recv`` — direct GPU-to-GPU data transfer
+
+For the full API, see the :ref:`API reference <api-library>`. For a detailed
+explanation of what each operation does and how the communicator model works,
+see :doc:`Collective operations in RCCL <./conceptual/collective-operations>`.
+
+Why RCCL is useful
+==================
+
+Training large neural networks or running large-scale simulations requires
+distributing data and model state across many GPUs. Without a library like
+RCCL, each application would need to implement its own communication logic,
+handle hardware topology, manage network transports, and tune for bandwidth
+and latency — a significant and error-prone engineering effort.
+
+RCCL abstracts this complexity. It automatically:
+
+- Discovers the hardware topology (GPUs, CPUs, NICs, and interconnects)
+- Selects the best algorithm for each collective based on message size, node
+  count, and topology
+- Selects the best protocol (Low Latency, LL128, or Simple) for the target
+  hardware
+- Routes data over the highest-speed path available: xGMI for intra-node
+  GPU-to-GPU, PCIe as a fallback, and InfiniBand, RoCE (RDMA over Converged
+  Ethernet), or TCP/IP for inter-node traffic
+- Uses GPUDirect RDMA (GDR) and DMA-BUF to move data directly between the
+  NIC and GPU memory, bypassing the CPU
+
+The result is that distributed frameworks such as PyTorch, JAX, and
+TensorFlow-ROCm can offload all communication to RCCL and get near-peak
+interconnect bandwidth without application-level tuning.
+
+Who should use RCCL
+===================
+
+RCCL is the right choice for you if you are:
+
+- Running distributed deep learning on AMD GPUs. RCCL integrates
+  directly with PyTorch (via ``torch.distributed``), JAX, and
+  TensorFlow-ROCm. You likely use RCCL already without calling it directly.
+
+- Building a distributed framework or runtime on ROCm. RCCL exposes a
+  C API that you can call from any language or runtime that supports C
+  foreign-function interfaces.
+
+- Porting a NCCL-based application to AMD hardware. Because RCCL is
+  API-compatible with NCCL, a recompile against ``librccl.so`` is usually
+  all that is required.
+
+- Developing or benchmarking Message Passing Interface (MPI)-based HPC applications that need
+  high-performance GPU-aware collectives alongside MPI.
+
+RCCL is not a user-facing machine learning tool. You interact with it through
+a framework or by linking against the library directly in your own code.
+
+How RCCL works
+==============
+
+When you initialize a communicator, RCCL performs topology discovery to build
+a complete model of the hardware — which GPUs can communicate directly over
+xGMI, which require PCIe, and which nodes are reachable over the network.
+This model drives all subsequent decisions.
+
+For each collective call, RCCL selects an algorithm from its supported set:
+
+- **Ring** — data travels around a ring of GPUs; scales well for large messages
+- **Tree** — a reduction tree that reduces latency for small messages
+- **Hierarchical** — two-level approach for multi-node, combining fast
+  intra-node communication with inter-node transfers
+- **CollNet** — offloads the reduction to a smart network switch when
+  available
+
+Within the chosen algorithm, RCCL picks a protocol that matches the
+latency-bandwidth tradeoff for the message size and hardware. Operations are
+launched from the host and executed on the GPU; a CPU proxy thread handles
+network-side progress for multi-node operations.
+
+For a detailed breakdown of each algorithm, when RCCL selects it, and the
+trade-offs it makes, see
+:doc:`Collective algorithms in RCCL <./conceptual/collective-algorithms>`.
+
+NCCL compatibility
+==================
+
+RCCL tracks NCCL closely. Each RCCL release declares compatibility with one or
+more NCCL versions, meaning the API, behavior, and environment variables from
+those NCCL versions are supported. Applications do not need to be rewritten or
+reconfigured to run on RCCL; in most cases, relinking against ``librccl.so``
+is sufficient.
+
+For the full compatibility history, see the
+:doc:`RCCL release notes <./release-notes>`.
+
+.. note::
+
+   Some NCCL environment variables and features are NVIDIA-specific (for
+   example, those that depend on NVLink Switch or CUDA driver internals) and
+   have no effect or equivalent on AMD hardware. RCCL documents these
+   differences where they are relevant.
+
+Related topics
+==============
+
+- :doc:`Install RCCL <./install/installation>` — get RCCL running on your system
+- :doc:`Build RCCL from source <./install/building-installing>` — build options and CMake configuration
+- :doc:`RCCL usage tips <./how-to/rccl-usage-tips>` — environment variables and tuning guidance
+- :doc:`Collective algorithms in RCCL <./conceptual/collective-algorithms>` — algorithm and protocol tuning
+- :ref:`API reference <api-library>` — full C API documentation
+- :ref:`Environment variables <env-variables>` — complete list of runtime knobs

@@ -1,13 +1,14 @@
 .. meta::
-   :description: RCCL attributions information
-   :keywords: RCCL, ROCm, library, API, attributions
+   :description: Attributions for RCCL, including NVIDIA NCCL source contributions and the NVIDIA Tools Extension (NVTX) SDK license information.
+   :keywords: RCCL, ROCm, attributions, NVTX, BSD license, NVIDIA NCCL, open source, third-party
 
 .. toctree::
    :maxdepth: 4
    :caption: Attributions
 
+************
 Attributions
-============
+************
 
 Contains contributions from NVIDIA.
 

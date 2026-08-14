@@ -1,12 +1,12 @@
 .. meta::
-   :description: RCCL library precision support
-   :keywords: RCCL, ROCm, API library, API reference, data type, support, precision
+   :description: Reference table of data types supported by RCCL, including float, bfloat16, and FP8, and their full or partial support status for collective operations.
+   :keywords: RCCL, ROCm, data type support, precision, ncclDataType_t, float, bfloat16, FP8, fp8_e4m3, rccl_bfloat8, half, int32, uint8, collective operations
 
 .. _rccl-data-type-support:
 
-******************************************
+**********************
 RCCL precision support
-******************************************
+**********************
 
 This topic lists the data type support for the RCCL library on AMD GPUs.
 

@@ -1,6 +1,6 @@
 .. meta::
-   :description: RCCL is a stand-alone library that provides multi-GPU and multi-node collective communication primitives optimized for AMD GPUs
-   :keywords: RCCL, ROCm, library, API
+   :description: RCCL documentation hub for AMD's collective communication library — install, build, tutorials, how-to guides, conceptual articles, and API reference.
+   :keywords: RCCL, ROCm, collective communication, multi-GPU, multi-node, AllReduce, AllGather, ReduceScatter, AllToAll, AMD Instinct, distributed training, HIP, MPI, InfiniBand
 
 .. _index:
 
@@ -8,10 +8,9 @@
 RCCL documentation
 ******************
 
-The ROCm Communication Collectives Library (RCCL) is a stand-alone library
-that provides multi-GPU and multi-node collective communication primitives
-optimized for AMD GPUs. It uses PCIe and xGMI high-speed interconnects.
-To learn more, see :doc:`what-is-rccl`
+The ROCm Communication Collectives Library (RCCL) (pronounced "rickle") is an open-source, host-initiated library enabling collective communications executed via GPU -- it also
+supports direct send/receive operations. RCCL supports collective algorithms across multiple processes and nodes using networking through Infiniband Verbs or TCP/IP sockets. RCCL is forked from
+the NVIDIA Collective Communication Library (NCCL); RCCL maintains an identical API library to NCCL. 
 
 The RCCL public repository is located within the rocm-systems repo at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl>`_.
 
@@ -22,28 +21,35 @@ The RCCL public repository is located within the rocm-systems repo at `<https://
 
     * :doc:`Install RCCL <./install/installation>`
     * :doc:`Build from source <./install/building-installing>`
-    * :doc:`Running RCCL using Docker <./install/docker-install>`
+    * :doc:`Run RCCL using Docker <./install/docker-install>`
+
+  .. grid-item-card:: Conceptual
+
+    * :doc:`Collective operations in RCCL <./conceptual/collective-operations>`
+    * :doc:`Collective algorithms in RCCL <./conceptual/collective-algorithms>`
+    * :doc:`Collective protocols in RCCL <./conceptual/collective-protocols>`
+    * :doc:`Hardware-specific optimizations <./conceptual/hardware-specific-optimizations>`
+    * :doc:`Fault tolerance <./conceptual/fault-tolerance>`
 
   .. grid-item-card:: How to
 
-    * :doc:`Using the RCCL Tuner plugin <./how-to/using-rccl-tuner-plugin-api>`
-    * :doc:`Using the NCCL Net plugin <./how-to/using-nccl>`
-    * :doc:`Fault tolerance in RCCL <./how-to/fault-tolerance>`
-    * :doc:`Troubleshoot RCCL <./how-to/troubleshooting-rccl>`
+    * :doc:`Run RCCL-Tests <./how-to/running-rccl-tests>`
+    * :doc:`Use the RCCL Recorder and Replayer <./how-to/rccl-recorder-replayer>`
+    * :doc:`Use the RCCL Tuner plugin <./how-to/using-rccl-tuner-plugin-api>`
+    * :doc:`Use the NCCL Net plugin <./how-to/using-nccl>`
     * :doc:`RCCL usage tips <./how-to/rccl-usage-tips>`
 
+  .. grid-item-card:: Tutorials
 
-  .. grid-item-card:: Examples
+    * :doc:`Create a RCCL program <./tutorials/create-a-rccl-program>`
 
-    * `RCCL Tuner plugin examples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/tuner/example>`_
-    * `NCCL Net plugin examples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/net/example>`_
-
-  .. grid-item-card:: API reference
+  .. grid-item-card:: Reference
 
     * :ref:`Library specification<library-specification>`
     * :ref:`api-library`
-    * :doc:`Precision support <./api-reference/data-type-support>`
+    * :doc:`Precision support <./reference/data-type-support>`
     * :ref:`Environment variables<env-variables>`
+    * :doc:`Troubleshooting <./reference/troubleshooting-rccl>`
 
 To contribute to the documentation, see
 `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

@@ -1,12 +1,12 @@
 .. meta::
-   :description: How RCCL handles errors and supports fault tolerance for multi-GPU and multi-node collective communication on AMD GPUs
-   :keywords: RCCL, ROCm, AMD, fault tolerance, error handling, communicator abort, shrink, grow, revoke
+   :description: Learn how RCCL handles errors and supports fault tolerance for multi-GPU and multi-node collective communication on AMD Instinct GPUs.
+   :keywords: RCCL, ROCm, fault tolerance, error handling, ncclCommAbort, ncclCommShrink, ncclCommGrow, ncclCommRevoke, ncclCommSuspend, ncclCommResume, non-blocking communicator, ncclResult_t, AMD Instinct
 
 .. _fault-tolerance:
 
-***************************
+***********************
 Fault tolerance in RCCL
-***************************
+***********************
 
 Large-scale jobs running across many AMD GPUs and nodes must survive failures
 such as a network link going down, an ECC error, a node crash, or a process that
@@ -119,13 +119,13 @@ asynchronous errors at the same time, instead of blocking in
 
 .. _ft-recovery:
 
-Recovering from a failure
+Recover from a failure
 =========================
 
 RCCL offers several recovery strategies, depending on how much of the job you
 want to preserve:
 
-* **Abort and re-create** the whole communicator -- a coarse, job-wide restart.
+* **Abort and re-create** the whole communicator — a coarse, job-wide restart.
 * **Shrink** to drop the failed ranks and keep running with the survivors.
 * **Grow** to bring replacement ranks back in and return to full size.
 * **Revoke** (RCCL-specific) to abort in-flight work without destroying the
@@ -136,7 +136,7 @@ call when :cpp:func:`ncclCommAbort` is invoked.
 
 .. _ft-shrink:
 
-Shrinking a communicator
+Shrink a communicator
 ========================
 
 :cpp:func:`ncclCommShrink` creates a new communicator by removing ranks from an
@@ -178,7 +178,7 @@ Shrink flags:
 
 .. _ft-grow:
 
-Growing a communicator
+Grow a communicator
 ======================
 
 :cpp:func:`ncclCommGrow` creates a new communicator by adding ranks. A
@@ -248,7 +248,7 @@ Notes:
 
 .. _ft-revoke:
 
-Revoking a communicator
+Revoke a communicator
 =======================
 
 :cpp:func:`ncclCommRevoke` aborts in-flight collectives **without** destroying
@@ -296,7 +296,7 @@ Behavior:
 
 .. _ft-finalize-destroy:
 
-Finalizing and destroying
+Finalize and destroy
 =========================
 
 For a clean shutdown, call :cpp:func:`ncclCommFinalize` to drain outstanding
