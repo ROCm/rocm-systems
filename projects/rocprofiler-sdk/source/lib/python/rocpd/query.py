@@ -71,9 +71,14 @@ def export_sqlite_query(
     """
 
     try:
-        import pandas as pd
-
         conn = conn.connection if isinstance(conn, RocpdImportData) else conn
+
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError(
+                "pandas module not found. Output to other formats requires pandas. Please install it using 'pip install pandas'\n"
+            )
 
         # 1) Run the query via pandas
         df = pd.read_sql_query(query, conn, params=params)
