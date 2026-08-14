@@ -84,6 +84,8 @@ if(WIN32)
 
   add_dependencies(GracefulExit hipGracefulExit_exe)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGracefulExit_exe)
+endif()
+
 if(WIN32 AND HIP_PLATFORM MATCHES "amd")
   add_executable(hipStreamKilledWorkerThread_exe EXCLUDE_FROM_ALL
                  hipStreamKilledWorkerThread_exe.cc)
