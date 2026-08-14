@@ -992,6 +992,9 @@ memory:
   Unit_hipMemPoolExportPointer_Negative:
     <<: *level_2
     tags: [alloc]
+  Unit_hipMemPoolExportPointer_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolExportToShareableHandle_SameProc:
     <<: *level_2
     tags: [alloc]
@@ -1007,12 +1010,21 @@ memory:
   Unit_hipMemPoolExportToShareableHandle_Negative:
     <<: *level_2
     tags: [alloc]
+  Unit_hipMemPoolExportToShareableHandle_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolImportFromShareableHandle_Negative:
     <<: *level_2
     tags: [alloc]
+  Unit_hipMemPoolImportFromShareableHandle_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolImportPointer_Negative:
     <<: *level_2
     tags: [alloc]
+  Unit_hipMemPoolImportPointer_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPtrGetInfo_Basic:
     <<: *level_2
     tags: [query]
@@ -1257,6 +1269,9 @@ memory:
   Unit_hipMemPoolSetAccess_NegTst:
     <<: *level_2
     tags: [alloc]
+  Unit_hipMemPoolSetAccess_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolGetAccess_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
@@ -1268,6 +1283,9 @@ memory:
   Unit_hipMemPoolGetAccess_GetDefMempoolOfEachDevice:
     <<: *level_2
     tags: [alloc]
+  Unit_hipMemPoolGetAccess_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolSetGetAttribute_Positive_Default:
     <<: *level_2
     tags: [alloc]
@@ -1290,6 +1308,9 @@ memory:
   Unit_hipMemPoolSetAttribute_ResetMemHighAttr:
     <<: *level_2
     tags: [alloc]
+  Unit_hipMemPoolSetAttribute_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolGetAttribute_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
@@ -1313,6 +1334,9 @@ memory:
   Unit_hipMemPoolGetAttribute_CheckDefaultValues:
     <<: *level_2
     tags: [alloc]
+  Unit_hipMemPoolGetAttribute_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolCreate_Negative_Parameter:
     <<: *level_2
     tags: [alloc]
@@ -1325,9 +1349,15 @@ memory:
   Unit_hipMemPoolCreate_DeviceTest:
     <<: *level_2
     tags: [alloc, multigpu]
+  Unit_hipMemPoolCreate_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolDestroy_Negative_Parameter:
     <<: *level_2
     tags: [alloc]
+  Unit_hipMemPoolDestroy_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolMaxAlloc:
     <<: *level_2
     tags: [alloc]
@@ -1347,6 +1377,9 @@ memory:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]
     tags: [alloc]
+  Unit_hipMemPoolTrimTo_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMallocFromPoolAsync_Basic_OneAlloc:
     <<: *level_2
     tags: [alloc]
