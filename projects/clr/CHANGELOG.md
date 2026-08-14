@@ -157,6 +157,7 @@ The HIP runtime now includes the hostname, GPU index, and kernel name in GPU fau
 * New HIP device attributes
     - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs.
     - `hipDeviceAttributeDmaBufSupported` is now supported, enabling buffer sharing.
+    - `hipDeviceAttributeHostAllocDmaBufSupported` is now supported, enabling host-allocated buffer sharing.
 
 ### Removed
 * roc-obj* tools and Perl dependency.

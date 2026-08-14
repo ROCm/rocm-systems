@@ -212,11 +212,8 @@ get_absolute_exe_filepath(std::string exe_name);
 std::string
 get_absolute_lib_filepath(std::string lib_name);
 
-bool
-exists(const std::string& name);
-
-bool
-is_file(std::string _name);
+std::string
+absolute(std::string _path);
 
 std::string
 get_cwd();
@@ -292,7 +289,8 @@ main(int argc, char** argv)
     auto rocprofsys_root_from_env = rocprofsys::get_env<std::string>(
         "rocprofiler_systems_ROOT",
         rocprofsys::get_env<std::string>(rocprofsys::env_vars::ROOT, ""));
-    if(!rocprofsys_root_from_env.empty() && exists(rocprofsys_root_from_env))
+    if(!rocprofsys_root_from_env.empty() &&
+       path::is_directory(absolute(rocprofsys_root_from_env)))
     {
         bin_search_paths.emplace_back(rocprofsys_root_from_env + "/bin");
         bin_search_paths.emplace_back(rocprofsys_root_from_env +
@@ -312,7 +310,7 @@ main(int argc, char** argv)
     }
 
     auto _rocprofsys_exe_filepath = path::realpath(get_absolute_exe_filepath(argv[0]));
-    if(!exists(_rocprofsys_exe_filepath))
+    if(!path::is_regular_file(absolute(_rocprofsys_exe_filepath)))
         _rocprofsys_exe_filepath =
             path::realpath(get_absolute_exe_filepath(rocprofsys_get_exe_realpath()));
     bin_search_paths.emplace_back(path::parent_path(_rocprofsys_exe_filepath));
@@ -2765,12 +2763,15 @@ absolute(std::string _path)
 std::string
 get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
 {
-    if(!_name.empty() && (!exists(_name) || !is_file(_name)))
+    if(!_name.empty() && !path::is_regular_file(absolute(_name)))
     {
         auto _orig = _name;
         for(auto itr : _search_paths)
         {
-            if(!path::is_directory(itr) || is_file(itr)) itr = path::parent_path(itr);
+            if(!path::is_directory(itr))
+            {
+                itr = path::parent_path(itr);
+            }
 
             auto _exists = false;
             ROCPROFSYS_ADD_LOG_ENTRY("searching", itr, "for", _name);
@@ -2778,7 +2779,7 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
                 { absolute(fmt::format("{}/{}", itr, _name)),
                   absolute(fmt::format("{}/{}", itr, path::filename(_name))) })
             {
-                _exists = exists(pitr) && is_file(pitr);
+                _exists = path::is_regular_file(pitr);
                 if(_exists)
                 {
                     _name = pitr;
@@ -2790,7 +2791,7 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
             if(_exists) break;
         }
 
-        if(!exists(_name))
+        if(!path::is_regular_file(absolute(_name)))
         {
             auto _search_paths_v = fmt::format("{}", fmt::join(bin_search_paths, ", "));
             verbprintf(
@@ -2843,27 +2844,13 @@ get_absolute_lib_filepath(std::string lib_name)
 {
     auto _orig_name = lib_name;
     lib_name        = get_absolute_filepath(std::move(lib_name), lib_search_paths);
-    if(_orig_name == lib_name && !exists(lib_name) &&
+    if(_orig_name == lib_name && !path::is_regular_file(absolute(lib_name)) &&
        lib_name.find(".so") == std::string::npos &&
        lib_name.find(".a") == std::string::npos)
     {
         lib_name = get_absolute_filepath(lib_name + ".so", lib_search_paths);
     }
     return lib_name;
-}
-
-bool
-exists(const std::string& name)
-{
-    return filepath::exists(absolute(name));
-}
-
-bool
-is_file(std::string _name)
-{
-    _name = path::realpath(_name);
-    struct stat buffer;
-    return (stat(_name.c_str(), &buffer) == 0 && S_ISREG(buffer.st_mode) != 0);
 }
 
 std::string
@@ -2895,10 +2882,10 @@ find_dyn_api_rt()
         rocprofsys::get_env<std::string>("DYNINSTAPI_RT_LIB", _dyn_api_rt_base + ".so");
     auto _dyn_api_rt_abs = get_absolute_lib_filepath(_dyn_api_rt_env);
 
-    if(!exists(_dyn_api_rt_abs))
+    if(!path::is_regular_file(absolute(_dyn_api_rt_abs)))
         _dyn_api_rt_abs = get_absolute_lib_filepath(_dyn_api_rt_base + ".a");
 
-    if(exists(_dyn_api_rt_abs))
+    if(path::is_regular_file(absolute(_dyn_api_rt_abs)))
     {
         rocprofsys::set_env<string_t>("DYNINSTAPI_RT_LIB", _dyn_api_rt_abs, 1);
         rocprofsys::set_env<string_t>("DYNINST_REWRITER_PATHS",
