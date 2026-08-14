@@ -881,6 +881,106 @@ TEST_CASE("Unit_HRR_StressApis_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
+// Workload: hipStreamWriteValue32 / hipStreamWriteValue64
+//
+// Exercises hipStreamWriteValue32 and hipStreamWriteValue64. These are replayed
+// faithfully (replay-only fix: the destination void* ptr is translated via the
+// alloc_map and the stream is translated); replay must reproduce the written
+// values, validated via D2H.
+//
+// Each written value gets its OWN D2H readback rather than one combined 16-byte
+// readback, because hrr-playback's D2H validator falls back to candidate float
+// encodings (f32/bf16/f16/f64, atol=rtol=1e-3) when the bytes differ and skips
+// byte-identical elements. A 16-byte readback holding the 32-bit sentinel in the
+// low half of an 8-byte slot decodes, under the f64 candidate, to the subnormal
+// 1.68e-314; a lost 32-bit write reads back as 0.0, which is inside the 1e-3
+// tolerance, so the buffer would be accepted as "f64 within tolerance" while the
+// 64-bit slot stayed byte-identical (skipped). Splitting the readbacks makes the
+// 32-bit blob 4 bytes, and 4 % 8 != 0 excludes the f64 candidate outright; the
+// remaining candidates reject 0.0-vs-0xCAFEBABE by ~1000x (f32 sees -8.35e6
+// against a tolerance of 8.35e3). Unit_HRR_StreamWriteValueRoundtrip also pins
+// HIP_HRR_D2H_EXACT=1 so the replay gate really is byte-for-byte.
+// ===========================================================================
+TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+
+  // Stream write/wait value is an optional device capability. Gate on the same
+  // attribute every other test of these APIs uses (catch/unit/stream/
+  // hipStreamValue.cc, Unit_HRR_StreamAdvanced2_Direct) so an unsupported
+  // target skips instead of aborting the capture subprocess.
+  int canUseStreamValue = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&canUseStreamValue,
+                                  hipDeviceAttributeCanUseStreamWaitValue, 0));
+  if (!canUseStreamValue) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
+  }
+
+  constexpr uint64_t kVal64 = 0xDEADBEEFFEEDFACEull;
+  constexpr uint32_t kVal32 = 0xCAFEBABEu;
+  // Increment slot: base value, then a read-modify-write increment on top of it.
+  // 0x0A0A0A0A + 0xF4E3F0C4 wraps to 0xFEEDFACE.
+  constexpr uint32_t kIncBase = 0x0A0A0A0Au;
+  constexpr uint32_t kIncDelta = 0xF4E3F0C4u;
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  // Two 64-bit slots so the 32-bit write and the 64-bit write land in disjoint,
+  // fully-defined memory.
+  uint64_t* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, 2 * sizeof(uint64_t)));
+  HIP_CHECK(hipMemset(d, 0, 2 * sizeof(uint64_t)));
+
+  // Separate slot for the flags-bearing write. Allocated 8 bytes wide so a
+  // 64-bit-granular implementation of the increment cannot overrun it.
+  uint32_t* inc = nullptr;
+  HIP_CHECK(hipMalloc(&inc, sizeof(uint64_t)));
+  HIP_CHECK(hipMemset(inc, 0, sizeof(uint64_t)));
+
+  // 64-bit stream write into slot0.
+  HIP_CHECK(hipStreamWriteValue64(s, d, kVal64, 0));
+  // 32-bit stream write into slot1 (low 32 bits); the high 32 bits stay zero.
+  HIP_CHECK(hipStreamWriteValue32(s, d + 1, kVal32, 0));
+
+  // Flags are plumbed through capture and replay, so exercise a non-default one.
+  // hipExtStreamWriteValueIncrement turns the write into a read-modify-write,
+  // which makes replay fidelity depend on the earlier writes to the same slot
+  // having been replayed too. The increment flag is not guaranteed on every
+  // target, so tolerate a rejection: capture only records successful calls, so
+  // on a target that rejects it the slot simply keeps kIncBase in both the
+  // recorded blob and the replay.
+  HIP_CHECK(hipStreamWriteValue32(s, inc, kIncBase, 0));
+  hipError_t incErr = hipStreamWriteValue32(s, inc, kIncDelta,
+                                            hipExtStreamWriteValueIncrement);
+  REQUIRE((incErr == hipSuccess || incErr == hipErrorInvalidValue
+           || incErr == hipErrorNotSupported));
+
+  HIP_CHECK(hipStreamSynchronize(s));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // One readback per value: an 8-byte blob for the 64-bit write and 4-byte blobs
+  // for the 32-bit ones (see the note above on the f64 candidate encoding).
+  uint64_t h64 = 0;
+  HIP_CHECK(hipMemcpy(&h64, d, sizeof(h64), hipMemcpyDeviceToHost));
+  REQUIRE(h64 == kVal64);
+
+  uint32_t h32 = 0;
+  HIP_CHECK(hipMemcpy(&h32, d + 1, sizeof(h32), hipMemcpyDeviceToHost));
+  REQUIRE(h32 == kVal32);
+
+  uint32_t hInc = 0;
+  HIP_CHECK(hipMemcpy(&hInc, inc, sizeof(hInc), hipMemcpyDeviceToHost));
+  // Deliberately not asserting the exact sum: the point of this slot is that
+  // replay reproduces whatever the increment produced at capture time. Only
+  // assert that a successful increment of a non-zero delta changed the slot.
+  if (incErr == hipSuccess) REQUIRE(hInc != kIncBase);
+
+  HIP_CHECK(hipFree(inc));
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+}
+
+// ===========================================================================
 // Pitched device-to-device memset (hipMemsetD2D*): shared geometry
 //
 // PITCH must be strictly greater than WIDTH.  CLR short-circuits the pitched

@@ -786,6 +786,58 @@ TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
   REQUIRE(ret == 2);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_StreamWriteValue_Direct (hipStreamWriteValue32 /
+ *     hipStreamWriteValue64, including one hipExtStreamWriteValueIncrement
+ *     write) and replay it.  Replay must reproduce every written value.
+ *   - Replay with HIP_HRR_D2H_EXACT=1.  This is deliberate, not decoration:
+ *     with the default tolerant validator a lost 32-bit write is accepted as
+ *     "f64 within tolerance" on any blob whose length is a multiple of 8, and
+ *     the increment slot differs from its no-increment value by far less than
+ *     atol=rtol=1e-3 of the recorded magnitude.  Exact mode makes the playback
+ *     exit code (the real gate) a byte-for-byte verdict.
+ *   - Gated on hipDeviceAttributeCanUseStreamWaitValue: on a target without
+ *     support the workload skips, which would leave too few events / no D2H
+ *     blob for the archive assertions, so skip the roundtrip as well.
+ */
+HIP_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
+  int canUseStreamValue = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&canUseStreamValue,
+                                  hipDeviceAttributeCanUseStreamWaitValue, 0));
+  if (!canUseStreamValue) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
+  }
+
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwritevalue"};
+  hrr_capture_direct("Unit_HRR_StreamWriteValue_Direct", cap.path);
+
+  auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_D2H_EXACT", "1"}});
+  INFO("Playback stdout:\n" << out);
+  INFO("Playback exit code: " << ret);
+#ifdef _WIN32
+  // Same policy as hrr_run_playback: on the Windows consumer-iGPU CI target
+  // replay is not guaranteed to reproduce device output bit-for-bit, so D2H
+  // fidelity is best-effort there.  A crash still fails via ret < 128.
+  REQUIRE(ret < 128);
+  if (ret != 0) return;
+#else
+  REQUIRE(ret == 0);  // exact-mode D2H: any differing byte fails the replay
+#endif
+
+  // Assert the three sentinel blobs were actually compared, so a replay that
+  // silently validated nothing cannot pass on the exit code alone.
+  size_t pos = out.find("D2H checks");
+  REQUIRE(pos != std::string::npos);
+  size_t colon = out.find(':', pos);
+  REQUIRE(colon != std::string::npos);
+  int d2h_pass = 0;
+  sscanf(out.c_str() + colon + 1, " %d pass", &d2h_pass);
+  INFO("D2H pass=" << d2h_pass);
+  CHECK(d2h_pass >= 3);
+}
+
 // ---------------------------------------------------------------------------
 // Helper: capture a workload and replay it with byte-exact D2H validation.
 //

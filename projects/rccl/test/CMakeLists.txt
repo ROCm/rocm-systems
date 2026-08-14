@@ -161,6 +161,19 @@ if(BUILD_TESTS)
     dl
     fmt::fmt-header-only
   )
+
+  # Link libs for the host-only micro-test binary (test/host). Deliberately no
+  # HIP runtime on the link line, so any un-shimmed HIP API call surfaces as an
+  # undefined-symbol link error instead of silently binding to libamdhip64.so.
+  # HIP's *compile* requirements (device intrinsics, gfx codegen, headers) are
+  # applied in test/host/CMakeLists.txt via $<TARGET_PROPERTY:hip::*,...> (a
+  # CMake 3.16-safe stand-in for $<COMPILE_ONLY:hip::*>, which needs 3.27).
+  set(MICRO_TEST_LINK_LIBS
+    ${GTEST_BOTH_LIBRARIES}
+    Threads::Threads
+    dl
+    fmt::fmt-header-only
+  )
   if(OPENMP_TESTS_ENABLED)
     list(APPEND RCCL_COMMON_LINK_LIBS "${OpenMP_CXX_FLAGS}")
   endif()
@@ -795,5 +808,10 @@ if(BUILD_TESTS)
     COMPONENT tests
     RENAME "CTestTestfile.cmake"
   )
+
+  # Host-only micro-test binaries (rccl-UnitTestsMicro). The host/ CMakeLists
+  # is dual-mode: under BUILD_TESTS it builds only the in-RCCL-build micro-test
+  # target and returns; invoked standalone it builds rccl-HostUnitTests too.
+  add_subdirectory(host)
 
 endif()
