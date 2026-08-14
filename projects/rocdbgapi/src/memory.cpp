@@ -1363,7 +1363,8 @@ amd_dbgapi_address_dependency (
       }
     else
       {
-        if (!wave->architecture ().is_address_space_supported (*address_space))
+        if (!wave->architecture ().is_address_space_supported (*address_space)
+            || &(wave->process ()) != process)
           THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY);
 
         auto [lowered_address_space, lowered_address]
