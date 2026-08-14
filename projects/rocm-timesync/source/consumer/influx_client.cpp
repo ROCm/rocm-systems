@@ -36,7 +36,11 @@ influx_client::influx_client(
 {
     // test that host is reachable
     if (!ping())
-        throw std::runtime_error("Failed to connect to the database");
+        throw std::runtime_error("Failed to connect to the database host");
+
+    // create database if it does not exist
+    if (!ensure_database())
+        throw std::runtime_error("Failed to create the database");
 }
 
 bool
@@ -322,6 +326,20 @@ influx_client::ping() const
     curl_easy_cleanup(curl);
 
     return (rc == CURLE_OK && http_code == 204);
+}
+
+bool
+influx_client::ensure_database()
+
+{
+    std::ostringstream q;
+
+    q << "CREATE DATABASE " << database_;
+    auto response = query(q.str());
+    if(response.empty())
+        return false;
+
+    return true;
 }
 
 bool

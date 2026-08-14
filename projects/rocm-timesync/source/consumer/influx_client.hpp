@@ -28,6 +28,7 @@ private:
     std::string make_ping_url() const;
     std::string query(std::string_view influxql);
     bool ping() const;
+    bool ensure_database();
 
     bool lookup_before(
         uint32_t gpu_id,
