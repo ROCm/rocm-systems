@@ -217,6 +217,7 @@ set(_ttc_headers
     capture_buffer.h
     leaf_context.h
     marker_stack.h
+    process_state.h
     record_function_callback.h
     record_function_installation.h
     scope_guard.h

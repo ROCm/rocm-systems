@@ -25,18 +25,24 @@ struct ThreadState
     std::vector<std::unique_ptr<c10::DebugInfoGuard>> guards;
 };
 
-inline thread_local ThreadState g_thread;
+// The calling thread's state. Each thread walks its own marker stack, so this
+// state is per-thread where process_state() is per-process.
+inline ThreadState& thread_state()
+{
+    static thread_local ThreadState state;
+    return state;
+}
 
 // Pushes `chain` onto the thread stack, skipping any leading prefix that is
 // already present. Returns the number of frames pushed.
 inline std::size_t push_with_prefix_dedup(const std::vector<StackEntry>& chain)
 {
-    const std::size_t maxc   = std::min(chain.size(), g_thread.stack.size());
-    std::size_t       common = 0;
+    std::vector<StackEntry>& stack  = thread_state().stack;
+    const std::size_t        maxc   = std::min(chain.size(), stack.size());
+    std::size_t              common = 0;
     for (; common < maxc; ++common)
     {
-        if (chain[common].marker != g_thread.stack[common].marker ||
-            chain[common].context != g_thread.stack[common].context)
+        if (chain[common].marker != stack[common].marker || chain[common].context != stack[common].context)
         {
             break;
         }
@@ -44,7 +50,7 @@ inline std::size_t push_with_prefix_dedup(const std::vector<StackEntry>& chain)
     std::size_t pushed = 0;
     for (std::size_t i = common; i < chain.size(); ++i)
     {
-        g_thread.stack.push_back(chain[i]);
+        stack.push_back(chain[i]);
         ++pushed;
     }
     return pushed;

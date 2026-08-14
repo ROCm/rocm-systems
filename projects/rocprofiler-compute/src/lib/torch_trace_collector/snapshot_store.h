@@ -73,6 +73,11 @@ public:
     static constexpr std::size_t kNumShards    = 64;
     static constexpr std::size_t kShardSoftCap = 10000;
 
+    explicit SnapshotStore(Stats& stats)
+        : stats_(stats)
+    {
+    }
+
     static std::size_t shard_index(const SnapshotKey& key) noexcept
     {
         return hash_snapshot_key(key) % kNumShards;
@@ -91,8 +96,8 @@ public:
                     // most recent save wins.
                     it->second = stack;
                     lru_touch(shard, key);
-                    inc(g_stats.snapshots_overwritten);
-                    inc(g_stats.snapshots_saved);
+                    inc(stats_.snapshots_overwritten);
+                    inc(stats_.snapshots_saved);
                     return;
                 }
                 while (shard.snapshots.size() >= kShardSoftCap)
@@ -101,7 +106,7 @@ public:
                 }
                 shard.snapshots.emplace(key, stack);
                 lru_touch(shard, key);
-                inc(g_stats.snapshots_saved);
+                inc(stats_.snapshots_saved);
             });
     }
 
@@ -118,7 +123,7 @@ public:
                 *out_stack = std::move(it->second);
                 shard.snapshots.erase(it);
                 lru_remove(shard, key);
-                inc(g_stats.snapshots_consumed);
+                inc(stats_.snapshots_consumed);
                 return true;
             });
     }
@@ -177,7 +182,7 @@ private:
         shard.lru_idx.emplace(key, tail);
     }
 
-    static void evict_oldest(Shard& shard)
+    void evict_oldest(Shard& shard)
     {
         // save() evicts until the shard is under its cap, so an empty order
         // would not terminate.
@@ -186,12 +191,11 @@ private:
         shard.lru_order.pop_front();
         shard.lru_idx.erase(oldest);
         shard.snapshots.erase(oldest);
-        inc(g_stats.snapshots_dropped);
+        inc(stats_.snapshots_dropped);
     }
 
+    Stats&                                        stats_;
     std::array<synchronized_t<Shard>, kNumShards> shards_;
 };
-
-inline SnapshotStore g_snapshots;
 
 }  // namespace torch_trace_collector::detail

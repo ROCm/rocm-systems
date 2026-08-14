@@ -4,6 +4,7 @@
 // Definitions for the torch_trace_collector capture hooks.
 
 #include "capture_buffer.h"
+#include "process_state.h"
 
 #include <string>
 #include <vector>
@@ -13,12 +14,12 @@ namespace torch_trace_collector::detail
 
 void start_capture()
 {
-    g_capture.start();
+    process_state().capture.start();
 }
 
 std::vector<std::string> stop_capture()
 {
-    return g_capture.stop();
+    return process_state().capture.stop();
 }
 
 }  // namespace torch_trace_collector::detail
