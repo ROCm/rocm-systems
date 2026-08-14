@@ -3077,7 +3077,6 @@
     },
     {
       "name": "Unit Tests - Fixtures (Debug)",
-      "serial_only": true,
       "description": "Non-MPI unit tests accessing internal symbols (Debug only)",
       "config": "unit_tests_fixtures_debug",
       "enabled": true

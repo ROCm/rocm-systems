@@ -3916,7 +3916,6 @@
     },
     {
       "name": "Unit Tests - Fixtures (Debug)",
-      "serial_only": true,
       "description": "Non-MPI unit tests accessing internal symbols (Debug only)",
       "config": "unit_tests_fixtures_debug",
       "enabled": true
@@ -3936,7 +3935,6 @@
     },
     {
       "name": "Asymmetric Visibility",
-      "serial_only": true,
       "description": "Comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
       "config": "asymmetric_visibility",
       "enabled": true
@@ -4533,14 +4531,12 @@
     },
     {
       "name": "Device API MPI - LSA Reduce/Copy",
-      "serial_only": true,
       "description": "DeviceApiMPITests memory/LSA pointer, barrier, reduce/copy, and custom RedOp coverage on 2 co-located ranks (NCCL_CUMEM_ENABLE=1)",
       "config": "device_api_mpi_lsa",
       "enabled": true
     },
     {
       "name": "Device API MPI - ReduceSumCopy Different Teams [5.1e]",
-      "serial_only": true,
       "description": "ncclLsaReduceSumCopy with different LSA sub-teams (full LSA src, innerFactor dst) on 4 co-located ranks, single node (NCCL_CUMEM_ENABLE=1)",
       "config": "device_api_mpi_different_teams",
       "enabled": true
@@ -4587,7 +4583,6 @@
     },
     {
       "name": "Symmetric Window Tests - Single Node",
-      "serial_only": true,
       "description": "Symmetric window registration tests for relaxed one-buffer path validation",
       "config": "symmetric_window_tests",
       "enabled": true
