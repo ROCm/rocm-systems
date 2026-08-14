@@ -173,29 +173,7 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
 
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
-// Returns true when the DDA fast path should be attempted for a collective
-// with the given total byte count.  gfx942Default is the per-collective
-// threshold for gfx942 (MI300).  gfx950Default optionally caps MI350; when 0,
-// gfx950 uses the user-configurable rcclParamDdaThreshold().
-// gfx1250 uses the user-configurable rcclParamDdaThreshold().
-// All other architectures return false (threshold 0).
-static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default = 0) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) return false;
-  size_t threshold;
-  if (IsArchMatch(comm->archName, "gfx1250")) {
-    threshold = (size_t)rcclParamDdaThreshold();
-  } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
-    if (comm->nRanks < 8) return false;
-    if (IsArchMatch(comm->archName, "gfx942")) {
-      threshold = gfx942Default;
-    } else {
-      threshold = gfx950Default ? gfx950Default : (size_t)rcclParamDdaThreshold();
-    }
-  } else {
-    return false;
-  }
-  return threshold > 0 && totalBytes <= threshold;
-}
+// rcclDdaEnabled() is now in rccl_wrap.cc (declared in rccl_common.h)
 
 // Check if symmteric kernels is requested for this collective
 static bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
@@ -438,7 +416,9 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     }
 #endif // ENABLE_ROCSHMEM
     // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
-    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), 4194304, 4194304)) {
+    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype),
+                       kDdaAlltoAllGfx942ThresholdBytes, kDdaAlltoAllGfx950ThresholdBytes,
+                       kDdaAlltoAllGfx1250ThresholdBytes)) {
       if (IsArchMatch(comm->archName, "gfx1250")) {
         const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
         const int64_t llThresh = rcclParamDdaLLThreshold();
