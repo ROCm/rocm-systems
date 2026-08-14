@@ -5,7 +5,6 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/sopp.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -18,43 +17,36 @@
 namespace rocjitsu {
 namespace cdna5 {
 
-void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nop_sopp(*this, wf); }
+void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SSethaltSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sethalt_sopp(*this, wf);
+void SSethaltSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+
+void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) {
+  constexpr uint32_t kSleepClocksPerUnit = 64;
+  wf.set_sleep_cycles(kSleepClocksPerUnit *
+                      (static_cast<uint32_t>(simm16.encoding_value_) & 0x7Fu));
+  wf.cu().request_functional_yield();
 }
-
-void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sleep_sopp(*this, wf); }
 
 void SMonitorSleepSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_clause_sopp(*this, wf); }
+void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SSetVgprMsbSopp::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_vgpr_msb_mode(static_cast<uint8_t>(simm16.encoding_value_ & 0xffu));
 }
 
-void SDelayAluSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_delay_alu_sopp(*this, wf);
-}
+void SDelayAluSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SWaitAluSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_wait_alu_sopp(*this, wf);
-}
+void SWaitAluSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SWaitIdleSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_wait_idle_sopp(*this, wf);
-}
+void SWaitIdleSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_trap_sopp(*this, wf); }
+void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SRoundModeSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_round_mode_sopp(*this, wf);
-}
+void SRoundModeSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SDenormModeSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_denorm_mode_sopp(*this, wf);
-}
+void SDenormModeSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SBarrierWaitSopp::execute_impl(amdgpu::Wavefront &wf) {
   int32_t barrier_id = static_cast<int16_t>(simm16.encoding_value_);
@@ -63,9 +55,7 @@ void SBarrierWaitSopp::execute_impl(amdgpu::Wavefront &wf) {
 
 void SBarrierLeaveSopp::execute_impl(amdgpu::Wavefront &wf) { wf.write_scc(wf.barrier_leave()); }
 
-void SCodeEndSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_code_end_sopp(*this, wf);
-}
+void SCodeEndSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SBranchSopp::execute_impl(amdgpu::Wavefront &wf) {
   int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
@@ -122,39 +112,45 @@ void SEndpgmSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
 
 void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
 
-void SWakeupSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wakeup_sopp(*this, wf); }
+void SWakeupSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SSetprioSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_setprio_sopp(*this, wf);
-}
+void SSetprioSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SSendmsgSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sendmsg_sopp(*this, wf);
+  const uint32_t message = static_cast<uint32_t>(simm16.encoding_value_);
+  if (wf.in_trap_handler() && (message & 0xFu) == 1u)
+    wf.set_trap_interrupt_sent(true);
+  wf.cu().handle_sendmsg(wf, message);
 }
 
 void SSendmsghaltSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sendmsghalt_sopp(*this, wf);
+  const uint32_t message = static_cast<uint32_t>(simm16.encoding_value_);
+  if (wf.in_trap_handler() && (message & 0xFu) == 1u)
+    wf.set_trap_interrupt_sent(true);
+  wf.cu().handle_sendmsg(wf, message);
+
+  // S_SENDMSGHALT halts the wave. Keep the architectural bit and the
+  // scheduler flag in step -- s_rfe consults STATUS.HALT on the way out.
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  wf.set_status_raw(wf.status_raw() | kStatusHalt);
+  wf.set_debug_halted(true);
+  // Remember who raised the bit. The trap handler also raises HALT, via
+  // s_setreg just before it returns, and there it means "keep the wave
+  // stopped" -- the opposite of what it means here, where the wave has
+  // already reported and is waiting to be resumed. The CWSR record cannot
+  // distinguish the two, so the resume path reads this instead.
+  wf.set_self_halted(true);
 }
 
-void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_incperflevel_sopp(*this, wf);
-}
+void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_decperflevel_sopp(*this, wf);
-}
+void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ttracedata_sopp(*this, wf);
-}
+void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void STtracedataImmSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ttracedata_imm_sopp(*this, wf);
-}
+void STtracedataImmSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_icache_inv_sopp(*this, wf);
-}
+void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SSetprioIncWgSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 

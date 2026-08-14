@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vds.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -542,7 +541,7 @@ void DsMaxNumF32Vds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-void DsNopVds::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_ds_nop_vds(*this, wf); }
+void DsNopVds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void DsAddF32Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -1157,7 +1156,31 @@ void DsMaxNumRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsSwizzleB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_swizzle_b32_vds(*this, wf);
+  uint64_t exec = wf.exec();
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
+  uint32_t src_data[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    src_data[i] = regs.read_lane(addr, i);
+  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t src_lane;
+    if (offset & 0x8000) {
+      // QDMode: four packed 2-bit selectors within each quad.
+      src_lane = (lane & ~0x3u) | ((offset >> (2u * (lane & 0x3u))) & 0x3u);
+    } else {
+      // BitMode: swizzle within 32-lane rows.
+      uint32_t and_mask = offset & 0x1F;
+      uint32_t or_mask = (offset >> 5) & 0x1F;
+      uint32_t xor_mask = (offset >> 10) & 0x1F;
+      uint32_t row_base = lane & ~0x1Fu;
+      uint32_t row_lane = lane & 0x1Fu;
+      src_lane = row_base + (((row_lane & and_mask) | or_mask) ^ xor_mask);
+    }
+    if (src_lane < wf.wf_size())
+      regs.write_lane(vdst, lane, src_data[src_lane]);
+  }
 }
 
 void DsLoadB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3127,15 +3150,84 @@ void DsLoadAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsPermuteB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_permute_b32_vds(*this, wf);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  uint32_t lane_group_width = wf.wf_size();
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
+  if (wf.wf_size() == 64 &&
+      (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
+    lane_group_width = 32;
+  // Pre-read all data0 values from every lane.
+  uint32_t src_data[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    src_data[i] = regs.read_lane(data0, i);
+  uint32_t tmp[64] = {};
+  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
+    if (!(exec & (1ULL << i)))
+      continue;
+    uint32_t addr_val = regs.read_lane(addr, i);
+    uint32_t group_base = (i / lane_group_width) * lane_group_width;
+    uint32_t dst_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
+    tmp[dst_lane] = src_data[i];
+  }
+  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
+    if (exec & (1ULL << i))
+      regs.write_lane(vdst, i, tmp[i]);
+  }
 }
 
 void DsBpermuteB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_bpermute_b32_vds(*this, wf);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  uint32_t lane_group_width = wf.wf_size();
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
+  if (wf.wf_size() == 64 &&
+      (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
+    lane_group_width = 32;
+  // Pre-read all data0 values from every lane.
+  uint32_t src_data[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    src_data[i] = regs.read_lane(data0, i);
+  uint32_t tmp[64] = {};
+  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
+    uint32_t addr_val = regs.read_lane(addr, i);
+    uint32_t group_base = (i / lane_group_width) * lane_group_width;
+    uint32_t src_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
+    if (exec & (1ULL << src_lane))
+      tmp[i] = src_data[src_lane];
+  }
+  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
+    if (exec & (1ULL << i))
+      regs.write_lane(vdst, i, tmp[i]);
+  }
 }
 
 void DsBpermuteFiB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_bpermute_fi_b32_vds(*this, wf);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  uint32_t lane_group_width = wf.wf_size();
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
+  if (wf.wf_size() == 64 &&
+      (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
+    lane_group_width = 32;
+  // Pre-read all data0 values from every lane.
+  uint32_t src_data[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    src_data[i] = regs.read_lane(data0, i);
+  uint32_t tmp[64] = {};
+  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
+    uint32_t addr_val = regs.read_lane(addr, i);
+    uint32_t group_base = (i / lane_group_width) * lane_group_width;
+    uint32_t src_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
+    tmp[i] = src_data[src_lane];
+  }
+  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
+    if (exec & (1ULL << i))
+      regs.write_lane(vdst, i, tmp[i]);
+  }
 }
 
 void DsStoreB96Vds::execute_impl(amdgpu::Wavefront &wf) {

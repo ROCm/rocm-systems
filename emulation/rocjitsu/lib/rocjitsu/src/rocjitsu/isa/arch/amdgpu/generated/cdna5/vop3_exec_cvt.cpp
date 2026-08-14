@@ -361,7 +361,35 @@ void VCvtOffF32I4Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_cvt_off_f32_i4_vop3(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, std::bit_cast<uint32_t>([&]() {
+      float v = [&]() {
+        float v = [&]() -> float {
+          int32_t nibble =
+              static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xfu);
+          if (nibble & 0x8)
+            nibble -= 16;
+          return static_cast<float>(nibble) * 0.0625f;
+        }();
+        const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
+            wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod);
+        if (effective_omod == 1)
+          v *= 2.0f;
+        else if (effective_omod == 2)
+          v *= 4.0f;
+        else if (effective_omod == 3)
+          v *= 0.5f;
+        v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+        return v;
+      }();
+      if (inst_.clamp)
+        v = amdgpu::clamp_floating_result(v, wf);
+      return v;
+    }()));
+  }
 }
 
 RJ_NOINLINE void VCvtOffF32I4Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -380,7 +408,35 @@ RJ_NOINLINE void VCvtOffF32I4Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_cvt_off_f32_i4_vop3(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, std::bit_cast<uint32_t>([&]() {
+      float v = [&]() {
+        float v = [&]() -> float {
+          int32_t nibble =
+              static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xfu);
+          if (nibble & 0x8)
+            nibble -= 16;
+          return static_cast<float>(nibble) * 0.0625f;
+        }();
+        const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
+            wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod);
+        if (effective_omod == 1)
+          v *= 2.0f;
+        else if (effective_omod == 2)
+          v *= 4.0f;
+        else if (effective_omod == 3)
+          v *= 0.5f;
+        v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+        return v;
+      }();
+      if (inst_.clamp)
+        v = amdgpu::clamp_floating_result(v, wf);
+      return v;
+    }()));
+  }
   dpp_write_mask_scope_.restore();
 }
 
@@ -1821,7 +1877,17 @@ void VCvtPkU8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_cvt_pk_u8_f32_vop3(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float fval = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    uint32_t byte_sel = amdgpu::RegisterAccess(wf).read_lane(src1, lane) & 3;
+    uint32_t old = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    uint32_t byte = static_cast<uint32_t>(std::clamp(fval, 0.0f, 255.0f));
+    uint32_t mask = ~(0xFFu << (byte_sel * 8));
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, (old & mask) | (byte << (byte_sel * 8)));
+  }
 }
 
 RJ_NOINLINE void VCvtPkU8F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1840,7 +1906,17 @@ RJ_NOINLINE void VCvtPkU8F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_cvt_pk_u8_f32_vop3(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float fval = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    uint32_t byte_sel = amdgpu::RegisterAccess(wf).read_lane(src1, lane) & 3;
+    uint32_t old = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    uint32_t byte = static_cast<uint32_t>(std::clamp(fval, 0.0f, 255.0f));
+    uint32_t mask = ~(0xFFu << (byte_sel * 8));
+    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, (old & mask) | (byte << (byte_sel * 8)));
+  }
   dpp_write_mask_scope_.restore();
 }
 

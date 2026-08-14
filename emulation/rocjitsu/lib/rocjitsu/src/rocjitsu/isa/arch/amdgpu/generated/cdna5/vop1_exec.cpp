@@ -23,7 +23,7 @@
 namespace rocjitsu {
 namespace cdna5 {
 
-void VNopVop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_nop_vop1(*this, wf); }
+void VNopVop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void VMovB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) {
@@ -364,7 +364,18 @@ void VCvtOffF32I4Vop1::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_cvt_off_f32_i4_vop1(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, std::bit_cast<uint32_t>([&]() -> float {
+      int32_t nibble =
+          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xfu);
+      if (nibble & 0x8)
+        nibble -= 16;
+      return static_cast<float>(nibble) * 0.0625f;
+    }()));
+  }
 }
 
 RJ_NOINLINE void VCvtOffF32I4Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -383,7 +394,18 @@ RJ_NOINLINE void VCvtOffF32I4Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) 
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_cvt_off_f32_i4_vop1(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, std::bit_cast<uint32_t>([&]() -> float {
+      int32_t nibble =
+          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane) & 0xfu);
+      if (nibble & 0x8)
+        nibble -= 16;
+      return static_cast<float>(nibble) * 0.0625f;
+    }()));
+  }
   dpp_write_mask_scope_.restore();
 }
 
@@ -707,9 +729,7 @@ RJ_NOINLINE void VFloorF64Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   dpp_write_mask_scope_.restore();
 }
 
-void VPipeflushVop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pipeflush_vop1(*this, wf);
-}
+void VPipeflushVop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void VMovB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) {
@@ -1194,7 +1214,15 @@ void VSinF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_sin_f32_vop1(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<true>(
+        *this, wf, vdst, lane,
+        std::bit_cast<uint32_t>(amdgpu::transcendental::sin_f32(
+            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)))));
+  }
 }
 
 RJ_NOINLINE void VSinF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1213,7 +1241,15 @@ RJ_NOINLINE void VSinF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_sin_f32_vop1(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<true>(
+        *this, wf, vdst, lane,
+        std::bit_cast<uint32_t>(amdgpu::transcendental::sin_f32(
+            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)))));
+  }
   dpp_write_mask_scope_.restore();
 }
 
@@ -1222,7 +1258,15 @@ void VCosF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_cos_f32_vop1(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<true>(
+        *this, wf, vdst, lane,
+        std::bit_cast<uint32_t>(amdgpu::transcendental::cos_f32(
+            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)))));
+  }
 }
 
 RJ_NOINLINE void VCosF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1241,7 +1285,15 @@ RJ_NOINLINE void VCosF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_cos_f32_vop1(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<true>(
+        *this, wf, vdst, lane,
+        std::bit_cast<uint32_t>(amdgpu::transcendental::cos_f32(
+            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)))));
+  }
   dpp_write_mask_scope_.restore();
 }
 
@@ -3001,7 +3053,17 @@ void VSwapB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPermlane64B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_permlane64_b32_vop1(*this, wf);
+  uint64_t exec = wf.exec();
+  uint32_t snap[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t partner = lane ^ 32;
+    if (partner < wf.wf_size())
+      amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[partner]);
+  }
 }
 
 void VSwaprelB32Vop1::execute_impl(amdgpu::Wavefront &wf) {

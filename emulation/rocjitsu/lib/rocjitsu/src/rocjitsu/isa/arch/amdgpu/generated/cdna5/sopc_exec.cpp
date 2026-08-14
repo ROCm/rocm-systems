@@ -5,8 +5,8 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/sopc.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -19,187 +19,272 @@ namespace rocjitsu {
 namespace cdna5 {
 
 void SCmpEqI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_eq_i32_sopc(*this, wf);
+  wf.write_scc((static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) ==
+                static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
 }
 
 void SCmpLgI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lg_i32_sopc(*this, wf);
+  wf.write_scc(([&]() {
+    auto a = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+    auto b = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+    return (a < b) || (a > b);
+  }()));
 }
 
 void SCmpGtI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_gt_i32_sopc(*this, wf);
+  wf.write_scc((static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) >
+                static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
 }
 
 void SCmpGeI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_ge_i32_sopc(*this, wf);
+  wf.write_scc((static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) >=
+                static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
 }
 
 void SCmpLtI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lt_i32_sopc(*this, wf);
+  wf.write_scc((static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) <
+                static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
 }
 
 void SCmpLeI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_le_i32_sopc(*this, wf);
+  wf.write_scc((static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) <=
+                static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
 }
 
 void SCmpEqU32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_eq_u32_sopc(*this, wf);
+  wf.write_scc((amdgpu::RegisterAccess(wf).read_scalar(ssrc0) ==
+                amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
 }
 
 void SCmpLgU32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lg_u32_sopc(*this, wf);
+  wf.write_scc(([&]() {
+    auto a = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+    auto b = amdgpu::RegisterAccess(wf).read_scalar(ssrc1);
+    return (a < b) || (a > b);
+  }()));
 }
 
 void SCmpGtU32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_gt_u32_sopc(*this, wf);
+  wf.write_scc((amdgpu::RegisterAccess(wf).read_scalar(ssrc0) >
+                amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
 }
 
 void SCmpGeU32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_ge_u32_sopc(*this, wf);
+  wf.write_scc((amdgpu::RegisterAccess(wf).read_scalar(ssrc0) >=
+                amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
 }
 
 void SCmpLtU32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lt_u32_sopc(*this, wf);
+  wf.write_scc((amdgpu::RegisterAccess(wf).read_scalar(ssrc0) <
+                amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
 }
 
 void SCmpLeU32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_le_u32_sopc(*this, wf);
+  wf.write_scc((amdgpu::RegisterAccess(wf).read_scalar(ssrc0) <=
+                amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
 }
 
 void SBitcmp0B32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitcmp0_b32_sopc(*this, wf);
+  wf.write_scc((((amdgpu::RegisterAccess(wf).read_scalar(ssrc0) >>
+                  (amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 31)) &
+                 1) == 0));
 }
 
 void SBitcmp1B32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitcmp1_b32_sopc(*this, wf);
+  wf.write_scc((((amdgpu::RegisterAccess(wf).read_scalar(ssrc0) >>
+                  (amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 31)) &
+                 1) != 0));
 }
 
 void SBitcmp0B64Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitcmp0_b64_sopc(*this, wf);
+  wf.write_scc((((static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) >>
+                  (amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 63)) &
+                 1ULL) == 0));
 }
 
 void SBitcmp1B64Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitcmp1_b64_sopc(*this, wf);
+  wf.write_scc((((static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) >>
+                  (amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 63)) &
+                 1ULL) != 0));
 }
 
 void SCmpEqU64Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_eq_u64_sopc(*this, wf);
+  wf.write_scc((static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) ==
+                static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1))));
 }
 
 void SCmpLgU64Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lg_u64_sopc(*this, wf);
+  wf.write_scc(([&]() {
+    auto a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
+    auto b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1));
+    return (a < b) || (a > b);
+  }()));
 }
 
 void SCmpLtF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lt_f32_sopc(*this, wf);
+  wf.write_scc((std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) <
+                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
 }
 
 void SCmpLtF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lt_f16_sopc(*this, wf);
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) <
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)))));
 }
 
 void SCmpEqF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_eq_f32_sopc(*this, wf);
+  wf.write_scc((std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) ==
+                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
 }
 
 void SCmpEqF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_eq_f16_sopc(*this, wf);
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) ==
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)))));
 }
 
 void SCmpLeF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_le_f32_sopc(*this, wf);
+  wf.write_scc((std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) <=
+                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
 }
 
 void SCmpLeF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_le_f16_sopc(*this, wf);
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) <=
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)))));
 }
 
 void SCmpGtF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_gt_f32_sopc(*this, wf);
+  wf.write_scc((std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) >
+                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
 }
 
 void SCmpGtF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_gt_f16_sopc(*this, wf);
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) >
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)))));
 }
 
 void SCmpLgF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lg_f32_sopc(*this, wf);
+  wf.write_scc(([&]() {
+    auto a = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+    auto b = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+    return (a < b) || (a > b);
+  }()));
 }
 
 void SCmpLgF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lg_f16_sopc(*this, wf);
+  wf.write_scc(([&]() {
+    auto a = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)));
+    auto b = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+    return (a < b) || (a > b);
+  }()));
 }
 
 void SCmpGeF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_ge_f32_sopc(*this, wf);
+  wf.write_scc((std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) >=
+                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
 }
 
 void SCmpGeF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_ge_f16_sopc(*this, wf);
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) >=
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)))));
 }
 
 void SCmpOF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_o_f32_sopc(*this, wf);
+  wf.write_scc((!std::isnan(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) &&
+                !std::isnan(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)))));
 }
 
 void SCmpOF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_o_f16_sopc(*this, wf);
+  wf.write_scc((!std::isnan(util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)))) &&
+                !std::isnan(util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))))));
 }
 
 void SCmpUF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_u_f32_sopc(*this, wf);
+  wf.write_scc((std::isnan(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) ||
+                std::isnan(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)))));
 }
 
 void SCmpUF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_u_f16_sopc(*this, wf);
+  wf.write_scc((std::isnan(util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)))) ||
+                std::isnan(util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))))));
 }
 
 void SCmpNgeF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nge_f32_sopc(*this, wf);
+  wf.write_scc((!(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) >=
+                  std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)))));
 }
 
 void SCmpNgeF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nge_f16_sopc(*this, wf);
+  wf.write_scc(
+      (!(util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) >=
+         util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))))));
 }
 
 void SCmpNlgF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nlg_f32_sopc(*this, wf);
+  wf.write_scc((!([&]() {
+    auto a = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+    auto b = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+    return (a < b) || (a > b);
+  }())));
 }
 
 void SCmpNlgF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nlg_f16_sopc(*this, wf);
+  wf.write_scc((!([&]() {
+    auto a = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)));
+    auto b = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+    return (a < b) || (a > b);
+  }())));
 }
 
 void SCmpNgtF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_ngt_f32_sopc(*this, wf);
+  wf.write_scc((!(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) >
+                  std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)))));
 }
 
 void SCmpNgtF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_ngt_f16_sopc(*this, wf);
+  wf.write_scc(
+      (!(util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) >
+         util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))))));
 }
 
 void SCmpNleF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nle_f32_sopc(*this, wf);
+  wf.write_scc((!(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) <=
+                  std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)))));
 }
 
 void SCmpNleF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nle_f16_sopc(*this, wf);
+  wf.write_scc(
+      (!(util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) <=
+         util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))))));
 }
 
 void SCmpNeqF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_neq_f32_sopc(*this, wf);
+  wf.write_scc((std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) !=
+                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
 }
 
 void SCmpNeqF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_neq_f16_sopc(*this, wf);
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) !=
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)))));
 }
 
 void SCmpNltF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nlt_f32_sopc(*this, wf);
+  wf.write_scc((!(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) <
+                  std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)))));
 }
 
 void SCmpNltF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nlt_f16_sopc(*this, wf);
+  wf.write_scc(
+      (!(util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) <
+         util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))))));
 }
 
 } // namespace cdna5

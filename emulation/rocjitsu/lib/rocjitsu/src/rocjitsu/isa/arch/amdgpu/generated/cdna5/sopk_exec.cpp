@@ -5,7 +5,6 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/sopk.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -22,15 +21,17 @@ namespace rocjitsu {
 namespace cdna5 {
 
 void SMovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_movk_i32_sopk(*this, wf);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(static_cast<int32_t>(
+                                                    static_cast<int16_t>(simm16.encoding_value_))));
 }
 
-void SVersionSopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_version_sopk(*this, wf);
-}
+void SVersionSopk::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmovk_i32_sopk(*this, wf);
+  if (wf.read_scc())
+    amdgpu::RegisterAccess(wf).write_scalar(
+        sdst,
+        static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(simm16.encoding_value_))));
 }
 
 void SAddkCoI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -46,7 +47,10 @@ void SAddkCoI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SMulkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_mulk_i32_sopk(*this, wf);
+  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar(sdst);
+  uint32_t imm =
+      static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(simm16.encoding_value_)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, s0 * imm);
 }
 
 void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {

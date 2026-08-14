@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -24,11 +25,9 @@
 namespace rocjitsu {
 namespace cdna5 {
 
-void VNopVop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_nop_vop3(*this, wf); }
+void VNopVop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void VPipeflushVop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pipeflush_vop3(*this, wf);
-}
+void VPipeflushVop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void VPrngB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) {
@@ -207,7 +206,44 @@ void VMullitF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_mullit_f32_vop3(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    if (inst_.abs & (1u << 0))
+      s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0))
+      s0 = -s0;
+    if (inst_.abs & (1u << 1))
+      s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1))
+      s1 = -s1;
+    if (inst_.abs & (1u << 2))
+      s2 = std::fabs(s2);
+    if (inst_.neg & (1u << 2))
+      s2 = -s2;
+    float result;
+    if (s1 == -std::numeric_limits<float>::max() || s1 == -std::numeric_limits<float>::infinity() ||
+        std::isnan(s1) || s2 <= 0.0f || std::isnan(s2))
+      result = -std::numeric_limits<float>::max();
+    else
+      result = (s0 == 0.0f || s1 == 0.0f) ? 0.0f : s0 * s1;
+    const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
+        wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod);
+    if (effective_omod == 1)
+      result *= 2.0f;
+    else if (effective_omod == 2)
+      result *= 4.0f;
+    else if (effective_omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = amdgpu::clamp_floating_result(result, wf);
+    result = amdgpu::fp_mode::finalize_omod_f32(result, effective_omod);
+    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 RJ_NOINLINE void VMullitF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -226,7 +262,44 @@ RJ_NOINLINE void VMullitF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_mullit_f32_vop3(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
+    if (inst_.abs & (1u << 0))
+      s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0))
+      s0 = -s0;
+    if (inst_.abs & (1u << 1))
+      s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1))
+      s1 = -s1;
+    if (inst_.abs & (1u << 2))
+      s2 = std::fabs(s2);
+    if (inst_.neg & (1u << 2))
+      s2 = -s2;
+    float result;
+    if (s1 == -std::numeric_limits<float>::max() || s1 == -std::numeric_limits<float>::infinity() ||
+        std::isnan(s1) || s2 <= 0.0f || std::isnan(s2))
+      result = -std::numeric_limits<float>::max();
+    else
+      result = (s0 == 0.0f || s1 == 0.0f) ? 0.0f : s0 * s1;
+    const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
+        wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod);
+    if (effective_omod == 1)
+      result *= 2.0f;
+    else if (effective_omod == 2)
+      result *= 4.0f;
+    else if (effective_omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = amdgpu::clamp_floating_result(result, wf);
+    result = amdgpu::fp_mode::finalize_omod_f32(result, effective_omod);
+    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, std::bit_cast<uint32_t>(result));
+  }
   dpp_write_mask_scope_.restore();
 }
 
@@ -343,7 +416,54 @@ RJ_NOINLINE void VBcntU32B32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
 }
 
 void VTrigPreopF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_trig_preop_f64_vop3(*this, wf);
+  // MSB-first 24-bit chunks of the binary expansion of 2/pi used by
+  // the ISA range-reduction lookup (the fdlibm/Payne-Hanek layout).
+  static constexpr uint32_t kTwoOverPiChunks[] = {
+      0xA2F983u, 0x6E4E44u, 0x1529FCu, 0x2757D1u, 0xF534DDu, 0xC0DB62u, 0x95993Cu, 0x439041u,
+      0xFE5163u, 0xABDEBBu, 0xC561B7u, 0x246E3Au, 0x424DD2u, 0xE00649u, 0x2EEA09u, 0xD1921Cu,
+      0xFE1DEBu, 0x1CB129u, 0xA73EE8u, 0x8235F5u, 0x2EBB44u, 0x84E99Cu, 0x7026B4u, 0x5F7E41u,
+      0x3991D6u, 0x398353u, 0x39F49Cu, 0x845F8Bu, 0xBDF928u, 0x3B1FF8u, 0x97FFDEu, 0x05980Fu,
+      0xEF2F11u, 0x8B5A0Au, 0x6D1F6Du, 0x367ECFu, 0x27CB09u, 0xB74F46u, 0x3F669Eu, 0x5FEA2Du,
+      0x7527BAu, 0xC7EBE5u, 0xF17B3Du, 0x0739F7u, 0x8A5292u, 0xEA6BFBu, 0x5FB11Fu, 0x8D5D08u,
+      0x560330u, 0x46FC7Bu, 0x6BABF0u};
+  static constexpr uint32_t kChunkBits = 24u;
+  static constexpr uint32_t kValidBits = 1201u;
+  auto table_bit = [](uint32_t bit) -> uint64_t {
+    if (bit >= kValidBits)
+      return 0;
+    uint32_t chunk = bit / kChunkBits;
+    if (chunk >= std::size(kTwoOverPiChunks))
+      return 0;
+    return (kTwoOverPiChunks[chunk] >> (kChunkBits - 1u - bit % kChunkBits)) & 1u;
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint64_t raw0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    double s0 = std::bit_cast<double>(raw0);
+    if (inst_.abs & (1u << 0))
+      s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0))
+      s0 = -s0;
+    uint32_t selector = amdgpu::RegisterAccess(wf).read_lane(src1, lane) & 31u;
+    uint32_t exponent = static_cast<uint32_t>((std::bit_cast<uint64_t>(s0) >> 52) & 0x7ffu);
+    uint32_t shift = selector * 53u;
+    if (exponent > 1077u)
+      shift += exponent - 1077u;
+    uint64_t segment = 0;
+    for (uint32_t bit = 0; bit < 53; ++bit)
+      segment = (segment << 1) | table_bit(shift + bit);
+    int scale = -53 - static_cast<int>(shift);
+    if (exponent >= 1968u)
+      scale += 128;
+    uint64_t result = amdgpu::fp_mode::scale_u53_f64_rtz(segment, scale);
+    uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
+        wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod);
+    result = amdgpu::fp_mode::finish_f64(result, wf.fp_round_mode_f16_f64(), effective_omod,
+                                         inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+    amdgpu::sdwa::write_lane64<true>(*this, wf, vdst, lane, result);
+  }
 }
 
 } // namespace cdna5

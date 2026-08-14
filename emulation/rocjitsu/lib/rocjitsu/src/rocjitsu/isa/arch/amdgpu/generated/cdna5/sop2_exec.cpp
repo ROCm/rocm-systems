@@ -5,7 +5,6 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/sop2.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -20,188 +19,489 @@ namespace rocjitsu {
 namespace cdna5 {
 
 void SAddCoU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_add_co_u32_sop2(*this, wf);
+  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar(ssrc1);
+  uint32_t result = (s0 + s1);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc(((static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1)) > 4294967295ULL));
 }
 
 void SSubCoU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sub_co_u32_sop2(*this, wf);
+  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar(ssrc1);
+  uint32_t result = (s0 - s1);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((s0 < s1));
 }
 
 void SAddCoI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_add_co_i32_sop2(*this, wf);
+  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar(ssrc1);
+  uint32_t result = (s0 + s1);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(s0, s1));
 }
 
 void SSubCoI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sub_co_i32_sop2(*this, wf);
+  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar(ssrc1);
+  uint32_t result = (s0 - s1);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc(::rocjitsu::amdgpu::signed_sub_overflows(s0, s1));
 }
 
 void SAddCoCiU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_add_co_ci_u32_sop2(*this, wf);
+  uint32_t result = [&]() {
+    uint64_t w = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) +
+                 static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)) +
+                 static_cast<uint64_t>(wf.read_scc());
+    wf.write_scc(w > 0xFFFFFFFFULL);
+    return static_cast<uint32_t>(w);
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
 }
 
 void SSubCoCiU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sub_co_ci_u32_sop2(*this, wf);
+  uint32_t result = [&]() {
+    uint32_t a = amdgpu::RegisterAccess(wf).read_scalar(ssrc0),
+             b = amdgpu::RegisterAccess(wf).read_scalar(ssrc1);
+    uint32_t cin = wf.read_scc() ? 1u : 0u;
+    wf.write_scc(static_cast<uint64_t>(a) < static_cast<uint64_t>(b) + cin);
+    return a - b - cin;
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
 }
 
 void SAbsdiffI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_absdiff_i32_sop2(*this, wf);
+  int32_t result = [&]() {
+    auto a = static_cast<int64_t>(
+        static_cast<int32_t>(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))));
+    auto b = static_cast<int64_t>(
+        static_cast<int32_t>(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
+    return static_cast<uint32_t>(a > b ? a - b : b - a);
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
 }
 
 void SLshlB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl_b32_sop2(*this, wf);
+  uint32_t result = (amdgpu::RegisterAccess(wf).read_scalar(ssrc0)
+                     << (amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 31u));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
 }
 
 void SLshlB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl_b64_sop2(*this, wf);
+  uint64_t result =
+      (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0))
+       << (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)) & 63u));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0ULL));
 }
 
 void SLshrB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshr_b32_sop2(*this, wf);
+  uint32_t result = (amdgpu::RegisterAccess(wf).read_scalar(ssrc0) >>
+                     (amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 31u));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
 }
 
 void SLshrB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshr_b64_sop2(*this, wf);
+  uint64_t result = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) >>
+                     (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)) & 63u));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0ULL));
 }
 
 void SAshrI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ashr_i32_sop2(*this, wf);
+  int32_t result = [&]() {
+    auto v =
+        static_cast<int32_t>(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)));
+    return static_cast<uint32_t>(
+        v >> (static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)) & 31u));
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
 }
 
 void SAshrI64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ashr_i64_sop2(*this, wf);
+  int64_t result = [&]() {
+    auto v =
+        static_cast<int64_t>(static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)));
+    return static_cast<uint64_t>(
+        v >> (static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)) & 63u));
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0LL));
 }
 
 void SLshl1AddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl1_add_u32_sop2(*this, wf);
+  uint32_t result = [&]() {
+    uint64_t w = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) << 1u) +
+                 static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+    wf.write_scc(w > 0xFFFFFFFFULL);
+    return static_cast<uint32_t>(w);
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
 }
 
 void SLshl2AddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl2_add_u32_sop2(*this, wf);
+  uint32_t result = [&]() {
+    uint64_t w = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) << 2u) +
+                 static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+    wf.write_scc(w > 0xFFFFFFFFULL);
+    return static_cast<uint32_t>(w);
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
 }
 
 void SLshl3AddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl3_add_u32_sop2(*this, wf);
+  uint32_t result = [&]() {
+    uint64_t w = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) << 3u) +
+                 static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+    wf.write_scc(w > 0xFFFFFFFFULL);
+    return static_cast<uint32_t>(w);
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
 }
 
 void SLshl4AddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl4_add_u32_sop2(*this, wf);
+  uint32_t result = [&]() {
+    uint64_t w = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) << 4u) +
+                 static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+    wf.write_scc(w > 0xFFFFFFFFULL);
+    return static_cast<uint32_t>(w);
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
 }
 
-void SMinI32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_min_i32_sop2(*this, wf); }
+void SMinI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+  int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+  int32_t result = std::min(s0, s1);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((s0 < s1));
+}
 
-void SMinU32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_min_u32_sop2(*this, wf); }
+void SMinU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar(ssrc1);
+  uint32_t result = std::min(s0, s1);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((s0 < s1));
+}
 
-void SMaxI32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_max_i32_sop2(*this, wf); }
+void SMaxI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+  int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+  int32_t result = std::max(s0, s1);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((s0 > s1));
+}
 
-void SMaxU32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_max_u32_sop2(*this, wf); }
+void SMaxU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t s0 = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  uint32_t s1 = amdgpu::RegisterAccess(wf).read_scalar(ssrc1);
+  uint32_t result = std::max(s0, s1);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((s0 > s1));
+}
 
-void SAndB32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_and_b32_sop2(*this, wf); }
+void SAndB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t result = (amdgpu::RegisterAccess(wf).read_scalar(ssrc0) &
+                     amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
+}
 
-void SAndB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_and_b64_sop2(*this, wf); }
+void SAndB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t result = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) &
+                     static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0ULL));
+}
 
-void SOrB32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_or_b32_sop2(*this, wf); }
+void SOrB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t result = (amdgpu::RegisterAccess(wf).read_scalar(ssrc0) |
+                     amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
+}
 
-void SOrB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_or_b64_sop2(*this, wf); }
+void SOrB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t result = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) |
+                     static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0ULL));
+}
 
-void SXorB32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_xor_b32_sop2(*this, wf); }
+void SXorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t result = (amdgpu::RegisterAccess(wf).read_scalar(ssrc0) ^
+                     amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
+}
 
-void SXorB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_xor_b64_sop2(*this, wf); }
+void SXorB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t result = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) ^
+                     static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0ULL));
+}
 
 void SNandB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_nand_b32_sop2(*this, wf);
+  uint32_t result = (~(amdgpu::RegisterAccess(wf).read_scalar(ssrc0) &
+                       amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
 }
 
 void SNandB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_nand_b64_sop2(*this, wf);
+  uint64_t result = (~(static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) &
+                       static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1))));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0ULL));
 }
 
-void SNorB32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nor_b32_sop2(*this, wf); }
+void SNorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t result = (~(amdgpu::RegisterAccess(wf).read_scalar(ssrc0) |
+                       amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
+}
 
-void SNorB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nor_b64_sop2(*this, wf); }
+void SNorB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t result = (~(static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) |
+                       static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1))));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0ULL));
+}
 
 void SXnorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_xnor_b32_sop2(*this, wf);
+  uint32_t result = (~(amdgpu::RegisterAccess(wf).read_scalar(ssrc0) ^
+                       amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
 }
 
 void SXnorB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_xnor_b64_sop2(*this, wf);
+  uint64_t result = (~(static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) ^
+                       static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1))));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0ULL));
 }
 
 void SAndNot1B32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_not1_b32_sop2(*this, wf);
+  uint32_t result = (amdgpu::RegisterAccess(wf).read_scalar(ssrc0) &
+                     (~amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
 }
 
 void SAndNot1B64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_not1_b64_sop2(*this, wf);
+  uint64_t result = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) &
+                     (~static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1))));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0ULL));
 }
 
 void SOrNot1B32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_or_not1_b32_sop2(*this, wf);
+  uint32_t result = (amdgpu::RegisterAccess(wf).read_scalar(ssrc0) |
+                     (~amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
 }
 
 void SOrNot1B64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_or_not1_b64_sop2(*this, wf);
+  uint64_t result = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) |
+                     (~static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1))));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0ULL));
 }
 
-void SBfeU32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_u32_sop2(*this, wf); }
+void SBfeU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t result = [&]() {
+    uint32_t base = amdgpu::RegisterAccess(wf).read_scalar(ssrc0),
+             field = amdgpu::RegisterAccess(wf).read_scalar(ssrc1);
+    uint32_t offset = field & 31u;
+    uint32_t width = (field >> 16) & 127u;
+    if (width == 0)
+      return 0u;
+    if (offset + width > 32)
+      width = 32 - offset;
+    uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);
+    return (base >> offset) & mask;
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
+}
 
-void SBfeI32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_i32_sop2(*this, wf); }
+void SBfeI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  int32_t result = [&]() {
+    uint32_t base = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
+             field = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+    uint32_t offset = field & 31u;
+    uint32_t width = (field >> 16) & 127u;
+    if (width == 0)
+      return 0u;
+    if (offset + width > 32)
+      width = 32 - offset;
+    uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);
+    uint32_t extracted = (base >> offset) & mask;
+    if (width < 32 && (extracted & (1u << (width - 1))))
+      extracted |= ~mask;
+    return extracted;
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+  wf.write_scc((result != 0));
+}
 
-void SBfeU64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_u64_sop2(*this, wf); }
+void SBfeU64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t result = [&]() {
+    uint64_t base = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
+    uint32_t field =
+        static_cast<uint32_t>(static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+    uint32_t offset = field & 63u;
+    uint32_t width = (field >> 16) & 127u;
+    if (width == 0)
+      return static_cast<uint64_t>(0);
+    if (offset + width > 64)
+      width = 64 - offset;
+    uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);
+    return (base >> offset) & mask;
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0ULL));
+}
 
-void SBfeI64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_i64_sop2(*this, wf); }
+void SBfeI64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  int64_t result = [&]() {
+    uint64_t base = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
+    uint32_t field =
+        static_cast<uint32_t>(static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+    uint32_t offset = field & 63u;
+    uint32_t width = (field >> 16) & 127u;
+    if (width == 0)
+      return static_cast<int64_t>(0);
+    if (offset + width > 64)
+      width = 64 - offset;
+    uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);
+    uint64_t extracted = (base >> offset) & mask;
+    if (width < 64 && (extracted & (1ULL << (width - 1))))
+      extracted |= ~mask;
+    return static_cast<int64_t>(extracted);
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+  wf.write_scc((result != 0LL));
+}
 
-void SBfmB32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfm_b32_sop2(*this, wf); }
+void SBfmB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t result = ::rocjitsu::amdgpu::bfm_b32(amdgpu::RegisterAccess(wf).read_scalar(ssrc0),
+                                                amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+}
 
-void SBfmB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfm_b64_sop2(*this, wf); }
+void SBfmB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t result = [&]() {
+    uint64_t cnt = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) & 63u;
+    uint64_t off = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)) & 63u;
+    return cnt == 0 ? 0ULL : ((1ULL << cnt) - 1ULL) << off;
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+}
 
-void SMulI32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_i32_sop2(*this, wf); }
+void SMulI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t result =
+      (static_cast<uint32_t>(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) *
+       static_cast<uint32_t>(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
+}
 
 void SMulHiU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_mul_hi_u32_sop2(*this, wf);
+  uint32_t result = [&]() {
+    auto a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+    auto b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+    return static_cast<uint32_t>((a * b) >> 32);
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
 }
 
 void SMulHiI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_mul_hi_i32_sop2(*this, wf);
+  int32_t result = [&]() {
+    auto a =
+        static_cast<uint64_t>(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)));
+    auto b =
+        static_cast<uint64_t>(static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+    return static_cast<uint32_t>((a * b) >> 32);
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
 }
 
 void SCselectB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cselect_b32_sop2(*this, wf);
+  amdgpu::RegisterAccess(wf).write_scalar(
+      sdst, wf.read_scc() ? amdgpu::RegisterAccess(wf).read_scalar(ssrc0)
+                          : amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
 }
 
 void SCselectB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cselect_b64_sop2(*this, wf);
+  amdgpu::RegisterAccess(wf).write_scalar64(
+      sdst, wf.read_scc() ? amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)
+                          : amdgpu::RegisterAccess(wf).read_scalar64(ssrc1));
 }
 
 void SPackLlB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_pack_ll_b32_b16_sop2(*this, wf);
+  uint32_t result = ((amdgpu::RegisterAccess(wf).read_scalar(ssrc0) & 0xFFFFu) |
+                     ((amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 0xFFFFu) << 16));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
 }
 
 void SPackLhB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_pack_lh_b32_b16_sop2(*this, wf);
+  uint32_t result = ((amdgpu::RegisterAccess(wf).read_scalar(ssrc0) & 0xFFFFu) |
+                     (amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 0xFFFF0000u));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
 }
 
 void SPackHhB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_pack_hh_b32_b16_sop2(*this, wf);
+  uint32_t result = (((amdgpu::RegisterAccess(wf).read_scalar(ssrc0) >> 16) & 0xFFFFu) |
+                     (amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 0xFFFF0000u));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
 }
 
 void SPackHlB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_pack_hl_b32_b16_sop2(*this, wf);
+  uint32_t result = (((amdgpu::RegisterAccess(wf).read_scalar(ssrc0) >> 16) & 0xFFFFu) |
+                     ((amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 0xFFFFu) << 16));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, result);
 }
 
-void SAddF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_add_f32_sop2(*this, wf); }
+void SAddF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  float result = (std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) +
+                  std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
+}
 
-void SSubF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sub_f32_sop2(*this, wf); }
+void SSubF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  float result = (std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) -
+                  std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
+}
 
 void SMinNumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_min_num_f32_sop2(*this, wf);
+  float result = std::fmin(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
+                           std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 
 void SMaxNumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_max_num_f32_sop2(*this, wf);
+  float result = std::fmax(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
+                           std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 
-void SMulF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f32_sop2(*this, wf); }
+void SMulF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  float result = (std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)) *
+                  std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
+}
 
 void SFmaakF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   float result = std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
@@ -233,19 +533,40 @@ void SCvtPkRtzF16F32Sop2::execute_impl(amdgpu::Wavefront &wf) {
               << 16)));
 }
 
-void SAddF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_add_f16_sop2(*this, wf); }
+void SAddF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  float result =
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) +
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, util::f32_to_f16(result));
+}
 
-void SSubF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sub_f16_sop2(*this, wf); }
+void SSubF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  float result =
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) -
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, util::f32_to_f16(result));
+}
 
 void SMinNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_min_num_f16_sop2(*this, wf);
+  float result = std::fmin(
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))),
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, util::f32_to_f16(result));
 }
 
 void SMaxNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_max_num_f16_sop2(*this, wf);
+  float result = std::fmax(
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))),
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, util::f32_to_f16(result));
 }
 
-void SMulF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f16_sop2(*this, wf); }
+void SMulF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  float result =
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))) *
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, util::f32_to_f16(result));
+}
 
 void SFmacF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
   float result = std::fma(
@@ -256,30 +577,74 @@ void SFmacF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SMinimumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_minimum_f32_sop2(*this, wf);
+  float result = [&]() {
+    auto a = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+    auto b = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+    if (std::isnan(a) || std::isnan(b))
+      return std::numeric_limits<decltype(a)>::quiet_NaN();
+    if (a == b)
+      return std::signbit(a) ? a : b;
+    return a < b ? a : b;
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 
 void SMaximumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_maximum_f32_sop2(*this, wf);
+  float result = [&]() {
+    auto a = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+    auto b = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1));
+    if (std::isnan(a) || std::isnan(b))
+      return std::numeric_limits<decltype(a)>::quiet_NaN();
+    if (a == b)
+      return std::signbit(a) ? b : a;
+    return a > b ? a : b;
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
 }
 
 void SMinimumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_minimum_f16_sop2(*this, wf);
+  float result = [&]() {
+    auto a = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)));
+    auto b = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+    if (std::isnan(a) || std::isnan(b))
+      return std::numeric_limits<decltype(a)>::quiet_NaN();
+    if (a == b)
+      return std::signbit(a) ? a : b;
+    return a < b ? a : b;
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, util::f32_to_f16(result));
 }
 
 void SMaximumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_maximum_f16_sop2(*this, wf);
+  float result = [&]() {
+    auto a = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)));
+    auto b = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+    if (std::isnan(a) || std::isnan(b))
+      return std::numeric_limits<decltype(a)>::quiet_NaN();
+    if (a == b)
+      return std::signbit(a) ? b : a;
+    return a > b ? a : b;
+  }();
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, util::f32_to_f16(result));
 }
 
 void SAddNcU64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_add_nc_u64_sop2(*this, wf);
+  uint64_t result = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) +
+                     static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
 }
 
 void SSubNcU64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sub_nc_u64_sop2(*this, wf);
+  uint64_t result = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) -
+                     static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
 }
 
-void SMulU64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_u64_sop2(*this, wf); }
+void SMulU64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t result = (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)) *
+                     static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)));
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);
+}
 
 } // namespace cdna5
 } // namespace rocjitsu
