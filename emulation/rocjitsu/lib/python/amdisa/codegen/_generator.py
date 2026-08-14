@@ -6390,7 +6390,7 @@ class CodeGenerator:
             if counter is not None:
                 L.append(f'    d->wait_counter_type = {counter};')
             L.append('    d->lds_dst = true;')
-            L.append('    d->lds_base = wf.m0() + wf.lds_base();')
+            L.append('    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
             L.append(f'    d->mtype = {self._mtype_expr()};')
             L.append(f'    d->non_temporal = {nt};')
             L.append(f'    {addr_fn}(inst_, wf, *d);')
