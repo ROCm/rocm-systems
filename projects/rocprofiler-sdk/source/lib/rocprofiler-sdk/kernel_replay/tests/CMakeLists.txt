@@ -44,6 +44,18 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main)
 
+# snap_restore.cpp is compiled as HIP, which would also make CMake pick the HIP linker for
+# this executable. That matters because ensure_live_tracking() ->
+# rocprofiler_force_configure() runs a register scan that dlopens this statically-linked
+# executable looking for rocprofiler_set_api_table; the SDK exports that symbol via the
+# rocprofiler-sdk-dl interface's -rdynamic, which is gated on a C/CXX link language, so a
+# HIP-linked executable never gets it and every test aborts. The kernel objects are
+# non-rdc (each carries a self-contained, self-registering fatbin), so a plain CXX link
+# resolves and registers the device code correctly. Force the CXX linker so the dl
+# interface's -rdynamic applies in every build configuration, not just Debug (where
+# debug-flags adds -rdynamic unconditionally).
+set_target_properties(kernel-replay-snapshot-test PROPERTIES LINKER_LANGUAGE CXX)
+
 rocprofiler_add_unit_test(
     TARGET kernel-replay-snapshot-test
     SOURCES ${KERNEL_REPLAY_SNAP_RESTORE_SOURCES}
