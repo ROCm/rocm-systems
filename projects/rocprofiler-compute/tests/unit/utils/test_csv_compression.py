@@ -238,7 +238,7 @@ def test_resolve_csv_returns_compressed_when_neither_exists(tmp_path):
 
 def test_native_counter_csv_header_matches_the_reader():
     source = (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[3]
         / "src/lib/rocprofiler_compute_tool/counters_writer.cpp"
     )
     if not source.is_file():
