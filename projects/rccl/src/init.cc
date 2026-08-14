@@ -79,7 +79,7 @@
 #include "dda_all_reduce.h"
 #include "ipc_init.h"
 #include "fabric_init.h"
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(__x86_64__) || defined(_M_X64)
 #include <cpuid.h>
 #endif
 #include <stdio.h>
@@ -299,7 +299,7 @@ static ncclResult_t ncclInit() {
   }
   INFO(NCCL_INIT, "Kernel version: %s", verStr);
   if (strstr(verStr, "cray") == NULL) {
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(__x86_64__) || defined(_M_X64)
     unsigned int eax, ebx, ecx, edx;
     if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx)) ecx = 0; // cpuid not supported
     NCCLCHECK(ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue));
