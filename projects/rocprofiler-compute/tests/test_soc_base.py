@@ -276,6 +276,8 @@ def test_trial_counter_file_with_extra_fits(perfmon_config):
     basis = CounterFile("0", perfmon_config)
     basis.add("SQ_WAVES")
     basis.add("TA_ADDR")
+    # Paired level-event slot, as held by an accumulator bucket.
+    basis.reserve("SQ_WAVES", 1)
 
     extras = ["TCP_READ", "TCC_HIT[0]"]
     trial = _trial_counter_file_with_extra(basis, perfmon_config, extras)
@@ -283,8 +285,12 @@ def test_trial_counter_file_with_extra_fits(perfmon_config):
     flat = flat_counters_in_perfmon_file(trial)
     assert set(flat) == {"SQ_WAVES", "TA_ADDR", "TCP_READ", "TCC_HIT[0]"}
 
+    # Reservations survive the clone, so the trial cannot spend a held slot.
+    assert trial.blocks["SQ"].avail == basis.blocks["SQ"].avail
+
     # Original basis is unchanged
     assert set(flat_counters_in_perfmon_file(basis)) == {"SQ_WAVES", "TA_ADDR"}
+    assert basis.blocks["SQ"].avail == perfmon_config["SQ"] - 2
 
 
 def test_trial_counter_file_with_extra_overflow(perfmon_config):
