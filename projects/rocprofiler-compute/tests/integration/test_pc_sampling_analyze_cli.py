@@ -14,7 +14,7 @@ import pytest
 
 from tests.integration import common as integration_common
 
-PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI300X_A1"
+PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI350"
 
 # Source paths recorded in the fixture workload's code object metadata.
 VCOPY_SOURCE = "/app/projects/rocprofiler-compute/sample/vcopy.cpp"

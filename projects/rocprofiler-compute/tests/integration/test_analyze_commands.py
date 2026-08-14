@@ -27,7 +27,10 @@ indirs = [
 ]
 
 PC_SAMPLING_SOURCE_WORKLOAD = (
-    Path(__file__).resolve().parent / "workloads" / "vcopy_pc_sampling_only" / "MI350"
+    Path(__file__).resolve().parents[1]
+    / "workloads"
+    / "vcopy_pc_sampling_only"
+    / "MI350"
 )
 SOURCE_WORKLOAD_NAME = "pc_sampling_source_workload"
 SOURCE_WORKLOAD_SUB_NAME = "run_001"
