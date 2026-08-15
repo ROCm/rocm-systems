@@ -7,6 +7,7 @@
 #include <alloc.h>
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
+#include <unordered_map>
 
 #include "TestBed.hpp"
 #include "common/ErrCode.hpp"
@@ -370,6 +371,62 @@ TEST(Alloc, ClampStreamPriority)
             EXPECT_EQ(ncclClampStreamPriority(greatest), greatest);
             EXPECT_EQ(ncclClampStreamPriority(least), least);
             EXPECT_EQ(ncclClampStreamPriority((greatest + least) / 2), (greatest + least) / 2);
+        }
+    );
+}
+
+// Keys with the same busId but different priorities must remain distinct.
+TEST(Alloc, SideStreamKeySeparatesPriorities)
+{
+    constexpr int64_t                                                        busId = 0x1234;
+    std::unordered_map<ncclSideStreamKey, int, ncclSideStreamKeyHash> streams;
+    streams.emplace(ncclSideStreamKey{busId, -1}, 1);
+    streams.emplace(ncclSideStreamKey{busId, 0}, 2);
+    ASSERT_EQ(streams.size(), 2);
+    EXPECT_EQ(streams.at(ncclSideStreamKey{busId, -1}), 1);
+    EXPECT_EQ(streams.at(ncclSideStreamKey{busId, 0}), 2);
+}
+
+// When the device supports multiple priorities, the pool creates and returns
+// separate streams for the same device at each priority.
+TEST(Alloc, SideStreamPoolSeparatesPriorities)
+{
+    RUN_ISOLATED_TEST(
+        "SideStreamPoolSeparatesPriorities",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            constexpr int dev = 0;
+
+            int least = 0, greatest = 0;
+            ASSERT_EQ(hipDeviceGetStreamPriorityRange(&least, &greatest), hipSuccess);
+            ASSERT_LE(greatest, least);
+            if(greatest == least)
+            {
+                GTEST_SKIP() << "Device exposes only one stream priority";
+            }
+
+            ASSERT_EQ(ncclSideStreamAcquire(dev, greatest), ncclSuccess);
+            ASSERT_EQ(ncclSideStreamAcquire(dev, least), ncclSuccess);
+
+            hipStream_t greatestStream = nullptr;
+            hipStream_t leastStream    = nullptr;
+            ASSERT_EQ(getSideStream(&greatestStream, greatest), ncclSuccess);
+            ASSERT_EQ(getSideStream(&leastStream, least), ncclSuccess);
+            ASSERT_NE(greatestStream, nullptr);
+            ASSERT_NE(leastStream, nullptr);
+            EXPECT_NE(greatestStream, leastStream)
+                << "Same busId at different priorities must not share a stream";
+
+            ASSERT_EQ(ncclSideStreamRelease(dev, greatest), ncclSuccess);
+            ASSERT_EQ(ncclSideStreamRelease(dev, least), ncclSuccess);
+
+            greatestStream = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            leastStream    = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&greatestStream, greatest), ncclSuccess);
+            ASSERT_EQ(getSideStream(&leastStream, least), ncclSuccess);
+            EXPECT_EQ(greatestStream, nullptr);
+            EXPECT_EQ(leastStream, nullptr);
         }
     );
 }

@@ -82,8 +82,8 @@ template <typename T>
 using ncclUniqueArrayPtr = std::unique_ptr<T[], ncclDeleterFree>;
 
 // Side streams are cached per (busId, priority) and reference counted by the
-// number of active "allocation scopes" (comm init/connect burst, buffer
-// registration, lazy connect). The stream is created on the first acquire of a
+// number of active "allocation scopes" (comm init and P2P connect bursts,
+// including lazy connect). The stream is created on the first acquire of a
 // given (busId, priority) and destroyed - releasing its scarce GPU hardware
 // queue - when the last scope for that key exits. This keeps allocations within
 // a burst churn-free while ensuring no side stream persists (and holds a HW
@@ -144,7 +144,7 @@ fail:
 }
 
 // Release a previously-acquired side stream. Destroys it (freeing the HW queue)
-// when the last scope for this (busId, priority) exits. No-op if not present.
+// when the last scope for this (busId, priority) exits.
 static inline ncclResult_t ncclSideStreamRelease(int cudaDev, int priority = 0) {
   ncclResult_t res = ncclSuccess;
   int64_t busId;
@@ -162,6 +162,8 @@ static inline ncclResult_t ncclSideStreamRelease(int cudaDev, int priority = 0) 
       INFO(NCCL_ALLOC, "Side stream %p dev %d busid %lx prio %d dec count to %ld", it->second.stream, cudaDev, busId,
            priority, it->second.refCount);
     }
+  } else {
+    WARN("Side stream of dev %d busid %lx prio %d was not found for release", cudaDev, busId, priority);
   }
 fail:
   pthread_mutex_unlock(&sideStreamLock);
@@ -190,8 +192,8 @@ static inline ncclResult_t getSideStream(cudaStream_t* stream, int priority = 0)
 // phase (e.g. transport pre-connect). All ncclCudaCalloc/ncclCudaMemcpy in the
 // phase - including those issued on the proxy thread for the same device while
 // the calling thread blocks - reuse the one pooled stream, then the HW queue is
-// freed on scope exit. The pool is keyed by busId, so cross-thread reuse for the
-// same device works.
+// freed on scope exit. The pool is keyed by (busId, priority), so cross-thread
+// reuse for the same device and priority works without merging priorities.
 struct ncclSideStreamScope {
   int dev;
   int prio;
