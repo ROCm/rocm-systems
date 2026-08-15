@@ -655,9 +655,9 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
-    int mergedDev = CreateMergedDevice(4, rank);
+    int mergedDev = CreateMergedDevice(4);
     if (mergedDev == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
     for (int iter = 0; iter < 3; iter++) {
@@ -756,10 +756,13 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
     for (int d : physDevs)
         if (props[d].speed == targetSpeed) compat.push_back(d);
 
-    int mergedDevA = CreateMergedDevice(2, rank);
-    int mergedDevB = CreateMergedDevice(3, rank, 2);
-    if (mergedDevA == -1 || mergedDevB == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+    int mergedDevA = CreateMergedDevice(2);
+    if (mergedDevA == -1) {
+        GTEST_SKIP() << mergeSkipReason_;
+    }
+    int mergedDevB = CreateMergedDevice(3, /*speedGroupStart=*/2);
+    if (mergedDevB == -1) {
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
     // Physical device = first NIC from merged A's group
@@ -971,9 +974,9 @@ TEST_F(NetIbMPITest, RapidConnectDisconnect) {
     }
     ASSERT_FALSE(physDevs.empty()) << "No physical devices found";
 
-    int mergedDev = CreateMergedDevice(3, rank);
+    int mergedDev = CreateMergedDevice(3);
     if (mergedDev == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
 

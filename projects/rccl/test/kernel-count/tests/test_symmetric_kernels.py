@@ -15,7 +15,7 @@ no built library) guards against unintended kernel growth in three layers --
 per-dimension value-sets (root cause), per-collective counts (where), and grand
 total (net effect) -- and keeps PARSER breakage distinct from baseline movement.
 
-Baselines seeded from origin/develop @ 40d3fae2dfa077769d45bac77a16e849c72d89ea.
+Baselines seeded from origin/develop @ 4a99ef1f9c (develop, post-AllGatherV).
 """
 
 import os
@@ -31,7 +31,7 @@ RCCL_ROOT = Path(__file__).resolve().parents[3]
 GENERATE_PY = RCCL_ROOT / "src" / "device" / "symmetric" / "generate.py"
 
 # ---------------------------------------------------------------------------
-# Baselines (origin/develop @ 40d3fae2dfa077769d45bac77a16e849c72d89ea).
+# Baselines (origin/develop @ 4a99ef1f9c (develop, post-AllGatherV)).
 # If a change moves these numbers, update them here AND explain in the PR
 # description WHY. Do not blind-update.
 # ---------------------------------------------------------------------------

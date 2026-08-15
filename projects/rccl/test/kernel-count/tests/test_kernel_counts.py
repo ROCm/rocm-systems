@@ -25,7 +25,7 @@ generated kernel set against hardcoded baselines in three complementary layers:
 Both shipping configurations are guarded: ENABLE_ROCSHMEM OFF (default) and ON
 (adds the AlltoAllGda / AlltoAllvGda GDA collectives).
 
-Baselines seeded from origin/develop @ 40d3fae2dfa077769d45bac77a16e849c72d89ea.
+Baselines seeded from origin/develop @ 4a99ef1f9c (develop, post-AllGatherV).
 
 Note on emitted vs declared values: the value-sets are the values ACTUALLY
 EMITTED into the specialized kernels, not the raw all_* lists in generate.py. In
@@ -48,16 +48,17 @@ RCCL_ROOT = Path(__file__).resolve().parents[3]
 GENERATE_PY = RCCL_ROOT / "src" / "device" / "generate.py"
 
 # ---------------------------------------------------------------------------
-# Baselines (origin/develop @ 40d3fae2dfa077769d45bac77a16e849c72d89ea).
+# Baselines (origin/develop @ 4a99ef1f9c (develop, post-AllGatherV)).
 # If a change moves these numbers, update them here AND explain in the PR
 # description WHY the kernel count changed (binary-size / build-time impact).
 # Do not blind-update.
 # ---------------------------------------------------------------------------
 EXPECTED = {
     "OFF": {
-        "total": 6102,
+        "total": 6120,
         "per_coll": {
             "AllGather": 48,
+            "AllGatherV": 18,
             "AllReduce": 3840,
             "AlltoAllPivot": 6,
             "Broadcast": 24,
@@ -67,9 +68,10 @@ EXPECTED = {
         },
     },
     "ON": {
-        "total": 6114,
+        "total": 6132,
         "per_coll": {
             "AllGather": 48,
+            "AllGatherV": 18,
             "AllReduce": 3840,
             "AlltoAllGda": 6,
             "AlltoAllPivot": 6,

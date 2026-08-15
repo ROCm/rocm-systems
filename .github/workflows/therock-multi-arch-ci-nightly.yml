@@ -40,6 +40,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   # This workflow only runs on schedule / workflow_dispatch (never on PRs).

@@ -1,7 +1,7 @@
 {
   "system_configurations": {
     "name": "RCCL Host Tests",
-    "description": "CPU-only host-path tests; no GPU or RCCL build required (requires_build=false)."
+    "description": "CPU-only host-path tests; no GPU or RCCL build required (build_configuration.enabled=false)."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
@@ -12,7 +12,7 @@
     "NCCL_DEBUG": "WARN"
   },
   "build_configuration": {
-    "requires_build": false
+    "enabled": false
   },
   "test_configurations": {
     "kernel_count_guards": {

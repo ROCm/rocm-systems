@@ -527,12 +527,8 @@ class TestExecutor:
         elif self.args.verbose:
             print("SKIP: MPI check skipped (--skip-mpi-check)")
 
-        # Check RCCL library (if not building or using custom lib). Skipped when
-        # the config declares it needs no build (requires_build = false): such
-        # CPU-only suites never load librccl, so requiring it here would block a
-        # legitimately build-free run (e.g. host-only pytest guards).
-        needs_lib = self.build_config.get("requires_build", True)
-        if (self.args.no_build or self.using_custom_lib) and needs_lib:
+        # Check RCCL library (if not building or using custom lib)
+        if self.args.no_build or self.using_custom_lib:
             lib_path = os.path.join(self.build_dir, "librccl.so")
             if not os.path.isfile(lib_path):
                 errors.append(f"RCCL library not found: {lib_path}")
@@ -626,15 +622,9 @@ class TestExecutor:
                 print("SKIP: Build step skipped (--no-build)")
             return True
 
-        # A config can opt out of building RCCL entirely by setting
-        # build_configuration.requires_build = false. This is for CPU-only suites
-        # (e.g. pytest guards that only exercise the code generators / host code
-        # and never load librccl); it skips both the build here and the
-        # librccl.so requirement in check_environment(). Defaults to true so all
-        # existing configs are unaffected.
-        if not self.build_config.get("requires_build", True):
+        if not self.build_config.get("enabled", True):
             if self.args.verbose:
-                print("SKIP: Build step skipped (build_configuration.requires_build = false)")
+                print("SKIP: librccl build disabled (build_configuration.enabled=false)")
             return True
 
         print("="*80)

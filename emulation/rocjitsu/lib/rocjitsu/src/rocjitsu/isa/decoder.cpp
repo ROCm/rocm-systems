@@ -27,6 +27,17 @@ Decoder::~Decoder() {
     deactivate_pool();
 }
 
+void Decoder::validate_instruction_operands(const Instruction &inst) {
+  for (int index = 0; index < inst.num_src_operands(); ++index) {
+    if (const Operand *operand = inst.src_operand(index))
+      operand->validate_encoding();
+  }
+  for (int index = 0; index < inst.num_dst_operands(); ++index) {
+    if (const Operand *operand = inst.dst_operand(index))
+      operand->validate_encoding();
+  }
+}
+
 Instruction *Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc) {
   Instruction *decoded = decode(inst);
   if (decoded != nullptr)

@@ -61,9 +61,13 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "requires_build": {
+        "enabled": {
           "type": "boolean",
-          "description": "When false, skip building RCCL entirely AND skip the librccl.so environment check. For CPU-only suites (e.g. pytest guards) that exercise only the generators/host code and never load librccl. Defaults to true."
+          "description": "Set to false to skip building librccl.so entirely (e.g. perf configs whose binaries come from an external build). Defaults to true."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable note about this build configuration (not interpreted by the runner)"
         },
         "install_flags": {
           "type": "array",
