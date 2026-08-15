@@ -523,7 +523,7 @@ TEST_F(sample_type_test, pmc_event_with_sample_default_constructor)
 
 TEST_F(sample_type_test, spm_sample_default_constructor)
 {
-    spm_sample sample;
+    const spm_sample sample;
     EXPECT_EQ(sample.type_identifier, type_identifier_t::spm_sample);
 }
 
@@ -608,7 +608,7 @@ TEST_F(sample_type_test, spm_sample_get_size)
                                   spm_counter_value{ 0, 789.25 },
                               } },
     };
-    spm_sample sample(7, 42, 99, 1234, 5678, 9876, 55, true, counters, samples);
+    const spm_sample sample(7, 42, 99, 1234, 5678, 9876, 55, true, counters, samples);
 
     const auto expected_size =
         sizeof(std::uint64_t) * 7 + sizeof(bool) + sizeof(std::uint32_t) * 2 +
@@ -621,7 +621,7 @@ TEST_F(sample_type_test, spm_sample_get_size)
 
 TEST_F(sample_type_test, spm_sample_empty_samples_and_no_data_loss)
 {
-    spm_sample original(7, 42, 99, 1234, 5678, 9876, 55, false, {}, {});
+    const spm_sample original(7, 42, 99, 1234, 5678, 9876, 55, false, {}, {});
 
     serialize(buffer.data(), original);
 

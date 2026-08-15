@@ -102,11 +102,15 @@ using counter_id_vec_t = std::vector<rocprofiler_counter_id_t>;
 using agent_counter_id_map_t =
     std::unordered_map<rocprofiler_agent_id_t, counter_id_vec_t>;
 
-// Deliberately not guarded by ROCPROFSYS_USE_SPM: rocprofiler_counter_config_id_t
-// comes from <rocprofiler-sdk/fwd.h>, not the experimental SPM header, so keeping
-// this unconditional gives client_data one layout in every translation unit.
+struct spm_counter_config_id_t
+{
+    std::uint64_t handle = 0;
+};
+
+// Deliberately not guarded by ROCPROFSYS_USE_SPM: keep client_data layout stable
+// even when some SDK versions do not declare rocprofiler_counter_config_id_t.
 using agent_spm_counter_config_map_t =
-    std::unordered_map<rocprofiler_agent_id_t, rocprofiler_counter_config_id_t>;
+    std::unordered_map<rocprofiler_agent_id_t, spm_counter_config_id_t>;
 
 using backtrace_operation_map_t =
     std::unordered_map<rocprofiler_callback_tracing_kind_t,

@@ -426,9 +426,6 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
         { "ROCPROFSYS_NETWORK_INTERFACE", "ib0" },
         { "ROCPROFSYS_TRACE_PERIODS", "1:5,10:20" },
         { "ROCPROFSYS_PAPI_MULTIPLEXING", "true" },
-        { "ROCPROFSYS_ROCM_SPM_EVENTS", "SQ_WAVES" },
-        { "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL", "4200" },
-        { "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT", "sclk_cycles" },
     };
 
     auto j = env_vars_to_json_schema(env_vars);
@@ -438,16 +435,11 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
     EXPECT_EQ(j["advanced"]["network_interface"]["value"], "ib0");
     EXPECT_EQ(j["advanced"]["trace_periods"]["value"], "1:5,10:20");
     EXPECT_EQ(j["hardware_counters"]["papi_multiplexing"]["enabled"], true);
-    EXPECT_EQ(j["hardware_counters"]["spm"]["enabled"], true);
-    EXPECT_EQ(j["hardware_counters"]["spm"]["events"]["value"], "SQ_WAVES");
-    EXPECT_EQ(j["hardware_counters"]["spm"]["sample_interval"]["value"], 4200);
-    EXPECT_EQ(j["hardware_counters"]["spm"]["sample_interval_unit"]["value"],
-              "sclk_cycles");
 }
 
 TEST_F(json_config_test, exports_large_spm_sample_interval_as_integer)
 {
-    std::map<std::string, std::string> env_vars = {
+    const std::map<std::string, std::string> env_vars = {
         { "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL", "4294967296" },
     };
 
@@ -458,7 +450,7 @@ TEST_F(json_config_test, exports_large_spm_sample_interval_as_integer)
 
 TEST_F(json_config_test, spm_env_export_round_trips_through_hw_counter_gate)
 {
-    std::map<std::string, std::string> env_vars = {
+    const std::map<std::string, std::string> env_vars = {
         { rocprofsys::env_vars::ROCM_SPM_EVENTS, "SQ_WAVES:device=0" },
         { rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL, "8192" },
     };
@@ -488,7 +480,7 @@ TEST_F(json_config_test, resolves_large_spm_sample_interval_from_json)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL"), "4294967296");
+    EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL), "4294967296");
 }
 
 // Test env_vars constants match expected string values

@@ -29,8 +29,8 @@
 //
 //   ROCPROFSYS_USE_SPM
 //     Set to 0/1 by cmake/Packages.cmake after probing for
-//     <rocprofiler-sdk/experimental/spm.h>. Also used by fwd.hpp and
-//     perfetto_processor.cpp for SPM-dependent data members/output.
+//     <rocprofiler-sdk/experimental/spm.h>. Also used by perfetto_processor.cpp
+//     for SPM-dependent output; fwd.hpp keeps macro-independent handle storage.
 //
 //   ROCPROFSYS_DISABLE_SPM_RUNTIME
 //     Defined only by the unit-test target so the SPM configuration/validation helpers
@@ -546,7 +546,8 @@ configure_agent_spm_configs(client_data& data, const configuration& requested_co
             }
             if(config.status == spm_status::failed) return false;
 
-            configs.emplace(rocprofiler_agent_id_t{ agent.agent->handle }, config.config);
+            configs.emplace(rocprofiler_agent_id_t{ agent.agent->handle },
+                            spm_counter_config_id_t{ config.config.handle });
             matched_agent = true;
         }
 
@@ -608,7 +609,7 @@ spm_dispatch_callback(
     data->agent_spm_counter_configs.rlock([&](const auto& configs) {
         if(const auto itr = configs.find(dispatch_data->dispatch_info.agent_id);
            itr != configs.end())
-            *config = itr->second;
+            *config = rocprofiler_counter_config_id_t{ itr->second.handle };
     });
 }
 
