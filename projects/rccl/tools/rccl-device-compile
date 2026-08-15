@@ -447,27 +447,31 @@ def discover_tools(clang_path):
 # ---------------------------------------------------------------------------
 
 def run_timed(cmd, description=""):
-    """Run a command and return (elapsed_seconds, exit_code)."""
+    """Run a command and return elapsed wall-clock seconds.
+
+    Any failure exits the process, so a broken device compile can never be
+    mistaken for a successful one. Callers that record timing set their stage
+    status before calling and log it from a `finally` block, which still runs
+    while SystemExit propagates.
+    """
     t0 = time.monotonic()
     try:
         subprocess.check_call(cmd)
-        return time.monotonic() - t0, 0
     except subprocess.CalledProcessError as e:
         label = f" ({description})" if description else ""
         print(f"ERROR{label}: command failed with exit code {e.returncode}:",
               file=sys.stderr)
         print(f"  {' '.join(cmd)}", file=sys.stderr)
-        return time.monotonic() - t0, e.returncode
+        sys.exit(e.returncode)
     except FileNotFoundError:
         print(f"ERROR: executable not found: {cmd[0]}", file=sys.stderr)
-        return time.monotonic() - t0, 1
+        sys.exit(1)
+    return time.monotonic() - t0
 
 
 def run(cmd, description=""):
-    """Run a command, raising on failure with the full command for diagnosis."""
-    _, rc = run_timed(cmd, description)
-    if rc != 0:
-        sys.exit(rc)
+    """Run a command, exiting on failure with the full command for diagnosis."""
+    run_timed(cmd, description)
 
 
 # ---------------------------------------------------------------------------
@@ -566,12 +570,11 @@ def do_compile(args, forwarded_flags):
         ] + forwarded_flags + [
             '-S', '-o', asm_file, source,
         ]
-        compile_s, rc = run_timed(compile_cmd, f"compile {os.path.basename(source)}")
-        if rc != 0:
-            status = f'compile_failed:{rc}'
-            sys.exit(rc)
+        status = 'compile_failed'
+        compile_s = run_timed(compile_cmd, f"compile {os.path.basename(source)}")
 
         # Step 2: Extract device function (inline)
+        status = 'extract_failed'
         t0 = time.monotonic()
         with open(asm_file) as f:
             asm_lines = f.readlines()
@@ -580,7 +583,6 @@ def do_compile(args, forwarded_flags):
             extracted_lines, resources = extract_device_function(asm_lines)
         except RuntimeError as e:
             extract_s = time.monotonic() - t0
-            status = 'extract_failed'
             print(f"ERROR: extraction failed for {source}: {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -601,11 +603,16 @@ def do_compile(args, forwarded_flags):
             f'-mcpu={arch}',
             '-c', '-o', output, ext_file,
         ]
-        assemble_s, rc = run_timed(assemble_cmd, f"assemble {os.path.basename(source)}")
-        if rc != 0:
-            status = f'assemble_failed:{rc}'
-            sys.exit(rc)
+        status = 'assemble_failed'
+        assemble_s = run_timed(assemble_cmd, f"assemble {os.path.basename(source)}")
+        status = 'ok'
 
+    except SystemExit as e:
+        # The failing step already reported the error; annotate the stage that
+        # was in flight with its exit code so the timing row records it.
+        if e.code:
+            status = f'{status}:{e.code}'
+        raise
     finally:
         log_timing(
             timing_log, 'compile', arch, kernel_name,
@@ -639,6 +646,9 @@ def do_link(args, forwarded_flags):
     compile_s = extract_s = assemble_s = 0.0
     status = 'ok'
     t_total = time.monotonic()
+    # Start of the patch/assemble/rocSHMEM window reported as extract_s; None
+    # until that window opens, so a failure before it logs 0.0.
+    t0 = None
 
     if not dispatcher:
         raise SystemExit("ERROR: --link requires --dispatcher=<source>")
@@ -689,12 +699,11 @@ def do_link(args, forwarded_flags):
         ] + forwarded_flags + [
             '-S', '-o', disp_asm, dispatcher,
         ]
-        compile_s, rc = run_timed(disp_compile_cmd, f"compile dispatcher for {arch}")
-        if rc != 0:
-            status = f'dispatcher_compile_failed:{rc}'
-            sys.exit(rc)
+        status = 'dispatcher_compile_failed'
+        compile_s = run_timed(disp_compile_cmd, f"compile dispatcher for {arch}")
 
         # Step 3: Patch dispatcher with aggregated resources
+        status = 'dispatcher_patch_failed'
         t0 = time.monotonic()
         with open(disp_asm) as f:
             disp_lines = f.readlines()
@@ -710,12 +719,8 @@ def do_link(args, forwarded_flags):
             f'-mcpu={arch}',
             '-c', '-o', disp_obj, disp_patched,
         ]
-        _, rc = run_timed(
-            disp_assemble_cmd, f"assemble dispatcher for {arch}")
-        if rc != 0:
-            extract_s = time.monotonic() - t0
-            status = f'dispatcher_assemble_failed:{rc}'
-            sys.exit(rc)
+        status = 'dispatcher_assemble_failed'
+        run_timed(disp_assemble_cmd, f"assemble dispatcher for {arch}")
 
         # Step 5: Compile rocSHMEM device bitcode to an amdgcn object (if provided).
         if rocshmem_bitcode:
@@ -731,12 +736,9 @@ def do_link(args, forwarded_flags):
                     '-c', '-x', 'ir',
                     '-o', rocshmem_obj, rocshmem_bitcode,
                 ]
-                _, rc = run_timed(
+                status = 'rocshmem_compile_failed'
+                run_timed(
                     bc_compile_cmd, f"compile rocSHMEM device bitcode for {arch}")
-                if rc != 0:
-                    extract_s = time.monotonic() - t0
-                    status = f'rocshmem_compile_failed:{rc}'
-                    sys.exit(rc)
         # t0 already spans patch + dispatcher assemble + optional rocSHMEM;
         # do not add those stage times again (that double-counts).
         extract_s = time.monotonic() - t0
@@ -756,10 +758,9 @@ def do_link(args, forwarded_flags):
             '-o', output,
             f'@{rsp_path}',
         ]
-        assemble_s, rc = run_timed(link_cmd, f"link device.elf for {arch}")
-        if rc != 0:
-            status = f'link_failed:{rc}'
-            sys.exit(rc)
+        status = 'link_failed'
+        assemble_s = run_timed(link_cmd, f"link device.elf for {arch}")
+        status = 'ok'
 
         if not keep_temps:
             try:
@@ -767,6 +768,14 @@ def do_link(args, forwarded_flags):
             except OSError:
                 pass
 
+    except SystemExit as e:
+        # The failing step already reported the error; annotate the stage that
+        # was in flight with its exit code so the timing row records it.
+        if e.code:
+            status = f'{status}:{e.code}'
+        if t0 is not None and not extract_s:
+            extract_s = time.monotonic() - t0
+        raise
     finally:
         log_timing(
             timing_log, 'link', arch, kernel_name,

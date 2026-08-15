@@ -39,3 +39,7 @@ jobs:
       - name: Run ce_reduce generator unit tests
         run: |
           python3 projects/rccl/src/device/ce_reduce/test_generate_ce_reduce.py -v
+
+      - name: Run rccl-device-compile unit tests
+        run: |
+          python3 projects/rccl/tools/test_rccl_device_compile.py -v

@@ -35,6 +35,14 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
+  # CPU-only unit test: rccl-device-compile still sys.exits on timed subprocess
+  # failure (timing refactor returns rc from run_timed; callers must exit).
+  add_test(
+    NAME rccl-device-compile-unit
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/tools/test_rccl_device_compile.py"
+  )
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
