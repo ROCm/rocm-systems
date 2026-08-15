@@ -501,6 +501,16 @@ static void parent_fork_handler(void) { dxg_runtime->hsakmt_mutex.unlock(); }
 static void child_fork_handler(void) {
   dxg_runtime->is_forked = true;
 
+  /* Sever the references the child inherited but never took, before any public
+   * entry point can act on them. CHECK_DXG_OPEN() already rejects calls while
+   * is_forked is set, but zeroing the counts means that even a path that
+   * bypasses it cannot decrement the parent's bookkeeping. Both are plain
+   * stores, which is all an atfork child handler may safely do - the heavier
+   * teardown waits for clear_after_fork().
+   */
+  dxg_runtime->dxg_open_count = 0;
+  topology_clear_snapshot_refs();
+
   /* prepare_fork_handler() locked hsakmt_mutex right before fork() so that
    * no other thread would be mid-operation during the fork snapshot. In the
    * child only this one thread survives, and its TID differs from whichever
@@ -524,6 +534,11 @@ static void child_fork_handler(void) {
 static void clear_after_fork(void) {
   reset_suballocator();
   clear_allocation_map();
+  /* The snapshot's WDDMDevices belong to the parent's DXCore session, which
+   * the runtime reset below discards. Let go of them rather than reusing or
+   * destroying them.
+   */
+  topology_abandon_after_fork();
 
   if (dxg_runtime->dxg_fd >= 0) {
 #if defined(__linux__)
@@ -638,14 +653,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   HsaSystemProperties sys_props;
   char *error;
 
-  std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
-
   /* If the process has forked, the child process must re-initialize
    * it's connection to DXG. Any references tracked by dxg_open_count
-   * belong to the parent
+   * belong to the parent.
+   *
+   * This runs before the lock is taken, and must: clear_after_fork() replaces
+   * *dxg_runtime, so a lock_guard constructed on the old object would unlock
+   * freed memory when it went out of scope. Only the forking thread survives
+   * into the child and child_fork_handler() has already reinitialized the
+   * mutex, so there is nothing here to exclude. is_forked is only ever written
+   * in a single-threaded child, so reading it unlocked races with nothing.
    */
   if (is_forked_child())
     clear_after_fork();
+
+  std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
 
   if (dxg_runtime->dxg_open_count == 0) {
     static bool atfork_installed = false;
@@ -680,7 +702,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
 
 
 
-    dxg_runtime->dxg_open_count = 1;
+    dxg_runtime->dxg_open_count++;
+
+    /* Only the 0->1 transition owns the suballocator. A later open comes from
+     * a second in-process consumer (on WSL, rocprofiler-sdk reading the KMT
+     * topology alongside the HSA runtime) and the first one's allocations are
+     * still live - resetting the fragment allocator here would throw away the
+     * bookkeeping that tracks them. clear_after_fork() above resets it on the
+     * one path where the inherited bookkeeping really is meaningless.
+     */
+    reset_suballocator();
 
     if (!atfork_installed) {
       /* Atfork handlers cannot be uninstalled and
@@ -699,12 +730,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
     result = HSAKMT_STATUS_KERNEL_ALREADY_OPENED;
   }
 
-  reset_suballocator();
   return result;
 dxcore_loader_failed:
+  /* Drop the descriptor we just took and forget it. dxg_open_count is still 0,
+   * so nobody else owns it, and leaving dxg_fd pointing at a closed descriptor
+   * makes the next hsaKmtOpenKFD() skip the reopen above and hand out a stale
+   * fd. Note the DxcoreLoader itself latches its result behind a std::once_flag
+   * and so cannot be retried in this process regardless.
+   */
 #if defined(__linux__)
-  close(fd);
+  if (dxg_runtime->dxg_fd >= 0)
+    close(dxg_runtime->dxg_fd);
 #endif
+  dxg_runtime->dxg_fd = -1;
 open_failed:
 
   return result;
@@ -716,6 +754,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
 
   if (dxg_runtime->dxg_open_count > 0) {
     if (--dxg_runtime->dxg_open_count == 0) {
+      /* Before DXCore goes, and so before the WDDMDevice objects a snapshot
+       * names become pointers into a dead session.
+       */
+      topology_drop_snapshot_at_last_close();
+
       dxg_runtime->HeapFini();
 #if defined(__linux__)
       close(dxg_runtime->dxg_fd);

@@ -1,7 +1,22 @@
 # Pure-logic tests for the DXG (WSL) thunk. No GPU, DXCore adapter or open
 # thunk is involved, so these run on any machine that can build the library.
 #
-# These targets are build-only artifacts and are deliberately not installed.
+# libhsakmt has no test framework; ../../../tests/unit_test_harness.h is the
+# whole harness. These targets are build-only artifacts and are deliberately
+# not installed.
+
+add_executable(dxg-snapshot-refcount-test snapshot_refcount_test.cpp)
+target_include_directories(
+    dxg-snapshot-refcount-test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../tests
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/dxg
+)
+set_target_properties(
+    dxg-snapshot-refcount-test
+    PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON
+)
+
+add_test(NAME dxg-snapshot-refcount COMMAND dxg-snapshot-refcount-test)
 
 # ---------------------------------------------------------------------------
 # Installed public headers: is the dev package self-contained?

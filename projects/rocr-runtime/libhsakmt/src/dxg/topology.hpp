@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "snapshot_refcount.hpp"
+
 /* Number of memory banks added by thunk on top of topology
  * This only includes static heaps like LDS, scratch and SVM,
  * not for MMIO_REMAP heap. MMIO_REMAP memory bank is reported
@@ -26,6 +28,10 @@ struct _topology_props {
   HsaSystemProperties *g_system = nullptr;
   std::vector<node_props_t> g_props;
   std::vector<wsl::thunk::WDDMDevice *> wdevices_;
+  /* Outstanding hsaKmtAcquireSystemProperties() references. Guarded by
+   * hsakmtRuntime::hsakmt_mutex.
+   */
+  wsl::thunk::SnapshotRefcount snapshot_refs_;
   uint32_t wdevice_num_ = 0;
   uint32_t num_sysfs_nodes = 0;
   uint32_t numa_node_count_ = 0;
