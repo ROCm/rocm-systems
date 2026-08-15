@@ -42,7 +42,17 @@ class KfdProcess {
 public:
   /// @brief Per-GPU state within a process.
   struct PerGpuState {
+    // Canonical shared backing retained for the process lifetime. Keeping the fd
+    // and monitor mapping stable means a client re-mmap only republishes its view;
+    // it cannot change the storage or address polled by the CP.
+    int doorbell_memfd = -1;
     void *doorbell_page = nullptr;
+    // Driver-side alias of doorbell_page. Both addresses are MAP_SHARED views of
+    // doorbell_memfd, and the CP only touches this stable view. Shared-page
+    // coherence makes client writes visible here. TSan keys shadow state by virtual
+    // address, so it cannot correlate stores and loads through these distinct views;
+    // sanitizer success is not evidence for the doorbell edge protocol itself.
+    void *doorbell_monitor_page = nullptr;
     size_t doorbell_page_size = 0;
     uint64_t doorbell_gpu_va = 0;
     uint64_t next_doorbell_offset = 0;

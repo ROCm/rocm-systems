@@ -194,28 +194,31 @@ jobs:
           ROCMINFO=RocminfoTest
           RCCL_DAEMON=RcclDaemonTest
           EXCLUDED_TESTS="${ROCMINFO}|${RCCL_DAEMON}"
-          ASAN_UBSAN_EXCLUDED_TESTS=(
-            "HsaTest\.InitSucceeded"
-            "HsaTest\.GpuAgentFound"
+          COMMON_SANITIZER_EXCLUDED_TESTS=(
             "Cdna4ToCdna3SimulatedDispatchTest\..*"
             "Cdna4ToCdna3DbtGuestTest\..*"
             "HipMemcpyTest\.RoundTripFloat"
             "HipMemcpyTest\.RoundTripInt"
             "HipMemcpyTest\.DeviceToDevice"
             "HipVectorAddTest\.CorrectResult"
-            "DaemonTest\.HipVectorAdd"
-            "DaemonTest\.HipMemcpyRoundTripFloat"
-            "DaemonTest\.HipMemcpyRoundTripInt"
-            "DaemonTest\.HipMemcpyDeviceToDevice"
-            "DaemonTest\.TwoIndependentClients"
             "DaemonTest\.LoggingPlugin"
             "BfeRegressionTest\.ThreadIdxY"
             "LoggingTest\.dispatch_logged"
             "CvtNarrow\.AllTests"
             "RaceTest\..*"
           )
+          # These daemon cases are stable under ASan/UBSan but still report
+          # ROCr-owned allocations through LSan. Keep them enabled under TSan;
+          # their exclusion here is unrelated to the doorbell lifecycle fix.
+          ASAN_UBSAN_EXCLUDED_TESTS=(
+            "${COMMON_SANITIZER_EXCLUDED_TESTS[@]}"
+            "DaemonTest\.HipMemcpyRoundTripFloat"
+            "DaemonTest\.HipMemcpyRoundTripInt"
+            "DaemonTest\.HipMemcpyDeviceToDevice"
+            "DaemonTest\.TwoIndependentClients"
+          )
           TSAN_EXCLUDED_TESTS=(
-            "${ASAN_UBSAN_EXCLUDED_TESTS[@]}"
+            "${COMMON_SANITIZER_EXCLUDED_TESTS[@]}"
             # This test has a five-second wall-clock assertion that becomes
             # load-sensitive at the TSan job's CI-level parallelism.
             "DaemonApi\.FullListenerQueueDoesNotBlockOrRemoveSocket"

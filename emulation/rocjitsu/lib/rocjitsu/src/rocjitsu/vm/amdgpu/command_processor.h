@@ -186,12 +186,17 @@ public:
   /// @brief Test-only view of the doorbell monitor lifecycle flag.
   ///
   /// @details Exposes doorbell_running_ so a regression test can observe the
-  /// monitor retiring after the last host-accessible queue is destroyed and
+  /// monitor stopping after the last host-accessible queue is destroyed and
   /// restarting when a new one registers. Read under doorbell_thread_mutex_ so it
-  /// never races the loop's self-exit or ensure_doorbell_monitor().
+  /// never races monitor teardown or ensure_doorbell_monitor().
   [[nodiscard]] bool doorbell_monitor_running_for_test() {
     std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
     return doorbell_running_;
+  }
+  /// @brief Test-only check that teardown reaped the monitor's thread handle.
+  [[nodiscard]] bool doorbell_monitor_joinable_for_test() {
+    std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+    return doorbell_thread_.joinable();
   }
 
 private:
@@ -352,6 +357,10 @@ private:
   void write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
 
   void stop_doorbell_monitor();
+  /// @brief Stop and join the monitor only when no host-accessible queue remains.
+  /// @details Serializes the empty-queue recheck with monitor startup so a queue
+  /// registered concurrently cannot be left without a polling thread.
+  void stop_doorbell_monitor_if_idle();
   /// @brief Start the doorbell monitor if one is not already running, reaping a
   /// previously self-exited thread first. Serialized by doorbell_thread_mutex_.
   /// @details Caller MUST NOT hold hw_queue_mutex_: this may join a monitor that
@@ -382,13 +391,12 @@ private:
   void doorbell_poll_loop(std::stop_token stop);
 
   // The doorbell monitor's lifecycle is serialized by its OWN mutex, deliberately
-  // distinct from hw_queue_mutex_. An empty monitor exits itself when it observes
-  // the last host-accessible queue gone (so unregister_queue never has to join a
-  // thread that may be mid-iteration inside engine/event code — that join could
-  // deadlock, which is why queue destruction only removes queue state). A later
-  // register_queue reaps the already-exited jthread and starts a fresh one. Taking
-  // doorbell_thread_mutex_ (never nested under hw_queue_mutex_) keeps concurrent
-  // register/unregister from racing on doorbell_thread_ and doorbell_running_.
+  // distinct from hw_queue_mutex_. Queue removal releases hw_queue_mutex_ before
+  // stopping and joining the monitor, so an in-progress scan can finish. The
+  // lifecycle path then rechecks the queue set while startup is excluded; this
+  // keeps a concurrent registration from losing its monitor. The loop retains its
+  // empty-queue self-exit as a backstop, and the next lifecycle operation reaps a
+  // monitor that returned before it could be joined.
   std::mutex doorbell_thread_mutex_;
   // True while a monitor is running or about to run. The monitor clears it under
   // doorbell_thread_mutex_ just before returning, so ensure_doorbell_monitor() can

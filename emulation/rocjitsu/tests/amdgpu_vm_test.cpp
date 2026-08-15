@@ -3175,7 +3175,7 @@ TEST(L1ScalarCacheVmidTest, WriteThroughStoreUsesStoreVmid) {
 }
 
 TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
-  // Regression for the leaked idle CP doorbell poller: the monitor must self-exit
+  // Regression for the idle CP doorbell poller: the monitor must stop and be joined
   // once the last host-accessible (KFD) queue is destroyed, and a later queue
   // registration must start a fresh monitor. Uses only the queue-registration
   // lifecycle (no dispatch), so the monitor thread runs on its own and its state
@@ -3202,7 +3202,9 @@ TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
 
   cp->unregister_queue(queue.queue_id, queue.process_id);
   EXPECT_FALSE(wait_for_monitor(false))
-      << "monitor must self-exit after the last host-accessible queue is destroyed";
+      << "monitor must stop after the last host-accessible queue is destroyed";
+  EXPECT_FALSE(cp->doorbell_monitor_joinable_for_test())
+      << "the stopped monitor must be joined before queue teardown returns";
 
   // A new queue landing on a CP whose monitor retired must get polling back.
   amdgpu::HwQueue queue2{};
@@ -3214,6 +3216,8 @@ TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
 
   cp->unregister_queue(queue2.queue_id, queue2.process_id);
   EXPECT_FALSE(wait_for_monitor(false)) << "monitor must retire again after the last queue";
+  EXPECT_FALSE(cp->doorbell_monitor_joinable_for_test())
+      << "the restarted monitor must also be joined during teardown";
 }
 
 } // namespace

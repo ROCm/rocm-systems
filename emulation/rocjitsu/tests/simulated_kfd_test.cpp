@@ -28,12 +28,14 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <thread>
 #include <vector>
 
+#include <sys/mman.h>
 #include <unistd.h>
 
 namespace {
@@ -92,6 +94,82 @@ TEST_F(SimulatedKfdTest, OpenAndClose) {
 
   int ret = t.driver()->close();
   EXPECT_EQ(ret, 0);
+}
+
+TEST_F(SimulatedKfdTest, DoorbellClientRemapKeepsDriverAliasStableWhenOffsetRecycles) {
+  auto t = create_test_vm();
+  auto *driver = t.driver();
+  ASSERT_NE(driver, nullptr);
+  ASSERT_GE(driver->open(), 0);
+
+  const long host_page_size = ::sysconf(_SC_PAGESIZE);
+  ASSERT_GT(host_page_size, 0);
+  const size_t doorbell_page_size = static_cast<size_t>(host_page_size);
+  const off_t doorbell_mmap_offset = static_cast<off_t>(
+      rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(driver->gpu_id()));
+
+  void *client_page = driver->mmap(nullptr, doorbell_page_size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                   doorbell_mmap_offset);
+  ASSERT_NE(client_page, MAP_FAILED);
+
+  alignas(4096) std::array<uint8_t, 4096> ring{};
+  alignas(uint64_t) uint64_t read_pointer = 0;
+  alignas(uint64_t) uint64_t write_pointer = 0;
+
+  kfd_ioctl_create_queue_args first_queue{};
+  first_queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  first_queue.ring_size = ring.size();
+  first_queue.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  first_queue.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  first_queue.gpu_id = driver->gpu_id();
+  first_queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_CREATE_QUEUE, &first_queue), 0);
+
+  kfd_ioctl_destroy_queue_args destroy_first{};
+  destroy_first.queue_id = first_queue.queue_id;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy_first), 0);
+
+  // Leave a non-sentinel value in the freed slot, then exercise the driver's
+  // re-mmap path. The backing and monitor alias must survive this client-view
+  // replacement rather than being recreated or orphaned.
+  auto *doorbell_slot = reinterpret_cast<uint64_t *>(static_cast<char *>(client_page) +
+                                                     (first_queue.doorbell_offset & 0xFFF));
+  std::atomic_ref<uint64_t>(*doorbell_slot).store(0, std::memory_order_release);
+  ASSERT_EQ(driver->mmap(client_page, doorbell_page_size, PROT_READ | PROT_WRITE,
+                         MAP_SHARED | MAP_FIXED, doorbell_mmap_offset),
+            client_page);
+
+  // Replace the client address with an inaccessible anonymous mapping, exactly
+  // as a runtime remap can replace the view returned by KFD. Driver-side queue
+  // initialization must never dereference this address.
+  ASSERT_EQ(::mmap(client_page, doorbell_page_size, PROT_NONE,
+                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0),
+            client_page);
+
+  kfd_ioctl_create_queue_args second_queue{};
+  second_queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  second_queue.ring_size = ring.size();
+  second_queue.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  second_queue.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  second_queue.gpu_id = driver->gpu_id();
+  second_queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_CREATE_QUEUE, &second_queue), 0);
+  EXPECT_EQ(second_queue.doorbell_offset, first_queue.doorbell_offset);
+
+  // Restore the client view and verify that recycled-slot initialization went
+  // through the stable alias into the same canonical backing.
+  ASSERT_EQ(driver->mmap(client_page, doorbell_page_size, PROT_READ | PROT_WRITE,
+                         MAP_SHARED | MAP_FIXED, doorbell_mmap_offset),
+            client_page);
+  doorbell_slot = reinterpret_cast<uint64_t *>(static_cast<char *>(client_page) +
+                                               (second_queue.doorbell_offset & 0xFFF));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(*doorbell_slot).load(std::memory_order_acquire),
+            ~uint64_t(0));
+
+  kfd_ioctl_destroy_queue_args destroy_second{};
+  destroy_second.queue_id = second_queue.queue_id;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy_second), 0);
+  EXPECT_EQ(driver->close(), 0);
 }
 
 TEST_F(SimulatedKfdTest, GuestDiscoveryOpenIsReleasedOnLastClose) {
