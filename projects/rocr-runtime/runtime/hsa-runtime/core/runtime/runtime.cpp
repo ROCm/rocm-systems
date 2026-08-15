@@ -2600,7 +2600,14 @@ hsa_status_t Runtime::Load() {
   hotswap::ConfigureHotswapBackend();
 
   thunkLoader_ = new ThunkLoader();
-  thunkLoader_->LoadThunkApiTable();
+
+  // A thunk that is missing an entry point leaves the rest of the table null,
+  // and the first call through one of those nulls is a fault rather than an
+  // error - the runtime has no way to notice by then. This is a real
+  // configuration: an installed thunk older than the runtime loading it.
+  if (!thunkLoader_->LoadThunkApiTable()) {
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  }
 
   if (!thunkLoader_->CreateThunkInstance()) {
     return HSA_STATUS_ERROR_NOT_INITIALIZED;

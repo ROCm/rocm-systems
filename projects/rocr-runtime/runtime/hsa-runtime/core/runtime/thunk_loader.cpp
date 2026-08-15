@@ -127,7 +127,7 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
     }
   }
 
-  void ThunkLoader::LoadThunkApiTable() {
+  bool ThunkLoader::LoadThunkApiTable() {
     if (IsSharedLibraryLoaded()) {
       rocr::os::DlError(); // Clear any existing error messages
 
@@ -498,10 +498,18 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)rocr::os::GetExportAddress(thunk_handle, "drmCommandWriteRead");
       if (DRM_PFN(drmCommandWriteRead) == nullptr) goto LOAD_ERROR;
       debug_print("Load all DTIF APIs OK!\n");
-      return;
+      return true;
 
 LOAD_ERROR:
+      // Binding stopped at the first entry point this thunk does not export,
+      // so nothing after it in the table was ever bound. Those slots hold the
+      // nullptr their declarations give them, so a caller that ignores this
+      // failure gets a null dereference naming the function it called rather
+      // than a jump to a non-canonical address. Saying so here is the
+      // difference between the caller abandoning the load and the runtime
+      // finding out the hard way.
       fprintf(stderr, "GetExportAddress failed: %s\n", rocr::os::DlError());
+      return false;
     } else {
       HSAKMT_PFN(hsaKmtOpenKFD) = (HSAKMT_DEF(hsaKmtOpenKFD)*)(&hsaKmtOpenKFD);
       HSAKMT_PFN(hsaKmtCloseKFD) = (HSAKMT_DEF(hsaKmtCloseKFD)*)(&hsaKmtCloseKFD);
@@ -635,6 +643,8 @@ LOAD_ERROR:
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)(&drmCommandWriteRead);
 #endif
     }
+
+    return true;
   }
 
   bool ThunkLoader::CreateThunkInstance() {
