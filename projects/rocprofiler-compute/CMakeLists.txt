@@ -849,12 +849,6 @@ add_test(
         tests/integration/test_pc_sampling_analyze_cli.py ${WORKING_DIR_OPTION}
 )
 
-set_tests_properties(
-    test_pc_sampling
-    test_pc_sampling_analyze_cli
-    PROPERTIES TIMEOUT 300 LABELS "profile" RESOURCE_GROUPS gpus:1
-)
-
 # -----------------------------------
 # TUI component tests
 # -----------------------------------
