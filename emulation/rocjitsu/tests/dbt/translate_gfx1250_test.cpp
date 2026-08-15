@@ -12316,7 +12316,7 @@ TEST(BinaryTranslatorE2E, Gfx1250IgnoresUndecodablePaddingAfterTerminator) {
                                                           : result.diagnostics.front().message);
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250RejectsReachableZeroInKernelBody) {
+TEST(BinaryTranslatorE2E, Gfx1250TerminatesFallthroughIntoZeroPadding) {
   constexpr uint32_t kGfx1250SNop = 0xBF800000u;
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
@@ -12330,14 +12330,25 @@ TEST(BinaryTranslatorE2E, Gfx1250RejectsReachableZeroInKernelBody) {
                                rocjitsu::ProcessorRevision::Gfx1250A0));
   auto result = translator.translate(source);
 
-  EXPECT_FALSE(result.ok());
-  EXPECT_EQ(result.elf_bytes, image);
-  EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
-      result, rocjitsu::DiagnosticKind::Legalization,
-      "reachable kernel code falls through into undecodable .text bytes"));
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  // Only the first two instructions are pinned: the relocated body may be followed by target-side
+  // alignment padding, which decodes as additional instructions.
+  ASSERT_GE(decoded.size(), 2u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "s_nop");
+  EXPECT_EQ(decoded[1]->mnemonic(), "s_endpgm");
+  // The synthesized boundary must stay attributable: pin the offset as well as the message so a
+  // silent early exit cannot lose its diagnostic while the output bytes still match.
+  EXPECT_TRUE(rocjitsu::test_support::has_warning_at(result, rocjitsu::DiagnosticKind::Legalization,
+                                                     "synthesized s_endpgm boundary",
+                                                     /*guest_offset=*/4));
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250AcceptsClangUnreachableKernelStub) {
+TEST(BinaryTranslatorE2E, Gfx1250TerminatesSetupFallthroughIntoZeroPadding) {
   // clang emits this one-instruction body for rocPRIM target-specialized
   // trampolines whose source ends in __builtin_unreachable(). The following
   // zero is alignment padding, not a second instruction.
@@ -12375,7 +12386,7 @@ TEST(BinaryTranslatorE2E, Gfx1250AcceptsClangUnreachableKernelStub) {
       << "the translated function extent must include its synthesized terminator";
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250AcceptsClangUnreachableKernelStubWithPrefetchPrologue) {
+TEST(BinaryTranslatorE2E, Gfx1250TerminatesPrefetchSetupFallthroughIntoZeroPadding) {
   // Newer clang adds the exact gfx1250 prefetch prologue in front of the same
   // unreachable rocPRIM target-specialization body.
   constexpr uint32_t kGlobalPrefetchB8[] = {0xee174000u, 0x00040000u, 0u};
@@ -12410,6 +12421,10 @@ TEST(BinaryTranslatorE2E, Gfx1250AcceptsClangUnreachableKernelStubWithPrefetchPr
   EXPECT_EQ(decoded[3]->mnemonic(), "s_endpgm");
 }
 
+// A stub whose last instruction ends exactly at the end of `.text` has no padding after it, but it
+// is no more terminated than one that does. Inferring the boundary only when the linker happened to
+// emit alignment bytes would make the translated tail depend on section layout, so section end is
+// treated as the same implicit boundary and the stub still receives its `s_endpgm`.
 TEST(BinaryTranslatorE2E, Gfx1250MaterializesSectionFinalClangUnreachableKernelStub) {
   constexpr uint32_t kSetReplayMode = 0xb9800641u;
   constexpr uint32_t kLiteralOne = 1u;
@@ -12430,11 +12445,19 @@ TEST(BinaryTranslatorE2E, Gfx1250MaterializesSectionFinalClangUnreachableKernelS
   ASSERT_EQ(decoded.size(), 2u);
   EXPECT_EQ(decoded[0]->mnemonic(), "s_setreg_imm32_b32");
   EXPECT_EQ(decoded[1]->mnemonic(), "s_endpgm");
+  // Section end is the same inferred boundary as padding, so it must be reported the same way.
+  EXPECT_TRUE(rocjitsu::test_support::has_warning_at(first, rocjitsu::DiagnosticKind::Legalization,
+                                                     "synthesized s_endpgm boundary",
+                                                     /*guest_offset=*/8));
 
   auto second = translator.translate(first_output);
   ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
                                                           : second.diagnostics.front().message);
   EXPECT_EQ(second.elf_bytes, first.elf_bytes);
+  // The first pass supplied the terminator, so the second must not infer another boundary.
+  EXPECT_FALSE(rocjitsu::test_support::has_warning_at(
+      second, rocjitsu::DiagnosticKind::Legalization, "synthesized s_endpgm boundary",
+      /*guest_offset=*/8));
 }
 
 TEST(BinaryTranslatorE2E, MatchedSemanticExpandRuleFailureIsDiagnostic) {
