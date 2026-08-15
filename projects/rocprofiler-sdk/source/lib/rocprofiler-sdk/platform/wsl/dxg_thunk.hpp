@@ -48,6 +48,7 @@ using PFN_hsaKmtAcquireSystemProperties = int32_t (*)(HsaSystemProperties*);
 using PFN_hsaKmtGetNodeProperties       = int32_t (*)(uint32_t, HsaNodeProperties*);
 using PFN_hsaKmtReleaseSystemProperties = int32_t (*)();
 using PFN_hsaKmtCloseKFD                = int32_t (*)();
+using PFN_DxgAbiCheck                   = int32_t (*)(HsaStructureSizes*);
 
 // The unversioned soname, matching ThunkLoader::whoami() in the HSA runtime.
 // Never a versioned name (librocdxg.so.1 / .so.7): hard-coding a soversion
@@ -60,6 +61,10 @@ inline constexpr const char* kLibRocdxgSoname = "librocdxg.so";
 // sharing the snapshot pair safe: librocdxg refcounts those two, so the
 // snapshot this read holds is the same one the HSA runtime holds and neither
 // consumer can drop it out from under the other.
+//
+// abi_check is the sixth and is deliberately outside complete(): it is the
+// structure-size handshake, and a thunk built before the handshake existed does
+// not export it. Requiring it would refuse thunks that work.
 struct DxgThunk
 {
     PFN_hsaKmtOpenKFD                 open_kfd         = nullptr;
@@ -67,6 +72,7 @@ struct DxgThunk
     PFN_hsaKmtGetNodeProperties       get_node         = nullptr;
     PFN_hsaKmtReleaseSystemProperties release_snapshot = nullptr;
     PFN_hsaKmtCloseKFD                close_kfd        = nullptr;
+    PFN_DxgAbiCheck                   abi_check        = nullptr;
 
     bool complete() const
     {
@@ -89,7 +95,8 @@ const DxgLoaderOps&
 default_loader_ops();
 
 // Resolve every entry point out of an already-open handle, warning about each
-// one the object does not export.
+// required one the object does not export. A missing abi_check is not warned
+// about: it means an older thunk, not a broken one.
 DxgThunk
 resolve_dxg_thunk(void* handle, const DxgLoaderOps& ops);
 

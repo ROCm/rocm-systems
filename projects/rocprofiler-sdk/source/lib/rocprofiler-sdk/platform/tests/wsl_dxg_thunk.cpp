@@ -99,7 +99,7 @@ struct FakeThunk
     FakeThunk() { g_state = &state; }
     ~FakeThunk() { g_state = nullptr; }
 
-    FakeThunk(const FakeThunk&)            = delete;
+    FakeThunk(const FakeThunk&) = delete;
     FakeThunk& operator=(const FakeThunk&) = delete;
 
     static int32_t OpenKfd()
@@ -141,6 +141,27 @@ struct FakeThunk
 
         *out = g_state->nodes.at(node_id);
         return kHsaKmtStatusSuccess;
+    }
+
+    // A thunk built against the same hsakmt revision as this test.
+    static int32_t AbiCheck(HsaStructureSizes* sizes)
+    {
+        g_state->calls.emplace_back("abi_check");
+        EXPECT_NE(sizes, nullptr) << "the handshake must advertise something to negotiate over";
+        if(sizes == nullptr) return kFailure;
+
+        EXPECT_EQ(sizes->StructureSizes, static_cast<uint16_t>(sizeof(HsaStructureSizes)));
+        EXPECT_EQ(sizes->SizeOfHsaNodeProperties, static_cast<uint16_t>(sizeof(HsaNodeProperties)))
+            << "the caller must advertise the record size it actually reads";
+        return kHsaKmtStatusSuccess;
+    }
+
+    // A thunk whose HsaNodeProperties is not the one this build reads.
+    // HSAKMT_STATUS_DRIVER_MISMATCH is what librocdxg answers with.
+    static int32_t AbiCheckMismatch(HsaStructureSizes*)
+    {
+        g_state->calls.emplace_back("abi_check");
+        return 2;
     }
 
     DxgThunk table() const
@@ -202,6 +223,8 @@ struct FakeLoader
                 return reinterpret_cast<void*>(&FakeThunk::ReleaseSnapshot);
             if(std::strcmp(name, "hsaKmtCloseKFD") == 0)
                 return reinterpret_cast<void*>(&FakeThunk::CloseKfd);
+            if(std::strcmp(name, "DxgAbiCheck") == 0)
+                return reinterpret_cast<void*>(&FakeThunk::AbiCheck);
             return nullptr;
         };
         out.close = [this](void*) {
@@ -215,11 +238,20 @@ struct FakeLoader
 
 // The five KMT symbols the read cannot proceed without, in the order
 // resolve_dxg_thunk() asks for them.
-const std::vector<std::string> kResolvedSymbols = {"hsaKmtOpenKFD",
+const std::vector<std::string> kRequiredSymbols = {"hsaKmtOpenKFD",
                                                    "hsaKmtAcquireSystemProperties",
                                                    "hsaKmtGetNodeProperties",
                                                    "hsaKmtReleaseSystemProperties",
                                                    "hsaKmtCloseKFD"};
+
+// Everything resolve_dxg_thunk() asks for: the five above plus the optional
+// structure-size handshake, asked for last.
+const std::vector<std::string> kResolvedSymbols = {"hsaKmtOpenKFD",
+                                                   "hsaKmtAcquireSystemProperties",
+                                                   "hsaKmtGetNodeProperties",
+                                                   "hsaKmtReleaseSystemProperties",
+                                                   "hsaKmtCloseKFD",
+                                                   "DxgAbiCheck"};
 }  // namespace
 
 // --- the happy path --------------------------------------------------------
@@ -363,6 +395,40 @@ TEST(wsl_dxg_thunk, a_thunk_missing_any_entry_point_is_never_called)
     }
 }
 
+// --- the structure-size handshake ------------------------------------------
+
+// A thunk that answers the handshake with a different sizeof(HsaNodeProperties)
+// writes records this build cannot interpret, so the read is abandoned before
+// the thunk is opened. Reading it anyway is the silent corruption the handshake
+// exists to prevent.
+TEST(wsl_dxg_thunk, a_thunk_reporting_a_different_record_size_is_never_read)
+{
+    auto fake = FakeThunk{};
+    fake.publish_gpu_nodes(1);
+
+    auto thunk      = fake.table();
+    thunk.abi_check = &FakeThunk::AbiCheckMismatch;
+
+    EXPECT_TRUE(read_dxg_gpu_topology(thunk).empty());
+    EXPECT_EQ(fake.state.calls, (std::vector<std::string>{"abi_check"}))
+        << "nothing may be opened or read once the layouts are known to differ";
+}
+
+// A thunk that agrees is read normally, and the handshake happens before
+// anything else so a mismatch cannot leave a half-open thunk behind.
+TEST(wsl_dxg_thunk, a_thunk_agreeing_on_the_record_size_is_read)
+{
+    auto fake = FakeThunk{};
+    fake.publish_gpu_nodes(1);
+
+    auto thunk      = fake.table();
+    thunk.abi_check = &FakeThunk::AbiCheck;
+
+    EXPECT_EQ(read_dxg_gpu_topology(thunk).size(), 1);
+    EXPECT_EQ(fake.state.calls.front(), "abi_check");
+    EXPECT_EQ(fake.state.calls.back(), "close_kfd");
+}
+
 // --- the loader ------------------------------------------------------------
 
 // The normal case during a profiling run: the HSA runtime already loaded the
@@ -420,7 +486,7 @@ TEST(wsl_dxg_thunk, a_missing_library_closes_nothing)
 // still has to be closed, and none of the entry points may be called.
 TEST(wsl_dxg_thunk, a_thunk_missing_a_required_symbol_is_closed_without_being_called)
 {
-    for(const auto& symbol : kResolvedSymbols)
+    for(const auto& symbol : kRequiredSymbols)
     {
         auto fake             = FakeThunk{};
         auto loader           = FakeLoader{};
@@ -449,6 +515,13 @@ TEST(wsl_dxg_thunk, resolve_reports_a_complete_table_only_when_all_five_resolve)
     EXPECT_FALSE(partial.complete());
     EXPECT_EQ(partial.get_node, nullptr);
     EXPECT_NE(partial.acquire_snapshot, nullptr) << "the other entry points still resolve";
+
+    // The handshake is the one entry point whose absence is not a defect, so it
+    // must not count towards completeness.
+    loader.missing_symbol = "DxgAbiCheck";
+    const auto older      = resolve_dxg_thunk(loader.handle, loader.ops());
+    EXPECT_TRUE(older.complete()) << "a thunk predating the handshake is still usable";
+    EXPECT_EQ(older.abi_check, nullptr);
 }
 
 // The resolved set is the whole KMT interface this topology read requires.

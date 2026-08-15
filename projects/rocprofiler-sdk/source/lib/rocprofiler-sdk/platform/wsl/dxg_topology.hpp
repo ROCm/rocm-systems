@@ -59,9 +59,14 @@ namespace wsl
 // the ROCr package makes true, since the hsakmt headers this build compiles
 // against come from that same package.
 //
-// What is checked at run time is that the object loads and that it exports
-// every entry point the read needs. Whether the layouts actually agree is not
-// established here.
+// What is checked at run time is that the object loads, that it exports every
+// entry point the read needs, and - through DxgAbiCheck, the hsakmt
+// structure-size handshake the HSA runtime also performs - that the thunk
+// agrees on sizeof(HsaNodeProperties). A thunk that disagrees is refused rather
+// than read. A thunk too old to export the handshake is still read, and a
+// rearrangement that left sizeof() alone still cannot be detected from here, so
+// the read is bounded by a destination larger than the record to keep the
+// undetectable cases from becoming memory corruption.
 
 // HSAKMT_STATUS values this file cares about.
 inline constexpr int32_t kHsaKmtStatusSuccess             = 0;

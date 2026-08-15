@@ -31,6 +31,7 @@
 
 #include <dlfcn.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
@@ -82,12 +83,86 @@ struct RocdxgHandle
         if(handle) ops.close(handle);
     }
 
-    RocdxgHandle(const RocdxgHandle&)            = delete;
+    RocdxgHandle(const RocdxgHandle&) = delete;
     RocdxgHandle& operator=(const RocdxgHandle&) = delete;
 
     bool ready() const { return handle != nullptr && thunk.complete(); }
 };
 
+// Ask the thunk whether it writes HsaNodeProperties to the layout this build
+// reads, before any record is read.
+//
+// hsaKmtGetNodeProperties() has no size parameter: the thunk writes
+// sizeof(HsaNodeProperties) bytes as *it* knows the type, into storage sized as
+// *this build* knows the type. A longer thunk record overruns the destination
+// and a rearranged one misassigns fields, and neither shows up as a failed
+// call. HsaStructureSizes is the hsakmt type that exists to negotiate this, so
+// asking costs no new interface.
+//
+// Only an explicit disagreement is fatal. A thunk that does not export the
+// handshake predates it, which is a supported configuration and the one this
+// port ran in until now.
+//
+// A matching size is necessary but not sufficient: HsaNodeProperties has also
+// been rearranged at an unchanged sizeof - KFDGpuID and FamilyID swapped
+// offsets, and apply_node_topology() reads both - and no size comparison can
+// see that.
+bool
+layout_agrees(const DxgThunk& dxg)
+{
+    if(dxg.abi_check == nullptr)
+    {
+        ROCP_INFO << fmt::format(
+            "wsl topology: {} does not export DxgAbiCheck, so the record layout cannot be "
+            "negotiated; proceeding on the assumption that it writes the {}-byte "
+            "HsaNodeProperties this build reads",
+            kLibRocdxgSoname,
+            sizeof(HsaNodeProperties));
+        return true;
+    }
+
+    // SizeOfHsaExternalHandleDesc is left zero: the thunk reads a zero as "the
+    // caller never exchanges that structure", which is true here.
+    auto sizes                    = HsaStructureSizes{};
+    sizes.StructureSizes          = static_cast<uint16_t>(sizeof(HsaStructureSizes));
+    sizes.SizeOfHsaNodeProperties = static_cast<uint16_t>(sizeof(HsaNodeProperties));
+
+    if(auto st = dxg.abi_check(&sizes); st != kHsaKmtStatusSuccess)
+    {
+        ROCP_ERROR << fmt::format(
+            "wsl topology: {} rejected the HsaNodeProperties layout this build was compiled "
+            "against ({} bytes, DxgAbiCheck status={}). No GPU agents will be enumerated from "
+            "the KMT topology: a record written to a different layout cannot be interpreted "
+            "here, and reading it anyway would attribute whatever the thunk wrote to the wrong "
+            "fields. Build rocprofiler-sdk against the hsakmt headers shipped with the ROCr "
+            "package that provides this thunk.",
+            kLibRocdxgSoname,
+            sizeof(HsaNodeProperties),
+            st);
+        return false;
+    }
+
+    return true;
+}
+
+// Destination for one hsaKmtGetNodeProperties() call, deliberately longer than
+// the record this build expects.
+//
+// The handshake above turns away a thunk that admits to a different size, but a
+// thunk that does not export it is taken at its word, and the call bounds
+// nothing. The slack means such a thunk overruns padding instead of the rest of
+// the stack frame. It does nothing about a same-size rearrangement, which stays
+// undetectable from here.
+constexpr auto kNodePropsSlack = size_t{128};
+
+struct NodePropsScratch
+{
+    HsaNodeProperties props                    = {};
+    std::byte         overrun[kNodePropsSlack] = {};
+};
+
+static_assert(offsetof(NodePropsScratch, overrun) == sizeof(HsaNodeProperties),
+              "the slack must directly follow the record it is there to absorb overruns into");
 }  // namespace
 
 const DxgLoaderOps&
@@ -121,6 +196,11 @@ resolve_dxg_thunk(void* handle, const DxgLoaderOps& ops)
     thunk.release_snapshot = reinterpret_cast<PFN_hsaKmtReleaseSystemProperties>(
         resolve("hsaKmtReleaseSystemProperties"));
     thunk.close_kfd = reinterpret_cast<PFN_hsaKmtCloseKFD>(resolve("hsaKmtCloseKFD"));
+
+    // Not through resolve(): an older thunk legitimately does not export this,
+    // so its absence is reported by layout_agrees() at info level rather than
+    // as a missing entry point.
+    thunk.abi_check = reinterpret_cast<PFN_DxgAbiCheck>(ops.sym(handle, "DxgAbiCheck"));
     return thunk;
 }
 
@@ -144,6 +224,8 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
     auto out = std::vector<DxgNode>{};
 
     if(!dxg.complete()) return out;
+
+    if(!layout_agrees(dxg)) return out;
 
     // The thunk refcounts this: SUCCESS means we opened it, KERNEL_ALREADY_OPENED
     // means the HSA runtime (or another consumer) had it open and we took an
@@ -181,15 +263,15 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
 
     for(uint32_t node_id = 0; node_id < num_nodes; ++node_id)
     {
-        auto props = HsaNodeProperties{};
-        if(auto st = dxg.get_node(node_id, &props); st != kHsaKmtStatusSuccess)
+        auto scratch = NodePropsScratch{};
+        if(auto st = dxg.get_node(node_id, &scratch.props); st != kHsaKmtStatusSuccess)
         {
             ROCP_WARNING << fmt::format(
                 "wsl topology: hsaKmtGetNodeProperties(node={}) failed (status={})", node_id, st);
             continue;
         }
 
-        auto node = DxgNode{node_id, props};
+        auto node = DxgNode{node_id, scratch.props};
 
         if(node.props.NumFComputeCores == 0) continue;  // CPU-only node
 
