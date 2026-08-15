@@ -824,7 +824,18 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.Domain = device->Domain();
   props.UniqueID = device->Uuid();
   props.NumXcc = device->NumXcc();
-  props.KFDGpuID = device->DeviceId();  // TODO
+  /* KFDGpuID has to be unique per GPU and nonzero: the rest of this file uses
+   * it both as the "this node is a GPU" predicate and as the key that
+   * gpuid_to_nodeid() and get_device_id_by_gpu_id() invert. The PCI device id
+   * satisfies neither on a machine with two identical GPUs - both nodes would
+   * claim the same id and the reverse lookups would always resolve to the
+   * first one. The node ordinal is unique by construction and stable for the
+   * life of the snapshot, which is the only scope these lookups span. It is
+   * never handed to the KMD, so it does not have to match any driver-side id.
+   * Bias by one so a GPU can never land on the reserved 0 even if this system
+   * somehow reports no NUMA nodes ahead of the GPU nodes.
+   */
+  props.KFDGpuID = node_id + 1;
   props.FamilyID = device->GfxFamily();
   props.LuidLowPart = device->GetLuid().LowPart;
   props.LuidHighPart = device->GetLuid().HighPart;
