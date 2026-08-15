@@ -118,8 +118,9 @@ void TestFanRead::Run(void) {
       struct stat dxg_st{};
       bool on_wsl = (stat("/dev/dxg", &dxg_st) == 0);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED && on_wsl) {
-        // fan_rpms goes through rsmi_wrapper which returns NOT_SUPPORTED on WSL;
-        // fan_speed/fan_speed_max use the WSL backend directly.
+        // fan_rpms dispatches to WSLGPUBackend::GetFanRpms, a hard NOT_SUPPORTED
+        // stub (no RPM telemetry over WDDM); fan_speed/fan_speed_max are backed
+        // by real rocdxg_smi metrics.
         DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_rpms", "gpu=" + std::to_string(i), VERB(STANDARD));
         err = amdsmi_get_gpu_fan_rpms(processor_handles_[i], 0, nullptr);
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_NOT_SUPPORTED);

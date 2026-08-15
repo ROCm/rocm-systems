@@ -361,6 +361,11 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   // WSL path: TryPopulate handles /dev/dxg detection, librocdxg loading, and
   // device enumeration. Returns NOT_SUPPORTED when not on WSL.
   amdsmi_status_t wsl_status = WSLGPUBackend::TryPopulate(sockets_, processors_);
+  if (wsl_status == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    std::ostringstream ss;
+    ss << __func__ << ": WSL detected (/dev/dxg) but librocdxg.so.1 failed to load";
+    LOG_INFO(ss);
+  }
   if (wsl_status != AMDSMI_STATUS_NOT_SUPPORTED) return wsl_status;
   // Fall through to native Linux path if not on WSL.
 #endif

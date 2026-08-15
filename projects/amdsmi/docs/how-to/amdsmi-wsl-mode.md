@@ -29,14 +29,14 @@ tool. When enabled, the backend reads real GPU telemetry through `librocdxg`
 ## How it works
 
 AMD SMI keeps a single code path per API. The WSL-versus-native decision is made
-**once per process**, on the first API call, not scattered through every
+**once per process**, during `amdsmi_init()`, not scattered through every
 function:
 
 ```text
 amdsmi_get_gpu_* (one dispatcher, backend-agnostic)
         │
         ├─ native  → DRM ioctls / sysfs        (default)
-        └─ WSL     → AMDSmiWslBackend → D3DKMT → /dev/dxg → dxgkrnl → Windows KMD
+        └─ WSL     → WSLGPUBackend → D3DKMT → /dev/dxg → dxgkrnl → Windows KMD
 ```
 
 Queries that WDDM cannot serve (for example CPU/HSMP metrics, NIC, xGMI fabric,
@@ -52,7 +52,9 @@ handling continues to work.
   `ls /sys/module/dxgkrnl`).
 - `librocdxg.so.1` installed and resolvable via `dlopen` (the WSL backend
   loads it at `amdsmi_init()`; without it, calls return
-  `AMDSMI_STATUS_DRIVER_NOT_LOADED`).
+  `AMDSMI_STATUS_DRIVER_NOT_LOADED`). It ships with the ROCm-on-WSL driver
+  package, not a standard Linux ROCm devel package — verify with
+  `ldconfig -p | grep librocdxg`.
 - `libdxcore.so`, provided by the WSL installation
   (`/usr/lib/wsl/lib/libdxcore.so`) — a transitive dependency of
   `librocdxg`, not something you need to install directly.
@@ -69,6 +71,11 @@ cmake --build build --target amd_smi -j"$(nproc)"
 
 A build without `-DENABLE_WSL_BACKEND=ON` produces the standard native library;
 the WSL source is not compiled and the intercept hooks expand to nothing.
+
+Building with the flag on also requires `hsakmt/rocdxg_smi.h` at compile time,
+from a `rocr-runtime/libhsakmt` tree built with its `WIN_SDK`/dxg path —
+distinct from the runtime `librocdxg.so.1` dependency above. CMake fails with
+a `FATAL_ERROR` if that header is not found alongside the checkout.
 
 ## Impact on existing scripts
 
