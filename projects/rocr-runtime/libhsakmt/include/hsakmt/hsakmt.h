@@ -32,8 +32,14 @@
 extern "C" {
 #endif
 
-/* Forward declaration for debug trap ioctl arguments */
+/* Forward declarations for the KFD ioctl arguments the entry points below take
+ * by pointer. linux/kfd_ioctl.h defines them and neither package installs it,
+ * so without these a consumer's C compiler invents a type scoped to the
+ * prototype and the pointer it passes is a different one.
+ */
 struct kfd_ioctl_dbg_trap_args;
+struct kfd_runtime_info;
+struct kfd_dbg_device_info_entry;
 
 /**
   "Opens" the HSA kernel driver for user-kernel mode communication.
@@ -1491,6 +1497,26 @@ hsaKmtGetAmdGPUDeviceFd(
   HsaAMDGPUDeviceHandle DeviceHandle, //IN
   int *fd //OUT
 );
+
+/**
+  Confirms that the caller and the thunk agree on the size of the structures
+  they copy across this interface without a size parameter - HsaNodeProperties
+  and HsaHandleImportDesc. The caller fills in the sizes it was built with;
+  a zero says it never exchanges that structure and so cannot disagree about
+  it. HSAKMT_STATUS_DRIVER_MISMATCH means a size differs and the pair must not
+  be used together.
+
+  Only the DXG (WSL) thunk defines this. It is resolved with dlsym() rather
+  than linked, so a thunk built before the handshake existed simply does not
+  export it, and the caller reads an absent symbol as an older thunk rather
+  than as a failure.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+DxgAbiCheck(
+    HsaStructureSizes*  StructureSizes    //IN
+    );
 
 #ifdef __cplusplus
 }   //extern "C"

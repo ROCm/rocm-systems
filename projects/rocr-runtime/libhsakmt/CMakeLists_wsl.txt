@@ -101,7 +101,8 @@ else ()
 endif ()
 
 ## Source files
-set ( ROCDXG_SRC "src/dxg/debug.cpp"
+set ( ROCDXG_SRC "src/dxg/abi.cpp"
+                 "src/dxg/debug.cpp"
                  "src/dxg/events.cpp"
                  "src/dxg/memory.cpp"
                  "src/dxg/libdrm.cpp"
@@ -193,9 +194,38 @@ install ( TARGETS ${ROCDXG_TARGET} EXPORT ${ROCDXG_TARGET}Targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
 
-# Install public headers
-#install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${ROCDXG_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-#  COMPONENT dev PATTERN "*drm*" EXCLUDE )
+# Install public headers.
+#
+# This is the only configuration that builds librocdxg, and it is mutually
+# exclusive with the libhsakmt branch of the parent CMakeLists.txt - which is
+# what installs include/hsakmt wholesale - so without a rule here the WSL dev
+# package would ship a library, a pkg-config file naming an include directory,
+# and nothing in it. There is no second install rule for these files.
+#
+# hsakmt.h declares the entry points this library exports, DxgAbiCheck among
+# them; hsakmttypes.h is the transitive closure behind it, and is also the
+# header rocprofiler-sdk includes for HsaNodeProperties and HsaStructureSizes.
+# Neither needs anything but <stdbool.h> and <stdint.h>, and tests/dxg checks
+# that claim by compiling against a staged copy of exactly this list. The rest
+# of include/hsakmt describes the native thunk and is deliberately not shipped.
+set ( ROCDXG_PUBLIC_HEADERS
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/hsakmt.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/hsakmttypes.h )
+
+install ( FILES ${ROCDXG_PUBLIC_HEADERS}
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hsakmt COMPONENT dev )
+
+# Pure-logic unit tests. They compile a header out of src/dxg on its own, or a
+# staged copy of ROCDXG_PUBLIC_HEADERS, and link nothing; one more reads the
+# built library's dynamic symbol table. None needs a GPU or a DXCore adapter,
+# so `ctest` here works on a machine with neither. Off by default so a
+# packaging build is unaffected. Kept after the install rule so the header list
+# is already set.
+option ( BUILD_ROCDXG_TESTS "Build the librocdxg unit tests" OFF )
+if ( BUILD_ROCDXG_TESTS )
+  enable_testing()
+  add_subdirectory ( tests/dxg )
+endif()
 
 # Record our usage data for clients find_package calls.
 install ( EXPORT ${ROCDXG_TARGET}Targets
