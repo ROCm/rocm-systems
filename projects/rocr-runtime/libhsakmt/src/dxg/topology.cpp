@@ -760,12 +760,27 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.WaveFrontSize = device->WavefrontSize();
   props.NumShaderBanks = device->NumShaderEngine();
   props.NumArrays = device->ShaderArrayPerShaderEngine();
-  if (props.NumArrays == 0) {
-    pr_warn("NumArrays is 0 for node %u, forcing NumCUPerArray to 0\n",
-            node_id);
-    props.NumCUPerArray = 0;
-  } else {
-    props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
+  /* NumArrays counts shader arrays per shader engine, so the number of arrays
+   * on the whole GPU is NumShaderBanks * NumArrays. Dividing the CU count by
+   * NumArrays alone over-reports NumCUPerArray by the shader engine count on
+   * every multi-SE part (128 CU / 4 SE / 2 arrays per SE is 16 CU per array,
+   * not 64), which is the same relation KFD reports on bare metal.
+   */
+  {
+    const uint32_t total_arrays = props.NumShaderBanks * props.NumArrays;
+    if (total_arrays == 0) {
+      pr_warn("NumShaderBanks(%u)*NumArrays(%u) is 0 for node %u, forcing "
+              "NumCUPerArray to 0\n",
+              props.NumShaderBanks, props.NumArrays, node_id);
+      props.NumCUPerArray = 0;
+    } else {
+      const uint32_t cu_count = device->ComputeUnitCount();
+      if (cu_count % total_arrays != 0)
+        pr_warn("ComputeUnitCount(%u) is not a multiple of the %u shader "
+                "arrays on node %u; NumCUPerArray is truncated\n",
+                cu_count, total_arrays, node_id);
+      props.NumCUPerArray = cu_count / total_arrays;
+    }
   }
   props.NumSIMDPerCU = simd_per_cu;
   props.MaxSlotsScratchCU = device->MaxScratchSlotsPerCu();
