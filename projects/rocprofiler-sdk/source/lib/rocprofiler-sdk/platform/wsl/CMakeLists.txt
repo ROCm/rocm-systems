@@ -4,7 +4,7 @@
 # path only when /dev/dxg is present and libdxcore.so loads.
 #
 
-set(ROCPROFILER_PLATFORM_WSL_HEADERS agent.hpp dxg_topology.hpp)
+set(ROCPROFILER_PLATFORM_WSL_HEADERS agent.hpp dxg_thunk.hpp dxg_topology.hpp)
 set(ROCPROFILER_PLATFORM_WSL_SOURCES agent.cpp dxg_topology.cpp)
 
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_PLATFORM_WSL_SOURCES}

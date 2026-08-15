@@ -24,7 +24,8 @@
 
 #include <rocprofiler-sdk/agent.h>
 
-#include <cstddef>
+#include <hsakmt/hsakmttypes.h>
+
 #include <cstdint>
 #include <set>
 #include <string>
@@ -36,105 +37,52 @@ namespace platform
 {
 namespace wsl
 {
-// === librocdxg KMT topology ABI ===
+// === Reading the KMT topology on WSL ===
 //
 // On WSL the KMT topology lives behind librocdxg (the DXG thunk), the same
 // component the HSA runtime loads for /dev/dxg systems. rocprofiler-sdk reads
 // it directly so that agent records are complete before they are published,
 // instead of being refined once the HSA runtime happens to come up.
 //
-// The declarations below mirror the ABI published by
-// rocr-runtime/libhsakmt/include/hsakmt/hsakmt_dxg.h. They are spelled out
-// here rather than included because that header is new: rocprofiler-sdk builds
-// standalone against an installed ROCm, and the hsakmt package satisfying the
-// build is not necessarily new enough to carry it. That is a build-time
-// concern only - this is not a claim to be independent of hsakmt, since
-// <rocprofiler-sdk/agent.h> above includes hsakmttypes.h, and the topology
-// snapshot is taken with the thunk's own hsaKmtAcquireSystemProperties().
+// The read goes through the thunk's ordinary KMT entry points -
+// hsaKmtGetNodeProperties() and the snapshot pair around it - and the records
+// are the driver's own HsaNodeProperties. librocdxg is resolved with dlopen
+// rather than linked, because on WSL it is the object the HSA runtime has
+// already loaded and there is nothing to link against before that happens.
 //
-// What the dedicated record buys is a layout that cannot shift underneath a
-// dynamically resolved thunk. The same fields are all present in
-// HsaNodeProperties and the DXG thunk fills that structure in full, but it is
-// an internal runtime structure with no stable layout: it has grown - 364
-// bytes to 396 - and it has also been rearranged at a constant size, with
-// same-sized fields swapping places and sizeof() never moving. rocprofiler-sdk
-// resolves librocdxg at run time and can therefore meet one from a different
-// ROCm package than it was built against, where neither change is detectable -
-// a size check would not even see the reordering. HsaDxgNodeTopology is
-// append-only and every reply describes itself
-// (DxgNodeTopology::StructSize / AbiVersion), so a thunk that disagrees with
-// these declarations is caught on the very call that would have used it.
+// HsaNodeProperties has no stable layout across ROCm packages: it has grown
+// (364 bytes to 396) and has also been rearranged at an unchanged size, and
+// hsaKmtGetNodeProperties() takes no size argument, so the callee writes
+// sizeof() bytes as *it* knows the type. Reading it through a dynamically
+// resolved thunk therefore assumes the thunk and this build come from
+// compatible ROCr/hsakmt package layouts - which is what shipping librocdxg in
+// the ROCr package makes true, since the hsakmt headers this build compiles
+// against come from that same package.
+//
+// What is checked at run time is that the object loads and that it exports
+// every entry point the read needs. Whether the layouts actually agree is not
+// established here.
 
 // HSAKMT_STATUS values this file cares about.
 inline constexpr int32_t kHsaKmtStatusSuccess             = 0;
 inline constexpr int32_t kHsaKmtStatusKernelAlreadyOpened = 22;
 
-inline constexpr uint32_t kDxgNodeTopologyAbiVersion = 2;
-inline constexpr uint32_t kDxgNodeTopologyMinSize    = 8;
-
-// Mirror of HsaDxgNodeTopology.
-struct DxgNodeTopology
+// One KMT node as this process read it.
+//
+// Internal bookkeeping, not an interface: nothing outside this library sees it
+// and nothing serializes it. The node id is carried alongside the properties
+// because hsaKmtGetNodeProperties() does not echo back the node it described,
+// and the enumerator publishes the driver's node id rather than inventing an
+// ordinal for it.
+struct DxgNode
 {
-    uint32_t StructSize;
-    uint32_t AbiVersion;
-
-    uint32_t NumCPUCores;
-    uint32_t NumFComputeCores;
-    uint32_t NumSIMDPerCU;
-    uint32_t NumShaderBanks;
-    uint32_t NumArrays;
-    uint32_t NumCUPerArray;
-    uint32_t WaveFrontSize;
-    uint32_t MaxWavesPerSIMD;
-    uint32_t MaxSlotsScratchCU;
-    uint32_t LDSSizeInKB;
-    uint32_t GDSSizeInKB;
-    uint32_t NumGws;
-    uint32_t NumXcc;
-    uint32_t NumSdmaEngines;
-    uint32_t NumSdmaXgmiEngines;
-    uint32_t NumSdmaQueuesPerEngine;
-    uint32_t NumCpQueues;
-    uint32_t MaxEngineClockMhzFCompute;
-    uint32_t MaxEngineClockMhzCCompute;
-
-    uint32_t EngineIdMajor;
-    uint32_t EngineIdMinor;
-    uint32_t EngineIdStepping;
-    uint32_t EngineIdUCode;
-    uint32_t OverrideEngineIdMajor;
-    uint32_t OverrideEngineIdMinor;
-    uint32_t OverrideEngineIdStepping;
-    uint32_t SdmaUCode;
-
-    uint32_t Capability;
-    uint32_t FamilyID;
-    uint32_t Domain;
-    uint32_t LocationId;
-    uint32_t VendorId;
-    uint32_t DeviceId;
-    uint32_t KFDGpuID;
-    uint32_t LuidLowPart;
-    uint32_t LuidHighPart;
-    uint32_t Integrated;
-    uint32_t NodeId;  // KMT node this record describes
-
-    uint64_t UniqueID;
-    uint64_t HiveID;
-    uint64_t LocalMemSize;
-    uint64_t WallClockKHz;
+    uint32_t          node_id = 0;
+    HsaNodeProperties props   = {};
 };
-
-static_assert(sizeof(DxgNodeTopology) == 192, "HsaDxgNodeTopology ABI mismatch");
-static_assert(offsetof(DxgNodeTopology, NumCPUCores) == kDxgNodeTopologyMinSize,
-              "HsaDxgNodeTopology ABI mismatch");
-static_assert(offsetof(DxgNodeTopology, NodeId) == 156, "HsaDxgNodeTopology ABI mismatch");
-static_assert(offsetof(DxgNodeTopology, UniqueID) == 160, "HsaDxgNodeTopology ABI mismatch");
-static_assert(offsetof(DxgNodeTopology, WallClockKHz) == 184, "HsaDxgNodeTopology ABI mismatch");
 
 // Every GPU node the thunk reported, in KMT node order. CPU-only nodes are
 // dropped: the agent enumerator pairs these against DXCore adapters.
-std::vector<DxgNodeTopology>
+std::vector<DxgNode>
 read_dxg_gpu_topology();
 
 // Outcome of pairing one DXCore adapter with a KMT topology node.
@@ -146,8 +94,8 @@ read_dxg_gpu_topology();
 // to the other.
 struct NodeMatch
 {
-    const DxgNodeTopology* node      = nullptr;
-    bool                   ambiguous = false;
+    const DxgNode* node      = nullptr;
+    bool           ambiguous = false;
 };
 
 // Find the KMT node describing a DXCore adapter.
@@ -157,15 +105,15 @@ struct NodeMatch
 // pairing is exact. The PCI device id is only a fallback for the nodes a LUID
 // cannot speak for, and it has to identify exactly one of them.
 //
-// `consumed_node_ids` holds the NodeId of every node already claimed by an
+// `consumed_node_ids` holds the node id of every node already claimed by an
 // earlier adapter. Matching is otherwise stateless, so without it two adapters
 // would happily claim the same node.
 NodeMatch
-match_node_to_adapter(const std::vector<DxgNodeTopology>& nodes,
-                      const std::set<uint32_t>&           consumed_node_ids,
-                      uint32_t                            luid_low,
-                      int32_t                             luid_high,
-                      uint32_t                            device_id);
+match_node_to_adapter(const std::vector<DxgNode>& nodes,
+                      const std::set<uint32_t>&   consumed_node_ids,
+                      uint32_t                    luid_low,
+                      int32_t                     luid_high,
+                      uint32_t                    device_id);
 
 // Resolve the gfx target name for a node, or an empty string if the node does
 // not report one.
@@ -176,14 +124,14 @@ match_node_to_adapter(const std::vector<DxgNodeTopology>& nodes,
 // ROCPROFILER_FORCE_GFX wins over both, so a user can select the counter
 // definitions for a target rocprofiler-sdk does not know about.
 std::string
-resolve_gfx_name(const DxgNodeTopology& node);
+resolve_gfx_name(const HsaNodeProperties& props);
 
 // Copy a node's topology and identity into an agent record. Returns false, and
 // leaves the record untouched, when the node cannot describe a publishable GPU:
 // counter collection divides by these values, so a partially described GPU is
 // omitted rather than published with invented ones.
 bool
-apply_node_topology(const DxgNodeTopology& node, rocprofiler_agent_t& info);
+apply_node_topology(const DxgNode& node, rocprofiler_agent_t& info);
 }  // namespace wsl
 }  // namespace platform
 }  // namespace rocprofiler

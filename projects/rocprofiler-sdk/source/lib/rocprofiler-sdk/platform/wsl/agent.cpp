@@ -674,7 +674,7 @@ enumerate()
         // simd_per_cu / num_shader_banks / cu_count, and counter definitions
         // are keyed by the gfx target name.
         auto       info        = common::init_public_api_struct(rocprofiler_agent_t{});
-        const auto gfx_name    = resolve_gfx_name(*node);
+        const auto gfx_name    = resolve_gfx_name(node->props);
         const auto gfx_version = ::rocprofiler::agent::parse_gfx_target_version(gfx_name);
         if(!gfx_version || !apply_node_topology(*node, info))
         {
@@ -686,16 +686,16 @@ enumerate()
                 devids.DeviceIds.VendorID,
                 devids.DeviceIds.DeviceID,
                 gfx_name,
-                node->NumFComputeCores,
-                node->NumSIMDPerCU,
-                node->NumShaderBanks,
-                node->NumArrays,
-                node->WaveFrontSize);
+                node->props.NumFComputeCores,
+                node->props.NumSIMDPerCU,
+                node->props.NumShaderBanks,
+                node->props.NumArrays,
+                node->props.WaveFrontSize);
             continue;
         }
 
         // Claim the node so a later adapter cannot be paired with it too.
-        consumed_nodes.emplace(node->NodeId);
+        consumed_nodes.emplace(node->node_id);
 
         info.type = ROCPROFILER_AGENT_TYPE_GPU;
         // logical_node_id is rocprofiler's own dense ordinal across all agent
@@ -703,7 +703,7 @@ enumerate()
         // than reusing the ordinal means a skipped adapter shifts the ordinals
         // without renaming the GPUs that were published.
         info.logical_node_id      = logical;
-        info.node_id              = node->NodeId;
+        info.node_id              = node->node_id;
         info.id.handle            = logical + offset;
         info.logical_node_type_id = gpu_type_index;
         ++logical;

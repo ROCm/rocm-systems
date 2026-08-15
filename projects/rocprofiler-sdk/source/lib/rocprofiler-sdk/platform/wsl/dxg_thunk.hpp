@@ -33,7 +33,6 @@
 
 #include <hsakmt/hsakmttypes.h>
 
-#include <array>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -44,48 +43,35 @@ namespace platform
 {
 namespace wsl
 {
-// hsaKmtAcquireSystemProperties() is called through the real
-// HsaSystemProperties, not a mirror of it. Unlike HsaDxgNodeTopology - new
-// enough that the hsakmt package this builds against need not carry its header
-// yet - HsaSystemProperties is four uint32 fields that have not moved since
-// the KMT topology API was introduced, and hsakmttypes.h is already a
-// dependency of rocprofiler-sdk's own public agent.h.
-using PFN_DxgGetNodeTopology            = int32_t (*)(uint32_t, uint32_t, DxgNodeTopology*);
-using PFN_hsaKmtAcquireSystemProperties = int32_t (*)(HsaSystemProperties*);
-using PFN_hsaKmtReleaseSystemProperties = int32_t (*)();
 using PFN_hsaKmtOpenKFD                 = int32_t (*)();
+using PFN_hsaKmtAcquireSystemProperties = int32_t (*)(HsaSystemProperties*);
+using PFN_hsaKmtGetNodeProperties       = int32_t (*)(uint32_t, HsaNodeProperties*);
+using PFN_hsaKmtReleaseSystemProperties = int32_t (*)();
 using PFN_hsaKmtCloseKFD                = int32_t (*)();
 
 // The unversioned soname, matching ThunkLoader::whoami() in the HSA runtime.
 // Never a versioned name (librocdxg.so.1 / .so.7): hard-coding a soversion
-// would silently stop resolving the very object the HSA runtime has loaded,
-// and the soversion is not what decides compatibility anyway - every
-// DxgGetNodeTopology reply carries its own size and ABI version.
+// would silently stop resolving the very object the HSA runtime has loaded.
 inline constexpr const char* kLibRocdxgSoname = "librocdxg.so";
 
-// Every entry point the topology read needs. The four hsaKmt* names are
-// long-standing librocdxg exports, so DxgGetNodeTopology is the only one of the
-// five that a thunk predating this ABI does not have.
-//
-// Requiring all five before any of them is called is also what makes reusing
-// the snapshot pair safe. Exporting those two is not the same as refcounting
-// them: librocdxg gained the refcount that lets a second consumer hold a
-// reference while ROCr is running in the same change that added
-// DxgGetNodeTopology. An older thunk would drop the snapshot outright on the
-// first release - but it has no DxgGetNodeTopology either, so it is refused
-// here before anything is acquired.
+// Every entry point the topology read needs, all of them long-standing KMT
+// exports. Requiring all five before any of them is called is what keeps the
+// read from having to unwind a half-open thunk, and it is also what makes
+// sharing the snapshot pair safe: librocdxg refcounts those two, so the
+// snapshot this read holds is the same one the HSA runtime holds and neither
+// consumer can drop it out from under the other.
 struct DxgThunk
 {
-    PFN_DxgGetNodeTopology            get_node         = nullptr;
-    PFN_hsaKmtAcquireSystemProperties acquire_snapshot = nullptr;
-    PFN_hsaKmtReleaseSystemProperties release_snapshot = nullptr;
     PFN_hsaKmtOpenKFD                 open_kfd         = nullptr;
+    PFN_hsaKmtAcquireSystemProperties acquire_snapshot = nullptr;
+    PFN_hsaKmtGetNodeProperties       get_node         = nullptr;
+    PFN_hsaKmtReleaseSystemProperties release_snapshot = nullptr;
     PFN_hsaKmtCloseKFD                close_kfd        = nullptr;
 
     bool complete() const
     {
-        return get_node != nullptr && acquire_snapshot != nullptr && release_snapshot != nullptr &&
-               open_kfd != nullptr && close_kfd != nullptr;
+        return open_kfd != nullptr && acquire_snapshot != nullptr && get_node != nullptr &&
+               release_snapshot != nullptr && close_kfd != nullptr;
     }
 };
 
@@ -109,16 +95,15 @@ resolve_dxg_thunk(void* handle, const DxgLoaderOps& ops);
 
 // Read the GPU nodes through an already-resolved thunk: open, acquire
 // snapshot, per-node read, then release and close on the way out of every path
-// including the early ones. Every record is checked against the ABI version
-// and size this build was compiled for before it is trusted. Returns an empty
-// vector for anything it refuses to trust; nothing here is fatal.
-std::vector<DxgNodeTopology>
+// including the early ones. Returns an empty vector for anything it cannot
+// read; nothing here is fatal.
+std::vector<DxgNode>
 read_dxg_gpu_topology(const DxgThunk& thunk);
 
 // The same, preceded by loading and resolving librocdxg through `ops`. The
 // handle is closed on the way out of every path. read_dxg_gpu_topology() is
 // this with default_loader_ops().
-std::vector<DxgNodeTopology>
+std::vector<DxgNode>
 read_dxg_gpu_topology(const DxgLoaderOps& ops);
 }  // namespace wsl
 }  // namespace platform

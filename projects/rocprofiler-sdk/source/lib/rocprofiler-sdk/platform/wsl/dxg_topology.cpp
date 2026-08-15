@@ -82,11 +82,12 @@ struct RocdxgHandle
         if(handle) ops.close(handle);
     }
 
-    RocdxgHandle(const RocdxgHandle&) = delete;
+    RocdxgHandle(const RocdxgHandle&)            = delete;
     RocdxgHandle& operator=(const RocdxgHandle&) = delete;
 
     bool ready() const { return handle != nullptr && thunk.complete(); }
 };
+
 }  // namespace
 
 const DxgLoaderOps&
@@ -111,18 +112,19 @@ resolve_dxg_thunk(void* handle, const DxgLoaderOps& ops)
         return sym;
     };
 
-    auto thunk     = DxgThunk{};
-    thunk.get_node = reinterpret_cast<PFN_DxgGetNodeTopology>(resolve("DxgGetNodeTopology"));
+    auto thunk             = DxgThunk{};
+    thunk.open_kfd         = reinterpret_cast<PFN_hsaKmtOpenKFD>(resolve("hsaKmtOpenKFD"));
     thunk.acquire_snapshot = reinterpret_cast<PFN_hsaKmtAcquireSystemProperties>(
         resolve("hsaKmtAcquireSystemProperties"));
+    thunk.get_node =
+        reinterpret_cast<PFN_hsaKmtGetNodeProperties>(resolve("hsaKmtGetNodeProperties"));
     thunk.release_snapshot = reinterpret_cast<PFN_hsaKmtReleaseSystemProperties>(
         resolve("hsaKmtReleaseSystemProperties"));
-    thunk.open_kfd  = reinterpret_cast<PFN_hsaKmtOpenKFD>(resolve("hsaKmtOpenKFD"));
     thunk.close_kfd = reinterpret_cast<PFN_hsaKmtCloseKFD>(resolve("hsaKmtCloseKFD"));
     return thunk;
 }
 
-std::vector<DxgNodeTopology>
+std::vector<DxgNode>
 read_dxg_gpu_topology(const DxgLoaderOps& ops)
 {
     const auto dxg = RocdxgHandle{ops};
@@ -130,16 +132,16 @@ read_dxg_gpu_topology(const DxgLoaderOps& ops)
     return read_dxg_gpu_topology(dxg.thunk);
 }
 
-std::vector<DxgNodeTopology>
+std::vector<DxgNode>
 read_dxg_gpu_topology()
 {
     return read_dxg_gpu_topology(default_loader_ops());
 }
 
-std::vector<DxgNodeTopology>
+std::vector<DxgNode>
 read_dxg_gpu_topology(const DxgThunk& dxg)
 {
-    auto out = std::vector<DxgNodeTopology>{};
+    auto out = std::vector<DxgNode>{};
 
     if(!dxg.complete()) return out;
 
@@ -160,10 +162,7 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
     } _open_guard{dxg};
 
     // Refcounted, like the open above: the HSA runtime's reference on this
-    // snapshot outlives the release below, which drops only ours. That refcount
-    // arrived with DxgGetNodeTopology, and complete() above required it, so a
-    // librocdxg old enough to drop the snapshot on the first release cannot
-    // reach this line.
+    // snapshot outlives the release below, which drops only ours.
     auto sys_props = HsaSystemProperties{};
     if(auto st = dxg.acquire_snapshot(&sys_props); st != kHsaKmtStatusSuccess)
     {
@@ -182,36 +181,17 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
 
     for(uint32_t node_id = 0; node_id < num_nodes; ++node_id)
     {
-        auto node = DxgNodeTopology{};
-        if(auto st = dxg.get_node(node_id, sizeof(node), &node); st != kHsaKmtStatusSuccess)
+        auto props = HsaNodeProperties{};
+        if(auto st = dxg.get_node(node_id, &props); st != kHsaKmtStatusSuccess)
         {
             ROCP_WARNING << fmt::format(
-                "wsl topology: DxgGetNodeTopology(node={}) failed (status={})", node_id, st);
+                "wsl topology: hsaKmtGetNodeProperties(node={}) failed (status={})", node_id, st);
             continue;
         }
 
-        // The whole compatibility contract, and all of it that is needed: the
-        // thunk reports which ABI it speaks and how many bytes it actually
-        // wrote, per call, so nothing here depends on process-wide state. A
-        // short write means an older revision than this build expects, leaving
-        // the trailing fields untouched rather than wrong. `node` above was
-        // zero-initialized, so a thunk that returned success without writing
-        // anything fails this check too rather than being read back as an
-        // all-zero GPU.
-        if(node.AbiVersion != kDxgNodeTopologyAbiVersion || node.StructSize != sizeof(node))
-        {
-            ROCP_WARNING << fmt::format(
-                "wsl topology: node {} returned topology abi_version={} size={}, this build "
-                "expects abi_version={} size={}",
-                node_id,
-                node.AbiVersion,
-                node.StructSize,
-                kDxgNodeTopologyAbiVersion,
-                sizeof(node));
-            continue;
-        }
+        auto node = DxgNode{node_id, props};
 
-        if(node.NumFComputeCores == 0) continue;  // CPU-only node
+        if(node.props.NumFComputeCores == 0) continue;  // CPU-only node
 
         out.emplace_back(node);
     }
@@ -222,19 +202,19 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
 }
 
 NodeMatch
-match_node_to_adapter(const std::vector<DxgNodeTopology>& nodes,
-                      const std::set<uint32_t>&           consumed_node_ids,
-                      uint32_t                            luid_low,
-                      int32_t                             luid_high,
-                      uint32_t                            device_id)
+match_node_to_adapter(const std::vector<DxgNode>& nodes,
+                      const std::set<uint32_t>&   consumed_node_ids,
+                      uint32_t                    luid_low,
+                      int32_t                     luid_high,
+                      uint32_t                    device_id)
 {
     const bool adapter_has_luid = (luid_low != 0 || luid_high != 0);
 
-    auto available = [&consumed_node_ids](const DxgNodeTopology& node) {
-        return consumed_node_ids.count(node.NodeId) == 0;
+    auto available = [&consumed_node_ids](const DxgNode& node) {
+        return consumed_node_ids.count(node.node_id) == 0;
     };
-    auto has_luid = [](const DxgNodeTopology& node) {
-        return node.LuidLowPart != 0 || node.LuidHighPart != 0;
+    auto has_luid = [](const DxgNode& node) {
+        return node.props.LuidLowPart != 0 || node.props.LuidHighPart != 0;
     };
 
     if(adapter_has_luid)
@@ -242,8 +222,8 @@ match_node_to_adapter(const std::vector<DxgNodeTopology>& nodes,
         for(const auto& node : nodes)
         {
             if(!available(node) || !has_luid(node)) continue;
-            if(node.LuidLowPart == luid_low &&
-               node.LuidHighPart == static_cast<uint32_t>(luid_high))
+            if(node.props.LuidLowPart == luid_low &&
+               node.props.LuidHighPart == static_cast<uint32_t>(luid_high))
                 return NodeMatch{&node, false};
         }
     }
@@ -253,10 +233,10 @@ match_node_to_adapter(const std::vector<DxgNodeTopology>& nodes,
     // Only nodes a LUID cannot already speak for are eligible. If both sides
     // report LUIDs and they did not match above, they are different GPUs and
     // the shared device id says nothing.
-    const DxgNodeTopology* candidate = nullptr;
+    const DxgNode* candidate = nullptr;
     for(const auto& node : nodes)
     {
-        if(!available(node) || node.DeviceId != device_id) continue;
+        if(!available(node) || node.props.DeviceId != device_id) continue;
         if(adapter_has_luid && has_luid(node)) continue;
 
         if(candidate != nullptr) return NodeMatch{nullptr, true};
@@ -267,7 +247,7 @@ match_node_to_adapter(const std::vector<DxgNodeTopology>& nodes,
 }
 
 std::string
-resolve_gfx_name(const DxgNodeTopology& node)
+resolve_gfx_name(const HsaNodeProperties& props)
 {
     if(const char* forced = std::getenv("ROCPROFILER_FORCE_GFX");
        forced != nullptr && *forced != '\0')
@@ -278,10 +258,15 @@ resolve_gfx_name(const DxgNodeTopology& node)
                      << "'; expected gfx<NNN> with >=3 decimal digits";
     }
 
-    const bool overridden = (node.OverrideEngineIdMajor != 0);
-    const auto major      = overridden ? node.OverrideEngineIdMajor : node.EngineIdMajor;
-    const auto minor      = overridden ? node.OverrideEngineIdMinor : node.EngineIdMinor;
-    const auto stepping   = overridden ? node.OverrideEngineIdStepping : node.EngineIdStepping;
+    // EngineId and OverrideEngineId are unions over the same bit-field layout,
+    // so the version digits come out of the .ui32 view of whichever one speaks.
+    const auto& reported   = props.EngineId.ui32;
+    const auto& overriding = props.OverrideEngineId.ui32;
+    const bool  overridden = (overriding.Major != 0);
+
+    const uint32_t major    = overridden ? overriding.Major : reported.Major;
+    const uint32_t minor    = overridden ? overriding.Minor : reported.Minor;
+    const uint32_t stepping = overridden ? overriding.Stepping : reported.Stepping;
 
     if(major == 0) return {};
 
@@ -289,22 +274,24 @@ resolve_gfx_name(const DxgNodeTopology& node)
 }
 
 bool
-apply_node_topology(const DxgNodeTopology& node, rocprofiler_agent_t& info)
+apply_node_topology(const DxgNode& node, rocprofiler_agent_t& info)
 {
-    if(node.NumFComputeCores == 0 || node.NumSIMDPerCU == 0 || node.NumShaderBanks == 0 ||
-       node.NumArrays == 0 || node.WaveFrontSize == 0)
+    const auto& props = node.props;
+
+    if(props.NumFComputeCores == 0 || props.NumSIMDPerCU == 0 || props.NumShaderBanks == 0 ||
+       props.NumArrays == 0 || props.WaveFrontSize == 0)
         return false;
 
     // NumArrays is per shader engine, so the total array count is the product -
     // the same relation the KFD path inverts when it derives num_shader_banks
     // from array_count / simd_arrays_per_engine.
-    info.simd_count             = node.NumFComputeCores;
-    info.simd_per_cu            = node.NumSIMDPerCU;
-    info.cu_count               = node.NumFComputeCores / node.NumSIMDPerCU;
-    info.num_shader_banks       = node.NumShaderBanks;
-    info.simd_arrays_per_engine = node.NumArrays;
-    info.array_count            = node.NumShaderBanks * node.NumArrays;
-    info.cu_per_engine          = info.cu_count / node.NumShaderBanks;
+    info.simd_count             = props.NumFComputeCores;
+    info.simd_per_cu            = props.NumSIMDPerCU;
+    info.cu_count               = props.NumFComputeCores / props.NumSIMDPerCU;
+    info.num_shader_banks       = props.NumShaderBanks;
+    info.simd_arrays_per_engine = props.NumArrays;
+    info.array_count            = props.NumShaderBanks * props.NumArrays;
+    info.cu_per_engine          = info.cu_count / props.NumShaderBanks;
 
     // Derived rather than copied from NumCUPerArray. The two must agree, but
     // this record is published as immutable and counter collection divides by
@@ -313,49 +300,49 @@ apply_node_topology(const DxgNodeTopology& node, rocprofiler_agent_t& info)
     // that disagrees is reporting a bug in itself; say so and keep going with
     // the self-consistent value.
     info.cu_per_simd_array = info.cu_count / info.array_count;
-    if(node.NumCUPerArray != info.cu_per_simd_array)
+    if(props.NumCUPerArray != info.cu_per_simd_array)
         ROCP_WARNING << fmt::format(
             "wsl topology: node {} reports NumCUPerArray={} but {} compute units across {} shader "
             "arrays ({} engines x {}) is {} per array; using the derived value",
-            node.NodeId,
-            node.NumCUPerArray,
+            node.node_id,
+            props.NumCUPerArray,
             info.cu_count,
             info.array_count,
-            node.NumShaderBanks,
-            node.NumArrays,
+            props.NumShaderBanks,
+            props.NumArrays,
             info.cu_per_simd_array);
-    info.wave_front_size      = node.WaveFrontSize;
-    info.max_waves_per_simd   = node.MaxWavesPerSIMD;
-    info.max_waves_per_cu     = node.NumSIMDPerCU * node.MaxWavesPerSIMD;
-    info.max_slots_scratch_cu = node.MaxSlotsScratchCU;
-    info.lds_size_in_kb       = node.LDSSizeInKB;
-    info.gds_size_in_kb       = node.GDSSizeInKB;
-    info.num_gws              = node.NumGws;
+    info.wave_front_size      = props.WaveFrontSize;
+    info.max_waves_per_simd   = props.MaxWavesPerSIMD;
+    info.max_waves_per_cu     = props.NumSIMDPerCU * props.MaxWavesPerSIMD;
+    info.max_slots_scratch_cu = props.MaxSlotsScratchCU;
+    info.lds_size_in_kb       = props.LDSSizeInKB;
+    info.gds_size_in_kb       = props.GDSSizeInKB;
+    info.num_gws              = props.NumGws;
     // Every GPU has at least one XCC and aqlprofile divides instance counts by
     // it, so treat an unreported value the way the KFD path treats a missing
     // num_xcc sysfs property.
-    info.num_xcc = (node.NumXcc != 0) ? node.NumXcc : 1;
+    info.num_xcc = (props.NumXcc != 0) ? props.NumXcc : 1;
 
-    info.num_sdma_engines           = node.NumSdmaEngines;
-    info.num_sdma_xgmi_engines      = node.NumSdmaXgmiEngines;
-    info.num_sdma_queues_per_engine = node.NumSdmaQueuesPerEngine;
-    info.num_cp_queues              = node.NumCpQueues;
-    info.max_engine_clk_fcompute    = node.MaxEngineClockMhzFCompute;
-    info.max_engine_clk_ccompute    = node.MaxEngineClockMhzCCompute;
+    info.num_sdma_engines           = props.NumSdmaEngines;
+    info.num_sdma_xgmi_engines      = props.NumSdmaXgmiEngines;
+    info.num_sdma_queues_per_engine = props.NumSdmaQueuesPerEngine;
+    info.num_cp_queues              = props.NumCpQueues;
+    info.max_engine_clk_fcompute    = props.MaxEngineClockMhzFCompute;
+    info.max_engine_clk_ccompute    = props.MaxEngineClockMhzCCompute;
 
-    info.vendor_id                 = static_cast<uint16_t>(node.VendorId);
-    info.device_id                 = static_cast<uint16_t>(node.DeviceId);
-    info.location_id               = node.LocationId;
-    info.domain                    = node.Domain;
-    info.family_id                 = node.FamilyID;
-    info.capability.Value          = node.Capability;
-    info.hive_id                   = node.HiveID;
-    info.gpu_id                    = node.KFDGpuID;
-    info.fw_version.ui32.uCode     = node.EngineIdUCode;
-    info.sdma_fw_version.uCodeSDMA = node.SdmaUCode;
+    info.vendor_id                 = props.VendorId;
+    info.device_id                 = props.DeviceId;
+    info.location_id               = props.LocationId;
+    info.domain                    = props.Domain;
+    info.family_id                 = props.FamilyID;
+    info.capability.Value          = props.Capability.Value;
+    info.hive_id                   = props.HiveID;
+    info.gpu_id                    = props.KFDGpuID;
+    info.fw_version.ui32.uCode     = props.EngineId.ui32.uCode;
+    info.sdma_fw_version.uCodeSDMA = props.uCodeEngineVersions.uCodeSDMA;
 
     auto _uuid       = ::rocprofiler::agent::uuid_view_t{};
-    _uuid.value64[0] = node.UniqueID;
+    _uuid.value64[0] = props.UniqueID;
     info.uuid        = static_cast<rocprofiler_uuid_t>(_uuid);
 
     // Workgroup and grid limits are architectural constants the HSA runtime

@@ -26,8 +26,8 @@
 //
 // What is under test is the call sequence and its balance: every path that
 // opened the thunk must close it, every path that acquired a snapshot must
-// release it, and an old or broken thunk must be refused rather than trusted
-// or aborted on.
+// release it, and a thunk that does not export everything the read needs must
+// be refused before any of it is called.
 
 #include "lib/rocprofiler-sdk/platform/wsl/dxg_thunk.hpp"
 
@@ -43,9 +43,7 @@
 namespace
 {
 using rocprofiler::platform::wsl::DxgLoaderOps;
-using rocprofiler::platform::wsl::DxgNodeTopology;
 using rocprofiler::platform::wsl::DxgThunk;
-using rocprofiler::platform::wsl::kDxgNodeTopologyAbiVersion;
 using rocprofiler::platform::wsl::kHsaKmtStatusKernelAlreadyOpened;
 using rocprofiler::platform::wsl::kHsaKmtStatusSuccess;
 using rocprofiler::platform::wsl::read_dxg_gpu_topology;
@@ -64,13 +62,9 @@ struct FakeThunkState
     int32_t  acquire_status = kHsaKmtStatusSuccess;
     uint32_t num_nodes      = 0;
 
-    // Leave the caller's record untouched on a successful get_node, the way a
-    // stub that answers the call without implementing it would.
-    bool get_node_writes_nothing = false;
-
     // per-node answers, indexed by node id
-    std::vector<int32_t>         node_status;
-    std::vector<DxgNodeTopology> nodes;
+    std::vector<int32_t>           node_status;
+    std::vector<HsaNodeProperties> nodes;
 
     int count(const std::string& name) const
     {
@@ -83,21 +77,18 @@ struct FakeThunkState
 
 FakeThunkState* g_state = nullptr;
 
-DxgNodeTopology
-make_gpu_node(uint32_t node_id)
+HsaNodeProperties
+make_gpu_node()
 {
-    auto node             = DxgNodeTopology{};
-    node.StructSize       = sizeof(DxgNodeTopology);
-    node.AbiVersion       = kDxgNodeTopologyAbiVersion;
-    node.NodeId           = node_id;
-    node.NumFComputeCores = 256;
-    node.NumSIMDPerCU     = 4;
-    node.NumShaderBanks   = 4;
-    node.NumArrays        = 2;
-    node.WaveFrontSize    = 32;
-    node.DeviceId         = 0x744c;
-    node.VendorId         = 0x1002;
-    return node;
+    auto props             = HsaNodeProperties{};
+    props.NumFComputeCores = 256;
+    props.NumSIMDPerCU     = 4;
+    props.NumShaderBanks   = 4;
+    props.NumArrays        = 2;
+    props.WaveFrontSize    = 32;
+    props.DeviceId         = 0x744c;
+    props.VendorId         = 0x1002;
+    return props;
 }
 
 // A DxgThunk wired to g_state, plus the fixture that owns it.
@@ -108,7 +99,7 @@ struct FakeThunk
     FakeThunk() { g_state = &state; }
     ~FakeThunk() { g_state = nullptr; }
 
-    FakeThunk(const FakeThunk&) = delete;
+    FakeThunk(const FakeThunk&)            = delete;
     FakeThunk& operator=(const FakeThunk&) = delete;
 
     static int32_t OpenKfd()
@@ -139,16 +130,14 @@ struct FakeThunk
         return kHsaKmtStatusSuccess;
     }
 
-    static int32_t GetNode(uint32_t node_id, uint32_t size, DxgNodeTopology* out)
+    static int32_t GetNode(uint32_t node_id, HsaNodeProperties* out)
     {
         g_state->calls.emplace_back("get_node");
-        EXPECT_EQ(size, sizeof(DxgNodeTopology))
-            << "the caller must tell the thunk how much room it has";
+        EXPECT_NE(out, nullptr) << "the node read must be handed somewhere to write";
 
         if(node_id >= g_state->node_status.size()) return kFailure;
         if(g_state->node_status.at(node_id) != kHsaKmtStatusSuccess)
             return g_state->node_status.at(node_id);
-        if(g_state->get_node_writes_nothing) return kHsaKmtStatusSuccess;
 
         *out = g_state->nodes.at(node_id);
         return kHsaKmtStatusSuccess;
@@ -157,10 +146,10 @@ struct FakeThunk
     DxgThunk table() const
     {
         auto thunk             = DxgThunk{};
-        thunk.get_node         = &GetNode;
-        thunk.acquire_snapshot = &AcquireSnapshot;
-        thunk.release_snapshot = &ReleaseSnapshot;
         thunk.open_kfd         = &OpenKfd;
+        thunk.acquire_snapshot = &AcquireSnapshot;
+        thunk.get_node         = &GetNode;
+        thunk.release_snapshot = &ReleaseSnapshot;
         thunk.close_kfd        = &CloseKfd;
         return thunk;
     }
@@ -171,7 +160,7 @@ struct FakeThunk
         state.num_nodes = count;
         for(uint32_t i = 0; i < count; ++i)
         {
-            state.nodes.emplace_back(make_gpu_node(i));
+            state.nodes.emplace_back(make_gpu_node());
             state.node_status.emplace_back(kHsaKmtStatusSuccess);
         }
     }
@@ -187,11 +176,8 @@ struct FakeLoader
     int                      close_count      = 0;
     bool                     noload_finds_it  = true;
     bool                     plain_open_works = true;
-    // The librocdxg that ships today: every hsaKmt* entry point resolves,
-    // DxgGetNodeTopology does not. Set false to model it.
-    bool        exports_topology = true;
-    std::string missing_symbol   = {};
-    void*       handle           = reinterpret_cast<void*>(0xd06);
+    std::string              missing_symbol   = {};
+    void*                    handle           = reinterpret_cast<void*>(0xd06);
 
     DxgLoaderOps ops()
     {
@@ -206,15 +192,14 @@ struct FakeLoader
         out.sym = [this](void*, const char* name) -> void* {
             requested_symbols.emplace_back(name);
             if(missing_symbol == name) return nullptr;
-            if(!exports_topology && std::strncmp(name, "Dxg", 3) == 0) return nullptr;
-            if(std::strcmp(name, "DxgGetNodeTopology") == 0)
-                return reinterpret_cast<void*>(&FakeThunk::GetNode);
-            if(std::strcmp(name, "hsaKmtAcquireSystemProperties") == 0)
-                return reinterpret_cast<void*>(&FakeThunk::AcquireSnapshot);
-            if(std::strcmp(name, "hsaKmtReleaseSystemProperties") == 0)
-                return reinterpret_cast<void*>(&FakeThunk::ReleaseSnapshot);
             if(std::strcmp(name, "hsaKmtOpenKFD") == 0)
                 return reinterpret_cast<void*>(&FakeThunk::OpenKfd);
+            if(std::strcmp(name, "hsaKmtAcquireSystemProperties") == 0)
+                return reinterpret_cast<void*>(&FakeThunk::AcquireSnapshot);
+            if(std::strcmp(name, "hsaKmtGetNodeProperties") == 0)
+                return reinterpret_cast<void*>(&FakeThunk::GetNode);
+            if(std::strcmp(name, "hsaKmtReleaseSystemProperties") == 0)
+                return reinterpret_cast<void*>(&FakeThunk::ReleaseSnapshot);
             if(std::strcmp(name, "hsaKmtCloseKFD") == 0)
                 return reinterpret_cast<void*>(&FakeThunk::CloseKfd);
             return nullptr;
@@ -228,15 +213,12 @@ struct FakeLoader
     }
 };
 
-// Exactly the symbols resolve_dxg_thunk() may ask for, in the order it asks.
-// Pinning the whole set is the point: whatever else a librocdxg happens to
-// export - in particular the process-global ABI handshake the HSA runtime
-// performs, whose side effect is to reconfigure the thunk for its caller -
-// must not be looked up here, let alone called.
-const std::vector<std::string> kResolvedSymbols = {"DxgGetNodeTopology",
+// The five KMT symbols the read cannot proceed without, in the order
+// resolve_dxg_thunk() asks for them.
+const std::vector<std::string> kResolvedSymbols = {"hsaKmtOpenKFD",
                                                    "hsaKmtAcquireSystemProperties",
+                                                   "hsaKmtGetNodeProperties",
                                                    "hsaKmtReleaseSystemProperties",
-                                                   "hsaKmtOpenKFD",
                                                    "hsaKmtCloseKFD"};
 }  // namespace
 
@@ -250,6 +232,8 @@ TEST(wsl_dxg_thunk, a_healthy_thunk_is_called_in_order_and_left_balanced)
     const auto nodes = read_dxg_gpu_topology(fake.table());
 
     EXPECT_EQ(nodes.size(), 2);
+    EXPECT_EQ(nodes.at(0).node_id, 0);
+    EXPECT_EQ(nodes.at(1).node_id, 1);
     EXPECT_EQ(fake.state.calls,
               (std::vector<std::string>{"open_kfd",
                                         "acquire_snapshot",
@@ -287,7 +271,7 @@ TEST(wsl_dxg_thunk, cpu_only_nodes_are_skipped_not_published)
     const auto nodes = read_dxg_gpu_topology(fake.table());
 
     ASSERT_EQ(nodes.size(), 1);
-    EXPECT_EQ(nodes.front().NodeId, 1);
+    EXPECT_EQ(nodes.front().node_id, 1);
     EXPECT_EQ(fake.state.count("get_node"), 2);
     EXPECT_EQ(fake.state.count("close_kfd"), 1);
 }
@@ -333,93 +317,9 @@ TEST(wsl_dxg_thunk, a_failed_node_query_skips_that_node_and_still_unwinds)
     const auto nodes = read_dxg_gpu_topology(fake.table());
 
     ASSERT_EQ(nodes.size(), 2);
-    EXPECT_EQ(nodes.at(0).NodeId, 0);
-    EXPECT_EQ(nodes.at(1).NodeId, 2);
+    EXPECT_EQ(nodes.at(0).node_id, 0);
+    EXPECT_EQ(nodes.at(1).node_id, 2);
     EXPECT_EQ(fake.state.count("release_snapshot"), 1);
-    EXPECT_EQ(fake.state.count("close_kfd"), 1);
-}
-
-// --- the per-record compatibility gate -------------------------------------
-//
-// Each reply carries the ABI version the thunk speaks and the number of bytes
-// it wrote. That pair is the entire compatibility contract, so these cases
-// are what stands between an incompatible thunk and a published agent record.
-
-// A thunk that wrote fewer bytes than this build expects is an older revision:
-// the trailing fields were never written, so the record is refused rather than
-// published with whatever was in the caller's buffer.
-TEST(wsl_dxg_thunk, a_short_record_is_refused)
-{
-    auto fake = FakeThunk{};
-    fake.publish_gpu_nodes(1);
-    fake.state.nodes.at(0).StructSize = sizeof(DxgNodeTopology) - 8;
-
-    const auto nodes = read_dxg_gpu_topology(fake.table());
-
-    EXPECT_TRUE(nodes.empty());
-    EXPECT_EQ(fake.state.count("release_snapshot"), 1);
-    EXPECT_EQ(fake.state.count("close_kfd"), 1);
-}
-
-// The mirror image: a thunk claiming to have written more than the buffer it
-// was handed is describing something this build cannot lay out either.
-TEST(wsl_dxg_thunk, an_overlong_record_is_refused)
-{
-    auto fake = FakeThunk{};
-    fake.publish_gpu_nodes(1);
-    fake.state.nodes.at(0).StructSize = sizeof(DxgNodeTopology) + 8;
-
-    const auto nodes = read_dxg_gpu_topology(fake.table());
-
-    EXPECT_TRUE(nodes.empty());
-    EXPECT_EQ(fake.state.count("release_snapshot"), 1);
-    EXPECT_EQ(fake.state.count("close_kfd"), 1);
-}
-
-TEST(wsl_dxg_thunk, a_record_from_a_different_abi_version_is_refused)
-{
-    auto fake = FakeThunk{};
-    fake.publish_gpu_nodes(2);
-    fake.state.nodes.at(0).AbiVersion = kDxgNodeTopologyAbiVersion - 1;
-    fake.state.nodes.at(1).AbiVersion = kDxgNodeTopologyAbiVersion + 1;
-
-    const auto nodes = read_dxg_gpu_topology(fake.table());
-
-    EXPECT_TRUE(nodes.empty());
-    EXPECT_EQ(fake.state.count("close_kfd"), 1);
-}
-
-// Something exporting the right name that answers the call without writing
-// anything. The caller's record is zero-initialized before every call, so the
-// same StructSize/AbiVersion pair catches this: a silent stub is refused
-// instead of being published as a GPU with no compute units.
-TEST(wsl_dxg_thunk, a_record_the_thunk_never_wrote_is_refused)
-{
-    auto fake                          = FakeThunk{};
-    fake.state.get_node_writes_nothing = true;
-    fake.publish_gpu_nodes(2);
-
-    const auto nodes = read_dxg_gpu_topology(fake.table());
-
-    EXPECT_TRUE(nodes.empty());
-    EXPECT_EQ(fake.state.count("get_node"), 2);
-    EXPECT_EQ(fake.state.count("release_snapshot"), 1);
-    EXPECT_EQ(fake.state.count("close_kfd"), 1);
-}
-
-// The gate is per record, not per thunk: one bad reply does not condemn the
-// nodes around it, and one good reply does not vouch for them.
-TEST(wsl_dxg_thunk, a_single_incompatible_record_does_not_discard_the_others)
-{
-    auto fake = FakeThunk{};
-    fake.publish_gpu_nodes(3);
-    fake.state.nodes.at(1).AbiVersion = kDxgNodeTopologyAbiVersion + 1;
-
-    const auto nodes = read_dxg_gpu_topology(fake.table());
-
-    ASSERT_EQ(nodes.size(), 2);
-    EXPECT_EQ(nodes.at(0).NodeId, 0);
-    EXPECT_EQ(nodes.at(1).NodeId, 2);
     EXPECT_EQ(fake.state.count("close_kfd"), 1);
 }
 
@@ -438,9 +338,8 @@ TEST(wsl_dxg_thunk, an_empty_snapshot_is_released_and_closed)
 
 // --- an incomplete function table ------------------------------------------
 
-// A thunk predating the topology ABI exports the hsaKmt* entry points but not
-// DxgGetNodeTopology. Missing any one of the five must stop the read before it
-// calls anything at all - not crash on a null pointer, and not abort.
+// Missing any one of the five must stop the read before it calls anything at
+// all - not crash on a null pointer, and not abort.
 TEST(wsl_dxg_thunk, a_thunk_missing_any_entry_point_is_never_called)
 {
     for(int missing = 0; missing < 5; ++missing)
@@ -450,10 +349,10 @@ TEST(wsl_dxg_thunk, a_thunk_missing_any_entry_point_is_never_called)
 
         switch(missing)
         {
-            case 0: thunk.get_node = nullptr; break;
+            case 0: thunk.open_kfd = nullptr; break;
             case 1: thunk.acquire_snapshot = nullptr; break;
-            case 2: thunk.release_snapshot = nullptr; break;
-            case 3: thunk.open_kfd = nullptr; break;
+            case 2: thunk.get_node = nullptr; break;
+            case 3: thunk.release_snapshot = nullptr; break;
             case 4: thunk.close_kfd = nullptr; break;
             default: break;
         }
@@ -517,9 +416,9 @@ TEST(wsl_dxg_thunk, a_missing_library_closes_nothing)
     EXPECT_TRUE(fake.state.calls.empty());
 }
 
-// An old thunk resolves some symbols and not others. The handle it did open
+// A thunk that resolves some symbols and not others. The handle it did open
 // still has to be closed, and none of the entry points may be called.
-TEST(wsl_dxg_thunk, an_old_thunk_missing_a_symbol_is_closed_without_being_called)
+TEST(wsl_dxg_thunk, a_thunk_missing_a_required_symbol_is_closed_without_being_called)
 {
     for(const auto& symbol : kResolvedSymbols)
     {
@@ -536,25 +435,6 @@ TEST(wsl_dxg_thunk, an_old_thunk_missing_a_symbol_is_closed_without_being_called
     }
 }
 
-// The librocdxg that ships today: it opens, it exports the entry points the
-// HSA runtime needs - snapshot ownership among them - and it has no
-// DxgGetNodeTopology. This is the configuration the WSL path actually meets in
-// the field, so the refusal has to be a clean one - the handle given back,
-// nothing invoked, no GPU agents and no abort.
-TEST(wsl_dxg_thunk, the_shipped_thunk_without_topology_exports_is_refused_cleanly)
-{
-    auto fake               = FakeThunk{};
-    auto loader             = FakeLoader{};
-    loader.exports_topology = false;
-    fake.publish_gpu_nodes(2);
-
-    const auto nodes = read_dxg_gpu_topology(loader.ops());
-
-    EXPECT_TRUE(nodes.empty());
-    EXPECT_EQ(loader.close_count, 1);
-    EXPECT_TRUE(fake.state.calls.empty());
-}
-
 // resolve_dxg_thunk() reports exactly which entry points it found, so the
 // warning naming the missing symbol is driven by the same data the caller
 // checks.
@@ -564,18 +444,14 @@ TEST(wsl_dxg_thunk, resolve_reports_a_complete_table_only_when_all_five_resolve)
 
     EXPECT_TRUE(resolve_dxg_thunk(loader.handle, loader.ops()).complete());
 
-    loader.missing_symbol = "DxgGetNodeTopology";
+    loader.missing_symbol = "hsaKmtGetNodeProperties";
     const auto partial    = resolve_dxg_thunk(loader.handle, loader.ops());
     EXPECT_FALSE(partial.complete());
     EXPECT_EQ(partial.get_node, nullptr);
     EXPECT_NE(partial.acquire_snapshot, nullptr) << "the other entry points still resolve";
 }
 
-// The resolved set is the whole of what this build asks a thunk for. Anything
-// beyond it would be a second, unnecessary coupling to librocdxg's ABI - and
-// the entry point most obviously missing from this list, the process-global
-// handshake, is one whose side effect on the thunk's own state makes calling
-// it from a second in-process consumer actively unsafe.
+// The resolved set is the whole KMT interface this topology read requires.
 TEST(wsl_dxg_thunk, resolve_asks_for_exactly_the_entry_points_it_needs)
 {
     auto loader = FakeLoader{};

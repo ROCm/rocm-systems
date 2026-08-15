@@ -32,13 +32,14 @@
 #include <gtest/gtest.h>
 
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <set>
 #include <vector>
 
 namespace
 {
-using rocprofiler::platform::wsl::DxgNodeTopology;
+using rocprofiler::platform::wsl::DxgNode;
 using rocprofiler::platform::wsl::match_node_to_adapter;
 
 // The matcher is called once per adapter with a growing consumed set; the tests
@@ -47,34 +48,34 @@ constexpr auto& match = match_node_to_adapter;
 
 // A gfx1150 (RDNA 3.5) node as the DXG thunk reports it: 1 shader engine, 2
 // SIMD arrays per engine, 2 SIMDs per CU.
-DxgNodeTopology
+DxgNode
 make_gfx1150_node()
 {
-    auto node                      = DxgNodeTopology{};
-    node.StructSize                = sizeof(DxgNodeTopology);
-    node.AbiVersion                = rocprofiler::platform::wsl::kDxgNodeTopologyAbiVersion;
-    node.NodeId                    = 1;  // KMT node 0 is the CPU
-    node.NumFComputeCores          = 32;
-    node.NumSIMDPerCU              = 2;
-    node.NumShaderBanks            = 1;
-    node.NumArrays                 = 2;
-    node.NumCUPerArray             = 8;
-    node.WaveFrontSize             = 32;
-    node.MaxWavesPerSIMD           = 16;
-    node.NumXcc                    = 1;
-    node.EngineIdMajor             = 11;
-    node.EngineIdMinor             = 5;
-    node.EngineIdStepping          = 0;
-    node.EngineIdUCode             = 42;
-    node.SdmaUCode                 = 17;
-    node.VendorId                  = 0x1002;
-    node.DeviceId                  = 0x150e;
-    node.LocationId                = 0x0300;
-    node.FamilyID                  = 145;
-    node.LuidLowPart               = 0xAABBCCDD;
-    node.LuidHighPart              = 0x11;
-    node.UniqueID                  = 0x0123456789ABCDEFULL;
-    node.MaxEngineClockMhzFCompute = 2900;
+    auto node    = DxgNode{};
+    node.node_id = 1;  // KMT node 0 is the CPU
+
+    auto& props                         = node.props;
+    props.NumFComputeCores              = 32;
+    props.NumSIMDPerCU                  = 2;
+    props.NumShaderBanks                = 1;
+    props.NumArrays                     = 2;
+    props.NumCUPerArray                 = 8;
+    props.WaveFrontSize                 = 32;
+    props.MaxWavesPerSIMD               = 16;
+    props.NumXcc                        = 1;
+    props.EngineId.ui32.Major           = 11;
+    props.EngineId.ui32.Minor           = 5;
+    props.EngineId.ui32.Stepping        = 0;
+    props.EngineId.ui32.uCode           = 42;
+    props.uCodeEngineVersions.uCodeSDMA = 17;
+    props.VendorId                      = 0x1002;
+    props.DeviceId                      = 0x150e;
+    props.LocationId                    = 0x0300;
+    props.FamilyID                      = 145;
+    props.LuidLowPart                   = 0xAABBCCDD;
+    props.LuidHighPart                  = 0x11;
+    props.UniqueID                      = 0x0123456789ABCDEFULL;
+    props.MaxEngineClockMhzFCompute     = 2900;
     return node;
 }
 
@@ -120,11 +121,11 @@ TEST(wsl_dxg_topology, derived_compute_topology)
 
 TEST(wsl_dxg_topology, array_count_is_a_total_across_shader_engines)
 {
-    auto node             = make_gfx1150_node();
-    node.NumShaderBanks   = 4;
-    node.NumArrays        = 2;
-    node.NumFComputeCores = 256;
-    node.NumCUPerArray    = 16;
+    auto node                   = make_gfx1150_node();
+    node.props.NumShaderBanks   = 4;
+    node.props.NumArrays        = 2;
+    node.props.NumFComputeCores = 256;
+    node.props.NumCUPerArray    = 16;
 
     auto info = rocprofiler::common::init_public_api_struct(rocprofiler_agent_t{});
     ASSERT_TRUE(rocprofiler::platform::wsl::apply_node_topology(node, info));
@@ -146,6 +147,7 @@ TEST(wsl_dxg_topology, identity_fields_are_copied)
     EXPECT_EQ(info.device_id, 0x150eu);
     EXPECT_EQ(info.location_id, 0x0300u);
     EXPECT_EQ(info.family_id, 145u);
+    // Read back out of the same union bit-fields the thunk fills in.
     EXPECT_EQ(info.fw_version.ui32.uCode, 42u);
     EXPECT_EQ(info.sdma_fw_version.uCodeSDMA, 17u);
     EXPECT_EQ(info.max_engine_clk_fcompute, 2900u);
@@ -163,22 +165,22 @@ TEST(wsl_dxg_topology, incomplete_nodes_are_rejected)
 {
     auto info = rocprofiler::common::init_public_api_struct(rocprofiler_agent_t{});
 
-    for(auto zero_field : {&DxgNodeTopology::NumFComputeCores,
-                           &DxgNodeTopology::NumSIMDPerCU,
-                           &DxgNodeTopology::NumShaderBanks,
-                           &DxgNodeTopology::NumArrays,
-                           &DxgNodeTopology::WaveFrontSize})
+    for(auto zero_field : {&HsaNodeProperties::NumFComputeCores,
+                           &HsaNodeProperties::NumSIMDPerCU,
+                           &HsaNodeProperties::NumShaderBanks,
+                           &HsaNodeProperties::NumArrays,
+                           &HsaNodeProperties::WaveFrontSize})
     {
-        auto node        = make_gfx1150_node();
-        node.*zero_field = 0;
+        auto node              = make_gfx1150_node();
+        node.props.*zero_field = 0;
         EXPECT_FALSE(rocprofiler::platform::wsl::apply_node_topology(node, info));
     }
 }
 
 TEST(wsl_dxg_topology, unreported_xcc_count_defaults_to_one)
 {
-    auto node   = make_gfx1150_node();
-    node.NumXcc = 0;
+    auto node         = make_gfx1150_node();
+    node.props.NumXcc = 0;
 
     auto info = rocprofiler::common::init_public_api_struct(rocprofiler_agent_t{});
     ASSERT_TRUE(rocprofiler::platform::wsl::apply_node_topology(node, info));
@@ -188,63 +190,63 @@ TEST(wsl_dxg_topology, unreported_xcc_count_defaults_to_one)
 
 TEST(wsl_dxg_topology, gfx_name_precedence)
 {
-    auto node = make_gfx1150_node();
+    const auto node = make_gfx1150_node();
 
     {
         const auto _env = ForceGfxEnv{nullptr};
-        EXPECT_EQ(rocprofiler::platform::wsl::resolve_gfx_name(node), "gfx1150");
+        EXPECT_EQ(rocprofiler::platform::wsl::resolve_gfx_name(node.props), "gfx1150");
     }
 
     // HSA_OVERRIDE_GFX_VERSION reaches us as OverrideEngineId with EngineId's
     // version fields left zero, exactly as the HSA runtime sees it.
     {
-        const auto _env                     = ForceGfxEnv{nullptr};
-        auto       overridden               = node;
-        overridden.EngineIdMajor            = 0;
-        overridden.EngineIdMinor            = 0;
-        overridden.EngineIdStepping         = 0;
-        overridden.OverrideEngineIdMajor    = 11;
-        overridden.OverrideEngineIdMinor    = 0;
-        overridden.OverrideEngineIdStepping = 0;
-        EXPECT_EQ(rocprofiler::platform::wsl::resolve_gfx_name(overridden), "gfx1100");
+        const auto _env                                 = ForceGfxEnv{nullptr};
+        auto       overridden                           = node;
+        overridden.props.EngineId.ui32.Major            = 0;
+        overridden.props.EngineId.ui32.Minor            = 0;
+        overridden.props.EngineId.ui32.Stepping         = 0;
+        overridden.props.OverrideEngineId.ui32.Major    = 11;
+        overridden.props.OverrideEngineId.ui32.Minor    = 0;
+        overridden.props.OverrideEngineId.ui32.Stepping = 0;
+        EXPECT_EQ(rocprofiler::platform::wsl::resolve_gfx_name(overridden.props), "gfx1100");
     }
 
     {
         const auto _env = ForceGfxEnv{"gfx942"};
-        EXPECT_EQ(rocprofiler::platform::wsl::resolve_gfx_name(node), "gfx942");
+        EXPECT_EQ(rocprofiler::platform::wsl::resolve_gfx_name(node.props), "gfx942");
     }
 
     // A malformed override is ignored rather than fed into gfx_target_version.
     {
         const auto _env = ForceGfxEnv{"not-a-target"};
-        EXPECT_EQ(rocprofiler::platform::wsl::resolve_gfx_name(node), "gfx1150");
+        EXPECT_EQ(rocprofiler::platform::wsl::resolve_gfx_name(node.props), "gfx1150");
     }
 
     // A node that reports no engine id yields no name, which makes the
     // enumerator omit the adapter instead of inventing a target.
     {
-        const auto _env       = ForceGfxEnv{nullptr};
-        auto       unknown    = node;
-        unknown.EngineIdMajor = 0;
-        EXPECT_TRUE(rocprofiler::platform::wsl::resolve_gfx_name(unknown).empty());
+        const auto _env                   = ForceGfxEnv{nullptr};
+        auto       unknown                = node;
+        unknown.props.EngineId.ui32.Major = 0;
+        EXPECT_TRUE(rocprofiler::platform::wsl::resolve_gfx_name(unknown.props).empty());
     }
 }
 
 TEST(wsl_dxg_topology, adapter_matching_prefers_luid)
 {
-    auto first         = make_gfx1150_node();
-    first.NodeId       = 1;
-    first.LuidLowPart  = 1;
-    first.LuidHighPart = 0;
-    first.DeviceId     = 0x7480;
+    auto first               = make_gfx1150_node();
+    first.node_id            = 1;
+    first.props.LuidLowPart  = 1;
+    first.props.LuidHighPart = 0;
+    first.props.DeviceId     = 0x7480;
 
-    auto second         = make_gfx1150_node();
-    second.NodeId       = 2;
-    second.LuidLowPart  = 2;
-    second.LuidHighPart = 0;
-    second.DeviceId     = 0x7480;
+    auto second               = make_gfx1150_node();
+    second.node_id            = 2;
+    second.props.LuidLowPart  = 2;
+    second.props.LuidHighPart = 0;
+    second.props.DeviceId     = 0x7480;
 
-    const auto nodes = std::vector<DxgNodeTopology>{first, second};
+    const auto nodes = std::vector<DxgNode>{first, second};
     const auto none  = std::set<uint32_t>{};
 
     // Identical device ids: only the LUID disambiguates the two adapters.
@@ -261,12 +263,12 @@ TEST(wsl_dxg_topology, adapter_matching_prefers_luid)
 
 TEST(wsl_dxg_topology, adapter_matching_falls_back_to_device_id)
 {
-    auto node         = make_gfx1150_node();
-    node.LuidLowPart  = 0;
-    node.LuidHighPart = 0;
-    node.DeviceId     = 0x150e;
+    auto node               = make_gfx1150_node();
+    node.props.LuidLowPart  = 0;
+    node.props.LuidHighPart = 0;
+    node.props.DeviceId     = 0x150e;
 
-    const auto nodes = std::vector<DxgNodeTopology>{node};
+    const auto nodes = std::vector<DxgNode>{node};
     const auto none  = std::set<uint32_t>{};
 
     EXPECT_EQ(match(nodes, none, 7, 0, 0x150e).node, &nodes[0]);
@@ -276,44 +278,44 @@ TEST(wsl_dxg_topology, adapter_matching_falls_back_to_device_id)
 
 TEST(wsl_dxg_topology, identical_device_ids_with_distinct_luids_do_not_alias)
 {
-    auto first         = make_gfx1150_node();
-    first.NodeId       = 1;
-    first.LuidLowPart  = 0x1111;
-    first.LuidHighPart = 0;
-    first.DeviceId     = 0x7480;
+    auto first               = make_gfx1150_node();
+    first.node_id            = 1;
+    first.props.LuidLowPart  = 0x1111;
+    first.props.LuidHighPart = 0;
+    first.props.DeviceId     = 0x7480;
 
-    auto second         = make_gfx1150_node();
-    second.NodeId       = 2;
-    second.LuidLowPart  = 0x2222;
-    second.LuidHighPart = 0;
-    second.DeviceId     = 0x7480;
+    auto second               = make_gfx1150_node();
+    second.node_id            = 2;
+    second.props.LuidLowPart  = 0x2222;
+    second.props.LuidHighPart = 0;
+    second.props.DeviceId     = 0x7480;
 
-    const auto nodes    = std::vector<DxgNodeTopology>{first, second};
+    const auto nodes    = std::vector<DxgNode>{first, second};
     auto       consumed = std::set<uint32_t>{};
 
     const auto a = match(nodes, consumed, 0x2222, 0, 0x7480);
     ASSERT_NE(a.node, nullptr);
-    EXPECT_EQ(a.node->NodeId, 2u);
-    consumed.emplace(a.node->NodeId);
+    EXPECT_EQ(a.node->node_id, 2u);
+    consumed.emplace(a.node->node_id);
 
     const auto b = match(nodes, consumed, 0x1111, 0, 0x7480);
     ASSERT_NE(b.node, nullptr);
-    EXPECT_EQ(b.node->NodeId, 1u);
+    EXPECT_EQ(b.node->node_id, 1u);
 }
 
 TEST(wsl_dxg_topology, identical_device_ids_without_luids_are_ambiguous)
 {
-    auto first        = make_gfx1150_node();
-    first.NodeId      = 1;
-    first.LuidLowPart = 0;
-    first.DeviceId    = 0x7480;
+    auto first              = make_gfx1150_node();
+    first.node_id           = 1;
+    first.props.LuidLowPart = 0;
+    first.props.DeviceId    = 0x7480;
 
-    auto second        = make_gfx1150_node();
-    second.NodeId      = 2;
-    second.LuidLowPart = 0;
-    second.DeviceId    = 0x7480;
+    auto second              = make_gfx1150_node();
+    second.node_id           = 2;
+    second.props.LuidLowPart = 0;
+    second.props.DeviceId    = 0x7480;
 
-    const auto nodes = std::vector<DxgNodeTopology>{first, second};
+    const auto nodes = std::vector<DxgNode>{first, second};
 
     // Two indistinguishable candidates: report it rather than picking one and
     // attributing this adapter's counters to the wrong GPU.
@@ -325,21 +327,21 @@ TEST(wsl_dxg_topology, identical_device_ids_without_luids_are_ambiguous)
     const auto resolved = match(nodes, std::set<uint32_t>{1}, 0, 0, 0x7480);
     EXPECT_FALSE(resolved.ambiguous);
     ASSERT_NE(resolved.node, nullptr);
-    EXPECT_EQ(resolved.node->NodeId, 2u);
+    EXPECT_EQ(resolved.node->node_id, 2u);
 }
 
 TEST(wsl_dxg_topology, a_consumed_node_is_never_matched_twice)
 {
-    auto node         = make_gfx1150_node();
-    node.NodeId       = 4;
-    node.LuidLowPart  = 0x99;
-    node.LuidHighPart = 0;
+    auto node               = make_gfx1150_node();
+    node.node_id            = 4;
+    node.props.LuidLowPart  = 0x99;
+    node.props.LuidHighPart = 0;
 
-    const auto nodes = std::vector<DxgNodeTopology>{node};
+    const auto nodes = std::vector<DxgNode>{node};
 
-    EXPECT_EQ(match(nodes, std::set<uint32_t>{}, 0x99, 0, node.DeviceId).node, &nodes[0]);
+    EXPECT_EQ(match(nodes, std::set<uint32_t>{}, 0x99, 0, node.props.DeviceId).node, &nodes[0]);
 
-    const auto second = match(nodes, std::set<uint32_t>{4}, 0x99, 0, node.DeviceId);
+    const auto second = match(nodes, std::set<uint32_t>{4}, 0x99, 0, node.props.DeviceId);
     EXPECT_EQ(second.node, nullptr);
     EXPECT_FALSE(second.ambiguous);
 }
@@ -348,12 +350,12 @@ TEST(wsl_dxg_topology, cu_per_simd_array_is_derived_across_shader_engines)
 {
     // 128 CU on 4 shader engines with 2 arrays each is 16 CU per array. A
     // producer that divided by the per-engine array count alone would say 64.
-    auto node             = make_gfx1150_node();
-    node.NumShaderBanks   = 4;
-    node.NumArrays        = 2;
-    node.NumSIMDPerCU     = 2;
-    node.NumFComputeCores = 256;
-    node.NumCUPerArray    = 64;
+    auto node                   = make_gfx1150_node();
+    node.props.NumShaderBanks   = 4;
+    node.props.NumArrays        = 2;
+    node.props.NumSIMDPerCU     = 2;
+    node.props.NumFComputeCores = 256;
+    node.props.NumCUPerArray    = 64;
 
     auto info = rocprofiler::common::init_public_api_struct(rocprofiler_agent_t{});
     ASSERT_TRUE(rocprofiler::platform::wsl::apply_node_topology(node, info));
@@ -365,29 +367,30 @@ TEST(wsl_dxg_topology, cu_per_simd_array_is_derived_across_shader_engines)
 
 TEST(wsl_dxg_topology, a_consistent_producer_is_reproduced_exactly)
 {
-    auto node             = make_gfx1150_node();
-    node.NumShaderBanks   = 4;
-    node.NumArrays        = 2;
-    node.NumSIMDPerCU     = 2;
-    node.NumFComputeCores = 256;
-    node.NumCUPerArray    = 16;  // what a corrected producer reports
+    auto node                   = make_gfx1150_node();
+    node.props.NumShaderBanks   = 4;
+    node.props.NumArrays        = 2;
+    node.props.NumSIMDPerCU     = 2;
+    node.props.NumFComputeCores = 256;
+    node.props.NumCUPerArray    = 16;  // what a corrected producer reports
 
     auto info = rocprofiler::common::init_public_api_struct(rocprofiler_agent_t{});
     ASSERT_TRUE(rocprofiler::platform::wsl::apply_node_topology(node, info));
 
-    EXPECT_EQ(info.cu_per_simd_array, node.NumCUPerArray);
+    EXPECT_EQ(info.cu_per_simd_array, node.props.NumCUPerArray);
 }
 
 TEST(wsl_dxg_topology, kmt_node_id_survives_the_transform)
 {
-    auto node   = make_gfx1150_node();
-    node.NodeId = 7;
+    auto node    = make_gfx1150_node();
+    node.node_id = 7;
 
-    const auto nodes = std::vector<DxgNodeTopology>{node};
-    const auto found = match(nodes, std::set<uint32_t>{}, node.LuidLowPart, 0x11, node.DeviceId);
+    const auto nodes = std::vector<DxgNode>{node};
+    const auto found =
+        match(nodes, std::set<uint32_t>{}, node.props.LuidLowPart, 0x11, node.props.DeviceId);
 
     ASSERT_NE(found.node, nullptr);
-    EXPECT_EQ(found.node->NodeId, 7u)
+    EXPECT_EQ(found.node->node_id, 7u)
         << "the enumerator publishes this as rocprofiler_agent_t::node_id, so it must not be "
            "replaced by a compacted ordinal";
 }
