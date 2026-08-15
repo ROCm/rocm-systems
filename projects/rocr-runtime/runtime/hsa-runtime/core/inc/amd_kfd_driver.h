@@ -48,6 +48,7 @@
 
 #include "hsakmt/hsakmt.h"
 
+#include "core/inc/amd_kfd_lifecycle.h"
 #include "core/inc/driver.h"
 #include "core/inc/memory_region.h"
 
@@ -187,6 +188,40 @@ public:
   /// It is legal for a system with Xnack ON to have devices that do not support
   /// Xnack functionality.
   static bool BindXnackMode();
+
+  /// @brief Builds the thunk call table KfdLifecycle drives.
+  static KfdLifecycleOps ThunkOps();
+
+  /// @brief Take the one topology snapshot reference this driver owns.
+  ///
+  /// @details Idempotent, because the lifecycle short-circuits every call after
+  /// the first: Init() and GetSystemProperties() can both ask without a second
+  /// reference being taken. Caches what the acquire reported in @ref sys_props_,
+  /// which is then the only thing the short-circuited calls can be answered
+  /// from. Const for the same reason lifecycle_ is mutable.
+  hsa_status_t AcquireTopologySnapshot() const;
+
+  /// @brief Owns whatever this driver has taken from the thunk.
+  ///
+  /// @details Mutable because GetSystemProperties() is const on the core::Driver
+  /// interface, yet taking the topology snapshot reference is precisely the
+  /// ownership change that has to be recorded there.
+  mutable KfdLifecycle lifecycle_{ThunkOps()};
+
+  /// @brief What the one acquire this driver performs reported.
+  ///
+  /// @details The acquire happens once, in Init(); the second caller,
+  /// BuildTopology(), finds the snapshot already owned and the lifecycle
+  /// short-circuits without calling the thunk - which would leave that
+  /// caller's output argument unwritten. Answering both callers from here is
+  /// what lets there be exactly one acquire.
+  ///
+  /// Only ever written by a thunk acquire that reported success, so a failed
+  /// one cannot leave a half-written record here to be handed out later. Not
+  /// synchronized, and does not need to be: Init() and BuildTopology() are both
+  /// reached from Runtime::Load(), which Runtime::Acquire() calls holding
+  /// bootstrap_lock().
+  mutable HsaSystemProperties sys_props_{};
 
   // Minimum acceptable KFD version numbers.
   static const uint32_t kfd_version_major_min = 0;

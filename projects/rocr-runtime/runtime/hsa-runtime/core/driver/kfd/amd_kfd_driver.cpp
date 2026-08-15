@@ -113,11 +113,63 @@ __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
 KfdDriver::KfdDriver(std::string devnode_name)
     : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
 
-hsa_status_t KfdDriver::Init() {
-  HSAKMT_STATUS ret =
-      HSAKMT_CALL(hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
+KfdLifecycleOps KfdDriver::ThunkOps() {
+  // HSAKMT_CALL resolves through the thunk loader at call time, so binding
+  // these before the loader exists is fine; none of them runs before ShutDown().
+  KfdLifecycleOps ops;
 
-  if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
+  ops.disable_runtime = []() {
+    const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
+
+    return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
+                                                                                : HSA_STATUS_ERROR;
+  };
+
+  ops.release_snapshot = []() {
+    return HSAKMT_CALL(hsaKmtReleaseSystemProperties()) == HSAKMT_STATUS_SUCCESS
+        ? HSA_STATUS_SUCCESS
+        : HSA_STATUS_ERROR;
+  };
+
+  ops.close = []() {
+    return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
+                                                                  : HSA_STATUS_ERROR;
+  };
+
+  return ops;
+}
+
+hsa_status_t KfdDriver::Init() {
+  // Before the runtime enable, not after. On DXG the debug probe inside
+  // hsaKmtRuntimeEnable() reads the device list the topology snapshot owns,
+  // and BuildTopology() reads it again immediately afterwards. Taking the one
+  // long-lived reference here is what lets both of them see the same
+  // enumeration: a probe that acquired for itself would drop the last
+  // reference on the way out, destroying the adapters it had just built and
+  // leaving BuildTopology() to enumerate them all over again.
+  //
+  // Not a WSL-only ordering. On the native thunk hsaKmtRuntimeEnable() reaches
+  // hsaKmtCheckRuntimeDebugSupport(), which acquires the system properties
+  // itself and never gives them back, so the snapshot was already being built
+  // during the enable. Whichever call arrives first builds it and the other is
+  // handed the copy; this only decides which one that is.
+  const hsa_status_t acquired = AcquireTopologySnapshot();
+  if (acquired != HSA_STATUS_SUCCESS) return acquired;
+
+  // Held outside the lambda: whether the thunk supports RuntimeEnable at all is
+  // what tells the runtime if debugging is available, and that outlives the
+  // success/failure answer the lifecycle needs.
+  HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
+
+  const hsa_status_t enabled = lifecycle_.EnableRuntime([&ret]() {
+    ret = HSAKMT_CALL(
+        hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
+
+    return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
+                                                                                : HSA_STATUS_ERROR;
+  });
+
+  if (enabled != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   uint32_t caps_mask = 0;
   if (HSAKMT_CALL(hsaKmtGetRuntimeCapabilities(&caps_mask)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
@@ -144,14 +196,17 @@ hsa_status_t KfdDriver::Init() {
 }
 
 hsa_status_t KfdDriver::ShutDown() {
-  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
-  if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
-
-  ret = HSAKMT_CALL(hsaKmtReleaseSystemProperties());
-
-  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-
-  return Close();
+  // Gives back exactly what this driver took and nothing else: disable only if
+  // Init() enabled, release only if the snapshot was acquired, close only if
+  // Open() opened. The order is the reverse of the acquire order - disable,
+  // release, close - so the device is never closed while the snapshot or the
+  // runtime enable still depend on it. Every owned step runs even if an earlier
+  // one fails, and the first error is the one reported. See KfdLifecycle.
+  //
+  // Correct on a half-built driver, which is what the failure paths through
+  // AMD::Load() hand it, and idempotent afterwards, so an unwind there and a
+  // later normal shutdown cannot both release the same reference.
+  return lifecycle_.ShutDown();
 }
 
 hsa_status_t KfdDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
@@ -170,23 +225,71 @@ hsa_status_t KfdDriver::QueryKernelModeDriver(core::DriverQuery query) {
 }
 
 hsa_status_t KfdDriver::Open() {
-  return HSAKMT_CALL(hsaKmtOpenKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
-                                                  : HSA_STATUS_ERROR;
+  return lifecycle_.Open([]() {
+    const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtOpenKFD());
+
+    if (ret == HSAKMT_STATUS_SUCCESS) return HSA_STATUS_SUCCESS;
+
+    // On WSL another component in this process legitimately has the thunk open
+    // already: rocprofiler-sdk reads the KMT topology through librocdxg before
+    // the HSA runtime starts. librocdxg refcounts both the device handle and
+    // the topology snapshot, and the else branch of its hsaKmtOpenKFD() takes
+    // the handle reference on our behalf before returning ALREADY_OPENED, so
+    // the matching Close() in ShutDown() drops exactly that one.
+    //
+    // Deliberately scoped to DXG. The native thunk has no such refcount on its
+    // topology snapshot, so accepting ALREADY_OPENED there would let ROCr run
+    // against a snapshot a foreign owner can drop underneath it. Bare metal
+    // keeps treating it as the hard failure it has always been.
+    if (ret == HSAKMT_STATUS_KERNEL_ALREADY_OPENED &&
+        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG())
+      return HSA_STATUS_SUCCESS;
+
+    return HSA_STATUS_ERROR;
+  });
 }
 
 hsa_status_t KfdDriver::Close() {
-  return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
-                                                   : HSA_STATUS_ERROR;
+  // Routed through ShutDown() rather than closing directly: by the time
+  // anything asks a driver to close, it may also be holding the runtime enable
+  // and the topology snapshot, and closing the device out from under those
+  // strands them. InitializeDriver()'s failure guard is exactly that case.
+  return lifecycle_.ShutDown();
+}
+
+hsa_status_t KfdDriver::AcquireTopologySnapshot() const {
+  // This acquisition is deliberately long-lived: it is the reference that keeps
+  // the topology snapshot alive for as long as the runtime is up, and ShutDown()
+  // is what gives it back. Releasing it here and re-acquiring later would tear
+  // down the FMM apertures and then fail to re-acquire the VM, because the
+  // kernel-side VM binding persists. It also keeps the device list in place
+  // from Init()'s debug probe through BuildTopology(), so the adapters are
+  // enumerated once rather than once per reader.
+  //
+  // Two callers reach this - Init(), and GetSystemProperties() on behalf of
+  // BuildTopology() - and only the first performs the acquire; the lifecycle
+  // short-circuits the rest so a second reference is never taken. That is why
+  // the answer is cached here: the short-circuit never runs the thunk call, so
+  // what the one acquire reported is the only thing left to answer with.
+  return lifecycle_.AcquireSnapshot([this]() {
+    HsaSystemProperties props = {};
+    if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&props)) != HSAKMT_STATUS_SUCCESS)
+      return HSA_STATUS_ERROR;
+
+    // Committed only once the thunk has reported success. A failed acquire is
+    // free to have written part of what it was handed, and the cache must not
+    // be able to pass that on afterwards; a retry then overwrites the whole
+    // record rather than merging into what the failure left.
+    sys_props_ = props;
+    return HSA_STATUS_SUCCESS;
+  });
 }
 
 hsa_status_t KfdDriver::GetSystemProperties(HsaSystemProperties& sys_props) const {
-  // Note: We intentionally do NOT call hsaKmtReleaseSystemProperties() here.
-  // hsaKmtRuntimeEnable (called from Init) already acquired system properties.
-  // Releasing and re-acquiring would tear down FMM apertures and fail to
-  // re-acquire the VM because the kernel-side VM binding persists.
-  // hsaKmtAcquireSystemProperties handles the cached-snapshot case internally.
-  if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&sys_props)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  const hsa_status_t status = AcquireTopologySnapshot();
+  if (status != HSA_STATUS_SUCCESS) return status;
 
+  sys_props = sys_props_;
   return HSA_STATUS_SUCCESS;
 }
 
