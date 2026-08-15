@@ -17,6 +17,9 @@ compile time by the macros. So these tests assert the *structure/gating* of the
 generated text rather than compiling it.
 """
 
+import contextlib
+import importlib.util
+import io
 import os
 import re
 import shutil
@@ -25,6 +28,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from importlib.machinery import SourceFileLoader
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERATE_PY = os.path.join(HERE, "generate.py")
@@ -38,26 +42,39 @@ GENERATE_PY = os.path.join(HERE, "generate.py")
 ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32|AllReduce RING LL128 Sum f32|SendRecv"
 
 
+def _write_fake_rocminfo(tmpdir, agents):
+    """Create a stub $ROCM_PATH/bin/rocminfo announcing `agents`, and return ROCM_PATH.
+
+    `agents` is a list of (name, compute_units). A leading CPU agent (a "Name:"
+    line with no "gfx" in it) is always emitted, mirroring real rocminfo output:
+    calc_unroll_and_pipeline_for_local_arch() must attribute each "Compute Unit:"
+    line to the preceding gfx "Name:" line and ignore the CPU's.
+    """
+    rocm = os.path.join(tmpdir, "rocm")
+    bin_dir = os.path.join(rocm, "bin")
+    os.makedirs(bin_dir, exist_ok=True)
+    lines = ["#!/bin/sh", 'echo "Name:                    AMD EPYC 9654"',
+             'echo "Compute Unit:            192"']
+    for name, cu in agents:
+        lines.append('echo "Name:                    %s"' % name)
+        lines.append('echo "Compute Unit:            %s"' % cu)
+    rocminfo = os.path.join(bin_dir, "rocminfo")
+    with open(rocminfo, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    os.chmod(rocminfo, 0o755)
+    return rocm
+
+
 def _generate(tmpdir, ifc="OFF", local_gpu_only="OFF", only_funcs=ONLY_FUNCS, gfx_name=None):
-    """Run generate.py into tmpdir and return the device_table.h contents."""
+    """Run generate.py into tmpdir and return (device_table.h contents, gensrc).
+
+    gfx_name is either a single gfx name (304 CUs assumed) or a list of
+    (name, compute_units) tuples for multi-agent / heterogeneous systems.
+    """
     env = os.environ.copy()
     if gfx_name is not None:
-        rocm = os.path.join(tmpdir, "rocm")
-        bin_dir = os.path.join(rocm, "bin")
-        os.makedirs(bin_dir, exist_ok=True)
-        rocminfo = os.path.join(bin_dir, "rocminfo")
-        with open(rocminfo, "w") as f:
-            f.write(
-                textwrap.dedent(
-                    f"""\
-                    #!/bin/sh
-                    echo "Name:                    {gfx_name}"
-                    echo "Compute Unit:            304"
-                    """
-                )
-            )
-        os.chmod(rocminfo, 0o755)
-        env["ROCM_PATH"] = rocm
+        agents = [(gfx_name, 304)] if isinstance(gfx_name, str) else list(gfx_name)
+        env["ROCM_PATH"] = _write_fake_rocminfo(tmpdir, agents)
         gensrc = os.path.join(tmpdir, "gensrc")
     else:
         gensrc = tmpdir
@@ -72,6 +89,38 @@ def _generate(tmpdir, ifc="OFF", local_gpu_only="OFF", only_funcs=ONLY_FUNCS, gf
     )
     with open(os.path.join(gensrc, "device_table.h")) as f:
         return f.read(), gensrc
+
+
+def _import_generate(tmpdir, only_funcs="", local_gpu_only="OFF", gfx_name=None):
+    """Import generate.py in-process so a test can inspect its own tables.
+
+    generate.py does all of its work at import time, driven by sys.argv, so this
+    performs a full generation into tmpdir as a side effect; the returned module
+    exposes that run's state (mod.gensrc, mod.primary_funcs, mod.get_arch_guard,
+    ...). Used where asserting on generated *text* would only re-derive what the
+    generator already computed.
+    """
+    gensrc = os.path.join(tmpdir, "gensrc")
+    saved_argv = sys.argv
+    saved_rocm = os.environ.get("ROCM_PATH")
+    if gfx_name is not None:
+        agents = [(gfx_name, 304)] if isinstance(gfx_name, str) else list(gfx_name)
+        os.environ["ROCM_PATH"] = _write_fake_rocminfo(tmpdir, agents)
+    try:
+        sys.argv = ["generate.py", gensrc, "OFF", "OFF", local_gpu_only, "OFF",
+                    only_funcs]
+        loader = SourceFileLoader("rccl_generate_under_test", GENERATE_PY)
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        mod = importlib.util.module_from_spec(spec)
+        with contextlib.redirect_stdout(io.StringIO()):
+            loader.exec_module(mod)
+        return mod
+    finally:
+        sys.argv = saved_argv
+        if saved_rocm is None:
+            os.environ.pop("ROCM_PATH", None)
+        else:
+            os.environ["ROCM_PATH"] = saved_rocm
 
 
 class DeviceTableGenerationTest(unittest.TestCase):
@@ -170,7 +219,10 @@ class DeviceTableGenerationTest(unittest.TestCase):
 
 
 class Gfx1250Fp8UnrollGenerationTest(unittest.TestCase):
-    """FP8 kernels on gfx1250 local builds must be generated only at unroll 8."""
+    """FP8 kernels on a gfx1250 local build must be generated only at unroll 8.
+
+    Fp8FixedUnrollArchRuleTest covers the same rule in a multi-arch/fat build.
+    """
 
     FP8_ONLY_FUNCS = "AllReduce RING SIMPLE Sum f8e4m3|AllReduce RING SIMPLE Sum f8e5m2"
     F32_ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32"
@@ -285,6 +337,123 @@ def _extract_table_rows(header, unroll):
             rows[int(mm.group(1))] = mm.group(2).strip()
         i += 1
     return rows
+
+
+class Fp8FixedUnrollArchRuleTest(unittest.TestCase):
+    """"gfx1250 launches FP8 only at unroll 8" is a property of the ARCH, so it
+    must hold however the build was invoked -- not just under --local_gpu_only.
+
+    A multi-arch/fat build never learns its GPU_TARGETS list, so it compiles the
+    gfx1250-exclusive tiers (8/16/32) unconditionally. Keying this rule on
+    local_gfx_name therefore left every FP8 kernel at unroll 16/32 in the fat
+    binary, where enqueue.cc's runtime clamp guarantees nothing can ever dispatch
+    it -- pure compile time at the two slowest tiers. The tiers gfx1250 shares
+    with other archs (1/2/4) must keep their FP8 variants, since those archs do
+    dispatch them.
+    """
+
+    # SIMPLE only: LL128 kernels are reg-variants whose filenames carry a
+    # trailing reg field, which would confuse a naive unroll-from-filename read.
+    FUNCS = "AllReduce RING SIMPLE Sum f8e4m3/f8e5m2/f32"
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(GENERATE_PY):
+            raise unittest.SkipTest("generate.py not found next to test")
+        cls._dir = tempfile.mkdtemp(prefix="rccl_fp8_arch_rule_")
+        # One generation per build mode, shared by every test below.
+        cls.multiarch_header, cls.multiarch = cls._gen("multiarch")
+        _, cls.gfx1250_local = cls._gen("gfx1250_local", local="ON", gfx="gfx1250")
+        _, cls.gfx950_local = cls._gen("gfx950_local", local="ON", gfx="gfx950")
+
+    @classmethod
+    def _gen(cls, name, local="OFF", gfx=None):
+        tmpdir = os.path.join(cls._dir, name)
+        os.makedirs(tmpdir, exist_ok=True)
+        return _generate(tmpdir, local_gpu_only=local, only_funcs=cls.FUNCS,
+                         gfx_name=gfx)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._dir, ignore_errors=True)
+
+    @staticmethod
+    def _unrolls_for_type(gensrc, ty):
+        """The unroll factors a specialized kernel was generated at for `ty`.
+
+        Filenames are specialized_<coll>_<algo>_<proto>_<redop>_<ty>_<acc>_
+        <pipeline>_<unroll>[_<reg>].cpp; anchoring on the type keeps the unroll
+        field unambiguous.
+        """
+        pattern = re.compile(rf"_{ty}_\d+_\d+_(\d+)(?:_\d+)?\.cpp$")
+        found = set()
+        for name in os.listdir(os.path.join(gensrc, "specialized")):
+            m = pattern.search(name)
+            if m:
+                found.add(m.group(1))
+        return found
+
+    def _fp8_unrolls(self, gensrc):
+        return (self._unrolls_for_type(gensrc, "f8e4m3")
+                | self._unrolls_for_type(gensrc, "f8e5m2"))
+
+    def test_multiarch_omits_fp8_at_gfx1250_exclusive_tiers(self):
+        # The regression this fix exists for: unroll 16/32 are compiled only for
+        # gfx1250, which can never launch FP8 there.
+        unrolls = self._fp8_unrolls(self.multiarch)
+        self.assertTrue(unrolls, "expected FP8 kernels in a multi-arch build")
+        self.assertEqual(set(), unrolls & {"16", "32"},
+                         "FP8 kernels generated at a gfx1250-exclusive tier that "
+                         "the runtime clamp makes unreachable")
+
+    def test_multiarch_keeps_fp8_at_shared_tiers_and_clamp_target(self):
+        # The other side of the rule: narrowing it must not strand gfx950/gfx942,
+        # which dispatch FP8 from the shared tiers, nor drop unroll 8 itself --
+        # the variant gfx1250 clamps TO.
+        self.assertEqual({"1", "2", "4", "8"}, self._fp8_unrolls(self.multiarch))
+
+    def test_multiarch_keeps_non_fp8_types_at_every_unroll(self):
+        # Guards against the rule leaking past FP8 and thinning out real work.
+        self.assertEqual({"1", "2", "4", "8", "16", "32"},
+                         self._unrolls_for_type(self.multiarch, "f32"))
+
+    def test_exclusive_tier_fp8_set_is_independent_of_build_mode(self):
+        # The point of the fix, stated directly: restricted to the tiers gfx1250
+        # owns, a fat build and a gfx1250 -l build agree on which FP8 variants
+        # exist. Before the fix the fat build had all three tiers here.
+        exclusive = {"8", "16", "32"}
+        self.assertEqual(self._fp8_unrolls(self.gfx1250_local) & exclusive,
+                         self._fp8_unrolls(self.multiarch) & exclusive)
+        self.assertEqual({"8"}, self._fp8_unrolls(self.gfx1250_local) & exclusive)
+
+    def test_non_gfx1250_local_build_keeps_every_fp8_variant(self):
+        # gfx950 owns none of the exclusive tiers, so one arch's launch rule must
+        # not follow it into its own -l build.
+        self.assertEqual(self._unrolls_for_type(self.gfx950_local, "f32"),
+                         self._fp8_unrolls(self.gfx950_local))
+
+    def test_exclusive_tier_tables_dispatch_fp8_to_the_clamp_target(self):
+        # Dropping the native variant leaves those tables' FP8 slots to be
+        # filled: they must land on the unroll-8 kernel the runtime clamp picks,
+        # not drift to the func-id axis (unroll 1 in a fat build).
+        for unroll in ("16", "32"):
+            rows = _extract_table_rows(self.multiarch_header, unroll)
+            self.assertIsNotNone(rows, "no ncclDevFuncTable_%s" % unroll)
+            fp8_rows = [sym for sym in rows.values()
+                        if "f8e4m3" in sym or "f8e5m2" in sym]
+            self.assertTrue(fp8_rows, "table %s has no FP8 rows" % unroll)
+            for sym in fp8_rows:
+                self.assertTrue(sym.endswith("_8"),
+                                "table %s dispatches FP8 to %s" % (unroll, sym))
+
+    def test_alias_log_reports_the_fp8_redirects(self):
+        # install.sh surfaces this log, so a silently-empty one would hide the
+        # redirect from anyone auditing a build.
+        with open(os.path.join(self.multiarch, "unroll_table_aliases.log")) as f:
+            log = f.read()
+        for unroll in ("16", "32"):
+            self.assertIn("ncclDevKernel_Generic_%s" % unroll, log)
+        self.assertRegex(log, r"f8e4m3.*-> \S+_8 \(compiled at unroll 8\)")
 
 
 class UnrollClampTest(unittest.TestCase):
@@ -854,6 +1023,472 @@ class MultiArchOverrideTest(unittest.TestCase):
                 winning_row("1", "_Sum_f32_0_0_", "__gfx942__"),
                 "ncclDevFunc_AllReduce_RING_SIMPLE_Sum_f32_0_0_1",
             )
+
+
+class LocalArchUnrollSelectionTest(unittest.TestCase):
+    """calc_unroll_and_pipeline_for_local_arch() maps the rocminfo-detected
+    agent set to this build's unroll/pipeline set.
+
+    Every arch branch other than gfx1250's was previously unexercised, as was
+    the "not exactly one gfx target" fallback -- which is the branch that
+    leaves local_gfx_name None and therefore switches the whole unroll-override
+    mechanism into its multi-arch mode (see override_archs). A regression here
+    silently changes which kernels get built for every non-gfx1250 target.
+    """
+
+    ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32"
+    ALL_UNROLLS = ["1", "16", "2", "32", "4", "8"]  # sorted as strings
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(GENERATE_PY):
+            raise unittest.SkipTest("generate.py not found next to test")
+
+    # Pipelining is only ever generated for the types in `pipelined_types`, so
+    # observing local_pipeline at all requires a bf16 kernel: with f32 the
+    # pipeline field is 0 no matter what local_pipeline says.
+    PIPELINED_ONLY_FUNCS = "AllReduce RING SIMPLE Sum bf16"
+
+    def _unrolls_and_pipelines(self, agents, only_funcs=None, ty="f32"):
+        """Return (sorted unroll suffixes, sorted pipeline fields) of the
+        generated specialized kernels for a --local_gpu_only build on `agents`."""
+        with tempfile.TemporaryDirectory(prefix="rccl_local_arch_") as tmpdir:
+            _, gensrc = _generate(
+                tmpdir,
+                local_gpu_only="ON",
+                only_funcs=self.ONLY_FUNCS if only_funcs is None else only_funcs,
+                gfx_name=agents,
+            )
+            names = sorted(os.listdir(os.path.join(gensrc, "specialized")))
+        unrolls, pipelines = set(), set()
+        for name in names:
+            m = re.search(r"_sum_%s_(\d+)_(\d+)_(\d+)\.cpp$" % ty, name)
+            self.assertIsNotNone(m, name)
+            pipelines.add(m.group(2))
+            unrolls.add(m.group(3))
+        return sorted(unrolls), sorted(pipelines)
+
+    def test_gfx950_uses_unroll_1_2(self):
+        unrolls, _ = self._unrolls_and_pipelines([("gfx950", 256)])
+        self.assertEqual(["1", "2"], unrolls)
+
+    def test_gfx950_disables_pipelining(self):
+        _, pipelines = self._unrolls_and_pipelines(
+            [("gfx950", 256)], only_funcs=self.PIPELINED_ONLY_FUNCS, ty="bf16")
+        self.assertEqual(["0"], pipelines)
+
+    def test_other_archs_keep_pipelining(self):
+        # Counterpart to the gfx950 case: proves the ["0"] above is gfx950's
+        # own disable, not just an artifact of the kernel selection.
+        for agent in (("gfx942", 304), ("gfx1250", 304)):
+            _, pipelines = self._unrolls_and_pipelines(
+                [agent], only_funcs=self.PIPELINED_ONLY_FUNCS, ty="bf16")
+            self.assertEqual(["0", "1"], pipelines, agent[0])
+
+    def test_gfx908_uses_unroll_2(self):
+        unrolls, _ = self._unrolls_and_pipelines([("gfx908", 120)])
+        self.assertEqual(["2"], unrolls)
+
+    def test_gfx942_above_80_cu_uses_unroll_2(self):
+        unrolls, _ = self._unrolls_and_pipelines([("gfx942", 304)])
+        self.assertEqual(["2"], unrolls)
+
+    def test_gfx942_at_80_cu_falls_through_to_unroll_4(self):
+        # The condition is `cu_count > 80`, so 80 itself is NOT the >80 tier.
+        # Pins the boundary: an off-by-one here changes the shipped kernel set
+        # for small-partition (SPX/CPX) gfx942 configurations.
+        unrolls, _ = self._unrolls_and_pipelines([("gfx942", 80)])
+        self.assertEqual(["4"], unrolls)
+        unrolls, _ = self._unrolls_and_pipelines([("gfx942", 81)])
+        self.assertEqual(["2"], unrolls)
+
+    def test_gfx1250_uses_unroll_8_16_32(self):
+        unrolls, _ = self._unrolls_and_pipelines([("gfx1250", 304)])
+        self.assertEqual(["16", "32", "8"], unrolls)
+
+    def test_unlisted_arch_defaults_to_unroll_4(self):
+        unrolls, _ = self._unrolls_and_pipelines([("gfx90a", 104)])
+        self.assertEqual(["4"], unrolls)
+
+    def test_homogeneous_multi_gpu_is_still_a_single_arch_build(self):
+        # Several identical agents dedupe to one (gfx_name, cu_count) key.
+        unrolls, _ = self._unrolls_and_pipelines([("gfx942", 304)] * 8)
+        self.assertEqual(["2"], unrolls)
+
+    def test_heterogeneous_archs_fall_back_to_all_unrolls(self):
+        unrolls, _ = self._unrolls_and_pipelines(
+            [("gfx942", 304), ("gfx1250", 304)])
+        self.assertEqual(self.ALL_UNROLLS, unrolls)
+
+    def test_same_arch_with_differing_cu_counts_is_heterogeneous(self):
+        # gfx_targets is keyed by (name, cu_count), so one gfx942 partitioned
+        # differently from another counts as two targets and must not be
+        # collapsed into a single-arch build.
+        unrolls, _ = self._unrolls_and_pipelines(
+            [("gfx942", 304), ("gfx942", 38)])
+        self.assertEqual(self.ALL_UNROLLS, unrolls)
+
+    def test_no_gpu_detected_falls_back_to_all_unrolls(self):
+        # rocminfo listing no gfx agent at all (CPU-only / no driver) must not
+        # crash or emit an empty kernel set -- it degrades to the full build.
+        unrolls, _ = self._unrolls_and_pipelines([])
+        self.assertEqual(self.ALL_UNROLLS, unrolls)
+
+    def _unrolls_without_rocminfo(self, rocm_path):
+        """Run a --local_gpu_only build whose ROCM_PATH has no usable rocminfo."""
+        env = os.environ.copy()
+        if rocm_path is None:
+            env.pop("ROCM_PATH", None)
+        else:
+            env["ROCM_PATH"] = rocm_path
+        with tempfile.TemporaryDirectory(prefix="rccl_no_rocminfo_") as tmpdir:
+            gensrc = os.path.join(tmpdir, "gensrc")
+            result = subprocess.run(
+                [sys.executable, GENERATE_PY, gensrc, "OFF", "OFF", "ON", "OFF",
+                 self.ONLY_FUNCS],
+                capture_output=True, text=True, env=env,
+            )
+            self.assertEqual(
+                0, result.returncode,
+                "a --local_gpu_only build must not fail when rocminfo is "
+                "unavailable:\n" + result.stderr)
+            names = sorted(os.listdir(os.path.join(gensrc, "specialized")))
+        unrolls = {re.search(r"_(\d+)\.cpp$", n).group(1) for n in names}
+        return sorted(unrolls), result.stderr
+
+    def test_unset_rocm_path_warns_and_builds_all_unrolls(self):
+        # CMake invokes generate.py with the ambient environment and does not
+        # set ROCM_PATH, so `-l` from a shell without it used to abort configure
+        # with a bare TypeError from string-concatenating None.
+        unrolls, stderr = self._unrolls_without_rocminfo(None)
+        self.assertEqual(self.ALL_UNROLLS, unrolls)
+        self.assertIn("WARNING", stderr)
+
+    def test_missing_rocminfo_binary_warns_and_builds_all_unrolls(self):
+        with tempfile.TemporaryDirectory(prefix="rccl_empty_rocm_") as rocm:
+            unrolls, stderr = self._unrolls_without_rocminfo(rocm)
+        self.assertEqual(self.ALL_UNROLLS, unrolls)
+        self.assertIn("rocminfo", stderr)
+
+
+class UnrollAliasLogTest(unittest.TestCase):
+    """gensrc/unroll_table_aliases.log is a build-facing artifact: install.sh
+    reads it (`-s` test) and prints either its path or "none". Nothing
+    previously asserted its content or its emptiness contract.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(GENERATE_PY):
+            raise unittest.SkipTest("generate.py not found next to test")
+
+    def _alias_log(self, **kwargs):
+        with tempfile.TemporaryDirectory(prefix="rccl_alias_log_") as tmpdir:
+            _, gensrc = _generate(tmpdir, **kwargs)
+            path = os.path.join(gensrc, "unroll_table_aliases.log")
+            self.assertTrue(os.path.isfile(path), "alias log was not written")
+            with open(path) as f:
+                return f.read()
+
+    def test_override_is_reported_for_each_higher_unroll_table(self):
+        body = self._alias_log(
+            local_gpu_only="ON",
+            only_funcs="AllReduce TREE SIMPLE MinMax u8|AllReduce TREE SIMPLE MinMax i8",
+            gfx_name="gfx1250",
+        )
+        # Tables 16/32 have no native variant for the overridden identity, so
+        # both redirect to the unroll-8 kernel and both must say so.
+        self.assertIn("ncclDevKernel_Generic_16:", body)
+        self.assertIn("ncclDevKernel_Generic_32:", body)
+        # Table 8 IS the override target, so nothing is redirected there.
+        self.assertNotIn("ncclDevKernel_Generic_8:", body)
+        self.assertIn("AllReduce TREE SIMPLE MinMax u8", body)
+        self.assertIn(
+            "-> ncclDevFunc_AllReduce_TREE_SIMPLE_MinMax_u8_1_0_8 "
+            "(compiled at unroll 8)", body)
+
+    def test_missing_native_variant_is_reported_even_without_an_override(self):
+        # FP8 on gfx1250 is generated only at unroll 8 (func_validate), with no
+        # _UNROLL_OVERRIDES entry involved. Tables 16/32 still fall back to the
+        # func-id-axis kernel, and that redirect must be logged too -- it is the
+        # same "this table does not use its native variant" fact.
+        body = self._alias_log(
+            local_gpu_only="ON",
+            only_funcs="AllReduce RING SIMPLE Sum f8e4m3",
+            gfx_name="gfx1250",
+        )
+        self.assertIn("ncclDevKernel_Generic_16:", body)
+        self.assertIn("f8e4m3", body)
+        self.assertIn("(compiled at unroll 8)", body)
+
+    def test_log_is_empty_when_nothing_is_redirected(self):
+        # install.sh distinguishes "no clamps" from "clamps happened" purely by
+        # `[[ -s $log ]]`, so a build with no redirects must leave the file
+        # genuinely zero-length, not containing a blank line or a header.
+        body = self._alias_log(
+            local_gpu_only="ON",
+            only_funcs="AllReduce RING SIMPLE Sum f32",
+            gfx_name="gfx950",
+        )
+        self.assertEqual("", body)
+
+    def test_reported_symbols_are_declared_in_device_table(self):
+        # A redirect naming a symbol that was never generated would be a
+        # silently wrong log; cross-check every reported target against the
+        # header's forward declarations.
+        with tempfile.TemporaryDirectory(prefix="rccl_alias_log_sym_") as tmpdir:
+            header, gensrc = _generate(
+                tmpdir, local_gpu_only="ON", only_funcs="", gfx_name="gfx1250")
+            with open(os.path.join(gensrc, "unroll_table_aliases.log")) as f:
+                body = f.read()
+        declared = set(re.findall(r"__device__ void (ncclDevFunc_\w+)\(\);", header))
+        reported = set(re.findall(r"-> (ncclDevFunc_\w+) ", body))
+        self.assertTrue(reported, "expected a gfx1250 build to log redirects")
+        self.assertEqual(set(), reported - declared)
+
+
+class TwoArchOverrideSameIdentityTest(unittest.TestCase):
+    """Two archs overriding the SAME identity to different shared-tier unrolls.
+
+    This is the only shape that produces a three-way dispatch chain
+    (#if/#elif/#else). The shipped table has a single arch, and
+    MultiArchOverrideTest's patched second arch targets a different identity,
+    so the #elif arm of both emitters (function-pointer table and pure-RDC
+    Caller specializations) was never generated. A malformed #elif breaks the
+    build for every arch at once.
+    """
+
+    IDENTITY = ("AllReduce", "RING", "SIMPLE", "Sum", "f32", "0", "0")
+    ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32"
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(GENERATE_PY):
+            raise unittest.SkipTest("generate.py not found next to test")
+
+    def _generate_two_arch(self, tmpdir):
+        with open(GENERATE_PY) as f:
+            src = f.read()
+        marker = '"gfx1250": {\n'
+        self.assertIn(marker, src, "generate.py layout changed; update this test")
+        # gfx90a -> unroll 2, gfx950 -> unroll 1; native stays unroll 4.
+        extra = ""
+        for gfx, unroll in (("gfx90a", "2"), ("gfx950", "1")):
+            extra += (
+                '  %r: {\n    UnrollOverride(%s),\n  },\n'
+                % (gfx, ", ".join(repr(x) for x in self.IDENTITY + (unroll,)))
+            )
+        patched = os.path.join(tmpdir, "generate_patched.py")
+        with open(patched, "w") as f:
+            f.write(src.replace(marker, extra + marker, 1))
+        gensrc = os.path.join(tmpdir, "gensrc")
+        result = subprocess.run(
+            [sys.executable, patched, gensrc, "OFF", "OFF", "OFF", "OFF", self.ONLY_FUNCS],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(os.path.join(gensrc, "device_table.h")) as f:
+            return f.read()
+
+    def test_function_pointer_table_emits_elif_chain(self):
+        with tempfile.TemporaryDirectory(prefix="rccl_two_arch_") as tmpdir:
+            header = self._generate_two_arch(tmpdir)
+        sym = "ncclDevFunc_AllReduce_RING_SIMPLE_Sum_f32_0_0"
+        m = re.search(
+            r"#if defined\(__gfx90a__\)\n"
+            r"/\*\s*\d+\*/ %s_2,\n"
+            r"#elif defined\(__gfx950__\)\n"
+            r"/\*\s*\d+\*/ %s_1,\n"
+            r"#else\n"
+            r"/\*\s*\d+\*/ %s_4,\n"
+            r"#endif\n" % (sym, sym, sym),
+            header,
+        )
+        self.assertIsNotNone(
+            m,
+            "expected a three-way #if/#elif/#else chain in ncclDevFuncTable_4: "
+            "gfx90a -> unroll 2, gfx950 -> unroll 1, everyone else -> native unroll 4",
+        )
+
+    def test_pure_rdc_caller_emits_elif_chain(self):
+        with tempfile.TemporaryDirectory(prefix="rccl_two_arch_rdc_") as tmpdir:
+            header = self._generate_two_arch(tmpdir)
+        # The Caller specializations are the pure-RDC (--no-device-linker) arm;
+        # they must carry the same three-way selection as the pointer table.
+        block = re.search(
+            r"#if defined\(__gfx90a__\)\n"
+            r"template<> struct Caller4<\d+, \d+> \{[^\n]*Sum_f32_0_0_2\(\);[^\n]*\n"
+            r"#elif defined\(__gfx950__\)\n"
+            r"template<> struct Caller4<\d+, \d+> \{[^\n]*Sum_f32_0_0_1\(\);[^\n]*\n"
+            r"#else\n"
+            r"template<> struct Caller4<\d+, \d+> \{[^\n]*Sum_f32_0_0_4\(\);[^\n]*\n"
+            r"#endif\n",
+            header,
+        )
+        self.assertIsNotNone(
+            block, "expected a three-way Caller4 specialization chain")
+
+    @unittest.skipUnless(shutil.which("cpp"), "no C preprocessor available")
+    def test_each_arch_preprocesses_to_its_own_override(self):
+        with tempfile.TemporaryDirectory(prefix="rccl_two_arch_cpp_") as tmpdir:
+            header = self._generate_two_arch(tmpdir)
+            header_path = os.path.join(tmpdir, "table.h")
+            with open(header_path, "w") as f:
+                f.write(header)
+
+            def winning_row(arch_macro):
+                out = subprocess.run(
+                    ["cpp", "-P", "-D%s" % arch_macro,
+                     "-DUSE_INDIRECT_FUNCTION_CALL", header_path],
+                    capture_output=True, text=True, check=True).stdout
+                m = re.search(
+                    r"ncclDevFuncTable_4\[\] = \{(.*?)nullptr\};", out, re.S)
+                rows = [r.strip().rstrip(",") for r in m.group(1).splitlines()
+                        if "Sum_f32_0_0_" in r]
+                self.assertEqual(1, len(rows), rows)
+                return rows[0]
+
+            sym = "ncclDevFunc_AllReduce_RING_SIMPLE_Sum_f32_0_0"
+            self.assertEqual(sym + "_2", winning_row("__gfx90a__"))
+            self.assertEqual(sym + "_1", winning_row("__gfx950__"))
+            # Not overridden for this identity: keeps table 4's native row.
+            self.assertEqual(sym + "_4", winning_row("__gfx942__"))
+            self.assertEqual(sym + "_4", winning_row("__gfx1250__"))
+
+
+class OnlyFuncsValidationTest(unittest.TestCase):
+    """ONLY_FUNCS is a developer-facing build knob; a typo must fail loudly at
+    generate time rather than silently building a smaller kernel set."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(GENERATE_PY):
+            raise unittest.SkipTest("generate.py not found next to test")
+
+    def _run(self, only_funcs):
+        with tempfile.TemporaryDirectory(prefix="rccl_only_funcs_") as tmpdir:
+            return subprocess.run(
+                [sys.executable, GENERATE_PY, os.path.join(tmpdir, "gensrc"),
+                 "OFF", "OFF", "OFF", "OFF", only_funcs],
+                capture_output=True, text=True,
+            )
+
+    def test_unknown_token_is_rejected(self):
+        result = self._run("AllReduce RING SIMPLE Sum notatype")
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("notatype", result.stderr)
+        self.assertIn("unrecognized", result.stderr)
+
+    def test_token_from_the_wrong_category_is_rejected(self):
+        # "TREE" is a valid algo but not a valid proto; the positional check
+        # must catch a field swap, not just an unknown word.
+        result = self._run("AllReduce RING TREE Sum f32")
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("TREE", result.stderr)
+
+    def test_valid_pattern_succeeds(self):
+        self.assertEqual(0, self._run("AllReduce RING SIMPLE Sum f32").returncode)
+
+
+class ExclusiveUnrollTierConsistencyTest(unittest.TestCase):
+    """_EXCLUSIVE_UNROLL_TIERS, get_arch_guard() and the specialized_files.txt
+    guard column each encode "unroll 8/16/32 belongs to gfx1250". They are
+    separate literals in three places, and generate.py's own comment asks for
+    them to be kept in sync by hand. This asserts they actually agree, so a
+    future arch added to one place cannot silently disagree with the others.
+
+    Also pins _FIXED_UNROLL_TYPES against the same tier table, since the unroll
+    it names becomes a dispatch target for tiers the same arch owns.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(GENERATE_PY):
+            raise unittest.SkipTest("generate.py not found next to test")
+        cls._dir = tempfile.mkdtemp(prefix="rccl_tier_sync_")
+        # LL128 must be in the mix: it is the one proto whose specialized_files
+        # guard differs from get_arch_guard() (the ENABLE_LL128 qualifier), so a
+        # slice without it cannot detect that qualifier going missing. acc=1
+        # kernels contribute the non-exclusive arch-guard case.
+        cls.mod = _import_generate(cls._dir, only_funcs=(
+            "AllReduce RING SIMPLE Sum f32|AllReduce RING LL128 Sum f32"))
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._dir, ignore_errors=True)
+
+    def test_get_arch_guard_matches_the_tier_table(self):
+        mod = self.mod
+        for unroll, owner in mod._EXCLUSIVE_UNROLL_TIERS.items():
+            fn = mod.Fn("AllReduce", "RING", "SIMPLE", "Sum", "f32", "0", "0",
+                        unroll, "0")
+            self.assertEqual("defined(__%s__)" % owner, mod.get_arch_guard(fn),
+                             "unroll %s" % unroll)
+
+    def test_non_exclusive_unrolls_have_no_arch_guard(self):
+        mod = self.mod
+        for unroll in mod.all_unrolls:
+            if unroll in mod._EXCLUSIVE_UNROLL_TIERS:
+                continue
+            fn = mod.Fn("AllReduce", "RING", "SIMPLE", "Sum", "f32", "0", "0",
+                        unroll, "0")
+            self.assertIsNone(mod.get_arch_guard(fn), "unroll %s" % unroll)
+
+    def test_fixed_unroll_targets_a_tier_its_own_arch_owns(self):
+        # Same hazard build_unroll_override_index() asserts on for explicit
+        # overrides: dispatch_branches_for_unroll_table() redirects an exclusive
+        # tier's rows to this unroll, so if the target were a tier some OTHER arch
+        # owns, that row would name a symbol guarded out of its own compile pass
+        # -- a null dispatch or trap on hardware rather than a build failure.
+        mod = self.mod
+        for gfx, (_, unroll) in mod._FIXED_UNROLL_TYPES.items():
+            self.assertEqual(
+                gfx, mod._EXCLUSIVE_UNROLL_TIERS.get(unroll),
+                "%s pins its FP8 kernels to unroll %s, which %s owns" % (
+                    gfx, unroll,
+                    mod._EXCLUSIVE_UNROLL_TIERS.get(unroll) or "no single arch"))
+
+    def test_fixed_unroll_types_are_real_datatypes(self):
+        # A typo here would silently constrain nothing at all.
+        mod = self.mod
+        for gfx, (tys, _) in mod._FIXED_UNROLL_TYPES.items():
+            self.assertTrue(tys, "%s constrains no datatypes" % gfx)
+            for ty in tys:
+                self.assertIn(ty, mod.all_tys, "%s: %s" % (gfx, ty))
+
+    def test_fixed_unroll_unconstrained_without_a_sole_owning_arch(self):
+        # A tier several archs share cannot be narrowed to one arch's rule; that
+        # is what keeps FP8 alive at unrolls 1/2/4 in a fat build.
+        mod = self.mod
+        self.assertIsNone(mod.fixed_unroll_for_type(None, "f8e4m3"))
+        self.assertIsNone(mod.fixed_unroll_for_type("gfx1250", "f32"))
+        self.assertEqual("8", mod.fixed_unroll_for_type("gfx1250", "f8e4m3"))
+
+    def test_specialized_files_guard_column_matches_arch_guard(self):
+        # specialized_files.txt is consumed by CMake to decide which kernels a
+        # given --offload-arch pass compiles; it must not disagree with the
+        # guard the generated source itself carries.
+        by_func = {}
+        with open(os.path.join(self.mod.gensrc, "specialized_files.txt")) as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                # "<filename> <func_name> [<guard>]" -- the guard column is
+                # empty for kernels that need no #if at all.
+                parts = line.rstrip("\n").split(" ", 2)
+                by_func[parts[1]] = parts[2].strip() if len(parts) > 2 else ""
+        self.assertTrue(by_func)
+        for fn in self.mod.primary_funcs:
+            guard = self.mod.get_arch_guard(fn)
+            actual = by_func["ncclDevFunc_" + self.mod.fn_sym(fn)]
+            if fn.unroll in self.mod._EXCLUSIVE_UNROLL_TIERS:
+                owner = self.mod._EXCLUSIVE_UNROLL_TIERS[fn.unroll]
+                expected = "defined(__%s__)" % owner
+                if fn.proto == "LL128":
+                    expected += " && defined(ENABLE_LL128)"
+                self.assertEqual(expected, actual, self.mod.fn_sym(fn))
+            else:
+                self.assertEqual(guard or "", actual, self.mod.fn_sym(fn))
 
 
 class HostDeviceDispatchAlignmentTest(unittest.TestCase):

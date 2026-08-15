@@ -222,54 +222,65 @@ class Fn:
 
 local_gfx_name = None
 
-def calc_unroll_and_pipeline_for_local_arch():
-  global local_gfx_name
+def detect_local_gfx_targets():
+  """Distinct (gfx_name, cu_count) pairs rocminfo reports, or [] if it can't run.
 
-  if not is_local_arch_only:
-    local_gfx_name = None
-    return (all_unrolls, all_pipelines)
+  Deduplicated by name AND compute-unit count, since the same gfx can appear
+  with different CU counts (SPX/CPX partitioning), which is not a homogeneous
+  system.
+  """
+  rocminfo_path = os.path.join(os.environ.get('ROCM_PATH', '/opt/rocm'),
+                               'bin', 'rocminfo')
+  try:
+    res = subprocess.run([rocminfo_path], stdout=subprocess.PIPE,
+                         universal_newlines=True, check=True)
+  except (OSError, subprocess.CalledProcessError) as e:
+    # Building every unroll factor is always correct, just slower, so warn and
+    # carry on instead of failing the configure step.
+    print("-- WARNING: cannot run %s (%s); building all unroll factors. Set "
+          "ROCM_PATH to narrow the build to the local architecture."
+          % (rocminfo_path, e), file=sys.stderr)
+    return []
 
-  rocminfo_path = os.environ.get('ROCM_PATH') + "/bin/rocminfo"
-
-  res = subprocess.run([rocminfo_path], stdout=subprocess.PIPE, universal_newlines=True)
-  rocminfo_output = res.stdout
-
-  # Parse rocminfo binary output
   gfx_targets = {}
   curr_name = None
-  for line in rocminfo_output.splitlines():
+  for line in res.stdout.splitlines():
     line = line.strip()
-
     if line.startswith("Name:"):
       name = line.split(':')[-1].strip()
       if "gfx" in name:
         curr_name = name
     if line.startswith("Compute Unit:") and curr_name:
-      cu_count = int(line.split(':')[-1].strip())
-      gfx_targets[(curr_name, cu_count)] = None
+      gfx_targets[(curr_name, int(line.split(':')[-1].strip()))] = None
       curr_name = None
+  return list(gfx_targets.keys())
 
-  # We want to remove duplicates but cannot use a dictionary since same gfx name can have different cu counts
-  # Use (gfx_name, cu_count) as key for dictionary and convert it to list here
-  gfx_targets = list(gfx_targets.keys())
-  
-  # Homogeneous system is required to build for only 1 variant of unroll factor (except for gfx950 and gfx1250)
-  if len(gfx_targets) == 1:
-    gfx_name, cu_count = gfx_targets[0]
-    local_gfx_name = gfx_name
-    if "gfx950" == gfx_name:
-      return (["1", "2"], ["0"])  # Disable pipelining for gfx950
-    elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
-      return (["2"], all_pipelines)
-    elif "gfx1250" == gfx_name:
-      # gfx1250 (MI450) benefits from larger unrolls; Unroll 8 required for FP8 launch;
-      # 32 is the default (commSetUnrollFactor).
-      return (["8", "16", "32"], all_pipelines)
-    else:
-      return (["4"], all_pipelines)
-  else:
-    local_gfx_name = None
+def calc_unroll_and_pipeline_for_local_arch():
+  """The (unrolls, pipelines) this build needs, setting local_gfx_name when
+  exactly one on-system gfx target was detected."""
+  global local_gfx_name
+  local_gfx_name = None
+
+  if not is_local_arch_only:
     return (all_unrolls, all_pipelines)
+
+  # A homogeneous system is required to narrow the unroll set at all.
+  gfx_targets = detect_local_gfx_targets()
+  if len(gfx_targets) != 1:
+    return (all_unrolls, all_pipelines)
+
+  gfx_name, cu_count = gfx_targets[0]
+  local_gfx_name = gfx_name
+  if "gfx950" == gfx_name:
+    return (["1", "2"], ["0"])  # Disable pipelining for gfx950
+  elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
+    return (["2"], all_pipelines)
+  elif "gfx1250" == gfx_name:
+    # gfx1250 (MI450) benefits from larger unrolls; Unroll 8 required for FP8 launch;
+    # 32 is the default (commSetUnrollFactor).
+    return (["8", "16", "32"], all_pipelines)
+  else:
+    return (["4"], all_pipelines)
 
 # if building for local arch only, we only need to build for 1 variant of unroll for most gfx targets,
 # except for gfx950. For gfx950, we also disable pipelining.
@@ -289,15 +300,9 @@ gda_colls = {"AlltoAllGda", "AlltoAllvGda"}
 # 17 slowest gfx1250 SIMPLE identities (compile time exceeded 45s at unroll
 # 16/32; see --kernel-compile-timing in install.sh) to their unroll-8 variant,
 # but the mechanism is general: any (identity, unroll) pair can be added here,
-# keyed by the local gfx target it applies to.
-#
-# If the target `unroll` isn't already produced for this build (e.g. it's not
-# one of local_unroll's members), an extra kernel is compiled just to serve
-# the override -- see forced_override_funcs() -- and a log line is printed
-# noting the forced compile. Only applies to local single-arch builds: a
-# multi-arch build's func_id_unroll is "1" (see below), so redirecting missing
-# rows to the func-id axis would be wrong there; see PR #10097. There's simply
-# no entry for multi-arch (local_gfx_name is None) to key off of.
+# keyed by the gfx target it applies to. If the target unroll isn't otherwise
+# produced by this build, an extra kernel is compiled just to serve the
+# override -- see forced_override_funcs().
 @dataclass(frozen=True)
 class UnrollOverride:
   coll: str
@@ -312,20 +317,37 @@ class UnrollOverride:
   def identity(self):
     return (self.coll, self.algo, self.proto, self.redop, self.ty, self.acc, self.pipeline)
 
-# Unroll values in this tier are compiled ONLY under a single arch's guard
-# (see get_arch_guard(): unroll in {8,16,32} => "defined(__gfx1250__)"), i.e.
-# no OTHER arch's compiled object ever contains a real (non-nullptr/non-trap)
-# definition of a kernel at one of these unrolls. This lets an override for
-# the owning arch skip generating a redundant native variant in this tier
-# even in a multi-arch/fat build: no other arch sharing the same binary could
-# ever have needed that variant anyway. Overrides that target a *shared*
-# unroll (anything not listed here, e.g. 1/2/4) can never skip generation in
-# a multi-arch build -- other archs in the same binary still need their own
-# native variant there -- so those only get a per-arch dispatch redirect
-# (see dispatch_branches_for_unroll_table()) instead.
-#
-# Keep in sync with get_arch_guard()'s `fn.unroll in (...)` branch below.
+# Unroll -> the single arch that exclusively owns it. get_arch_guard() compiles
+# these unrolls only under that arch's guard, so no other arch's object ever
+# holds a real (non-nullptr/non-trap) definition at one of them. That makes an
+# override for the owning arch safe to skip a redundant native variant even in a
+# multi-arch/fat build. An override targeting a *shared* unroll (1/2/4) cannot:
+# the other archs in that binary still need their own native variant, so it gets
+# a per-arch dispatch redirect instead (dispatch_branches_for_unroll_table()).
+# This table is the single source of that fact -- get_arch_guard() and the
+# specialized_files.txt guard column both derive from it.
 _EXCLUSIVE_UNROLL_TIERS = {"8": "gfx1250", "16": "gfx1250", "32": "gfx1250"}
+
+# gfx -> (datatypes, unroll): datatypes this arch may only ever launch at one
+# fixed unroll factor, regardless of which table dispatches them. gfx1250 FP8
+# kernels launch correctly only at unroll 8, and enqueue.cc clamps FP8 there at
+# runtime, so no other FP8 variant of an unroll tier gfx1250 owns is ever
+# reachable. This is a property of the ARCH, not of how the build was invoked,
+# so it must hold in a multi-arch/fat build too -- not just under
+# --local_gpu_only. Shared tiers (1/2/4) keep their FP8 variants: the other
+# archs in a fat build still dispatch them.
+_FIXED_UNROLL_TYPES = {"gfx1250": (("f8e4m3", "f8e5m2"), "8")}
+
+def fixed_unroll_for_type(gfx, ty):
+  """The only unroll `gfx` may launch `ty` at, or None when unconstrained.
+
+  A gfx of None (no sole owner -- see sole_arch_for_unroll()) is unconstrained:
+  a tier shared by several archs cannot be narrowed to one arch's rule.
+  """
+  entry = _FIXED_UNROLL_TYPES.get(gfx)
+  if entry is None or ty not in entry[0]:
+    return None
+  return entry[1]
 
 _UNROLL_OVERRIDES = {
   "gfx1250": {
@@ -363,14 +385,10 @@ def build_unroll_override_index():
         "Unroll override for %s %s targets unroll %r, not one of %s"
         % (gfx, ov.identity(), ov.unroll, all_unrolls)
       )
-      # An unroll in an *exclusive* tier only ever gets a real
-      # (non-nullptr/non-trap) kernel body compiled under its one owning
-      # arch's guard (see _EXCLUSIVE_UNROLL_TIERS / get_arch_guard()). An
-      # override for a DIFFERENT arch targeting such an unroll would
-      # reference a symbol that's guarded out -- and therefore undeclared --
-      # during that arch's own compile pass, silently trapping or
-      # null-dispatching at runtime instead of failing to build. Catch that
-      # here, at generate-time, instead of on real hardware.
+      # An override for one arch targeting another arch's exclusive tier would
+      # reference a symbol guarded out -- and therefore undeclared -- during its
+      # own compile pass, silently trapping or null-dispatching at runtime
+      # instead of failing to build. Catch it here rather than on hardware.
       exclusive_owner = _EXCLUSIVE_UNROLL_TIERS.get(ov.unroll)
       assert exclusive_owner is None or exclusive_owner == gfx, (
         "Unroll override for %s %s targets unroll %r, but that unroll is "
@@ -386,22 +404,16 @@ def build_unroll_override_index():
 
 _unroll_override_by_identity = build_unroll_override_index()
 
-# Which gfx targets' override entries are "active" for this generation run:
-#   - True single local-arch build (calc_unroll_and_pipeline_for_local_arch()
-#     detected exactly one on-system gfx, so local_gfx_name is set): only
-#     THAT one arch is ever compiled, so only its entry (if any) applies, and
-#     it applies unconditionally -- no other arch shares this compile.
+# Which gfx targets' override entries are active for this generation run:
+#   - True single local-arch build (local_gfx_name is set): only that arch is
+#     ever compiled, so only its entry applies, and it applies unconditionally.
 #   - Multi-arch/fat build (local_gfx_name is None: --local_gpu_only wasn't
 #     requested, or rocminfo found zero/multiple gfx targets): generate.py is
-#     never told the actual GPU_TARGETS list (that's a separate CMake-level
-#     concept), so EVERY gfx key in _UNROLL_OVERRIDES is treated as
-#     potentially present and gets its own `#if defined(__gfxN__)` branch in
-#     the dispatch tables (see dispatch_branches_for_unroll_table()). Each
-#     branch is simply never selected during any OTHER arch's compile pass,
-#     so this is correct regardless of which subset of archs actually end up
-#     in a given build's GPU_TARGETS list -- e.g. building for
-#     "gfx950;gfx1250" from a gfx942 dev system keeps both archs' overrides
-#     intact in the resulting fat binary.
+#     never told the real GPU_TARGETS list (a CMake-level concept), so every gfx
+#     key is treated as potentially present and gets its own
+#     `#if defined(__gfxN__)` dispatch branch. Each branch is simply never
+#     selected during another arch's compile pass, so this stays correct for any
+#     subset of archs a build actually targets.
 if local_gfx_name is not None:
   override_archs = [local_gfx_name] if local_gfx_name in _unroll_override_by_identity else []
 else:
@@ -411,7 +423,8 @@ def unroll_override_for_gfx(gfx, coll, algo, proto, redop, ty, acc, pipeline):
   """Return gfx's override target unroll for this identity, or None.
 
   Also checks the equivalence-class representative (e.g. MinMax i8 folds into
-  MinMax u8) so both share the same override.
+  MinMax u8) so both share the same override. A gfx of None (no sole owner --
+  see sole_arch_for_unroll()) simply has no overrides.
   """
   by_identity = _unroll_override_by_identity.get(gfx)
   if not by_identity:
@@ -422,35 +435,32 @@ def unroll_override_for_gfx(gfx, coll, algo, proto, redop, ty, acc, pipeline):
   eq_identity = equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, "1", "0")[:7]
   return by_identity.get(eq_identity)
 
-def maybe_remap_unroll(coll, algo, proto, redop, ty, acc, pipeline, unroll):
-  """Skip generating a redundant native variant of an overridden identity.
+def sole_arch_for_unroll(unroll):
+  """The one gfx target whose overrides can apply to unroll `unroll`, or None
+  when several archs share it.
 
-  An override redirects every generic-kernel dispatch of this identity onto a
-  single compiled variant (see dispatch_branches_for_unroll_table()), so a
-  variant that's provably never dispatched to by ANY arch that could compile
-  this source is just unused dead code:
-    - True single-local-arch build: only local_gfx_name is ever compiled, so
-      any of ITS overrides may skip a redundant variant outright, same as
-      before.
-    - Multi-arch/fat build: several archs may share this same compiled
-      object, so skipping a native variant is only safe within an *exclusive*
-      unroll tier -- one only ever compiled for a single owning arch to begin
-      with (e.g. gfx1250's 8/16/32; see _EXCLUSIVE_UNROLL_TIERS). A *shared*
-      tier (1/2/4) must keep every arch's native variant here and instead
-      gets a per-arch dispatch redirect at the table level (see
-      dispatch_branches_for_unroll_table()).
-  The func-id-axis anchor (func_id_unroll, needed for funcId / host_table
-  bookkeeping) and the override's own target unroll are always kept.
+  A true single-local-arch build compiles exactly one arch, so that arch owns
+  every tier. Otherwise only an exclusive tier has a single owner; a shared
+  tier (1/2/4) is reached by every arch in a fat build, which needs per-arch
+  dispatch branches instead (see dispatch_branches_for_unroll_table()).
   """
   if local_gfx_name is not None:
-    override_unroll = unroll_override_for_gfx(
-      local_gfx_name, coll, algo, proto, redop, ty, acc, pipeline)
-  else:
-    exclusive_gfx = _EXCLUSIVE_UNROLL_TIERS.get(unroll)
-    override_unroll = (
-      unroll_override_for_gfx(exclusive_gfx, coll, algo, proto, redop, ty, acc, pipeline)
-      if exclusive_gfx is not None else None
-    )
+    return local_gfx_name
+  return _EXCLUSIVE_UNROLL_TIERS.get(unroll)
+
+def maybe_remap_unroll(coll, algo, proto, redop, ty, acc, pipeline, unroll):
+  """Skip generating a native variant that no arch could ever dispatch to.
+
+  An override redirects every generic-kernel dispatch of this identity onto one
+  compiled variant, so the other variants are dead code -- but only where a
+  single arch owns this unroll (sole_arch_for_unroll()). A shared tier of a
+  multi-arch build must keep every arch's native variant and gets a per-arch
+  dispatch redirect instead. The func-id-axis anchor (func_id_unroll, needed
+  for funcId / host_table bookkeeping) and the override's own target are always
+  kept.
+  """
+  override_unroll = unroll_override_for_gfx(
+    sole_arch_for_unroll(unroll), coll, algo, proto, redop, ty, acc, pipeline)
   if override_unroll is None or unroll in (func_id_unroll, override_unroll):
     return unroll
   return None
@@ -486,8 +496,10 @@ def func_validate(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg,
       (not ignore_unroll_membership and unroll not in local_unroll) or
       reg not in reg_values_of(coll, proto)):
     return False
-  # FP8 kernels on gfx1250 must use unroll 8 for correct launch.
-  if local_gfx_name == "gfx1250" and ty in ("f8e4m3", "f8e5m2") and unroll != "8":
+  # Drop a datatype variant the arch owning this unroll tier could never launch
+  # from it (gfx1250 FP8 anywhere but unroll 8).
+  fixed_unroll = fixed_unroll_for_type(sole_arch_for_unroll(unroll), ty)
+  if fixed_unroll is not None and fixed_unroll != unroll:
     return False
   return True
 
@@ -687,41 +699,33 @@ def dispatch_branches_for_unroll_table(unroll, base_fn):
   covered by an earlier branch).
 
   A single-branch [(None, fn)] result means no arch-conditional dispatch is
-  needed for this slot -- the common case, and the ONLY case in a true
-  single-local-arch build (only one arch is ever compiled, so its override,
-  if any, applies unconditionally -- nothing else shares the compile) or for
-  an unroll tier that's exclusively compiled for one arch to begin with (see
-  _EXCLUSIVE_UNROLL_TIERS: no other arch's pass ever reaches a real entry
-  here regardless).
+  needed -- the common case, and the only possible one when a single arch owns
+  this unroll (see sole_arch_for_unroll()).
 
   Multiple branches only arise on a *shared* unroll tier (1/2/4) of a
-  multi-arch/fat build, where several archs reuse the SAME table/slot and
-  each wants its own override (or none): each --offload-arch compile pass
-  only ever defines its own __gfxNNN__ macro, so the preprocessor picks
-  exactly the right branch per arch. An override always wins over the native
-  variant for its arch -- including on this identity's own func_id_unroll
-  table -- since the point of an override is to replace this identity's
-  kernel wherever it's dispatched for that arch, not just where its native
-  variant happens to be missing. Any arch with no matching override falls
-  through to the native variant generated at this table's unroll, or to the
-  func-id-axis entry (this identity's variant at func_id_unroll) when no
-  native variant exists (e.g. FP8-only-at-8 identities in tables 16/32).
+  multi-arch/fat build, where several archs reuse the SAME table slot and each
+  wants its own override (or none): each --offload-arch compile pass defines
+  only its own __gfxNNN__ macro, so the preprocessor picks the right branch per
+  arch. An override always wins over the native variant for its arch --
+  including on this identity's own func_id_unroll table -- since the point of an
+  override is to replace this identity's kernel wherever it is dispatched.
+
+  On a tier with a sole owner, an explicit override is tried first and the
+  owner's fixed-unroll rule for this datatype second, so an identity with no
+  native variant here (gfx1250 FP8 in tables 16/32) lands on the same kernel the
+  runtime clamp picks rather than drifting to the func-id axis. Any arch with
+  neither falls through to the native variant generated at this table's unroll,
+  or to the func-id-axis entry when none exists.
   """
   identity_key = fn_identity_key(base_fn)
   native = primary_by_identity_unroll.get((identity_key, unroll), base_fn)
 
-  exclusive_gfx = _EXCLUSIVE_UNROLL_TIERS.get(unroll)
-  if local_gfx_name is not None or exclusive_gfx is not None:
-    # Exactly one arch could ever land here: local_gfx_name if we're a true
-    # single-local-arch build (it takes priority: only it is ever compiled,
-    # tier-exclusivity is irrelevant), otherwise this tier's sole owner.
-    gfx = local_gfx_name if local_gfx_name is not None else exclusive_gfx
-    override_unroll = unroll_override_for_gfx(gfx, *identity_key[:7])
-    if override_unroll is not None:
-      overridden = primary_by_identity_unroll.get((identity_key, override_unroll))
-      if overridden is not None:
-        return [(None, overridden)]
-    return [(None, native)]
+  gfx = sole_arch_for_unroll(unroll)
+  if gfx is not None:
+    override_unroll = (unroll_override_for_gfx(gfx, *identity_key[:7])
+                       or fixed_unroll_for_type(gfx, base_fn.ty))
+    overridden = primary_by_identity_unroll.get((identity_key, override_unroll))
+    return [(None, native if overridden is None else overridden)]
 
   # Shared tier of a multi-arch/fat build: one branch per override arch that
   # redirects this identity away from its native/default row here, in
@@ -745,8 +749,6 @@ def unroll_table_aliases(unroll):
   because no native variant was generated at all. gfx_or_None identifies
   which arch's branch this is (None for the fallback branch, which is only
   reported if IT also differs from native, e.g. no native variant exists)."""
-  if unroll not in local_unroll:
-    return []
   aliases = []
   for index, base_fn in enumerate(func_id_axis):
     # No default here (unlike dispatch_branches_for_unroll_table's internal
@@ -826,11 +828,10 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
             out("#elif defined(__%s__)\n" % gfx)
         sym = "ncclDevFunc_" + fn_sym(fn)
         if gfx is not None:
-          # An arch-selected branch (not the fallback): build_unroll_override_
-          # index() already validated fn's own get_arch_guard() (if any) is
-          # implied by this branch's `defined(__gfxN__)` selector, so
-          # re-checking it here would just be a redundant (always-true when
-          # reached) nested guard.
+          # An arch-selected branch: build_unroll_override_index() already
+          # validated that fn's own get_arch_guard() (if any) is implied by this
+          # branch's `defined(__gfxN__)` selector, so re-checking it would be a
+          # redundant always-true nested guard.
           out("/*%4d*/ %s,\n" % (index, sym))
         else:
           guard = get_arch_guard(fn)
@@ -883,11 +884,7 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
               out("#elif defined(__%s__)\n" % gfx)
           sym = "ncclDevFunc_" + fn_sym(fn)
           if gfx is not None:
-            # An arch-selected branch (not the fallback): build_unroll_
-            # override_index() already validated fn's own get_arch_guard()
-            # (if any) is implied by this branch's `defined(__gfxN__)`
-            # selector, so re-checking it here would just be a redundant
-            # (always-true when reached) nested guard.
+            # See the matching note in the function-pointer table above.
             out(f"{spec} {{ {sym}(); }} }};\n")
             continue
           guard = get_arch_guard(fn)
@@ -936,48 +933,43 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
   # use the func_id_unroll slice (not a positional slice: some identities, e.g.
   # FP8 or unroll-8-clamped kernels, aren't generated at every unroll, so the
   # per-unroll slices of func_rows aren't equal size).
+  # Each field is packed into 4 bits of the key below.
+  for name, values in (("all_colls", all_colls), ("all_algos", all_algos),
+                       ("all_protos", all_protos), ("all_redops", all_redops),
+                       ("all_tys", all_tys), ("all_accs", all_accs),
+                       ("all_pipelines", all_pipelines), ("all_regs", all_regs)):
+    assert len(values) <= 16, \
+      "Error: %s has more than 16 values, which exceeds 4-bit capacity." % name
+
   for fn in [fn for fn in func_rows if fn.unroll == func_id_unroll]:
-    fn_id = -1
-    if fn is not None:
-      guard = get_arch_guard(fn)
-      fn_id = primary_to_index[Fn(*equivalent_primary(*fn))]
-      comment = " // " + paste(" ", *fn)
-      # Build the function signature string: "<coll> <algo> <proto> <redop> <ty>"
-      # get parts indexes in order (coll, algo, proto, redop, ty, acc, pipeline, unroll)
-      coll_idx = all_colls.index(fn.coll)
-      algo_idx = all_algos.index(fn.algo)
-      proto_idx = all_protos.index(fn.proto)
-      redop_idx = all_redops.index(fn.redop)
-      ty_idx = all_tys.index(fn.ty)
-      acc_idx = all_accs.index(fn.acc)
-      pipeline_idx = all_pipelines.index(fn.pipeline)
-      reg_idx = all_regs.index(fn.reg)
-      # Assert that 4 bits (16 values) is enough to map all_colls, all_algos, etc.
-      assert len(all_colls) <= 16, "Error: all_colls has more than 16 values, which exceeds 4-bit capacity."
-      assert len(all_algos) <= 16, "Error: all_algos has more than 16 values, which exceeds 4-bit capacity."
-      assert len(all_protos) <= 16, "Error: all_protos has more than 16 values, which exceeds 4-bit capacity."
-      assert len(all_redops) <= 16, "Error: all_redops has more than 16 values, which exceeds 4-bit capacity."
-      assert len(all_tys) <= 16, "Error: all_tys has more than 16 values, which exceeds 4-bit capacity."
-      assert len(all_accs) <= 16, "Error: all_accs has more than 16 values, which exceeds 4-bit capacity."
-      assert len(all_pipelines) <= 16, "Error: all_pipelines has more than 16 values, which exceeds 4-bit capacity."
-      assert len(all_regs) <= 16, "Error: all_regs has more than 16 values, which exceeds 4-bit capacity."
-      # Create a 64-bit unsigned integer key and pack the indices into 4 bits each
-      key = (
-        (coll_idx & 0xF)
-        | ((algo_idx & 0xF) << 4)
-        | ((proto_idx & 0xF) << 8)
-        | ((redop_idx & 0xF) << 12)
-        | ((ty_idx & 0xF) << 16)
-        | ((acc_idx & 0xF) << 20)
-        | ((pipeline_idx & 0xF) << 24)
-        | ((reg_idx & 0xF) << 28)
-      )
-      if fn.coll == "Broadcast":
-        key = ((coll_idx & 0x3F) | ((proto_idx & 0x3F) << 8) | ((reg_idx & 0xF) << 28))
-      if fn.coll in ["SendRecv", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
-        key = ((coll_idx & 0x3F))
-      
-      out(f'  {{{key}, {fn_id}}}, {comment}\n')
+    fn_id = primary_to_index[Fn(*equivalent_primary(*fn))]
+    comment = " // " + paste(" ", *fn)
+    # Field indexes in order (coll, algo, proto, redop, ty, acc, pipeline, reg)
+    coll_idx = all_colls.index(fn.coll)
+    algo_idx = all_algos.index(fn.algo)
+    proto_idx = all_protos.index(fn.proto)
+    redop_idx = all_redops.index(fn.redop)
+    ty_idx = all_tys.index(fn.ty)
+    acc_idx = all_accs.index(fn.acc)
+    pipeline_idx = all_pipelines.index(fn.pipeline)
+    reg_idx = all_regs.index(fn.reg)
+    # Create a 64-bit unsigned integer key and pack the indices into 4 bits each
+    key = (
+      (coll_idx & 0xF)
+      | ((algo_idx & 0xF) << 4)
+      | ((proto_idx & 0xF) << 8)
+      | ((redop_idx & 0xF) << 12)
+      | ((ty_idx & 0xF) << 16)
+      | ((acc_idx & 0xF) << 20)
+      | ((pipeline_idx & 0xF) << 24)
+      | ((reg_idx & 0xF) << 28)
+    )
+    if fn.coll == "Broadcast":
+      key = ((coll_idx & 0x3F) | ((proto_idx & 0x3F) << 8) | ((reg_idx & 0xF) << 28))
+    if fn.coll in ["SendRecv", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
+      key = ((coll_idx & 0x3F))
+
+    out(f'  {{{key}, {fn_id}}}, {comment}\n')
   out("};\n")
 
   # Which unroll-factor tables were actually generated for this build. The host
@@ -1068,17 +1060,12 @@ for name in name_to_funcs.keys():
 # enabling the compiler to optimize the device function in kernel context
 # (LDS allocation, barriers, etc.) while keeping it as a separate linkable symbol.
 
+# gensrc (including any previous `specialized/`) was already emptied above.
 specialized_dir = os.path.join(gensrc, "specialized")
-if not os.path.exists(specialized_dir):
-  os.makedirs(specialized_dir)
-else:
-  for name in os.listdir(specialized_dir):
-    os.remove(os.path.join(specialized_dir, name))
+os.makedirs(specialized_dir)
 
 specialized_filelist = []
 for fn in primary_funcs:
-  if fn.coll == "Nop":
-    continue
   sym = fn_sym(fn)
   func_name = "ncclDevFunc_" + sym
   lower_coll = coll_camel_to_lower[fn.coll]
@@ -1132,12 +1119,12 @@ specialized_filelist.sort(key=_compile_cost_key)
 # Write the list of specialized files for CMake consumption
 with open(os.path.join(gensrc, "specialized_files.txt"), "w") as f:
   for filename, func_name, guard, fn in specialized_filelist:
-    if fn.unroll in ("8", "16", "32"):
-      cmake_guard = "defined(__gfx1250__)"
-      if fn.proto == "LL128":
-        cmake_guard += " && defined(ENABLE_LL128)"
-    else:
-      cmake_guard = guard or ""
+    cmake_guard = guard or ""
+    # In an exclusive tier get_arch_guard() reports only the owning arch (the
+    # unroll check wins over the LL128 one), but CMake must still skip LL128
+    # kernels when LL128 is disabled.
+    if fn.unroll in _EXCLUSIVE_UNROLL_TIERS and fn.proto == "LL128":
+      cmake_guard += " && defined(ENABLE_LL128)"
     f.write("%s %s %s\n" % (filename, func_name, cmake_guard))
 
 print("-- Generated %d specialized kernel files in %s" % (len(specialized_filelist), specialized_dir))

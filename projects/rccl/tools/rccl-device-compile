@@ -32,6 +32,7 @@ Tool discovery:
 """
 
 import argparse
+import contextlib
 import csv
 import fcntl
 import json
@@ -469,11 +470,6 @@ def run_timed(cmd, description=""):
     return time.monotonic() - t0
 
 
-def run(cmd, description=""):
-    """Run a command, exiting on failure with the full command for diagnosis."""
-    run_timed(cmd, description)
-
-
 # ---------------------------------------------------------------------------
 # Per-kernel compile timing log
 # ---------------------------------------------------------------------------
@@ -482,6 +478,10 @@ _TIMING_LOG_HEADER = (
     'mode', 'arch', 'kernel', 'compile_s', 'extract_s', 'assemble_s', 'total_s',
     'status',
 )
+
+# Duration columns, in header order. TimingRecord charges each stage to one of
+# these; install.sh reads them positionally (see _TIMING_LOG_HEADER).
+_TIMING_COLUMNS = ('compile', 'extract', 'assemble')
 
 
 def resolve_timing_log(args):
@@ -492,7 +492,13 @@ def resolve_timing_log(args):
 
 
 def append_timing_log(path, row):
-    """Append one CSV row to path, creating the file/header if needed."""
+    """Append one CSV row to path, writing the header if the file is still empty.
+
+    A timing build runs one of these processes per kernel, so the emptiness test
+    and the write must be atomic against each other. The lock is held across the
+    flush as well: bytes left in the csv writer's buffer are invisible to the
+    next process to take the lock, which would then write a second header.
+    """
     log_dir = os.path.dirname(path)
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
@@ -500,13 +506,11 @@ def append_timing_log(path, row):
     with open(path, 'a', newline='') as f:
         fcntl.flock(f.fileno(), fcntl.LOCK_EX)
         try:
-            write_header = (
-                not os.path.exists(path) or os.path.getsize(path) == 0
-            )
             writer = csv.writer(f)
-            if write_header:
+            if os.fstat(f.fileno()).st_size == 0:
                 writer.writerow(_TIMING_LOG_HEADER)
             writer.writerow(row)
+            f.flush()
         finally:
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
@@ -527,6 +531,60 @@ def log_timing(path, mode, arch, kernel, compile_s, extract_s, assemble_s,
     ])
 
 
+class TimingRecord:
+    """Collects one invocation's per-stage wall times and writes a single CSV row.
+
+    Used as a context manager so the row is emitted even while a SystemExit from
+    a failed step propagates, tagged with the step that was in flight and its
+    exit code. `mark` names the next step, `run` times a subprocess into a
+    column, and `window` times an inline step. When no timing log is configured
+    every method is still callable and nothing is written.
+    """
+
+    def __init__(self, path, mode, arch, kernel):
+        self._path = path
+        self._mode = mode
+        self._arch = arch
+        self._kernel = kernel
+        self._stage = 'ok'
+        self._times = dict.fromkeys(_TIMING_COLUMNS, 0.0)
+        self._start = time.monotonic()
+
+    def mark(self, stage):
+        """Name the step about to run, so a failure in it can be attributed."""
+        self._stage = stage
+
+    def run(self, column, cmd, description=''):
+        """Run cmd, charging its wall time to `column`."""
+        self._times[column] += run_timed(cmd, description)
+
+    @contextlib.contextmanager
+    def window(self, column):
+        """Charge the wall time of an inline (non-subprocess) step to `column`."""
+        t0 = time.monotonic()
+        try:
+            yield
+        finally:
+            self._times[column] += time.monotonic() - t0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            status = 'ok'
+        else:
+            status = self._stage
+            code = getattr(exc, 'code', None)
+            if code:
+                status = f'{status}:{code}'
+        log_timing(self._path, self._mode, self._arch, self._kernel,
+                   self._times['compile'], self._times['extract'],
+                   self._times['assemble'], time.monotonic() - self._start,
+                   status)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Compile mode: .cpp -> .o + .resources.json
 # ---------------------------------------------------------------------------
@@ -538,12 +596,6 @@ def do_compile(args, forwarded_flags):
     source = args.source
     output = args.output
     keep_temps = args.keep_temps
-    timing_log = resolve_timing_log(args)
-    kernel_name = os.path.basename(source)
-    compile_s = extract_s = assemble_s = 0.0
-    status = 'ok'
-    t_total = time.monotonic()
-
     base = os.path.splitext(output)[0]
     json_out = base + '.resources.json'
 
@@ -558,66 +610,57 @@ def do_compile(args, forwarded_flags):
         ext_file = os.path.join(tmpdir, 'extracted.s')
         cleanup = [asm_file, ext_file, tmpdir]
 
+    timing = TimingRecord(resolve_timing_log(args), 'compile', arch,
+                          os.path.basename(source))
     try:
-        # Step 1: Compile to assembly
-        compile_cmd = [
-            clang,
-            '-x', 'hip',
-            '--offload-device-only',
-            f'--offload-arch={arch}',
-            '-gline-tables-only',
-            '-w',
-        ] + forwarded_flags + [
-            '-S', '-o', asm_file, source,
-        ]
-        status = 'compile_failed'
-        compile_s = run_timed(compile_cmd, f"compile {os.path.basename(source)}")
+        with timing:
+            # Step 1: Compile to assembly
+            compile_cmd = [
+                clang,
+                '-x', 'hip',
+                '--offload-device-only',
+                f'--offload-arch={arch}',
+                '-gline-tables-only',
+                '-w',
+            ] + forwarded_flags + [
+                '-S', '-o', asm_file, source,
+            ]
+            timing.mark('compile_failed')
+            timing.run('compile', compile_cmd, f"compile {os.path.basename(source)}")
 
-        # Step 2: Extract device function (inline)
-        status = 'extract_failed'
-        t0 = time.monotonic()
-        with open(asm_file) as f:
-            asm_lines = f.readlines()
+            # Step 2: Extract device function (inline)
+            timing.mark('extract_failed')
+            with timing.window('extract'):
+                with open(asm_file) as f:
+                    asm_lines = f.readlines()
 
-        try:
-            extracted_lines, resources = extract_device_function(asm_lines)
-        except RuntimeError as e:
-            extract_s = time.monotonic() - t0
-            print(f"ERROR: extraction failed for {source}: {e}", file=sys.stderr)
-            sys.exit(1)
+                try:
+                    extracted_lines, resources = extract_device_function(asm_lines)
+                except RuntimeError as e:
+                    print(f"ERROR: extraction failed for {source}: {e}",
+                          file=sys.stderr)
+                    sys.exit(1)
 
-        extracted_lines = _normalize_file_directives(extracted_lines)
+                extracted_lines = _normalize_file_directives(extracted_lines)
 
-        with open(ext_file, 'w') as f:
-            f.writelines(extracted_lines)
+                with open(ext_file, 'w') as f:
+                    f.writelines(extracted_lines)
 
-        with open(json_out, 'w') as f:
-            json.dump(resources, f, indent=2)
-        extract_s = time.monotonic() - t0
+                with open(json_out, 'w') as f:
+                    json.dump(resources, f, indent=2)
 
-        # Step 3: Assemble to object
-        assemble_cmd = [
-            clang,
-            '-x', 'assembler',
-            '-target', 'amdgcn-amd-amdhsa',
-            f'-mcpu={arch}',
-            '-c', '-o', output, ext_file,
-        ]
-        status = 'assemble_failed'
-        assemble_s = run_timed(assemble_cmd, f"assemble {os.path.basename(source)}")
-        status = 'ok'
-
-    except SystemExit as e:
-        # The failing step already reported the error; annotate the stage that
-        # was in flight with its exit code so the timing row records it.
-        if e.code:
-            status = f'{status}:{e.code}'
-        raise
+            # Step 3: Assemble to object
+            assemble_cmd = [
+                clang,
+                '-x', 'assembler',
+                '-target', 'amdgcn-amd-amdhsa',
+                f'-mcpu={arch}',
+                '-c', '-o', output, ext_file,
+            ]
+            timing.mark('assemble_failed')
+            timing.run('assemble', assemble_cmd,
+                       f"assemble {os.path.basename(source)}")
     finally:
-        log_timing(
-            timing_log, 'compile', arch, kernel_name,
-            compile_s, extract_s, assemble_s, time.monotonic() - t_total, status,
-        )
         if not keep_temps:
             for f in cleanup:
                 try:
@@ -641,14 +684,8 @@ def do_link(args, forwarded_flags):
     dispatcher = args.dispatcher
     keep_temps = args.keep_temps
     rocshmem_bitcode = getattr(args, 'rocshmem_bitcode', None)
-    timing_log = resolve_timing_log(args)
-    kernel_name = os.path.basename(output)
-    compile_s = extract_s = assemble_s = 0.0
-    status = 'ok'
-    t_total = time.monotonic()
-    # Start of the patch/assemble/rocSHMEM window reported as extract_s; None
-    # until that window opens, so a failure before it logs 0.0.
-    t0 = None
+    timing = TimingRecord(resolve_timing_log(args), 'link', arch,
+                          os.path.basename(output))
 
     if not dispatcher:
         raise SystemExit("ERROR: --link requires --dispatcher=<source>")
@@ -689,98 +726,87 @@ def do_link(args, forwarded_flags):
             cleanup.insert(-1, rocshmem_obj)  # remove before rmdir
 
     try:
-        # Step 2: Compile dispatcher to assembly
-        disp_compile_cmd = [
-            clang,
-            '-x', 'hip',
-            '--offload-device-only',
-            f'--offload-arch={arch}',
-            '-g', '-w',
-        ] + forwarded_flags + [
-            '-S', '-o', disp_asm, dispatcher,
-        ]
-        status = 'dispatcher_compile_failed'
-        compile_s = run_timed(disp_compile_cmd, f"compile dispatcher for {arch}")
+        with timing:
+            # Step 2: Compile dispatcher to assembly
+            disp_compile_cmd = [
+                clang,
+                '-x', 'hip',
+                '--offload-device-only',
+                f'--offload-arch={arch}',
+                '-g', '-w',
+            ] + forwarded_flags + [
+                '-S', '-o', disp_asm, dispatcher,
+            ]
+            timing.mark('dispatcher_compile_failed')
+            timing.run('compile', disp_compile_cmd, f"compile dispatcher for {arch}")
 
-        # Step 3: Patch dispatcher with aggregated resources
-        status = 'dispatcher_patch_failed'
-        t0 = time.monotonic()
-        with open(disp_asm) as f:
-            disp_lines = f.readlines()
-        patched_lines = patch_dispatcher(disp_lines, max_res)
-        with open(disp_patched, 'w') as f:
-            f.writelines(patched_lines)
+            # Steps 3-5 (patch, assemble dispatcher, optional rocSHMEM) share
+            # one timing column; the individual run_timed results are already
+            # inside the window and must not be charged again.
+            with timing.window('extract'):
+                # Step 3: Patch dispatcher with aggregated resources
+                timing.mark('dispatcher_patch_failed')
+                with open(disp_asm) as f:
+                    disp_lines = f.readlines()
+                patched_lines = patch_dispatcher(disp_lines, max_res)
+                with open(disp_patched, 'w') as f:
+                    f.writelines(patched_lines)
 
-        # Step 4: Assemble patched dispatcher
-        disp_assemble_cmd = [
-            clang,
-            '-x', 'assembler',
-            '-target', 'amdgcn-amd-amdhsa',
-            f'-mcpu={arch}',
-            '-c', '-o', disp_obj, disp_patched,
-        ]
-        status = 'dispatcher_assemble_failed'
-        run_timed(disp_assemble_cmd, f"assemble dispatcher for {arch}")
-
-        # Step 5: Compile rocSHMEM device bitcode to an amdgcn object (if provided).
-        if rocshmem_bitcode:
-            if not os.path.exists(rocshmem_bitcode):
-                print(f"  rocSHMEM: no device bitcode for {arch} ({rocshmem_bitcode}), skipping",
-                      file=sys.stderr)
-                rocshmem_obj = None
-            else:
-                bc_compile_cmd = [
+                # Step 4: Assemble patched dispatcher
+                disp_assemble_cmd = [
                     clang,
+                    '-x', 'assembler',
                     '-target', 'amdgcn-amd-amdhsa',
                     f'-mcpu={arch}',
-                    '-c', '-x', 'ir',
-                    '-o', rocshmem_obj, rocshmem_bitcode,
+                    '-c', '-o', disp_obj, disp_patched,
                 ]
-                status = 'rocshmem_compile_failed'
-                run_timed(
-                    bc_compile_cmd, f"compile rocSHMEM device bitcode for {arch}")
-        # t0 already spans patch + dispatcher assemble + optional rocSHMEM;
-        # do not add those stage times again (that double-counts).
-        extract_s = time.monotonic() - t0
+                timing.mark('dispatcher_assemble_failed')
+                run_timed(disp_assemble_cmd, f"assemble dispatcher for {arch}")
 
-        # Step 6: Link all objects + dispatcher into device.elf
-        # Use a response file for potentially long object lists
-        rsp_path = os.path.join(output_dir, f'link_{arch}.rsp')
-        with open(rsp_path, 'w') as f:
-            f.write(disp_obj + '\n')
-            for obj in objects:
-                f.write(obj + '\n')
-            if rocshmem_obj:
-                f.write(rocshmem_obj + '\n')
+                # Step 5: Compile rocSHMEM device bitcode to an amdgcn object
+                # (if provided).
+                if rocshmem_bitcode:
+                    if not os.path.exists(rocshmem_bitcode):
+                        print(f"  rocSHMEM: no device bitcode for {arch} ({rocshmem_bitcode}), skipping",
+                              file=sys.stderr)
+                        rocshmem_obj = None
+                    else:
+                        bc_compile_cmd = [
+                            clang,
+                            '-target', 'amdgcn-amd-amdhsa',
+                            f'-mcpu={arch}',
+                            '-c', '-x', 'ir',
+                            '-o', rocshmem_obj, rocshmem_bitcode,
+                        ]
+                        timing.mark('rocshmem_compile_failed')
+                        run_timed(
+                            bc_compile_cmd,
+                            f"compile rocSHMEM device bitcode for {arch}")
 
-        link_cmd = [
-            lld, '-shared',
-            '-o', output,
-            f'@{rsp_path}',
-        ]
-        status = 'link_failed'
-        assemble_s = run_timed(link_cmd, f"link device.elf for {arch}")
-        status = 'ok'
+            # Step 6: Link all objects + dispatcher into device.elf
+            # Use a response file for potentially long object lists
+            rsp_path = os.path.join(output_dir, f'link_{arch}.rsp')
+            with open(rsp_path, 'w') as f:
+                f.write(disp_obj + '\n')
+                for obj in objects:
+                    f.write(obj + '\n')
+                if rocshmem_obj:
+                    f.write(rocshmem_obj + '\n')
 
-        if not keep_temps:
-            try:
-                os.unlink(rsp_path)
-            except OSError:
-                pass
+            link_cmd = [
+                lld, '-shared',
+                '-o', output,
+                f'@{rsp_path}',
+            ]
+            timing.mark('link_failed')
+            timing.run('assemble', link_cmd, f"link device.elf for {arch}")
 
-    except SystemExit as e:
-        # The failing step already reported the error; annotate the stage that
-        # was in flight with its exit code so the timing row records it.
-        if e.code:
-            status = f'{status}:{e.code}'
-        if t0 is not None and not extract_s:
-            extract_s = time.monotonic() - t0
-        raise
+            if not keep_temps:
+                try:
+                    os.unlink(rsp_path)
+                except OSError:
+                    pass
     finally:
-        log_timing(
-            timing_log, 'link', arch, kernel_name,
-            compile_s, extract_s, assemble_s, time.monotonic() - t_total, status,
-        )
         if not keep_temps:
             for f in cleanup:
                 try:
