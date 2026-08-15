@@ -12,34 +12,309 @@ ROCprofiler-SDK has experimental support for running under WSL2 (Windows
 Subsystem for Linux). On WSL2 the GPU is exposed through the DirectX paravirt
 driver (``/dev/dxg``) and the DXCore user-mode library rather than the native
 KFD driver (``/dev/kfd``). Because ``/dev/kfd`` is not present, ROCprofiler-SDK
-takes a different path for agent enumeration and hardware counter collection.
+enumerates agents differently and arms hardware counters through the DXG
+vendor-packet path instead of the KFD profiling ioctl.
 
-This page documents how agents are discovered on WSL2 and the environment
-variables that control that behavior.
+This page describes how to set up a working WSL2 profiling environment, what
+``rocprofv3`` collects once it is set up, and which results should not be taken
+at face value. The behavior described here was measured on a gfx1150
+(AMD Radeon 890M) system running WSL2 with ``/dev/dxg`` and no ``/dev/kfd``.
+Other GPUs and other WSL2 installations are expected to behave the same way but
+have not been measured.
 
-What works on WSL2
-==================
+Setting up
+==========
 
-* **API tracing** (HIP, HSA, kernel dispatch, memory copy/allocation, marker
-  / ROCTx): works as on native Linux.
-* **Hardware counter collection**: performance counters are collected with
-  correct, non-zero, per-instance values through the DXG vendor-packet path
-  (see :ref:`wsl-vendor-packet` below). Both single-counter and multi-counter
-  collection are supported. Multi-counter collection previously hit a per-queue
-  PM4 command-buffer frame-size limit in libhsakmt; that limit is now computed
-  from the device geometry instead of a fixed bound, so multi-counter passes
-  fit. This was verified on a gfx11-class GPU under WSL2 with a four-counter
-  collection (``SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE SQ_INSTS_VALU``): all four
-  counters were reported with no PM4 command-buffer overflow.
+Matching the runtime and the DXG thunk
+--------------------------------------
 
-Known limitations
-==================
+``librocdxg.so`` (the DXG thunk) and ``libhsa-runtime64.so`` must be built from
+the same source. This is a requirement, not a recommendation.
 
-* **PC sampling and Advanced Thread Trace (ATT)**: the software/decode layers
-  build and pass their unit tests, but the end-to-end paths require KFD
-  features that are not available on WSL2 and are therefore disabled.
-* **SPM (Streaming Performance Monitor)**: not available; the gfx11-class
-  counter database does not expose SPM-capable counters.
+.. important::
+
+   ``HsaNodeProperties``, the record the thunk fills in for each KMT node, is an
+   internal structure with no stable layout: it is 376 bytes in the ROCm 7.2.x
+   packages and 396 bytes in current development sources.
+   ``hsaKmtGetNodeProperties()`` carries no size argument, so the thunk writes
+   ``sizeof()`` bytes as *it* knows the type, into storage sized as the caller
+   knows the type. Pairing a newer thunk with an older runtime therefore
+   overruns the older side's buffer and corrupts the heap, which typically
+   surfaces later as a crash somewhere unrelated.
+
+ROCprofiler-SDK negotiates the layout where the thunk allows it. Before reading
+any node record it calls the thunk's ``DxgAbiCheck`` handshake, and a thunk that
+reports a different ``sizeof(HsaNodeProperties)`` is refused rather than read,
+with ``wsl topology: ... rejected the HsaNodeProperties layout`` in the log. A
+thunk too old to export the handshake is read anyway, into storage deliberately
+longer than the record so that an overrun lands in padding, and a layout that
+was rearranged without changing ``sizeof()`` cannot be detected at all. Treat
+the handshake as a backstop, not as a substitute for a matched pair.
+
+Required environment variables
+------------------------------
+
+Export the following before running ``rocprofv3``:
+
+.. code-block:: bash
+
+   # Resolve the matched runtime, thunk and ROCprofiler-SDK libraries ahead of
+   # any older system install under /opt/rocm
+   export LD_LIBRARY_PATH=<rocm-build>/lib:${LD_LIBRARY_PATH}
+
+   # Required: offer the HSA API table to rocprofiler-register on the DXG path
+   export HSA_TOOLS_DISABLE_REGISTER=0
+
+   # Required with stock ROCm 7.2.x packages; already the default on current
+   # builds. Never set this to 0 on WSL2.
+   export HSA_ENABLE_DXG_DETECTION=1
+
+``HSA_TOOLS_DISABLE_REGISTER=0`` is mandatory. The HSA runtime disables tool
+registration on the DXG path by default, leaving rocprofiler-register with no
+HSA API table to intercept, so without this variable the profiled application
+runs to completion and ``rocprofv3`` writes no output files at all — not empty
+files, no files. That failure mode is silent, so if a run produces nothing,
+check this variable first.
+
+What makes ``0`` the working value is not the value but the fact that the
+variable is bound at all: the runtime reads any binding as a deliberate choice
+and stops applying its DXG default, and the choice ``0`` expresses is that
+registration should happen, since registration is disabled only when the
+variable reads exactly ``1``. Leaving it unset is therefore not neutral, and
+setting it to ``1`` disables registration outright; either way you get no
+output. The variable belongs to the general HSA runtime interface and is not
+something WSL introduced, so a ``1`` exported elsewhere in your environment for
+unrelated reasons will suppress profiling output here too.
+
+``HSA_ENABLE_DXG_DETECTION`` is an HSA runtime variable rather than a
+ROCprofiler-SDK one. On a current build the runtime enables DXG detection unless
+the variable is explicitly set to ``0``, so exporting it is unnecessary but
+harmless. With stock ROCm 7.2.x packages it is still opt-in, and without it
+``hsa_init()`` fails and every tool reports ``no supported GPU devices``, which
+reads like absent hardware rather than a configuration gap. Setting it to ``0``
+disables the DXG path entirely and nothing on this page works.
+
+.. note::
+
+   Export these from ``~/.profile`` or from the job script rather than from
+   ``~/.bashrc``. The default Ubuntu ``.bashrc`` returns early for
+   non-interactive shells, so scripts and CI would never see them.
+
+Overriding ``librocdxg`` at run time
+------------------------------------
+
+A newer ``librocdxg`` can be placed ahead of the installed one on the loader
+search path instead of replacing the system package, which is one way to get a
+matched pair without touching ``/opt/rocm``. Both the HSA runtime and
+ROCprofiler-SDK ask for the unversioned name ``librocdxg.so``, so a directory
+holding that one symlink, placed first on ``LD_LIBRARY_PATH``, redirects both
+consumers:
+
+.. code-block:: bash
+
+   mkdir -p ~/wsl-dxg-lib
+   ln -sf <path-to-matched-build>/librocdxg.so ~/wsl-dxg-lib/librocdxg.so
+   export LD_LIBRARY_PATH=~/wsl-dxg-lib:${LD_LIBRARY_PATH}
+
+.. warning::
+
+   Preloading by absolute path — ``LD_PRELOAD=/path/to/librocdxg.so.<version>``
+   — does **not** work, even though the preload itself succeeds. glibc registers
+   a preloaded object under the path it was given and under that object's
+   ``SONAME``. A request for ``librocdxg.so`` matches neither string, so the
+   loader falls through to a path search and quietly loads a second, stock copy
+   alongside the preloaded one. Preloading by bare name
+   (``LD_PRELOAD=librocdxg.so``) does work, because the loader resolves that
+   name through an ordinary search.
+
+What rocprofv3 collects on WSL2
+===============================
+
+The record counts in this section come from a HIP application that runs eight
+iterations, each of which copies 1 MiB from host to device, launches a kernel,
+and copies the result back. Run it under ``rocprofv3`` the same way as on native
+Linux:
+
+.. code-block:: bash
+
+   rocprofv3 --sys-trace -d ./out -o results -- ./my_application
+
+.. list-table:: Collection verified on WSL2
+   :header-rows: 1
+
+   * - Option
+     - What was collected
+
+   * - ``--hip-trace``
+     - 52 HIP API records, including exactly 16 ``hipMemcpy`` calls and 8
+       ``hipLaunchKernel`` calls, matching the workload.
+
+   * - ``--hsa-trace``
+     - Between 710 and 734 records across 38 distinct HSA functions, with no
+       zero-length and no negative durations.
+
+   * - ``--kernel-trace``
+     - 8 dispatches, each with a kernel name, begin and end timestamps, VGPR and
+       SGPR counts, and workgroup and grid dimensions.
+
+   * - ``--memory-copy-trace``
+     - 16 records: 8 host-to-device and 8 device-to-host.
+
+   * - ``--marker-trace``
+     - 8 ranges named ``iter0`` through ``iter7``. The application must link
+       against ``librocprofiler-sdk-roctx``; see
+       :ref:`using-rocprofiler-sdk-roctx`.
+
+   * - ``--pmc``
+     - Four hardware counters collected together in one pass, with no PM4
+       command-buffer overflow.
+
+   * - ``--sys-trace``
+     - All of the above in one run, consistently with the individual options.
+
+Tracing and counter collection were also exercised together in four different
+combinations of options, and neither perturbed the other's output.
+
+Timestamps
+----------
+
+Timestamps are usable for building a timeline. Rather than inspecting the values
+directly, correctness was checked by containment: every GPU dispatch falls
+entirely inside the host interval between its ``hipLaunchKernel`` and the
+following device-to-host ``hipMemcpy`` that consumes its result, and every copy
+falls entirely inside the ``hipMemcpy`` that issued it. A skewed or wrongly
+scaled GPU clock would break that relationship.
+
+The reference workload has no explicit ``hipDeviceSynchronize``; the blocking
+copy is what synchronizes it. Where a workload does call one, the dispatch is
+contained by the launch-to-synchronize interval instead, as a variant of the
+same workload confirmed.
+
+The host timeline is the WSL VM's ``CLOCK_MONOTONIC`` in nanoseconds.
+``HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY`` reports 1 GHz, the frequency measures
+999.9978 MHz, and the timeline agrees with ``CLOCK_MONOTONIC`` to within 175 ns.
+The GPU agent's own wall clock runs at 100 MHz (``WallClockKHz = 100000``) and
+the runtime converts it, so agent-side and host-side timestamps can be compared
+directly.
+
+.. _wsl-counter-accuracy:
+
+Hardware counter accuracy
+=========================
+
+Counter values on WSL2 need to be interpreted with care. The SQ counters are
+global to the shader engines with no per-process scoping, and WDDM time-slices
+the GPU among all its clients, so any GPU work performed for another client
+inside a dispatch's counting window is attributed to that dispatch. The Windows
+desktop compositor is one such client.
+
+Apart from the zero read-backs described under `Known issues`_ below, the error
+is one-directional: measured values are never below the analytically expected
+result, and the smallest value observed over repeated runs is the one closest to
+the truth:
+
+* A 262,144 work-item kernel (wave32, so 8,192 waves in theory) reported a
+  minimum ``SQ_WAVES`` of exactly 8,192 in each of three different collection
+  configurations. Maxima in the same runs reached 185,561.
+* A 1,048,576 work-item kernel (32,768 waves in theory) reported 36,537,
+  111,929, 162,155, 260,666, 315,977 and 394,836 across six runs. The smallest
+  of those is 11 percent above theory; none is below it.
+
+The collector itself is therefore behaving correctly — where the floor is
+reached it lands exactly on the analytically derived value — and the excess is
+contamination from concurrent GPU work, not a counting error. What varies is how
+much foreign activity happened to land in the window.
+
+To get usable numbers, sample the same workload several times and take the
+smallest non-zero value, or collect with the Windows desktop idle so there is
+little foreign work to absorb. Short-running kernels are affected
+disproportionately, because a fixed amount of contamination is a much larger
+fraction of a small count.
+ROCprofiler-SDK cannot correct for this: attributing counts back to a single
+process would require the hardware counters to be filtered per VMID, below the
+SDK.
+
+Known issues
+============
+
+GRBM counters read zero at the start of a session
+-------------------------------------------------
+
+``GRBM_*`` counters can read back zero on the opening dispatches of a profiling
+session, on dispatches that demonstrably ran and produced waves. Such a zero is
+invalid data rather than a measurement, and it matters because derived metrics
+divide by these counters: ``GPU_UTIL`` and ``CU_UTILIZATION`` divide by
+``GRBM_COUNT``, and ``VALUBusy``, ``SALUBusy``, ``MemUnitStalled``,
+``LDSBankConflict`` and ``MeanOccupancyPerCU`` depend on ``GRBM_GUI_ACTIVE``.
+Discard the affected dispatches rather than letting the zero propagate into a
+metric.
+
+When GRBM-derived metrics matter, discard the first 300 ms of dispatches in the
+session, which covers the longest burst observed, or give the application a
+short warm-up phase so that the affected window falls before the region of
+interest.
+
+The behavior is narrow and well characterized. It is confined to the start of a
+session: across 354 sessions and 23,990 dispatches, 11 sessions (3.1 percent)
+and 191 dispatches (0.80 percent) were affected, all 11 bursts began at the very
+first dispatch of their session, and none began mid-session, including through
+36 seconds of continuous profiling. Each burst is contiguous and does not
+recur — once a GRBM counter reports a non-zero value it keeps reporting for the
+rest of that session — and bursts ran from 9 ms to 291 ms, with a median around
+54 ms. Every ``GRBM_*`` counter in a set fails together, so one GRBM counter
+reading zero while another reads normally is not a case you have to handle.
+
+The fault sits in the GRBM block itself: the counting window, the perfmon
+arming, the packet execution and the read-back have all been verified working,
+and during a burst the block is correctly armed and correctly programmed for the
+counter requested, indistinguishable from a healthy dispatch. What is left is a
+counter that does not advance, and why it does not is still unknown. It is at
+least not a matter of some other consumer of GPU utilization telemetry claiming
+the block — profiling alongside a Windows utilization monitor that samples
+continuously produced no affected sessions at all, the opposite of what
+competition for the counter slots would predict.
+
+Nothing under your control changes the odds: the rate does not vary with the
+number or combination of counters requested, with dispatch duration, with a
+dispatch's position in the session, or with how long the GPU sat idle
+beforehand. It does drift over time, though, and affected sessions arrive in
+clusters rather than independently — across roughly an hour of continuous
+profiling it moved between zero and about one session in ten. A short run that
+sees no zeros therefore does not establish that a machine is unaffected, and one
+that sees several does not mean it is unusually bad.
+
+SQ counters are not completely immune to a zero read-back — 0.10 percent of
+dispatches showed one — but those are always isolated single dispatches rather
+than an opening burst, so the GRBM behavior is a distinct effect.
+
+Behavior that is not a defect
+=============================
+
+Two observations are easy to mistake for WSL2 gaps and are worth stating
+explicitly.
+
+The memory copy CSV has no byte-count column. Its columns are ``Kind``,
+``Direction``, ``Stream_Id``, ``Source_Agent_Id``, ``Destination_Agent_Id``,
+``Correlation_Id``, ``Start_Timestamp`` and ``End_Timestamp``. That is the
+upstream schema on every platform, not something WSL2 drops. Byte counts are
+available from the rocpd output, in ``rocpd_memory_copy.size``:
+
+.. code-block:: bash
+
+   rocprofv3 --memory-copy-trace --output-format rocpd -d ./out -o results -- ./my_application
+
+Device-to-device copies within the same device do not appear in the memory copy
+trace. HIP implements them as a blit kernel rather than as an SDMA copy, so they
+appear in the kernel trace as ``__amd_rocclr_copyBuffer``. Copies that cross
+agents are unaffected.
+
+Not covered on WSL2
+===================
+
+PC sampling, thread trace (ATT) and SPM are not covered by this page and were
+not verified in this configuration. Those paths reach the GPU through KFD
+interfaces that WSL2 does not expose, and ROCprofiler-SDK gates them on the
+presence of the KFD device.
 
 .. _wsl-agent-discovery:
 
@@ -56,107 +331,63 @@ becomes visible through ``rocprofiler_query_available_agents()``:
   firmware versions and the gfx target — through the same interface the HSA
   runtime itself uses on ``/dev/dxg`` systems.
 
-ROCprofiler-SDK loads ``librocdxg.so`` at run time with ``dlopen`` (reusing the
-copy the HSA runtime already loaded when there is one), so no build-time
-configuration is required and no separate link dependency exists. Pre-HSA
-consumers such as ``rocprofv3-avail`` and tool initialization get the same
-complete records as a profiling run: agent records are built once, at
-enumeration time, and are never modified afterwards.
+ROCprofiler-SDK loads ``librocdxg.so`` at run time with ``dlopen``, reusing the
+copy the HSA runtime already loaded when there is one, so no build-time
+configuration and no link dependency are involved. Records are built once, at
+enumeration time, and are never modified afterwards, so pre-HSA consumers such
+as ``rocprofv3-avail`` see the same complete records as a profiling run.
 
 Each adapter is paired with its KMT node by Windows LUID. The PCI device id is
-only a fallback for the nodes a LUID cannot speak for, and it has to identify
-exactly one of them: two identical GPUs that report no LUID cannot be told
-apart, so both are omitted with a diagnostic rather than one being guessed at.
-Each node is claimed by at most one adapter. An adapter with no matching node,
-or whose node reports an incomplete topology, is likewise logged and omitted
-rather than published with placeholder values.
+only a fallback for nodes that report no LUID, and it has to identify exactly
+one of them: two identical GPUs that report no LUID cannot be told apart, so
+both are omitted with a diagnostic rather than one being guessed at. Each node
+is claimed by at most one adapter. An adapter with no matching node, or whose
+node reports an incomplete topology, is likewise logged and omitted rather than
+published with placeholder values.
 
-Version requirement
--------------------
+The read uses the thunk's ordinary KMT entry points — ``hsaKmtOpenKFD``,
+``hsaKmtAcquireSystemProperties``, ``hsaKmtGetNodeProperties``,
+``hsaKmtReleaseSystemProperties`` and ``hsaKmtCloseKFD``. All of them must
+resolve before any of them is called, so a thunk missing one is refused, with
+the missing symbol named, before anything is opened.
 
-``DxgGetNodeTopology`` is a hard requirement, not a preference. There is no
-fallback to the older ``hsaKmtGetNodeProperties`` path. It reports the same
-data, but it exchanges a full ``HsaNodeProperties``: an internal runtime
-structure that has grown (364 bytes to 396) and has also been rearranged at an
-unchanged size, carrying no size parameter for a caller to check either against.
-``librocdxg`` is resolved at run time and can come from a different ROCm package
-than this build, where a mismatch would silently overrun the caller's buffer or
-misread its fields — and a size comparison would not even see the reordering.
+When agents are missing
+-----------------------
 
-Taking the topology snapshot needs no new entry point. ROCprofiler-SDK uses
-``hsaKmtAcquireSystemProperties`` and ``hsaKmtReleaseSystemProperties``, which
-``librocdxg`` has exported all along. What is new is that it reference-counts
-them, so the snapshot this read runs against is the same one the HSA runtime
-holds and neither consumer can drop it out from under the other. That refcount
-arrived together with ``DxgGetNodeTopology``, and every entry point is required
-before any of them is called, so a ``librocdxg`` predating it — one that would
-drop the snapshot on the first release — is refused before anything is
-acquired.
+A ``librocdxg`` that does not export what the read needs, or that fails the
+layout handshake, yields **no GPU agents at all** in ROCprofiler-SDK. This is
+visible rather than silent, but it is not harmless: the HSA runtime loads the
+same thunk and still reports its GPUs, so ROCprofiler-SDK and HSA disagree about
+which agents exist. Partially described topologies land in the same place — the
+GPU that could be described is published and the other is omitted, while HSA
+keeps reporting both.
 
-Compatibility is settled one call at a time. Each ``DxgGetNodeTopology`` reply
-states the ABI version it was written to and how many bytes were written, and
-a record that does not match what this build expects is discarded. Nothing is
-negotiated once for the process as a whole, so reading the topology never
-changes what the HSA runtime — which has the same thunk open in the same
-process — subsequently sees.
-
-A ``librocdxg`` that predates this ABI, or one whose records this build cannot
-interpret, therefore yields **no GPU agents at all**. That is not harmless: the
-HSA runtime loads the same thunk and still reports its GPUs, so rocprofiler-SDK
-and HSA disagree about which agents exist.
-
-Partially described topologies land in the same place. If one of two adapters
-reports no LUID, is ambiguous against its node, or describes an incomplete
-topology, rocprofiler-SDK publishes the GPU it could describe and omits the
-other, while HSA keeps reporting both.
-
-On WSL, agent records are paired with HSA agents by the real KMT node id the
-thunk reported, so the GPUs that were published stay correctly paired no matter
-which ones were omitted — the mapping never falls back to a dense ordinal that
-would silently pair a published GPU with the wrong HSA agent. HSA GPUs left
-without a counterpart are reported as an unsupported-profiling condition naming
-their KMT node ids: profiling is unavailable on those GPUs, the ones that did
-pair remain fully profilable, and the application under test keeps running. It
-is not treated as the fatal internal inconsistency the equivalent mismatch means
-on bare metal, where rocprofiler-SDK and HSA read the same KFD sysfs tree and
-cannot legitimately disagree. The log names the symbol, ABI version or adapter
-that was rejected; the fix is to update the WSL ROCm runtime package to one
-matching this rocprofiler-SDK.
-
-Overriding ``librocdxg`` at run time
-------------------------------------
-
-A newer ``librocdxg`` can be put ahead of the installed one on the loader search
-path instead of replacing the system package. ROCprofiler-SDK asks ``dlopen``
-for the unversioned ``librocdxg.so``, so the override has to be reachable under
-that name and under the usual chain of version links — a directory of correctly
-named symlinks, placed first on ``LD_LIBRARY_PATH``:
-
-.. code-block:: shell
-
-   mkdir -p /tmp/dxg-lib
-   ln -sf /path/to/newer/librocdxg.so.1.2.2 /tmp/dxg-lib/librocdxg.so.1.2.2
-   ln -sf librocdxg.so.1.2.2 /tmp/dxg-lib/librocdxg.so.1
-   ln -sf librocdxg.so.1 /tmp/dxg-lib/librocdxg.so
-   export LD_LIBRARY_PATH=/tmp/dxg-lib:${LD_LIBRARY_PATH}
-
-Adjust the version suffix to match the library that was built. Preloading by
-bare name — ``LD_PRELOAD=librocdxg.so`` — works as well, because the loader
-still resolves the name through an ordinary search.
-
-.. warning::
-
-   Preloading by absolute path — ``LD_PRELOAD=/path/to/librocdxg.so.1.2.2`` —
-   does **not** work, even though the preload itself succeeds. glibc registers a
-   preloaded object under the path it was given and under that object's
-   ``SONAME``, ``librocdxg.so.1``. ROCprofiler-SDK requests ``librocdxg.so``,
-   which matches neither string, so the loader falls through to a path search
-   and quietly loads a second, stock copy. The symptom is that the
-   ``does not export DxgGetNodeTopology`` warnings persist and no GPU agents
-   appear, even though the newer library is demonstrably loaded in the process.
+Agent records are paired with HSA agents by the KMT node id the thunk reported,
+never by a dense ordinal, so the GPUs that were published stay correctly paired
+no matter which ones were omitted. HSA GPUs left without a counterpart are
+reported as an unsupported-profiling condition naming their KMT node ids:
+profiling is unavailable on those GPUs, the ones that did pair remain fully
+profilable, and the application under test keeps running. The log names the
+symbol or adapter that was rejected; the fix is to bring the WSL ROCm runtime
+package and ROCprofiler-SDK back into a matched pair.
 
 Environment variables
-======================
+=====================
+
+``HSA_TOOLS_DISABLE_REGISTER``
+   An existing HSA runtime variable that disables tool registration when it
+   reads ``1``, leaving rocprofiler-register without an HSA API table to
+   intercept. On WSL2 it must be set to ``0``: the DXG path disables
+   registration by default, but only while the variable is unset, so binding it
+   to ``0`` both suppresses that default and asks for registration. With the
+   variable unset, or set to ``1``, ``rocprofv3`` produces no output files at
+   all.
+
+``HSA_ENABLE_DXG_DETECTION``
+   An HSA runtime variable. Current builds enable DXG detection unless this is
+   explicitly set to ``0``; stock ROCm 7.2.x packages require ``1`` to be set,
+   and otherwise fail ``hsa_init()`` and report ``no supported GPU devices``.
+   Setting it to ``0`` disables the DXG path on any build.
 
 .. _wsl-vendor-packet:
 
@@ -164,37 +395,23 @@ Environment variables
    Gates whether the libhsakmt DXG path honors the vendor-specific PM4 IB
    packets that AQLprofile emits for hardware counter collection. When unset
    (the libhsakmt default), the embedded PM4 IB is silently dropped and every
-   ``Counter_Value`` reads back zero. ROCprofiler-SDK **enables this
-   automatically** (sets it to ``1`` when it detects a WSL GPU environment),
-   using a non-overwriting write so an explicit user setting always wins. You
-   normally do not need to set it yourself; export ``WSLKMT_VENDOR_PACKET=0``
-   to opt out.
+   ``Counter_Value`` reads back zero. ROCprofiler-SDK sets it to ``1``
+   automatically when it detects a WSL GPU environment, using a non-overwriting
+   write so an explicit user setting always wins. You normally do not need to
+   set it; export ``WSLKMT_VENDOR_PACKET=0`` to opt out.
 
 ``ROCPROFILER_FORCE_GFX``
-   Overrides the GPU's ``gfx`` target name used to look up the counter
-   definitions (``config.yaml`` is keyed by gfx target). The target normally
-   comes from the KMT node's engine id, which already honors the HSA runtime's
-   own ``HSA_OVERRIDE_GFX_VERSION``; set this variable to override both. The
-   value is validated and must be of the form ``gfx<NNN>`` with at least three
-   decimal digits; a malformed value is ignored with a warning and the
-   node-reported target is used.
+   Overrides the ``gfx`` target name used to look up counter definitions
+   (``config.yaml`` is keyed by gfx target). The target normally comes from the
+   KMT node's engine id, which already honors the HSA runtime's own
+   ``HSA_OVERRIDE_GFX_VERSION``; set this variable to override both. The value
+   must be of the form ``gfx<NNN>`` with at least three decimal digits; a
+   malformed value is ignored with a warning and the node-reported target is
+   used.
 
-``HSA_ENABLE_DXG_DETECTION``
-   An HSA runtime variable rather than a ROCprofiler-SDK one, but a
-   prerequisite for everything on this page. ROCr only enables DXG detection by
-   default since upstream commit ``901f9a5`` ("rocr: Enable DXG detection by
-   default", PR #3863); before that it was opt-in. On a ROCm release predating
-   that commit — ROCm 7.2.4, which ships ROCr 1.18, is one — ``hsa_init()``
-   fails with status ``4104`` unless ``HSA_ENABLE_DXG_DETECTION=1`` is set, and
-   every tool then reports ``no supported GPU devices``, which reads like absent
-   hardware rather than a configuration gap. Export it from ``~/.profile`` or
-   from the job script rather than from ``~/.bashrc``: Ubuntu's default
-   ``.bashrc`` returns early for non-interactive shells, so scripts and CI would
-   never see it.
-
-.. note::
-
-   On WSL2 you may also need to prepend the ROCprofiler-SDK build's ``lib/``
-   directory to ``LD_LIBRARY_PATH`` so the loader resolves the matching
-   ROCprofiler-SDK and HSA libraries instead of an older system install under
-   ``/opt/rocm``.
+``ROCPROFILER_FORCE_PLATFORM``
+   Overrides platform autodetection, which otherwise selects the KFD enumerator
+   when KFD sysfs is present and the WSL enumerator when ``/dev/dxg`` and
+   ``libdxcore.so`` are. Accepts ``gnulinux`` or ``wsl`` on Linux; a value not
+   built into the binary is logged and ignored. This is a diagnostic escape
+   hatch and is not needed in normal use.
