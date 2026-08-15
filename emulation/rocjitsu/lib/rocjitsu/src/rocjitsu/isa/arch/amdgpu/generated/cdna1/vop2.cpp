@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna1 {
@@ -57,6 +58,12 @@ VCndmaskB32Vop2::VCndmaskB32Vop2(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCndmaskB32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VCndmaskB32Vop2>(opcode);
+}
+} // namespace detail
+
 VAddF32Vop2::VAddF32Vop2(const MachineInst *inst)
     : Vop2("v_add_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddF32Vop2)),
@@ -98,6 +105,12 @@ VAddF32Vop2::VAddF32Vop2(const MachineInst *inst)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddF32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VAddF32Vop2>(opcode);
+}
+} // namespace detail
 
 VSubF32Vop2::VSubF32Vop2(const MachineInst *inst)
     : Vop2("v_sub_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -141,6 +154,12 @@ VSubF32Vop2::VSubF32Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubF32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VSubF32Vop2>(opcode);
+}
+} // namespace detail
+
 VSubrevF32Vop2::VSubrevF32Vop2(const MachineInst *inst)
     : Vop2("v_subrev_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubrevF32Vop2)),
@@ -182,6 +201,12 @@ VSubrevF32Vop2::VSubrevF32Vop2(const MachineInst *inst)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubrevF32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VSubrevF32Vop2>(opcode);
+}
+} // namespace detail
 
 VMulLegacyF32Vop2::VMulLegacyF32Vop2(const MachineInst *inst)
     : Vop2("v_mul_legacy_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -225,6 +250,12 @@ VMulLegacyF32Vop2::VMulLegacyF32Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulLegacyF32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMulLegacyF32Vop2>(opcode);
+}
+} // namespace detail
+
 VMulF32Vop2::VMulF32Vop2(const MachineInst *inst)
     : Vop2("v_mul_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulF32Vop2)),
@@ -266,6 +297,12 @@ VMulF32Vop2::VMulF32Vop2(const MachineInst *inst)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulF32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMulF32Vop2>(opcode);
+}
+} // namespace detail
 
 VMulI32I24Vop2::VMulI32I24Vop2(const MachineInst *inst)
     : Vop2("v_mul_i32_i24_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -309,6 +346,12 @@ VMulI32I24Vop2::VMulI32I24Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulI32I24Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMulI32I24Vop2>(opcode);
+}
+} // namespace detail
+
 VMulHiI32I24Vop2::VMulHiI32I24Vop2(const MachineInst *inst)
     : Vop2("v_mul_hi_i32_i24_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulHiI32I24Vop2)),
@@ -350,6 +393,12 @@ VMulHiI32I24Vop2::VMulHiI32I24Vop2(const MachineInst *inst)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulHiI32I24Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMulHiI32I24Vop2>(opcode);
+}
+} // namespace detail
 
 VMulU32U24Vop2::VMulU32U24Vop2(const MachineInst *inst)
     : Vop2("v_mul_u32_u24_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -393,6 +442,12 @@ VMulU32U24Vop2::VMulU32U24Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulU32U24Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMulU32U24Vop2>(opcode);
+}
+} // namespace detail
+
 VMulHiU32U24Vop2::VMulHiU32U24Vop2(const MachineInst *inst)
     : Vop2("v_mul_hi_u32_u24_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulHiU32U24Vop2)),
@@ -434,6 +489,12 @@ VMulHiU32U24Vop2::VMulHiU32U24Vop2(const MachineInst *inst)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulHiU32U24Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMulHiU32U24Vop2>(opcode);
+}
+} // namespace detail
 
 VMinF32Vop2::VMinF32Vop2(const MachineInst *inst)
     : Vop2("v_min_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -477,6 +538,12 @@ VMinF32Vop2::VMinF32Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinF32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMinF32Vop2>(opcode);
+}
+} // namespace detail
+
 VMaxF32Vop2::VMaxF32Vop2(const MachineInst *inst)
     : Vop2("v_max_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxF32Vop2)),
@@ -518,6 +585,12 @@ VMaxF32Vop2::VMaxF32Vop2(const MachineInst *inst)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxF32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMaxF32Vop2>(opcode);
+}
+} // namespace detail
 
 VMinI32Vop2::VMinI32Vop2(const MachineInst *inst)
     : Vop2("v_min_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -561,6 +634,12 @@ VMinI32Vop2::VMinI32Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinI32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMinI32Vop2>(opcode);
+}
+} // namespace detail
+
 VMaxI32Vop2::VMaxI32Vop2(const MachineInst *inst)
     : Vop2("v_max_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxI32Vop2)),
@@ -602,6 +681,12 @@ VMaxI32Vop2::VMaxI32Vop2(const MachineInst *inst)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxI32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMaxI32Vop2>(opcode);
+}
+} // namespace detail
 
 VMinU32Vop2::VMinU32Vop2(const MachineInst *inst)
     : Vop2("v_min_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -645,6 +730,12 @@ VMinU32Vop2::VMinU32Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinU32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMinU32Vop2>(opcode);
+}
+} // namespace detail
+
 VMaxU32Vop2::VMaxU32Vop2(const MachineInst *inst)
     : Vop2("v_max_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxU32Vop2)),
@@ -686,6 +777,12 @@ VMaxU32Vop2::VMaxU32Vop2(const MachineInst *inst)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxU32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMaxU32Vop2>(opcode);
+}
+} // namespace detail
 
 VLshrrevB32Vop2::VLshrrevB32Vop2(const MachineInst *inst)
     : Vop2("v_lshrrev_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -729,6 +826,12 @@ VLshrrevB32Vop2::VLshrrevB32Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLshrrevB32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VLshrrevB32Vop2>(opcode);
+}
+} // namespace detail
+
 VAshrrevI32Vop2::VAshrrevI32Vop2(const MachineInst *inst)
     : Vop2("v_ashrrev_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAshrrevI32Vop2)),
@@ -770,6 +873,12 @@ VAshrrevI32Vop2::VAshrrevI32Vop2(const MachineInst *inst)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAshrrevI32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VAshrrevI32Vop2>(opcode);
+}
+} // namespace detail
 
 VLshlrevB32Vop2::VLshlrevB32Vop2(const MachineInst *inst)
     : Vop2("v_lshlrev_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -813,6 +922,12 @@ VLshlrevB32Vop2::VLshlrevB32Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLshlrevB32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VLshlrevB32Vop2>(opcode);
+}
+} // namespace detail
+
 VAndB32Vop2::VAndB32Vop2(const MachineInst *inst)
     : Vop2("v_and_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAndB32Vop2)),
@@ -854,6 +969,12 @@ VAndB32Vop2::VAndB32Vop2(const MachineInst *inst)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAndB32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VAndB32Vop2>(opcode);
+}
+} // namespace detail
 
 VOrB32Vop2::VOrB32Vop2(const MachineInst *inst)
     : Vop2("v_or_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -897,6 +1018,12 @@ VOrB32Vop2::VOrB32Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVOrB32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VOrB32Vop2>(opcode);
+}
+} // namespace detail
+
 VXorB32Vop2::VXorB32Vop2(const MachineInst *inst)
     : Vop2("v_xor_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VXorB32Vop2)),
@@ -939,6 +1066,12 @@ VXorB32Vop2::VXorB32Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVXorB32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VXorB32Vop2>(opcode);
+}
+} // namespace detail
+
 VMacF32Vop2::VMacF32Vop2(const MachineInst *inst)
     : Vop2("v_mac_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMacF32Vop2)),
@@ -967,6 +1100,12 @@ VMacF32Vop2::VMacF32Vop2(const MachineInst *inst)
     throw util::InvalidInst("V_MAC_F32 does not support SDWA", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMacF32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMacF32Vop2>(opcode);
+}
+} // namespace detail
+
 VMadmkF32Vop2::VMadmkF32Vop2(const MachineInst *inst)
     : Vop2("v_madmk_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMadmkF32Vop2)),
@@ -993,6 +1132,12 @@ VMadmkF32Vop2::VMadmkF32Vop2(const MachineInst *inst)
     throw util::InvalidInst("V_MADMK_F32 does not support SDWA", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadmkF32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMadmkF32Vop2>(opcode);
+}
+} // namespace detail
+
 VMadakF32Vop2::VMadakF32Vop2(const MachineInst *inst)
     : Vop2("v_madak_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMadakF32Vop2)),
@@ -1018,6 +1163,12 @@ VMadakF32Vop2::VMadakF32Vop2(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
     throw util::InvalidInst("V_MADAK_F32 does not support SDWA", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadakF32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMadakF32Vop2>(opcode);
+}
+} // namespace detail
 
 VAddCoU32Vop2::VAddCoU32Vop2(const MachineInst *inst)
     : Vop2("v_add_co_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1064,6 +1215,12 @@ VAddCoU32Vop2::VAddCoU32Vop2(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddCoU32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VAddCoU32Vop2>(opcode);
+}
+} // namespace detail
+
 VSubCoU32Vop2::VSubCoU32Vop2(const MachineInst *inst)
     : Vop2("v_sub_co_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubCoU32Vop2)),
@@ -1109,6 +1266,12 @@ VSubCoU32Vop2::VSubCoU32Vop2(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubCoU32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VSubCoU32Vop2>(opcode);
+}
+} // namespace detail
+
 VSubrevCoU32Vop2::VSubrevCoU32Vop2(const MachineInst *inst)
     : Vop2("v_subrev_co_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubrevCoU32Vop2)),
@@ -1153,6 +1316,12 @@ VSubrevCoU32Vop2::VSubrevCoU32Vop2(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubrevCoU32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VSubrevCoU32Vop2>(opcode);
+}
+} // namespace detail
 
 VAddcCoU32Vop2::VAddcCoU32Vop2(const MachineInst *inst)
     : Vop2("v_addc_co_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1202,6 +1371,12 @@ VAddcCoU32Vop2::VAddcCoU32Vop2(const MachineInst *inst)
   vcc_in.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddcCoU32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VAddcCoU32Vop2>(opcode);
+}
+} // namespace detail
+
 VSubbCoU32Vop2::VSubbCoU32Vop2(const MachineInst *inst)
     : Vop2("v_subb_co_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubbCoU32Vop2)),
@@ -1249,6 +1424,12 @@ VSubbCoU32Vop2::VSubbCoU32Vop2(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
   vcc_in.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubbCoU32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VSubbCoU32Vop2>(opcode);
+}
+} // namespace detail
 
 VSubbrevCoU32Vop2::VSubbrevCoU32Vop2(const MachineInst *inst)
     : Vop2("v_subbrev_co_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1298,6 +1479,12 @@ VSubbrevCoU32Vop2::VSubbrevCoU32Vop2(const MachineInst *inst)
   vcc_in.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubbrevCoU32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VSubbrevCoU32Vop2>(opcode);
+}
+} // namespace detail
+
 VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
     : Vop2("v_add_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddF16Vop2)),
@@ -1340,6 +1527,12 @@ VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddF16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VAddF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VAddF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -1390,6 +1583,12 @@ VSubF16Vop2::VSubF16Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubF16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VSubF16Vop2>(opcode);
+}
+} // namespace detail
+
 void VSubF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1438,6 +1637,12 @@ VSubrevF16Vop2::VSubrevF16Vop2(const MachineInst *inst)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubrevF16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VSubrevF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VSubrevF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -1488,6 +1693,12 @@ VMulF16Vop2::VMulF16Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulF16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMulF16Vop2>(opcode);
+}
+} // namespace detail
+
 void VMulF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1523,6 +1734,12 @@ VMacF16Vop2::VMacF16Vop2(const MachineInst *inst)
     throw util::InvalidInst("V_MAC_F16 does not support SDWA", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMacF16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMacF16Vop2>(opcode);
+}
+} // namespace detail
+
 void VMacF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1557,6 +1774,12 @@ VMadmkF16Vop2::VMadmkF16Vop2(const MachineInst *inst)
     throw util::InvalidInst("V_MADMK_F16 does not support SDWA", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadmkF16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMadmkF16Vop2>(opcode);
+}
+} // namespace detail
+
 void VMadmkF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1590,6 +1813,12 @@ VMadakF16Vop2::VMadakF16Vop2(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
     throw util::InvalidInst("V_MADAK_F16 does not support SDWA", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadakF16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMadakF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VMadakF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -1640,6 +1869,12 @@ VAddU16Vop2::VAddU16Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddU16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VAddU16Vop2>(opcode);
+}
+} // namespace detail
+
 void VAddU16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1688,6 +1923,12 @@ VSubU16Vop2::VSubU16Vop2(const MachineInst *inst)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubU16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VSubU16Vop2>(opcode);
+}
+} // namespace detail
 
 void VSubU16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -1738,6 +1979,12 @@ VSubrevU16Vop2::VSubrevU16Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubrevU16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VSubrevU16Vop2>(opcode);
+}
+} // namespace detail
+
 void VSubrevU16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1786,6 +2033,12 @@ VMulLoU16Vop2::VMulLoU16Vop2(const MachineInst *inst)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulLoU16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMulLoU16Vop2>(opcode);
+}
+} // namespace detail
 
 void VMulLoU16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -1836,6 +2089,12 @@ VLshlrevB16Vop2::VLshlrevB16Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLshlrevB16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VLshlrevB16Vop2>(opcode);
+}
+} // namespace detail
+
 void VLshlrevB16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1884,6 +2143,12 @@ VLshrrevB16Vop2::VLshrrevB16Vop2(const MachineInst *inst)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVLshrrevB16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VLshrrevB16Vop2>(opcode);
+}
+} // namespace detail
 
 void VLshrrevB16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -1934,6 +2199,12 @@ VAshrrevI16Vop2::VAshrrevI16Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAshrrevI16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VAshrrevI16Vop2>(opcode);
+}
+} // namespace detail
+
 void VAshrrevI16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1982,6 +2253,12 @@ VMaxF16Vop2::VMaxF16Vop2(const MachineInst *inst)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxF16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMaxF16Vop2>(opcode);
+}
+} // namespace detail
 
 void VMaxF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -2032,6 +2309,12 @@ VMinF16Vop2::VMinF16Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinF16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMinF16Vop2>(opcode);
+}
+} // namespace detail
+
 void VMinF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2080,6 +2363,12 @@ VMaxU16Vop2::VMaxU16Vop2(const MachineInst *inst)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxU16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMaxU16Vop2>(opcode);
+}
+} // namespace detail
 
 void VMaxU16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -2130,6 +2419,12 @@ VMaxI16Vop2::VMaxI16Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxI16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMaxI16Vop2>(opcode);
+}
+} // namespace detail
+
 void VMaxI16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2178,6 +2473,12 @@ VMinU16Vop2::VMinU16Vop2(const MachineInst *inst)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinU16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMinU16Vop2>(opcode);
+}
+} // namespace detail
 
 void VMinU16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
@@ -2228,6 +2529,12 @@ VMinI16Vop2::VMinI16Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinI16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VMinI16Vop2>(opcode);
+}
+} // namespace detail
+
 void VMinI16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2277,6 +2584,12 @@ VLdexpF16Vop2::VLdexpF16Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLdexpF16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VLdexpF16Vop2>(opcode);
+}
+} // namespace detail
+
 void VLdexpF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2325,6 +2638,12 @@ VAddU32Vop2::VAddU32Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddU32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VAddU32Vop2>(opcode);
+}
+} // namespace detail
+
 VSubU32Vop2::VSubU32Vop2(const MachineInst *inst)
     : Vop2("v_sub_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubU32Vop2)),
@@ -2366,6 +2685,12 @@ VSubU32Vop2::VSubU32Vop2(const MachineInst *inst)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubU32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VSubU32Vop2>(opcode);
+}
+} // namespace detail
 
 VSubrevU32Vop2::VSubrevU32Vop2(const MachineInst *inst)
     : Vop2("v_subrev_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2409,6 +2734,12 @@ VSubrevU32Vop2::VSubrevU32Vop2(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubrevU32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VSubrevU32Vop2>(opcode);
+}
+} // namespace detail
+
 VDot2cF32F16Vop2::VDot2cF32F16Vop2(const MachineInst *inst)
     : Vop2("v_dot2c_f32_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDot2cF32F16Vop2)),
@@ -2436,6 +2767,12 @@ VDot2cF32F16Vop2::VDot2cF32F16Vop2(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
     throw util::InvalidInst("V_DOT2C_F32_F16 does not support SDWA", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot2cF32F16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VDot2cF32F16Vop2>(opcode);
+}
+} // namespace detail
 
 VDot2cI32I16Vop2::VDot2cI32I16Vop2(const MachineInst *inst)
     : Vop2("v_dot2c_i32_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2465,6 +2802,12 @@ VDot2cI32I16Vop2::VDot2cI32I16Vop2(const MachineInst *inst)
     throw util::InvalidInst("V_DOT2C_I32_I16 does not support SDWA", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot2cI32I16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VDot2cI32I16Vop2>(opcode);
+}
+} // namespace detail
+
 VDot4cI32I8Vop2::VDot4cI32I8Vop2(const MachineInst *inst)
     : Vop2("v_dot4c_i32_i8_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDot4cI32I8Vop2)),
@@ -2492,6 +2835,12 @@ VDot4cI32I8Vop2::VDot4cI32I8Vop2(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
     throw util::InvalidInst("V_DOT4C_I32_I8 does not support SDWA", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot4cI32I8Vop2(const MachineInst *opcode) {
+  return std::make_unique<VDot4cI32I8Vop2>(opcode);
+}
+} // namespace detail
 
 VDot8cI32I4Vop2::VDot8cI32I4Vop2(const MachineInst *inst)
     : Vop2("v_dot8c_i32_i4_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2521,6 +2870,12 @@ VDot8cI32I4Vop2::VDot8cI32I4Vop2(const MachineInst *inst)
     throw util::InvalidInst("V_DOT8C_I32_I4 does not support SDWA", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot8cI32I4Vop2(const MachineInst *opcode) {
+  return std::make_unique<VDot8cI32I4Vop2>(opcode);
+}
+} // namespace detail
+
 VFmacF32Vop2::VFmacF32Vop2(const MachineInst *inst)
     : Vop2("v_fmac_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFmacF32Vop2)),
@@ -2549,6 +2904,12 @@ VFmacF32Vop2::VFmacF32Vop2(const MachineInst *inst)
     throw util::InvalidInst("V_FMAC_F32 does not support SDWA", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFmacF32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VFmacF32Vop2>(opcode);
+}
+} // namespace detail
+
 VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst)
     : Vop2("v_pk_fmac_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPkFmacF16Vop2)),
@@ -2576,6 +2937,12 @@ VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst)
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
     throw util::InvalidInst("V_PK_FMAC_F16 does not support SDWA", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkFmacF16Vop2(const MachineInst *opcode) {
+  return std::make_unique<VPkFmacF16Vop2>(opcode);
+}
+} // namespace detail
 
 VXnorB32Vop2::VXnorB32Vop2(const MachineInst *inst)
     : Vop2("v_xnor_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2618,6 +2985,12 @@ VXnorB32Vop2::VXnorB32Vop2(const MachineInst *inst)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVXnorB32Vop2(const MachineInst *opcode) {
+  return std::make_unique<VXnorB32Vop2>(opcode);
+}
+} // namespace detail
 
 } // namespace cdna1
 } // namespace rocjitsu

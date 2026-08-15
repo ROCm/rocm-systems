@@ -52,7 +52,8 @@ typedef enum {
   NCCL_PROFILE = 0x4000,
   NCCL_RAS = 0x8000,
   NCCL_DESTROY = 0x10000,
-  NCCL_VERBS = 0x20000,
+  NCCL_ALLOC_HOST = 0x20000,
+  NCCL_VERBS = 0x40000, // RCCL-only: relocated to avoid collision with upstream NCCL_ALLOC_HOST at 0x20000
   NCCL_ALL = ~0
 } ncclDebugLogSubSys;
 
