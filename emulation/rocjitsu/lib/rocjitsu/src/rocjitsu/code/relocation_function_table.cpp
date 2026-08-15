@@ -18,6 +18,7 @@
 #include <span>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -296,6 +297,79 @@ void run_pair_dataflow(std::span<const std::unique_ptr<BasicBlock>> blocks,
 }
 
 } // namespace
+
+bool object_defines_only_kernels(const AmdGpuCodeObject &object) {
+  // The suffix AMDHSA gives a kernel's descriptor object, matching amdgpu_code_object.cpp and
+  // kernel_symbol.cpp rather than restating the contract in a third place.
+  constexpr std::string_view kKernelDescriptorSymbolSuffix = ".kd";
+  const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
+  const std::span<const uint8_t> image(bytes, object.image_size());
+  Elf64_Ehdr ehdr{};
+  if (!read_object(image, 0, ehdr) || ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
+      !range_in_image(image, ehdr.e_shoff,
+                      static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr)))
+    return false;
+
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+
+  if (object.text_sections().size() != 1)
+    return false;
+  const Section &text = *object.text_sections().front();
+  const auto text_index = text_section_index(sections, text);
+  if (!text_index)
+    return false;
+
+  // One symbol's name, bounded at the end of its string table so an unterminated string cannot
+  // run past it.
+  const auto name_at = [&](const Elf64_Shdr &strtab, uint32_t offset) -> std::string_view {
+    if (strtab.sh_type != SHT_STRTAB || !range_in_image(image, strtab.sh_offset, strtab.sh_size) ||
+        offset >= strtab.sh_size)
+      return {};
+    const char *first = reinterpret_cast<const char *>(image.data() + strtab.sh_offset + offset);
+    const size_t bound = static_cast<size_t>(strtab.sh_size - offset);
+    return std::string_view(first, ::strnlen(first, bound));
+  };
+
+  // The two tables have different string tables, so gather every descriptor name across both
+  // before asking whether a function has one: a function is a kernel if a descriptor for it
+  // exists anywhere in the object, not merely in the table that happens to name the function.
+  std::unordered_set<std::string_view> descriptor_names;
+  std::vector<std::string_view> function_names;
+  bool saw_symbol_table = false;
+  for (const Elf64_Shdr &symtab : sections) {
+    if ((symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) ||
+        symtab.sh_entsize != sizeof(Elf64_Sym) ||
+        !range_in_image(image, symtab.sh_offset, symtab.sh_size))
+      continue;
+    if (symtab.sh_link >= sections.size())
+      return false;
+    const Elf64_Shdr &strtab = sections[symtab.sh_link];
+    saw_symbol_table = true;
+    const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Sym symbol{};
+      if (!read_object(image, symtab.sh_offset + index * sizeof(Elf64_Sym), symbol))
+        return false;
+      const std::string_view name = name_at(strtab, symbol.st_name);
+      if (name.empty())
+        continue;
+      if (name.ends_with(kKernelDescriptorSymbolSuffix)) {
+        descriptor_names.insert(name.substr(0, name.size() - kKernelDescriptorSymbolSuffix.size()));
+        continue;
+      }
+      if (elf_symbol_type(symbol.st_info) == kElfSymbolTypeFunc && symbol.st_size != 0 &&
+          symbol.st_shndx == *text_index) {
+        function_names.push_back(name);
+      }
+    }
+  }
+  if (!saw_symbol_table)
+    return false;
+
+  return std::ranges::all_of(
+      function_names, [&](std::string_view name) { return descriptor_names.contains(name); });
+}
 
 std::vector<uint64_t> discover_text_function_symbol_offsets(const AmdGpuCodeObject &object) {
   const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());

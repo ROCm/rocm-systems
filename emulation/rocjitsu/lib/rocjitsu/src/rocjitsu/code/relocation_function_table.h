@@ -161,6 +161,23 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object);
 [[nodiscard]] std::vector<uint64_t>
 discover_text_function_symbol_offsets(const AmdGpuCodeObject &object);
 
+/// @brief Whether every sized `STT_FUNC` in `.text` is an AMDHSA kernel.
+///
+/// @details A kernel is `<name>` with a companion `<name>.kd` descriptor object; a device function
+/// has no companion. When this holds the object defines no device-function body, so a pointer
+/// reaching an indirect transfer can only name a body in another code object -- and this
+/// translation has none of its own to adopt as a root, retarget, or grow a descriptor for.
+///
+/// This is a scope fence, not a soundness argument. It bounds what admitting an unproven transfer
+/// would own; the proof that such a target is already relocated has to come from the transfer's
+/// own operand. It is vacuously true for an object with no such symbol, so it must never be the
+/// only gate.
+///
+/// @returns True when no sized `.text` `STT_FUNC` lacks a `<name>.kd`. False when the symbol
+/// tables cannot be read -- unlike its siblings here, an object this cannot inspect must not earn
+/// the fence.
+[[nodiscard]] bool object_defines_only_kernels(const AmdGpuCodeObject &object);
+
 /// @brief Function entries named by an `R_AMDGPU_RELATIVE64` addend landing in `.text`.
 ///
 /// @details Each such addend is a stored function pointer, so its target is an address-taken body

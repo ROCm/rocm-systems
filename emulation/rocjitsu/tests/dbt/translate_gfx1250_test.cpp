@@ -2490,8 +2490,9 @@ TEST(BinaryTranslatorE2E, Gfx1250KeepsDirectlyCalledHelperThatIsAlsoAddressTaken
       rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),   // word 5: return
   };
 
-  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
-      words, /*kernel1_entry_word=*/2, {{.offset_word = 4, .words = 2}});
+  auto image =
+      rocjitsu::test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
+          words, /*kernel1_entry_word=*/2, {{.offset_word = 4, .words = 2}});
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
 
@@ -2601,10 +2602,12 @@ TEST(BinaryTranslatorE2E, Gfx1250SizedFunctionSymbolEndingInsideMarkedWindowKeep
 
   // The window is regenerated at its reserved size, so the symbol keeps its four words. Mapping
   // the extent to kernel_text.size() instead would report the whole window and round st_size up.
-  const auto first_symbol = rocjitsu::test_support::find_elf_symbol_for_test(first.elf_bytes, "kernel");
+  const auto first_symbol =
+      rocjitsu::test_support::find_elf_symbol_for_test(first.elf_bytes, "kernel");
   ASSERT_TRUE(first_symbol.has_value());
   EXPECT_EQ(first_symbol->st_size, 4 * sizeof(uint32_t));
-  const auto second_symbol = rocjitsu::test_support::find_elf_symbol_for_test(second.elf_bytes, "kernel");
+  const auto second_symbol =
+      rocjitsu::test_support::find_elf_symbol_for_test(second.elf_bytes, "kernel");
   ASSERT_TRUE(second_symbol.has_value());
   EXPECT_EQ(second_symbol->st_size, first_symbol->st_size);
 

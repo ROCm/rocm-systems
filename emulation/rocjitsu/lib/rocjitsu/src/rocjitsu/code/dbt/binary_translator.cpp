@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/dbt/binary_translator.h"
 
+#include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/analysis/liveness.h"
@@ -41,6 +42,7 @@
 #include <array>
 #include <cassert>
 #include <cstring>
+#include <deque>
 #include <functional>
 #include <iterator>
 #include <limits>
@@ -122,6 +124,177 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
       return false;
   }
   return true;
+}
+
+/// @brief Indirect transfers in one scope whose target pair was loaded from the kernarg segment.
+///
+/// @details A target this object never computed and never stored still has a provenance when it
+/// arrives through kernarg: the host wrote it, and the only `.text` address a host can hold is one
+/// it read from a symbol, which relocate_text_symbols() rewrites. That is a positive fact about
+/// this operand. It is deliberately not the weaker claim that the object produces no code address
+/// at all -- an undefined live-in also satisfies that, and it has no supplier whatsoever, so
+/// admitting it would accept on absence of evidence.
+///
+/// A meet-over-predecessors fixpoint, not a linear scan. A block reached from a preheader where
+/// the pair is kernarg-loaded and from a latch where it was clobbered must not inherit the
+/// preheader's answer, and the transfers this admits sit inside exactly such loops.
+[[nodiscard]] std::unordered_set<uint64_t>
+kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const KdTranslation &kd) {
+  std::unordered_set<uint64_t> offsets;
+  if (!kd.source_has_kernarg_segment_ptr || blocks.empty())
+    return offsets;
+
+  // Pair-low registers holding the kernarg segment pointer, and those holding a value loaded
+  // through it. Tracked separately: only the first may be a load base, only the second may be a
+  // transfer target.
+  struct PairState {
+    std::set<uint16_t> pointer;
+    std::set<uint16_t> loaded;
+    bool operator==(const PairState &other) const {
+      return pointer == other.pointer && loaded == other.loaded;
+    }
+  };
+
+  const auto pair_operand = [](const Operand *operand, uint16_t &lo, uint16_t &width) {
+    if (operand == nullptr)
+      return false;
+    const auto ref = operand->to_register_ref();
+    if (!ref || ref->cls != RegClass::SGPR)
+      return false;
+    lo = ref->index;
+    width = ref->width;
+    return true;
+  };
+
+  // Every even-aligned pair start whose whole pair the instruction defines. Driven from the
+  // instruction's full def set rather than a destination operand, so a wide load clears the pairs
+  // above it and a def of one half clears the pair it belongs to.
+  const auto kill_defs = [&](const Instruction &inst, PairState &state) {
+    const InstDefUse def_use(inst);
+    for (uint16_t lo = 0; lo + 1 < REGISTER_SET_MAX_SGPRS; ++lo) {
+      const RegisterRef low{.cls = RegClass::SGPR, .index = lo, .width = 1};
+      const RegisterRef high{
+          .cls = RegClass::SGPR, .index = static_cast<uint16_t>(lo + 1), .width = 1};
+      if (!def_use.defs.contains(low) && !def_use.defs.contains(high))
+        continue;
+      // Writing either half destroys this pair, and only this pair. The pair below is reached on
+      // its own iteration and tested against its own halves -- erasing it here as well would let a
+      // write to s82 destroy s[80:81], which shares no register with it.
+      state.pointer.erase(lo);
+      state.loaded.erase(lo);
+    }
+  };
+
+  const auto transfer = [&](BasicBlock *block, PairState state, bool record) {
+    for (const Instruction &inst : block->instructions()) {
+      const uint64_t flags = inst.flags();
+      const bool is_transfer = (flags & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0;
+      if (is_transfer && record) {
+        // s_setpc takes the target as its only source; s_swappc takes the return pair first.
+        for (int i = 0; i < inst.num_src_operands(); ++i) {
+          uint16_t lo = 0;
+          uint16_t width = 0;
+          if (pair_operand(inst.src_operand(i), lo, width) && width == 2 &&
+              state.loaded.contains(lo)) {
+            offsets.insert(inst.src_loc());
+            break;
+          }
+        }
+      }
+
+      uint16_t base_lo = 0;
+      uint16_t base_width = 0;
+      const bool loads_through_kernarg =
+          inst.mnemonic().starts_with("s_load_b") && inst.num_src_operands() >= 1 &&
+          pair_operand(inst.src_operand(0), base_lo, base_width) && state.pointer.contains(base_lo);
+      uint16_t copy_lo = 0;
+      uint16_t copy_width = 0;
+      const bool copies_pointer = inst.mnemonic() == "s_mov_b64" && inst.num_src_operands() == 1 &&
+                                  pair_operand(inst.src_operand(0), copy_lo, copy_width) &&
+                                  copy_width == 2 && state.pointer.contains(copy_lo);
+
+      uint16_t dst_lo = 0;
+      uint16_t dst_width = 0;
+      const bool has_pair_dst =
+          inst.num_dst_operands() == 1 && pair_operand(inst.dst_operand(0), dst_lo, dst_width);
+
+      kill_defs(inst, state);
+
+      // A call clobbers everything the ABI does not preserve, direct or indirect alike.
+      if ((flags & INDIRECT_CALL) != 0 || inst.mnemonic().starts_with("s_call")) {
+        std::erase_if(state.pointer, [](uint16_t lo) { return !is_callee_saved_sgpr(lo); });
+        std::erase_if(state.loaded, [](uint16_t lo) { return !is_callee_saved_sgpr(lo); });
+      }
+
+      if (has_pair_dst && loads_through_kernarg && dst_width >= 2) {
+        // Only an even-aligned pair wholly inside the loaded range is addressable as a 64-bit
+        // transfer operand, so s_load_b96 s[80:82] yields (80,81) and b128 s[80:83] adds (82,83).
+        for (uint16_t lo = dst_lo; lo + 1 < dst_lo + dst_width; lo += 2)
+          state.loaded.insert(lo);
+      }
+      if (has_pair_dst && copies_pointer && dst_width == 2)
+        state.pointer.insert(dst_lo);
+    }
+    return state;
+  };
+
+  const std::unordered_set<const BasicBlock *> in_scope(blocks.begin(), blocks.end());
+  PairState seed;
+  seed.pointer.insert(kd.kernarg_segment_ptr_sgpr);
+
+  // A must-analysis has to start every non-entry block at TOP, not at the empty set. Starting
+  // empty and intersecting is starting at BOTTOM: the meet can never grow a fact back, so a block
+  // whose predecessors had not been visited yet would be pinned empty for the rest of the run and
+  // the transfer it guards would never be admitted. `computed` marks which blocks hold a real
+  // answer; a predecessor without one is treated as TOP and simply skipped by the meet.
+  std::unordered_map<const BasicBlock *, PairState> entry_state;
+  std::unordered_set<const BasicBlock *> computed;
+  entry_state[blocks.front()] = seed;
+  computed.insert(blocks.front());
+
+  // Sweep to a fixpoint rather than draining a change-driven worklist: a block popped before its
+  // predecessors were known would otherwise be dropped and never requeued. The lattice is finite
+  // and every step is monotone, so the sweep count is a guard, not a semantic bound.
+  const size_t sweep_cap = blocks.size() + 2;
+  for (size_t sweep = 0; sweep < sweep_cap; ++sweep) {
+    bool changed = false;
+    for (BasicBlock *block : blocks) {
+      if (block == nullptr || block == blocks.front())
+        continue;
+      PairState in;
+      bool seeded = false;
+      for (const BasicBlock *predecessor : block->predecessors()) {
+        if (!in_scope.contains(predecessor) || !computed.contains(predecessor))
+          continue;
+        PairState exit =
+            transfer(const_cast<BasicBlock *>(predecessor), entry_state[predecessor], false);
+        if (!seeded) {
+          in = std::move(exit);
+          seeded = true;
+          continue;
+        }
+        std::erase_if(in.pointer, [&](uint16_t lo) { return !exit.pointer.contains(lo); });
+        std::erase_if(in.loaded, [&](uint16_t lo) { return !exit.loaded.contains(lo); });
+      }
+      if (!seeded)
+        continue;
+      const auto it = entry_state.find(block);
+      if (it == entry_state.end() || !(it->second == in)) {
+        entry_state[block] = std::move(in);
+        computed.insert(block);
+        changed = true;
+      }
+    }
+    if (!changed)
+      break;
+  }
+
+  for (BasicBlock *block : blocks) {
+    const auto it = block == nullptr ? entry_state.end() : entry_state.find(block);
+    if (it != entry_state.end())
+      transfer(block, it->second, true);
+  }
+  return offsets;
 }
 
 [[nodiscard]] std::unordered_set<uint64_t>
@@ -1524,6 +1697,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // incoming SGPR-pair facts that call establishes, turning otherwise recoverable getpc flows
   // unresolved.
   const auto text_function_symbol_offsets = discover_text_function_symbol_offsets(obj);
+  // Fences the kernarg admission below. Admitting an externally supplied pointer in an object that
+  // DOES define device functions drags in the rest of that problem -- those bodies would have to be
+  // adopted as roots or they are dropped, and their resource envelope propagated into every
+  // descriptor that can enter them. Where the object defines none, that obligation is vacuous.
+  const bool object_defines_no_device_function = object_defines_only_kernels(obj);
   const auto relative_text_addend_targets =
       discover_relative_text_addend_targets(obj, text_function_symbol_offsets);
   std::vector<uint64_t> block_split_points = text_function_symbol_offsets;
@@ -2504,6 +2682,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // An adopted root's return is validated from its own body rather than from a call site, so it
     // is added here for whichever scope ended up carrying that body.
     valid_call_return_offsets.insert(adopted_return_offsets.begin(), adopted_return_offsets.end());
+    const std::unordered_set<uint64_t> kernarg_supplied_targets =
+        object_defines_no_device_function && scope.translation != nullptr
+            ? kernarg_supplied_indirect_targets(scope.blocks, *scope.translation)
+            : std::unordered_set<uint64_t>{};
     struct RecoveredConsumer {
       std::vector<IndirectCallFixup> fixups;
       bool use_transfer_window = false;
@@ -2972,7 +3154,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // plus a byte offset, and a symbol that is present but unreferenced, which
         // relocate_text_symbols() tolerates so debug labels in padding do not refuse the object.
         const bool target_is_relocated_by_construction =
-            object_produces_code_addresses && code_addresses_fully_accounted;
+            (object_produces_code_addresses && code_addresses_fully_accounted) ||
+            kernarg_supplied_targets.contains(offset);
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
             !has_recovered_indirect_call && !has_relocation_table_call &&
             !recovered_indirect_return && !direct_branch_delta &&
