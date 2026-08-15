@@ -531,6 +531,14 @@ class SystemCapabilities:
             return False, f"failed to run rocprofv3-avail: {exc}"
 
         if result.returncode != 0:
+            # An SDK predating "list --spm" rejects the flag outright. That is a
+            # tooling mismatch, not a hardware capability result, and reporting it
+            # as a plain skip makes a stale SDK look like a GPU without SPM.
+            if "unrecognized arguments" in result.stdout and "--spm" in result.stdout:
+                return (
+                    False,
+                    "rocprofv3-avail does not support SPM listing; SDK/tool is too old",
+                )
             return False, f"rocprofv3-avail failed: {result.stdout}"
 
         if "SQ_WAVES" not in result.stdout:

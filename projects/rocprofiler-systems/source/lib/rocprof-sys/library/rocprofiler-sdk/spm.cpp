@@ -613,30 +613,10 @@ spm_dispatch_callback(
 }
 
 void
-spm_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
-                    const rocprofiler_spm_counter_record_t** records, size_t record_count,
-                    rocprofiler_spm_record_flag_t flags,
-                    rocprofiler_user_data_t /*userdata*/, void* record_callback_args)
+store_spm_records(const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
+                  const rocprofiler_spm_counter_record_t** records, size_t record_count,
+                  bool data_loss)
 {
-    if(dispatch_data == nullptr) return;
-
-    // Dispatch-complete notifications do not carry SPM records, even if other
-    // flags are set. Handle them before record/data-loss processing.
-    if((flags & ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END) != 0) return;
-
-    if(records == nullptr) return;
-    if(record_count == 0) return;
-
-    const auto data_loss = ((flags & ROCPROFILER_SPM_RECORD_FLAG_DATA_LOSS) != 0);
-    if(data_loss)
-    {
-        auto* data = static_cast<client_data*>(record_callback_args);
-        if(data != nullptr)
-            data->spm_data_loss_reports.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    if((flags & ROCPROFILER_SPM_RECORD_FLAG_DATA) == 0) return;
-
     auto counters             = std::vector<trace_cache::spm_counter_info>{};
     auto samples              = std::vector<trace_cache::spm_timestamp_sample>{};
     auto counter_info_indices = std::unordered_map<std::uint64_t, std::uint32_t>{};
@@ -686,6 +666,54 @@ spm_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t* disp
         std::move(counters),
         std::move(samples),
     });
+}
+
+/// SDK entry point for SPM records.
+///
+/// libaqlprofile invokes this from its own KFD thread, so a C++ exception must not
+/// escape: unwinding through those frames is not guaranteed and would terminate the
+/// profiled process. Buffered storage throws once it stops running, and the decode
+/// buffers below allocate, so the whole body is contained here and a failed batch is
+/// dropped instead.
+void
+spm_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
+                    const rocprofiler_spm_counter_record_t** records, size_t record_count,
+                    rocprofiler_spm_record_flag_t flags,
+                    rocprofiler_user_data_t /*userdata*/, void* record_callback_args)
+{
+    if(dispatch_data == nullptr) return;
+
+    // Dispatch-complete notifications do not carry SPM records, even if other
+    // flags are set. Handle them before record/data-loss processing.
+    if((flags & ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END) != 0) return;
+
+    // Account for data loss before the record guards below. A loss batch can decode
+    // to zero records, which is exactly when loss is most likely, so returning early
+    // on an empty batch would silently under-report it.
+    const auto data_loss = ((flags & ROCPROFILER_SPM_RECORD_FLAG_DATA_LOSS) != 0);
+    if(data_loss)
+    {
+        auto* data = static_cast<client_data*>(record_callback_args);
+        if(data != nullptr)
+            data->spm_data_loss_reports.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    if(records == nullptr) return;
+    if(record_count == 0) return;
+    if((flags & ROCPROFILER_SPM_RECORD_FLAG_DATA) == 0) return;
+
+    try
+    {
+        store_spm_records(dispatch_data, records, record_count, data_loss);
+    } catch(const std::exception& e)
+    {
+        LOG_WARNING("Dropping SPM record batch of {} record(s): {}", record_count,
+                    e.what());
+    } catch(...)
+    {
+        LOG_WARNING("Dropping SPM record batch of {} record(s): unknown error",
+                    record_count);
+    }
 }
 }  // namespace
 

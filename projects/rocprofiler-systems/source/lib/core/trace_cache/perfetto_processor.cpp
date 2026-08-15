@@ -31,6 +31,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -1406,8 +1407,21 @@ perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
     using counter_collection_track =
         core::perfetto::counter_track<category::rocm_counter_collection>;
 
-    const auto device_id = static_cast<std::uint32_t>(
-        m_agent_manager.get_agent_by_handle(_spm.agent_id_handle).device_type_index);
+    // get_agent_by_handle() throws when the handle is absent, which happens when a
+    // per-process metadata file is missing or truncated. The sample_processor dispatch
+    // thunk is noexcept, so an escaping exception terminates post-processing and loses
+    // every output file. Drop just this sample instead.
+    std::uint32_t device_id = 0;
+    try
+    {
+        device_id = static_cast<std::uint32_t>(
+            m_agent_manager.get_agent_by_handle(_spm.agent_id_handle).device_type_index);
+    } catch(const std::exception& e)
+    {
+        LOG_WARNING("Dropping SPM sample: no agent metadata for handle {} ({})",
+                    _spm.agent_id_handle, e.what());
+        return;
+    }
 
     struct spm_track_info
     {
@@ -1423,9 +1437,27 @@ perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
             m_metadata.find_spm_counter_by_id(device_id, counter.counter_instance_id);
         if(!name_info)
         {
-            LOG_DEBUG("No SPM counter metadata for device {} counter instance {}; "
-                      "dropping samples for this counter",
-                      device_id, counter.counter_instance_id);
+            // Warn rather than debug: the usual cause is a child/MPI process, whose
+            // metadata file does not carry SPM counter names yet, and the only other
+            // symptom is an SPM track that never appears. Deduplicated per
+            // (device, counter instance) so a long run does not flood the log.
+            static auto reported = std::set<std::pair<std::uint32_t, std::uint64_t>>{};
+            static auto reported_mutex = std::mutex{};
+            auto        should_report  = false;
+            {
+                std::lock_guard scope{ reported_mutex };
+                should_report =
+                    reported.emplace(device_id, counter.counter_instance_id).second;
+            }
+            if(should_report)
+            {
+                LOG_WARNING(
+                    "No SPM counter metadata for device {} counter instance {}; "
+                    "dropping samples for this counter. SPM counter names are not "
+                    "serialized into per-process metadata yet, so SPM tracks from "
+                    "forked/MPI child processes may not resolve.",
+                    device_id, counter.counter_instance_id);
+            }
             tracks.emplace_back();
             continue;
         }

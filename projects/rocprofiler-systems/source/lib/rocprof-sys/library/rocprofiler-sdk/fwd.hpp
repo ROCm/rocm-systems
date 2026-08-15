@@ -102,10 +102,11 @@ using counter_id_vec_t = std::vector<rocprofiler_counter_id_t>;
 using agent_counter_id_map_t =
     std::unordered_map<rocprofiler_agent_id_t, counter_id_vec_t>;
 
-#if ROCPROFSYS_USE_SPM
+// Deliberately not guarded by ROCPROFSYS_USE_SPM: rocprofiler_counter_config_id_t
+// comes from <rocprofiler-sdk/fwd.h>, not the experimental SPM header, so keeping
+// this unconditional gives client_data one layout in every translation unit.
 using agent_spm_counter_config_map_t =
     std::unordered_map<rocprofiler_agent_id_t, rocprofiler_counter_config_id_t>;
-#endif
 
 using backtrace_operation_map_t =
     std::unordered_map<rocprofiler_callback_tracing_kind_t,
@@ -148,15 +149,16 @@ struct client_data
     agent_counter_id_map_t             agent_events              = {};
     agent_counter_info_map_t           agent_counter_info        = {};
     agent_counter_profile_map_t        agent_counter_profiles    = {};
-#if ROCPROFSYS_USE_SPM
+    // Unconditional so client_data has one layout regardless of ROCPROFSYS_USE_SPM.
+    // A translation unit that misses the macro would otherwise see a shorter struct
+    // and read past the end of every member below.
     common::synchronized<agent_spm_counter_config_map_t> agent_spm_counter_configs = {};
     std::atomic<std::uint64_t>                           spm_data_loss_reports{ 0 };
-#endif
-    common::synchronized<code_object_vec_t>   code_object_records   = {};
-    common::synchronized<kernel_symbol_vec_t> kernel_symbol_records = {};
-    buffer_name_info_t                        buffered_tracing_info = {};
-    callback_name_info_t                      callback_tracing_info = {};
-    backtrace_operation_map_t                 backtrace_operations  = {};
+    common::synchronized<code_object_vec_t>              code_object_records   = {};
+    common::synchronized<kernel_symbol_vec_t>            kernel_symbol_records = {};
+    buffer_name_info_t                                   buffered_tracing_info = {};
+    callback_name_info_t                                 callback_tracing_info = {};
+    backtrace_operation_map_t                            backtrace_operations  = {};
 
     void                        initialize();
     void                        initialize_event_info();

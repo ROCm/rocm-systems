@@ -322,6 +322,12 @@ SPM collection is mutually exclusive with the existing ROCm GPU counter paths in
 this beta. Do not combine ``ROCPROFSYS_ROCM_SPM_EVENTS`` with either
 ``ROCPROFSYS_ROCM_EVENTS`` or ``ROCPROFSYS_GPU_PERF_COUNTERS`` in the same run.
 
+In this beta, SPM Perfetto output is single-process. SPM counter-name metadata is
+kept in memory for the collecting process and is not yet written to the
+per-process metadata files, so SPM tracks from forked or MPI child processes might
+not resolve during post-processing. A warning is logged for each counter whose
+metadata cannot be resolved.
+
 The following example collects ``SQ_WAVES`` SPM samples from device 0 while
 running the ``transpose`` example and writes a Perfetto trace:
 
