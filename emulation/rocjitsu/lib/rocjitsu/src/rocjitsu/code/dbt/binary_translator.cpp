@@ -149,6 +149,21 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
       std::ranges::find(blocks, entry) == blocks.end())
     return offsets;
 
+  // The only fact this function can produce is attached to an indirect transfer, so a scope with
+  // none has nothing to say. Checking first avoids running the fixpoint -- an InstDefUse and two
+  // RegisterSet expansions per instruction, per predecessor edge, per sweep -- to build an answer
+  // that is empty by construction. The consumer asks per instruction and its cheaper disjunct is
+  // usually false, so without this the fixpoint runs for effectively every scope of every object;
+  // it measured as the whole of a 22% translation-time regression. An indirect transfer ends its
+  // block, so the terminator is the only place it can be.
+  if (std::ranges::none_of(blocks, [](const BasicBlock *block) {
+        if (block == nullptr)
+          return false;
+        const Instruction *term = block->terminator();
+        return term != nullptr && (term->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0;
+      }))
+    return offsets;
+
   // Pair-low registers holding the kernarg segment pointer, and those holding a value loaded
   // through it. Tracked separately: only the first may be a load base, only the second may be a
   // transfer target.
@@ -175,19 +190,20 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
   // instruction's full def set rather than a destination operand, so a wide load clears the pairs
   // above it and a def of one half clears the pair it belongs to.
   const auto kill_defs = [&](const Instruction &inst, PairState &state) {
+    if (state.pointer.empty() && state.loaded.empty())
+      return;
     const InstDefUse def_use(inst);
-    for (size_t lo = 0; lo + 1 < REGISTER_SET_MAX_SGPRS; ++lo) {
-      const RegisterRef low{.cls = RegClass::SGPR, .index = static_cast<uint16_t>(lo), .width = 1};
+    // Only the pairs actually being tracked can be killed, and there are a handful at most.
+    // Sweeping the whole SGPR file instead cost two RegisterSet::contains() calls per register per
+    // instruction per sweep, which profiled as half of all translation time.
+    const auto pair_is_defined = [&](uint16_t lo) {
+      const RegisterRef low{.cls = RegClass::SGPR, .index = lo, .width = 1};
       const RegisterRef high{
           .cls = RegClass::SGPR, .index = static_cast<uint16_t>(lo + 1), .width = 1};
-      if (!def_use.defs.contains(low) && !def_use.defs.contains(high))
-        continue;
-      // Writing either half destroys this pair, and only this pair. The pair below is reached on
-      // its own iteration and tested against its own halves -- erasing it here as well would let a
-      // write to s82 destroy s[80:81], which shares no register with it.
-      state.pointer.erase(static_cast<uint16_t>(lo));
-      state.loaded.erase(static_cast<uint16_t>(lo));
-    }
+      return def_use.defs.contains(low) || def_use.defs.contains(high);
+    };
+    std::erase_if(state.pointer, pair_is_defined);
+    std::erase_if(state.loaded, pair_is_defined);
   };
 
   const auto transfer = [&](BasicBlock *block, PairState state, bool record) {
@@ -1716,9 +1732,21 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // DOES define device functions drags in the rest of that problem -- those bodies would have to be
   // adopted as roots or they are dropped, and their resource envelope propagated into every
   // descriptor that can enter them. Where the object defines none, that obligation is vacuous.
-  const bool object_defines_no_device_function = object_defines_only_kernels(obj);
-  const auto externally_resolvable_text_function_offsets =
-      discover_externally_resolvable_text_function_offsets(obj);
+  // Both walk the whole symbol table, and most objects never reach the code that needs them, so
+  // pay for them on first use. Doing it eagerly cost about 2x the translation time across the
+  // packaged-HSACO corpus -- enough on its own to exhaust the sanitizer job's budget.
+  std::optional<bool> object_defines_no_device_function_cache;
+  const auto object_defines_no_device_function = [&] {
+    if (!object_defines_no_device_function_cache)
+      object_defines_no_device_function_cache = object_defines_only_kernels(obj);
+    return *object_defines_no_device_function_cache;
+  };
+  std::optional<std::vector<uint64_t>> externally_resolvable_cache;
+  const auto externally_resolvable_text_function_offsets = [&]() -> const std::vector<uint64_t> & {
+    if (!externally_resolvable_cache)
+      externally_resolvable_cache = discover_externally_resolvable_text_function_offsets(obj);
+    return *externally_resolvable_cache;
+  };
   const auto relative_text_addend_targets =
       discover_relative_text_addend_targets(obj, text_function_symbol_offsets);
   std::vector<uint64_t> block_split_points = text_function_symbol_offsets;
@@ -2032,8 +2060,19 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             relocation_function_tables,
             [](const RelocationFunctionTable &table) { return !table.entries.empty(); }) ||
         !relative_text_addend_targets.empty();
-    if (object_stores_code_addresses) {
-      for (const uint64_t target : externally_resolvable_text_function_offsets)
+    // And only when the object can actually reach the promise: the strict symbol requirement is
+    // turned on by admitting an UNRECOVERED indirect transfer, so an object with no indirect
+    // transfer at all can never turn it on. Skipping those keeps their scopes the size they were,
+    // which matters because every later analysis is proportional to blocks emitted.
+    const bool object_has_indirect_transfer =
+        std::ranges::any_of(blocks, [](const std::unique_ptr<BasicBlock> &block) {
+          if (block == nullptr)
+            return false;
+          const Instruction *term = block->terminator();
+          return term != nullptr && (term->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0;
+        });
+    if (object_stores_code_addresses && object_has_indirect_transfer) {
+      for (const uint64_t target : externally_resolvable_text_function_offsets())
         adopt(target);
     }
 
@@ -2047,7 +2086,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     std::ranges::sort(adopted_roots);
     adopted_roots.erase(std::ranges::unique(adopted_roots).begin(), adopted_roots.end());
     const size_t pointer_root_count = adopted_roots.size();
-    if (pointer_root_count != 0) {
+    // The rebuild exists solely so the getpc loop below can ask "does the pointer closure already
+    // emit this?". With no getpc naming an in-text address that loop adopts nothing, so the walk --
+    // a full reachability pass per kernel over every block -- would be paid for an answer nobody
+    // reads. Most objects are in that case, and under a sanitizer the difference is the corpus
+    // job's time budget.
+    const bool has_in_text_getpc_target = std::ranges::any_of(
+        pc_relative_address_builders, [&](const PcRelativeAddressBuilder &builder) {
+          return builder.target_vaddr >= text_vaddr &&
+                 builder.target_vaddr - text_vaddr < text.size();
+        });
+    const bool rebuilt_for_pointer_roots = pointer_root_count != 0 && has_in_text_getpc_target;
+    if (rebuilt_for_pointer_roots) {
       scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations,
                                          adopted_roots, &address_taken_entries);
       emitting_scopes.clear();
@@ -2090,9 +2140,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
     std::ranges::sort(adopted_roots);
     adopted_roots.erase(std::ranges::unique(adopted_roots).begin(), adopted_roots.end());
-    // Phase A already built the scopes for the pointer roots, so repeat the walk only when the
-    // getpc loop actually added something.
-    if (adopted_roots.size() != pointer_root_count) {
+    // Phase A builds the scopes for the pointer roots only when it had a reason to. Repeat the
+    // walk when it did not, or when the getpc loop added roots on top of what it built.
+    if (!adopted_roots.empty() &&
+        (!rebuilt_for_pointer_roots || adopted_roots.size() != pointer_root_count)) {
       scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations,
                                          adopted_roots, &address_taken_entries);
     }
@@ -2719,10 +2770,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // An adopted root's return is validated from its own body rather than from a call site, so it
     // is added here for whichever scope ended up carrying that body.
     valid_call_return_offsets.insert(adopted_return_offsets.begin(), adopted_return_offsets.end());
-    const std::unordered_set<uint64_t> kernarg_supplied_targets =
-        object_defines_no_device_function && scope.translation != nullptr
-            ? kernarg_supplied_indirect_targets(scope.blocks, scope.entry, *scope.translation)
-            : std::unordered_set<uint64_t>{};
+    // Only an unrecovered indirect transfer ever asks this, and most scopes have none, so run the
+    // fixpoint on first question rather than for every scope.
+    std::optional<std::unordered_set<uint64_t>> kernarg_supplied_cache;
+    const auto kernarg_supplied_targets = [&]() -> const std::unordered_set<uint64_t> & {
+      if (!kernarg_supplied_cache) {
+        kernarg_supplied_cache =
+            scope.translation != nullptr && object_defines_no_device_function()
+                ? kernarg_supplied_indirect_targets(scope.blocks, scope.entry, *scope.translation)
+                : std::unordered_set<uint64_t>{};
+      }
+      return *kernarg_supplied_cache;
+    };
     struct RecoveredConsumer {
       std::vector<IndirectCallFixup> fixups;
       bool use_transfer_window = false;
@@ -3192,7 +3251,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // relocate_text_symbols() tolerates so debug labels in padding do not refuse the object.
         const bool target_is_relocated_by_construction =
             (object_produces_code_addresses && code_addresses_fully_accounted) ||
-            kernarg_supplied_targets.contains(offset);
+            kernarg_supplied_targets().contains(offset);
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
             !has_recovered_indirect_call && !has_relocation_table_call &&
             !recovered_indirect_return && !direct_branch_delta &&

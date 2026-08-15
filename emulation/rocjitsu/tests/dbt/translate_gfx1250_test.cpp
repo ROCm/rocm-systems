@@ -2525,6 +2525,182 @@ TEST(BinaryTranslatorE2E, Gfx1250KeepsDirectlyCalledHelperThatIsAlsoAddressTaken
 // adopt()'s exact-start check, because a mid-instruction offset has no placement either way and
 // relocate_relative_text_addends() then fails. Isolating that check needs a unit test on adopt();
 // what this guards is that the object is never quietly accepted.
+// The kernarg-provenance admission and its guards. A target this object never computed and never
+// stored still has a provenance when it arrives through kernarg: the host wrote it, and the only
+// `.text` address a host can hold is one it read from a symbol that relocate_text_symbols()
+// rewrites. These fixtures carry no pointer table and no getpc, so object_produces_code_addresses
+// is false and the kernarg set is the ONLY route to acceptance -- each case is non-vacuous by
+// construction.
+namespace {
+
+constexpr uint16_t kKernargTargetSreg = 80;
+constexpr uint16_t kKernargReturnSreg = 30;
+
+[[nodiscard]] uint32_t kernarg_load_word(size_t index) {
+  // sbase is encoded halved, so s[0:1] is 0. The analysis matches `s_load_b`, which is the gfx1250
+  // spelling; CDNA's `s_load_dwordx2` would not be recognized.
+  return cdna5::build_smem(cdna5::kSLoadB64Smem, {.sbase = 0, .sdata = kKernargTargetSreg})[index];
+}
+
+[[nodiscard]] rocjitsu::TranslatedCodeObject
+translate_kernarg_fixture(const std::vector<uint32_t> &words, bool enable_kernarg) {
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  if (enable_kernarg)
+    rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  EXPECT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  return translator.translate(source);
+}
+
+[[nodiscard]] bool refused_unrecovered_transfer(const rocjitsu::TranslatedCodeObject &result) {
+  return !result.ok() && rocjitsu::test_support::has_error_containing(
+                             result, rocjitsu::DiagnosticKind::Legalization,
+                             "indirect branch or call target recovery is not implemented");
+}
+
+} // namespace
+
+TEST(BinaryTranslatorE2E, Gfx1250AdmitsKernargLoadedIndirectCallTarget) {
+  const std::vector<uint32_t> words = {
+      kernarg_load_word(0),
+      kernarg_load_word(1),
+      rocjitsu::build_s_swappc_b64(kKernargReturnSreg, kKernargTargetSreg,
+                                   ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  EXPECT_TRUE(translate_kernarg_fixture(words, /*enable_kernarg=*/true).ok());
+}
+
+// The same words with no kernarg segment pointer in the descriptor. Nothing then supplies the
+// pair, so the transfer has no provenance and must be refused -- this is what separates "the host
+// wrote it" from "this object simply never computed it", which an undefined live-in also satisfies.
+TEST(BinaryTranslatorE2E, Gfx1250RefusesIndirectCallWhenNoKernargSegmentExists) {
+  const std::vector<uint32_t> words = {
+      kernarg_load_word(0),
+      kernarg_load_word(1),
+      rocjitsu::build_s_swappc_b64(kKernargReturnSreg, kKernargTargetSreg,
+                                   ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  EXPECT_TRUE(refused_unrecovered_transfer(translate_kernarg_fixture(words,
+                                                                     /*enable_kernarg=*/false)));
+}
+
+// A write to s82 must not disturb s[80:81]: they share no register. Killing the pair below the one
+// written is the bug this pins.
+TEST(BinaryTranslatorE2E, Gfx1250KernargFactSurvivesWriteToTheRegisterAboveThePair) {
+  const std::vector<uint32_t> words = {
+      kernarg_load_word(0),
+      kernarg_load_word(1),
+      cdna5::build_sop1(cdna5::kSMovB32Sop1,
+                        {.ssrc0 = 128, .sdst = static_cast<uint8_t>(kKernargTargetSreg + 2)})[0],
+      rocjitsu::build_s_swappc_b64(kKernargReturnSreg, kKernargTargetSreg,
+                                   ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  EXPECT_TRUE(translate_kernarg_fixture(words, /*enable_kernarg=*/true).ok());
+}
+
+// Clobbered on ONE of the two paths into the consumer. A meet that is not an intersection would
+// carry the surviving path's fact through and admit a transfer whose target is unknown on the
+// other path.
+TEST(BinaryTranslatorE2E, Gfx1250RefusesKernargTargetClobberedOnOnePath) {
+  const std::vector<uint32_t> words = {
+      kernarg_load_word(0),
+      kernarg_load_word(1),
+      cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 1})[0],
+      cdna5::build_sop1(cdna5::kSMovB64Sop1,
+                        {.ssrc0 = 128, .sdst = static_cast<uint8_t>(kKernargTargetSreg)})[0],
+      rocjitsu::build_s_swappc_b64(kKernargReturnSreg, kKernargTargetSreg,
+                                   ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  EXPECT_TRUE(refused_unrecovered_transfer(translate_kernarg_fixture(words,
+                                                                     /*enable_kernarg=*/true)));
+}
+
+// The control for the case above: same shape, nothing clobbered, so both paths agree and the
+// transfer is admitted. Without it the refusal above could be passing for the wrong reason.
+TEST(BinaryTranslatorE2E, Gfx1250AdmitsKernargTargetLiveOnBothPaths) {
+  const std::vector<uint32_t> words = {
+      kernarg_load_word(0),
+      kernarg_load_word(1),
+      cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 1})[0],
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_swappc_b64(kKernargReturnSreg, kKernargTargetSreg,
+                                   ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  EXPECT_TRUE(translate_kernarg_fixture(words, /*enable_kernarg=*/true).ok());
+}
+
+// A latch edge back into the consumer. A must-analysis that starts non-entry blocks at the empty
+// set instead of top can never grow the fact back across that meet, and would refuse this.
+TEST(BinaryTranslatorE2E, Gfx1250AdmitsKernargTargetReachedThroughALoopLatch) {
+  const std::vector<uint32_t> words = {
+      kernarg_load_word(0),
+      kernarg_load_word(1),
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_swappc_b64(kKernargReturnSreg, kKernargTargetSreg,
+                                   ROCJITSU_CODE_ARCH_GFX1250),
+      cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = static_cast<uint16_t>(-3)})[0],
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  EXPECT_TRUE(translate_kernarg_fixture(words, /*enable_kernarg=*/true).ok());
+}
+
+// adopted_root_return_offsets() walks forward from each adopted root and stops at the next one.
+// AMDGPU pads between functions rather than terminating them, so without that wall root A's walk
+// falls through into root B and classifies a setpc under A's entry state. The wall depends on
+// adopt()'s exact-start guarantee: "the next root starts here" has to be a fact, not a guess.
+//
+// Two plain adjacent bodies cannot show this -- a root's own walk always accepts its own setpc --
+// so the setpc here is SHARED, reached from A by a branch and from B by fallthrough. The bare
+// getpc at word 0 is load-bearing too: it is an unresolved PC producer the lattice never sees, so
+// the whole-object permission is withheld and the misclassification is not masked by it.
+TEST(BinaryTranslatorE2E, Gfx1250StopsAdoptedRootReturnWalkAtTheNextRoot) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint16_t kSharedReturnSreg = 30;
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_getpc_b64(10, ROCJITSU_CODE_ARCH_GFX1250), // word 0: kernel 0, poisons the
+                                                                   // code-address accounting
+      kGfx1250SEndpgm,                                             // word 1: kernel 1 entry
+      cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 3})[0], // word 2: root A -> word 6
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),          // word 3: A falls into B
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),          // word 4: root B
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),          // word 5
+      rocjitsu::build_s_setpc_b64(kSharedReturnSreg,
+                                  ROCJITSU_CODE_ARCH_GFX1250), // word 6: reached from both
+      kGfx1250SEndpgm,                                         // word 7
+  };
+
+  auto image =
+      rocjitsu::test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
+          words, /*kernel1_entry_word=*/1,
+          {{.offset_word = 2, .words = 1}, {.offset_word = 4, .words = 3}});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  // Both walks reach an out-of-body predecessor at the shared setpc and fail closed. Removing the
+  // boundary lets A's walk pull B in, the setpc classifies as A's return, and the object is
+  // accepted with a return proven from the wrong entry state.
+  EXPECT_FALSE(result.ok())
+      << "a setpc shared by two adopted roots must not be classified from one root's entry state";
+  EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
+      result, rocjitsu::DiagnosticKind::Legalization,
+      "indirect branch or call target recovery is not implemented"));
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250RefusesFunctionPointerIntoTheMiddleOfAnInstruction) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr uint16_t kPcSreg = 4;
