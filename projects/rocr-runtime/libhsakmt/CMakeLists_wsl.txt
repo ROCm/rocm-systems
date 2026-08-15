@@ -277,10 +277,9 @@ if(${EXPORT_TO_USER_PACKAGE_REGISTRY})
   export(PACKAGE ${ROCDXG_TARGET})
 endif()
 
-# Since librocdxg.pc and libhsakmt.pc are installed to the same pkgconfig directory,
-# we can directly use libhsakmt's header file path in the includedir.
-# This allows librocdxg to reference the same header files as libhsakmt without
-# duplicating header installation.
+# The includedir librocdxg.pc emits in its Cflags is CMAKE_INSTALL_INCLUDEDIR,
+# which is where the ROCDXG_PUBLIC_HEADERS rule above puts hsakmt/. libhsakmt
+# is not built in this configuration, so nothing else populates it.
 configure_file ( librocdxg.pc.in librocdxg.pc @ONLY )
 
 install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/librocdxg.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev )
