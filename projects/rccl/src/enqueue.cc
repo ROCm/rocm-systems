@@ -1077,11 +1077,11 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
               static bool loggedGfx1250UnrollClamp = false;
               if (!loggedGfx1250UnrollClamp) {
                 if (fp8Datatype) {
-                  INFO(NCCL_INIT, "Using unroll 8 for FP8 datatypes on gfx1250 (default unroll %d)",
-                       (int)(pow(2.0, (double)kernelIndex)));
+                  INFO(NCCL_INIT, "Using unroll 8 for FP8 datatypes on gfx1250 instead of default unroll %d",
+                       1 << kernelIndex);
                 } else {
-                  INFO(NCCL_INIT, "Using unroll 8 for LL protocol on gfx1250 (default unroll %d)",
-                       (int)(pow(2.0, (double)kernelIndex)));
+                  INFO(NCCL_INIT, "Using unroll 8 for LL protocol on gfx1250 instead of default unroll %d",
+                       1 << kernelIndex);
                 }
                 loggedGfx1250UnrollClamp = true;
               }

@@ -274,25 +274,37 @@ gda_colls = {"AlltoAllGda", "AlltoAllvGda"}
 # gfx1250 SIMPLE kernel identities whose compile time exceeded 45s at unroll
 # 16/32 (see --kernel-compile-timing in install.sh). Only unroll 8 is generated
 # for these; ncclDevFuncTable_16/32 alias them back to the unroll-8 symbol
-# (see table_rows_for_unroll() below).
+# (see table_rows_for_unroll() below). Applied only for local gfx1250 builds:
+# multi-arch keeps native 16/32 variants (func_id_unroll is "1" there, so
+# aliasing missing 16/32 rows to the func-id axis would be wrong).
+@dataclass(frozen=True)
+class Unroll8OnlyIdentity:
+  coll: str
+  algo: str
+  proto: str
+  redop: str
+  ty: str
+  acc: str
+  pipeline: str
+
 _UNROLL_8_ONLY_IDENTITIES = {
-  ("AllReduce", "TREE", "SIMPLE", "MinMax", "f16", "1", "0"),
-  ("AllReduce", "TREE", "SIMPLE", "MinMax", "f16", "0", "0"),
-  ("AllReduce", "RING", "SIMPLE", "MinMax", "f16", "1", "0"),
-  ("AllReduce", "RING", "SIMPLE", "MinMax", "u8", "1", "0"),
-  ("AllReduce", "TREE", "SIMPLE", "SumPostDiv", "u8", "1", "0"),
-  ("AllReduce", "TREE", "SIMPLE", "MinMax", "u8", "1", "0"),
-  ("AllReduce", "TREE", "SIMPLE", "Prod", "u8", "1", "0"),
-  ("AllReduce", "TREE", "SIMPLE", "PreMulSum", "bf16", "0", "1"),
-  ("AllReduce", "TREE", "SIMPLE", "PreMulSum", "u8", "1", "0"),
-  ("AllReduce", "TREE", "SIMPLE", "Sum", "u8", "1", "0"),
-  ("AllReduce", "TREE", "SIMPLE", "MinMax", "bf16", "0", "1"),
-  ("AllReduce", "TREE", "SIMPLE", "MinMax", "bf16", "1", "1"),
-  ("AllReduce", "TREE", "SIMPLE", "Prod", "bf16", "0", "1"),
-  ("AllReduce", "TREE", "SIMPLE", "Sum", "bf16", "0", "1"),
-  ("AllReduce", "TREE", "SIMPLE", "SumPostDiv", "u8", "0", "0"),
-  ("AllReduce", "TREE", "SIMPLE", "PreMulSum", "bf16", "1", "1"),
-  ("AllReduce", "RING", "SIMPLE", "SumPostDiv", "u8", "1", "0"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "MinMax", "f16", "1", "0"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "MinMax", "f16", "0", "0"),
+  Unroll8OnlyIdentity("AllReduce", "RING", "SIMPLE", "MinMax", "f16", "1", "0"),
+  Unroll8OnlyIdentity("AllReduce", "RING", "SIMPLE", "MinMax", "u8", "1", "0"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "SumPostDiv", "u8", "1", "0"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "MinMax", "u8", "1", "0"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "Prod", "u8", "1", "0"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "PreMulSum", "bf16", "0", "1"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "PreMulSum", "u8", "1", "0"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "Sum", "u8", "1", "0"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "MinMax", "bf16", "0", "1"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "MinMax", "bf16", "1", "1"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "Prod", "bf16", "0", "1"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "Sum", "bf16", "0", "1"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "SumPostDiv", "u8", "0", "0"),
+  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "PreMulSum", "bf16", "1", "1"),
+  Unroll8OnlyIdentity("AllReduce", "RING", "SIMPLE", "SumPostDiv", "u8", "1", "0"),
 }
 
 def maybe_remap_unroll(coll, algo, proto, redop, ty, acc, pipeline, unroll):
@@ -301,10 +313,11 @@ def maybe_remap_unroll(coll, algo, proto, redop, ty, acc, pipeline, unroll):
   Also checks the equivalence-class representative (e.g. MinMax i8 folds into
   MinMax u8) so both keep the same generated unroll set.
   """
-  if unroll not in ("16", "32"):
+  if local_gfx_name != "gfx1250" or unroll not in ("16", "32"):
     return unroll
-  identity = (coll, algo, proto, redop, ty, acc, pipeline)
-  eq_identity = equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, "1", "0")[:7]
+  identity = Unroll8OnlyIdentity(coll, algo, proto, redop, ty, acc, pipeline)
+  eq = equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, "1", "0")
+  eq_identity = Unroll8OnlyIdentity(*eq[:7])
   if identity in _UNROLL_8_ONLY_IDENTITIES or eq_identity in _UNROLL_8_ONLY_IDENTITIES:
     return None
   return unroll

@@ -19,6 +19,7 @@ generated text rather than compiling it.
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -282,6 +283,20 @@ class UnrollClampTest(unittest.TestCase):
         self.assertFalse(any(n.endswith("_16.cpp") for n in u8))
         self.assertFalse(any(n.endswith("_32.cpp") for n in u8))
 
+    def test_builtin_clamp_does_not_apply_on_multiarch(self):
+        # Multi-arch func_id_unroll is "1"; clamping 16/32 there would alias
+        # missing rows to the wrong axis. The blocklist is gfx1250-local only.
+        with tempfile.TemporaryDirectory(prefix="rccl_unroll_clamp_ma_") as tmpdir:
+            _, gensrc = _generate(
+                tmpdir,
+                local_gpu_only="OFF",
+                only_funcs=self.MINMAX_U8_ONLY,
+            )
+            names = sorted(os.listdir(os.path.join(gensrc, "specialized")))
+        u8 = [n for n in names if "minmax_u8_1_0_" in n]
+        self.assertTrue(any(n.endswith("_16.cpp") for n in u8), names)
+        self.assertTrue(any(n.endswith("_32.cpp") for n in u8), names)
+
     def _extract_gfx1250_table(self, header, unroll):
         rows = {}
         m = re.search(
@@ -340,6 +355,61 @@ class UnrollClampTest(unittest.TestCase):
         )
         self.assertTrue(t16[native_idx].endswith("_Sum_f32_1_0_16"))
         self.assertTrue(t32[native_idx].endswith("_Sum_f32_1_0_32"))
+
+
+class HostDeviceDispatchAlignmentTest(unittest.TestCase):
+    """host_table.cpp must map every device dispatch-table funcId.
+
+    Guards against non-uniform per-unroll func_rows slices truncating
+    host_table.cpp and dropping ncclDevFuncNameToId keys for real device
+    funcIds (SendRecv, AllReduce SIMPLE, ...), which makes ncclDevFuncId()
+    return -1 and the collective fail with ncclInvalidUsage at launch.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(GENERATE_PY):
+            raise unittest.SkipTest("generate.py not found next to test")
+        cls._multiarch_dir = tempfile.mkdtemp(prefix="rccl_align_multiarch_")
+        cls.multiarch_header, cls.multiarch_gensrc = _generate(
+            cls._multiarch_dir, local_gpu_only="OFF", only_funcs="")
+        cls._gfx1250_dir = tempfile.mkdtemp(prefix="rccl_align_gfx1250_")
+        cls.gfx1250_header, cls.gfx1250_gensrc = _generate(
+            cls._gfx1250_dir, local_gpu_only="ON", only_funcs="", gfx_name="gfx1250")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._multiarch_dir, ignore_errors=True)
+        shutil.rmtree(cls._gfx1250_dir, ignore_errors=True)
+
+    def _device_funcids(self, header):
+        m = re.search(r"ncclDevFuncTable_8\[\] = \{(.*?)\nnullptr\};", header, re.S)
+        self.assertIsNotNone(m, "ncclDevFuncTable_8 not found in device_table.h")
+        # Arch-guarded rows print the index twice (symbol + nullptr); set() dedups.
+        return {int(i) for i in re.findall(r"/\*\s*(\d+)\s*\*/", m.group(1))}
+
+    def _host_funcids(self, gensrc):
+        with open(os.path.join(gensrc, "host_table.cpp")) as f:
+            body = f.read()
+        return {int(fid) for _, fid in re.findall(r"\{(\d+),\s*(-?\d+)\}", body)
+                if int(fid) >= 0}
+
+    def _assert_complete(self, header, gensrc, label):
+        missing = sorted(self._device_funcids(header) - self._host_funcids(gensrc))
+        self.assertEqual(missing, [], "%s: %d device funcId(s) have no "
+                         "ncclDevFuncNameToId key: %s" % (label, len(missing), missing[:16]))
+
+    def test_multiarch_host_table_is_complete(self):
+        self._assert_complete(self.multiarch_header, self.multiarch_gensrc, "multi-arch")
+
+    def test_gfx1250_local_host_table_is_complete(self):
+        self._assert_complete(self.gfx1250_header, self.gfx1250_gensrc, "gfx1250 -l")
+
+    def test_p2p_sendrecv_key_present_multiarch(self):
+        with open(os.path.join(self.multiarch_gensrc, "host_table.cpp")) as f:
+            body = f.read()
+        self.assertRegex(body, r"\{5,\s*\d+\}",
+                         "SendRecv key (5) missing -> ncclDevFuncId_P2p() returns -1")
 
 
 if __name__ == "__main__":

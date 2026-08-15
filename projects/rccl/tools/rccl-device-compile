@@ -710,7 +710,7 @@ def do_link(args, forwarded_flags):
             f'-mcpu={arch}',
             '-c', '-o', disp_obj, disp_patched,
         ]
-        disp_assemble_s, rc = run_timed(
+        _, rc = run_timed(
             disp_assemble_cmd, f"assemble dispatcher for {arch}")
         if rc != 0:
             extract_s = time.monotonic() - t0
@@ -718,7 +718,6 @@ def do_link(args, forwarded_flags):
             sys.exit(rc)
 
         # Step 5: Compile rocSHMEM device bitcode to an amdgcn object (if provided).
-        rocshmem_s = 0.0
         if rocshmem_bitcode:
             if not os.path.exists(rocshmem_bitcode):
                 print(f"  rocSHMEM: no device bitcode for {arch} ({rocshmem_bitcode}), skipping",
@@ -732,13 +731,15 @@ def do_link(args, forwarded_flags):
                     '-c', '-x', 'ir',
                     '-o', rocshmem_obj, rocshmem_bitcode,
                 ]
-                rocshmem_s, rc = run_timed(
+                _, rc = run_timed(
                     bc_compile_cmd, f"compile rocSHMEM device bitcode for {arch}")
                 if rc != 0:
                     extract_s = time.monotonic() - t0
                     status = f'rocshmem_compile_failed:{rc}'
                     sys.exit(rc)
-        extract_s = time.monotonic() - t0 + disp_assemble_s + rocshmem_s
+        # t0 already spans patch + dispatcher assemble + optional rocSHMEM;
+        # do not add those stage times again (that double-counts).
+        extract_s = time.monotonic() - t0
 
         # Step 6: Link all objects + dispatcher into device.elf
         # Use a response file for potentially long object lists
