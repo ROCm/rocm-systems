@@ -203,11 +203,11 @@ Examples:
         self.parser.add_argument(
             '--max-parallel-ranks',
             type=int,
-            default=3,
+            default=8,
             help="Under --jobs>1, only entries needing at most this many ranks are "
-                 "co-tenanted; entries needing more run serially (avoids GPU oversubscription "
-                 "on a single node). Default: 3. Entries flagged serial_only always run "
-                 "serially regardless of rank."
+                 "co-tenanted; entries needing more ranks run serially (bounds GPU "
+                 "oversubscription on a single node). Entries flagged serial_only always "
+                 "run serially regardless of rank. Default: 8."
         )
 
     def parse_arguments(self):

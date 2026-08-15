@@ -1818,7 +1818,7 @@ class TestExecutor:
             nranks = 10**9 if is_auto else int(tr)
         except (ValueError, TypeError):
             nranks = 10**9
-        if nranks > getattr(self.args, "max_parallel_ranks", 3):
+        if nranks > getattr(self.args, "max_parallel_ranks", 8):
             return False
 
         return True
