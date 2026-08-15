@@ -651,35 +651,55 @@ LOAD_ERROR:
     if (!IsDTIF())
       return true;
 
+    if (thunk_handle == nullptr)
+      return false;
+
+    // Both halves up front. A thunk exporting DtifCreate but not DtifDestroy
+    // would otherwise hand over an instance that nothing in this process can
+    // ever give back, and the load would only find that out during its own
+    // rollback, with the library about to be closed underneath it.
     DtifCreateFunc* pfnDtifCreate =
         (DtifCreateFunc*)rocr::os::GetExportAddress(thunk_handle, "DtifCreate");
-    if (pfnDtifCreate != nullptr) {
-      if (pfnDtifCreate("HSA") != nullptr) {
-        debug_print("DtifCreate OK!\n");
-        return true;
-      } else {
-        debug_print("DtifCreate failed!\n");
-        return false;
-      }
+    DtifDestroyFunc* pfnDtifDestroy =
+        (DtifDestroyFunc*)rocr::os::GetExportAddress(thunk_handle, "DtifDestroy");
+    if (pfnDtifCreate == nullptr || pfnDtifDestroy == nullptr) {
+      debug_print("DtifCreate/DtifDestroy not both exported, refusing the thunk.\n");
+      return false;
     }
-    return false;
+
+    if (pfnDtifCreate("HSA") == nullptr) {
+      debug_print("DtifCreate failed!\n");
+      return false;
+    }
+
+    // Taking the instance and recording how to give it back are the same act.
+    dtif_destroy_ = pfnDtifDestroy;
+    debug_print("DtifCreate OK!\n");
+    return true;
   }
 
   bool ThunkLoader::DestroyThunkInstance() {
     if (!IsDTIF())
       return true;
 
-    if (thunk_handle == nullptr)
-      return false;
-
-    DtifDestroyFunc* pfnDtifDestroy =
-        (DtifDestroyFunc*)rocr::os::GetExportAddress(thunk_handle, "DtifDestroy");
-    if (pfnDtifDestroy != nullptr) {
-      pfnDtifDestroy();
-      debug_print("DtifDestroy OK!\n");
+    // Nothing to give back. The load can fail before CreateThunkInstance() ever
+    // runs - LoadThunkApiTable() rejecting an incomplete table - or inside it,
+    // and either way the rollback still comes through here. There is no lookup
+    // on this path at all now: if an instance is owned then the way to release
+    // it was resolved before it was taken, and if none is owned there is
+    // nothing to look up.
+    if (dtif_destroy_ == nullptr)
       return true;
-    }
-    return false;
+
+    // Dropped before the call rather than after it, so a destroy that fails
+    // cannot be retried into a second release. Ownership ends here either way:
+    // there is no second instance to give back.
+    DtifDestroyFunc* pfnDtifDestroy = dtif_destroy_;
+    dtif_destroy_ = nullptr;
+
+    pfnDtifDestroy();
+    debug_print("DtifDestroy OK!\n");
+    return true;
   }
 
   bool ThunkLoader::CheckThunkAbi() {

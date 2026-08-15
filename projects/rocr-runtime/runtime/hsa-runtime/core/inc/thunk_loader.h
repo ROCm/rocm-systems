@@ -449,7 +449,27 @@ class ThunkLoader {
     /// rest of the table is left null and calling into it would fault - the
     /// caller has to abandon the load rather than carry on.
     bool LoadThunkApiTable();
+
+    /// @brief Create the thunk's process-wide instance, where it has one.
+    ///
+    /// @details Only DTIF does. Both halves of the pair are resolved before
+    /// either is called, so a thunk that can create an instance but not
+    /// destroy one is refused rather than taken up on the offer: the
+    /// alternative is an instance that outlives the process's ability to give
+    /// it back. This is the rule KfdDriver::ImportExternalSemaphore() already
+    /// applies to the other optional acquire/release pair in the table.
+    ///
+    /// Ownership of the instance is recorded here and nowhere else, so that a
+    /// load which fails before or during this call leaves nothing for the
+    /// rollback to give back.
     bool CreateThunkInstance();
+
+    /// @brief Destroy the instance this loader owns, if it owns one.
+    ///
+    /// @details Owning nothing is success - the rollback path runs this after
+    /// failures at every stage of the load, including ones that never got as
+    /// far as creating an instance. Idempotent, so an unwind on the failure
+    /// path and a later normal shutdown cannot both release the same instance.
     bool DestroyThunkInstance();
     bool CheckThunkAbi();
     bool IsDXG() const { return is_win_dxg_ || is_wsl_dxg_; }
@@ -595,6 +615,11 @@ class ThunkLoader {
     bool is_wsl_dxg_;
     bool is_dtif_;
     bool is_loaded_;
+    /// The instance this loader owns, held as the means of giving it back
+    /// rather than as a flag saying that it should be. Non-null exactly when
+    /// DtifCreate() returned an instance, and it can only have been set if
+    /// DtifDestroy() was already known to exist.
+    DtifDestroyFunc* dtif_destroy_ = nullptr;
 };
 
 }   //  namespace core
