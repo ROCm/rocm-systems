@@ -9158,6 +9158,56 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
     wf->halt();
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadDrainsXcntBeforeRestoringM0) {
+  // The M0 restore must not be reachable while the load is still replayable. Hardware latches M0
+  // at issue, so the transfer itself is safe, but an XNACK replay re-issues the VMEM instruction
+  // and re-reads its scalar operands; a restore that already ran would hand the replayed load the
+  // guest's original cluster mask and undo the multicast suppression this rewrite exists for.
+  // Assert the ordering rather than a fixed index so the guarantee survives changes in scratch
+  // allocation, which vary the surrounding instructions.
+  constexpr auto cluster =
+      cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal, {.saddr = 4, .vdst = 8, .vaddr = 12});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {cluster[0], cluster[1], cluster[2], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+
+  constexpr uint16_t kGfx1250M0Operand = 125;
+  std::optional<size_t> load_index;
+  std::optional<size_t> drain_index;
+  std::optional<size_t> restore_index;
+  for (size_t i = 0; i < decoded.size(); ++i) {
+    const auto &inst = *decoded[i];
+    if (inst.opcode() == cdna5::kClusterLoadB32Vglobal && !load_index)
+      load_index = i;
+    if (inst.mnemonic() == "s_wait_xcnt" && load_index && !drain_index)
+      drain_index = i;
+    if (inst.mnemonic() == "s_mov_b32" && inst.raw_encoding() != nullptr && load_index &&
+        !restore_index && ((inst.raw_encoding()[0] >> 16) & 0x7fu) == kGfx1250M0Operand)
+      restore_index = i;
+  }
+
+  ASSERT_TRUE(load_index.has_value()) << "the cluster load must survive translation";
+  ASSERT_TRUE(drain_index.has_value()) << "no XCNT drain follows the cluster load";
+  ASSERT_TRUE(restore_index.has_value()) << "M0 is never restored after the cluster load";
+  EXPECT_LT(*load_index, *drain_index) << "the drain must follow the load it acknowledges";
+  EXPECT_LT(*drain_index, *restore_index)
+      << "M0 is restored while the load is still replayable, which reinstates the cluster mask";
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250MasksM0AroundOffFormClusterLoadForA0) {
   // An off-form (NULL-saddr) cluster load is NOT demoted to a global load. Like
   // every cluster-load form, it stays a cluster load and is wrapped so it runs
@@ -9305,17 +9355,20 @@ TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadsUseVgprCarrierUnderSgprPressure) {
     EXPECT_EQ(
         std::ranges::count_if(decoded, [&](const auto &inst) { return inst->opcode() == opcode; }),
         1);
-    ASSERT_GE(decoded.size(), 8u);
+    ASSERT_GE(decoded.size(), 9u);
     ASSERT_EQ(decoded[0]->mnemonic(), "s_wait_idle");
     ASSERT_EQ(decoded[1]->mnemonic(), "v_writelane_b32");
-    ASSERT_EQ(decoded[6]->mnemonic(), "v_readlane_b32");
+    // The XCNT drain separates the load from the M0 restore even when the borrowed SGPR is
+    // carried through a VGPR, so the carrier restore sits one instruction later than the drain.
+    ASSERT_EQ(decoded[5]->mnemonic(), "s_wait_xcnt");
+    ASSERT_EQ(decoded[7]->mnemonic(), "v_readlane_b32");
 
     ASSERT_NE(decoded[1]->raw_encoding(), nullptr);
-    ASSERT_NE(decoded[6]->raw_encoding(), nullptr);
+    ASSERT_NE(decoded[7]->raw_encoding(), nullptr);
     cdna5::Vop3MachineInst save{};
     cdna5::Vop3MachineInst restore{};
     std::memcpy(&save, decoded[1]->raw_encoding(), sizeof(save));
-    std::memcpy(&restore, decoded[6]->raw_encoding(), sizeof(restore));
+    std::memcpy(&restore, decoded[7]->raw_encoding(), sizeof(restore));
     EXPECT_EQ(save.src0, restore.vdst) << "the carrier must restore the borrowed SGPR";
     EXPECT_EQ(static_cast<uint16_t>(256u + save.vdst), restore.src0)
         << "the carrier save and restore must use the same VGPR";
@@ -9399,6 +9452,7 @@ TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadDoesNotReuseNonzeroM0Write) {
   constexpr auto generated_restore =
       cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 0, .sdst = 125});
   constexpr auto dependency_barrier = cdna5::build_sopp(cdna5::kSWaitIdleSopp);
+  constexpr auto wait_xcnt = cdna5::build_sopp(cdna5::kSWaitXcntSopp, {.simm16 = 0});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
       {nonzero_m0[0], cluster[0], cluster[1], cluster[2], kGfx1250SEndpgm});
@@ -9414,7 +9468,7 @@ TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadDoesNotReuseNonzeroM0Write) {
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_FALSE(translated.text_sections().empty());
-  ASSERT_EQ(translated.text_sections()[0]->size(), 9 * sizeof(uint32_t));
+  ASSERT_EQ(translated.text_sections()[0]->size(), 10 * sizeof(uint32_t));
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   EXPECT_EQ(target_words[0], nonzero_m0[0]);
@@ -9424,8 +9478,11 @@ TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadDoesNotReuseNonzeroM0Write) {
   EXPECT_EQ(target_words[4], cluster[0]);
   EXPECT_EQ(target_words[5], cluster[1]);
   EXPECT_EQ(target_words[6], cluster[2]);
-  EXPECT_EQ(target_words[7], generated_restore[0]);
-  EXPECT_EQ(target_words[8], kGfx1250SEndpgm);
+  // The XCNT drain must sit between the load and the restore, or an XNACK replay of the load
+  // re-reads a restored M0 and the cluster mask comes back.
+  EXPECT_EQ(target_words[7], wait_xcnt[0]);
+  EXPECT_EQ(target_words[8], generated_restore[0]);
+  EXPECT_EQ(target_words[9], kGfx1250SEndpgm);
 
   rocjitsu::BinaryTranslator verifier(
       ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
@@ -9459,7 +9516,7 @@ TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadDoesNotReuseZeroWriteToOtherSgpr) {
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_FALSE(translated.text_sections().empty());
-  ASSERT_EQ(translated.text_sections()[0]->size(), 9 * sizeof(uint32_t));
+  ASSERT_EQ(translated.text_sections()[0]->size(), 10 * sizeof(uint32_t));
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   EXPECT_EQ(target_words[0], clear_s7[0]);
@@ -9481,6 +9538,7 @@ TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadDoesNotReuseM0ClearBypassedByBranch)
   constexpr auto source_restore =
       cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 12, .sdst = 125});
   constexpr auto dependency_barrier = cdna5::build_sopp(cdna5::kSWaitIdleSopp);
+  constexpr auto wait_xcnt = cdna5::build_sopp(cdna5::kSWaitXcntSopp, {.simm16 = 0});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
       {branch_to_cluster[0], source_save[0], clear_m0[0], cluster[0], cluster[1], cluster[2],
@@ -9497,7 +9555,7 @@ TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadDoesNotReuseM0ClearBypassedByBranch)
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_FALSE(translated.text_sections().empty());
-  ASSERT_EQ(translated.text_sections()[0]->size(), 12 * sizeof(uint32_t));
+  ASSERT_EQ(translated.text_sections()[0]->size(), 13 * sizeof(uint32_t));
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   constexpr auto generated_save = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 125, .sdst = 0});
@@ -9512,9 +9570,10 @@ TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadDoesNotReuseM0ClearBypassedByBranch)
   EXPECT_EQ(target_words[6], cluster[0]);
   EXPECT_EQ(target_words[7], cluster[1]);
   EXPECT_EQ(target_words[8], cluster[2]);
-  EXPECT_EQ(target_words[9], generated_restore[0]);
-  EXPECT_EQ(target_words[10], source_restore[0]);
-  EXPECT_EQ(target_words[11], kGfx1250SEndpgm);
+  EXPECT_EQ(target_words[9], wait_xcnt[0]);
+  EXPECT_EQ(target_words[10], generated_restore[0]);
+  EXPECT_EQ(target_words[11], source_restore[0]);
+  EXPECT_EQ(target_words[12], kGfx1250SEndpgm);
 
   rocjitsu::BinaryTranslator verifier(
       ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,

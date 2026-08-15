@@ -1155,8 +1155,9 @@ ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, 
 ///
 /// @details Every cluster-load form (both SADDR and off/NULL-saddr, all widths)
 /// is left as a cluster load and wrapped so it executes with M0 forced to zero:
-/// save M0 to a scratch SGPR, set M0 = 0, run the load, then restore M0. The opcode
-/// is not changed.
+/// save M0 to a scratch SGPR, set M0 = 0, run the load, drain XCNT, then restore M0. The opcode
+/// is not changed. The drain is what keeps the restore from racing an XNACK replay of the load;
+/// see the comment at the emission site.
 ///
 /// Under full SGPR pressure, EXEC-independent lane-zero operations carry one
 /// live SGPR through a dead low-bank VGPR. This keeps the guest cluster load
@@ -1203,7 +1204,7 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
   // MUST use kGfx1250M0 (125): on gfx1250 M0 encodes as 125 and NULL as 124 (the
   // inverse of CDNA), so a write to 124 would be a discarded NULL write.
   std::vector<uint32_t> words;
-  words.reserve(18);
+  words.reserve(19);
   append_gfx1250_scratch_dependency_barrier(words);
   uint8_t current_mode = 0;
   std::optional<uint8_t> original_mode;
@@ -1223,6 +1224,17 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
                                {.ssrc0 = kGfx1250M0, .sdst = static_cast<uint8_t>(scratch->base)}));
   words.push_back(build_cluster_m0_clear());
   words.insert(words.end(), inst.raw_encoding(), inst.raw_encoding() + 3);
+  // Drain XCNT before giving M0 its guest value back. The hardware latches M0 at issue, so the
+  // transfer itself is safe, but an XNACK replay re-issues the VMEM instruction and re-reads its
+  // scalar operands. A restore that has already landed would hand the replayed load the original
+  // cluster mask and silently reinstate the multicast this rewrite exists to suppress. Once XCNT
+  // reaches zero the load is acknowledged and unreplayable, and replay skips non-VMEM ops, so a
+  // restore placed after the wait can never execute mid-replay.
+  //
+  // Unconditional rather than gated on MODE.REPLAY_MODE: the compiler sets that bit in every
+  // gfx1250 entry prologue, and a translator cannot prove it is clear on every path into this
+  // block.
+  append_words(words, cdna5::build_sopp(cdna5::kSWaitXcntSopp, {.simm16 = 0}));
   append_words(
       words, cdna5::build_sop1(cdna5::kSMovB32Sop1,
                                {.ssrc0 = static_cast<uint8_t>(scratch->base), .sdst = kGfx1250M0}));
