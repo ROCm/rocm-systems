@@ -16,6 +16,8 @@ struct IbCastSharedQp       g_IbCastSharedQpPool[IBCAST_MAX_SHARED_QPS];
 int                         g_IbCastSharedQpPoolCount = 0;
 struct IbCastCommTableEntry g_IbCastCommTable[IBCAST_MAX_COMMS];
 uint16_t                    g_IbCastNextCommId = 1;   // 0 reserved for "not shared"
+uint16_t                    g_IbCastCommIdFreeStack[IBCAST_MAX_COMMS];
+int                         g_IbCastCommIdFreeTop = 0;
 std::mutex                  g_IbCastSharedQpMutex;
 
 void IbCastStripPort(union ncclSocketAddress* addr) {
@@ -109,11 +111,17 @@ int IbCastCountPeerTotalRefcount(int ibDevN, const union ncclSocketAddress* peer
 
 uint16_t IbCastAllocCommId(void* comm, bool isSend) {
     std::lock_guard<std::mutex> lock(g_IbCastSharedQpMutex);
-    if (g_IbCastNextCommId >= IBCAST_MAX_COMMS) {
+    uint16_t id;
+    if (g_IbCastCommIdFreeTop > 0) {
+        // Reuse a previously freed commId — O(1)
+        id = g_IbCastCommIdFreeStack[--g_IbCastCommIdFreeTop];
+    } else if (g_IbCastNextCommId < IBCAST_MAX_COMMS) {
+        // Allocate a fresh commId — O(1)
+        id = g_IbCastNextCommId++;
+    } else {
         WARN("NET/IB: commId pool exhausted (max %d), falling back to non-sharing", IBCAST_MAX_COMMS);
         return 0;
     }
-    uint16_t id = g_IbCastNextCommId++;
     g_IbCastCommTable[id].comm = comm;
     g_IbCastCommTable[id].isSend = isSend;
     g_IbCastCommTable[id].used = true;
@@ -126,6 +134,7 @@ void IbCastFreeCommIdLocked(uint16_t commId) {
     if (commId > 0 && commId < IBCAST_MAX_COMMS) {
         g_IbCastCommTable[commId].used = false;
         g_IbCastCommTable[commId].comm = NULL;
+        g_IbCastCommIdFreeStack[g_IbCastCommIdFreeTop++] = commId;
     }
 }
 

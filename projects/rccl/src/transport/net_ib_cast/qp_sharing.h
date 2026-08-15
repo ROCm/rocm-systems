@@ -62,6 +62,8 @@ extern struct IbCastSharedQp       g_IbCastSharedQpPool[IBCAST_MAX_SHARED_QPS];
 extern int                         g_IbCastSharedQpPoolCount;
 extern struct IbCastCommTableEntry g_IbCastCommTable[IBCAST_MAX_COMMS];
 extern uint16_t                    g_IbCastNextCommId;
+extern uint16_t                    g_IbCastCommIdFreeStack[IBCAST_MAX_COMMS];
+extern int                         g_IbCastCommIdFreeTop;
 extern std::mutex                  g_IbCastSharedQpMutex;
 
 // Strip port from socket address for peer matching
