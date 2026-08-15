@@ -404,14 +404,14 @@ query_supported_spm_counters(rocprofiler_agent_id_t                 agent_id,
     {
         LOG_WARNING("SPM is not supported on the architecture of device {} (agent {})",
                     device_id, agent_id.handle);
-        return { spm_status::skipped, {} };
+        return { .status = spm_status::skipped, .resolved_counters = {} };
     }
 
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
         LOG_WARNING("Failed to query SPM counters for agent {}: {} ({})", agent_id.handle,
                     static_cast<int>(status), rocprofiler_get_status_string(status));
-        return { spm_status::failed, {} };
+        return { .status = spm_status::failed, .resolved_counters = {} };
     }
 
     auto counters = resolved_counter_vec_t{};
@@ -432,7 +432,8 @@ query_supported_spm_counters(rocprofiler_agent_id_t                 agent_id,
     }
 
     if(matched.size() == requested_names.size())
-        return { spm_status::success, std::move(counters) };
+        return { .status            = spm_status::success,
+                 .resolved_counters = std::move(counters) };
 
     for(const auto& name : requested_names)
     {
@@ -444,7 +445,7 @@ query_supported_spm_counters(rocprofiler_agent_id_t                 agent_id,
         }
     }
 
-    return { spm_status::skipped, {} };
+    return { .status = spm_status::skipped, .resolved_counters = {} };
 }
 
 std::optional<rocprofiler_counter_config_id_t>
@@ -486,14 +487,15 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id
     const auto requested_names = detail::requested_counter_names(requested);
     auto       counter_query =
         query_supported_spm_counters(agent_id, requested_names, device_id);
-    if(counter_query.status != spm_status::success) return { counter_query.status, {} };
+    if(counter_query.status != spm_status::success)
+        return { .status = counter_query.status, .config = {} };
 
     if(!sample_interval_supported(agent_id, requested_config))
     {
         LOG_WARNING("SPM sample interval {} SCLK cycles is not supported for device {} "
                     "(agent {})",
                     requested_config.sample_interval, device_id, agent_id.handle);
-        return { spm_status::failed, {} };
+        return { .status = spm_status::failed, .config = {} };
     }
 
     auto config_data = make_counter_config_data(counter_query.resolved_counters);
@@ -503,10 +505,10 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id
     {
         trace_cache::get_metadata_registry().set_spm_counter_names(
             static_cast<std::uint32_t>(device_id), std::move(config_data.name_entries));
-        return { spm_status::success, *config };
+        return { .status = spm_status::success, .config = *config };
     }
 
-    return { spm_status::failed, {} };
+    return { .status = spm_status::failed, .config = {} };
 }
 
 bool
@@ -585,8 +587,8 @@ make_counter_info(rocprofiler_counter_instance_id_t instance_id)
     }
 
     return trace_cache::spm_counter_info{
-        counter_id.handle,
-        instance_id,
+        .counter_id          = counter_id.handle,
+        .counter_instance_id = instance_id,
     };
 }
 
@@ -656,16 +658,17 @@ store_spm_records(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
 
     const auto& info = dispatch_data->dispatch_info;
     trace_cache::get_buffer_storage().store(trace_cache::spm_sample{
-        info.agent_id.handle,
-        info.dispatch_id,
-        info.kernel_id,
-        info.queue_id.handle,
-        dispatch_data->correlation_id.internal,
-        dispatch_data->correlation_id.external.value,
-        0,  // TODO: wire HIP stream correlation for SPM dispatch callbacks.
-        data_loss,
-        std::move(counters),
-        std::move(samples),
+        .agent_id_handle         = info.agent_id.handle,
+        .dispatch_id             = info.dispatch_id,
+        .kernel_id               = info.kernel_id,
+        .queue_id_handle         = info.queue_id.handle,
+        .correlation_id_internal = dispatch_data->correlation_id.internal,
+        .correlation_id_ancestor = dispatch_data->correlation_id.external.value,
+        // TODO: wire HIP stream correlation for SPM dispatch callbacks.
+        .stream_handle = 0,
+        .data_loss     = data_loss,
+        .counters      = std::move(counters),
+        .samples       = std::move(samples),
     });
 }
 

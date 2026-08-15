@@ -637,25 +637,6 @@ struct spm_sample : cacheable_t
 {
     static constexpr type_identifier_t type_identifier = type_identifier_t::spm_sample;
 
-    spm_sample() = default;
-    spm_sample(std::uint64_t _agent_id_handle, std::uint64_t _dispatch_id,
-               std::uint64_t _kernel_id, std::uint64_t _queue_id_handle,
-               std::uint64_t _correlation_id_internal,
-               std::uint64_t _correlation_id_ancestor, std::uint64_t _stream_handle,
-               bool _data_loss, std::vector<spm_counter_info> _counters,
-               std::vector<spm_timestamp_sample> _samples)
-    : agent_id_handle(_agent_id_handle)
-    , dispatch_id(_dispatch_id)
-    , kernel_id(_kernel_id)
-    , queue_id_handle(_queue_id_handle)
-    , correlation_id_internal(_correlation_id_internal)
-    , correlation_id_ancestor(_correlation_id_ancestor)
-    , stream_handle(_stream_handle)
-    , data_loss(_data_loss)
-    , counters(std::move(_counters))
-    , samples(std::move(_samples))
-    {}
-
     std::uint64_t                     agent_id_handle         = 0;
     std::uint64_t                     dispatch_id             = 0;
     std::uint64_t                     kernel_id               = 0;

@@ -536,8 +536,8 @@ TEST_F(sample_type_test, backtrace_region_sample_default_constructor)
 TEST_F(sample_type_test, spm_sample_serialize_deserialize)
 {
     auto counters = std::vector<spm_counter_info>{
-        spm_counter_info{ 11, 111 },
-        spm_counter_info{ 12, 222 },
+        spm_counter_info{ .counter_id = 11, .counter_instance_id = 111 },
+        spm_counter_info{ .counter_id = 12, .counter_instance_id = 222 },
     };
     auto samples = std::vector<spm_timestamp_sample>{
         spm_timestamp_sample{ 1000,
@@ -550,7 +550,18 @@ TEST_F(sample_type_test, spm_sample_serialize_deserialize)
                                   spm_counter_value{ 0, 789.25 },
                               } },
     };
-    spm_sample original(7, 42, 99, 1234, 5678, 9876, 55, true, counters, samples);
+    spm_sample original{
+        .agent_id_handle         = 7,
+        .dispatch_id             = 42,
+        .kernel_id               = 99,
+        .queue_id_handle         = 1234,
+        .correlation_id_internal = 5678,
+        .correlation_id_ancestor = 9876,
+        .stream_handle           = 55,
+        .data_loss               = true,
+        .counters                = counters,
+        .samples                 = samples,
+    };
 
     serialize(buffer.data(), original);
 
@@ -594,8 +605,8 @@ TEST_F(sample_type_test, spm_sample_serialize_deserialize)
 TEST_F(sample_type_test, spm_sample_get_size)
 {
     auto counters = std::vector<spm_counter_info>{
-        spm_counter_info{ 11, 111 },
-        spm_counter_info{ 12, 222 },
+        spm_counter_info{ .counter_id = 11, .counter_instance_id = 111 },
+        spm_counter_info{ .counter_id = 12, .counter_instance_id = 222 },
     };
     auto samples = std::vector<spm_timestamp_sample>{
         spm_timestamp_sample{ 1000,
@@ -608,7 +619,18 @@ TEST_F(sample_type_test, spm_sample_get_size)
                                   spm_counter_value{ 0, 789.25 },
                               } },
     };
-    const spm_sample sample(7, 42, 99, 1234, 5678, 9876, 55, true, counters, samples);
+    const spm_sample sample{
+        .agent_id_handle         = 7,
+        .dispatch_id             = 42,
+        .kernel_id               = 99,
+        .queue_id_handle         = 1234,
+        .correlation_id_internal = 5678,
+        .correlation_id_ancestor = 9876,
+        .stream_handle           = 55,
+        .data_loss               = true,
+        .counters                = counters,
+        .samples                 = samples,
+    };
 
     const auto expected_size =
         sizeof(std::uint64_t) * 7 + sizeof(bool) + sizeof(std::uint32_t) * 2 +
@@ -621,7 +643,16 @@ TEST_F(sample_type_test, spm_sample_get_size)
 
 TEST_F(sample_type_test, spm_sample_empty_samples_and_no_data_loss)
 {
-    const spm_sample original(7, 42, 99, 1234, 5678, 9876, 55, false, {}, {});
+    const spm_sample original{
+        .agent_id_handle         = 7,
+        .dispatch_id             = 42,
+        .kernel_id               = 99,
+        .queue_id_handle         = 1234,
+        .correlation_id_internal = 5678,
+        .correlation_id_ancestor = 9876,
+        .stream_handle           = 55,
+        .data_loss               = false,
+    };
 
     serialize(buffer.data(), original);
 
