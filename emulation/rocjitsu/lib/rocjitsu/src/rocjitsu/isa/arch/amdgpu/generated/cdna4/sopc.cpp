@@ -5,22 +5,16 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/sopc.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna4 {
 
 SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpEqI32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpEqI32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -40,13 +34,15 @@ SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpEqI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_eq_i32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpEqI32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpEqI32Sopc>(opcode);
 }
+} // namespace detail
 
 SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpLgI32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpLgI32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -66,13 +62,15 @@ SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpLgI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lg_i32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLgI32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLgI32Sopc>(opcode);
 }
+} // namespace detail
 
 SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpGtI32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpGtI32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -92,13 +90,15 @@ SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpGtI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_gt_i32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpGtI32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpGtI32Sopc>(opcode);
 }
+} // namespace detail
 
 SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpGeI32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpGeI32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -118,13 +118,15 @@ SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpGeI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_ge_i32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpGeI32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpGeI32Sopc>(opcode);
 }
+} // namespace detail
 
 SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpLtI32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpLtI32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -144,13 +146,15 @@ SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpLtI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lt_i32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLtI32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLtI32Sopc>(opcode);
 }
+} // namespace detail
 
 SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_le_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpLeI32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpLeI32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -170,13 +174,15 @@ SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpLeI32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_le_i32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLeI32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLeI32Sopc>(opcode);
 }
+} // namespace detail
 
 SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpEqU32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpEqU32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -196,13 +202,15 @@ SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpEqU32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_eq_u32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpEqU32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpEqU32Sopc>(opcode);
 }
+} // namespace detail
 
 SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpLgU32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpLgU32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -222,13 +230,15 @@ SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpLgU32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lg_u32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLgU32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLgU32Sopc>(opcode);
 }
+} // namespace detail
 
 SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpGtU32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpGtU32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -248,13 +258,15 @@ SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpGtU32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_gt_u32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpGtU32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpGtU32Sopc>(opcode);
 }
+} // namespace detail
 
 SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpGeU32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpGeU32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -274,13 +286,15 @@ SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpGeU32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_ge_u32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpGeU32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpGeU32Sopc>(opcode);
 }
+} // namespace detail
 
 SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpLtU32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpLtU32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -300,13 +314,15 @@ SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpLtU32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lt_u32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLtU32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLtU32Sopc>(opcode);
 }
+} // namespace detail
 
 SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_le_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpLeU32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpLeU32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -326,13 +342,15 @@ SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpLeU32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_le_u32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLeU32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLeU32Sopc>(opcode);
 }
+} // namespace detail
 
 SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
     : Sopc("s_bitcmp0_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitcmp0B32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SBitcmp0B32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -352,13 +370,15 @@ SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SBitcmp0B32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitcmp0_b32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitcmp0B32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SBitcmp0B32Sopc>(opcode);
 }
+} // namespace detail
 
 SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
     : Sopc("s_bitcmp1_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitcmp1B32Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SBitcmp1B32Sopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -378,13 +398,15 @@ SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SBitcmp1B32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitcmp1_b32_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitcmp1B32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SBitcmp1B32Sopc>(opcode);
 }
+} // namespace detail
 
 SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
     : Sopc("s_bitcmp0_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitcmp0B64Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SBitcmp0B64Sopc)),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -405,13 +427,15 @@ SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SBitcmp0B64Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitcmp0_b64_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitcmp0B64Sopc(const MachineInst *opcode) {
+  return std::make_unique<SBitcmp0B64Sopc>(opcode);
 }
+} // namespace detail
 
 SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
     : Sopc("s_bitcmp1_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitcmp1B64Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SBitcmp1B64Sopc)),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -432,12 +456,15 @@ SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SBitcmp1B64Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitcmp1_b64_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitcmp1B64Sopc(const MachineInst *opcode) {
+  return std::make_unique<SBitcmp1B64Sopc>(opcode);
 }
+} // namespace detail
 
 SSetvskipSopc::SSetvskipSopc(const MachineInst *inst)
-    : Sopc("s_setvskip", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSetvskipSopc>()),
+    : Sopc("s_setvskip", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SSetvskipSopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
   src_operands_[0] = &ssrc0;
@@ -454,14 +481,15 @@ SSetvskipSopc::SSetvskipSopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SSetvskipSopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+std::unique_ptr<Instruction> decodeSSetvskipSopc(const MachineInst *opcode) {
+  return std::make_unique<SSetvskipSopc>(opcode);
 }
+} // namespace detail
 
 SSetGprIdxOnSopc::SSetGprIdxOnSopc(const MachineInst *inst)
     : Sopc("s_set_gpr_idx_on", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSetGprIdxOnSopc>()),
+           selected_exec_fn(InstructionExecutionId::SSetGprIdxOnSopc)),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SIMM4, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       m0(32, OperandType::OPR_SDST_M0, 124), m0_in(32, OperandType::OPR_SDST_M0, 124) {
@@ -483,13 +511,15 @@ SSetGprIdxOnSopc::SSetGprIdxOnSopc(const MachineInst *inst)
   m0_in.apply_fieldless_caps(false, false, false);
 }
 
-void SSetGprIdxOnSopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_set_gpr_idx_on_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSSetGprIdxOnSopc(const MachineInst *opcode) {
+  return std::make_unique<SSetGprIdxOnSopc>(opcode);
 }
+} // namespace detail
 
 SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpEqU64Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpEqU64Sopc)),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -511,13 +541,15 @@ SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpEqU64Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_eq_u64_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpEqU64Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpEqU64Sopc>(opcode);
 }
+} // namespace detail
 
 SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCmpLgU64Sopc>()),
+           selected_exec_fn(InstructionExecutionId::SCmpLgU64Sopc)),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -539,9 +571,11 @@ SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SCmpLgU64Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lg_u64_sopc(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLgU64Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLgU64Sopc>(opcode);
 }
+} // namespace detail
 
 } // namespace cdna4
 } // namespace rocjitsu

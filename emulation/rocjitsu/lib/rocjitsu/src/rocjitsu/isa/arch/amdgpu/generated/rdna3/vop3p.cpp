@@ -5,19 +5,10 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/mma_exec.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3 {
@@ -26,7 +17,8 @@ VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_mad_i16_e64_dpp"
                 : "v_pk_mad_i16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkMadI16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMadI16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -54,15 +46,18 @@ VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_MAD_I16 does not support DPP", "");
 }
 
-void VPkMadI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mad_i16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMadI16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMadI16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_mul_lo_u16_e64_dpp"
                 : "v_pk_mul_lo_u16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkMulLoU16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMulLoU16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -84,15 +79,18 @@ VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_MUL_LO_U16 does not support DPP", "");
 }
 
-void VPkMulLoU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mul_lo_u16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMulLoU16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMulLoU16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_add_i16_e64_dpp"
                 : "v_pk_add_i16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkAddI16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkAddI16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -114,15 +112,18 @@ VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_ADD_I16 does not support DPP", "");
 }
 
-void VPkAddI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_add_i16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkAddI16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkAddI16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_sub_i16_e64_dpp"
                 : "v_pk_sub_i16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkSubI16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkSubI16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -144,15 +145,18 @@ VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_SUB_I16 does not support DPP", "");
 }
 
-void VPkSubI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_sub_i16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkSubI16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkSubI16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_lshlrev_b16_e64_dpp"
                 : "v_pk_lshlrev_b16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkLshlrevB16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkLshlrevB16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -174,15 +178,18 @@ VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_LSHLREV_B16 does not support DPP", "");
 }
 
-void VPkLshlrevB16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_lshlrev_b16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkLshlrevB16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkLshlrevB16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_lshrrev_b16_e64_dpp"
                 : "v_pk_lshrrev_b16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkLshrrevB16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkLshrrevB16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -204,15 +211,18 @@ VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_LSHRREV_B16 does not support DPP", "");
 }
 
-void VPkLshrrevB16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_lshrrev_b16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkLshrrevB16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkLshrrevB16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_ashrrev_i16_e64_dpp"
                 : "v_pk_ashrrev_i16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkAshrrevI16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkAshrrevI16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -234,15 +244,18 @@ VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_ASHRREV_I16 does not support DPP", "");
 }
 
-void VPkAshrrevI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_ashrrev_i16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkAshrrevI16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkAshrrevI16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_max_i16_e64_dpp"
                 : "v_pk_max_i16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkMaxI16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMaxI16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -264,15 +277,18 @@ VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_MAX_I16 does not support DPP", "");
 }
 
-void VPkMaxI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_max_i16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMaxI16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMaxI16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_min_i16_e64_dpp"
                 : "v_pk_min_i16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkMinI16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMinI16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -294,15 +310,18 @@ VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_MIN_I16 does not support DPP", "");
 }
 
-void VPkMinI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_min_i16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMinI16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMinI16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_mad_u16_e64_dpp"
                 : "v_pk_mad_u16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkMadU16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMadU16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -330,15 +349,18 @@ VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_MAD_U16 does not support DPP", "");
 }
 
-void VPkMadU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mad_u16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMadU16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMadU16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_add_u16_e64_dpp"
                 : "v_pk_add_u16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkAddU16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkAddU16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -360,15 +382,18 @@ VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_ADD_U16 does not support DPP", "");
 }
 
-void VPkAddU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_add_u16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkAddU16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkAddU16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_sub_u16_e64_dpp"
                 : "v_pk_sub_u16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkSubU16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkSubU16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -390,15 +415,18 @@ VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_SUB_U16 does not support DPP", "");
 }
 
-void VPkSubU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_sub_u16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkSubU16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkSubU16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_max_u16_e64_dpp"
                 : "v_pk_max_u16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkMaxU16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMaxU16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -420,15 +448,18 @@ VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_MAX_U16 does not support DPP", "");
 }
 
-void VPkMaxU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_max_u16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMaxU16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMaxU16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_min_u16_e64_dpp"
                 : "v_pk_min_u16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkMinU16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMinU16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -450,15 +481,18 @@ VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_MIN_U16 does not support DPP", "");
 }
 
-void VPkMinU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_min_u16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMinU16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMinU16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_fma_f16_e64_dpp"
                 : "v_pk_fma_f16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkFmaF16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkFmaF16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -486,15 +520,18 @@ VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_FMA_F16 does not support DPP", "");
 }
 
-void VPkFmaF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_fma_f16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkFmaF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkFmaF16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_add_f16_e64_dpp"
                 : "v_pk_add_f16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkAddF16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkAddF16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -516,15 +553,18 @@ VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_ADD_F16 does not support DPP", "");
 }
 
-void VPkAddF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_add_f16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkAddF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkAddF16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_mul_f16_e64_dpp"
                 : "v_pk_mul_f16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkMulF16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMulF16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -546,15 +586,18 @@ VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_MUL_F16 does not support DPP", "");
 }
 
-void VPkMulF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mul_f16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMulF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMulF16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMinF16Vop3p::VPkMinF16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_min_f16_e64_dpp"
                 : "v_pk_min_f16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkMinF16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMinF16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -576,15 +619,18 @@ VPkMinF16Vop3p::VPkMinF16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_MIN_F16 does not support DPP", "");
 }
 
-void VPkMinF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_min_f16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMinF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMinF16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMaxF16Vop3p::VPkMaxF16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_pk_max_f16_e64_dpp"
                 : "v_pk_max_f16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPkMaxF16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VPkMaxF16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -606,15 +652,18 @@ VPkMaxF16Vop3p::VPkMaxF16Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_PK_MAX_F16 does not support DPP", "");
 }
 
-void VPkMaxF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_max_f16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMaxF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMaxF16Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot2F32F16Vop3p::VDot2F32F16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_dot2_f32_f16_e64_dpp"
                 : "v_dot2_f32_f16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VDot2F32F16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VDot2F32F16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -656,22 +705,18 @@ VDot2F32F16Vop3p::VDot2F32F16Vop3p(const MachineInst *inst)
   }
 }
 
-void VDot2F32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
-                           dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_.get());
-  amdgpu::execute_v_dot2_f32_f16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot2F32F16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot2F32F16Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot4I32Iu8Vop3p::VDot4I32Iu8Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_dot4_i32_iu8_e64_dpp"
                 : "v_dot4_i32_iu8",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VDot4I32Iu8Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VDot4I32Iu8Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -699,15 +744,18 @@ VDot4I32Iu8Vop3p::VDot4I32Iu8Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_DOT4_I32_IU8 does not support DPP", "");
 }
 
-void VDot4I32Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot4_i32_iu8_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot4I32Iu8Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot4I32Iu8Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_dot4_u32_u8_e64_dpp"
                 : "v_dot4_u32_u8",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VDot4U32U8Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VDot4U32U8Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -735,15 +783,18 @@ VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_DOT4_U32_U8 does not support DPP", "");
 }
 
-void VDot4U32U8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot4_u32_u8_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot4U32U8Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot4U32U8Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot8I32Iu4Vop3p::VDot8I32Iu4Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_dot8_i32_iu4_e64_dpp"
                 : "v_dot8_i32_iu4",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VDot8I32Iu4Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VDot8I32Iu4Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -771,15 +822,18 @@ VDot8I32Iu4Vop3p::VDot8I32Iu4Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_DOT8_I32_IU4 does not support DPP", "");
 }
 
-void VDot8I32Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot8_i32_iu4_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot8I32Iu4Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot8I32Iu4Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_dot8_u32_u4_e64_dpp"
                 : "v_dot8_u32_u4",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VDot8U32U4Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VDot8U32U4Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -807,15 +861,18 @@ VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
     throw util::InvalidInst("V_DOT8_U32_U4 does not support DPP", "");
 }
 
-void VDot8U32U4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot8_u32_u4_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot8U32U4Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot8U32U4Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot2F32Bf16Vop3p::VDot2F32Bf16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_dot2_f32_bf16_e64_dpp"
                 : "v_dot2_f32_bf16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VDot2F32Bf16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VDot2F32Bf16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -857,22 +914,18 @@ VDot2F32Bf16Vop3p::VDot2F32Bf16Vop3p(const MachineInst *inst)
   }
 }
 
-void VDot2F32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
-                           dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_.get());
-  amdgpu::execute_v_dot2_f32_bf16_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot2F32Bf16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot2F32Bf16Vop3p>(opcode);
 }
+} // namespace detail
 
 VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_fma_mix_f32_e64_dpp"
                 : "v_fma_mix_f32",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmaMixF32Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VFmaMixF32Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -914,22 +967,18 @@ VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
   }
 }
 
-void VFmaMixF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
-                           dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_.get());
-  amdgpu::execute_v_fma_mix_f32_vop3p(*this, wf);
+namespace detail {
+std::unique_ptr<Instruction> decodeVFmaMixF32Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VFmaMixF32Vop3p>(opcode);
 }
+} // namespace detail
 
 VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_fma_mixlo_f16_e64_dpp"
                 : "v_fma_mixlo_f16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmaMixloF16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VFmaMixloF16Vop3p)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -971,6 +1020,12 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFmaMixloF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VFmaMixloF16Vop3p>(opcode);
+}
+} // namespace detail
 
 void VFmaMixloF16Vop3p::implicit_uses(RegisterSet &uses) const {
   Vop3p::implicit_uses(uses);
@@ -978,22 +1033,12 @@ void VFmaMixloF16Vop3p::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VFmaMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
-                           dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_.get());
-  amdgpu::execute_v_fma_mixlo_f16_vop3p(*this, wf);
-}
-
 VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_fma_mixhi_f16_e64_dpp"
                 : "v_fma_mixhi_f16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmaMixhiF16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VFmaMixhiF16Vop3p)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1036,28 +1081,24 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFmaMixhiF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VFmaMixhiF16Vop3p>(opcode);
+}
+} // namespace detail
+
 void VFmaMixhiF16Vop3p::implicit_uses(RegisterSet &uses) const {
   Vop3p::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VFmaMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
-                           dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
-  ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_.get());
-  amdgpu::execute_v_fma_mixhi_f16_vop3p(*this, wf);
-}
-
 VWmmaF3216x16x16F16Vop3p::VWmmaF3216x16x16F16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_wmma_f32_16x16x16_f16_e64_dpp"
                 : "v_wmma_f32_16x16x16_f16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VWmmaF3216x16x16F16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VWmmaF3216x16x16F16Vop3p)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1069,41 +1110,23 @@ VWmmaF3216x16x16F16Vop3p::VWmmaF3216x16x16F16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X16_F16 does not support DPP", "");
 }
 
-void VWmmaF3216x16x16F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_gfx11_wmma_f32(
-      cu, wf.wf_size(), 16, 16, 16, 16, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, amdgpu::extract_f16, amdgpu::extract_f16,
-      const_acc, amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+namespace detail {
+std::unique_ptr<Instruction> decodeVWmmaF3216x16x16F16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VWmmaF3216x16x16F16Vop3p>(opcode);
 }
+} // namespace detail
 
 VWmmaF3216x16x16Bf16Vop3p::VWmmaF3216x16x16Bf16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_wmma_f32_16x16x16_bf16_e64_dpp"
                 : "v_wmma_f32_16x16x16_bf16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VWmmaF3216x16x16Bf16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VWmmaF3216x16x16Bf16Vop3p)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1115,41 +1138,23 @@ VWmmaF3216x16x16Bf16Vop3p::VWmmaF3216x16x16Bf16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F32_16X16X16_BF16 does not support DPP", "");
 }
 
-void VWmmaF3216x16x16Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_gfx11_wmma_f32(
-      cu, wf.wf_size(), 16, 16, 16, 16, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
-      const_acc, amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+namespace detail {
+std::unique_ptr<Instruction> decodeVWmmaF3216x16x16Bf16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VWmmaF3216x16x16Bf16Vop3p>(opcode);
 }
+} // namespace detail
 
 VWmmaF1616x16x16F16Vop3p::VWmmaF1616x16x16F16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_wmma_f16_16x16x16_f16_e64_dpp"
                 : "v_wmma_f16_16x16x16_f16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VWmmaF1616x16x16F16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VWmmaF1616x16x16F16Vop3p)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1161,41 +1166,23 @@ VWmmaF1616x16x16F16Vop3p::VWmmaF1616x16x16F16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_F16_16X16X16_F16 does not support DPP", "");
 }
 
-void VWmmaF1616x16x16F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_gfx11_wmma_f16(
-      cu, wf.wf_size(), 16, 16, 16, 16, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, (inst_.op_sel >> 2) & 0x1u,
-      amdgpu::extract_f16, amdgpu::extract_f16, const_acc);
+namespace detail {
+std::unique_ptr<Instruction> decodeVWmmaF1616x16x16F16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VWmmaF1616x16x16F16Vop3p>(opcode);
 }
+} // namespace detail
 
 VWmmaBf1616x16x16Bf16Vop3p::VWmmaBf1616x16x16Bf16Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_wmma_bf16_16x16x16_bf16_e64_dpp"
                 : "v_wmma_bf16_16x16x16_bf16",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VWmmaBf1616x16x16Bf16Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VWmmaBf1616x16x16Bf16Vop3p)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1207,41 +1194,23 @@ VWmmaBf1616x16x16Bf16Vop3p::VWmmaBf1616x16x16Bf16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_BF16_16X16X16_BF16 does not support DPP", "");
 }
 
-void VWmmaBf1616x16x16Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_gfx11_wmma_bf16(
-      cu, wf.wf_size(), 16, 16, 16, 16, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, (inst_.op_sel >> 2) & 0x1u,
-      amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc);
+namespace detail {
+std::unique_ptr<Instruction> decodeVWmmaBf1616x16x16Bf16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VWmmaBf1616x16x16Bf16Vop3p>(opcode);
 }
+} // namespace detail
 
 VWmmaI3216x16x16Iu8Vop3p::VWmmaI3216x16x16Iu8Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_wmma_i32_16x16x16_iu8_e64_dpp"
                 : "v_wmma_i32_16x16x16_iu8",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VWmmaI3216x16x16Iu8Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VWmmaI3216x16x16Iu8Vop3p)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1253,48 +1222,23 @@ VWmmaI3216x16x16Iu8Vop3p::VWmmaI3216x16x16Iu8Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_I32_16X16X16_IU8 does not support DPP", "");
 }
 
-void VWmmaI3216x16x16Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)
-                              : amdgpu::extract_u8(cu, base, loc);
-  };
-  auto extract_b = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)
-                              : amdgpu::extract_u8(cu, base, loc);
-  };
-  amdgpu::exec_gfx11_wmma_i32(
-      cu, wf.wf_size(), 16, 16, 16, 8, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, extract_a, extract_b, inst_.clamp, const_acc);
+namespace detail {
+std::unique_ptr<Instruction> decodeVWmmaI3216x16x16Iu8Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VWmmaI3216x16x16Iu8Vop3p>(opcode);
 }
+} // namespace detail
 
 VWmmaI3216x16x16Iu4Vop3p::VWmmaI3216x16x16Iu4Vop3p(const MachineInst *inst)
     : Vop3p(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                 ? "v_wmma_i32_16x16x16_iu4_e64_dpp"
                 : "v_wmma_i32_16x16x16_iu4",
-            reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VWmmaI3216x16x16Iu4Vop3p>()),
+            reinterpret_cast<const OpEncoding *>(inst),
+            selected_exec_fn(InstructionExecutionId::VWmmaI3216x16x16Iu4Vop3p)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1306,44 +1250,16 @@ VWmmaI3216x16x16Iu4Vop3p::VWmmaI3216x16x16Iu4Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        256, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WMMA_I32_16X16X16_IU4 does not support DPP", "");
 }
 
-void VWmmaI3216x16x16Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + vdst.encoding_value_;
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x1u) ? amdgpu::extract_i4(cu, base, loc)
-                              : amdgpu::extract_u4(cu, base, loc);
-  };
-  auto extract_b = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
-    return (inst_.neg & 0x2u) ? amdgpu::extract_i4(cu, base, loc)
-                              : amdgpu::extract_u4(cu, base, loc);
-  };
-  amdgpu::exec_gfx11_wmma_i32(
-      cu, wf.wf_size(), 16, 16, 16, 4, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, extract_a, extract_b, inst_.clamp, const_acc);
+namespace detail {
+std::unique_ptr<Instruction> decodeVWmmaI3216x16x16Iu4Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VWmmaI3216x16x16Iu4Vop3p>(opcode);
 }
+} // namespace detail
 
 } // namespace rdna3
 } // namespace rocjitsu

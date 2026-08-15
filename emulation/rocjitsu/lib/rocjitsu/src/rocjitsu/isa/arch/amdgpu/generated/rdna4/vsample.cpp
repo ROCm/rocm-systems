@@ -5,21 +5,16 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vsample.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
 
 ImageMsaaLoadVsample::ImageMsaaLoadVsample(const MachineInst *inst)
     : Vsample("image_msaa_load", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageMsaaLoadVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageMsaaLoadVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -31,14 +26,15 @@ ImageMsaaLoadVsample::ImageMsaaLoadVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageMsaaLoadVsample::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageMsaaLoadVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageMsaaLoadVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleVsample::ImageSampleVsample(const MachineInst *inst)
     : Vsample("image_sample", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -52,13 +48,15 @@ ImageSampleVsample::ImageSampleVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleDVsample::ImageSampleDVsample(const MachineInst *inst)
     : Vsample("image_sample_d", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleDVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleDVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -72,13 +70,15 @@ ImageSampleDVsample::ImageSampleDVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleDVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleDVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleDVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleLVsample::ImageSampleLVsample(const MachineInst *inst)
     : Vsample("image_sample_l", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleLVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleLVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -92,13 +92,15 @@ ImageSampleLVsample::ImageSampleLVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleLVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleLVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleLVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleBVsample::ImageSampleBVsample(const MachineInst *inst)
     : Vsample("image_sample_b", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleBVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleBVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -112,13 +114,15 @@ ImageSampleBVsample::ImageSampleBVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleBVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleBVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleBVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleLzVsample::ImageSampleLzVsample(const MachineInst *inst)
     : Vsample("image_sample_lz", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleLzVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleLzVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -132,13 +136,15 @@ ImageSampleLzVsample::ImageSampleLzVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleLzVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleLzVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleLzVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCVsample::ImageSampleCVsample(const MachineInst *inst)
     : Vsample("image_sample_c", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -152,13 +158,15 @@ ImageSampleCVsample::ImageSampleCVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDVsample::ImageSampleCDVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCDVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCDVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -172,13 +180,15 @@ ImageSampleCDVsample::ImageSampleCDVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCDVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCDVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCDVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCLVsample::ImageSampleCLVsample(const MachineInst *inst)
     : Vsample("image_sample_c_l", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCLVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCLVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -192,13 +202,15 @@ ImageSampleCLVsample::ImageSampleCLVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCLVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCLVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCLVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCBVsample::ImageSampleCBVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCBVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCBVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -212,13 +224,15 @@ ImageSampleCBVsample::ImageSampleCBVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCBVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCBVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCBVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCLzVsample::ImageSampleCLzVsample(const MachineInst *inst)
     : Vsample("image_sample_c_lz", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCLzVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCLzVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -232,13 +246,15 @@ ImageSampleCLzVsample::ImageSampleCLzVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCLzVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCLzVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCLzVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleOVsample::ImageSampleOVsample(const MachineInst *inst)
     : Vsample("image_sample_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -252,13 +268,15 @@ ImageSampleOVsample::ImageSampleOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleDOVsample::ImageSampleDOVsample(const MachineInst *inst)
     : Vsample("image_sample_d_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleDOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleDOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -272,13 +290,15 @@ ImageSampleDOVsample::ImageSampleDOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleDOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleDOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleDOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleLOVsample::ImageSampleLOVsample(const MachineInst *inst)
     : Vsample("image_sample_l_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleLOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleLOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -292,13 +312,15 @@ ImageSampleLOVsample::ImageSampleLOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleLOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleLOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleLOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleBOVsample::ImageSampleBOVsample(const MachineInst *inst)
     : Vsample("image_sample_b_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleBOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleBOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -312,13 +334,15 @@ ImageSampleBOVsample::ImageSampleBOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleBOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleBOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleBOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleLzOVsample::ImageSampleLzOVsample(const MachineInst *inst)
     : Vsample("image_sample_lz_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleLzOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleLzOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -332,13 +356,15 @@ ImageSampleLzOVsample::ImageSampleLzOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleLzOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleLzOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleLzOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCOVsample::ImageSampleCOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -352,13 +378,15 @@ ImageSampleCOVsample::ImageSampleCOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDOVsample::ImageSampleCDOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCDOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCDOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -372,13 +400,15 @@ ImageSampleCDOVsample::ImageSampleCDOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCDOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCDOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCDOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCLOVsample::ImageSampleCLOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCLOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCLOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -392,13 +422,15 @@ ImageSampleCLOVsample::ImageSampleCLOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCLOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCLOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCLOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCBOVsample::ImageSampleCBOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCBOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCBOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -412,13 +444,15 @@ ImageSampleCBOVsample::ImageSampleCBOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCBOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCBOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCBOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCLzOVsample::ImageSampleCLzOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCLzOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCLzOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -432,13 +466,15 @@ ImageSampleCLzOVsample::ImageSampleCLzOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCLzOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCLzOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCLzOVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4Vsample::ImageGather4Vsample(const MachineInst *inst)
     : Vsample("image_gather4", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4Vsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4Vsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -452,13 +488,15 @@ ImageGather4Vsample::ImageGather4Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4Vsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4Vsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4LVsample::ImageGather4LVsample(const MachineInst *inst)
     : Vsample("image_gather4_l", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4LVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4LVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -472,13 +510,15 @@ ImageGather4LVsample::ImageGather4LVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4LVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4LVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4LVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4BVsample::ImageGather4BVsample(const MachineInst *inst)
     : Vsample("image_gather4_b", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4BVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4BVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -492,13 +532,15 @@ ImageGather4BVsample::ImageGather4BVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4BVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4BVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4BVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4LzVsample::ImageGather4LzVsample(const MachineInst *inst)
     : Vsample("image_gather4_lz", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4LzVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4LzVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -512,13 +554,15 @@ ImageGather4LzVsample::ImageGather4LzVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4LzVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4LzVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4LzVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4CVsample::ImageGather4CVsample(const MachineInst *inst)
     : Vsample("image_gather4_c", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4CVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4CVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -532,13 +576,15 @@ ImageGather4CVsample::ImageGather4CVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4CVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4CLzVsample::ImageGather4CLzVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_lz", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4CLzVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4CLzVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -552,13 +598,15 @@ ImageGather4CLzVsample::ImageGather4CLzVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4CLzVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CLzVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CLzVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4OVsample::ImageGather4OVsample(const MachineInst *inst)
     : Vsample("image_gather4_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4OVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4OVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -572,13 +620,15 @@ ImageGather4OVsample::ImageGather4OVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4OVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4OVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4OVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4LzOVsample::ImageGather4LzOVsample(const MachineInst *inst)
     : Vsample("image_gather4_lz_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4LzOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4LzOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -592,13 +642,15 @@ ImageGather4LzOVsample::ImageGather4LzOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4LzOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4LzOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4LzOVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4CLzOVsample::ImageGather4CLzOVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4CLzOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4CLzOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -612,13 +664,15 @@ ImageGather4CLzOVsample::ImageGather4CLzOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4CLzOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CLzOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CLzOVsample>(opcode);
 }
+} // namespace detail
 
 ImageGetLodVsample::ImageGetLodVsample(const MachineInst *inst)
     : Vsample("image_get_lod", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGetLodVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGetLodVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -632,13 +686,15 @@ ImageGetLodVsample::ImageGetLodVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGetLodVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGetLodVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGetLodVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleDG16Vsample::ImageSampleDG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_g16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleDG16Vsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleDG16Vsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(224, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -652,13 +708,15 @@ ImageSampleDG16Vsample::ImageSampleDG16Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleDG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleDG16Vsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleDG16Vsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDG16Vsample::ImageSampleCDG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_g16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCDG16Vsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCDG16Vsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -672,13 +730,15 @@ ImageSampleCDG16Vsample::ImageSampleCDG16Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCDG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCDG16Vsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCDG16Vsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleDOG16Vsample::ImageSampleDOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleDOG16Vsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleDOG16Vsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -692,13 +752,15 @@ ImageSampleDOG16Vsample::ImageSampleDOG16Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleDOG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleDOG16Vsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleDOG16Vsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDOG16Vsample::ImageSampleCDOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCDOG16Vsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCDOG16Vsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -712,13 +774,15 @@ ImageSampleCDOG16Vsample::ImageSampleCDOG16Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCDOG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCDOG16Vsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCDOG16Vsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleClVsample::ImageSampleClVsample(const MachineInst *inst)
     : Vsample("image_sample_cl", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleClVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleClVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -732,13 +796,15 @@ ImageSampleClVsample::ImageSampleClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleClVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleClVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleDClVsample::ImageSampleDClVsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleDClVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleDClVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -752,13 +818,15 @@ ImageSampleDClVsample::ImageSampleDClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleDClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleDClVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleDClVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleBClVsample::ImageSampleBClVsample(const MachineInst *inst)
     : Vsample("image_sample_b_cl", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleBClVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleBClVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -772,13 +840,15 @@ ImageSampleBClVsample::ImageSampleBClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleBClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleBClVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleBClVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCClVsample::ImageSampleCClVsample(const MachineInst *inst)
     : Vsample("image_sample_c_cl", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCClVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCClVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -792,13 +862,15 @@ ImageSampleCClVsample::ImageSampleCClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCClVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCClVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDClVsample::ImageSampleCDClVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCDClVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCDClVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -812,13 +884,15 @@ ImageSampleCDClVsample::ImageSampleCDClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCDClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCDClVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCDClVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCBClVsample::ImageSampleCBClVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCBClVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCBClVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -832,13 +906,15 @@ ImageSampleCBClVsample::ImageSampleCBClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCBClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCBClVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCBClVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleClOVsample::ImageSampleClOVsample(const MachineInst *inst)
     : Vsample("image_sample_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleClOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleClOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -852,13 +928,15 @@ ImageSampleClOVsample::ImageSampleClOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleClOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleClOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleClOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleDClOVsample::ImageSampleDClOVsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleDClOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleDClOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -872,13 +950,15 @@ ImageSampleDClOVsample::ImageSampleDClOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleDClOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleDClOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleDClOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleBClOVsample::ImageSampleBClOVsample(const MachineInst *inst)
     : Vsample("image_sample_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleBClOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleBClOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -892,13 +972,15 @@ ImageSampleBClOVsample::ImageSampleBClOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleBClOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleBClOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleBClOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCClOVsample::ImageSampleCClOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCClOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCClOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -912,13 +994,15 @@ ImageSampleCClOVsample::ImageSampleCClOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCClOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCClOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCClOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDClOVsample::ImageSampleCDClOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCDClOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCDClOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -932,13 +1016,15 @@ ImageSampleCDClOVsample::ImageSampleCDClOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCDClOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCDClOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCDClOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCBClOVsample::ImageSampleCBClOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCBClOVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCBClOVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(224, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -952,13 +1038,15 @@ ImageSampleCBClOVsample::ImageSampleCBClOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCBClOVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCBClOVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCBClOVsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDClG16Vsample::ImageSampleCDClG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCDClG16Vsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCDClG16Vsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -972,13 +1060,15 @@ ImageSampleCDClG16Vsample::ImageSampleCDClG16Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCDClG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCDClG16Vsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCDClG16Vsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleDClOG16Vsample::ImageSampleDClOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleDClOG16Vsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleDClOG16Vsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -992,13 +1082,15 @@ ImageSampleDClOG16Vsample::ImageSampleDClOG16Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleDClOG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleDClOG16Vsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleDClOG16Vsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDClOG16Vsample::ImageSampleCDClOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleCDClOG16Vsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleCDClOG16Vsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -1012,13 +1104,15 @@ ImageSampleCDClOG16Vsample::ImageSampleCDClOG16Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleCDClOG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleCDClOG16Vsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleCDClOG16Vsample>(opcode);
 }
+} // namespace detail
 
 ImageSampleDClG16Vsample::ImageSampleDClG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageSampleDClG16Vsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageSampleDClG16Vsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -1032,13 +1126,15 @@ ImageSampleDClG16Vsample::ImageSampleDClG16Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageSampleDClG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleDClG16Vsample(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleDClG16Vsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4ClVsample::ImageGather4ClVsample(const MachineInst *inst)
     : Vsample("image_gather4_cl", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4ClVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4ClVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -1052,13 +1148,15 @@ ImageGather4ClVsample::ImageGather4ClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4ClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4ClVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4ClVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4BClVsample::ImageGather4BClVsample(const MachineInst *inst)
     : Vsample("image_gather4_b_cl", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4BClVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4BClVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -1072,13 +1170,15 @@ ImageGather4BClVsample::ImageGather4BClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4BClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4BClVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4BClVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4CClVsample::ImageGather4CClVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_cl", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4CClVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4CClVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -1092,13 +1192,15 @@ ImageGather4CClVsample::ImageGather4CClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4CClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CClVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CClVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4CLVsample::ImageGather4CLVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_l", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4CLVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4CLVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -1112,13 +1214,15 @@ ImageGather4CLVsample::ImageGather4CLVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4CLVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CLVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CLVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4CBVsample::ImageGather4CBVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_b", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4CBVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4CBVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -1132,13 +1236,15 @@ ImageGather4CBVsample::ImageGather4CBVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4CBVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CBVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CBVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4CBClVsample::ImageGather4CBClVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4CBClVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4CBClVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -1152,13 +1258,15 @@ ImageGather4CBClVsample::ImageGather4CBClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4CBClVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4CBClVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4CBClVsample>(opcode);
 }
+} // namespace detail
 
 ImageGather4hVsample::ImageGather4hVsample(const MachineInst *inst)
     : Vsample("image_gather4h", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<ImageGather4hVsample>()),
+              selected_exec_fn(InstructionExecutionId::ImageGather4hVsample)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -1172,9 +1280,11 @@ ImageGather4hVsample::ImageGather4hVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGather4hVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGather4hVsample(const MachineInst *opcode) {
+  return std::make_unique<ImageGather4hVsample>(opcode);
 }
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu

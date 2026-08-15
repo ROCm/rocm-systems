@@ -5,21 +5,16 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vdsdir.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
 
 DsParamLoadVdsdir::DsParamLoadVdsdir(const MachineInst *inst)
     : Vdsdir("ds_param_load", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<DsParamLoadVdsdir>()),
+             selected_exec_fn(InstructionExecutionId::DsParamLoadVdsdir)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr),
       dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -33,13 +28,15 @@ DsParamLoadVdsdir::DsParamLoadVdsdir(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void DsParamLoadVdsdir::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+namespace detail {
+std::unique_ptr<Instruction> decodeDsParamLoadVdsdir(const MachineInst *opcode) {
+  return std::make_unique<DsParamLoadVdsdir>(opcode);
 }
+} // namespace detail
 
 DsDirectLoadVdsdir::DsDirectLoadVdsdir(const MachineInst *inst)
     : Vdsdir("ds_direct_load", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<DsDirectLoadVdsdir>()),
+             selected_exec_fn(InstructionExecutionId::DsDirectLoadVdsdir)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
@@ -51,9 +48,11 @@ DsDirectLoadVdsdir::DsDirectLoadVdsdir(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void DsDirectLoadVdsdir::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+namespace detail {
+std::unique_ptr<Instruction> decodeDsDirectLoadVdsdir(const MachineInst *opcode) {
+  return std::make_unique<DsDirectLoadVdsdir>(opcode);
 }
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu

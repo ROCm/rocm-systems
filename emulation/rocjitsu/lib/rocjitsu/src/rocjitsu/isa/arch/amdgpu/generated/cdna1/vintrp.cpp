@@ -5,21 +5,16 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/vintrp.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna1 {
 
 VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
     : Vintrp("v_interp_p1_f32", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<VInterpP1F32Vintrp>()),
+             selected_exec_fn(InstructionExecutionId::VInterpP1F32Vintrp)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr),
@@ -33,13 +28,15 @@ VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void VInterpP1F32Vintrp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+namespace detail {
+std::unique_ptr<Instruction> decodeVInterpP1F32Vintrp(const MachineInst *opcode) {
+  return std::make_unique<VInterpP1F32Vintrp>(opcode);
 }
+} // namespace detail
 
 VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
     : Vintrp("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<VInterpP2F32Vintrp>()),
+             selected_exec_fn(InstructionExecutionId::VInterpP2F32Vintrp)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr),
@@ -54,13 +51,15 @@ VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void VInterpP2F32Vintrp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+namespace detail {
+std::unique_ptr<Instruction> decodeVInterpP2F32Vintrp(const MachineInst *opcode) {
+  return std::make_unique<VInterpP2F32Vintrp>(opcode);
 }
+} // namespace detail
 
 VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
     : Vintrp("v_interp_mov_f32", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<VInterpMovF32Vintrp>()),
+             selected_exec_fn(InstructionExecutionId::VInterpMovF32Vintrp)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vsrc(32, OperandType::OPR_PARAM, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr),
@@ -74,9 +73,11 @@ VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void VInterpMovF32Vintrp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+namespace detail {
+std::unique_ptr<Instruction> decodeVInterpMovF32Vintrp(const MachineInst *opcode) {
+  return std::make_unique<VInterpMovF32Vintrp>(opcode);
 }
+} // namespace detail
 
 } // namespace cdna1
 } // namespace rocjitsu

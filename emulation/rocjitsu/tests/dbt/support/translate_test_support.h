@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+/// @file translate_test_support.h
+/// @brief Shared fixtures for CPU-only DBT translation tests.
+
+#include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/instruction.h"
+
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string_view>
+#include <vector>
+
+namespace rocjitsu::test_support {
+
+using TestKernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
+inline constexpr size_t kKernelDescriptorSize = sizeof(TestKernelDescriptor);
+
+void write_kernel_descriptor_entry_offset(void *descriptor, int64_t entry_offset);
+[[nodiscard]] int64_t read_kernel_descriptor_entry_offset(const void *descriptor);
+[[nodiscard]] TestKernelDescriptor read_kernel_descriptor_for_test(const void *descriptor);
+void write_kernel_descriptor_for_test(void *descriptor, const TestKernelDescriptor &kd);
+
+[[nodiscard]] std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
+    const std::vector<uint32_t> &text_words,
+    std::optional<size_t> text_function_words = std::nullopt, size_t text_function_offset_words = 0,
+    std::optional<size_t> function_pointer_table_target_words = std::nullopt,
+    bool name_function_pointer_table_with_symbol = true);
+[[nodiscard]] std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text();
+[[nodiscard]] std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors(
+    const std::vector<uint32_t> &text_words = {0xBF810000u, 0xBF810000u});
+[[nodiscard]] std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry();
+
+[[nodiscard]] std::unique_ptr<Instruction> decode_one(uint32_t word, rj_code_arch_t arch);
+[[nodiscard]] bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kind,
+                                        std::string_view message);
+/// @brief Whether a warning of @p kind naming @p guest_offset contains @p message.
+/// @details Pins the offset as well as the text so a diagnostic cannot silently move to a
+/// different block while the message still matches.
+[[nodiscard]] bool has_warning_at(const TranslatedCodeObject &result, DiagnosticKind kind,
+                                  std::string_view message, uint64_t guest_offset);
+void enable_workgroup_id_x_sgpr(std::vector<uint8_t> &image);
+
+} // namespace rocjitsu::test_support

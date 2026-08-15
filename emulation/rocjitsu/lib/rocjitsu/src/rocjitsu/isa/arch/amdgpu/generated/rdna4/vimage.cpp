@@ -5,21 +5,16 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vimage.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
 
 ImageLoadVimage::ImageLoadVimage(const MachineInst *inst)
     : Vimage("image_load", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageLoadVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageLoadVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -31,14 +26,15 @@ ImageLoadVimage::ImageLoadVimage(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageLoadVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadVimage>(opcode);
 }
+} // namespace detail
 
 ImageLoadMipVimage::ImageLoadMipVimage(const MachineInst *inst)
     : Vimage("image_load_mip", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageLoadMipVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageLoadMipVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -50,14 +46,15 @@ ImageLoadMipVimage::ImageLoadMipVimage(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageLoadMipVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadMipVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadMipVimage>(opcode);
 }
+} // namespace detail
 
 ImageLoadPckVimage::ImageLoadPckVimage(const MachineInst *inst)
     : Vimage("image_load_pck", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageLoadPckVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageLoadPckVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -69,14 +66,15 @@ ImageLoadPckVimage::ImageLoadPckVimage(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageLoadPckVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadPckVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadPckVimage>(opcode);
 }
+} // namespace detail
 
 ImageLoadPckSgnVimage::ImageLoadPckSgnVimage(const MachineInst *inst)
     : Vimage("image_load_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageLoadPckSgnVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageLoadPckSgnVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -88,14 +86,15 @@ ImageLoadPckSgnVimage::ImageLoadPckSgnVimage(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageLoadPckSgnVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadPckSgnVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadPckSgnVimage>(opcode);
 }
+} // namespace detail
 
 ImageLoadMipPckVimage::ImageLoadMipPckVimage(const MachineInst *inst)
     : Vimage("image_load_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageLoadMipPckVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageLoadMipPckVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -107,14 +106,15 @@ ImageLoadMipPckVimage::ImageLoadMipPckVimage(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageLoadMipPckVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadMipPckVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadMipPckVimage>(opcode);
 }
+} // namespace detail
 
 ImageLoadMipPckSgnVimage::ImageLoadMipPckSgnVimage(const MachineInst *inst)
     : Vimage("image_load_mip_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageLoadMipPckSgnVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageLoadMipPckSgnVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -126,14 +126,15 @@ ImageLoadMipPckSgnVimage::ImageLoadMipPckSgnVimage(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageLoadMipPckSgnVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadMipPckSgnVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadMipPckSgnVimage>(opcode);
 }
+} // namespace detail
 
 ImageStoreVimage::ImageStoreVimage(const MachineInst *inst)
     : Vimage("image_store", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageStoreVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageStoreVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -145,14 +146,15 @@ ImageStoreVimage::ImageStoreVimage(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageStoreVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageStoreVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageStoreVimage>(opcode);
 }
+} // namespace detail
 
 ImageStoreMipVimage::ImageStoreMipVimage(const MachineInst *inst)
     : Vimage("image_store_mip", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageStoreMipVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageStoreMipVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -164,14 +166,15 @@ ImageStoreMipVimage::ImageStoreMipVimage(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageStoreMipVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageStoreMipVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageStoreMipVimage>(opcode);
 }
+} // namespace detail
 
 ImageStorePckVimage::ImageStorePckVimage(const MachineInst *inst)
     : Vimage("image_store_pck", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageStorePckVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageStorePckVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -183,14 +186,15 @@ ImageStorePckVimage::ImageStorePckVimage(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageStorePckVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageStorePckVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageStorePckVimage>(opcode);
 }
+} // namespace detail
 
 ImageStoreMipPckVimage::ImageStoreMipPckVimage(const MachineInst *inst)
     : Vimage("image_store_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageStoreMipPckVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageStoreMipPckVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -202,14 +206,15 @@ ImageStoreMipPckVimage::ImageStoreMipPckVimage(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageStoreMipPckVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageStoreMipPckVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageStoreMipPckVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicSwapVimage::ImageAtomicSwapVimage(const MachineInst *inst)
     : Vimage("image_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicSwapVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicSwapVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -227,13 +232,15 @@ ImageAtomicSwapVimage::ImageAtomicSwapVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicSwapVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicSwapVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicSwapVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
     : Vimage("image_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicCmpswapVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicCmpswapVimage)),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -251,13 +258,15 @@ ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicCmpswapVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicCmpswapVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicCmpswapVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
     : Vimage("image_atomic_add_uint", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicAddUintVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicAddUintVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -275,13 +284,15 @@ ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicAddUintVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicAddUintVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicAddUintVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
     : Vimage("image_atomic_sub_uint", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicSubUintVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicSubUintVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -299,13 +310,15 @@ ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicSubUintVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicSubUintVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicSubUintVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
     : Vimage("image_atomic_min_int", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicMinIntVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicMinIntVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -323,13 +336,15 @@ ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicMinIntVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicMinIntVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicMinIntVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
     : Vimage("image_atomic_min_uint", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicMinUintVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicMinUintVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -347,13 +362,15 @@ ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicMinUintVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicMinUintVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicMinUintVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
     : Vimage("image_atomic_max_int", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicMaxIntVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicMaxIntVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -371,13 +388,15 @@ ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicMaxIntVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicMaxIntVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicMaxIntVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
     : Vimage("image_atomic_max_uint", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicMaxUintVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicMaxUintVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -395,13 +414,15 @@ ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicMaxUintVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicMaxUintVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicMaxUintVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
     : Vimage("image_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicAndVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicAndVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -419,13 +440,15 @@ ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicAndVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicAndVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicAndVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
     : Vimage("image_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicOrVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicOrVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -443,13 +466,15 @@ ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicOrVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicOrVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicOrVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
     : Vimage("image_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicXorVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicXorVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -467,13 +492,15 @@ ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicXorVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicXorVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicXorVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
     : Vimage("image_atomic_inc_uint", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicIncUintVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicIncUintVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -491,13 +518,15 @@ ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicIncUintVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicIncUintVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicIncUintVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
     : Vimage("image_atomic_dec_uint", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicDecUintVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicDecUintVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -515,13 +544,15 @@ ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicDecUintVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicDecUintVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicDecUintVimage>(opcode);
 }
+} // namespace detail
 
 ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
     : Vimage("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageGetResinfoVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageGetResinfoVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(32, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -533,13 +564,15 @@ ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageGetResinfoVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGetResinfoVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageGetResinfoVimage>(opcode);
 }
+} // namespace detail
 
 ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
     : Vimage("image_bvh_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageBvhIntersectRayVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageBvhIntersectRayVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -551,13 +584,15 @@ ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageBvhIntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageBvhIntersectRayVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageBvhIntersectRayVimage>(opcode);
 }
+} // namespace detail
 
 ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *inst)
     : Vimage("image_bvh64_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageBvh64IntersectRayVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageBvh64IntersectRayVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -569,14 +604,15 @@ ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *in
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageBvh64IntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+std::unique_ptr<Instruction> decodeImageBvh64IntersectRayVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageBvh64IntersectRayVimage>(opcode);
 }
+} // namespace detail
 
 ImageBvhDualIntersectRayVimage::ImageBvhDualIntersectRayVimage(const MachineInst *inst)
     : Vimage("image_bvh_dual_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageBvhDualIntersectRayVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageBvhDualIntersectRayVimage)),
       vdata(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -589,14 +625,15 @@ ImageBvhDualIntersectRayVimage::ImageBvhDualIntersectRayVimage(const MachineInst
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageBvhDualIntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+std::unique_ptr<Instruction> decodeImageBvhDualIntersectRayVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageBvhDualIntersectRayVimage>(opcode);
 }
+} // namespace detail
 
 ImageBvh8IntersectRayVimage::ImageBvh8IntersectRayVimage(const MachineInst *inst)
     : Vimage("image_bvh8_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageBvh8IntersectRayVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageBvh8IntersectRayVimage)),
       vdata(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -609,14 +646,15 @@ ImageBvh8IntersectRayVimage::ImageBvh8IntersectRayVimage(const MachineInst *inst
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
-void ImageBvh8IntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+std::unique_ptr<Instruction> decodeImageBvh8IntersectRayVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageBvh8IntersectRayVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicAddFltVimage::ImageAtomicAddFltVimage(const MachineInst *inst)
     : Vimage("image_atomic_add_flt", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicAddFltVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicAddFltVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -634,13 +672,15 @@ ImageAtomicAddFltVimage::ImageAtomicAddFltVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicAddFltVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicAddFltVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicAddFltVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
     : Vimage("image_atomic_min_flt", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicMinFltVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicMinFltVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -658,13 +698,15 @@ ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicMinFltVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicMinFltVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicMinFltVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
     : Vimage("image_atomic_max_flt", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicMaxFltVimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicMaxFltVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -682,13 +724,15 @@ ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicMaxFltVimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicMaxFltVimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicMaxFltVimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
     : Vimage("image_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicPkAddF16Vimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicPkAddF16Vimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -706,13 +750,15 @@ ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicPkAddF16Vimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicPkAddF16Vimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicPkAddF16Vimage>(opcode);
 }
+} // namespace detail
 
 ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
     : Vimage("image_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
-             make_exec_fn<ImageAtomicPkAddBf16Vimage>()),
+             selected_exec_fn(InstructionExecutionId::ImageAtomicPkAddBf16Vimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
@@ -730,9 +776,11 @@ ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
 }
 
-void ImageAtomicPkAddBf16Vimage::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicPkAddBf16Vimage(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicPkAddBf16Vimage>(opcode);
 }
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu

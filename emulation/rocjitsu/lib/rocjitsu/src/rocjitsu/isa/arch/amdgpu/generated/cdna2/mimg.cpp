@@ -5,20 +5,16 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/mimg.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna2 {
 
 ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
-    : Mimg("image_load", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<ImageLoadMimg>()),
+    : Mimg("image_load", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::ImageLoadMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -33,14 +29,15 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadMimg>(opcode);
 }
+} // namespace detail
 
 ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
     : Mimg("image_load_mip", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageLoadMipMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageLoadMipMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -55,14 +52,15 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageLoadMipMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadMipMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadMipMimg>(opcode);
 }
+} // namespace detail
 
 ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
     : Mimg("image_load_pck", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageLoadPckMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageLoadPckMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -77,14 +75,15 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageLoadPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadPckMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadPckMimg>(opcode);
 }
+} // namespace detail
 
 ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
     : Mimg("image_load_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageLoadPckSgnMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageLoadPckSgnMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -99,14 +98,15 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageLoadPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadPckSgnMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadPckSgnMimg>(opcode);
 }
+} // namespace detail
 
 ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
     : Mimg("image_load_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageLoadMipPckMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageLoadMipPckMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -121,14 +121,15 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageLoadMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadMipPckMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadMipPckMimg>(opcode);
 }
+} // namespace detail
 
 ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
     : Mimg("image_load_mip_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageLoadMipPckSgnMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageLoadMipPckSgnMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -143,14 +144,15 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageLoadMipPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageLoadMipPckSgnMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageLoadMipPckSgnMimg>(opcode);
 }
+} // namespace detail
 
 ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
     : Mimg("image_store", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageStoreMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageStoreMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -165,14 +167,15 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageStoreMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageStoreMimg>(opcode);
 }
+} // namespace detail
 
 ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
     : Mimg("image_store_mip", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageStoreMipMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageStoreMipMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -187,14 +190,15 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void ImageStoreMipMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageStoreMipMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageStoreMipMimg>(opcode);
 }
+} // namespace detail
 
 ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
     : Mimg("image_store_pck", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageStorePckMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageStorePckMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -209,14 +213,15 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void ImageStorePckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageStorePckMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageStorePckMimg>(opcode);
 }
+} // namespace detail
 
 ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
     : Mimg("image_store_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageStoreMipPckMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageStoreMipPckMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -231,14 +236,15 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void ImageStoreMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+namespace detail {
+std::unique_ptr<Instruction> decodeImageStoreMipPckMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageStoreMipPckMimg>(opcode);
 }
+} // namespace detail
 
 ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
     : Mimg("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGetResinfoMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGetResinfoMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -253,13 +259,15 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGetResinfoMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageGetResinfoMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageGetResinfoMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
     : Mimg("image_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicSwapMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicSwapMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -275,13 +283,15 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicSwapMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicSwapMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicSwapMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
     : Mimg("image_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicCmpswapMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicCmpswapMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -297,13 +307,15 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicCmpswapMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicCmpswapMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicCmpswapMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
     : Mimg("image_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicAddMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicAddMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -319,13 +331,15 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicAddMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicAddMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicAddMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
     : Mimg("image_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicSubMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicSubMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -341,13 +355,15 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicSubMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicSubMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicSubMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
     : Mimg("image_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicSminMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicSminMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -363,13 +379,15 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicSminMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicSminMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicSminMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
     : Mimg("image_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicUminMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicUminMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -385,13 +403,15 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicUminMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicUminMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicUminMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
     : Mimg("image_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicSmaxMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicSmaxMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -407,13 +427,15 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicSmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicSmaxMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicSmaxMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
     : Mimg("image_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicUmaxMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicUmaxMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -429,13 +451,15 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicUmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicUmaxMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicUmaxMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
     : Mimg("image_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicAndMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicAndMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -451,13 +475,15 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicAndMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicAndMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicAndMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
     : Mimg("image_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicOrMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicOrMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -473,13 +499,15 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicOrMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicOrMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicOrMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
     : Mimg("image_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicXorMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicXorMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -495,13 +523,15 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicXorMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicXorMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicXorMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
     : Mimg("image_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicIncMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicIncMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -517,13 +547,15 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicIncMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicIncMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicIncMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
     : Mimg("image_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicDecMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicDecMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -539,13 +571,15 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicDecMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageAtomicDecMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageAtomicDecMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
     : Mimg("image_sample", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleMimg)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -562,9 +596,11 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+std::unique_ptr<Instruction> decodeImageSampleMimg(const MachineInst *opcode) {
+  return std::make_unique<ImageSampleMimg>(opcode);
 }
+} // namespace detail
 
 } // namespace cdna2
 } // namespace rocjitsu

@@ -35,6 +35,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "util/except.h"
 
 #include <algorithm>
 #include <array>
@@ -127,13 +128,21 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
     for (uint16_t slot = 0; slot < kDirectBranchIslandPoolSlots; ++slot) {
       const uint64_t slot_offset =
           offset + (kGeneratedIslandPoolHeaderWords + slot) * sizeof(uint32_t);
-      uint32_t slot_word = text_word_at(text, slot_offset);
-      std::unique_ptr<Instruction> slot_inst(decoder->decode(&slot_word));
-      if (!slot_inst || slot_inst->size() != static_cast<int>(sizeof(uint32_t)) ||
-          slot_inst->mnemonic() != "s_branch" || !slot_inst->branch_offset_bytes()) {
-        has_canonical_slots = false;
-        break;
+      // A malformed slot can select an extension-bearing format. Pad the
+      // speculative decode so pool recognition never reads beyond its input.
+      const std::array<uint32_t, 3> slot_words = {text_word_at(text, slot_offset), 0, 0};
+      try {
+        std::unique_ptr<Instruction> slot_inst(decoder->decode(slot_words.data()));
+        if (slot_inst && slot_inst->size() == static_cast<int>(sizeof(uint32_t)) &&
+            slot_inst->mnemonic() == "s_branch" && slot_inst->branch_offset_bytes()) {
+          continue;
+        }
+      } catch (const util::InvalidInst &) {
+        // A marker-shaped region containing an invalid instruction is not a
+        // generated pool. Normal block decoding will report the instruction.
       }
+      has_canonical_slots = false;
+      break;
     }
     if (has_canonical_slots)
       offsets.insert(offset);
@@ -1455,8 +1464,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // helper block, Phase 3 emits that helper into both relocated bodies so every
   // branch or call target can be resolved through the current kernel's placement
   // map without borrowing another kernel's return continuation.
-  auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders,
-                                  ExternalEntryPolicy::ExplicitOnly);
+  std::vector<std::unique_ptr<BasicBlock>> blocks;
+  try {
+    blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders,
+                               ExternalEntryPolicy::ExplicitOnly);
+  } catch (const util::InvalidInst &error) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization, error.what());
+    return leave_unchanged();
+  }
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   const uint64_t text_vaddr = obj.text_sections().front()->vaddr();
   const auto relocation_pair_analysis =
@@ -1994,21 +2009,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         failure.required_work = diagnostic.required_work;
         break;
       }
-      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
-                              text_relocations_begin, data_relocations_begin, relocation_snapshot))
-        continue;
-      return leave_unchanged();
-    }
-
-    const auto opaque_fallthrough =
-        std::ranges::find_if(scope.blocks, [&](const BasicBlock *block) {
-          return block != nullptr && block->falls_through_to_undecodable_text();
-        });
-    if (opaque_fallthrough != scope.blocks.end()) {
-      auto failure =
-          make_kernel_failure(DiagnosticKind::Legalization,
-                              "reachable kernel code falls through into undecodable .text bytes",
-                              (*opaque_fallthrough)->end_offset());
       if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
                               text_relocations_begin, data_relocations_begin, relocation_snapshot))
         continue;
@@ -3024,6 +3024,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // materialization can turn this unreachable stub into a fallthrough.
         const uint32_t endpgm = build_s_endpgm(host_arch_);
         append_words(kernel_text, std::span<const uint32_t>(&endpgm, 1));
+        // The boundary is inferred from what follows the block, not from anything the block itself
+        // says, so a body that really did run on past here is cut short instead of translated.
+        // Name the offset: an execution that stops early is otherwise indistinguishable from one
+        // that was always meant to, and nothing else in the output records that a decision was
+        // made here.
+        append_warning(result.diagnostics, DiagnosticKind::Legalization,
+                       "fallthrough past this block reaches no decodable instruction; translated "
+                       "with a synthesized s_endpgm boundary",
+                       block->end_offset());
       }
       placement.target_end =
           block_generated_island_pool &&

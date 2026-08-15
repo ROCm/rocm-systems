@@ -5,20 +5,16 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/exp.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
 #include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna1 {
 
 ExpExp::ExpExp(const MachineInst *inst)
-    : Exp("exp", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<ExpExp>()),
+    : Exp("exp", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::ExpExp)),
       tgt(128, OperandType::OPR_TGT, reinterpret_cast<const OpEncoding *>(inst)->tgt),
       vsrc0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -36,9 +32,11 @@ ExpExp::ExpExp(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
 }
 
-void ExpExp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Export: no-op in compute simulation.
+namespace detail {
+std::unique_ptr<Instruction> decodeExpExp(const MachineInst *opcode) {
+  return std::make_unique<ExpExp>(opcode);
 }
+} // namespace detail
 
 } // namespace rdna1
 } // namespace rocjitsu
