@@ -275,17 +275,31 @@ def calc_unroll_and_pipeline_for_local_arch():
 # except for gfx950. For gfx950, we also disable pipelining.
 local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()
 
+# funcId indexes the first local_unroll slice (see host_table / enumerate_func_rows
+# and dispatch_fn_for_unroll_table() below). Defined here, ahead of the unroll
+# override table, because maybe_remap_unroll() below depends on it.
+func_id_unroll = local_unroll[0]
+
 # rocSHMEM/GDA-based collectives: only generated when ENABLE_ROCSHMEM build is requested
 gda_colls = {"AlltoAllGda", "AlltoAllvGda"}
 
-# gfx1250 SIMPLE kernel identities whose compile time exceeded 45s at unroll
-# 16/32 (see --kernel-compile-timing in install.sh). Only unroll 8 is generated
-# for these; ncclDevFuncTable_16/32 alias them back to the unroll-8 symbol
-# (see table_rows_for_unroll() below). Applied only for local gfx1250 builds:
-# multi-arch keeps native 16/32 variants (func_id_unroll is "1" there, so
-# aliasing missing 16/32 rows to the func-id axis would be wrong).
+# Unroll overrides: force a collective identity's generic-kernel dispatch (in
+# EVERY built ncclDevFuncTable_*/Caller* table) to use one specific unroll's
+# kernel instead of each table's own native variant. Used today to route the
+# 17 slowest gfx1250 SIMPLE identities (compile time exceeded 45s at unroll
+# 16/32; see --kernel-compile-timing in install.sh) to their unroll-8 variant,
+# but the mechanism is general: any (identity, unroll) pair can be added here,
+# keyed by the local gfx target it applies to.
+#
+# If the target `unroll` isn't already produced for this build (e.g. it's not
+# one of local_unroll's members), an extra kernel is compiled just to serve
+# the override -- see forced_override_funcs() -- and a log line is printed
+# noting the forced compile. Only applies to local single-arch builds: a
+# multi-arch build's func_id_unroll is "1" (see below), so redirecting missing
+# rows to the func-id axis would be wrong there; see PR #10097. There's simply
+# no entry for multi-arch (local_gfx_name is None) to key off of.
 @dataclass(frozen=True)
-class Unroll8OnlyIdentity:
+class UnrollOverride:
   coll: str
   algo: str
   proto: str
@@ -293,41 +307,81 @@ class Unroll8OnlyIdentity:
   ty: str
   acc: str
   pipeline: str
+  unroll: str  # kernel to substitute wherever this identity is dispatched
 
-_UNROLL_8_ONLY_IDENTITIES = {
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "MinMax", "f16", "1", "0"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "MinMax", "f16", "0", "0"),
-  Unroll8OnlyIdentity("AllReduce", "RING", "SIMPLE", "MinMax", "f16", "1", "0"),
-  Unroll8OnlyIdentity("AllReduce", "RING", "SIMPLE", "MinMax", "u8", "1", "0"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "SumPostDiv", "u8", "1", "0"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "MinMax", "u8", "1", "0"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "Prod", "u8", "1", "0"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "PreMulSum", "bf16", "0", "1"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "PreMulSum", "u8", "1", "0"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "Sum", "u8", "1", "0"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "MinMax", "bf16", "0", "1"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "MinMax", "bf16", "1", "1"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "Prod", "bf16", "0", "1"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "Sum", "bf16", "0", "1"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "SumPostDiv", "u8", "0", "0"),
-  Unroll8OnlyIdentity("AllReduce", "TREE", "SIMPLE", "PreMulSum", "bf16", "1", "1"),
-  Unroll8OnlyIdentity("AllReduce", "RING", "SIMPLE", "SumPostDiv", "u8", "1", "0"),
+  def identity(self):
+    return (self.coll, self.algo, self.proto, self.redop, self.ty, self.acc, self.pipeline)
+
+_UNROLL_OVERRIDES = {
+  "gfx1250": {
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "MinMax", "f16", "1", "0", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "MinMax", "f16", "0", "0", "8"),
+    UnrollOverride("AllReduce", "RING", "SIMPLE", "MinMax", "f16", "1", "0", "8"),
+    UnrollOverride("AllReduce", "RING", "SIMPLE", "MinMax", "u8", "1", "0", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "SumPostDiv", "u8", "1", "0", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "MinMax", "u8", "1", "0", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "Prod", "u8", "1", "0", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "PreMulSum", "bf16", "0", "1", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "PreMulSum", "u8", "1", "0", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "Sum", "u8", "1", "0", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "MinMax", "bf16", "0", "1", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "MinMax", "bf16", "1", "1", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "Prod", "bf16", "0", "1", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "Sum", "bf16", "0", "1", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "SumPostDiv", "u8", "0", "0", "8"),
+    UnrollOverride("AllReduce", "TREE", "SIMPLE", "PreMulSum", "bf16", "1", "1", "8"),
+    UnrollOverride("AllReduce", "RING", "SIMPLE", "SumPostDiv", "u8", "1", "0", "8"),
+  },
 }
 
-def maybe_remap_unroll(coll, algo, proto, redop, ty, acc, pipeline, unroll):
-  """Skip generating the unroll 16/32 variant of a capped identity.
+def build_unroll_override_index():
+  """local_gfx_name -> {identity -> override unroll}, validated once from
+  _UNROLL_OVERRIDES above."""
+  index = {}
+  for gfx, overrides in _UNROLL_OVERRIDES.items():
+    by_identity = {}
+    for ov in overrides:
+      assert ov.identity() not in by_identity, (
+        "Duplicate unroll override for %s identity %s" % (gfx, ov.identity())
+      )
+      assert ov.unroll in all_unrolls, (
+        "Unroll override for %s %s targets unroll %r, not one of %s"
+        % (gfx, ov.identity(), ov.unroll, all_unrolls)
+      )
+      by_identity[ov.identity()] = ov.unroll
+    index[gfx] = by_identity
+  return index
+
+_unroll_override_by_identity = build_unroll_override_index()
+
+def unroll_override_for(coll, algo, proto, redop, ty, acc, pipeline):
+  """Return the override target unroll for this identity, or None.
 
   Also checks the equivalence-class representative (e.g. MinMax i8 folds into
-  MinMax u8) so both keep the same generated unroll set.
+  MinMax u8) so both share the same override.
   """
-  if local_gfx_name != "gfx1250" or unroll not in ("16", "32"):
-    return unroll
-  identity = Unroll8OnlyIdentity(coll, algo, proto, redop, ty, acc, pipeline)
-  eq = equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, "1", "0")
-  eq_identity = Unroll8OnlyIdentity(*eq[:7])
-  if identity in _UNROLL_8_ONLY_IDENTITIES or eq_identity in _UNROLL_8_ONLY_IDENTITIES:
+  by_identity = _unroll_override_by_identity.get(local_gfx_name)
+  if not by_identity:
     return None
-  return unroll
+  identity = (coll, algo, proto, redop, ty, acc, pipeline)
+  if identity in by_identity:
+    return by_identity[identity]
+  eq_identity = equivalent_primary(coll, algo, proto, redop, ty, acc, pipeline, "1", "0")[:7]
+  return by_identity.get(eq_identity)
+
+def maybe_remap_unroll(coll, algo, proto, redop, ty, acc, pipeline, unroll):
+  """Skip generating a redundant native variant of an overridden identity.
+
+  An override redirects every generic-kernel dispatch of this identity onto a
+  single compiled variant (see dispatch_fn_for_unroll_table()), so only that
+  variant and the func-id-axis anchor (func_id_unroll, needed for funcId /
+  host_table bookkeeping) actually need to be compiled here; other
+  local_unroll variants would just be unused dead code.
+  """
+  override_unroll = unroll_override_for(coll, algo, proto, redop, ty, acc, pipeline)
+  if override_unroll is None or unroll in (func_id_unroll, override_unroll):
+    return unroll
+  return None
 
 def yield_func_row(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
   if not func_validate(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
@@ -336,8 +390,14 @@ def yield_func_row(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg):
     return
   yield (coll, algo, proto, redop, ty, acc, pipeline, unroll, reg)
 
-# Helper function to check if the conditions for the collective is being met
-def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
+# Helper function to check if the conditions for the collective is being met.
+# ignore_unroll_membership bypasses only the "unroll must be in local_unroll"
+# check, for forced_override_funcs() below to validate a kernel that an
+# unroll override needs compiled at a factor this build wouldn't otherwise
+# produce; every other structural check (algo/proto/redop/ty/acc/pipeline
+# compatibility, FP8-requires-unroll-8, etc.) still applies.
+def func_validate(coll, algo, proto, redop, ty, acc, pipeline, unroll, reg,
+                   ignore_unroll_membership=False):
   if redop == "SumPostDiv" and ty[0] not in ("i","u"):
     return False
   if coll == "" or algo == "":
@@ -351,7 +411,7 @@ def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
       acc not in acc_of_coll[coll] or
       pipeline not in pipelines_of_coll[coll] or (pipeline in ["1"] and ty not in pipelined_types) or
       pipeline not in local_pipeline or
-      unroll not in local_unroll or
+      (not ignore_unroll_membership and unroll not in local_unroll) or
       reg not in reg_values_of(coll, proto)):
     return False
   # FP8 kernels on gfx1250 must use unroll 8 for correct launch.
@@ -491,19 +551,48 @@ def fn_sym(fn):
 func_rows = [Fn(*fn) for fn in enumerate_func_rows()]
 
 # Corresponds to ncclDevFuncTable[]
-primary_funcs = sorted(
-    {Fn(*equivalent_primary(*fn)) for fn in parse_input(func_pattern)}, key=custom_sort_key
-)
+_primary_funcs_set = {Fn(*equivalent_primary(*fn)) for fn in parse_input(func_pattern)}
+
+def fn_identity_key(fn):
+  return (fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.reg)
+
+def forced_override_funcs():
+  """Extra Fn rows for overrides whose target unroll isn't produced by the
+  normal local_unroll enumeration (e.g. an override to unroll 4 on a build
+  that only compiles 8/16/32). These are compiled once and folded into every
+  generic kernel's dispatch table for that identity (see
+  dispatch_fn_for_unroll_table() below); without this there would be nothing
+  for those tables to redirect to.
+  """
+  extra = []
+  for ov in _UNROLL_OVERRIDES.get(local_gfx_name, ()):
+    override_unroll = unroll_override_for(*ov.identity())
+    if override_unroll is None or override_unroll in local_unroll:
+      continue
+    for reg in reg_values_of(ov.coll, ov.proto):
+      if not func_validate(ov.coll, ov.algo, ov.proto, ov.redop, ov.ty, ov.acc,
+                            ov.pipeline, override_unroll, reg,
+                            ignore_unroll_membership=True):
+        continue
+      fn = Fn(*equivalent_primary(ov.coll, ov.algo, ov.proto, ov.redop, ov.ty,
+                                   ov.acc, ov.pipeline, override_unroll, reg))
+      if fn in _primary_funcs_set:
+        continue
+      print(
+        "-- Unroll override: %s is not built at unroll %s for this target "
+        "(local unroll = %s); compiling an extra kernel so its generic-kernel "
+        "dispatch can use unroll %s"
+        % (paste(" ", *ov.identity()), override_unroll, "/".join(local_unroll), override_unroll)
+      )
+      extra.append(fn)
+  return extra
+
+_primary_funcs_set |= set(forced_override_funcs())
+primary_funcs = sorted(_primary_funcs_set, key=custom_sort_key)
 
 # primary_to_index[primary_funcs[i]] == i
 primary_to_index = {fn: i for i, fn in enumerate(primary_funcs)}
 primary_to_index = {fn: primary_to_index.get(Fn(*fn), -1) for fn in func_rows}
-
-# funcId indexes the first local_unroll slice (see host_table / enumerate_func_rows).
-func_id_unroll = local_unroll[0]
-
-def fn_identity_key(fn):
-  return (fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.reg)
 
 primary_by_identity_unroll = {
   (fn_identity_key(fn), fn.unroll): fn for fn in primary_funcs
@@ -514,10 +603,21 @@ func_id_axis = [fn for fn in primary_funcs if fn.unroll == func_id_unroll]
 def dispatch_fn_for_unroll_table(unroll, base_fn):
   """Row for funcId=base_fn when the generic kernel uses unroll `unroll`.
 
-  Prefer the native variant at that unroll when it was generated; otherwise use
-  the func-id-axis entry (kernels clamped to func_id_unroll by unroll overrides).
+  An override always wins, on every table -- including this identity's own
+  func_id_unroll table -- since the point of an override is to replace this
+  identity's kernel wherever it's dispatched, not just where its native
+  variant happens to be missing. Otherwise prefer the native variant
+  generated at this table's unroll; fall back to the func-id-axis entry
+  (this identity's variant at func_id_unroll) when no native variant exists
+  (e.g. FP8-only-at-8 identities in tables 16/32).
   """
-  return primary_by_identity_unroll.get((fn_identity_key(base_fn), unroll), base_fn)
+  identity_key = fn_identity_key(base_fn)
+  override_unroll = unroll_override_for(*identity_key[:7])
+  if override_unroll is not None:
+    overridden = primary_by_identity_unroll.get((identity_key, override_unroll))
+    if overridden is not None:
+      return overridden
+  return primary_by_identity_unroll.get((identity_key, unroll), base_fn)
 
 def table_rows_for_unroll(unroll):
   if unroll not in local_unroll:
@@ -525,14 +625,18 @@ def table_rows_for_unroll(unroll):
   return [dispatch_fn_for_unroll_table(unroll, base) for base in func_id_axis]
 
 def unroll_table_aliases(unroll):
-  """(funcId, base_fn) pairs aliased to func_id_unroll in a higher-unroll table."""
-  if unroll not in local_unroll or unroll == func_id_unroll:
+  """(funcId, base_fn, actual_fn) triples where this table's row for funcId
+  does not use its own native unroll-`unroll` variant -- either because an
+  override redirects it elsewhere, or no native variant was generated at all.
+  """
+  if unroll not in local_unroll:
     return []
   aliases = []
   for index, base_fn in enumerate(func_id_axis):
     native = primary_by_identity_unroll.get((fn_identity_key(base_fn), unroll))
-    if native is None:
-      aliases.append((index, base_fn))
+    actual = dispatch_fn_for_unroll_table(unroll, base_fn)
+    if actual != native:
+      aliases.append((index, base_fn, actual))
   return aliases
 
 alias_log_lines = []
@@ -541,16 +645,16 @@ for unroll in local_unroll:
   if not aliases:
     continue
   alias_log_lines.append(
-    "ncclDevKernel_Generic_%s: %d specialized function(s) aliased to unroll %s "
-    "(no native unroll-%s variant generated)"
-    % (unroll, len(aliases), func_id_unroll, unroll)
+    "ncclDevKernel_Generic_%s: %d specialized function(s) redirected away from "
+    "their native unroll-%s variant"
+    % (unroll, len(aliases), unroll)
   )
-  for index, base_fn in aliases:
-    sym = "ncclDevFunc_" + fn_sym(base_fn)
+  for index, base_fn, actual_fn in aliases:
+    sym = "ncclDevFunc_" + fn_sym(actual_fn)
     alias_log_lines.append(
-      "  funcId %4d  %s  -> %s"
+      "  funcId %4d  %s  -> %s (compiled at unroll %s)"
       % (index, paste(" ", base_fn.coll, base_fn.algo, base_fn.proto, base_fn.redop,
-                      base_fn.ty, base_fn.acc, base_fn.pipeline), sym)
+                      base_fn.ty, base_fn.acc, base_fn.pipeline), sym, actual_fn.unroll)
     )
 
 alias_log_path = os.path.join(gensrc, "unroll_table_aliases.log")

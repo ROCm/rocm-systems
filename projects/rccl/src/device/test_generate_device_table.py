@@ -257,6 +257,36 @@ class Gfx1250Fp8UnrollGenerationTest(unittest.TestCase):
         )
 
 
+def _extract_table_rows(header, unroll):
+    """Parse funcId -> symbol rows out of a generated ncclDevFuncTable_<unroll>[]
+    (handling the "#if defined(__gfx1250__) ... #else ... #endif" guard form)."""
+    rows = {}
+    m = re.search(
+        rf"ncclDevFuncTable_{unroll}\[\] = \{{(.*?)\nnullptr\}};",
+        header,
+        re.S,
+    )
+    if m is None:
+        return None
+    body = m.group(1)
+    lines = body.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if line.startswith("#if "):
+            idx_line = lines[i + 1].strip()
+            mm = re.match(r"/\*(\s*\d+)\*/\s*(.+?),", idx_line)
+            if mm:
+                rows[int(mm.group(1))] = mm.group(2).strip()
+            i += 4
+            continue
+        mm = re.match(r"/\*(\s*\d+)\*/\s*(.+?),", line)
+        if mm:
+            rows[int(mm.group(1))] = mm.group(2).strip()
+        i += 1
+    return rows
+
+
 class UnrollClampTest(unittest.TestCase):
     MINMAX_U8 = "AllReduce TREE SIMPLE MinMax u8"
     MINMAX_U8_ONLY = MINMAX_U8 + "|AllReduce TREE SIMPLE MinMax i8"
@@ -298,29 +328,8 @@ class UnrollClampTest(unittest.TestCase):
         self.assertTrue(any(n.endswith("_32.cpp") for n in u8), names)
 
     def _extract_gfx1250_table(self, header, unroll):
-        rows = {}
-        m = re.search(
-            rf"ncclDevFuncTable_{unroll}\[\] = \{{(.*?)\nnullptr\}};",
-            header,
-            re.S,
-        )
-        self.assertIsNotNone(m, f"table_{unroll} missing")
-        body = m.group(1)
-        i = 0
-        lines = body.splitlines()
-        while i < len(lines):
-            line = lines[i].strip()
-            if line.startswith("#if defined(__gfx1250__)"):
-                idx_line = lines[i + 1].strip()
-                mm = re.match(r"/\*(\s*\d+)\*/\s*(.+?),", idx_line)
-                if mm:
-                    rows[int(mm.group(1))] = mm.group(2).strip()
-                i += 4
-                continue
-            mm = re.match(r"/\*(\s*\d+)\*/\s*(.+?),", line)
-            if mm:
-                rows[int(mm.group(1))] = mm.group(2).strip()
-            i += 1
+        rows = _extract_table_rows(header, unroll)
+        self.assertIsNotNone(rows, f"table_{unroll} missing")
         return rows
 
     def test_clamped_kernels_alias_in_higher_unroll_tables(self):
@@ -355,6 +364,123 @@ class UnrollClampTest(unittest.TestCase):
         )
         self.assertTrue(t16[native_idx].endswith("_Sum_f32_1_0_16"))
         self.assertTrue(t32[native_idx].endswith("_Sum_f32_1_0_32"))
+
+
+class ArbitraryUnrollOverrideTest(unittest.TestCase):
+    """The unroll override table is a general (identity -> target unroll)
+    mechanism, not just a fixed "clamp to 8" blocklist: any identity can be
+    redirected to any unroll, including one this build wouldn't otherwise
+    produce -- that variant is compiled on demand and logged, then folded
+    into every generic kernel's dispatch table for that identity.
+
+    Exercises this via a throwaway extra entry appended to the "gfx1250" set
+    inside _UNROLL_OVERRIDES in a patched copy of generate.py, so the
+    built-in 17-entry table (all of which target unroll 8, already covered by
+    UnrollClampTest) doesn't need to be changed just to test the general
+    mechanism.
+    """
+
+    # acc=0 so the override target's arch guard is unambiguous (see
+    # get_arch_guard(): unroll 8/16/32 implies gfx1250, acc=1 implies
+    # gfx942/950/1250 -- neither applies to a bare unroll-4 acc=0 kernel).
+    EXTRA_IDENTITY = ("AllReduce", "RING", "SIMPLE", "Sum", "f32", "0", "0")
+    EXTRA_UNROLL = "4"  # not in gfx1250's local_unroll (8/16/32)
+    ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32"
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.exists(GENERATE_PY):
+            raise unittest.SkipTest("generate.py not found next to test")
+
+    def _patch_generate_py(self, tmpdir):
+        with open(GENERATE_PY) as f:
+            src = f.read()
+        marker = '"gfx1250": {\n'
+        self.assertIn(marker, src, "generate.py layout changed; update this test")
+        extra = "    UnrollOverride(%s),\n" % ", ".join(
+            repr(x) for x in self.EXTRA_IDENTITY + (self.EXTRA_UNROLL,)
+        )
+        patched_path = os.path.join(tmpdir, "generate_patched.py")
+        with open(patched_path, "w") as f:
+            f.write(src.replace(marker, marker + extra, 1))
+        return patched_path
+
+    def _generate(self, tmpdir):
+        patched = self._patch_generate_py(tmpdir)
+        rocm = os.path.join(tmpdir, "rocm")
+        bin_dir = os.path.join(rocm, "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        rocminfo = os.path.join(bin_dir, "rocminfo")
+        with open(rocminfo, "w") as f:
+            f.write(
+                textwrap.dedent(
+                    """\
+                    #!/bin/sh
+                    echo "Name:                    gfx1250"
+                    echo "Compute Unit:            304"
+                    """
+                )
+            )
+        os.chmod(rocminfo, 0o755)
+        env = os.environ.copy()
+        env["ROCM_PATH"] = rocm
+        gensrc = os.path.join(tmpdir, "gensrc")
+        result = subprocess.run(
+            [sys.executable, patched, gensrc, "OFF", "OFF", "ON", "OFF", self.ONLY_FUNCS],
+            check=True, capture_output=True, text=True, env=env,
+        )
+        return result, gensrc
+
+    def test_missing_target_unroll_is_forced_and_logged(self):
+        with tempfile.TemporaryDirectory(prefix="rccl_override_arb_") as tmpdir:
+            result, gensrc = self._generate(tmpdir)
+            names = sorted(os.listdir(os.path.join(gensrc, "specialized")))
+        overridden = [n for n in names if "_sum_f32_0_0_" in n]
+        # unroll 4 (the override target) is force-compiled even though it's
+        # not in gfx1250's local_unroll (8/16/32).
+        self.assertTrue(any(n.endswith("_4.cpp") for n in overridden), overridden)
+        # unroll 8 (func_id_unroll) is still compiled too -- it anchors this
+        # identity's funcId/host_table bookkeeping -- but every generic
+        # kernel's dispatch table is folded onto unroll 4 instead (see
+        # test_generic_tables_fold_overridden_identity_everywhere), so 16/32
+        # are redundant and skipped.
+        self.assertTrue(any(n.endswith("_8.cpp") for n in overridden), overridden)
+        self.assertFalse(any(n.endswith("_16.cpp") for n in overridden), overridden)
+        self.assertFalse(any(n.endswith("_32.cpp") for n in overridden), overridden)
+        self.assertIn("Unroll override", result.stdout)
+        self.assertIn("unroll 4", result.stdout)
+
+    def test_generic_tables_fold_overridden_identity_everywhere(self):
+        # func_id_unroll (8) is skipped too: an override always wins, even on
+        # its own identity's func-id-axis table (see
+        # dispatch_fn_for_unroll_table()), so nothing needs to natively exist
+        # at unroll 8 for this identity either.
+        with tempfile.TemporaryDirectory(prefix="rccl_override_arb2_") as tmpdir:
+            _, gensrc = self._generate(tmpdir)
+            with open(os.path.join(gensrc, "device_table.h")) as f:
+                header = f.read()
+        for unroll in ("8", "16", "32"):
+            rows = _extract_table_rows(header, unroll)
+            self.assertIsNotNone(rows, f"table_{unroll} missing")
+            idx = next(
+                i for i, sym in rows.items() if sym.endswith("_Sum_f32_0_0_4")
+            )
+            self.assertTrue(
+                rows[idx].endswith("_Sum_f32_0_0_4"),
+                f"table_{unroll} funcId {idx} = {rows[idx]!r}, expected the "
+                "override's unroll-4 symbol",
+            )
+
+    def test_unrelated_identity_is_unaffected(self):
+        # Only the overridden acc=0 identity is redirected; the acc=1 variant
+        # of the same coll/algo/proto/redop/ty keeps its native unroll set.
+        with tempfile.TemporaryDirectory(prefix="rccl_override_arb3_") as tmpdir:
+            _, gensrc = self._generate(tmpdir)
+            names = sorted(os.listdir(os.path.join(gensrc, "specialized")))
+        native = [n for n in names if "_sum_f32_1_0_" in n]
+        self.assertTrue(any(n.endswith("_8.cpp") for n in native), names)
+        self.assertTrue(any(n.endswith("_16.cpp") for n in native), names)
+        self.assertTrue(any(n.endswith("_32.cpp") for n in native), names)
 
 
 class HostDeviceDispatchAlignmentTest(unittest.TestCase):
