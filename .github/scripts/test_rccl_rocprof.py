@@ -153,13 +153,6 @@ class TestRCCLRocprof:
             env = make_env()
             env["UT_MIN_GPUS"] = "2"
             env["UT_MAX_GPUS"] = "2"
-            # rocprofv3 --hip-trace records EVERY HIP API call; the full AllReduce.OutOfPlace
-            # sweep (all datatypes x reduction ops) emits far too many to trace within the
-            # timeout (--rccl-trace, which records only RCCL ops, handles the full sweep
-            # fine). Restrict to one datatype + one op: still a real RCCL AllReduce for the
-            # smoke trace, but ~60x fewer iterations so hip-trace completes well under 300s.
-            env["UT_DATATYPES"] = "ncclFloat32"
-            env["UT_REDOPS"] = "sum"
             result = run_cmd(cmd, env=env, timeout=300)
 
             assert result.returncode == 0, (
