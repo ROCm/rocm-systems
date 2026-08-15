@@ -1,0 +1,6 @@
+# Store every text file with LF, whatever the platform it was edited on does.
+#
+# The WSL sources here are written from Windows, so CRLF gets into new files
+# easily and is invisible in review until someone notices the whole file has
+# changed. Without this it is caught, if at all, by a cleanup commit afterwards.
+* text=auto eol=lf
