@@ -998,9 +998,13 @@ class TestExecutor:
             return detected if detected else 8
         return int(value)
 
-    def run_test(self, test_config, suite_config):
+    def run_test(self, test_config, suite_config, capture_log_path=None):
         """
         Run a single test
+
+        When capture_log_path is set (parallel mode), the test's stdout+stderr are
+        redirected straight to that file instead of the shared console, so concurrently
+        running tests never interleave their output; the file also serves as the emit log.
 
         Args:
             test_config: Test configuration dict
@@ -1403,8 +1407,25 @@ class TestExecutor:
         # the test's (not tee's). Default behaviour (inherited stdout, no capture)
         # is unchanged when emission is off.
         emit_log_path = None
+        capture_fd = None
         start_time = time.time()
-        if self.emit_enabled:
+        if capture_log_path:
+            # Parallel mode: redirect this test's stdout+stderr straight to its own log
+            # file so concurrent tests never interleave on the shared console. Writing to
+            # a real file descriptor (not a PIPE) means proc.wait() cannot deadlock on a
+            # full pipe buffer. The file doubles as the emit log for perf parsing.
+            emit_log_path = capture_log_path
+            capture_fd = open(capture_log_path, "wb")
+            proc = subprocess.Popen(
+                cmd,
+                shell=True,
+                cwd=run_cwd,
+                env=env,
+                stdout=capture_fd,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        elif self.emit_enabled:
             emit_log_path = self._emit_log_path(test_name)
             wrapped = f"set -o pipefail; ({cmd}) 2>&1 | tee {shlex.quote(emit_log_path)}"
             proc = subprocess.Popen(
@@ -1481,6 +1502,11 @@ class TestExecutor:
                 "exec_mode": exec_mode, "nthreads": perf_nthreads,
             }
         finally:
+            if capture_fd is not None:
+                try:
+                    capture_fd.close()
+                except OSError:
+                    pass
             if gtest_json_path:
                 try:
                     os.unlink(gtest_json_path)
@@ -1881,22 +1907,45 @@ class TestExecutor:
                     record["test_name"] = test.get("name")
                     self.test_records.append(record)
 
-        # 1) Compute entries concurrently.
+        # Per-test log path (thread-safe): each parallel-mode entry writes to its own file
+        # under log_dir so concurrent output never interleaves. The lock-guarded counter
+        # keeps names unique and ordered (shared with the emit-log numbering).
+        def _plog_path(test):
+            safe_s = re.sub(r'[^A-Za-z0-9_.-]+', '_', str(suite_name))[:40]
+            safe_t = re.sub(r'[^A-Za-z0-9_.-]+', '_', str(test.get("name", "test")))[:60]
+            with lock:
+                self._emit_log_counter += 1
+                n = self._emit_log_counter
+            return os.path.join(self.log_dir, f"{n:04d}_{safe_s}__{safe_t}.log")
+
+        # Run one entry with its output redirected to its own log file, printing only
+        # concise START/result status to the console (under the lock so the two status
+        # lines themselves never interleave across threads).
+        def _run_one(test, tag):
+            tname = test.get("name")
+            plog = _plog_path(test)
+            with lock:
+                print(f"[parallel] START   [{tag}] {suite_name} / {tname}")
+                print(f"[parallel]         log: {plog}")
+            res = self.run_test(test, suite_config, capture_log_path=plog)
+            _accumulate(test, res)
+            with lock:
+                print(f"[parallel] {str(res.get('result', '?')):7s} {suite_name} / {tname} "
+                      f"({res.get('duration', 0.0):.1f}s)  log: {plog}")
+            return res
+
+        # 1) Concurrent entries through the bounded pool (each streams to its own file).
         if parallel_entries:
-            def _worker(test):
-                res = self.run_test(test, suite_config)
-                _accumulate(test, res)
-                return res
             with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
-                futures = [ex.submit(_worker, t) for t in parallel_entries]
+                futures = [ex.submit(_run_one, t, "concurrent") for t in parallel_entries]
                 for f in concurrent.futures.as_completed(futures):
                     f.result()  # surface any worker exception
 
-        # 2) MPI/whole-node entries serially (one at a time).
+        # 2) serial_only / whole-node entries one at a time (still per-test logs).
         for test in serial_entries:
-            res = self.run_test(test, suite_config)
-            _accumulate(test, res)
+            _run_one(test, "serial")
 
+        print(f"[parallel] suite '{suite_name}' done -- per-test logs under {self.log_dir}")
         return results
 
     def _format_duration(self, seconds):
