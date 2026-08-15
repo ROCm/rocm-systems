@@ -25,11 +25,12 @@ from utils.utils_counter_defs import SUPPORTED_DENOM, UNIT_COUNTER
 class TestMetricEvaluator:
     """Tests for utils.metrics.metric_evaluator."""
 
-    def test_eval_expression_cannot_reach_builtins(self):
-        """Builtins are suppressed at the eval site."""
+    @pytest.mark.parametrize("expr", ["open('/etc/passwd')", "getattr(1, 'real')"])
+    def test_eval_expression_cannot_reach_builtins(self, expr):
+        """Builtins other than __import__ are suppressed at the eval site."""
         evaluator = MetricEvaluator(pd.DataFrame(), {}, {})
         with patch("utils.metrics.metric_evaluator.console_warning") as mock_warning:
-            result = evaluator.eval_expression("__import__('os')")
+            result = evaluator.eval_expression(expr)
         assert result == "N/A"
         assert mock_warning.called
 
