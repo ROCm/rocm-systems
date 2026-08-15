@@ -23,8 +23,14 @@ namespace RcclUnitTesting
       case ncclFloat32:   { using T = float;        ACTION; break; }           \
       case ncclFloat64:   { using T = double;       ACTION; break; }           \
       case ncclBfloat16:  { using T = hip_bfloat16; ACTION; break; }           \
-      case ncclFloat8e4m3:{ using T = rccl_float8;  ACTION; break; }           \
-      case ncclFloat8e5m2:{ using T = rccl_bfloat8; ACTION; break; }           \
+      /* fp8 is never dispatched here: callers route it to the dedicated byte-based    */ \
+      /* kernels (rccl_float8/rccl_bfloat8 alias different types in the host vs device */ \
+      /* compile pass, so a templated kernel would be instantiated with a mismatched  */ \
+      /* mangling). Fail loudly rather than instantiate the templated form for fp8.   */ \
+      case ncclFloat8e4m3:                                                     \
+      case ncclFloat8e5m2:                                                     \
+        TEST_ERROR("fp8 must use the byte-based kernel path (%d)", dt);        \
+        return TEST_FAIL;                                                      \
       default: TEST_ERROR("Unsupported datatype (%d)", dt); return TEST_FAIL;  \
     }
 
@@ -84,13 +90,22 @@ namespace RcclUnitTesting
 
     // Scope-guarded device frees: every early return below (CHECK_HIP failures and the
     // dispatch default) runs these destructors, so nothing leaks on the error path.
-    struct DevFree { void* p = nullptr; ~DevFree() { if (p) (void)hipFree(p); } } gScratch, gVals;
+    struct DevFree
+    {
+      void* p = nullptr;
+      ~DevFree()
+      {
+        if (p) { (void)hipFree(p); }
+      }
+    } gScratch, gVals, gBits;
 
     // dScratch[0] = mismatch count, dScratch[1] = first (lowest) divergent index.
     unsigned long long* dScratch = nullptr;
-    double*             dVals    = nullptr;   // [expected, actual] at the first divergent index
+    double*             dVals    = nullptr;   // [expected, actual] float view at first divergent index
+    unsigned long long* dBits    = nullptr;   // [expected, actual] exact raw bits (integer dtypes)
     CHECK_HIP(hipMalloc(&dScratch, 2 * sizeof(unsigned long long))); gScratch.p = dScratch;
     CHECK_HIP(hipMalloc(&dVals,    2 * sizeof(double)));             gVals.p    = dVals;
+    CHECK_HIP(hipMalloc(&dBits,    2 * sizeof(unsigned long long))); gBits.p    = dBits;
     unsigned long long hInit[2] = { 0ULL, (unsigned long long)numElements };  // idx init = n (= "none")
     CHECK_HIP(hipMemcpy(dScratch, hInit, sizeof(hInit), hipMemcpyHostToDevice));
 
@@ -130,20 +145,37 @@ namespace RcclUnitTesting
       {
         RCCL_UT_DTYPE_DISPATCH(dataType,
           hipLaunchKernelGGL(CaptureElemKernel<T>, dim3(1), dim3(1), 0, 0,
-                             (const T*)actualGpu, (const T*)expectedGpu, fi, dVals));
+                             (const T*)actualGpu, (const T*)expectedGpu, fi, dVals, dBits));
       }
       CHECK_HIP(hipGetLastError());
-      double hVals[2] = { 0.0, 0.0 };   // [expected, actual]
+      double             hVals[2] = { 0.0, 0.0 };    // float view [expected, actual]
+      unsigned long long hBits[2] = { 0ULL, 0ULL };  // exact raw bits [expected, actual]
       CHECK_HIP(hipMemcpy(hVals, dVals, sizeof(hVals), hipMemcpyDeviceToHost));
+      CHECK_HIP(hipMemcpy(hBits, dBits, sizeof(hBits), hipMemcpyDeviceToHost));
+      // Mirror the host IsEqual verbose format exactly, per dtype: integers print from the
+      // exact bits (no double rounding), floats from the double view. fp8's dBits are unused
+      // (it fills only dVals via CaptureElemFp8) and prints through the float default.
       switch (dataType)
       {
-      case ncclInt8: case ncclInt32: case ncclInt64:
+      case ncclInt8:
+        TEST_ERROR("Expected output: %d.  Actual output: %d at index %zu",
+                   (int)(int8_t)hBits[0], (int)(int8_t)hBits[1], fi); break;
+      case ncclUint8:
+        TEST_ERROR("Expected output: %u.  Actual output: %u at index %zu",
+                   (unsigned)(uint8_t)hBits[0], (unsigned)(uint8_t)hBits[1], fi); break;
+      case ncclInt32:
+        TEST_ERROR("Expected output: %d.  Actual output: %d at index %zu",
+                   (int32_t)hBits[0], (int32_t)hBits[1], fi); break;
+      case ncclUint32:
+        TEST_ERROR("Expected output: %u.  Actual output: %u at index %zu",
+                   (uint32_t)hBits[0], (uint32_t)hBits[1], fi); break;
+      case ncclInt64:
         TEST_ERROR("Expected output: %lld.  Actual output: %lld at index %zu",
-                   (long long)hVals[0], (long long)hVals[1], fi); break;
-      case ncclUint8: case ncclUint32: case ncclUint64:
+                   (long long)(int64_t)hBits[0], (long long)(int64_t)hBits[1], fi); break;
+      case ncclUint64:
         TEST_ERROR("Expected output: %llu.  Actual output: %llu at index %zu",
-                   (unsigned long long)hVals[0], (unsigned long long)hVals[1], fi); break;
-      default:  // all floating-point dtypes (fp16/fp32/fp64/bf16/fp8)
+                   (unsigned long long)hBits[0], (unsigned long long)hBits[1], fi); break;
+      default:  // floating-point dtypes (fp16/fp32/fp64/bf16/fp8) — exact via double
         TEST_ERROR("Expected output: %f.  Actual output: %f at index %zu",
                    hVals[0], hVals[1], fi); break;
       }

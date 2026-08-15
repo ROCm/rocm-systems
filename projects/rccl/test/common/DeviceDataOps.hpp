@@ -126,15 +126,23 @@ namespace RcclUnitTesting
     }
   }
 
-  // Capture expected/actual (as double) at a single index for the diagnostic print.
-  // Launched with one thread after the first divergent index is known.
+  // Capture expected/actual at a single index for the diagnostic print. Launched with
+  // one thread after the first divergent index is known. Emits BOTH a double view (used
+  // for the float dtypes) and the exact raw element bits (used for the integer dtypes so
+  // 64-bit values above 2^53 print without double rounding).
   template <typename T>
-  __global__ void CaptureElemKernel(const T* actual, const T* expected, size_t idx, double* out)
+  __global__ void CaptureElemKernel(const T* actual, const T* expected, size_t idx,
+                                    double* outF, unsigned long long* outBits)
   {
     if (blockIdx.x == 0 && threadIdx.x == 0)
     {
-      out[0] = ToDoubleVal<T>(expected[idx]);   // out[0] = expected
-      out[1] = ToDoubleVal<T>(actual[idx]);     // out[1] = actual
+      outF[0] = ToDoubleVal<T>(expected[idx]);   // [0] = expected
+      outF[1] = ToDoubleVal<T>(actual[idx]);     // [1] = actual
+      unsigned long long e = 0, a = 0;           // zero-extended exact bits (sizeof(T) <= 8)
+      memcpy(&e, &expected[idx], sizeof(T));
+      memcpy(&a, &actual[idx],   sizeof(T));
+      outBits[0] = e;
+      outBits[1] = a;
     }
   }
 
