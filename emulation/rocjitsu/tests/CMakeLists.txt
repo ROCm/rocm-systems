@@ -415,6 +415,7 @@ add_executable(
     partitioning_test.cpp
     simulated_kfd_test.cpp
     decode_smoke_test.cpp
+    decoder_c_api_test.cpp
     buffer_operand_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
