@@ -308,6 +308,17 @@ bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kin
                               diagnostic.message.find(message) != std::string::npos;
                      });
 }
+
+bool has_warning_at(const TranslatedCodeObject &result, DiagnosticKind kind,
+                    std::string_view message, uint64_t guest_offset) {
+  return std::any_of(result.diagnostics.begin(), result.diagnostics.end(),
+                     [&](const TranslationDiagnostic &diagnostic) {
+                       return diagnostic.severity == DiagnosticSeverity::Warning &&
+                              diagnostic.kind == kind && diagnostic.guest_offset == guest_offset &&
+                              diagnostic.message.find(message) != std::string::npos;
+                     });
+}
+
 std::vector<uint8_t>
 make_minimal_amdgpu_elf_with_two_kernel_descriptors(const std::vector<uint32_t> &text_words) {
   constexpr uint64_t text_offset = 0x100;

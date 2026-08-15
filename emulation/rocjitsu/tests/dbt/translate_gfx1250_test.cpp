@@ -12336,9 +12336,16 @@ TEST(BinaryTranslatorE2E, Gfx1250TerminatesFallthroughIntoZeroPadding) {
   ASSERT_FALSE(translated.text_sections().empty());
   const auto decoded =
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  // Only the first two instructions are pinned: the relocated body may be followed by target-side
+  // alignment padding, which decodes as additional instructions.
   ASSERT_GE(decoded.size(), 2u);
   EXPECT_EQ(decoded[0]->mnemonic(), "s_nop");
   EXPECT_EQ(decoded[1]->mnemonic(), "s_endpgm");
+  // The synthesized boundary must stay attributable: pin the offset as well as the message so a
+  // silent early exit cannot lose its diagnostic while the output bytes still match.
+  EXPECT_TRUE(rocjitsu::test_support::has_warning_at(result, rocjitsu::DiagnosticKind::Legalization,
+                                                     "synthesized s_endpgm boundary",
+                                                     /*guest_offset=*/4));
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250TerminatesSetupFallthroughIntoZeroPadding) {
@@ -12438,11 +12445,19 @@ TEST(BinaryTranslatorE2E, Gfx1250MaterializesSectionFinalClangUnreachableKernelS
   ASSERT_EQ(decoded.size(), 2u);
   EXPECT_EQ(decoded[0]->mnemonic(), "s_setreg_imm32_b32");
   EXPECT_EQ(decoded[1]->mnemonic(), "s_endpgm");
+  // Section end is the same inferred boundary as padding, so it must be reported the same way.
+  EXPECT_TRUE(rocjitsu::test_support::has_warning_at(first, rocjitsu::DiagnosticKind::Legalization,
+                                                     "synthesized s_endpgm boundary",
+                                                     /*guest_offset=*/8));
 
   auto second = translator.translate(first_output);
   ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
                                                           : second.diagnostics.front().message);
   EXPECT_EQ(second.elf_bytes, first.elf_bytes);
+  // The first pass supplied the terminator, so the second must not infer another boundary.
+  EXPECT_FALSE(rocjitsu::test_support::has_warning_at(
+      second, rocjitsu::DiagnosticKind::Legalization, "synthesized s_endpgm boundary",
+      /*guest_offset=*/8));
 }
 
 TEST(BinaryTranslatorE2E, MatchedSemanticExpandRuleFailureIsDiagnostic) {

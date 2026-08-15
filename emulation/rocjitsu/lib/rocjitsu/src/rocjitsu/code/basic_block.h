@@ -70,16 +70,22 @@ public:
   uint32_t num_instructions() const { return num_instructions_; }
 
   /// @brief Whether the block ends with an explicit or implicit terminator.
-  /// @retval true The last instruction is a branch/program terminator, or its
-  /// sequential fallthrough reaches zero-filled gfx1250 text padding.
+  /// @retval true The last instruction is a branch/program terminator, or the block carries an
+  /// inferred boundary (see has_implicit_terminator()).
   /// @retval false The block falls through to the next.
   bool has_terminator() const { return has_terminator_; }
 
-  /// @brief Whether zero-filled text padding terminates this block's fallthrough.
+  /// @brief Whether an inferred boundary terminates this block's fallthrough edge.
   ///
-  /// @details Clang may omit an architectural terminator after
-  /// __builtin_unreachable(). When the next source word is gfx1250 zero-filled
-  /// text padding, relocation materializes that boundary as an s_endpgm.
+  /// @details Clang may omit an architectural terminator after __builtin_unreachable(). Two
+  /// source conditions establish the boundary, and they are equivalent because neither leaves a
+  /// next instruction to reach: the following word is gfx1250 zero-filled text padding, or the
+  /// block ends at the end of `.text`. Relocation materializes either as an s_endpgm.
+  ///
+  /// This cuts the FALLTHROUGH edge only. A conditional or indirect branch carrying this flag
+  /// still has a live taken edge, so consumers must not read it as a whole-block program exit --
+  /// classify_function() treats it as one only when no branch edge remains, which keeps the taken
+  /// target subject to the missing-target checks.
   bool has_implicit_terminator() const { return has_implicit_terminator_; }
 
   /// @brief Last instruction in the block, or nullptr for an empty block.
