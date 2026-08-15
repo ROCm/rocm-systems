@@ -81,7 +81,7 @@ bool tableContains(const char** table, int len, const char* key) {
 
 TEST(ParameterApiTests, Bind_KnownKey_Succeeds) {
   RUN_ISOLATED_TEST("Bind_KnownKey_Succeeds", []() {
-    ncclParamHandle_t* h = nullptr;
+    ncclParamHandle_t h = nullptr;
     ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
     ASSERT_NE(h, nullptr);
   });
@@ -89,24 +89,26 @@ TEST(ParameterApiTests, Bind_KnownKey_Succeeds) {
 
 TEST(ParameterApiTests, Bind_UnknownKey_ReturnsInvalidArgAndLeavesOutUntouched) {
   RUN_ISOLATED_TEST("Bind_UnknownKey", []() {
-    auto* sentinel = reinterpret_cast<ncclParamHandle_t*>(0xdeadbeef);
-    ncclParamHandle_t* h = sentinel;
+    auto sentinel = reinterpret_cast<ncclParamHandle_t>(0xdeadbeef);
+    ncclParamHandle_t h = sentinel;
     ASSERT_EQ(ncclParamBind(&h, "NCCL_DEFINITELY_NOT_A_PARAM"), ncclInvalidArgument);
     ASSERT_EQ(h, sentinel) << "*out must be left untouched on unknown key";
   });
 }
 
 // Legacy NCCL_PARAM(...) knobs are not registered in the new registry.
+// NCCL_DEBUG was migrated to DEFINE_NCCL_PARAM in debug.cc; NVLS_ENABLE still
+// uses the legacy macro in src/transport/nvls.cc.
 TEST(ParameterApiTests, Bind_LegacyParamNotRegistered) {
   RUN_ISOLATED_TEST("Bind_LegacyParamNotRegistered", []() {
-    ncclParamHandle_t* h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, "NCCL_DEBUG"), ncclInvalidArgument);
+    ncclParamHandle_t h = nullptr;
+    ASSERT_EQ(ncclParamBind(&h, "NVLS_ENABLE"), ncclInvalidArgument);
   });
 }
 
 TEST(ParameterApiTests, Bind_NullArgs) {
   RUN_ISOLATED_TEST("Bind_NullArgs", []() {
-    ncclParamHandle_t* h = nullptr;
+    ncclParamHandle_t h = nullptr;
     ASSERT_EQ(ncclParamBind(nullptr, kI32Key), ncclInvalidArgument);
     ASSERT_EQ(ncclParamBind(&h, nullptr), ncclInvalidArgument);
   });
@@ -120,7 +122,7 @@ TEST(ParameterApiTests, GetI32_MatchingType_ReturnsValue) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetI32_MatchingType",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
         int32_t v = 0;
         ASSERT_EQ(ncclParamGetI32(h, &v), ncclSuccess);
@@ -131,7 +133,7 @@ TEST(ParameterApiTests, GetI32_MatchingType_ReturnsValue) {
 
 TEST(ParameterApiTests, GetI32_Unset_ReturnsDefault) {
   RUN_ISOLATED_TEST("GetI32_Unset_ReturnsDefault", []() {
-    ncclParamHandle_t* h = nullptr;
+    ncclParamHandle_t h = nullptr;
     ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
     int32_t v = 0;
     ASSERT_EQ(ncclParamGetI32(h, &v), ncclSuccess);
@@ -142,7 +144,7 @@ TEST(ParameterApiTests, GetI32_Unset_ReturnsDefault) {
 // A handle bound to a bool param cannot be read as I32 (typeId guard).
 TEST(ParameterApiTests, GetI32_TypeMismatch_ReturnsInvalidArg) {
   RUN_ISOLATED_TEST("GetI32_TypeMismatch", []() {
-    ncclParamHandle_t* h = nullptr;
+    ncclParamHandle_t h = nullptr;
     ASSERT_EQ(ncclParamBind(&h, kDumpAllKey), ncclSuccess); // bool param
     int32_t v = 0;
     ASSERT_EQ(ncclParamGetI32(h, &v), ncclInvalidArgument);
@@ -152,7 +154,7 @@ TEST(ParameterApiTests, GetI32_TypeMismatch_ReturnsInvalidArg) {
 // Reading an I8 param through the I32 accessor is a typeId mismatch.
 TEST(ParameterApiTests, GetI32_CrossWidth_ReturnsInvalidArg) {
   RUN_ISOLATED_TEST("GetI32_CrossWidth", []() {
-    ncclParamHandle_t* h = nullptr;
+    ncclParamHandle_t h = nullptr;
     ASSERT_EQ(ncclParamBind(&h, kI8Key), ncclSuccess);
     int32_t v = 0;
     ASSERT_EQ(ncclParamGetI32(h, &v), ncclInvalidArgument);
@@ -161,7 +163,7 @@ TEST(ParameterApiTests, GetI32_CrossWidth_ReturnsInvalidArg) {
 
 TEST(ParameterApiTests, GetI32_NullArgs) {
   RUN_ISOLATED_TEST("GetI32_NullArgs", []() {
-    ncclParamHandle_t* h = nullptr;
+    ncclParamHandle_t h = nullptr;
     ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
     int32_t v = 0;
     ASSERT_EQ(ncclParamGetI32(nullptr, &v), ncclInvalidArgument);
@@ -173,7 +175,7 @@ TEST(ParameterApiTests, GetU32_MatchingType_ReturnsValue) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetU32_MatchingType",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_U32"), ncclSuccess);
         uint32_t v = 0;
         ASSERT_EQ(ncclParamGetU32(h, &v), ncclSuccess);
@@ -186,7 +188,7 @@ TEST(ParameterApiTests, GetI64_MatchingType_ReturnsValue) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetI64_MatchingType",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_I64"), ncclSuccess);
         int64_t v = 0;
         ASSERT_EQ(ncclParamGetI64(h, &v), ncclSuccess);
@@ -209,7 +211,7 @@ TEST(ParameterApiTests, GetI64_WordOverflow_FallsBackToDefault) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetI64_WordOverflow",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_I64"), ncclSuccess);
         int64_t v = 0;
         ASSERT_EQ(ncclParamGetI64(h, &v), ncclSuccess);
@@ -222,7 +224,7 @@ TEST(ParameterApiTests, GetI8_InRange_ReturnsValue) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetI8_InRange",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, kI8Key), ncclSuccess);
         int8_t v = 0;
         ASSERT_EQ(ncclParamGetI8(h, &v), ncclSuccess);
@@ -237,7 +239,7 @@ TEST(ParameterApiTests, GetI8_SubWordOverflow_Wraps) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetI8_SubWordOverflow",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, kI8Key), ncclSuccess);
         int8_t v = 0;
         ASSERT_EQ(ncclParamGetI8(h, &v), ncclSuccess);
@@ -250,7 +252,7 @@ TEST(ParameterApiTests, GetU8_Negative_Wraps) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetU8_Negative",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, kU8Key), ncclSuccess);
         uint8_t v = 0;
         // strtoull("-1") wraps to ULLONG_MAX (no ERANGE), truncates to 0xFF.
@@ -264,7 +266,7 @@ TEST(ParameterApiTests, GetI32_NonNumeric_FallsBackToDefault) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetI32_NonNumeric",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
         int32_t v = 0;
         ASSERT_EQ(ncclParamGetI32(h, &v), ncclSuccess);
@@ -281,7 +283,7 @@ TEST(ParameterApiTests, GetStr_StringParam_ReturnsValue) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetStr_StringParam",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, kNoCacheKey), ncclSuccess);
         const char* s = nullptr;
         ASSERT_EQ(ncclParamGetStr(h, &s), ncclSuccess);
@@ -294,7 +296,7 @@ TEST(ParameterApiTests, GetStr_StringParam_ReturnsValue) {
 // A non-cstr (bool) param cannot be read via GetStr.
 TEST(ParameterApiTests, GetStr_TypeMismatch_ReturnsInvalidArg) {
   RUN_ISOLATED_TEST("GetStr_TypeMismatch", []() {
-    ncclParamHandle_t* h = nullptr;
+    ncclParamHandle_t h = nullptr;
     ASSERT_EQ(ncclParamBind(&h, kDumpAllKey), ncclSuccess); // bool param
     const char* s = nullptr;
     ASSERT_EQ(ncclParamGetStr(h, &s), ncclInvalidArgument);
@@ -303,7 +305,7 @@ TEST(ParameterApiTests, GetStr_TypeMismatch_ReturnsInvalidArg) {
 
 TEST(ParameterApiTests, GetStr_NullArgs) {
   RUN_ISOLATED_TEST("GetStr_NullArgs", []() {
-    ncclParamHandle_t* h = nullptr;
+    ncclParamHandle_t h = nullptr;
     ASSERT_EQ(ncclParamBind(&h, kNoCacheKey), ncclSuccess);
     const char* s = nullptr;
     ASSERT_EQ(ncclParamGetStr(nullptr, &s), ncclInvalidArgument);
@@ -319,7 +321,7 @@ TEST(ParameterApiTests, GetRaw_SufficientBuffer_WritesLenBytes) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "GetRaw_SufficientBuffer",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
         int32_t buf = 0;
         int len = -1;
@@ -334,7 +336,7 @@ TEST(ParameterApiTests, GetRaw_SufficientBuffer_WritesLenBytes) {
 // required size that the NVIDIA doc describes).
 TEST(ParameterApiTests, GetRaw_MaxLenTooSmall_ReturnsInvalidArgAndZeroLen) {
   RUN_ISOLATED_TEST("GetRaw_MaxLenTooSmall", []() {
-    ncclParamHandle_t* h = nullptr;
+    ncclParamHandle_t h = nullptr;
     ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
     int8_t tiny = 0;
     int len = -1;
@@ -345,7 +347,7 @@ TEST(ParameterApiTests, GetRaw_MaxLenTooSmall_ReturnsInvalidArgAndZeroLen) {
 
 TEST(ParameterApiTests, GetRaw_NullArgs) {
   RUN_ISOLATED_TEST("GetRaw_NullArgs", []() {
-    ncclParamHandle_t* h = nullptr;
+    ncclParamHandle_t h = nullptr;
     ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
     int32_t buf = 0;
     int len = 0;
@@ -476,7 +478,7 @@ TEST(ParameterApiTests, Cache_DefaultCachesValue) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "Cache_DefaultCachesValue",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, kCachedKey), ncclSuccess);
         int32_t v = 0;
         ASSERT_EQ(ncclParamGetI32(h, &v), ncclSuccess);
@@ -494,7 +496,7 @@ TEST(ParameterApiTests, Cache_PerKeyForcesReRead) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "Cache_PerKeyForcesReRead",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, kCachedKey), ncclSuccess);
         int32_t v = 0;
         ASSERT_EQ(ncclParamGetI32(h, &v), ncclSuccess);
@@ -512,7 +514,7 @@ TEST(ParameterApiTests, Cache_AllForcesReRead) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "Cache_AllForcesReRead",
       []() {
-        ncclParamHandle_t* h = nullptr;
+        ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, kCachedKey), ncclSuccess);
         int32_t v = 0;
         ASSERT_EQ(ncclParamGetI32(h, &v), ncclSuccess);

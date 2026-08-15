@@ -18,6 +18,7 @@
 
 #include <numa.h>
 
+#include <cstdint>
 #include <vector>
 
 #include <hip_test_kernels.hh>
@@ -519,6 +520,104 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_NumaTypedAccess) {
 
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  HIP_CHECK(hipMemRelease(handle));
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Export a host-backed (NUMA) VMM allocation to a POSIX file descriptor
+ * (dma-buf), import it back into a new generic handle, map the imported handle
+ * to a VA range, grant device access and validate the allocation via a GPU
+ * kernel round-trip. Exercises host-allocation backed buffer sharing.
+ *
+ *    - Skips when hipDeviceAttributeHostAllocDmaBufSupported reports 0 (older
+ * platforms return 0 rather than erroring).
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemCreateHostNuma.cc
+ * Test requirements
+ * ------------------------
+ *    - Host specific (LINUX)
+ *    - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_ExportImport) {
+  constexpr int N = DATA_SIZE;
+  const size_t buffer_size = N * sizeof(int);
+  CTX_CREATE();
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
+  checkHostAllocDmaBufSupported(device);
+
+  if (numa_available() < 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+  }
+  const std::vector<int> nodes = allowedNumaNodes();
+  if (nodes.empty()) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+  }
+
+  hipMemLocationType locType = hipMemLocationTypeHostNuma;
+  int locId = nodes.front();
+  SECTION("hipMemLocationTypeHostNuma first allowed node") {
+    locType = hipMemLocationTypeHostNuma;
+    locId = nodes.front();
+  }
+  SECTION("hipMemLocationTypeHostNumaCurrent") {
+    locType = hipMemLocationTypeHostNumaCurrent;
+    locId = 0;
+  }
+
+  // Host-backed allocation that is exportable via a POSIX file descriptor.
+  hipMemAllocationProp prop = makeHostNumaProp(locType, locId);
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+  size_t granularity = 0;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+  const size_t size_mem = ((buffer_size + granularity - 1) / granularity) * granularity;
+
+  hipMemGenericAllocationHandle_t handle;
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
+
+  // Export the host-backed handle to a dma-buf FD, then import it back.
+  int shareable_handle = -1;
+  HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, handle,
+                                          hipMemHandleTypePosixFileDescriptor, 0));
+  REQUIRE(shareable_handle >= 0);
+
+  hipMemGenericAllocationHandle_t imported_handle;
+  HIP_CHECK(hipMemImportFromShareableHandle(
+      &imported_handle, reinterpret_cast<void*>(static_cast<uintptr_t>(shareable_handle)),
+      hipMemHandleTypePosixFileDescriptor));
+
+  // Map the imported handle and validate access through that mapping.
+  void* ptrA = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
+  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0));
+
+  hipMemAccessDesc accessDesc = {};
+  accessDesc.location.type = hipMemLocationTypeDevice;
+  accessDesc.location.id = device;
+  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+
+  std::vector<int> A_h(N), B_h(N), C_h(N);
+  for (int idx = 0; idx < N; ++idx) {
+    A_h[idx] = idx;
+    C_h[idx] = idx * idx;
+  }
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+  hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
+                     reinterpret_cast<int*>(ptrA));
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
+
+  HIP_CHECK(hipMemUnmap(ptrA, size_mem));
+  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  HIP_CHECK(hipMemRelease(imported_handle));
   HIP_CHECK(hipMemRelease(handle));
   CTX_DESTROY();
 }
