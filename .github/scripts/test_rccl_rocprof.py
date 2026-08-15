@@ -87,6 +87,12 @@ def make_env():
     if not env.get("HIP_VISIBLE_DEVICES"):
         env["HIP_VISIBLE_DEVICES"] = "0,1"
 
+    # Force the unit-test host data path for this smoke test: the device-data mode added in
+    # this PR (UT_DEVICE_DATA, ON by default) deadlocks under rocprofv3 --hip-trace (no
+    # progress for >400s -- a profiler+threading hang, not slowness, so a timeout bump would
+    # not help). The host path traces fine (~21s) and keeps full rocprof smoke coverage.
+    env["UT_DEVICE_DATA"] = "0"
+
     env.pop("GPU_DEVICE_ORDINAL", None)
     return env
 
