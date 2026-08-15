@@ -2966,6 +2966,10 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
       }
     }
   }
+  if ((flags & MAP_FIXED) && addr) {
+    if (auto *driver = InterposerContext::ctx.driver())
+      return driver->mmap_replacing_client_doorbell_views(addr, length, prot, flags, fd, offset);
+  }
   return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset);
 }
 

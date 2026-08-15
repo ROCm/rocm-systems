@@ -73,6 +73,10 @@ public:
   /// @brief Return true if a mapping range overlaps a protected doorbell.
   [[nodiscard]] bool is_doorbell_range(const void *addr, size_t length) const override;
 
+  /// @brief Forward fixed-map replacement to the simulated execution driver when present.
+  void *mmap_replacing_client_doorbell_views(void *addr, size_t length, int prot, int flags, int fd,
+                                             off_t offset) override;
+
   /// @brief Return true when @p minor is the configured guest render node.
   [[nodiscard]] bool handles_drm_render_minor(uint32_t minor) const override;
 
