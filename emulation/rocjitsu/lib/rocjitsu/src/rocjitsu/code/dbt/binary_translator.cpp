@@ -1810,12 +1810,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       // it. Omitting the anonymous ones made an object whose only producers are those slots look
       // producerless, so an unresolved indirect consumer took the rejection path even though this
       // pass discovers, adopts and relocates every one of those addends.
-      !relative_text_addend_targets.empty() ||
-      std::ranges::any_of(pc_relative_address_builders,
-                          [&](const PcRelativeAddressBuilder &builder) {
-                            return builder.target_vaddr >= text_vaddr &&
-                                   builder.target_vaddr - text_vaddr < text.size();
-                          });
+      !relative_text_addend_targets.empty();
+  // Deliberately NOT counting in-text getpc builders. Admitting a transfer on this permission also
+  // promises that every externally resolvable `.text` symbol still names its body, which is kept by
+  // adopting those bodies as roots -- and adoption has to rest on facts read from the image, or the
+  // adopted set differs between passes and `.text` moves. The discovery pass finds a different
+  // number of getpc builders each time (it folds the ones it recovers), so counting them here would
+  // let the promise be made where the adoption backing it cannot be, and materialization would then
+  // refuse the object for a symbol nothing emitted.
 
   // Getpc producers whose builder range the recovered-indirect path rewrites.
   //
@@ -2055,11 +2057,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // gating on it adopts a different set the second time round and grows `.text` between passes.
     // An object with neither producer can never claim the permission, so it never turns the strict
     // symbol requirement on and needs none of these roots.
-    const bool object_stores_code_addresses =
-        std::ranges::any_of(
-            relocation_function_tables,
-            [](const RelocationFunctionTable &table) { return !table.entries.empty(); }) ||
-        !relative_text_addend_targets.empty();
     // And only when the object can actually reach the promise: the strict symbol requirement is
     // turned on by admitting an UNRECOVERED indirect transfer, so an object with no indirect
     // transfer at all can never turn it on. Skipping those keeps their scopes the size they were,
@@ -2071,7 +2068,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           const Instruction *term = block->terminator();
           return term != nullptr && (term->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0;
         });
-    if (object_stores_code_addresses && object_has_indirect_transfer) {
+    // Same predicate the promise uses, so a permission is never granted without the roots
+    // that satisfy it being adopted.
+    if (object_produces_code_addresses && object_has_indirect_transfer) {
       for (const uint64_t target : externally_resolvable_text_function_offsets())
         adopt(target);
     }
