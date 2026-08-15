@@ -702,38 +702,11 @@ static hipError_t playback_hipDrvGraphAddMemcpyNode(PlaybackContext& ctx, const 
   return hipSuccess;
 }
 
-static hipError_t playback_hipDrvMemcpy2DUnaligned(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvMemcpy2DUnaligned — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipDrvMemcpy2DUnaligned(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipDrvMemcpy3D(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvMemcpy3D — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipDrvMemcpy3D(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipDrvMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvMemcpy3DAsync — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipDrvMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipDrvPointerGetAttributes(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
@@ -3162,25 +3135,39 @@ static hipError_t playback_hipStreamWaitValue64(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipStreamWriteValue32(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipStreamWriteValue32 — "
-            "this API is not replayed; results may differ from capture.\n");
+  const auto* a = reinterpret_cast<const hrr_args_hipStreamWriteValue32*>(payload);
+  void* _live_dst = ctx.translate_ptr(a->ptr);
+  if (_live_dst == nullptr) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      fprintf(stderr, "[HRR] hipStreamWriteValue32: recorded destination 0x%llx "
+              "is not in the alloc map (memory HRR does not track); "
+              "skipping this write. Results may differ from capture.\n",
+              (unsigned long long)a->ptr);
+    }
+    return hipSuccess;
   }
-  return hipSuccess;
+  hipError_t _r = (hipError_t)hipStreamWriteValue32((hipStream_t)ctx.translate_stream(a->stream), _live_dst, (uint32_t)a->value, (unsigned int)a->flags);
+  return _r;
 }
 
 static hipError_t playback_hipStreamWriteValue64(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipStreamWriteValue64 — "
-            "this API is not replayed; results may differ from capture.\n");
+  const auto* a = reinterpret_cast<const hrr_args_hipStreamWriteValue64*>(payload);
+  void* _live_dst = ctx.translate_ptr(a->ptr);
+  if (_live_dst == nullptr) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      fprintf(stderr, "[HRR] hipStreamWriteValue64: recorded destination 0x%llx "
+              "is not in the alloc map (memory HRR does not track); "
+              "skipping this write. Results may differ from capture.\n",
+              (unsigned long long)a->ptr);
+    }
+    return hipSuccess;
   }
-  return hipSuccess;
+  hipError_t _r = (hipError_t)hipStreamWriteValue64((hipStream_t)ctx.translate_stream(a->stream), _live_dst, (uint64_t)a->value, (unsigned int)a->flags);
+  return _r;
 }
 
 static hipError_t playback_hipStreamBatchMemOp(PlaybackContext& ctx, const uint8_t* payload) {

@@ -20,7 +20,18 @@
     "cts.gfx1250.fpsan.fpsan_wmma_scale_f8f6f4_gfx1250_test",
     "cts.gfx1250.fpsan.fpsan_swmmac_16x16x128_fp8_gfx1250_test",
     "cts.gfx1250.fpsan.fpsan_swmmac_16x16x64_16_gfx1250_test",
-    "cts.gfx1250.fpsan.fpsan_amdgcn_math_extra_test"
+    "cts.gfx1250.fpsan.fpsan_amdgcn_math_extra_test",
+    "cts.gfx1250.fpsan.fpsan_amdgcn_bf16_trans_test",
+    "cts.gfx1250.fpsan.fpsan_classify_test",
+    "cts.gfx1250.fpsan.fpsan_cvt_f16_fp8_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_cvt_fp8_pack_test",
+    "cts.gfx1250.fpsan.fpsan_cvt_fp8_pk_test",
+    "cts.gfx1250.fpsan.fpsan_cvt_fp8_sr_test",
+    "cts.gfx1250.fpsan.fpsan_cvt_fp8_test",
+    "cts.gfx1250.fpsan.fpsan_cvt_sr_pack_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_cvt_sr_pk_f16_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_cvt_test",
+    "cts.gfx1250.fpsan.fpsan_wmma_16x16x4_gfx1250_test"
   ],
   "kernels": [
     "rocblas_sgemm::large_2048x2048"

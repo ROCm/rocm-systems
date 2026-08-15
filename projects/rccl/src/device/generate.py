@@ -7,7 +7,7 @@ import shutil
 
 # Order of colls, redops, tys, protos, algos must match src/include/device.h
 # The empty entries are for collectives like Gather, Scatter, etc.
-all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "", "", "", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]
+all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "", "", "", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda", "AllGatherV"]
 all_redops    = ["Sum","Prod","MinMax","PreMulSum","SumPostDiv"]
 all_tys       = ["i8","u8","i32","u32","i64","u64","f16","f32","f64","bf16","f8e4m3","f8e5m2"]
 all_protos    = ["LL","LL128","SIMPLE"]
@@ -105,14 +105,15 @@ if func_pattern and func_pattern[0]:
 else:
   # GDA (rocSHMEM-based) kernels only when rocshmem build requested
   if is_rocshmem:
-    func_pattern = "AllGather|AllReduce|AlltoAllPivot|AlltoAllGda|AlltoAllvGda|Broadcast|Reduce|ReduceScatter|SendRecv"
+    func_pattern = "AllGather|AllGatherV|AllReduce|AlltoAllPivot|AlltoAllGda|AlltoAllvGda|Broadcast|Reduce|ReduceScatter|SendRecv"
   else:
-    func_pattern = "AllGather|AllReduce|AlltoAllPivot|Broadcast|Reduce|ReduceScatter|SendRecv"
+    func_pattern = "AllGather|AllGatherV|AllReduce|AlltoAllPivot|Broadcast|Reduce|ReduceScatter|SendRecv"
 
 ################################################################################
 
 algos_of_coll = {
   "AllGather":             ["RING", "PAT"],
+  "AllGatherV":            ["RING"],
   "AllReduce":             ["RING", "TREE"],
   "AlltoAllPivot":         ["RING"],
   "AlltoAllGda":           ["RING"],
@@ -125,6 +126,7 @@ algos_of_coll = {
 
 protos_of_coll = {
   "AllGather":              all_protos,
+  "AllGatherV":             all_protos,
   "AllReduce":              all_protos,
   "AlltoAllPivot":          ["SIMPLE"],
   "AlltoAllGda":            ["SIMPLE"],
@@ -137,6 +139,7 @@ protos_of_coll = {
 
 redops_of_coll = {
   "AllGather":            ["Sum"],
+  "AllGatherV":           ["Sum"],
   "AllReduce":            all_redops,
   "AlltoAllPivot":        ["Sum"],
   "AlltoAllGda":          ["Sum"],
@@ -149,6 +152,7 @@ redops_of_coll = {
 
 tys_of_coll = {
   "AllGather":             ["i8"],
+  "AllGatherV":            ["i8"],
   "AllReduce":             all_tys,
   "AlltoAllPivot":         ["i8"],
   "AlltoAllGda":           ["i8"],
@@ -161,6 +165,7 @@ tys_of_coll = {
 
 acc_of_coll = {
   "AllGather":             ["0"],
+  "AllGatherV":            ["0"],
   "AllReduce":             all_accs,
   "AlltoAllPivot":         ["0"],
   "AlltoAllGda":           ["0"],
@@ -173,6 +178,7 @@ acc_of_coll = {
 
 pipelines_of_coll = {
   "AllGather":             ["0"],
+  "AllGatherV":            ["0"],
   "AllReduce":             all_pipelines,
   "AlltoAllPivot":         ["0"],
   "AlltoAllGda":           ["0"],
@@ -186,6 +192,7 @@ pipelined_types = ["bf16"]
 
 coll_camel_to_lower = {
   "AllGather":             "all_gather",
+  "AllGatherV":            "all_gather_v",
   "AllReduce":             "all_reduce",
   "AlltoAllPivot":         "alltoall_pivot",
   "AlltoAllGda":           "alltoall_gda",

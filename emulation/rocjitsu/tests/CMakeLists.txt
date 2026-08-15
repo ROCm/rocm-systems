@@ -348,6 +348,12 @@ add_test(
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_cli.py -v
 )
+add_test(
+    NAME PretranslateScriptUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLUGIN_LOADER_FIXTURE_DIR
@@ -396,7 +402,13 @@ add_executable(
     daemon_api_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
-    gfx1250_sim_test.cpp
+    cdna5_architecture_test.cpp
+    cdna5_cluster_test.cpp
+    cdna5_dispatch_memory_test.cpp
+    cdna5_execution_test.cpp
+    cdna5_instruction_test.cpp
+    cdna5_sdma_test.cpp
+    cdna5_tensor_dma_test.cpp
     l2_cache_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp
@@ -427,6 +439,10 @@ add_executable(
     dbt/waitcnt_translator_test.cpp
     dbt/virtual_lds_dispatch_rewrite_test.cpp
     dbt/virtual_lds_metadata_test.cpp
+    dbt/encoding_translator_test.cpp
+    dbt/legalization_table_test.cpp
+    dbt/support/translate_test_support.cpp
+    dbt/translate_gfx1250_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
     sysfs_test.cpp
@@ -586,7 +602,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_model_only_test
         PRIVATE
             rocjitsu_dbt_internal
-            rocjitsu_gfx1250_model_registry
+            rocjitsu_cdna5_model_registry
             simdojo_headers
             GTest::gtest_main
     )
@@ -625,11 +641,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         WARNINGS
     )
     rj_add_gtest_tests(gfx1250_b0_to_a0_library_test)
+    # Checked on the translator rather than the hook. The hook used to link the
+    # translator as a static archive and so carried the model code itself; now it
+    # loads a shared object, and the boundary this guards -- model in, execution
+    # out -- belongs to whichever artifact holds that code. Pointed at the hook it
+    # would now pass vacuously, which is the failure mode the required-symbol
+    # check at the end of the script exists to catch.
     add_test(
         NAME Gfx1250B0ToA0Library.SymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:hsa_hotswap_rocjitsu> -P
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0> -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 
@@ -678,7 +700,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_narrow_isa_registry_fixture
         PRIVATE
             rocjitsu_dbt_internal
-            rocjitsu_gfx1250_model_registry
+            rocjitsu_cdna5_model_registry
             simdojo_headers
     )
     rj_configure_target(rocjitsu_narrow_isa_registry_fixture LIB)
@@ -1222,9 +1244,72 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             hsa_hotswap_rocjitsu_unit_test
             probe_relocation_function_table_dispatch_gfx1250
         )
+        # The pre-translated tier is filled by a separate program and read by the
+        # hook. Running the real tool is the only way to test that the two agree
+        # on a key; writing entries through a test seam would exercise the hook's
+        # own derivation twice and prove nothing about the pair.
+        target_compile_definitions(
+            hsa_hotswap_rocjitsu_unit_test
+            PRIVATE RJ_PRETRANSLATE_TOOL="$<TARGET_FILE:rj_pretranslate>"
+        )
+        add_dependencies(hsa_hotswap_rocjitsu_unit_test rj_pretranslate)
     endif()
     rj_configure_target(hsa_hotswap_rocjitsu_unit_test TEST)
     gtest_discover_tests(hsa_hotswap_rocjitsu_unit_test)
+
+    # Compiles the translation store as a plain DBT component rather than
+    # reaching it through a hook, which is how a second consumer would use it.
+    add_executable(
+        translation_store_test
+        dbt/translation_store_test.cpp
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/code/dbt/translation_store.cpp
+    )
+    target_include_directories(
+        translation_store_test
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+    )
+    target_compile_definitions(
+        translation_store_test
+        PRIVATE RJ_TRANSLATION_STORE_TEST_HOOKS
+    )
+    # The store keys entries on this note and disables itself without it.
+    target_link_options(translation_store_test PRIVATE "LINKER:--build-id=sha1")
+    target_link_libraries(
+        translation_store_test
+        PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(translation_store_test TEST)
+    gtest_discover_tests(translation_store_test)
+
+    # One source, two modules differing only in build id -- which is what a
+    # rebuilt translator is. Entries written against one must be invisible to the
+    # other, and no single binary can show that: the store derives identity from
+    # the module containing an address, so two identities need two modules.
+    #
+    # The ids are fixed rather than content-derived so this stays a test of the
+    # store rather than of the linker. Content-derived ids would also differ, but
+    # only incidentally, and would churn whenever either file was touched.
+    foreach(_probe_suffix a b)
+        set(_probe rj_translator_build_probe_${_probe_suffix})
+        add_library(${_probe} MODULE dbt/translator_build_probe.cpp)
+        rj_configure_target(${_probe} TEST)
+        target_compile_definitions(
+            translation_store_test
+            PRIVATE
+                RJ_TRANSLATOR_PROBE_${_probe_suffix}="$<TARGET_FILE:${_probe}>"
+        )
+        add_dependencies(translation_store_test ${_probe})
+    endforeach()
+    target_link_options(
+        rj_translator_build_probe_a
+        PRIVATE "LINKER:--build-id=0xaaaaaaaaaaaaaaaa"
+    )
+    target_link_options(
+        rj_translator_build_probe_b
+        PRIVATE "LINKER:--build-id=0xbbbbbbbbbbbbbbbb"
+    )
 endif()
 
 # A separate loadable module is the only way to observe the force-scalar gate's
@@ -1283,77 +1368,105 @@ add_executable(interposer_dup_test interposer_dup_test.cpp)
 rj_configure_target(interposer_dup_test TEST)
 target_include_directories(
     interposer_dup_test
-    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers
 )
-target_link_libraries(interposer_dup_test PRIVATE GTest::gtest_main)
+target_link_libraries(
+    interposer_dup_test
+    PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+)
 add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(interposer_dup_test)
 endif()
-foreach(
-    _interposer_dup_test
-    IN
-    ITEMS
-        DupKeepsKfdRoutingAfterPrimaryClose
-        FcntlDupfdKeepsKfdRouting
-        Dup2OverPrimaryInvalidatesKfdIdentity
-        Dup2OntoFreshFdRoutesKfd
-        Dup3RoutesKfdAndRejectsSameFd
-        ReopenAfterPrimaryOverwriteKeepsBackend
-        SerializedReopenUnderContentionStaysRoutable
-)
-    rj_add_test(
-        NAME "InterposerDupTest.${_interposer_dup_test}"
-        COMMAND
-            ${RJ_CLI}
-            --config
-            ${RJ_CDNA4_KMD_CONFIG}
-            --
-            $<TARGET_FILE:interposer_dup_test>
-            "--gtest_filter=InterposerDupTest.${_interposer_dup_test}"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-        INSTALL_COMMAND
-            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            "--config"
-            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
-            "--"
-            "bin/interposer_dup_test"
-            "--gtest_filter=InterposerDupTest.${_interposer_dup_test}"
-    )
-endforeach()
+function(rj_add_interposer_test_suite _suite)
+    foreach(_case IN LISTS ARGN)
+        rj_add_test(
+            NAME "${_suite}.${_case}"
+            COMMAND
+                ${RJ_CLI}
+                --config
+                ${RJ_CDNA4_KMD_CONFIG}
+                --
+                $<TARGET_FILE:interposer_dup_test>
+                "--gtest_filter=${_suite}.${_case}"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+            INSTALL_COMMAND
+                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                "--config"
+                "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+                "--"
+                "bin/interposer_dup_test"
+                "--gtest_filter=${_suite}.${_case}"
+        )
+    endforeach()
+endfunction()
 
-foreach(
-    _interposer_gem_test
-    IN
-    ITEMS
-        ReusedDmabufFdMintsDistinctHandles
-        UnmapWithWrongHandleFails
-        MapSucceedsAfterExportFdClosed
-        ReplaceEvictsOverlappingDifferentSizeRange
-        ReplaceTransfersOwnershipAcrossOldOwnerClose
-        ClearUpdatesOwnerBookkeeping
+set(_rj_interposer_dup_tests
+    DupKeepsKfdRoutingAfterPrimaryClose
+    FcntlDupfdKeepsKfdRouting
+    Dup2OverPrimaryInvalidatesKfdIdentity
+    Dup2OntoFreshFdRoutesKfd
+    Dup3RoutesKfdAndRejectsSameFd
+    ReopenAfterPrimaryOverwriteKeepsBackend
+    SerializedReopenUnderContentionStaysRoutable
+    FcntlDupfdReplacesStaleDrmTracking
+    NonDrmDuplicatesClearStaleDrmTracking
 )
-    rj_add_test(
-        NAME "InterposerGemTest.${_interposer_gem_test}"
-        COMMAND
-            ${RJ_CLI}
-            --config
-            ${RJ_CDNA4_KMD_CONFIG}
-            --
-            $<TARGET_FILE:interposer_dup_test>
-            "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-        INSTALL_COMMAND
-            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            "--config"
-            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
-            "--"
-            "bin/interposer_dup_test"
-            "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
+# TSan models concurrent close/dup on one descriptor as an application-level fd
+# race even though the interposer deliberately serializes the kernel operation.
+# Keep the lifecycle regression in regular and ASan builds, where it exercises
+# the intended close/reuse schedule without a sanitizer false positive.
+if(NOT RJ_ENABLE_TSAN)
+    list(
+        APPEND _rj_interposer_dup_tests
+        DrmCloseReuseRaceNeverMisclassifiesDuplicate
     )
-endforeach()
+endif()
+rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
+
+rj_add_interposer_test_suite(
+    InterposerGemTest
+    GemNamespaceIsPrivateButSharedByDuplicates
+    IndependentDrmFilesRejectOverlappingMappings
+    ReusedDmabufFdMintsDistinctHandles
+    UnmapWithWrongHandleFails
+    MapSucceedsAfterExportFdClosed
+    ReplaceEvictsOverlappingDifferentSizeRange
+    ReplaceTransfersOwnershipAcrossOldOwnerClose
+    ClearUpdatesOwnerBookkeeping
+)
+
+set(_rj_interposer_syncobj_tests
+    VmTimelineWaitObservesSynchronousMapAndUnmap
+    VmDelayUpdateSuppressesTimelinePublication
+    GemVaSignalsBinarySyncobjsAtPointZero
+    PointZeroOutputReplacesTimelinePayload
+    DuplicateDrmFdsShareNamespaceAndLifetime
+    IndependentDrmOpensHaveSeparateNamespaces
+    CreateSignaledSeedsOnlyTheInitialPoint
+    WaitValidationMatchesDrm
+    DestroyRejectsInvalidInput
+    TimelineWaitBlocksUntilSignalOrDeadline
+    TimelineWaitReturnsEintrForSignal
+    ConcurrentVmUpdatesShareTimeline
+    OutOfOrderTimelinePointPreservesWatermark
+)
+# TSan cannot start new threads after a multithreaded fork. This regression
+# intentionally exercises inherited interposer state in that unsupported child,
+# so retain it for regular and ASan builds and omit it from TSan configurations.
+if(NOT RJ_ENABLE_TSAN)
+    list(
+        APPEND _rj_interposer_syncobj_tests
+        ForkedChildReinitializesTimelineFutexState
+    )
+endif()
+rj_add_interposer_test_suite(
+    InterposerSyncobjTest
+    ${_rj_interposer_syncobj_tests}
+)
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.
