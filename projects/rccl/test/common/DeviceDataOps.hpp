@@ -57,12 +57,26 @@ namespace RcclUnitTesting
   template <> __host__ __device__ inline bool Matches<uint32_t>(uint32_t a,uint32_t b){ return a == b; }
   template <> __host__ __device__ inline bool Matches<int64_t> (int64_t a, int64_t b) { return a == b; }
   template <> __host__ __device__ inline bool Matches<uint64_t>(uint64_t a,uint64_t b){ return a == b; }
-  template <> __host__ __device__ inline bool Matches<float>   (float a,  float b)  { return fabsf(a - b) < 1e-5f; }
+  // Tolerances use the SAME double literals as the host IsEqual (PtrUnion.cpp), not
+  // float literals: 9e-2/1e-5 aren't exactly representable, so a float-literal bound
+  // differs from the host's double bound by ~1e-9 and could flip a verdict at the
+  // tolerance boundary. Keeping them identical guarantees host==device verdicts.
+  template <> __host__ __device__ inline bool Matches<float>   (float a,  float b)  { return fabs((double)(a - b)) < 1e-5; }
   template <> __host__ __device__ inline bool Matches<double>  (double a, double b)  { return fabs(a - b) < 1e-12; }
-  template <> __host__ __device__ inline bool Matches<__half>       (__half a, __half b)             { return fabsf(__half2float(a) - __half2float(b)) < 9e-2f; }
-  template <> __host__ __device__ inline bool Matches<hip_bfloat16> (hip_bfloat16 a, hip_bfloat16 b) { return fabsf((float)a - (float)b) < 9e-2f; }
-  template <> __host__ __device__ inline bool Matches<rccl_float8>  (rccl_float8 a, rccl_float8 b)   { return fabsf((float)a - (float)b) < 9e-2f; }
-  template <> __host__ __device__ inline bool Matches<rccl_bfloat8> (rccl_bfloat8 a, rccl_bfloat8 b) { return fabsf((float)a - (float)b) < 9e-2f; }
+  template <> __host__ __device__ inline bool Matches<__half>       (__half a, __half b)             { return fabs((double)(__half2float(a) - __half2float(b))) < 9e-2; }
+  template <> __host__ __device__ inline bool Matches<hip_bfloat16> (hip_bfloat16 a, hip_bfloat16 b) { return fabs((double)((float)a - (float)b)) < 9e-2; }
+  template <> __host__ __device__ inline bool Matches<rccl_float8>  (rccl_float8 a, rccl_float8 b)   { return fabs((double)((float)a - (float)b)) < 9e-2; }
+  template <> __host__ __device__ inline bool Matches<rccl_bfloat8> (rccl_bfloat8 a, rccl_bfloat8 b) { return fabs((double)((float)a - (float)b)) < 9e-2; }
+
+  // ---- per-type -> double (for the first-mismatch diagnostic) -----------------
+  // Test-pattern values are small (mod 256, reduced over a handful of ranks), so a
+  // double captures every dtype's value exactly, including fp8 converted with the
+  // correct device (fnuz) type.
+  template <typename T> __host__ __device__ inline double ToDoubleVal(T v)          { return (double)v; }
+  template <> __host__ __device__ inline double ToDoubleVal<__half>      (__half v)       { return (double)__half2float(v); }
+  template <> __host__ __device__ inline double ToDoubleVal<hip_bfloat16>(hip_bfloat16 v) { return (double)(float)v; }
+  template <> __host__ __device__ inline double ToDoubleVal<rccl_float8> (rccl_float8 v)  { return (double)(float)v; }
+  template <> __host__ __device__ inline double ToDoubleVal<rccl_bfloat8>(rccl_bfloat8 v) { return (double)(float)v; }
 
   // ---- reduction step (mirrors PtrUnion::Reduce / DivideByInt per-type) -------
   // op encoding matches ncclRedOp_t: 0=sum 1=prod 2=max 3=min (avg handled via sum+DivStep).
@@ -99,11 +113,29 @@ namespace RcclUnitTesting
   }
 
   template <typename T>
-  __global__ void MismatchReduceKernel(const T* a, const T* b, size_t n, unsigned long long* mismatches)
+  __global__ void MismatchReduceKernel(const T* a, const T* b, size_t n,
+                                       unsigned long long* mismatches,
+                                       unsigned long long* firstIdx)
   {
     size_t j = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (j >= n) return;
-    if (!Matches<T>(a[j], b[j])) atomicAdd(mismatches, 1ULL);
+    if (!Matches<T>(a[j], b[j]))
+    {
+      atomicAdd(mismatches, 1ULL);
+      atomicMin(firstIdx, (unsigned long long)j);   // remember earliest divergent index
+    }
+  }
+
+  // Capture expected/actual (as double) at a single index for the diagnostic print.
+  // Launched with one thread after the first divergent index is known.
+  template <typename T>
+  __global__ void CaptureElemKernel(const T* actual, const T* expected, size_t idx, double* out)
+  {
+    if (blockIdx.x == 0 && threadIdx.x == 0)
+    {
+      out[0] = ToDoubleVal<T>(expected[idx]);   // out[0] = expected
+      out[1] = ToDoubleVal<T>(actual[idx]);     // out[1] = actual
+    }
   }
 
   // Build the all-ranks reduction of the pattern for element idx, mirroring the host
@@ -148,14 +180,37 @@ namespace RcclUnitTesting
   }
 
   __global__ void MismatchReduceFp8(const uint8_t* a, const uint8_t* b, size_t n,
-                                    unsigned long long* mismatches, bool isE5m2)
+                                    unsigned long long* mismatches, unsigned long long* firstIdx,
+                                    bool isE5m2)
   {
     size_t j = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (j >= n) return;
     bool m;
     if (isE5m2) { rccl_bfloat8 av = *reinterpret_cast<const rccl_bfloat8*>(a + j), bv = *reinterpret_cast<const rccl_bfloat8*>(b + j); m = Matches<rccl_bfloat8>(av, bv); }
     else        { rccl_float8  av = *reinterpret_cast<const rccl_float8*> (a + j), bv = *reinterpret_cast<const rccl_float8*> (b + j); m = Matches<rccl_float8>(av, bv); }
-    if (!m) atomicAdd(mismatches, 1ULL);
+    if (!m)
+    {
+      atomicAdd(mismatches, 1ULL);
+      atomicMin(firstIdx, (unsigned long long)j);
+    }
+  }
+
+  __global__ void CaptureElemFp8(const uint8_t* actual, const uint8_t* expected, size_t idx,
+                                 double* out, bool isE5m2)
+  {
+    if (blockIdx.x == 0 && threadIdx.x == 0)
+    {
+      if (isE5m2)
+      {
+        out[0] = ToDoubleVal<rccl_bfloat8>(*reinterpret_cast<const rccl_bfloat8*>(expected + idx));
+        out[1] = ToDoubleVal<rccl_bfloat8>(*reinterpret_cast<const rccl_bfloat8*>(actual   + idx));
+      }
+      else
+      {
+        out[0] = ToDoubleVal<rccl_float8>(*reinterpret_cast<const rccl_float8*>(expected + idx));
+        out[1] = ToDoubleVal<rccl_float8>(*reinterpret_cast<const rccl_float8*>(actual   + idx));
+      }
+    }
   }
 
   __global__ void ExpectedReduceFp8(uint8_t* out, size_t n, int totalRanks, int op, bool isAvg, bool isE5m2, size_t startIdx)

@@ -92,7 +92,8 @@ namespace RcclUnitTesting
     // Device data-op layer (reusable by any collective/test). Fills this (device)
     // buffer with the shared pattern via a kernel; the pattern at position j uses
     // global index (startIdx + j). IsEqualDevice compares two device buffers with
-    // the same per-type tolerance as IsEqual and returns the mismatch count.
+    // the same per-type tolerance as IsEqual, returns the mismatch count, and on a
+    // mismatch logs the first divergent index with its expected/actual value.
     ErrCode FillPatternDevice(ncclDataType_t const dataType,
                               size_t         const numElements,
                               int            const globalRank,

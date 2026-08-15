@@ -81,27 +81,73 @@ namespace RcclUnitTesting
     }
     mismatches = 0;
     if (numElements == 0) return TEST_SUCCESS;
-    unsigned long long* dCount = nullptr;
-    CHECK_HIP(hipMalloc(&dCount, sizeof(unsigned long long)));
-    CHECK_HIP(hipMemset(dCount, 0, sizeof(unsigned long long)));
+
+    // Scope-guarded device frees: every early return below (CHECK_HIP failures and the
+    // dispatch default) runs these destructors, so nothing leaks on the error path.
+    struct DevFree { void* p = nullptr; ~DevFree() { if (p) (void)hipFree(p); } } gScratch, gVals;
+
+    // dScratch[0] = mismatch count, dScratch[1] = first (lowest) divergent index.
+    unsigned long long* dScratch = nullptr;
+    double*             dVals    = nullptr;   // [expected, actual] at the first divergent index
+    CHECK_HIP(hipMalloc(&dScratch, 2 * sizeof(unsigned long long))); gScratch.p = dScratch;
+    CHECK_HIP(hipMalloc(&dVals,    2 * sizeof(double)));             gVals.p    = dVals;
+    unsigned long long hInit[2] = { 0ULL, (unsigned long long)numElements };  // idx init = n (= "none")
+    CHECK_HIP(hipMemcpy(dScratch, hInit, sizeof(hInit), hipMemcpyHostToDevice));
+
+    bool const fp8    = (dataType == ncclFloat8e4m3 || dataType == ncclFloat8e5m2);
+    bool const isE5m2 = (dataType == ncclFloat8e5m2);
     size_t const threads = 256, blocks = (numElements + threads - 1) / threads;
-    if (dataType == ncclFloat8e4m3 || dataType == ncclFloat8e5m2)
+    if (fp8)
     {
       hipLaunchKernelGGL(MismatchReduceFp8, dim3(blocks), dim3(threads), 0, 0,
                          (const uint8_t*)actualGpu, (const uint8_t*)expectedGpu, numElements,
-                         dCount, dataType == ncclFloat8e5m2);
+                         dScratch, dScratch + 1, isE5m2);
     }
     else
     {
       RCCL_UT_DTYPE_DISPATCH(dataType,
         hipLaunchKernelGGL(MismatchReduceKernel<T>, dim3(blocks), dim3(threads), 0, 0,
-                           (const T*)actualGpu, (const T*)expectedGpu, numElements, dCount));
+                           (const T*)actualGpu, (const T*)expectedGpu, numElements,
+                           dScratch, dScratch + 1));
     }
     CHECK_HIP(hipGetLastError());
-    unsigned long long hCount = 0;
-    CHECK_HIP(hipMemcpy(&hCount, dCount, sizeof(hCount), hipMemcpyDeviceToHost));
-    CHECK_HIP(hipFree(dCount));
-    mismatches = (size_t)hCount;
+    unsigned long long hOut[2] = { 0ULL, 0ULL };
+    CHECK_HIP(hipMemcpy(hOut, dScratch, sizeof(hOut), hipMemcpyDeviceToHost));
+    mismatches = (size_t)hOut[0];
+
+    // Diagnostic: with the host buffering path retired this is the only value dump, so
+    // report the first divergent index with its expected/actual (dtype-aware). The test
+    // pattern's values are small, so a double captures every dtype exactly.
+    if (hOut[0] != 0 && hOut[1] < (unsigned long long)numElements)
+    {
+      size_t const fi = (size_t)hOut[1];
+      if (fp8)
+      {
+        hipLaunchKernelGGL(CaptureElemFp8, dim3(1), dim3(1), 0, 0,
+                           (const uint8_t*)actualGpu, (const uint8_t*)expectedGpu, fi, dVals, isE5m2);
+      }
+      else
+      {
+        RCCL_UT_DTYPE_DISPATCH(dataType,
+          hipLaunchKernelGGL(CaptureElemKernel<T>, dim3(1), dim3(1), 0, 0,
+                             (const T*)actualGpu, (const T*)expectedGpu, fi, dVals));
+      }
+      CHECK_HIP(hipGetLastError());
+      double hVals[2] = { 0.0, 0.0 };   // [expected, actual]
+      CHECK_HIP(hipMemcpy(hVals, dVals, sizeof(hVals), hipMemcpyDeviceToHost));
+      switch (dataType)
+      {
+      case ncclInt8: case ncclInt32: case ncclInt64:
+        TEST_ERROR("Expected output: %lld.  Actual output: %lld at index %zu",
+                   (long long)hVals[0], (long long)hVals[1], fi); break;
+      case ncclUint8: case ncclUint32: case ncclUint64:
+        TEST_ERROR("Expected output: %llu.  Actual output: %llu at index %zu",
+                   (unsigned long long)hVals[0], (unsigned long long)hVals[1], fi); break;
+      default:  // all floating-point dtypes (fp16/fp32/fp64/bf16/fp8)
+        TEST_ERROR("Expected output: %f.  Actual output: %f at index %zu",
+                   hVals[0], hVals[1], fi); break;
+      }
+    }
     return TEST_SUCCESS;
   }
 
