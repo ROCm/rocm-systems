@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/code_object_identity.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/isa/decoder.h"
@@ -86,6 +87,13 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
     size_t pc = 0;
 
     while (pc < word_count) {
+      // Linked gfx1250 objects use zero-filled holes between independently
+      // aligned function bodies. BasicBlock::build() treats these words as
+      // padding rather than instructions, so host validation must do the same.
+      if (arch == ROCJITSU_CODE_ARCH_GFX1250 && words[pc] == 0) {
+        ++pc;
+        continue;
+      }
       try {
         std::unique_ptr<Instruction> inst(decoder->decode(&words[pc]));
         if (!inst) {
@@ -468,6 +476,8 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     add_error(output, kInputError, error.empty() ? "failed to load input" : error);
     return output;
   }
+  output.value.source_code_object_id =
+      stable_code_object_id(input.code_object->image_data(), input.code_object->image_size());
 
   const bool need_report = options.collect_diagnostics;
   const bool need_source_disassembly = options.disassembly == DisassemblyMode::Source ||
@@ -526,7 +536,8 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     output.value.disassembly += translated_inspection.disassembly;
   }
 
-  if (!validate_host_decode(output.value.translated_report, error)) {
+  const bool data_only = has_diagnostic_kind(output.value.diagnostics, DiagnosticKind::DataOnly);
+  if (!data_only && !validate_host_decode(output.value.translated_report, error)) {
     add_error(output, kValidationError, error);
     return output;
   }

@@ -23,7 +23,7 @@ output_file_registry::make_entry(std::string path, output_format format,
                      "Open in https://ui.perfetto.dev" };
         case output_format::rocpd:
             return { "RocPD database", std::move(path),
-                     "sqlite3, AMD Visualizer (OPTIQ), or rocprofiler-sdk provided rocpd "
+                     "sqlite3, ROCm Optiq, or rocprofiler-sdk provided rocpd "
                      "Python module for conversion to other formats" };
         case output_format::json:
             return { component_name.empty() ? "JSON output"

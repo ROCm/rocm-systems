@@ -15,9 +15,7 @@ namespace thunk {
 namespace dxcore {
 
 DxcoreLoader::DxcoreLoader()
-    : dxcore_handle_(nullptr)
-    , init_flag_()
-    , pfn_D3DKMTCreateAllocation2(nullptr)
+    : pfn_D3DKMTCreateAllocation2(nullptr)
     , pfn_D3DKMTDestroyAllocation2(nullptr)
     , pfn_D3DKMTMapGpuVirtualAddress(nullptr)
     , pfn_D3DKMTReserveGpuVirtualAddress(nullptr)
@@ -52,7 +50,9 @@ DxcoreLoader::DxcoreLoader()
     , pfn_D3DKMTSubmitCommandToHwQueue(nullptr)
     , pfn_D3DKMTEnumAdapters3(nullptr)
     , pfn_D3DKMTQueryResourceInfo(nullptr)
-    , pfn_D3DKMTOpenResource(nullptr) {
+    , pfn_D3DKMTOpenResource(nullptr)
+    , dxcore_handle_(nullptr)
+    , init_flag_() {
 }
 
 DxcoreLoader::~DxcoreLoader() {
@@ -85,6 +85,8 @@ bool DxcoreLoader::Initialize() {
 
 void DxcoreLoader::Shutdown() {
     if (dxcore_handle_) {
+        // CloseLib follows the platform API convention: true/nonzero means the
+        // library was unloaded successfully, false means the unload failed.
         if (!rocr::os::CloseLib(dxcore_handle_)) {
             pr_err("[DxcoreLoader] Cannot unload libdxcore.so: %s\n", rocr::os::DlError());
         } else {

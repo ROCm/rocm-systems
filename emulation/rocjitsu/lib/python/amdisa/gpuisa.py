@@ -237,6 +237,12 @@ class Instruction(InstBase):
         name: Name of the instruction.
         opcode: Opcode of the instruction.
         operands: The instruction's operands.
+        available_encodings: All encoding names listed for this instruction in
+            the machine-readable ISA, including alternate DPP, SDWA, and
+            literal forms that are not emitted as independent instruction
+            classes. ``None`` means encoding provenance is unknown; modifier
+            generation rejects that state, so synthetic VOP instructions must
+            provide an explicit set.
     """
 
     def __init__(
@@ -246,11 +252,13 @@ class Instruction(InstBase):
         opcode: int,
         operands: list[Operand],
         is_implied_literal_enc: bool = False,
+        available_encodings: frozenset[str] | None = None,
     ) -> None:
         super().__init__(enc_name, is_implied_literal_enc)
         self.name = name
         self.opcode = opcode
         self.operands = operands
+        self.available_encodings = available_encodings
 
     @cached_property
     def fmt_name(self) -> str:
@@ -334,7 +342,10 @@ class IsaSpec:
 
     Attributes:
         profile: ISA-specific encoding rules and constants.
-        arch_name: Architecture name.
+        arch_name: Logical architecture name used by parser/codegen rules.
+        cpp_namespace: Namespace used by generated C++ declarations.
+        generated_dir_name: Filesystem directory for generated and handwritten
+            architecture files.
         version: Schema version string.
         encoding_map: Maps encoding names to InstEncoding objects.
         inst_encodings: All encodings parsed from the spec.
@@ -348,9 +359,18 @@ class IsaSpec:
             ``is_implied_literal_encoding()`` method.
     """
 
-    def __init__(self, arch_name: str, version: str, profile: IsaProfile) -> None:
+    def __init__(
+        self,
+        arch_name: str,
+        version: str,
+        profile: IsaProfile,
+        generated_dir_name: str | None = None,
+        cpp_namespace: str | None = None,
+    ) -> None:
         self.profile = profile
         self.arch_name = arch_name
+        self.generated_dir_name = generated_dir_name or arch_name
+        self.cpp_namespace = cpp_namespace or arch_name
         self.version = version
         self.encoding_map: dict[str, InstEncoding] = {}
         self.inst_encodings: list[InstEncoding] = []

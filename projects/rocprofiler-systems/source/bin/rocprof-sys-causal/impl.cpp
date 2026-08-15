@@ -299,7 +299,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
         - Note: source scope requires debug info
     )desc";
 
-    auto parser = parser_t{ basename(argv[0]), _desc };
+    auto parser = parser_t{ path::filename(argv[0]), _desc };
 
     parser.on_error([](parser_t&, const parser_err_t& _err) {
         stream(std::cerr, color::fatal()) << _err << "\n";
@@ -395,7 +395,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             _generate_configs = true;
             auto _dir         = p.get<std::string>("generate-configs");
             if(!_dir.empty()) _config_folder = std::move(_dir);
-            if(!filepath::exists(_config_folder)) filepath::makedir(_config_folder);
+            if(!path::is_directory(_config_folder)) filepath::makedir(_config_folder);
         });
     parser
         .add_argument({ "--no-defaults" },
