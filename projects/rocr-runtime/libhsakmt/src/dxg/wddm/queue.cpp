@@ -636,7 +636,7 @@ hsa_status_t ComputeQueue::EndSubmit(void) {
   sync_point = cmdbuf_aql_frame_write_index;
 
   ib_start_addr = cmdbuf_addr +
-      (cmdbuf_aql_frame_write_index % WDDMDevice::GetAqlFrameNum()) * cmdbuf_aql_frame_size;
+      (cmdbuf_aql_frame_write_index % device->GetAqlFrameNum()) * cmdbuf_aql_frame_size;
   ib_size = 0;
 
   return HSA_STATUS_SUCCESS;
@@ -900,9 +900,13 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
     }
   }
 
-  if (required_size > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in VendorSpecific: required %zu bytes, limit %u bytes\n",
-           required_size, cmdbuf_aql_frame_size);
+  // The IB is inlined at ib_size, not at the frame base: SwitchAql2PM4() defers
+  // submission to merge consecutive dispatches, so earlier packets may already
+  // own part of this frame and only the remainder is available here.
+  if (ib_size + required_size > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in VendorSpecific: required %zu bytes at offset %" PRIu64
+           ", limit %u bytes\n",
+           required_size, ib_size, cmdbuf_aql_frame_size);
     // Oversized vendor IB: drop the PM4 payload but still retire the AQL
     // packet and signal completion, matching the existing
     // vendor_packet_process=off skip contract below (no queue hang).
@@ -967,7 +971,7 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
   // Safety net: required_size above must stay in lockstep with the Build*
   // calls emitted in this function. Catch drift in debug builds if a new
   // Build* call is added without a matching required_size term.
-  assert((i - ib_size) <= cmdbuf_aql_frame_size);
+  assert(i <= cmdbuf_aql_frame_size);
 
   ib_size = i;
   cmdbuf_aql_frame_write_index++;
@@ -990,6 +994,9 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
   hsa_kernel_dispatch_packet_t* aql_packet = (hsa_kernel_dispatch_packet_t*)packet;
   hsa_status_t ret;
 
+  // A failing translation helper leaves the packet unretired: the write index is
+  // not advanced and the header is still valid, so dropping its status would let
+  // Process() re-read the same slot forever instead of surfacing the failure.
   switch (header) {
     case HSA_PACKET_TYPE_KERNEL_DISPATCH:
       ret = KernelDispatchAqlToPm4((char*)ib_start_addr, aql_packet);
@@ -997,20 +1004,23 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
 
       // Stop merging packages util below conditions are met:
       // 1) The kernel with completion signal;
-      // 2) The cmdbuf_aql_frame_write_index reaches the end of cmdbuf
+      // 2) The merged packets would no longer fit in the current cmdbuf frame
       // 3) The HW queue is empty now, submit the packet right now.
       // 4) The AQL queue is empty now, submit the packet right now.
       if (!(aql_packet->completion_signal.handle) &&
-          (cmdbuf_aql_frame_write_index % WDDMDevice::GetAqlFrameNum()) &&
+          (cmdbuf_aql_frame_write_index % device->GetAqlMergeLimit()) &&
           (*sync_addr != sync_point) && (cmdbuf_aql_frame_write_index != GetRingWptr()->load()))
         return HSA_STATUS_SUCCESS;
 
       break;
     case HSA_PACKET_TYPE_BARRIER_AND:
-      BarrierGenericAqlToPm4((char*)ib_start_addr, (hsa_barrier_and_packet_t*)aql_packet);
+      ret = BarrierGenericAqlToPm4((char*)ib_start_addr, (hsa_barrier_and_packet_t*)aql_packet);
+      if (ret != HSA_STATUS_SUCCESS) return ret;
       break;
     case HSA_PACKET_TYPE_BARRIER_OR:
-      BarrierGenericAqlToPm4((char*)ib_start_addr, (hsa_barrier_and_packet_t*)aql_packet, true);
+      ret =
+          BarrierGenericAqlToPm4((char*)ib_start_addr, (hsa_barrier_and_packet_t*)aql_packet, true);
+      if (ret != HSA_STATUS_SUCCESS) return ret;
       break;
     case HSA_PACKET_TYPE_VENDOR_SPECIFIC:
       // A burst commit makes the producer bump the write index before the new
@@ -1020,7 +1030,8 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
       // exactly like an INVALID packet.
       if (((amd_aql_pm4_ib*)aql_packet)->ven_hdr != AMD_AQL_FORMAT_PM4_IB)
         return HSA_STATUS_SUCCESS;
-      VendorSpecificAqlToPm4((char*)ib_start_addr, (amd_aql_pm4_ib*)aql_packet);
+      ret = VendorSpecificAqlToPm4((char*)ib_start_addr, (amd_aql_pm4_ib*)aql_packet);
+      if (ret != HSA_STATUS_SUCCESS) return ret;
       break;
     case HSA_PACKET_TYPE_INVALID:
       // When packets are submitted out of order, the format field of current AQL packet
@@ -1049,8 +1060,8 @@ hsa_status_t ComputeQueue::Process(void) {
     // If wptr catch up the rptr in the cmdbuf, this needs wait for the rptr to free the cmdbuf.
     // Here the wptr comes from queue->cmdbuf_aql_frame_write_index, while rptr comes from
     // *queue->sync_addr.
-    if (*sync_addr + WDDMDevice::GetAqlFrameNum() <= cmdbuf_aql_frame_write_index) {
-      uint64_t value = cmdbuf_aql_frame_write_index - WDDMDevice::GetAqlFrameNum() + 1;
+    if (*sync_addr + device->GetAqlFrameNum() <= cmdbuf_aql_frame_write_index) {
+      uint64_t value = cmdbuf_aql_frame_write_index - device->GetAqlFrameNum() + 1;
       if (!device->CpuWait(&syncobj, &value, 1, false)) return HSA_STATUS_ERROR;
     }
 

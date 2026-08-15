@@ -62,8 +62,6 @@
 namespace wsl {
 namespace thunk {
 
-const uint32_t WDDMDevice::cmdbuf_aql_frame_num_ = 0x1000;
-
 WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id)
   : adapter_(adapter), adapter_luid_(adapter_luid), node_id_(node_id), init_status_(kDeviceSuccess) {
   memset(&device_info_, 0, sizeof(device_info_));
@@ -666,6 +664,9 @@ void WDDMDevice::InitCmdbufInfo(void) {
     sizeof(DispatchTemplate) +
     sizeof(AtomicTemplate) * 2;
 
+  // Worst-case PM4 of a single AQL packet, before the PMC headroom is added.
+  const uint32_t aql_packet_size = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
+
   // WSL multi-counter PM4 frame headroom (computed worst case).
   //
   // A vendor-specific (PMC) AQL packet is expanded in
@@ -686,11 +687,15 @@ void WDDMDevice::InitCmdbufInfo(void) {
   //   read : per instance -> GRBM index (12) + 2x COPY_DATA(48) = 60 B -> 64
   // The heaviest blocks (WGP-class on gfx11) are read once per WGP, so a
   // single counter's worst-case read-instance count is the device WGP count
-  // (CU/2); that also upper-bounds the SE*SA fanout of other blocks. SQ (the
-  // largest block) exposes 16 counter slots and a pass may span several
-  // blocks, so we bound a pass at 32 counters. The original 128 B alignment
-  // slack is retained. This scales with device geometry instead of being a
-  // blunt over-allocation, and grows automatically if counter sets grow.
+  // (CU/2); that also upper-bounds the SE*SA fanout of other blocks. The 32
+  // below is only a byte budget, not a ceiling anyone enforces: no upstream
+  // invariant caps the events in a pass, and the one hardware limit that is
+  // checked is per (block, block_index) in CounterPacketConstruct::can_collect(),
+  // so a pass may emit many more events than this. What keeps an oversized pass
+  // from overflowing the frame is the runtime bounds check in
+  // VendorSpecificAqlToPm4(), not this constant. The original 128 B alignment
+  // slack is retained, and the per-counter cost still scales with device
+  // geometry instead of being a blunt over-allocation.
   constexpr uint32_t kFrameAlignmentMargin    = 128;
   // Per-pass fixed overhead independent of the counter count: the shared PMC
   // programming aqlprofile emits once around the per-counter loop
@@ -723,6 +728,20 @@ void WDDMDevice::InitCmdbufInfo(void) {
                             kMaxPmcCountersPerPass * per_counter_bytes;
 
   cmdbuf_aql_frame_size_ = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
+
+  // Only a vendor-specific (PMC) frame uses the headroom above, but all frames
+  // are sized alike, so cap the ring depth instead of letting the whole
+  // allocation scale with the frame size.
+  constexpr uint32_t kCmdbufBudgetBytes = 2 * 1024 * 1024;
+
+  cmdbuf_aql_frame_num_ =
+      std::clamp(kCmdbufBudgetBytes / cmdbuf_aql_frame_size_, 1u, kMaxAqlFrameNum);
+
+  // SwitchAql2PM4() keeps merging consecutive dispatch packets into the current
+  // frame until the write index reaches a multiple of this limit, so a merge
+  // run must not be able to outgrow one frame.
+  cmdbuf_aql_merge_limit_ =
+      std::clamp(cmdbuf_aql_frame_size_ / aql_packet_size, 1u, cmdbuf_aql_frame_num_);
 
   cmdbuf_size_ = rocr::AlignUp(cmdbuf_aql_frame_num_ * cmdbuf_aql_frame_size_, 0x1000);
 }
