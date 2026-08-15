@@ -773,6 +773,16 @@ if(BUILD_TESTS)
     include("${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
     enable_testing()
 
+    set(_rccl_test_categories_generator_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_generator.yaml")
+    if(EXISTS "${_rccl_test_categories_generator_yaml}")
+        message(STATUS "Applying test categories for RCCL generator tests")
+        apply_ctest_category_labels(
+            "${_rccl_test_categories_generator_yaml}"
+        )
+    else()
+        message(WARNING "Skipping test categories for RCCL generator tests: missing ${_rccl_test_categories_generator_yaml}")
+    endif()
+
     set(_rccl_test_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
     if(EXISTS "${_rccl_test_categories_yaml}")
         message(STATUS "Applying test categories for rccl-UnitTests")
