@@ -24,18 +24,36 @@ if(NOT hip_FOUND)
     return()
 endif()
 
-# rocSHMEM's installed cmake config calls find_dependency(NUMA), which needs the
-# project's FindNUMA.cmake on the module path. The examples suite is a separate
-# CMake project that does not inherit the top-level CMAKE_MODULE_PATH, so add it
-# here relative to this file.
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../../cmake/Modules)
-
 # rocSHMEM provides the roc::rocshmem imported target. When built as part of
 # the rocm-systems monorepo the target is already defined; for standalone
 # builds we attempt a find_package.
 if(NOT TARGET roc::rocshmem)
     find_package(rocshmem HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
 endif()
+
+# Fallback for older rocSHMEM packages whose installed cmake config calls a bare
+# find_dependency(NUMA) and cannot locate TheRock's sysdeps numa-config.cmake on
+# its own. Only reached when the first attempt failed; newer rocSHMEM
+# (rocm-systems#9583) resolves NUMA internally, so the first attempt already
+# succeeds and this whole block is skipped, deferring entirely to rocSHMEM.
+if(NOT TARGET roc::rocshmem)
+    if(NOT NUMA_DIR)
+        foreach(_rocm_root ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
+            if(
+                _rocm_root
+                AND EXISTS "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA/numa-config.cmake"
+            )
+                set(NUMA_DIR "${_rocm_root}/lib/rocm_sysdeps/lib/cmake/NUMA")
+                break()
+            endif()
+        endforeach()
+    endif()
+    # Retry with whatever NUMA_DIR is now (user-provided or sysdeps-discovered).
+    if(NUMA_DIR)
+        find_package(rocshmem HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
+    endif()
+endif()
+
 if(NOT TARGET roc::rocshmem)
     message(${_MSG_TYPE} "rocshmem-test skipped: rocSHMEM (roc::rocshmem) not found.")
     return()

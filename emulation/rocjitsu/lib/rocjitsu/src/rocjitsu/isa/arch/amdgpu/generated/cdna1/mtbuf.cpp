@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna1 {
@@ -40,6 +41,12 @@ TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferLoadFormatXMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferLoadFormatXMtbuf>(opcode);
+}
+} // namespace detail
+
 TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXyMtbuf)),
@@ -57,6 +64,12 @@ TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferLoadFormatXyMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferLoadFormatXyMtbuf>(opcode);
+}
+} // namespace detail
 
 TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -76,6 +89,12 @@ TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferLoadFormatXyzMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferLoadFormatXyzMtbuf>(opcode);
+}
+} // namespace detail
+
 TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXyzwMtbuf)),
@@ -93,6 +112,12 @@ TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferLoadFormatXyzwMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferLoadFormatXyzwMtbuf>(opcode);
+}
+} // namespace detail
 
 TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -112,6 +137,12 @@ TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferStoreFormatXMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferStoreFormatXMtbuf>(opcode);
+}
+} // namespace detail
+
 TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferStoreFormatXyMtbuf)),
@@ -129,6 +160,12 @@ TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferStoreFormatXyMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferStoreFormatXyMtbuf>(opcode);
+}
+} // namespace detail
 
 TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -148,6 +185,12 @@ TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferStoreFormatXyzMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferStoreFormatXyzMtbuf>(opcode);
+}
+} // namespace detail
+
 TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferStoreFormatXyzwMtbuf)),
@@ -166,6 +209,12 @@ TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferStoreFormatXyzwMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferStoreFormatXyzwMtbuf>(opcode);
+}
+} // namespace detail
+
 TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatD16XMtbuf)),
@@ -183,6 +232,12 @@ TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferLoadFormatD16XMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferLoadFormatD16XMtbuf>(opcode);
+}
+} // namespace detail
 
 void TbufferLoadFormatD16XMtbuf::implicit_uses(RegisterSet &uses) const {
   Mtbuf::implicit_uses(uses);
@@ -208,6 +263,12 @@ TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferLoadFormatD16XyMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferLoadFormatD16XyMtbuf>(opcode);
+}
+} // namespace detail
+
 TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatD16XyzMtbuf)),
@@ -225,6 +286,12 @@ TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *in
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferLoadFormatD16XyzMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferLoadFormatD16XyzMtbuf>(opcode);
+}
+} // namespace detail
 
 void TbufferLoadFormatD16XyzMtbuf::implicit_uses(RegisterSet &uses) const {
   Mtbuf::implicit_uses(uses);
@@ -250,6 +317,12 @@ TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferLoadFormatD16XyzwMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferLoadFormatD16XyzwMtbuf>(opcode);
+}
+} // namespace detail
+
 TbufferStoreFormatD16XMtbuf::TbufferStoreFormatD16XMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferStoreFormatD16XMtbuf)),
@@ -267,6 +340,12 @@ TbufferStoreFormatD16XMtbuf::TbufferStoreFormatD16XMtbuf(const MachineInst *inst
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferStoreFormatD16XMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferStoreFormatD16XMtbuf>(opcode);
+}
+} // namespace detail
 
 TbufferStoreFormatD16XyMtbuf::TbufferStoreFormatD16XyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -286,6 +365,12 @@ TbufferStoreFormatD16XyMtbuf::TbufferStoreFormatD16XyMtbuf(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferStoreFormatD16XyMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferStoreFormatD16XyMtbuf>(opcode);
+}
+} // namespace detail
+
 TbufferStoreFormatD16XyzMtbuf::TbufferStoreFormatD16XyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferStoreFormatD16XyzMtbuf)),
@@ -304,6 +389,12 @@ TbufferStoreFormatD16XyzMtbuf::TbufferStoreFormatD16XyzMtbuf(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferStoreFormatD16XyzMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferStoreFormatD16XyzMtbuf>(opcode);
+}
+} // namespace detail
+
 TbufferStoreFormatD16XyzwMtbuf::TbufferStoreFormatD16XyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferStoreFormatD16XyzwMtbuf)),
@@ -321,6 +412,12 @@ TbufferStoreFormatD16XyzwMtbuf::TbufferStoreFormatD16XyzwMtbuf(const MachineInst
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeTbufferStoreFormatD16XyzwMtbuf(const MachineInst *opcode) {
+  return std::make_unique<TbufferStoreFormatD16XyzwMtbuf>(opcode);
+}
+} // namespace detail
 
 } // namespace cdna1
 } // namespace rocjitsu
