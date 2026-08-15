@@ -594,7 +594,7 @@ TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
     ASSERT_MPI_TRUE(parent != nullptr);
     ASSERT_MPI_TRUE(parent->sharedRes != nullptr);
 
-    if(parent->sharedRes->ginState.ncclGin == nullptr || parent->rmaState.rmaProxyState.ncclGin == nullptr)
+    if(parent->sharedRes->ginState.ncclGin == nullptr || parent->rmaState.rmaProxyState.ncclRma == nullptr)
     {
         GTEST_SKIP() << "Requires both the GIN and RMA plugins enabled on this host";
     }
@@ -602,8 +602,8 @@ TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
     // One internal backend serves both roles, so the contexts are distinct
     // only when RMA owns a separate field.
     ASSERT_MPI_TRUE(parent->ginContext != nullptr);
-    ASSERT_MPI_TRUE(parent->rmaGinContext != nullptr);
-    ASSERT_MPI_TRUE(parent->ginContext != parent->rmaGinContext);
+    ASSERT_MPI_TRUE(parent->rmaContext != nullptr);
+    ASSERT_MPI_TRUE(parent->ginContext != parent->rmaContext);
 
     // The parent shares its resources, so the child inherits both contexts
     // instead of initializing the plugins again.
@@ -614,7 +614,7 @@ TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
     struct ncclComm* child = splitComm;
     ASSERT_MPI_TRUE(child->sharedRes == parent->sharedRes);
     ASSERT_MPI_TRUE(child->ginContext == parent->ginContext);
-    ASSERT_MPI_TRUE(child->rmaGinContext == parent->rmaGinContext);
+    ASSERT_MPI_TRUE(child->rmaContext == parent->rmaContext);
 
     // Destroy the parent first so the child holds the last reference and
     // finalizes both plugins against the contexts it inherited.
