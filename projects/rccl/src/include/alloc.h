@@ -114,7 +114,15 @@ extern ncclResult_t getBusId(int cudaDev, int64_t* busId);
 // greatest is the most-prioritized (numerically smallest) value.
 static inline int ncclClampStreamPriority(int priority) {
   int least = 0, greatest = 0;
-  if (cudaDeviceGetStreamPriorityRange(&least, &greatest) != cudaSuccess) return 0;
+  cudaError_t err = cudaDeviceGetStreamPriorityRange(&least, &greatest);
+  if (err != cudaSuccess) {
+    // Fall back to priority 0 rather than leaving an out-of-range value. This
+    // path does not go through CUDACHECK/rcclCudaErrorHandler, so log here.
+    WARN("cudaDeviceGetStreamPriorityRange failed: '%s'; defaulting side-stream "
+         "priority clamp to 0",
+         cudaGetErrorString(err));
+    return 0;
+  }
   if (priority < greatest) priority = greatest;
   if (priority > least) priority = least;
   return priority;
@@ -134,11 +142,18 @@ static inline ncclResult_t ncclSideStreamAcquire(int cudaDev, int priority = 0) 
          priority, it->second.refCount);
   } else {
     cudaStream_t stream;
+    // cudaStreamCreateWithPriority can fail for OOM, invalid value, init/driver
+    // errors, etc. — not only cudaErrorStreamCaptureInvalidated. CUDACHECKGOTO
+    // logs the HIP string via rcclCudaErrorHandler; add operation context here.
     CUDACHECKGOTO(cudaStreamCreateWithPriority(&stream, cudaStreamNonBlocking, priority), res, fail);
     sideStream.emplace(key, ncclSideStream{stream, 1});
     INFO(NCCL_ALLOC, "Created side stream %p dev %d busid %lx prio %d", stream, cudaDev, busId, priority);
   }
 fail:
+  if (res != ncclSuccess)
+    WARN("ncclSideStreamAcquire: cudaStreamCreateWithPriority failed for "
+         "dev %d busid %lx prio %d (see HIP failure above)",
+         cudaDev, busId, priority);
   pthread_mutex_unlock(&sideStreamLock);
   return res;
 }
@@ -166,6 +181,10 @@ static inline ncclResult_t ncclSideStreamRelease(int cudaDev, int priority = 0) 
     WARN("Side stream of dev %d busid %lx prio %d was not found for release", cudaDev, busId, priority);
   }
 fail:
+  if (res != ncclSuccess)
+    WARN("ncclSideStreamRelease: cudaStreamDestroy failed for "
+         "dev %d busid %lx prio %d (see HIP failure above)",
+         cudaDev, busId, priority);
   pthread_mutex_unlock(&sideStreamLock);
   return res;
 }
