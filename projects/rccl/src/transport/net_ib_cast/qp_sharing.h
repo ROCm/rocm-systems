@@ -25,6 +25,7 @@ extern int64_t rcclParamIbCastQpDepthMultiplier();
 #define IBCAST_MAX_SHARED_QPS 1024
 #define IBCAST_MAX_COMMS      4096
 #define IBCAST_CTS_QP_SLOT_INVALID 0xFF
+#define IBCAST_FLUSH_QP_IDX  -1   // sentinel qpIdx for flush QPs in the shared pool
 
 // Pool key -- uniquely identifies a shared QP
 struct IbCastSharedQpKey {

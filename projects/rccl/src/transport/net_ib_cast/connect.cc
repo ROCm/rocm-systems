@@ -2100,6 +2100,31 @@ ib_recv:
       }
       recvExistingSlot->cqRefcount++;
 
+      // Share flush QPs from primary
+      if (rComm->flushEnabled) {
+        for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
+          IbCastSharedQpKey flushKey;
+          memset(&flushKey, 0, sizeof(flushKey));
+          flushKey.ibDevN = rComm->base.vProps.devs[i];
+          flushKey.peerAddr = recvPeerAddr;
+          flushKey.remIbDevIdx = remMeta.senderIbDevIdx;
+          flushKey.isSend = false;
+          flushKey.groupIdx = recvGroupIdx;
+          flushKey.qpIdx = IBCAST_FLUSH_QP_IDX;
+
+          struct IbCastSharedQp* flushSlot = IbCastFindSharedQp(&flushKey);
+          if (flushSlot) {
+            rComm->devs[i].gpuFlush.qp.qp = flushSlot->qp;
+            flushSlot->refcount++;
+            INFO(NCCL_NET, "NET/IB: %s: SECONDARY recv sharing flush QP qpn=%u dev=%d group=%d refcount=%d commId=%u",
+                 __func__, flushSlot->qp->qp_num, i, recvGroupIdx, flushSlot->refcount, rComm->base.commId);
+          } else {
+            WARN("NET/IB: %s: SECONDARY recv could not find shared flush QP for dev=%d group=%d commId=%u",
+                 __func__, i, recvGroupIdx, rComm->base.commId);
+          }
+        }
+      }
+
       goto qp_sharing_done_recv;
     } else {
       // PRIMARY receiver: create QPs with scaled depth, register in pool
@@ -2140,6 +2165,26 @@ qp_sharing_skip_recv:
         if (q == 0) {
           entry->cqRefcount = 1;
         }
+      }
+    }
+
+    // Register flush QPs in shared pool (primary only)
+    if (rComm->flushEnabled) {
+      for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
+        IbCastSharedQpKey flushKey;
+        memset(&flushKey, 0, sizeof(flushKey));
+        flushKey.ibDevN = rComm->base.vProps.devs[i];
+        flushKey.peerAddr = recvPeerAddr;
+        flushKey.remIbDevIdx = remMeta.senderIbDevIdx;
+        flushKey.isSend = false;
+        flushKey.groupIdx = rComm->base.sharedGroupIdx;
+        flushKey.qpIdx = IBCAST_FLUSH_QP_IDX;
+
+        IbCastRegisterSharedQp(&flushKey, rComm->devs[i].gpuFlush.qp.qp,
+            rComm->devs[i].base.cq, &rComm->devs[i].base, i, 1);
+        INFO(NCCL_NET, "NET/IB: %s: PRIMARY recv registered flush QP qpn=%u dev=%d group=%d commId=%u",
+             __func__, rComm->devs[i].gpuFlush.qp.qp->qp_num, i,
+             rComm->base.sharedGroupIdx, rComm->base.commId);
       }
     }
   }
@@ -2429,10 +2474,11 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
       }
       IbCastFreeCommIdLocked(comm->base.commId);  // caller holds g_IbCastSharedQpMutex
 
-      // GPU flush cleanup remains per-comm
+      // GPU flush cleanup — flush QP is shared, memory resources are per-comm
       for (int i = 0; i < comm->base.vProps.ndevs; i++) {
         struct ncclIbRecvCommDev* commDev = comm->devs + i;
         if (comm->flushEnabled) {
+          // Per-comm flush memory cleanup (always done)
           if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
             CUDACHECK(hipFree(commDev->gpuFlush.gpuFlushGpuMem));
             commDev->gpuFlush.gpuFlushGpuMem = nullptr;
@@ -2440,7 +2486,25 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
             commDev->gpuFlush.gpuMr = nullptr;
             if(commDev->gpuFlush.dmabufFd > 0) { close(commDev->gpuFlush.dmabufFd);}
           }
-          if (commDev->gpuFlush.qp.qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
+          // Shared flush QP teardown (refcount-based)
+          if (commDev->gpuFlush.qp.qp != NULL) {
+            struct IbCastSharedQp* flushSlot = IbCastFindSharedQpByQpn(
+                commDev->gpuFlush.qp.qp->qp_num, false);
+            if (flushSlot) {
+              flushSlot->refcount--;
+              if (flushSlot->refcount <= 0 && flushSlot->qp) {
+                INFO(NCCL_NET, "IB CAST TEARDOWN: destroying shared flush QP qpn=%u group=%d",
+                     flushSlot->qp->qp_num, flushSlot->key.groupIdx);
+                wrap_ibv_destroy_qp(flushSlot->qp);
+                flushSlot->qp = NULL;
+                flushSlot->used = false;
+              }
+            } else {
+              // Not in pool (shouldn't happen), destroy directly
+              NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
+            }
+            commDev->gpuFlush.qp.qp = NULL;
+          }
           if (commDev->gpuFlush.hostMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.hostMr));
         }
         if (commDev->ctsFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->ctsFifoMr));
