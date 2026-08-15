@@ -1444,7 +1444,7 @@ public:
    * @return True if size bytes of data can be inlined into a WQE with OpCode Op, else false.
    */
   template <OpCode Op>
-  static __device__ constexpr bool can_inline(size_t size);
+  static __host__ __device__ __forceinline__ constexpr bool can_inline(size_t size);
 
   /**
    * @brief Convert value to ProviderEndianness, byteswapping if necessary.
@@ -1455,7 +1455,7 @@ public:
    * @return endian::from_native<ProviderEndianness, T>(val)
    */
   template <typename T>
-  static __host__ __device__ constexpr T to_provider_endianness(T val);
+  static __host__ __device__ __forceinline__ constexpr T to_provider_endianness(T val);
 /**@}*/
 
 
@@ -1940,7 +1940,8 @@ std::tuple<uintptr_t, uint32_t> QueuePairBase<Provider>::get_raddr_info(const vo
 
 template <typename Provider>
 template <typename QueuePairBase<Provider>::OpCode Op>
-__device__ constexpr bool QueuePairBase<Provider>::can_inline(size_t size) {
+__host__ __device__ __forceinline__
+constexpr bool QueuePairBase<Provider>::can_inline(size_t size) {
   if constexpr (Op == OpCode::RDMA_WRITE) {
     return size <= Traits::InlineThreshold;
   } else {
@@ -1950,7 +1951,8 @@ __device__ constexpr bool QueuePairBase<Provider>::can_inline(size_t size) {
 
 template <typename Provider>
 template <typename T>
-__host__ __device__ constexpr T QueuePairBase<Provider>::to_provider_endianness(T val) {
+__host__ __device__ __forceinline__
+constexpr T QueuePairBase<Provider>::to_provider_endianness(T val) {
   return endian::from_native<ProviderEndianness, T>(val);
 }
 

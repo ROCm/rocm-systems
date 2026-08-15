@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <tuple>
+#include <type_traits>
 
 #include <hip/hip_runtime.h>
 
@@ -203,7 +204,7 @@ public:
    * @return True if size bytes of data can be inlined into a WQE with OpCode Op, else false.
    */
   template <OpCode Op>
-  static __device__ __forceinline__ constexpr bool can_inline(size_t size);
+  static __host__ __device__ __forceinline__ constexpr bool can_inline(size_t size);
 
   /**
    * @brief Convert value to Endianness of selected provider, byteswapping if necessary.
@@ -214,10 +215,7 @@ public:
    * @return QueuePairProvider::to_provider_endianness<T>(val)
    */
   template <typename T>
-  __host__ T to_provider_endianness(T val);
-
-  template <typename T>
-  static __device__ __forceinline__ T to_provider_endianness(T val);
+  static __host__ __device__ __forceinline__ T to_provider_endianness(T val);
 
 private:
   union QueuePairUnion {
@@ -289,7 +287,10 @@ private:
    * @brief Underlying GDA Provider.
    * Only used by __host__ code, __device__ code should use constmem.gda_provider instead.
    */
-  GDAProvider provider;
+  static inline GDAProvider provider{GDAProvider::UNSET};
+
+  static __host__   __forceinline__ GDAProvider get_provider() { return provider; }
+  static __device__ __forceinline__ GDAProvider get_provider() { return constmem.gda_provider; }
 
   /*
    * @brief Convert from QueuePairMux::OpCode to the equivalent Provider::OpCode
@@ -318,7 +319,7 @@ template <QueuePairMux::OpCode Op, typename... Options>
 __device__ __forceinline__ void QueuePairMux::post_wqe_rma(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
     const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
-  switch (constmem.gda_provider) {
+  switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.post_wqe_rma<provider_op<Op, QueuePairIONIC>()>(
@@ -344,7 +345,7 @@ template <QueuePairMux::OpCode Op, typename... Options>
 __device__ __forceinline__ void QueuePairMux::post_wqe_rma_single(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
     PostOpt<Options...> options) {
-  switch (constmem.gda_provider) {
+  switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.post_wqe_rma_single<provider_op<Op, QueuePairIONIC>()>(
@@ -371,7 +372,7 @@ __device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  switch (constmem.gda_provider) {
+  switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.post_wqe_amo<provider_op<Op, QueuePairIONIC>(), Fetch>(
@@ -398,7 +399,7 @@ __device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     PostOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  switch (constmem.gda_provider) {
+  switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.post_wqe_amo_single<provider_op<Op, QueuePairIONIC>(), Fetch>(
@@ -421,7 +422,7 @@ __device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe
 }
 
 __device__ __forceinline__ void QueuePairMux::quiet_single() {
-  switch (constmem.gda_provider) {
+  switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.quiet_single();
@@ -442,7 +443,7 @@ __device__ __forceinline__ void QueuePairMux::quiet_single() {
 
 __device__ __forceinline__ std::tuple<uintptr_t, uint32_t>
 QueuePairMux::get_laddr_info(const void *addr, bool inlined) const {
-  switch (constmem.gda_provider) {
+  switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.get_laddr_info(addr, inlined);
@@ -463,7 +464,7 @@ QueuePairMux::get_laddr_info(const void *addr, bool inlined) const {
 
 __device__ __forceinline__
 std::tuple<uintptr_t, uint32_t> QueuePairMux::get_raddr_info(const void *addr) const {
-  switch (constmem.gda_provider) {
+  switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.get_raddr_info(addr);
@@ -483,7 +484,7 @@ std::tuple<uintptr_t, uint32_t> QueuePairMux::get_raddr_info(const void *addr) c
 }
 
 template <QueuePairMux::OpCode Op>
-__device__ __forceinline__ constexpr bool QueuePairMux::can_inline(size_t size) {
+__host__ __device__ __forceinline__ constexpr bool QueuePairMux::can_inline(size_t size) {
   /*
    * We don't know which GDA provider will be selected at runtime,
    * so we define QueuePairTraits<QueuePairMux>::InlineThreshold
@@ -515,7 +516,7 @@ __device__ __forceinline__ constexpr bool QueuePairMux::can_inline(size_t size) 
     }
   } else {
     // At runtime, dispatch to the selected GDA provider.
-    switch (constmem.gda_provider) {
+    switch (get_provider()) {
 #if defined(GDA_IONIC)
     case GDAProvider::IONIC:
       return QueuePairIONIC::can_inline<provider_op<Op, QueuePairIONIC>()>(size);
@@ -529,15 +530,20 @@ __device__ __forceinline__ constexpr bool QueuePairMux::can_inline(size_t size) 
       return QueuePairMLX5::can_inline<provider_op<Op, QueuePairMLX5>()>(size);
 #endif
     default:
-      assert(false /* invalid GDAProvider */);
-      __builtin_unreachable();
+#ifdef __HIP_DEVICE_COMPILE__
+    assert(false /* invalid GDAProvider */);
+    __builtin_unreachable();
+#else
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
+#endif
     }
   }
 }
 
 template <typename T>
-__host__ T QueuePairMux::to_provider_endianness(T val) {
-  switch (provider) {
+__host__ __device__ __forceinline__ T QueuePairMux::to_provider_endianness(T val) {
+  switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return QueuePairIONIC::to_provider_endianness<T>(val);
@@ -551,29 +557,13 @@ __host__ T QueuePairMux::to_provider_endianness(T val) {
     return QueuePairMLX5::to_provider_endianness<T>(val);
 #endif
   default:
-    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
-    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
-  }
-}
-
-template <typename T>
-__device__ __forceinline__ T QueuePairMux::to_provider_endianness(T val) {
-  switch (constmem.gda_provider) {
-#if defined(GDA_IONIC)
-  case GDAProvider::IONIC:
-    return QueuePairIONIC::to_provider_endianness<T>(val);
-#endif
-#if defined(GDA_BNXT)
-  case GDAProvider::BNXT:
-    return QueuePairBNXT::to_provider_endianness<T>(val);
-#endif
-#if defined(GDA_MLX5)
-  case GDAProvider::MLX5:
-    return QueuePairMLX5::to_provider_endianness<T>(val);
-#endif
-  default:
+#ifdef __HIP_DEVICE_COMPILE__
     assert(false /* invalid GDAProvider */);
     __builtin_unreachable();
+#else
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
+#endif
   }
 }
 

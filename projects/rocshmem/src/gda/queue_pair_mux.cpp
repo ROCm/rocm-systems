@@ -44,7 +44,9 @@ namespace rocshmem {
 
 #if defined(GDA_IONIC)
 __host__ QueuePairMux::QueuePairMux(QueuePairIONIC&& ionic)
-  : qp{std::move(ionic)}, provider{GDAProvider::IONIC} { }
+  : qp{std::move(ionic)} {
+  provider = GDAProvider::IONIC;
+}
 
 __host__ QueuePairMux::QueuePairUnion::QueuePairUnion(QueuePairIONIC&& ionic)
   : ionic{std::move(ionic)} { }
@@ -52,7 +54,9 @@ __host__ QueuePairMux::QueuePairUnion::QueuePairUnion(QueuePairIONIC&& ionic)
 
 #if defined(GDA_BNXT)
 __host__ QueuePairMux::QueuePairMux(QueuePairBNXT&& bnxt)
-  : qp{std::move(bnxt)}, provider{GDAProvider::BNXT} { }
+  : qp{std::move(bnxt)} {
+  provider = GDAProvider::BNXT;
+}
 
 __host__ QueuePairMux::QueuePairUnion::QueuePairUnion(QueuePairBNXT&& bnxt)
   : bnxt{std::move(bnxt)} { }
@@ -60,7 +64,9 @@ __host__ QueuePairMux::QueuePairUnion::QueuePairUnion(QueuePairBNXT&& bnxt)
 
 #if defined(GDA_MLX5)
 __host__ QueuePairMux::QueuePairMux(QueuePairMLX5&& mlx5)
-  : qp{std::move(mlx5)}, provider{GDAProvider::MLX5} { }
+  : qp{std::move(mlx5)} {
+  provider = GDAProvider::MLX5;
+}
 
 __host__ QueuePairMux::QueuePairUnion::QueuePairUnion(QueuePairMLX5&& mlx5)
   : mlx5{std::move(mlx5)} { }
@@ -137,52 +143,24 @@ __host__ void QueuePairMux::QueuePairUnion::destruct(GDAProvider provider) {
 }
 
 /* Note:
- * qp{QueuePairUnion::construct(std::move(other.qp), other.provider)}
+ * qp{QueuePairUnion::construct(std::move(other.qp), get_provider())}
  * only works in C++17 or later: the "guaranteed copy elision" prvalue semantics
  * mean that the qp subobject does not need to have an accessible copy or move constructor */
 __host__ QueuePairMux::QueuePairMux(QueuePairMux&& other)
-  : qp{QueuePairUnion::construct(std::move(other.qp), other.provider)},
-    provider{std::move(other.provider)} { }
+  : qp{QueuePairUnion::construct(std::move(other.qp), get_provider())} { }
 
 __host__ QueuePairMux& QueuePairMux::operator=(QueuePairMux&& other) {
-  if (provider == other.provider) [[likely]] {
-    /* Common case where both use the same provider
-     *
-     * Steps 1 & 2: clean up resources held by active subobject of this->qp
-     * and move active subobject of other.qp to this->qp
-     * QueuePairUnion::assign uses the assignment operator of the active subobject,
-     * which will internally clean up resources held by the active subobject */
-    qp.assign(std::move(other.qp), provider);
-  } else {
-    /* Different providers, so obviously cannot be the same object
-     *
-     * Must manually end the lifetime of the active subobject of this->qp
-     * so that its storage can be reused by the moved-from object
-     * Also end the lifetime of the union itself: QueuePairUnion::~QueuePairUnion() is empty,
-     * but this is formally required so that its lifetime ends
-     * before we reuse the storage via placement-new and begin the lifetime of a new object
-     *
-     * Step 1: end lifetime of and clean up resources held by union and its active subobject */
-    qp.destruct(provider);
-    qp.~QueuePairUnion();
-    /* Step 2: construct new QueuePairUnion in the storage of this->qp,
-     * moving the active subobject from other.qp */
-    new (&qp) QueuePairUnion{QueuePairUnion::construct(std::move(other.qp), other.provider)};
-  }
-
-  /* Step 3: member-wise move of remaining data members from other to *this */
-  provider = std::move(other.provider);
-
-  /* Step 4: return *this */
+  /* All QueuePairMux have the same underlying provider */
+  qp.assign(std::move(other.qp), get_provider());
   return *this;
 }
 
 __host__ QueuePairMux::~QueuePairMux() {
-  qp.destruct(provider);
+  qp.destruct(get_provider());
 }
 
 __host__ int QueuePairMux::buffer_register(void *addr, size_t length) {
-  switch (provider) {
+  switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.buffer_register(addr, length);
@@ -197,12 +175,12 @@ __host__ int QueuePairMux::buffer_register(void *addr, size_t length) {
 #endif
   default:
     static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
-    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
   }
 }
 
 __host__ int QueuePairMux::buffer_unregister(void *addr) {
-  switch (provider) {
+  switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.buffer_unregister(addr);
@@ -217,12 +195,12 @@ __host__ int QueuePairMux::buffer_unregister(void *addr) {
 #endif
   default:
     static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
-    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
   }
 }
 
 __host__ int QueuePairMux::buffer_unregister_all() {
-  switch (provider) {
+  switch (get_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.buffer_unregister_all();
@@ -237,7 +215,7 @@ __host__ int QueuePairMux::buffer_unregister_all() {
 #endif
   default:
     static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
-    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(provider));
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
   }
 }
 

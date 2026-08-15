@@ -868,8 +868,8 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
       e.local_base = key;
       e.remote_base = bases[pe];
       e.length = length;
-      e.rkey = rkeys[flat_pe_nic_idx(pe, n)];
-      e.lkey = lkeys[n];
+      e.rkey = QueuePair::to_provider_endianness(rkeys[flat_pe_nic_idx(pe, n)]);
+      e.lkey = QueuePair::to_provider_endianness(lkeys[n]);
     }
   }
 
