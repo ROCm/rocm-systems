@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -53,6 +54,12 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_eq_f16_dpp"
@@ -93,6 +100,12 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -135,6 +148,12 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_gt_f16_dpp"
@@ -175,6 +194,12 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -217,6 +242,12 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLgF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLgF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_f16_dpp"
@@ -257,6 +288,12 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -299,6 +336,12 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpOF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpOF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_u_f16_dpp"
@@ -339,6 +382,12 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpUF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpUF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -381,6 +430,12 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNgeF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNgeF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nlg_f16_dpp"
@@ -421,6 +476,12 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNlgF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNlgF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -463,6 +524,12 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNgtF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNgtF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nle_f16_dpp"
@@ -503,6 +570,12 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNleF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNleF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -545,6 +618,12 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeqF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeqF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nlt_f16_dpp"
@@ -586,6 +665,12 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNltF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNltF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_f32_dpp"
@@ -623,6 +708,12 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -662,6 +753,12 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_f32_dpp"
@@ -699,6 +796,12 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -738,6 +841,12 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lg_f32_dpp"
@@ -775,6 +884,12 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLgF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLgF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -814,6 +929,12 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_o_f32_dpp"
@@ -851,6 +972,12 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpOF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpOF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -890,6 +1017,12 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpUF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpUF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nge_f32_dpp"
@@ -927,6 +1060,12 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNgeF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNgeF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -966,6 +1105,12 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNlgF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNlgF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ngt_f32_dpp"
@@ -1003,6 +1148,12 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNgtF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNgtF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1042,6 +1193,12 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNleF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNleF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_neq_f32_dpp"
@@ -1079,6 +1236,12 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeqF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeqF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1118,6 +1281,12 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNltF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNltF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_f64_dpp"
@@ -1142,6 +1311,12 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_LT_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1168,6 +1343,12 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_f64_dpp"
@@ -1192,6 +1373,12 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_LE_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1218,6 +1405,12 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lg_f64_dpp"
@@ -1242,6 +1435,12 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_LG_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLgF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLgF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1268,6 +1467,12 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_o_f64_dpp"
@@ -1292,6 +1497,12 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_O_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpOF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpOF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1318,6 +1529,12 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpUF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpUF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nge_f64_dpp"
@@ -1342,6 +1559,12 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_NGE_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNgeF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNgeF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1368,6 +1591,12 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNlgF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNlgF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ngt_f64_dpp"
@@ -1392,6 +1621,12 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_NGT_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNgtF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNgtF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1418,6 +1653,12 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNleF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNleF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_neq_f64_dpp"
@@ -1443,6 +1684,12 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeqF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeqF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nlt_f64_dpp"
@@ -1467,6 +1714,12 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_NLT_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNltF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNltF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1509,6 +1762,12 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtI16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtI16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_eq_i16_dpp"
@@ -1549,6 +1808,12 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqI16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqI16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1591,6 +1856,12 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeI16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeI16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_gt_i16_dpp"
@@ -1631,6 +1902,12 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtI16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtI16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1673,6 +1950,12 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeI16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeI16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_i16_dpp"
@@ -1713,6 +1996,12 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeI16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeI16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1755,6 +2044,12 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtU16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_eq_u16_dpp"
@@ -1795,6 +2090,12 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqU16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqU16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1837,6 +2138,12 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeU16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_gt_u16_dpp"
@@ -1877,6 +2184,12 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtU16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtU16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1919,6 +2232,12 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeU16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_u16_dpp"
@@ -1960,6 +2279,12 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeU16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_i32_dpp"
@@ -1997,6 +2322,12 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtI32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2036,6 +2367,12 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqI32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_i32_dpp"
@@ -2073,6 +2410,12 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeI32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2112,6 +2455,12 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtI32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ne_i32_dpp"
@@ -2149,6 +2498,12 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeI32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2188,6 +2543,12 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeI32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_u32_dpp"
@@ -2225,6 +2586,12 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtU32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2264,6 +2631,12 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqU32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_u32_dpp"
@@ -2301,6 +2674,12 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeU32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2340,6 +2719,12 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtU32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ne_u32_dpp"
@@ -2377,6 +2762,12 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
   }
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeU32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2416,6 +2807,12 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeU32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_i64_dpp"
@@ -2440,6 +2837,12 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_LT_I64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtI64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2466,6 +2869,12 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqI64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqI64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_i64_dpp"
@@ -2490,6 +2899,12 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_LE_I64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeI64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2516,6 +2931,12 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtI64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtI64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ne_i64_dpp"
@@ -2540,6 +2961,12 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_NE_I64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeI64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2566,6 +2993,12 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeI64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeI64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_u64_dpp"
@@ -2590,6 +3023,12 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_LT_U64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtU64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2616,6 +3055,12 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqU64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqU64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_u64_dpp"
@@ -2640,6 +3085,12 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_LE_U64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeU64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2666,6 +3117,12 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtU64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtU64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ne_u64_dpp"
@@ -2691,6 +3148,12 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeU64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeU64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_u64_dpp"
@@ -2715,6 +3178,12 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_GE_U64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeU64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2757,6 +3226,12 @@ VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpClassF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpClassF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_class_f32_dpp"
@@ -2795,6 +3270,12 @@ VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpClassF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpClassF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_class_f64_dpp"
@@ -2819,6 +3300,12 @@ VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_CLASS_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpClassF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpClassF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2865,6 +3352,12 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_eq_f16_dpp"
@@ -2909,6 +3402,12 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2955,6 +3454,12 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_gt_f16_dpp"
@@ -2999,6 +3504,12 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3045,6 +3556,12 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLgF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLgF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_f16_dpp"
@@ -3089,6 +3606,12 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3135,6 +3658,12 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxOF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxOF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_u_f16_dpp"
@@ -3179,6 +3708,12 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxUF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxUF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3225,6 +3760,12 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNgeF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNgeF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nlg_f16_dpp"
@@ -3269,6 +3810,12 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNlgF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNlgF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3315,6 +3862,12 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNgtF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNgtF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nle_f16_dpp"
@@ -3359,6 +3912,12 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNleF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNleF16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3405,6 +3964,12 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeqF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeqF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nlt_f16_dpp"
@@ -3450,6 +4015,12 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNltF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNltF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_f32_dpp"
@@ -3491,6 +4062,12 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3534,6 +4111,12 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_f32_dpp"
@@ -3575,6 +4158,12 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3618,6 +4207,12 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lg_f32_dpp"
@@ -3659,6 +4254,12 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLgF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLgF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3702,6 +4303,12 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_o_f32_dpp"
@@ -3743,6 +4350,12 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxOF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxOF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3786,6 +4399,12 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxUF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxUF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nge_f32_dpp"
@@ -3827,6 +4446,12 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNgeF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNgeF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3870,6 +4495,12 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNlgF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNlgF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ngt_f32_dpp"
@@ -3911,6 +4542,12 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNgtF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNgtF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3954,6 +4591,12 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNleF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNleF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_neq_f32_dpp"
@@ -3995,6 +4638,12 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeqF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeqF32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4038,6 +4687,12 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNltF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNltF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_f64_dpp"
@@ -4066,6 +4721,12 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4096,6 +4757,12 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_f64_dpp"
@@ -4124,6 +4791,12 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4154,6 +4827,12 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lg_f64_dpp"
@@ -4182,6 +4861,12 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLgF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLgF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4212,6 +4897,12 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_o_f64_dpp"
@@ -4240,6 +4931,12 @@ VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxOF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxOF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4270,6 +4967,12 @@ VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxUF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxUF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nge_f64_dpp"
@@ -4298,6 +5001,12 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNgeF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNgeF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4328,6 +5037,12 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNlgF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNlgF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ngt_f64_dpp"
@@ -4356,6 +5071,12 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNgtF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNgtF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4386,6 +5107,12 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNleF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNleF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_neq_f64_dpp"
@@ -4415,6 +5142,12 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeqF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeqF64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nlt_f64_dpp"
@@ -4443,6 +5176,12 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNltF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNltF64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4489,6 +5228,12 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtI16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtI16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_eq_i16_dpp"
@@ -4533,6 +5278,12 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqI16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqI16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4579,6 +5330,12 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeI16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeI16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_gt_i16_dpp"
@@ -4623,6 +5380,12 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtI16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtI16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4669,6 +5432,12 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeI16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeI16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_i16_dpp"
@@ -4713,6 +5482,12 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeI16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeI16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4759,6 +5534,12 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtU16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_eq_u16_dpp"
@@ -4803,6 +5584,12 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqU16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqU16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4849,6 +5636,12 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeU16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_gt_u16_dpp"
@@ -4893,6 +5686,12 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtU16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtU16Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4939,6 +5738,12 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeU16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_u16_dpp"
@@ -4984,6 +5789,12 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeU16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeU16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_i32_dpp"
@@ -5025,6 +5836,12 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtI32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5068,6 +5885,12 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqI32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_i32_dpp"
@@ -5109,6 +5932,12 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeI32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5152,6 +5981,12 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtI32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ne_i32_dpp"
@@ -5193,6 +6028,12 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeI32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeI32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5236,6 +6077,12 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeI32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeI32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_u32_dpp"
@@ -5277,6 +6124,12 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtU32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5320,6 +6173,12 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqU32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_u32_dpp"
@@ -5361,6 +6220,12 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeU32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5404,6 +6269,12 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtU32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ne_u32_dpp"
@@ -5445,6 +6316,12 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeU32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeU32Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5488,6 +6365,12 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeU32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeU32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_i64_dpp"
@@ -5516,6 +6399,12 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtI64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5546,6 +6435,12 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqI64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqI64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_i64_dpp"
@@ -5574,6 +6469,12 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeI64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5604,6 +6505,12 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtI64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtI64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ne_i64_dpp"
@@ -5632,6 +6539,12 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeI64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeI64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5662,6 +6575,12 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeI64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeI64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_u64_dpp"
@@ -5690,6 +6609,12 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtU64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5720,6 +6645,12 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqU64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqU64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_u64_dpp"
@@ -5748,6 +6679,12 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeU64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5778,6 +6715,12 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtU64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtU64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ne_u64_dpp"
@@ -5807,6 +6750,12 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeU64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeU64Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_u64_dpp"
@@ -5835,6 +6784,12 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeU64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeU64Vopc>(opcode);
+}
+} // namespace detail
 
 VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5881,6 +6836,12 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxClassF16Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxClassF16Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_class_f32_dpp"
@@ -5923,6 +6884,12 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxClassF32Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxClassF32Vopc>(opcode);
+}
+} // namespace detail
+
 VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
     : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_class_f64_dpp"
@@ -5951,6 +6918,12 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxClassF64Vopc(const MachineInst *opcode) {
+  return std::make_unique<VCmpxClassF64Vopc>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu

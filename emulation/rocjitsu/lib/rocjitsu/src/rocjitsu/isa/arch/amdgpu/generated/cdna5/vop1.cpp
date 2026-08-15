@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna5 {
@@ -20,6 +21,12 @@ VNopVop1::VNopVop1(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVNopVop1(const MachineInst *opcode) {
+  return std::make_unique<VNopVop1>(opcode);
+}
+} // namespace detail
 
 VMovB32Vop1::VMovB32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -65,6 +72,12 @@ VMovB32Vop1::VMovB32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovB32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VMovB32Vop1>(opcode);
+}
+} // namespace detail
+
 VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_readfirstlane_b32_dpp"
@@ -82,6 +95,12 @@ VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1(const MachineInst *inst)
     throw util::InvalidInst("V_READFIRSTLANE_B32 does not support DPP", "");
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVReadfirstlaneB32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VReadfirstlaneB32Vop1>(opcode);
+}
+} // namespace detail
 
 VCvtI32F64Vop1::VCvtI32F64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -122,6 +141,12 @@ VCvtI32F64Vop1::VCvtI32F64Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtI32F64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtI32F64Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtF64I32Vop1::VCvtF64I32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f64_i32_dpp"
@@ -159,6 +184,12 @@ VCvtF64I32Vop1::VCvtF64I32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF64I32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF64I32Vop1>(opcode);
+}
+} // namespace detail
 
 VCvtF32I32Vop1::VCvtF32I32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -204,6 +235,12 @@ VCvtF32I32Vop1::VCvtF32I32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32I32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32I32Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtF32U32Vop1::VCvtF32U32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f32_u32_dpp"
@@ -247,6 +284,12 @@ VCvtF32U32Vop1::VCvtF32U32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32U32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32U32Vop1>(opcode);
+}
+} // namespace detail
 
 VCvtU32F32Vop1::VCvtU32F32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -292,6 +335,12 @@ VCvtU32F32Vop1::VCvtU32F32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtU32F32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtU32F32Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtI32F32Vop1::VCvtI32F32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_i32_f32_dpp"
@@ -335,6 +384,12 @@ VCvtI32F32Vop1::VCvtI32F32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtI32F32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtI32F32Vop1>(opcode);
+}
+} // namespace detail
 
 VCvtF16F32Vop1::VCvtF16F32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -381,6 +436,12 @@ VCvtF16F32Vop1::VCvtF16F32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF16F32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF16F32Vop1>(opcode);
+}
+} // namespace detail
 
 void VCvtF16F32Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -441,6 +502,12 @@ VCvtF32F16Vop1::VCvtF32F16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32F16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32F16Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtNearestI32F32Vop1::VCvtNearestI32F32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_nearest_i32_f32_dpp"
@@ -484,6 +551,12 @@ VCvtNearestI32F32Vop1::VCvtNearestI32F32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtNearestI32F32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtNearestI32F32Vop1>(opcode);
+}
+} // namespace detail
 
 VCvtFloorI32F32Vop1::VCvtFloorI32F32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -529,6 +602,12 @@ VCvtFloorI32F32Vop1::VCvtFloorI32F32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtFloorI32F32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtFloorI32F32Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtOffF32I4Vop1::VCvtOffF32I4Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_off_f32_i4_dpp"
@@ -573,6 +652,12 @@ VCvtOffF32I4Vop1::VCvtOffF32I4Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtOffF32I4Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtOffF32I4Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtF32F64Vop1::VCvtF32F64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f32_f64_dpp"
@@ -612,6 +697,12 @@ VCvtF32F64Vop1::VCvtF32F64Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32F64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32F64Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtF64F32Vop1::VCvtF64F32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f64_f32_dpp"
@@ -649,6 +740,12 @@ VCvtF64F32Vop1::VCvtF64F32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF64F32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF64F32Vop1>(opcode);
+}
+} // namespace detail
 
 VCvtF32Ubyte0Vop1::VCvtF32Ubyte0Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -694,6 +791,12 @@ VCvtF32Ubyte0Vop1::VCvtF32Ubyte0Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Ubyte0Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Ubyte0Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtF32Ubyte1Vop1::VCvtF32Ubyte1Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f32_ubyte1_dpp"
@@ -737,6 +840,12 @@ VCvtF32Ubyte1Vop1::VCvtF32Ubyte1Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Ubyte1Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Ubyte1Vop1>(opcode);
+}
+} // namespace detail
 
 VCvtF32Ubyte2Vop1::VCvtF32Ubyte2Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -782,6 +891,12 @@ VCvtF32Ubyte2Vop1::VCvtF32Ubyte2Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Ubyte2Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Ubyte2Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtF32Ubyte3Vop1::VCvtF32Ubyte3Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f32_ubyte3_dpp"
@@ -826,6 +941,12 @@ VCvtF32Ubyte3Vop1::VCvtF32Ubyte3Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Ubyte3Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Ubyte3Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtU32F64Vop1::VCvtU32F64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_u32_f64_dpp"
@@ -865,6 +986,12 @@ VCvtU32F64Vop1::VCvtU32F64Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtU32F64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtU32F64Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtF64U32Vop1::VCvtF64U32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f64_u32_dpp"
@@ -902,6 +1029,12 @@ VCvtF64U32Vop1::VCvtF64U32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF64U32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF64U32Vop1>(opcode);
+}
+} // namespace detail
 
 VTruncF64Vop1::VTruncF64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -942,6 +1075,12 @@ VTruncF64Vop1::VTruncF64Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVTruncF64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VTruncF64Vop1>(opcode);
+}
+} // namespace detail
+
 VCeilF64Vop1::VCeilF64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_ceil_f64_dpp"
@@ -980,6 +1119,12 @@ VCeilF64Vop1::VCeilF64Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCeilF64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCeilF64Vop1>(opcode);
+}
+} // namespace detail
 
 VRndneF64Vop1::VRndneF64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1020,6 +1165,12 @@ VRndneF64Vop1::VRndneF64Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRndneF64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VRndneF64Vop1>(opcode);
+}
+} // namespace detail
+
 VFloorF64Vop1::VFloorF64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_floor_f64_dpp"
@@ -1059,6 +1210,12 @@ VFloorF64Vop1::VFloorF64Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFloorF64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VFloorF64Vop1>(opcode);
+}
+} // namespace detail
+
 VPipeflushVop1::VPipeflushVop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_pipeflush_dpp"
@@ -1068,6 +1225,12 @@ VPipeflushVop1::VPipeflushVop1(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPipeflushVop1(const MachineInst *opcode) {
+  return std::make_unique<VPipeflushVop1>(opcode);
+}
+} // namespace detail
 
 VMovB16Vop1::VMovB16Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1116,6 +1279,12 @@ VMovB16Vop1::VMovB16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovB16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VMovB16Vop1>(opcode);
+}
+} // namespace detail
 
 void VMovB16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -1168,6 +1337,12 @@ VMovB64Vop1::VMovB64Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovB64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VMovB64Vop1>(opcode);
+}
+} // namespace detail
+
 VTanhF32Vop1::VTanhF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_tanh_f32_dpp"
@@ -1211,6 +1386,12 @@ VTanhF32Vop1::VTanhF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVTanhF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VTanhF32Vop1>(opcode);
+}
+} // namespace detail
 
 VTanhF16Vop1::VTanhF16Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1259,6 +1440,12 @@ VTanhF16Vop1::VTanhF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVTanhF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VTanhF16Vop1>(opcode);
+}
+} // namespace detail
 
 void VTanhF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -1316,6 +1503,12 @@ VFractF32Vop1::VFractF32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFractF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VFractF32Vop1>(opcode);
+}
+} // namespace detail
+
 VTruncF32Vop1::VTruncF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_trunc_f32_dpp"
@@ -1359,6 +1552,12 @@ VTruncF32Vop1::VTruncF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVTruncF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VTruncF32Vop1>(opcode);
+}
+} // namespace detail
 
 VCeilF32Vop1::VCeilF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1404,6 +1603,12 @@ VCeilF32Vop1::VCeilF32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCeilF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCeilF32Vop1>(opcode);
+}
+} // namespace detail
+
 VRndneF32Vop1::VRndneF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_rndne_f32_dpp"
@@ -1447,6 +1652,12 @@ VRndneF32Vop1::VRndneF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVRndneF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VRndneF32Vop1>(opcode);
+}
+} // namespace detail
 
 VFloorF32Vop1::VFloorF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1492,6 +1703,12 @@ VFloorF32Vop1::VFloorF32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFloorF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VFloorF32Vop1>(opcode);
+}
+} // namespace detail
+
 VExpF32Vop1::VExpF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_exp_f32_dpp"
@@ -1535,6 +1752,12 @@ VExpF32Vop1::VExpF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVExpF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VExpF32Vop1>(opcode);
+}
+} // namespace detail
 
 VLogF32Vop1::VLogF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1580,6 +1803,12 @@ VLogF32Vop1::VLogF32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLogF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VLogF32Vop1>(opcode);
+}
+} // namespace detail
+
 VRcpF32Vop1::VRcpF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_rcp_f32_dpp"
@@ -1623,6 +1852,12 @@ VRcpF32Vop1::VRcpF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVRcpF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VRcpF32Vop1>(opcode);
+}
+} // namespace detail
 
 VRcpIflagF32Vop1::VRcpIflagF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1668,6 +1903,12 @@ VRcpIflagF32Vop1::VRcpIflagF32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRcpIflagF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VRcpIflagF32Vop1>(opcode);
+}
+} // namespace detail
+
 VRsqF32Vop1::VRsqF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_rsq_f32_dpp"
@@ -1712,6 +1953,12 @@ VRsqF32Vop1::VRsqF32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRsqF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VRsqF32Vop1>(opcode);
+}
+} // namespace detail
+
 VRcpF64Vop1::VRcpF64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_rcp_f64_dpp"
@@ -1743,6 +1990,12 @@ VRcpF64Vop1::VRcpF64Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRcpF64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VRcpF64Vop1>(opcode);
+}
+} // namespace detail
+
 VRsqF64Vop1::VRsqF64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_rsq_f64_dpp"
@@ -1773,6 +2026,12 @@ VRsqF64Vop1::VRsqF64Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVRsqF64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VRsqF64Vop1>(opcode);
+}
+} // namespace detail
 
 VSqrtF32Vop1::VSqrtF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1818,6 +2077,12 @@ VSqrtF32Vop1::VSqrtF32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSqrtF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSqrtF32Vop1>(opcode);
+}
+} // namespace detail
+
 VSqrtF64Vop1::VSqrtF64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_sqrt_f64_dpp"
@@ -1848,6 +2113,12 @@ VSqrtF64Vop1::VSqrtF64Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSqrtF64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSqrtF64Vop1>(opcode);
+}
+} // namespace detail
 
 VSinF32Vop1::VSinF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1893,6 +2164,12 @@ VSinF32Vop1::VSinF32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSinF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSinF32Vop1>(opcode);
+}
+} // namespace detail
+
 VCosF32Vop1::VCosF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cos_f32_dpp"
@@ -1936,6 +2213,12 @@ VCosF32Vop1::VCosF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCosF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCosF32Vop1>(opcode);
+}
+} // namespace detail
 
 VNotB32Vop1::VNotB32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1981,6 +2264,12 @@ VNotB32Vop1::VNotB32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVNotB32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VNotB32Vop1>(opcode);
+}
+} // namespace detail
+
 VBfrevB32Vop1::VBfrevB32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_bfrev_b32_dpp"
@@ -2024,6 +2313,12 @@ VBfrevB32Vop1::VBfrevB32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVBfrevB32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VBfrevB32Vop1>(opcode);
+}
+} // namespace detail
 
 VClzI32U32Vop1::VClzI32U32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2069,6 +2364,12 @@ VClzI32U32Vop1::VClzI32U32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVClzI32U32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VClzI32U32Vop1>(opcode);
+}
+} // namespace detail
+
 VCtzI32B32Vop1::VCtzI32B32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_ctz_i32_b32_dpp"
@@ -2112,6 +2413,12 @@ VCtzI32B32Vop1::VCtzI32B32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCtzI32B32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCtzI32B32Vop1>(opcode);
+}
+} // namespace detail
 
 VClsI32Vop1::VClsI32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2157,6 +2464,12 @@ VClsI32Vop1::VClsI32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVClsI32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VClsI32Vop1>(opcode);
+}
+} // namespace detail
+
 VFrexpExpI32F64Vop1::VFrexpExpI32F64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_frexp_exp_i32_f64_dpp"
@@ -2195,6 +2508,12 @@ VFrexpExpI32F64Vop1::VFrexpExpI32F64Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFrexpExpI32F64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VFrexpExpI32F64Vop1>(opcode);
+}
+} // namespace detail
 
 VFrexpMantF64Vop1::VFrexpMantF64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2235,6 +2554,12 @@ VFrexpMantF64Vop1::VFrexpMantF64Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFrexpMantF64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VFrexpMantF64Vop1>(opcode);
+}
+} // namespace detail
+
 VFractF64Vop1::VFractF64Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_fract_f64_dpp"
@@ -2273,6 +2598,12 @@ VFractF64Vop1::VFractF64Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFractF64Vop1(const MachineInst *opcode) {
+  return std::make_unique<VFractF64Vop1>(opcode);
+}
+} // namespace detail
 
 VFrexpExpI32F32Vop1::VFrexpExpI32F32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2318,6 +2649,12 @@ VFrexpExpI32F32Vop1::VFrexpExpI32F32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFrexpExpI32F32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VFrexpExpI32F32Vop1>(opcode);
+}
+} // namespace detail
+
 VFrexpMantF32Vop1::VFrexpMantF32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_frexp_mant_f32_dpp"
@@ -2361,6 +2698,12 @@ VFrexpMantF32Vop1::VFrexpMantF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFrexpMantF32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VFrexpMantF32Vop1>(opcode);
+}
+} // namespace detail
 
 VMovreldB32Vop1::VMovreldB32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2409,6 +2752,12 @@ VMovreldB32Vop1::VMovreldB32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovreldB32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VMovreldB32Vop1>(opcode);
+}
+} // namespace detail
+
 VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_movrels_b32_dpp"
@@ -2444,6 +2793,12 @@ VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovrelsB32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VMovrelsB32Vop1>(opcode);
+}
+} // namespace detail
 
 VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2481,6 +2836,12 @@ VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovrelsdB32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VMovrelsdB32Vop1>(opcode);
+}
+} // namespace detail
+
 VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_movrelsd_2_b32_dpp"
@@ -2517,6 +2878,12 @@ VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovrelsd2B32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VMovrelsd2B32Vop1>(opcode);
+}
+} // namespace detail
+
 VPermlane16SwapB32Vop1::VPermlane16SwapB32Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_permlane16_swap_b32_dpp"
@@ -2538,6 +2905,12 @@ VPermlane16SwapB32Vop1::VPermlane16SwapB32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPermlane16SwapB32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VPermlane16SwapB32Vop1>(opcode);
+}
+} // namespace detail
 
 VTanhBf16Vop1::VTanhBf16Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2586,6 +2959,12 @@ VTanhBf16Vop1::VTanhBf16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVTanhBf16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VTanhBf16Vop1>(opcode);
+}
+} // namespace detail
 
 void VTanhBf16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -2644,6 +3023,12 @@ VPrngB32Vop1::VPrngB32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPrngB32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VPrngB32Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f16_u16_dpp"
@@ -2691,6 +3076,12 @@ VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF16U16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF16U16Vop1>(opcode);
+}
+} // namespace detail
 
 void VCvtF16U16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -2753,6 +3144,12 @@ VCvtF16I16Vop1::VCvtF16I16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF16I16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF16I16Vop1>(opcode);
+}
+} // namespace detail
+
 void VCvtF16I16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2813,6 +3210,12 @@ VCvtU16F16Vop1::VCvtU16F16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtU16F16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtU16F16Vop1>(opcode);
+}
+} // namespace detail
 
 void VCvtU16F16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -2875,6 +3278,12 @@ VCvtI16F16Vop1::VCvtI16F16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtI16F16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtI16F16Vop1>(opcode);
+}
+} // namespace detail
+
 void VCvtI16F16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2936,6 +3345,12 @@ VRcpF16Vop1::VRcpF16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRcpF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VRcpF16Vop1>(opcode);
+}
+} // namespace detail
+
 void VRcpF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2995,6 +3410,12 @@ VSqrtF16Vop1::VSqrtF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSqrtF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSqrtF16Vop1>(opcode);
+}
+} // namespace detail
 
 void VSqrtF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -3056,6 +3477,12 @@ VRsqF16Vop1::VRsqF16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRsqF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VRsqF16Vop1>(opcode);
+}
+} // namespace detail
+
 void VRsqF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3115,6 +3542,12 @@ VLogF16Vop1::VLogF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVLogF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VLogF16Vop1>(opcode);
+}
+} // namespace detail
 
 void VLogF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -3176,6 +3609,12 @@ VExpF16Vop1::VExpF16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVExpF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VExpF16Vop1>(opcode);
+}
+} // namespace detail
+
 void VExpF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3235,6 +3674,12 @@ VFrexpMantF16Vop1::VFrexpMantF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFrexpMantF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VFrexpMantF16Vop1>(opcode);
+}
+} // namespace detail
 
 void VFrexpMantF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -3297,6 +3742,12 @@ VFrexpExpI16F16Vop1::VFrexpExpI16F16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFrexpExpI16F16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VFrexpExpI16F16Vop1>(opcode);
+}
+} // namespace detail
+
 void VFrexpExpI16F16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3357,6 +3808,12 @@ VFloorF16Vop1::VFloorF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFloorF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VFloorF16Vop1>(opcode);
+}
+} // namespace detail
 
 void VFloorF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -3419,6 +3876,12 @@ VCeilF16Vop1::VCeilF16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCeilF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCeilF16Vop1>(opcode);
+}
+} // namespace detail
+
 void VCeilF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3478,6 +3941,12 @@ VTruncF16Vop1::VTruncF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVTruncF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VTruncF16Vop1>(opcode);
+}
+} // namespace detail
 
 void VTruncF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -3540,6 +4009,12 @@ VRndneF16Vop1::VRndneF16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRndneF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VRndneF16Vop1>(opcode);
+}
+} // namespace detail
+
 void VRndneF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3600,6 +4075,12 @@ VFractF16Vop1::VFractF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFractF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VFractF16Vop1>(opcode);
+}
+} // namespace detail
 
 void VFractF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -3662,6 +4143,12 @@ VSinF16Vop1::VSinF16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSinF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSinF16Vop1>(opcode);
+}
+} // namespace detail
+
 void VSinF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3722,6 +4209,12 @@ VCosF16Vop1::VCosF16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCosF16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCosF16Vop1>(opcode);
+}
+} // namespace detail
+
 void VCosF16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3779,6 +4272,12 @@ VSatPkU8I16Vop1::VSatPkU8I16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSatPkU8I16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSatPkU8I16Vop1>(opcode);
+}
+} // namespace detail
 
 void VSatPkU8I16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -3841,6 +4340,12 @@ VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtNormI16F16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtNormI16F16Vop1>(opcode);
+}
+} // namespace detail
+
 void VCvtNormI16F16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3902,6 +4407,12 @@ VCvtNormU16F16Vop1::VCvtNormU16F16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtNormU16F16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtNormU16F16Vop1>(opcode);
+}
+} // namespace detail
+
 void VCvtNormU16F16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3936,6 +4447,12 @@ VSwapB32Vop1::VSwapB32Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSwapB32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSwapB32Vop1>(opcode);
+}
+} // namespace detail
+
 VSwapB16Vop1::VSwapB16Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_swap_b16_dpp"
@@ -3958,6 +4475,12 @@ VSwapB16Vop1::VSwapB16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSwapB16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSwapB16Vop1>(opcode);
+}
+} // namespace detail
 
 void VSwapB16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -3996,6 +4519,12 @@ VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSwaprelB32Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSwaprelB32Vop1>(opcode);
+}
+} // namespace detail
 
 VNotB16Vop1::VNotB16Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4044,6 +4573,12 @@ VNotB16Vop1::VNotB16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVNotB16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VNotB16Vop1>(opcode);
+}
+} // namespace detail
 
 void VNotB16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -4103,6 +4638,12 @@ VCvtI32I16Vop1::VCvtI32I16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtI32I16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtI32I16Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtU32U16Vop1::VCvtU32U16Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_u32_u16_dpp"
@@ -4149,6 +4690,12 @@ VCvtU32U16Vop1::VCvtU32U16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtU32U16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtU32U16Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtF32Fp8Vop1::VCvtF32Fp8Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f32_fp8_dpp"
@@ -4192,6 +4739,12 @@ VCvtF32Fp8Vop1::VCvtF32Fp8Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Fp8Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Fp8Vop1>(opcode);
+}
+} // namespace detail
 
 VCvtF32Bf8Vop1::VCvtF32Bf8Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4237,6 +4790,12 @@ VCvtF32Bf8Vop1::VCvtF32Bf8Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Bf8Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Bf8Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtPkF32Fp8Vop1::VCvtPkF32Fp8Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_pk_f32_fp8_dpp"
@@ -4269,6 +4828,12 @@ VCvtPkF32Fp8Vop1::VCvtPkF32Fp8Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkF32Fp8Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkF32Fp8Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtPkF32Bf8Vop1::VCvtPkF32Bf8Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_pk_f32_bf8_dpp"
@@ -4300,6 +4865,12 @@ VCvtPkF32Bf8Vop1::VCvtPkF32Bf8Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkF32Bf8Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkF32Bf8Vop1>(opcode);
+}
+} // namespace detail
 
 VCvtF32Bf16Vop1::VCvtF32Bf16Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4347,6 +4918,12 @@ VCvtF32Bf16Vop1::VCvtF32Bf16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Bf16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Bf16Vop1>(opcode);
+}
+} // namespace detail
+
 VSatPk4I4I8Vop1::VSatPk4I4I8Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_sat_pk4_i4_i8_dpp"
@@ -4392,6 +4969,12 @@ VSatPk4I4I8Vop1::VSatPk4I4I8Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSatPk4I4I8Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSatPk4I4I8Vop1>(opcode);
+}
+} // namespace detail
 
 void VSatPk4I4I8Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -4452,6 +5035,12 @@ VSatPk4U4U8Vop1::VSatPk4U4U8Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSatPk4U4U8Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSatPk4U4U8Vop1>(opcode);
+}
+} // namespace detail
+
 void VSatPk4U4U8Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4511,6 +5100,12 @@ VCvtPkF16Fp8Vop1::VCvtPkF16Fp8Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkF16Fp8Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkF16Fp8Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtPkF16Bf8Vop1::VCvtPkF16Bf8Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_pk_f16_bf8_dpp"
@@ -4557,6 +5152,12 @@ VCvtPkF16Bf8Vop1::VCvtPkF16Bf8Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkF16Bf8Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkF16Bf8Vop1>(opcode);
+}
+} // namespace detail
+
 VCvtF16Fp8Vop1::VCvtF16Fp8Vop1(const MachineInst *inst)
     : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f16_fp8_dpp"
@@ -4602,6 +5203,12 @@ VCvtF16Fp8Vop1::VCvtF16Fp8Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF16Fp8Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF16Fp8Vop1>(opcode);
+}
+} // namespace detail
 
 void VCvtF16Fp8Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -4661,6 +5268,12 @@ VCvtF16Bf8Vop1::VCvtF16Bf8Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF16Bf8Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCvtF16Bf8Vop1>(opcode);
+}
+} // namespace detail
 
 void VCvtF16Bf8Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -4723,6 +5336,12 @@ VRcpBf16Vop1::VRcpBf16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRcpBf16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VRcpBf16Vop1>(opcode);
+}
+} // namespace detail
+
 void VRcpBf16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4782,6 +5401,12 @@ VSqrtBf16Vop1::VSqrtBf16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSqrtBf16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSqrtBf16Vop1>(opcode);
+}
+} // namespace detail
 
 void VSqrtBf16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -4844,6 +5469,12 @@ VRsqBf16Vop1::VRsqBf16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRsqBf16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VRsqBf16Vop1>(opcode);
+}
+} // namespace detail
+
 void VRsqBf16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4903,6 +5534,12 @@ VLogBf16Vop1::VLogBf16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVLogBf16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VLogBf16Vop1>(opcode);
+}
+} // namespace detail
 
 void VLogBf16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
@@ -4964,6 +5601,12 @@ VExpBf16Vop1::VExpBf16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVExpBf16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VExpBf16Vop1>(opcode);
+}
+} // namespace detail
+
 void VExpBf16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -5024,6 +5667,12 @@ VSinBf16Vop1::VSinBf16Vop1(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSinBf16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VSinBf16Vop1>(opcode);
+}
+} // namespace detail
+
 void VSinBf16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -5083,6 +5732,12 @@ VCosBf16Vop1::VCosBf16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCosBf16Vop1(const MachineInst *opcode) {
+  return std::make_unique<VCosBf16Vop1>(opcode);
+}
+} // namespace detail
 
 void VCosBf16Vop1::implicit_uses(RegisterSet &uses) const {
   Vop1::implicit_uses(uses);
