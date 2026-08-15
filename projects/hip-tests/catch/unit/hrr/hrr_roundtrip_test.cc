@@ -733,6 +733,13 @@ HIP_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
  *     exact D2H validation.  REQUIRE the exit code is NOT 2 (it runs to
  *     completion / D2H-fail), proving the guard is what produces exit 2, not
  *     some unrelated error.
+ *
+ *   Regression guard for ROCM-27652: the guard-ON path takes hrr-playback's
+ *   early divergence-abort exit, which must still tear down every GPU/host
+ *   resource tracked in the PlaybackContext.  Under the AddressSanitizer CI
+ *   build a leak on this path is reported by LeakSanitizer, so this test is the
+ *   guard that the divergence-abort teardown stays leak-free.  The clean exit 2
+ *   (not a signal/abort >= 128) is the deterministic contract asserted here.
  */
 HIP_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_divergence"};
@@ -749,6 +756,9 @@ HIP_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
     // Exit 2 == divergence guard tripped and stopped cleanly. The "replay
     // DIVERGED" text is on stderr (not captured), so the exit code is the
     // asserted contract.
+    // A clean divergence-abort, never a crash/sanitizer abort (>= 128).
+    REQUIRE(ret < 128);
+    // Exit 2 == divergence guard tripped and stopped cleanly.
     REQUIRE(ret == 2);
   }
 
