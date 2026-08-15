@@ -986,65 +986,65 @@ hsa_status_t BlitKernel::GetPatchedBlitObject(const char* agent_name,
                                               uint8_t** blit_code_object) {
   std::string sname(agent_name);
 
-  if (sname == "gfx700") {
-    *blit_code_object = ocl_blit_object_gfx700;
-  } else if (sname == "gfx701") {
-    *blit_code_object = ocl_blit_object_gfx701;
-  } else if (sname == "gfx702") {
-    *blit_code_object = ocl_blit_object_gfx702;
-  } else if (sname == "gfx801") {
-    *blit_code_object = ocl_blit_object_gfx801;
-  } else if (sname == "gfx802") {
-    *blit_code_object = ocl_blit_object_gfx802;
-  } else if (sname == "gfx803") {
-    *blit_code_object = ocl_blit_object_gfx803;
-  } else if (sname == "gfx805") {
-    *blit_code_object = ocl_blit_object_gfx805;
-  } else if (sname == "gfx810") {
-    *blit_code_object = ocl_blit_object_gfx810;
-  } else if (sname == "gfx900") {
-    *blit_code_object = ocl_blit_object_gfx900;
-  } else if (sname == "gfx902") {
-    *blit_code_object = ocl_blit_object_gfx902;
-  } else if (sname == "gfx904") {
-    *blit_code_object = ocl_blit_object_gfx904;
-  } else if (sname == "gfx906") {
-    *blit_code_object = ocl_blit_object_gfx906;
-  } else if (sname == "gfx908") {
-    *blit_code_object = ocl_blit_object_gfx908;
-  } else if (sname == "gfx909") {
-    *blit_code_object = ocl_blit_object_gfx909;
-  } else if (sname == "gfx90a") {
-    *blit_code_object = ocl_blit_object_gfx90a;
-  } else if (sname == "gfx90c") {
-    *blit_code_object = ocl_blit_object_gfx90c;
-  } else if (sname == "gfx942") {
-    *blit_code_object = ocl_blit_object_gfx942;
-  } else if (sname == "gfx950") {
-    *blit_code_object = ocl_blit_object_gfx950;
-  } else if (sname == "gfx1010") {
-    *blit_code_object = ocl_blit_object_gfx1010;
-  } else if (sname == "gfx1011") {
-    *blit_code_object = ocl_blit_object_gfx1011;
-  } else if (sname == "gfx1012") {
-    *blit_code_object = ocl_blit_object_gfx1012;
-  } else if (sname == "gfx1013") {
-    *blit_code_object = ocl_blit_object_gfx1013;
-  } else if (sname == "gfx1030") {
-    *blit_code_object = ocl_blit_object_gfx1030;
-  } else if (sname == "gfx1031") {
-    *blit_code_object = ocl_blit_object_gfx1031;
-  } else if (sname == "gfx1032") {
-    *blit_code_object = ocl_blit_object_gfx1032;
-  } else if (sname == "gfx1033") {
-    *blit_code_object = ocl_blit_object_gfx1033;
-  } else if (sname == "gfx1034") {
-    *blit_code_object = ocl_blit_object_gfx1034;
-  } else if (sname == "gfx1035") {
-    *blit_code_object = ocl_blit_object_gfx1035;
-  } else if (sname == "gfx1036") {
-    *blit_code_object = ocl_blit_object_gfx1036;
-  } else if (sname == "gfx1100") {
+  // if (sname == "gfx700") {
+  //   *blit_code_object = ocl_blit_object_gfx700;
+  // } else if (sname == "gfx701") {
+  //   *blit_code_object = ocl_blit_object_gfx701;
+  // } else if (sname == "gfx702") {
+  //   *blit_code_object = ocl_blit_object_gfx702;
+  // } else if (sname == "gfx801") {
+  //   *blit_code_object = ocl_blit_object_gfx801;
+  // } else if (sname == "gfx802") {
+  //   *blit_code_object = ocl_blit_object_gfx802;
+  // } else if (sname == "gfx803") {
+  //   *blit_code_object = ocl_blit_object_gfx803;
+  // } else if (sname == "gfx805") {
+  //   *blit_code_object = ocl_blit_object_gfx805;
+  // } else if (sname == "gfx810") {
+  //   *blit_code_object = ocl_blit_object_gfx810;
+  // } else if (sname == "gfx900") {
+  //   *blit_code_object = ocl_blit_object_gfx900;
+  // } else if (sname == "gfx902") {
+  //   *blit_code_object = ocl_blit_object_gfx902;
+  // } else if (sname == "gfx904") {
+  //   *blit_code_object = ocl_blit_object_gfx904;
+  // } else if (sname == "gfx906") {
+  //   *blit_code_object = ocl_blit_object_gfx906;
+  // } else if (sname == "gfx908") {
+  //   *blit_code_object = ocl_blit_object_gfx908;
+  // } else if (sname == "gfx909") {
+  //   *blit_code_object = ocl_blit_object_gfx909;
+  // } else if (sname == "gfx90a") {
+  //   *blit_code_object = ocl_blit_object_gfx90a;
+  // } else if (sname == "gfx90c") {
+  //   *blit_code_object = ocl_blit_object_gfx90c;
+  // } else if (sname == "gfx942") {
+  //   *blit_code_object = ocl_blit_object_gfx942;
+  // } else if (sname == "gfx950") {
+  //   *blit_code_object = ocl_blit_object_gfx950;
+  // } else if (sname == "gfx1010") {
+  //   *blit_code_object = ocl_blit_object_gfx1010;
+  // } else if (sname == "gfx1011") {
+  //   *blit_code_object = ocl_blit_object_gfx1011;
+  // } else if (sname == "gfx1012") {
+  //   *blit_code_object = ocl_blit_object_gfx1012;
+  // } else if (sname == "gfx1013") {
+  //   *blit_code_object = ocl_blit_object_gfx1013;
+  // } else if (sname == "gfx1030") {
+  //   *blit_code_object = ocl_blit_object_gfx1030;
+  // } else if (sname == "gfx1031") {
+  //   *blit_code_object = ocl_blit_object_gfx1031;
+  // } else if (sname == "gfx1032") {
+  //   *blit_code_object = ocl_blit_object_gfx1032;
+  // } else if (sname == "gfx1033") {
+  //   *blit_code_object = ocl_blit_object_gfx1033;
+  // } else if (sname == "gfx1034") {
+  //   *blit_code_object = ocl_blit_object_gfx1034;
+  // } else if (sname == "gfx1035") {
+  //   *blit_code_object = ocl_blit_object_gfx1035;
+  // } else if (sname == "gfx1036") {
+  //   *blit_code_object = ocl_blit_object_gfx1036;
+  /*} else */ if (sname == "gfx1100") {
     *blit_code_object = ocl_blit_object_gfx1100;
   } else if (sname == "gfx1101") {
     *blit_code_object = ocl_blit_object_gfx1101;
