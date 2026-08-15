@@ -61,7 +61,7 @@ from utils.metrics.aggregation import (
     to_std,
     to_sum,
 )
-from utils.metrics.common import ValuDualIssueDetector
+from utils.metrics.common import EVAL_BUILTINS, ValuDualIssueDetector
 from utils.metrics.expression import transform_expression
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
@@ -881,7 +881,7 @@ class db_analysis(OmniAnalyze_Base):
                 warnings.simplefilter("always", RuntimeWarning)
                 eval_result = eval(
                     compile(value, "<string>", "eval"),
-                    {"__builtins__": {}},
+                    {"__builtins__": EVAL_BUILTINS},
                     {
                         # only locals
                         "pmc_df": pmc_df,
