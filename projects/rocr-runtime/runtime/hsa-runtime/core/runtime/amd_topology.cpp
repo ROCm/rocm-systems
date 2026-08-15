@@ -65,6 +65,7 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
+#include "core/util/os.h"
 #include "core/util/utils.h"
 #ifdef HSAKMT_VIRTIO_ENABLED
 #include "core/inc/amd_virtio_driver.h"
@@ -332,7 +333,12 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
         core::Runtime::runtime_singleton_->flag().set_ipc_mode_legacy(false);
         core::Runtime::runtime_singleton_->flag().disable_dev_mem_queue_buf();
         core::Runtime::runtime_singleton_->flag().disable_sdma_hdp_flush();
-        core::Runtime::runtime_singleton_->flag().set_disable_tool_register(true);
+        // Registration is disabled by default on DXG, but profiling tools need the
+        // HSA API table to be offered to rocprofiler-register to intercept dispatches.
+        // HSA_TOOLS_DISABLE_REGISTER already drives this flag, so an explicit user
+        // setting of it must win over this platform default.
+        if (!os::IsEnvVarSet("HSA_TOOLS_DISABLE_REGISTER"))
+          core::Runtime::runtime_singleton_->flag().set_disable_tool_register(true);
       }
 
       // Instantiate a Gpu device. The IO links
