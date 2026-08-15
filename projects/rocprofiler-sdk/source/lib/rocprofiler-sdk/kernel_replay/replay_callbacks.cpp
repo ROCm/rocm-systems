@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
@@ -72,12 +73,17 @@ context_has_kernel_replay(const tracing::context_t* ctx)
 void
 set_replay_service_configured(bool enabled)
 {
+    // Skip during finalization: the flag is a static_object that may already be destroyed.
+    if(registration::get_fini_status() > 0) return;
     replay_service_configured_flag().store(enabled, std::memory_order_relaxed);
 }
 
 bool
 has_active_replay_contexts()
 {
+    // Skip during finalization: the flag and the context registry are static_objects that may be
+    // destroyed by then, and WriteInterceptor can still call this from HIP/HSA teardown.
+    if(registration::get_fini_status() > 0) return false;
     // Cheap common-case rejection: if no replay service was ever configured, skip the context walk.
     if(!replay_service_configured_flag().load(std::memory_order_relaxed)) return false;
     return !context::get_active_contexts(context_has_kernel_replay).empty();
