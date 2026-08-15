@@ -153,6 +153,28 @@ public:
     static void cleanup_mpi();
 
     /**
+     * @brief Init-pipeline device-code warmup (opt-in, no-op by default)
+     *
+     * When the environment variable ``RCCL_TEST_READY_GO`` is set, warms the
+     * RCCL device-code object on this rank's assigned GPU using a throwaway
+     * single-rank communicator (``ncclCommInitAll`` with count 1), then destroys
+     * it. This pays the ~13 s ``-O0`` device-code load up front WITHOUT creating
+     * any cross-rank/NIC connection (no QP/transport setup), so the real
+     * per-test communicators built later start warm.
+     *
+     * Failure is uniform across ranks: an ``MPI_Allreduce`` (MIN) means rank 0
+     * never proceeds while any rank's warmup failed. Because ``SetUp`` returns
+     * ``void`` it cannot "return failure", so on failure every rank takes the
+     * same branch -- sets ``retCode = 1`` and raises a fatal GoogleTest assertion
+     * -- and the process exits nonzero without running the collectives.
+     *
+     * @note MPI runs one process per rank (no fork), so the warming process is
+     *       the executing process -- see test/common/ForkSafetyInvariant.md.
+     * @note Called from SetUp() AFTER initialize_devices().
+     */
+    static void warmup_device_code();
+
+    /**
      * @brief Google Test SetUp hook - called once before all tests
      *
      * Initializes MPI and GPU devices for the entire test suite.

@@ -7,6 +7,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Added
 * Compatibility with NCCL 2.30.7.
 * Added scalable AllGatherV pattern: grouped `ncclBroadcast` calls with distinct roots are fused into a single ring kernel, improving performance at large scale. Gated by `NCCL_ALLGATHERV_ENABLE` (default off).
+* Added an opt-in RCCL device-code warmup to the MPI unit-test environment (`MPIEnvironment::SetUp`), gated by `RCCL_TEST_READY_GO` (no-op by default). It loads the `-O0` device-code object up front via a throwaway single-rank communicator — with no cross-rank/NIC connection — so per-test communicators start warm; warmup failure is uniform across ranks. Groundwork for the init-pipeline execution mode; MPI runs one process per rank (no fork), so it is fork-safe (see `test/common/ForkSafetyInvariant.md`).
 
 ### Changed
 * Adapted the device-initiated GIN backends (Anvil SDMA and rocSHMEM GDA) to the NCCL 2.30.7 GIN API v14: added the new `getGinProperties` host op, dropped the data-path ops (`iput`/`iputSignal`/`iget`/`iflush`/`test`) that moved out of GIN under the GIN/RMA split, switched `createContext` to `ncclGinConfig_v14_t`, updated the device dispatch signatures, and matched the GIN type renumbering (`ROCSHMEM_GDA` and `ANVIL_SDMA` shifted after the new `GIN_GPI` type). The plugins now use the generic (unversioned) `ncclGin_t` / `ncclGinConfig_t` / `ncclGinProperties_t` typedefs so future ABI bumps do not require touching call sites.

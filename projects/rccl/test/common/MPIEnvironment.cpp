@@ -15,8 +15,10 @@
 #ifdef MPI_TESTS_ENABLED
 
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <thread>
+#include <unistd.h>
 
 /**
  * @brief Initialize the global test environment
@@ -32,6 +34,102 @@ void MPIEnvironment::SetUp()
     // One-time initialization (MPI_Init can only be called once)
     initialize_mpi();
     initialize_devices();
+    // Init-pipeline device-code warmup. No-op unless RCCL_TEST_READY_GO is set,
+    // so the default (serial) path is byte-identical. Must run AFTER
+    // initialize_devices() so the assigned device/context already exist.
+    warmup_device_code();
+}
+
+void MPIEnvironment::warmup_device_code()
+{
+    // Opt-in: no-op unless the init-pipeline feature is enabled by the runner.
+    if(std::getenv("RCCL_TEST_READY_GO") == nullptr)
+    {
+        return;
+    }
+
+    // Device init must have succeeded on this rank before we touch the GPU.
+    // (A failed initialize_devices() already set retCode and desynchronized the
+    // job via its own error paths; do not add a new collective on that path.)
+    if(retCode != 0)
+    {
+        std::fprintf(stderr,
+                     "[RCCL_TEST_WARMUP] rank %d pid %d: skipped (device init failed)\n",
+                     world_rank,
+                     static_cast<int>(getpid()));
+        std::fflush(stderr);
+        return;
+    }
+
+    // This rank's assigned device == the current device after
+    // initialize_devices()'s hipSetDevice(assigned_device).
+    int         assigned_device = -1;
+    int         local_ok        = 1;
+    const pid_t pid             = getpid();
+    if(hipGetDevice(&assigned_device) != hipSuccess)
+    {
+        local_ok = 0;
+    }
+    else
+    {
+        // Diagnostic for the Gate A2 same-PID proof: the process that warms a
+        // device MUST be the process that later runs the test on it. Emitted
+        // unconditionally (not behind NCCL_DEBUG) so the validity gate can rely
+        // on it. MPI does not fork, so pid here == the executing rank's pid.
+        std::fprintf(stderr,
+                     "[RCCL_TEST_WARMUP] rank %d pid %d device %d: start\n",
+                     world_rank,
+                     static_cast<int>(pid),
+                     assigned_device);
+        std::fflush(stderr);
+
+        const auto   t0   = std::chrono::steady_clock::now();
+        ncclComm_t   warm = nullptr;
+        ncclResult_t nr   = ncclCommInitAll(&warm, 1, &assigned_device);
+        if(nr == ncclSuccess && warm != nullptr)
+        {
+            ncclCommDestroy(warm);
+        }
+        else
+        {
+            local_ok = 0;
+        }
+        (void)hipDeviceSynchronize();
+        const auto ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0)
+                .count();
+        std::fprintf(stderr,
+                     "[RCCL_TEST_WARMUP] rank %d pid %d device %d: %s (%lld ms)\n",
+                     world_rank,
+                     static_cast<int>(pid),
+                     assigned_device,
+                     local_ok ? "ok" : "FAILED",
+                     static_cast<long long>(ms));
+        std::fflush(stderr);
+    }
+
+    // Uniform failure: rank 0 must NOT proceed if ANY rank failed warmup.
+    int all_ok = 0;
+    MPICHECK(MPI_Allreduce(&local_ok, &all_ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!all_ok)
+    {
+        if(world_rank == 0)
+        {
+            TEST_WARN("MPI device-code warmup failed on at least one rank");
+        }
+        // SetUp() returns void, so it cannot "return failure". Every rank takes
+        // this same branch (all_ok is the MIN across ranks): set retCode and
+        // raise a fatal GoogleTest assertion so no rank runs the collectives and
+        // the process exits nonzero with a reliable failed result.
+        retCode = 1;
+        ASSERT_TRUE(false) << "RCCL_TEST_READY_GO: MPI device-code warmup failed";
+        return;
+    }
+
+    // Phase 1.2: no READY/GO rendezvous yet. Barrier so every rank is warm
+    // before RUN_ALL_TESTS proceeds; the real cross-rank communicators are built
+    // by the tests themselves (after this point).
+    MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
 }
 
 /**
