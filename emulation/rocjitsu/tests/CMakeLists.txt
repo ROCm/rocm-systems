@@ -1368,77 +1368,105 @@ add_executable(interposer_dup_test interposer_dup_test.cpp)
 rj_configure_target(interposer_dup_test TEST)
 target_include_directories(
     interposer_dup_test
-    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers
 )
-target_link_libraries(interposer_dup_test PRIVATE GTest::gtest_main)
+target_link_libraries(
+    interposer_dup_test
+    PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+)
 add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(interposer_dup_test)
 endif()
-foreach(
-    _interposer_dup_test
-    IN
-    ITEMS
-        DupKeepsKfdRoutingAfterPrimaryClose
-        FcntlDupfdKeepsKfdRouting
-        Dup2OverPrimaryInvalidatesKfdIdentity
-        Dup2OntoFreshFdRoutesKfd
-        Dup3RoutesKfdAndRejectsSameFd
-        ReopenAfterPrimaryOverwriteKeepsBackend
-        SerializedReopenUnderContentionStaysRoutable
-)
-    rj_add_test(
-        NAME "InterposerDupTest.${_interposer_dup_test}"
-        COMMAND
-            ${RJ_CLI}
-            --config
-            ${RJ_CDNA4_KMD_CONFIG}
-            --
-            $<TARGET_FILE:interposer_dup_test>
-            "--gtest_filter=InterposerDupTest.${_interposer_dup_test}"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-        INSTALL_COMMAND
-            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            "--config"
-            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
-            "--"
-            "bin/interposer_dup_test"
-            "--gtest_filter=InterposerDupTest.${_interposer_dup_test}"
-    )
-endforeach()
+function(rj_add_interposer_test_suite _suite)
+    foreach(_case IN LISTS ARGN)
+        rj_add_test(
+            NAME "${_suite}.${_case}"
+            COMMAND
+                ${RJ_CLI}
+                --config
+                ${RJ_CDNA4_KMD_CONFIG}
+                --
+                $<TARGET_FILE:interposer_dup_test>
+                "--gtest_filter=${_suite}.${_case}"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+            INSTALL_COMMAND
+                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                "--config"
+                "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+                "--"
+                "bin/interposer_dup_test"
+                "--gtest_filter=${_suite}.${_case}"
+        )
+    endforeach()
+endfunction()
 
-foreach(
-    _interposer_gem_test
-    IN
-    ITEMS
-        ReusedDmabufFdMintsDistinctHandles
-        UnmapWithWrongHandleFails
-        MapSucceedsAfterExportFdClosed
-        ReplaceEvictsOverlappingDifferentSizeRange
-        ReplaceTransfersOwnershipAcrossOldOwnerClose
-        ClearUpdatesOwnerBookkeeping
+set(_rj_interposer_dup_tests
+    DupKeepsKfdRoutingAfterPrimaryClose
+    FcntlDupfdKeepsKfdRouting
+    Dup2OverPrimaryInvalidatesKfdIdentity
+    Dup2OntoFreshFdRoutesKfd
+    Dup3RoutesKfdAndRejectsSameFd
+    ReopenAfterPrimaryOverwriteKeepsBackend
+    SerializedReopenUnderContentionStaysRoutable
+    FcntlDupfdReplacesStaleDrmTracking
+    NonDrmDuplicatesClearStaleDrmTracking
 )
-    rj_add_test(
-        NAME "InterposerGemTest.${_interposer_gem_test}"
-        COMMAND
-            ${RJ_CLI}
-            --config
-            ${RJ_CDNA4_KMD_CONFIG}
-            --
-            $<TARGET_FILE:interposer_dup_test>
-            "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-        INSTALL_COMMAND
-            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            "--config"
-            "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
-            "--"
-            "bin/interposer_dup_test"
-            "--gtest_filter=InterposerGemTest.${_interposer_gem_test}"
+# TSan models concurrent close/dup on one descriptor as an application-level fd
+# race even though the interposer deliberately serializes the kernel operation.
+# Keep the lifecycle regression in regular and ASan builds, where it exercises
+# the intended close/reuse schedule without a sanitizer false positive.
+if(NOT RJ_ENABLE_TSAN)
+    list(
+        APPEND _rj_interposer_dup_tests
+        DrmCloseReuseRaceNeverMisclassifiesDuplicate
     )
-endforeach()
+endif()
+rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
+
+rj_add_interposer_test_suite(
+    InterposerGemTest
+    GemNamespaceIsPrivateButSharedByDuplicates
+    IndependentDrmFilesRejectOverlappingMappings
+    ReusedDmabufFdMintsDistinctHandles
+    UnmapWithWrongHandleFails
+    MapSucceedsAfterExportFdClosed
+    ReplaceEvictsOverlappingDifferentSizeRange
+    ReplaceTransfersOwnershipAcrossOldOwnerClose
+    ClearUpdatesOwnerBookkeeping
+)
+
+set(_rj_interposer_syncobj_tests
+    VmTimelineWaitObservesSynchronousMapAndUnmap
+    VmDelayUpdateSuppressesTimelinePublication
+    GemVaSignalsBinarySyncobjsAtPointZero
+    PointZeroOutputReplacesTimelinePayload
+    DuplicateDrmFdsShareNamespaceAndLifetime
+    IndependentDrmOpensHaveSeparateNamespaces
+    CreateSignaledSeedsOnlyTheInitialPoint
+    WaitValidationMatchesDrm
+    DestroyRejectsInvalidInput
+    TimelineWaitBlocksUntilSignalOrDeadline
+    TimelineWaitReturnsEintrForSignal
+    ConcurrentVmUpdatesShareTimeline
+    OutOfOrderTimelinePointPreservesWatermark
+)
+# TSan cannot start new threads after a multithreaded fork. This regression
+# intentionally exercises inherited interposer state in that unsupported child,
+# so retain it for regular and ASan builds and omit it from TSan configurations.
+if(NOT RJ_ENABLE_TSAN)
+    list(
+        APPEND _rj_interposer_syncobj_tests
+        ForkedChildReinitializesTimelineFutexState
+    )
+endif()
+rj_add_interposer_test_suite(
+    InterposerSyncobjTest
+    ${_rj_interposer_syncobj_tests}
+)
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.
