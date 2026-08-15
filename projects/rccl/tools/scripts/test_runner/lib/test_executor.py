@@ -21,6 +21,7 @@ import time
 import datetime
 import copy
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from enum import IntEnum, Enum
 from pathlib import Path
 
@@ -228,6 +229,34 @@ def _distinct_host_count(mpi_hosts: dict) -> int:
             return 0
         return len(seen)
     return 0
+
+
+@dataclass
+class LaunchSpec:
+    """Everything needed to launch one test process and infer its result.
+
+    It is the pure output of ``TestExecutor._build_launch_spec`` -- no process is
+    started while building it. Splitting the launch (spec) from the blocking wait
+    (``_wait_and_infer``) lets a scheduler own the process handle across a
+    READY/GO boundary without duplicating command/env assembly. The serial
+    ``run_test`` just chains build -> spawn -> wait back-to-back, so its behavior
+    is byte-identical to the previous monolithic implementation.
+    """
+    name: str
+    cmd: str
+    run_cwd: str
+    env: dict
+    timeout: float
+    is_gtest: bool
+    gtest_json_path: str = ""     # temp gtest --gtest_output=json path; "" when not a gtest
+    emit_log_path: str = None     # per-test captured-log path; None unless emission enabled
+    binary: str = ""
+    perf_dtype: object = None
+    num_nodes: int = 1
+    num_gpus: int = 0
+    num_ranks: int = 1
+    exec_mode: str = "single"
+    perf_nthreads: int = 1
 
 
 class TestExecutor:
@@ -998,16 +1027,25 @@ class TestExecutor:
             return detected if detected else 8
         return int(value)
 
-    def run_test(self, test_config, suite_config):
+    def _build_launch_spec(self, test_config, suite_config):
         """
-        Run a single test
+        Build the LaunchSpec for a single test without starting any process.
+
+        This is the pure, side-effect-light front half of the old ``run_test``:
+        it resolves the binary, applies every skip/validation rule, and assembles
+        the exact command, environment and working directory that ``_spawn`` will
+        launch. It does *not* fork/exec, so a scheduler can build many specs up
+        front and own each process handle across a READY/GO boundary.
 
         Args:
             test_config: Test configuration dict
             suite_config: Test suite configuration dict
 
         Returns:
-            dict: Test result
+            tuple[LaunchSpec | None, dict | None]: exactly one is non-None.
+            ``(spec, None)`` when the test is launchable; ``(None, result)`` when
+            the test is skipped, mis-configured, or already fully handled (e.g. a
+            pytest-harness suite returns its own result dict here).
         """
         test_name = test_config.get("name")
         is_gtest = test_config.get("is_gtest", True)  # Default to True for backward compatibility
@@ -1035,7 +1073,7 @@ class TestExecutor:
         except (ValueError, TypeError) as e:
             msg = f"Invalid num_nodes/num_gpus/num_ranks for test '{test_name}': {e}"
             print(f"ERROR: {msg}")
-            return {
+            return None, {
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": 0,
@@ -1076,7 +1114,7 @@ class TestExecutor:
         # Pytest-harness suites use a dedicated runner; the gtest/MPI path below
         # is left untouched.
         if test_config.get("is_pytest", False):
-            return self._run_pytest_test(test_config, merged_env)
+            return None, self._run_pytest_test(test_config, merged_env)
 
         if self.args.verbose:
             if description:
@@ -1105,14 +1143,14 @@ class TestExecutor:
         if not os.path.isfile(test_binary_path):
             if num_ranks > 1:
                 print(f"SKIP: MPI test binary not found: {test_binary_path} (build may not have --enable-mpi-tests)")
-                return {
+                return None, {
                     "name": test_name,
                     "result": TestResult.RESULT_SKIPPED.value,
                     "duration": 0,
                     "error": f"MPI binary not found: {test_binary_path}"
                 }
             print(f"ERROR: Test binary not found: {test_binary_path}")
-            return {
+            return None, {
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": 0,
@@ -1127,7 +1165,7 @@ class TestExecutor:
                 mpirun = None
             if not mpirun:
                 print(f"SKIP: mpirun not found, cannot run MPI test '{test_name}'")
-                return {
+                return None, {
                     "name": test_name,
                     "result": TestResult.RESULT_SKIPPED.value,
                     "duration": 0,
@@ -1148,7 +1186,7 @@ class TestExecutor:
                     f"node has {detected_gpus}"
                 )
                 print(msg)
-                return {
+                return None, {
                     "name": test_name,
                     "result": TestResult.RESULT_SKIPPED.value,
                     "duration": 0,
@@ -1164,7 +1202,7 @@ class TestExecutor:
                     f"hostfile/SLURM has {avail}"
                 )
                 print(msg)
-                return {
+                return None, {
                     "name": test_name,
                     "result": TestResult.RESULT_SKIPPED.value,
                     "duration": 0,
@@ -1388,102 +1426,184 @@ class TestExecutor:
             print(f"  LD_LIBRARY_PATH: {env.get('LD_LIBRARY_PATH', '')}")
             print(f"  LLVM_PROFILE_FILE: {env.get('LLVM_PROFILE_FILE', 'Not set')}\n")
 
-        # Inherit stdout/stderr (no PIPE capture). For gtest, --gtest_output=json:…
-        # (temp file, removed in finally) supplies reliable SKIPPED vs PASSED on exit 0.
-        #
-        # Launch the test in its own session (start_new_session=True) so the
-        # shell AND every descendant -- mpirun, orted, and the spawned ranks /
-        # perf binaries -- share a single process group we can signal as a unit.
-        # subprocess.run(timeout=...) only SIGKILLs the immediate /bin/sh child,
-        # leaving mpirun and all of its ranks running (and holding the GPUs),
-        # which is exactly the orphaned-process behaviour seen on timeout.
-        # When result emission is enabled, tee output to a per-test log so perf
-        # (busbw/algbw) numbers can be parsed afterwards, while still streaming to
-        # the console. ``set -o pipefail`` keeps the pipeline's exit status equal to
-        # the test's (not tee's). Default behaviour (inherited stdout, no capture)
-        # is unchanged when emission is off.
-        emit_log_path = None
-        start_time = time.time()
-        if self.emit_enabled:
-            emit_log_path = self._emit_log_path(test_name)
-            wrapped = f"set -o pipefail; ({cmd}) 2>&1 | tee {shlex.quote(emit_log_path)}"
-            proc = subprocess.Popen(
+        # The per-test captured-log path is computed here so the spec is fully
+        # self-describing; _spawn decides how to wire it (tee to console + file
+        # on the serial path). None unless result emission is enabled -- the
+        # default (inherited stdout, no capture) is unchanged when emission is off.
+        emit_log_path = self._emit_log_path(test_name) if self.emit_enabled else None
+
+        return LaunchSpec(
+            name=test_name,
+            cmd=cmd,
+            run_cwd=run_cwd,
+            env=env,
+            timeout=timeout,
+            is_gtest=is_gtest,
+            gtest_json_path=gtest_json_path or "",
+            emit_log_path=emit_log_path,
+            binary=binary,
+            perf_dtype=perf_dtype,
+            num_nodes=num_nodes,
+            num_gpus=num_gpus,
+            num_ranks=num_ranks,
+            exec_mode=exec_mode,
+            perf_nthreads=perf_nthreads,
+        ), None
+
+    def _spawn(self, spec):
+        """Launch ``spec.cmd`` non-blocking in its own session; return the Popen.
+
+        Byte-identical to the previous serial launch: when result emission is on,
+        output is tee'd to the per-test log (streamed to the console too) via
+        ``set -o pipefail`` so the pipeline's exit status is the test's, not
+        tee's; otherwise stdout/stderr are inherited with no capture.
+        ``start_new_session=True`` keeps the shell, mpirun, orted and every rank
+        in one process group ``_terminate_process_group`` can signal as a unit.
+        """
+        if spec.emit_log_path:
+            wrapped = f"set -o pipefail; ({spec.cmd}) 2>&1 | tee {shlex.quote(spec.emit_log_path)}"
+            return subprocess.Popen(
                 ["bash", "-c", wrapped],
-                cwd=run_cwd,
-                env=env,
+                cwd=spec.run_cwd,
+                env=spec.env,
                 start_new_session=True,
             )
-        else:
-            proc = subprocess.Popen(
-                cmd,
-                shell=True,
-                cwd=run_cwd,
-                env=env,
-                start_new_session=True,
-            )
+        return subprocess.Popen(
+            spec.cmd,
+            shell=True,
+            cwd=spec.run_cwd,
+            env=spec.env,
+            start_new_session=True,
+        )
+
+    def _spawn_captured(self, spec):
+        """Launch primitive for the init-pipeline scheduler (Phase 4).
+
+        Captures the whole process tree's stdout+stderr into a per-entry file via
+        a real file descriptor -- NOT ``subprocess.PIPE`` -- so ``proc.wait()``
+        can never deadlock on a full pipe buffer while the runner holds the handle
+        across a READY/GO boundary. Returns ``(proc, capture_fd)``; the caller
+        owns ``capture_fd`` and must close it after the process exits. Additive:
+        the serial ``run_test`` does not use this path.
+
+        Requires ``spec.emit_log_path`` (the capture target) to be set.
+        """
+        if not spec.emit_log_path:
+            raise ValueError("_spawn_captured requires spec.emit_log_path to be set")
+        capture_fd = open(spec.emit_log_path, "wb")
         try:
-            try:
-                returncode = proc.wait(timeout=timeout if timeout > 0 else None)
-            except subprocess.TimeoutExpired:
-                duration = time.time() - start_time
-                print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
-                print("  Killing process group (mpirun and all ranks)...")
-                self._terminate_process_group(proc)
-                return {
-                    "name": test_name,
-                    "result": TestResult.RESULT_TIMEOUT.value,
-                    "duration": duration,
-                    "error": f"Test timed out after {timeout} seconds",
-                    "binary": binary, "is_gtest": is_gtest, "dtype": perf_dtype,
-                    "num_nodes": num_nodes, "num_gpus": num_gpus,
-                    "num_ranks": num_ranks, "log_file": emit_log_path,
-                    "exec_mode": exec_mode, "nthreads": perf_nthreads,
-                }
-            except KeyboardInterrupt:
-                # Make sure Ctrl-C tears down the whole MPI job, not just the shell.
-                print("\n  Interrupted -- killing process group (mpirun and all ranks)...")
-                self._terminate_process_group(proc)
-                raise
-            except Exception as e:
-                duration = time.time() - start_time
-                self._terminate_process_group(proc)
-                print(f"\n  ERROR: {e}")
-                return {
-                    "name": test_name,
-                    "result": TestResult.RESULT_FAILED.value,
-                    "duration": duration,
-                    "error": str(e)
-                }
+            proc = subprocess.Popen(
+                spec.cmd,
+                shell=True,
+                cwd=spec.run_cwd,
+                env=spec.env,
+                stdout=capture_fd,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        except BaseException:
+            capture_fd.close()
+            raise
+        return proc, capture_fd
 
+    def _wait_and_infer(self, proc, spec, start_time):
+        """Block on the process tree, then map (exit code, gtest JSON) to a result.
+
+        The unchanged back half of the old ``run_test``: timeout/interrupt tear
+        down the whole process group; duration is measured from ``start_time``
+        (taken by the caller immediately before ``_spawn``) to now, so a real 2 s
+        test reports ~2 s and never 0.000 s. A nonzero/crash return code always
+        maps to FAILED via ``infer_gtest_result_from_json_file`` -- a partial or
+        stale gtest JSON can never turn a crash into PASSED.
+        """
+        try:
+            returncode = proc.wait(timeout=spec.timeout if spec.timeout > 0 else None)
+        except subprocess.TimeoutExpired:
             duration = time.time() - start_time
-
-            if is_gtest:
-                rc = returncode if returncode is not None else -1
-                test_result = infer_gtest_result_from_json_file(gtest_json_path or "", rc)
-            else:
-                if returncode == ExitCode.EXIT_SUCCESS:
-                    test_result = TestResult.RESULT_PASSED.value
-                elif returncode == ExitCode.EXIT_TIMEOUT:
-                    test_result = TestResult.RESULT_TIMEOUT.value
-                else:
-                    test_result = TestResult.RESULT_FAILED.value
-
-            print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
-
+            print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {spec.timeout} seconds")
+            print("  Killing process group (mpirun and all ranks)...")
+            self._terminate_process_group(proc)
             return {
-                "name": test_name,
-                "result": test_result,
+                "name": spec.name,
+                "result": TestResult.RESULT_TIMEOUT.value,
                 "duration": duration,
-                "exit_code": int(returncode) if returncode is not None else -1,
-                "binary": binary, "is_gtest": is_gtest, "dtype": perf_dtype,
-                "num_nodes": num_nodes, "num_gpus": num_gpus,
-                "num_ranks": num_ranks, "log_file": emit_log_path,
-                "exec_mode": exec_mode, "nthreads": perf_nthreads,
+                "error": f"Test timed out after {spec.timeout} seconds",
+                "binary": spec.binary, "is_gtest": spec.is_gtest, "dtype": spec.perf_dtype,
+                "num_nodes": spec.num_nodes, "num_gpus": spec.num_gpus,
+                "num_ranks": spec.num_ranks, "log_file": spec.emit_log_path,
+                "exec_mode": spec.exec_mode, "nthreads": spec.perf_nthreads,
             }
+        except KeyboardInterrupt:
+            # Make sure Ctrl-C tears down the whole MPI job, not just the shell.
+            print("\n  Interrupted -- killing process group (mpirun and all ranks)...")
+            self._terminate_process_group(proc)
+            raise
+        except Exception as e:
+            duration = time.time() - start_time
+            self._terminate_process_group(proc)
+            print(f"\n  ERROR: {e}")
+            return {
+                "name": spec.name,
+                "result": TestResult.RESULT_FAILED.value,
+                "duration": duration,
+                "error": str(e)
+            }
+
+        duration = time.time() - start_time
+
+        if spec.is_gtest:
+            rc = returncode if returncode is not None else -1
+            test_result = infer_gtest_result_from_json_file(spec.gtest_json_path or "", rc)
+        else:
+            if returncode == ExitCode.EXIT_SUCCESS:
+                test_result = TestResult.RESULT_PASSED.value
+            elif returncode == ExitCode.EXIT_TIMEOUT:
+                test_result = TestResult.RESULT_TIMEOUT.value
+            else:
+                test_result = TestResult.RESULT_FAILED.value
+
+        print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
+
+        return {
+            "name": spec.name,
+            "result": test_result,
+            "duration": duration,
+            "exit_code": int(returncode) if returncode is not None else -1,
+            "binary": spec.binary, "is_gtest": spec.is_gtest, "dtype": spec.perf_dtype,
+            "num_nodes": spec.num_nodes, "num_gpus": spec.num_gpus,
+            "num_ranks": spec.num_ranks, "log_file": spec.emit_log_path,
+            "exec_mode": spec.exec_mode, "nthreads": spec.perf_nthreads,
+        }
+
+    def run_test(self, test_config, suite_config):
+        """
+        Run a single test serially: build the launch spec, spawn, wait + infer.
+
+        This is a thin wrapper that chains the three extracted stages back-to-back
+        so its observable behavior is byte-identical to the previous monolithic
+        implementation. ``start_time`` is captured immediately before ``_spawn``
+        (never before spec-building) so the reported duration measures only the
+        test process, and the gtest JSON temp file is always cleaned up.
+
+        Args:
+            test_config: Test configuration dict
+            suite_config: Test suite configuration dict
+
+        Returns:
+            dict: Test result
+        """
+        spec, early_result = self._build_launch_spec(test_config, suite_config)
+        if early_result is not None:
+            return early_result
+
+        start_time = time.time()
+        proc = self._spawn(spec)
+        try:
+            return self._wait_and_infer(proc, spec, start_time)
         finally:
-            if gtest_json_path:
+            if spec.gtest_json_path:
                 try:
-                    os.unlink(gtest_json_path)
+                    os.unlink(spec.gtest_json_path)
                 except OSError:
                     pass
 
