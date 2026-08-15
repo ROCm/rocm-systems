@@ -46,6 +46,11 @@ void write_kernel_descriptor_for_test(void *descriptor, const TestKernelDescript
 [[nodiscard]] std::unique_ptr<Instruction> decode_one(uint32_t word, rj_code_arch_t arch);
 [[nodiscard]] bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kind,
                                         std::string_view message);
+/// @brief Whether a warning of @p kind naming @p guest_offset contains @p message.
+/// @details Pins the offset as well as the text so a diagnostic cannot silently move to a
+/// different block while the message still matches.
+[[nodiscard]] bool has_warning_at(const TranslatedCodeObject &result, DiagnosticKind kind,
+                                  std::string_view message, uint64_t guest_offset);
 void enable_workgroup_id_x_sgpr(std::vector<uint8_t> &image);
 
 } // namespace rocjitsu::test_support
