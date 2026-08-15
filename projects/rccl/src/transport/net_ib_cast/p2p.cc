@@ -770,6 +770,10 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
   req->sock = &comm->base.sock;
   struct ncclIbMrHandle* mhandle = (struct ncclIbMrHandle*)mhandles[last];
 
+  INFO(NCCL_NET, "NET/IB: %s: flush commId=%u group=%d isPrimary=%d ndevs=%d",
+       __func__, comm->base.commId, comm->base.sharedGroupIdx,
+       comm->base.isSharedQpPrimary, comm->base.vProps.ndevs);
+
   // We don't know which devIndex the recv was on, so we flush on all devices
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     struct ibv_send_wr wr;
@@ -790,6 +794,8 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
           wr.wr_id);
     TIME_START(4);
     struct ibv_send_wr* bad_wr;
+    INFO(NCCL_NET, "NET/IB: %s: posting flush dev=%d qpn=%u wr_id=0x%lx",
+         __func__, i, comm->devs[i].gpuFlush.qp.qp->qp_num, wr.wr_id);
     NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr));
     TIME_STOP(4);
 
