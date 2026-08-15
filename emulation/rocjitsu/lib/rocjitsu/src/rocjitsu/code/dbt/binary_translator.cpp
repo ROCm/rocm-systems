@@ -2015,21 +2015,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       return leave_unchanged();
     }
 
-    const auto opaque_fallthrough =
-        std::ranges::find_if(scope.blocks, [&](const BasicBlock *block) {
-          return block != nullptr && block->falls_through_to_undecodable_text();
-        });
-    if (opaque_fallthrough != scope.blocks.end()) {
-      auto failure =
-          make_kernel_failure(DiagnosticKind::Legalization,
-                              "reachable kernel code falls through into undecodable .text bytes",
-                              (*opaque_fallthrough)->end_offset());
-      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
-                              text_relocations_begin, data_relocations_begin, relocation_snapshot))
-        continue;
-      return leave_unchanged();
-    }
-
     // Phase 3: translate this kernel into a temporary, source-ordered body. The
     // body starts at offset zero while it is being built; after final padding and
     // any launch window are chosen, every recorded target offset is rebased into
@@ -3039,6 +3024,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // materialization can turn this unreachable stub into a fallthrough.
         const uint32_t endpgm = build_s_endpgm(host_arch_);
         append_words(kernel_text, std::span<const uint32_t>(&endpgm, 1));
+        // The boundary is inferred from what follows the block, not from anything the block itself
+        // says, so a body that really did run on past here is cut short instead of translated.
+        // Name the offset: an execution that stops early is otherwise indistinguishable from one
+        // that was always meant to, and nothing else in the output records that a decision was
+        // made here.
+        append_warning(result.diagnostics, DiagnosticKind::Legalization,
+                       "fallthrough past this block reaches no decodable instruction; translated "
+                       "with a synthesized s_endpgm boundary",
+                       block->end_offset());
       }
       placement.target_end =
           block_generated_island_pool &&
