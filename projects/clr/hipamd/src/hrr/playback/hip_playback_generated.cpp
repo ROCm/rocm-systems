@@ -702,38 +702,11 @@ static hipError_t playback_hipDrvGraphAddMemcpyNode(PlaybackContext& ctx, const 
   return hipSuccess;
 }
 
-static hipError_t playback_hipDrvMemcpy2DUnaligned(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvMemcpy2DUnaligned — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipDrvMemcpy2DUnaligned(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipDrvMemcpy3D(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvMemcpy3D — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipDrvMemcpy3D(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipDrvMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvMemcpy3DAsync — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipDrvMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipDrvPointerGetAttributes(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
