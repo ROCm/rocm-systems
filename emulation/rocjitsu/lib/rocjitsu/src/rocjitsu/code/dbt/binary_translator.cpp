@@ -171,8 +171,8 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const KdT
   // above it and a def of one half clears the pair it belongs to.
   const auto kill_defs = [&](const Instruction &inst, PairState &state) {
     const InstDefUse def_use(inst);
-    for (uint16_t lo = 0; lo + 1 < REGISTER_SET_MAX_SGPRS; ++lo) {
-      const RegisterRef low{.cls = RegClass::SGPR, .index = lo, .width = 1};
+    for (size_t lo = 0; lo + 1 < REGISTER_SET_MAX_SGPRS; ++lo) {
+      const RegisterRef low{.cls = RegClass::SGPR, .index = static_cast<uint16_t>(lo), .width = 1};
       const RegisterRef high{
           .cls = RegClass::SGPR, .index = static_cast<uint16_t>(lo + 1), .width = 1};
       if (!def_use.defs.contains(low) && !def_use.defs.contains(high))
@@ -180,8 +180,8 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const KdT
       // Writing either half destroys this pair, and only this pair. The pair below is reached on
       // its own iteration and tested against its own halves -- erasing it here as well would let a
       // write to s82 destroy s[80:81], which shares no register with it.
-      state.pointer.erase(lo);
-      state.loaded.erase(lo);
+      state.pointer.erase(static_cast<uint16_t>(lo));
+      state.loaded.erase(static_cast<uint16_t>(lo));
     }
   };
 
@@ -229,8 +229,8 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const KdT
       if (has_pair_dst && loads_through_kernarg && dst_width >= 2) {
         // Only an even-aligned pair wholly inside the loaded range is addressable as a 64-bit
         // transfer operand, so s_load_b96 s[80:82] yields (80,81) and b128 s[80:83] adds (82,83).
-        for (uint16_t lo = dst_lo; lo + 1 < dst_lo + dst_width; lo += 2)
-          state.loaded.insert(lo);
+        for (unsigned lo = dst_lo; lo + 1u < unsigned{dst_lo} + dst_width; lo += 2)
+          state.loaded.insert(static_cast<uint16_t>(lo));
       }
       if (has_pair_dst && copies_pointer && dst_width == 2)
         state.pointer.insert(dst_lo);
