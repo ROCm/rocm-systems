@@ -371,7 +371,25 @@ bool object_defines_only_kernels(const AmdGpuCodeObject &object) {
       function_names, [&](std::string_view name) { return descriptor_names.contains(name); });
 }
 
+static std::vector<uint64_t> discover_text_function_symbol_offsets(const AmdGpuCodeObject &object,
+                                                                   bool externally_resolvable_only);
+
+std::vector<uint64_t>
+discover_externally_resolvable_text_function_offsets(const AmdGpuCodeObject &object) {
+  std::vector<uint64_t> offsets;
+  for (uint64_t offset :
+       discover_text_function_symbol_offsets(object, /*externally_resolvable_only=*/true))
+    offsets.push_back(offset);
+  return offsets;
+}
+
 std::vector<uint64_t> discover_text_function_symbol_offsets(const AmdGpuCodeObject &object) {
+  return discover_text_function_symbol_offsets(object, /*externally_resolvable_only=*/false);
+}
+
+static std::vector<uint64_t>
+discover_text_function_symbol_offsets(const AmdGpuCodeObject &object,
+                                      bool externally_resolvable_only) {
   const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
   const std::span<const uint8_t> image(bytes, object.image_size());
   Elf64_Ehdr ehdr{};
@@ -406,6 +424,9 @@ std::vector<uint64_t> discover_text_function_symbol_offsets(const AmdGpuCodeObje
       if (!read_object(image, symtab.sh_offset + index * sizeof(Elf64_Sym), symbol))
         continue;
       if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeFunc || symbol.st_size == 0)
+        continue;
+      if (externally_resolvable_only &&
+          !elf_symbol_is_externally_resolvable(symbol.st_info, symbol.st_other))
         continue;
       // The symbol has to belong to `.text` before its value means anything here. This is what
       // makes the ET_REL branch below safe: st_value is section-relative there, so a sized

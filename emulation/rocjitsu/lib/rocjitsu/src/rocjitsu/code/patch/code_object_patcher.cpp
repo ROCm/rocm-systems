@@ -611,6 +611,14 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
           // on re-translation -- passing the sized-STT_FUNC filter and being adopted as a root that
           // the first pass never had. Undefine it instead: a symbol with no body is exactly what
           // this is, and saying so keeps the next pass's view identical to this one's.
+          // An externally resolvable symbol is part of this object's interface -- HSA hands out
+          // indirect-function symbols -- so silently turning one into SHN_UNDEF would delete an
+          // exported entry, and would also change what object_defines_only_kernels() sees on the
+          // next pass and with it the kernarg fence. Refuse instead; only a symbol nothing outside
+          // can name may be dropped. Leaving it as it was is the behaviour that predates this
+          // rewrite.
+          if (externally_resolvable)
+            continue;
           symbol.st_shndx = SHN_UNDEF;
           symbol.st_value = 0;
           symbol.st_size = 0;
@@ -627,6 +635,14 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
         // on re-translation -- passing the sized-STT_FUNC filter and being adopted as a root that
         // the first pass never had. Undefine it instead: a symbol with no body is exactly what
         // this is, and saying so keeps the next pass's view identical to this one's.
+        // An externally resolvable symbol is part of this object's interface -- HSA hands out
+        // indirect-function symbols -- so silently turning one into SHN_UNDEF would delete an
+        // exported entry, and would also change what object_defines_only_kernels() sees on the
+        // next pass and with it the kernarg fence. Refuse instead; only a symbol nothing outside
+        // can name may be dropped. Leaving it as it was is the behaviour that predates this
+        // rewrite.
+        if (externally_resolvable)
+          continue;
         symbol.st_shndx = SHN_UNDEF;
         symbol.st_value = 0;
         symbol.st_size = 0;
@@ -642,6 +658,14 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
         // on re-translation -- passing the sized-STT_FUNC filter and being adopted as a root that
         // the first pass never had. Undefine it instead: a symbol with no body is exactly what
         // this is, and saying so keeps the next pass's view identical to this one's.
+        // An externally resolvable symbol is part of this object's interface -- HSA hands out
+        // indirect-function symbols -- so silently turning one into SHN_UNDEF would delete an
+        // exported entry, and would also change what object_defines_only_kernels() sees on the
+        // next pass and with it the kernarg fence. Refuse instead; only a symbol nothing outside
+        // can name may be dropped. Leaving it as it was is the behaviour that predates this
+        // rewrite.
+        if (externally_resolvable)
+          continue;
         symbol.st_shndx = SHN_UNDEF;
         symbol.st_value = 0;
         symbol.st_size = 0;

@@ -178,6 +178,19 @@ discover_text_function_symbol_offsets(const AmdGpuCodeObject &object);
 /// the fence.
 [[nodiscard]] bool object_defines_only_kernels(const AmdGpuCodeObject &object);
 
+/// @brief Sized `.text` `STT_FUNC` offsets whose symbol a host could resolve.
+///
+/// @details When a translation relies on the whole-object relocation permission it also promises
+/// that every externally resolvable `.text` symbol still names its body afterwards, because such a
+/// symbol is exactly what an outside holder of a code address looked it up through. Those bodies
+/// therefore have to be emitted, and a body no kernel reaches is emitted only if something adopts
+/// it. Like the other symbol-derived sets here this is a fixed property of the input, so adopting
+/// from it leaves the scope partition a fixed point.
+///
+/// @returns Sorted, unique offsets. Empty when the object has no symbol table or no such symbol.
+[[nodiscard]] std::vector<uint64_t>
+discover_externally_resolvable_text_function_offsets(const AmdGpuCodeObject &object);
+
 /// @brief Function entries named by an `R_AMDGPU_RELATIVE64` addend landing in `.text`.
 ///
 /// @details Each such addend is a stored function pointer, so its target is an address-taken body

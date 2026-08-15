@@ -139,9 +139,14 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
 /// the pair is kernarg-loaded and from a latch where it was clobbered must not inherit the
 /// preheader's answer, and the transfers this admits sit inside exactly such loops.
 [[nodiscard]] std::unordered_set<uint64_t>
-kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const KdTranslation &kd) {
+kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const BasicBlock *entry,
+                                  const KdTranslation &kd) {
   std::unordered_set<uint64_t> offsets;
-  if (!kd.source_has_kernarg_segment_ptr || blocks.empty())
+  // reachable_kernel_blocks() orders by offset, so blocks.front() can be a backward-reachable
+  // helper or an adopted body rather than the scope entry. Seeding that block with the ABI's
+  // kernarg fact would fabricate provenance for a pair the entry never established.
+  if (!kd.source_has_kernarg_segment_ptr || blocks.empty() || entry == nullptr ||
+      std::ranges::find(blocks, entry) == blocks.end())
     return offsets;
 
   // Pair-low registers holding the kernarg segment pointer, and those holding a value loaded
@@ -249,17 +254,23 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const KdT
   // answer; a predecessor without one is treated as TOP and simply skipped by the meet.
   std::unordered_map<const BasicBlock *, PairState> entry_state;
   std::unordered_set<const BasicBlock *> computed;
-  entry_state[blocks.front()] = seed;
-  computed.insert(blocks.front());
+  entry_state[entry] = seed;
+  computed.insert(entry);
 
   // Sweep to a fixpoint rather than draining a change-driven worklist: a block popped before its
   // predecessors were known would otherwise be dropped and never requeued. The lattice is finite
   // and every step is monotone, so the sweep count is a guard, not a semantic bound.
+  //
+  // The guard is not a convergence bound -- this is a descending product lattice and a state can
+  // keep losing facts for more sweeps than the block count -- so exhausting it means the answer is
+  // still an over-approximation. Treating that as proof would admit a transfer the true fixpoint
+  // would have refused, so give up and claim nothing instead.
   const size_t sweep_cap = blocks.size() + 2;
+  bool converged = false;
   for (size_t sweep = 0; sweep < sweep_cap; ++sweep) {
     bool changed = false;
     for (BasicBlock *block : blocks) {
-      if (block == nullptr || block == blocks.front())
+      if (block == nullptr || block == entry)
         continue;
       PairState in;
       bool seeded = false;
@@ -285,9 +296,13 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const KdT
         changed = true;
       }
     }
-    if (!changed)
+    if (!changed) {
+      converged = true;
       break;
+    }
   }
+  if (!converged)
+    return offsets;
 
   for (BasicBlock *block : blocks) {
     const auto it = block == nullptr ? entry_state.end() : entry_state.find(block);
@@ -1702,6 +1717,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // adopted as roots or they are dropped, and their resource envelope propagated into every
   // descriptor that can enter them. Where the object defines none, that obligation is vacuous.
   const bool object_defines_no_device_function = object_defines_only_kernels(obj);
+  const auto externally_resolvable_text_function_offsets =
+      discover_externally_resolvable_text_function_offsets(obj);
   const auto relative_text_addend_targets =
       discover_relative_text_addend_targets(obj, text_function_symbol_offsets);
   std::vector<uint64_t> block_split_points = text_function_symbol_offsets;
@@ -1999,6 +2016,26 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // emitted, so adopting them is what turns that refusal into a translation.
     for (const uint64_t target : relative_text_addend_targets)
       adopt(target);
+    // Admitting an unrecovered transfer promises that every externally resolvable `.text` symbol
+    // still names its body afterwards -- that promise is what lets an outside holder of a code
+    // address keep it. replace_text() enforces it and refuses when such a symbol has no mapping,
+    // so a body no kernel reaches has to be adopted here or the promise cannot be kept. Symbols
+    // are a fixed property of the input, so this leaves the partition a fixed point.
+    // Gated on the two producers that are pure ELF facts -- a relocation function table and a
+    // RELATIVE64 addend are read from the image, not recovered -- so the adopted set is the same on
+    // every pass. code_addresses_fully_accounted must NOT appear here: it is analysis-derived, so
+    // gating on it adopts a different set the second time round and grows `.text` between passes.
+    // An object with neither producer can never claim the permission, so it never turns the strict
+    // symbol requirement on and needs none of these roots.
+    const bool object_stores_code_addresses =
+        std::ranges::any_of(
+            relocation_function_tables,
+            [](const RelocationFunctionTable &table) { return !table.entries.empty(); }) ||
+        !relative_text_addend_targets.empty();
+    if (object_stores_code_addresses) {
+      for (const uint64_t target : externally_resolvable_text_function_offsets)
+        adopt(target);
+    }
 
     // Everything adopted so far is input-fixed: relocation-table slots and RELATIVE64 addends are
     // discovered identically whether or not the object has been translated before. What they reach
@@ -2684,7 +2721,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     valid_call_return_offsets.insert(adopted_return_offsets.begin(), adopted_return_offsets.end());
     const std::unordered_set<uint64_t> kernarg_supplied_targets =
         object_defines_no_device_function && scope.translation != nullptr
-            ? kernarg_supplied_indirect_targets(scope.blocks, *scope.translation)
+            ? kernarg_supplied_indirect_targets(scope.blocks, scope.entry, *scope.translation)
             : std::unordered_set<uint64_t>{};
     struct RecoveredConsumer {
       std::vector<IndirectCallFixup> fixups;
