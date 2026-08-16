@@ -10,6 +10,8 @@
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
+#include <cassert>
+#include <functional>
 
 namespace rocjitsu {
 
@@ -49,6 +51,13 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
     expand_rule_keys_.push_back(packed_rule_key(rule.src_encoding_id, rule.src_opcode));
     max_encoding_id = std::max(max_encoding_id, rule.src_encoding_id);
   }
+  // Every table in the tree static_asserts translation_rules_sorted(), so this
+  // is the catch-all for one added later without it. Strict ordering, matching
+  // that predicate: a duplicated key would leave the second rule unreachable
+  // behind the first.
+  assert(std::adjacent_find(expand_rule_keys_.begin(), expand_rule_keys_.end(),
+                            std::greater_equal<>{}) == expand_rule_keys_.end() &&
+         "semantic rule tables must stay strictly sorted by (encoding id, opcode)");
   if (!expand_rules_.empty()) {
     // Candidate collection scans every decoded instruction in large kernels.
     // Most encodings have no handwritten semantic rules, so this tiny bitset
