@@ -138,8 +138,9 @@ def test_run_suite_init_pipeline_end_to_end(tmp_path):
     suite_config = {"suite_details": {"name": "S"}}
     tests = [
         {"name": "AR", "binary": "rccl-UnitTests", "warmup_profile": "fork_coll",
+         "test_filter": "AllReduce.OutOfPlace",
          "fork_expand": {"num_gpus": [8], "process_mask": 3, "max_ranks_per_gpu": 1}},
-        {"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll"},
+        {"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll", "test_filter": "M.C"},
         {"name": "Sx"},  # serial
     ]
     records = ex._run_suite_init_pipeline(suite_config, "S", tests)
@@ -209,6 +210,7 @@ def test_rerun_failed_converges_split_sweep(tmp_path):
     suite_config = {"suite_details": {"name": "S"},
                     "rerun_env_variables": {"FORCE_PASS": "1"}}
     tests = [{"name": "AR", "binary": "rccl-UnitTests", "warmup_profile": "fork_coll",
+              "test_filter": "AllReduce.OutOfPlace",
               "fork_expand": {"num_gpus": [8], "process_mask": 3, "max_ranks_per_gpu": 1}}]
     records = ex._run_suite_init_pipeline(suite_config, "S", tests)
 

@@ -22,6 +22,11 @@ tested; the scheduler + TestExecutor supply the actual process I/O separately.
 from dataclasses import dataclass, field
 
 try:
+    from lib.gtest_preflight import is_wildcard_filter
+except ImportError:
+    from gtest_preflight import is_wildcard_filter
+
+try:
     from lib.sweep import (
         Eligibility, PROFILE_FORK, PROFILE_MPI, PROFILE_NETIB, PROFILE_NONE,
         expand_fork_entry,
@@ -130,10 +135,20 @@ def planning_summary(resolved):
 
 
 def run_guards(resolved, *, exec_mode, allow_serial_only=False):
-    """Whole-run guardrails (v10 §7). Returns a list of fatal error messages."""
+    """Whole-run guardrails (v10 §7 / v11 CR-2). Returns a deduped list of fatal
+    error messages; a non-empty list means the runner must exit BEFORE spawning
+    anything. A serial-by-policy ('none') entry is never fatal."""
     errors = []
     if exec_mode != "init-pipeline":
         return errors
+
+    # CR-2: ANY rejected entry aborts the whole run before spawn.
+    for r in resolved:
+        if r["disposition"] == "rejected":
+            ident = f"{r.get('suite', '?')}/{r.get('name')}"
+            reason = r.get("error") or r.get("exclusion_reason") or "rejected"
+            errors.append(f"{ident}: rejected -- {reason}")
+
     executable = sum(r["pipeline_subentries"] for r in resolved if r["disposition"] == "pipeline")
     if executable == 0 and not allow_serial_only:
         errors.append("--exec-mode init-pipeline resolved ZERO pipeline entries over the whole run; "
@@ -142,10 +157,18 @@ def run_guards(resolved, *, exec_mode, allow_serial_only=False):
     # fallback is rejected -- classification must be entry- or approved-suite-level.
     for r in resolved:
         if r["disposition"] == "pipeline" and r["provenance"] not in ("entry", "suite"):
-            errors.append(f"{r['name']}: pipeline classification came from an implicit "
-                          f"'{r['provenance']}' default; classification must be explicit "
+            errors.append(f"{r.get('suite', '?')}/{r['name']}: pipeline classification came from an "
+                          f"implicit '{r['provenance']}' default; classification must be explicit "
                           f"(entry or approved suite level)")
-    return errors
+
+    # Deduplicate while preserving order + suite/test identity.
+    seen = set()
+    deduped = []
+    for e in errors:
+        if e not in seen:
+            seen.add(e)
+            deduped.append(e)
+    return deduped
 
 
 def classify_errors(tests, *, exec_mode):
@@ -178,6 +201,14 @@ def classify_errors(tests, *, exec_mode):
         elif prof == PROFILE_FORK and ("MPI" in binary or "rccl-UnitTests" not in binary):
             errors.append((name, f"warmup_profile 'fork_coll' requires a fork "
                                  f"rccl-UnitTests binary, got '{binary}'"))
+        # Pipeline gtest entries must select exactly one case: a missing/wildcard
+        # filter runs the whole binary (multiple generations) -- the job-216183
+        # failure. name is the runner label, NOT the gtest filter (v11 CR-1).
+        if prof in (PROFILE_FORK, PROFILE_MPI) and t.get("is_gtest", True):
+            if is_wildcard_filter(t.get("test_filter")):
+                errors.append((name, "pipeline gtest entry requires an explicit "
+                                     f"non-wildcard test_filter (got {t.get('test_filter')!r}); "
+                                     "'name' is the runner label, not the gtest filter"))
     return errors
 
 # Results that make a parent roll-up FAILED. Includes both the scheduler's

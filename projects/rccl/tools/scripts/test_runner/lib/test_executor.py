@@ -2004,14 +2004,18 @@ class TestExecutor:
                     pass
         return results_by_name
 
-    def plan_init_pipeline_run(self, test_suites):
-        """Whole-run pre-pass for init-pipeline (v10 §7). Resolves every test's
-        classification across all suites, prints the planning summary, and runs the
-        run-wide guardrails (zero-pipeline, overbroad-default). Returns
-        (resolved_rows, fatal_errors). Callers must abort the run if fatal_errors.
-        The manifest is authoritative and side-effect-free (no spawn)."""
+    def plan_init_pipeline_run(self, test_suites, run_preflight=True):
+        """Whole-run pre-pass for init-pipeline (v10 §7 / v11 CR-1/CR-2). Resolves
+        every test's classification across all suites, runs the binary-backed
+        gtest filter preflight for pipeline gtest entries, prints the planning
+        summary, and runs the run-wide guardrails. Returns (resolved_rows,
+        fatal_errors); the caller MUST abort the run before spawn if fatal_errors
+        is non-empty. Side-effect-free apart from the (cached) --gtest_list_tests
+        preflight, which carries no pipeline env."""
         from lib.pipeline_runner import resolve_test, planning_summary, run_guards
+        from lib.gtest_preflight import preflight_filter
         resolved = []
+        list_cache = {}
         for suite in test_suites:
             sd = suite.get("suite_details", {})
             if not sd.get("enabled", True):
@@ -2025,6 +2029,20 @@ class TestExecutor:
                     continue
                 row = resolve_test(test, exec_mode="init-pipeline")
                 row["suite"] = sname
+                row["test_filter"] = test.get("test_filter")
+                # Binary-backed filter preflight for pipeline gtest entries: prove
+                # the filter resolves to exactly one real test before spawn (v11 CR-1).
+                if run_preflight and row["disposition"] == "pipeline" and test.get("is_gtest", True):
+                    try:
+                        bpath = self._resolve_binary_path(test.get("binary", ""), test)
+                        matches = preflight_filter(bpath, test.get("test_filter"),
+                                                   curated=True, cache=list_cache)
+                        row["preflight_matches"] = matches
+                        row["resolved_test_identity"] = matches[0]
+                    except (ValueError, RuntimeError) as e:
+                        row["disposition"] = "rejected"
+                        row["error"] = f"filter preflight: {e}"
+                        row["exclusion_reason"] = "unclassified"
                 resolved.append(row)
 
         s = planning_summary(resolved)

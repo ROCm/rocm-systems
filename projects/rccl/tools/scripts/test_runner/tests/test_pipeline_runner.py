@@ -153,19 +153,40 @@ def test_classify_netib_rejected():
 
 def test_classify_mpi_profile_needs_mpi_binary():
     bad = classify_errors([{"name": "M", "warmup_profile": "mpi_coll",
-                            "binary": "rccl-UnitTests"}], exec_mode="init-pipeline")
-    assert len(bad) == 1 and "requires an MPI binary" in bad[0][1]
+                            "binary": "rccl-UnitTests", "test_filter": "M.C"}],
+                          exec_mode="init-pipeline")
+    assert any("requires an MPI binary" in m for _, m in bad)
     ok = classify_errors([{"name": "M", "warmup_profile": "mpi_coll",
-                           "binary": "rccl-UnitTestsMPI"}], exec_mode="init-pipeline")
+                           "binary": "rccl-UnitTestsMPI", "test_filter": "M.C"}],
+                         exec_mode="init-pipeline")
     assert ok == []
 
 
 def test_classify_fork_profile_needs_fork_binary():
     bad = classify_errors([{"name": "F", "warmup_profile": "fork_coll",
-                            "binary": "rccl-UnitTestsMPI"}], exec_mode="init-pipeline")
-    assert len(bad) == 1 and "requires a fork" in bad[0][1]
+                            "binary": "rccl-UnitTestsMPI", "test_filter": "F.C"}],
+                          exec_mode="init-pipeline")
+    assert any("requires a fork" in m for _, m in bad)
     ok = classify_errors([{"name": "F", "warmup_profile": "fork_coll",
-                           "binary": "rccl-UnitTests"}], exec_mode="init-pipeline")
+                           "binary": "rccl-UnitTests", "test_filter": "F.C"}],
+                         exec_mode="init-pipeline")
+    assert ok == []
+
+
+def test_classify_pipeline_requires_nonwildcard_filter():
+    # Missing filter -> rejected (would run the whole binary).
+    bad = classify_errors([{"name": "AR", "binary": "rccl-UnitTests",
+                            "warmup_profile": "fork_coll"}], exec_mode="init-pipeline")
+    assert any("test_filter" in m for _, m in bad)
+    # Wildcard filter -> rejected.
+    bad2 = classify_errors([{"name": "AR", "binary": "rccl-UnitTests",
+                             "warmup_profile": "fork_coll", "test_filter": "*"}],
+                           exec_mode="init-pipeline")
+    assert any("test_filter" in m for _, m in bad2)
+    # Explicit exact filter -> accepted.
+    ok = classify_errors([{"name": "AR", "binary": "rccl-UnitTests",
+                           "warmup_profile": "fork_coll", "test_filter": "AllReduce.OutOfPlace"}],
+                         exec_mode="init-pipeline")
     assert ok == []
 
 
@@ -188,6 +209,7 @@ def test_resolve_serial_and_provenance():
 
 def test_resolve_pipeline_fork_counts_subentries():
     r = resolve_test({"name": "AR", "binary": "rccl-UnitTests", "warmup_profile": "fork_coll",
+                      "test_filter": "AllReduce.OutOfPlace",
                       "fork_expand": {"num_gpus": [8], "process_mask": 3, "max_ranks_per_gpu": 1}},
                      exec_mode="init-pipeline")
     assert r["disposition"] == "pipeline" and r["provenance"] == "entry"
@@ -206,10 +228,31 @@ def test_zero_pipeline_guard():
     assert not run_guards(resolved, exec_mode="init-pipeline", allow_serial_only=True)
 
 
+def test_rejected_entry_is_globally_fatal():
+    # A rejected NetIb entry alongside a valid pipeline entry aborts the whole run.
+    resolved = [
+        resolve_test({"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll",
+                      "test_filter": "AllReduceMPITest.OutOfPlace"}, exec_mode="init-pipeline"),
+        resolve_test({"name": "N", "binary": "rccl-UnitTestsMPI", "warmup_profile": "netib_plugin",
+                      "test_filter": "NetIb.Foo"}, exec_mode="init-pipeline"),
+    ]
+    errs = run_guards(resolved, exec_mode="init-pipeline")
+    assert any("N" in e and "rejected" in e for e in errs)
+
+
+def test_serial_entry_not_fatal_in_mixed_run():
+    resolved = [
+        resolve_test({"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll",
+                      "test_filter": "AllReduceMPITest.OutOfPlace"}, exec_mode="init-pipeline"),
+        resolve_test({"name": "S"}, exec_mode="init-pipeline"),  # serial by policy
+    ]
+    assert run_guards(resolved, exec_mode="init-pipeline") == []
+
+
 def test_overbroad_default_guard():
     # A pipeline entry whose profile came from an implicit fallback is rejected.
-    row = resolve_test({"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll"},
-                       exec_mode="init-pipeline")
+    row = resolve_test({"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll",
+                        "test_filter": "M.C"}, exec_mode="init-pipeline")
     row["provenance"] = "fallback"  # simulate an implicit non-none default
     errs = run_guards([row], exec_mode="init-pipeline")
     assert any("implicit" in e for e in errs)
@@ -237,10 +280,11 @@ def test_max_concurrent_execution_detects_overlap():
 def test_planning_summary_counts_subentries():
     resolved = [
         resolve_test({"name": "AR", "binary": "rccl-UnitTests", "warmup_profile": "fork_coll",
+                      "test_filter": "AllReduce.OutOfPlace",
                       "fork_expand": {"num_gpus": [8], "process_mask": 3, "max_ranks_per_gpu": 1}},
                      exec_mode="init-pipeline"),
-        resolve_test({"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll"},
-                     exec_mode="init-pipeline"),
+        resolve_test({"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll",
+                      "test_filter": "M.C"}, exec_mode="init-pipeline"),
         resolve_test({"name": "S"}, exec_mode="init-pipeline"),
     ]
     s = planning_summary(resolved)
