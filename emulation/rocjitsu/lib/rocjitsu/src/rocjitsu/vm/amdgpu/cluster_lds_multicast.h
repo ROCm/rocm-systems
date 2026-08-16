@@ -62,15 +62,15 @@ enum class [[nodiscard]] ClusterLdsMulticastResult {
 using ClusterLdsMulticastCompletion = std::function<void()>;
 
 /// @brief Remap a source WG LDS address into an equivalent target WG LDS window.
-uint32_t remap_cluster_lds_addr(uint32_t source_lds_base, uint32_t target_lds_base,
-                                uint32_t source_lds_addr);
+uint64_t remap_cluster_lds_addr(uint32_t source_lds_base, uint32_t target_lds_base,
+                                uint64_t source_lds_addr);
 
 /// @brief Return the lane LDS address remapped into one target LDS window.
 ///
 /// @details Immediate functional writeback only uses this with the issuing
 /// participant's own target, where the remap is identity. Deferred/timing
 /// backends can reuse it when modeling peer-visible multicast responses.
-uint32_t cluster_lds_lane_addr(const ClusterLdsMulticastTransaction &txn, uint32_t lane,
+uint64_t cluster_lds_lane_addr(const ClusterLdsMulticastTransaction &txn, uint32_t lane,
                                uint32_t target_lds_base);
 
 /// @brief Return true when the transaction mask selects the issuing workgroup.

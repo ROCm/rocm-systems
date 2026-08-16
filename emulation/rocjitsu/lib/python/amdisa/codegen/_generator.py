@@ -5847,6 +5847,7 @@ class CodeGenerator:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         _, _, nt = self._coherency_exprs()
+        stride = esz * ne
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
@@ -5869,7 +5870,7 @@ class CodeGenerator:
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
-            '  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.'
+            '  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.'
         )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vdst')};")
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -5877,7 +5878,9 @@ class CodeGenerator:
         L.append(
             '    uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);'
         )
-        L.append('    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;')
+        L.append(
+            f'    d->per_lane_lds_addr[lane] = async_lds_lane_address(inst_, wf, lane_lds_addr, {stride});'
+        )
         L.append('  }')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -5903,14 +5906,20 @@ class CodeGenerator:
         L.append('  const auto &lds = cu.lds();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
-            '  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.'
+            '  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.'
         )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vsrc')};")
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(
-            '    uint32_t lds_addr = wf.lds_base() + amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);'
+            '    uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);'
+        )
+        L.append(
+            f'    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, {stride});'
+        )
+        L.append(
+            '    // Out-of-range LDS reads return zero; the global store still issues.'
         )
         L.append(f'    lds.read(lds_addr, &d->store_data[lane * {stride}], {stride});')
         L.append('  }')
@@ -5925,9 +5934,12 @@ class CodeGenerator:
         L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
         L.append('    d->cu_path = wf.cu().full_path();')
         L.append('    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);')
-        L.append(
-            '    int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);'
+        offset_expr = (
+            'signed_ioffset(inst_.ioffset)'
+            if self.isa_spec.arch_name == 'gfx1250'
+            else 'static_cast<int32_t>(inst_.ioffset << 8) >> 8'
         )
+        L.append(f'    int64_t offset = static_cast<int64_t>({offset_expr});')
         L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('      if (!(exec & (1ULL << lane))) continue;')
         L.append(
