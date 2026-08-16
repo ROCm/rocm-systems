@@ -22,6 +22,7 @@ from lib.pipeline_runner import (  # noqa: E402
     classify_errors,
     eligibility_from_test,
     max_concurrent_execution,
+    validate_execution_intervals,
     plan_entries,
     planning_summary,
     resolve_test,
@@ -284,6 +285,43 @@ def test_max_concurrent_execution_detects_overlap():
         {"exec_start": 12.0, "exec_end": 15.0},  # overlaps the first
     ]
     assert max_concurrent_execution(recs) == 2
+
+
+def test_validate_execution_intervals_ok():
+    recs = [
+        {"entry_kind": "pipeline", "name": "P", "exec_start": 12.0, "exec_end": 14.0,
+         "launch_ts": 10.0, "ready_ts": 11.5, "go_ts": 12.0, "exit_ts": 14.0},
+        {"entry_kind": "serial", "name": "S", "exec_start": 14.0, "exec_end": 15.0,
+         "launch_ts": 14.0, "exit_ts": 15.0},
+    ]
+    ok, report, errors = validate_execution_intervals(recs)
+    assert ok and report["max_executing"] == 1 and report["executed_entries"] == 2
+
+
+def test_validate_execution_intervals_detects_overlap():
+    recs = [
+        {"entry_kind": "pipeline", "name": "A", "exec_start": 10.0, "exec_end": 13.0,
+         "launch_ts": 9.0, "ready_ts": 9.5, "go_ts": 10.0, "exit_ts": 13.0},
+        {"entry_kind": "pipeline", "name": "B", "exec_start": 12.0, "exec_end": 15.0,
+         "launch_ts": 11.0, "ready_ts": 11.5, "go_ts": 12.0, "exit_ts": 15.0},  # overlaps A
+    ]
+    ok, _, errors = validate_execution_intervals(recs)
+    assert not ok and any("overlap" in e for e in errors)
+
+
+def test_validate_execution_intervals_detects_missing_reap():
+    # exec_start set but exec_end absent -> executed without a confirmed reap.
+    recs = [{"entry_kind": "serial", "name": "C", "exec_start": 20.0, "exec_end": None,
+             "launch_ts": 20.0, "exit_ts": None}]
+    ok, _, errors = validate_execution_intervals(recs)
+    assert not ok and any("reap" in e for e in errors)
+
+
+def test_validate_execution_intervals_detects_unordered():
+    recs = [{"entry_kind": "pipeline", "name": "X", "exec_start": 10.0, "exec_end": 11.0,
+             "launch_ts": 10.0, "ready_ts": 9.0, "go_ts": 10.5, "exit_ts": 11.0}]  # ready < launch
+    ok, _, errors = validate_execution_intervals(recs)
+    assert not ok and any("ordered" in e for e in errors)
 
 
 def test_planning_summary_counts_subentries():

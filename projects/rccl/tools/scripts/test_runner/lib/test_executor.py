@@ -39,7 +39,7 @@ try:
     )
     from lib.pipeline_runner import (
         plan_entries, assemble_records, aggregate_phase_timings, classify_errors,
-        CONFIG_ERROR_EXIT_CODE,
+        validate_execution_intervals, CONFIG_ERROR_EXIT_CODE,
     )
 except ImportError:
     from pipeline import (
@@ -47,7 +47,7 @@ except ImportError:
     )
     from pipeline_runner import (
         plan_entries, assemble_records, aggregate_phase_timings, classify_errors,
-        CONFIG_ERROR_EXIT_CODE,
+        validate_execution_intervals, CONFIG_ERROR_EXIT_CODE,
     )
 
 # Make stdout unbuffered to prevent output ordering issues with subprocesses
@@ -2207,6 +2207,19 @@ class TestExecutor:
                 w = pt.get("ready_queue_wait")
                 if w is not None and w > qw:
                     print(f"  WARNING: {rec.get('name')} waited {w:.1f}s READY->GO (> {qw:g}s)")
+
+        # Execution-serialization + timing validity (v11 CR-8): run automatically,
+        # store the result, and surface a failure loudly (EXECUTING>1, missing
+        # reap, or unordered timestamps make the run diagnostic-only).
+        ok, ival_report, ival_errors = validate_execution_intervals(records)
+        if not hasattr(self, "interval_validation"):
+            self.interval_validation = []
+        self.interval_validation.append({"suite": suite_name, **ival_report, "errors": ival_errors})
+        print(f"  init-pipeline interval validation [{suite_name}]: "
+              f"max_executing={ival_report['max_executing']} "
+              f"executed={ival_report['executed_entries']} ok={ok}")
+        for e in ival_errors:
+            print(f"    INTERVAL-VALIDATION FAILURE: {e}")
 
         # Aggregate phase timings (init / queue-wait / execution): refines the
         # ledger's init_overhead by splitting warmup from post-GO time.

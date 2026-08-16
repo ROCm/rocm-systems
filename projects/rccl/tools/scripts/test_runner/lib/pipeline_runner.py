@@ -425,6 +425,50 @@ def max_concurrent_execution(records):
     return peak
 
 
+def validate_execution_intervals(records):
+    """Production validity check run automatically before a run is declared valid
+    (v11 CR-8). Returns (ok, report, errors).
+
+    Fails if: any two execution intervals overlap (max EXECUTING > 1); an executed
+    entry lacks a confirmed reap endpoint; or a pipeline entry's phase timestamps
+    are not ordered launch <= ready <= go <= exit (serial: launch <= exit). Missing
+    events must remain absent (None), never zero-filled.
+    """
+    errors = []
+    peak = max_concurrent_execution(records)
+    if peak > 1:
+        errors.append(f"max EXECUTING == {peak}: execution intervals overlap")
+
+    executed = 0
+    for r in records:
+        start = r.get("exec_start")
+        if start is None:
+            continue  # never executed (rejected / cancelled pre-exec)
+        executed += 1
+        if r.get("exec_end") is None:
+            errors.append(f"{r.get('name')}: executed entry has no confirmed reap endpoint")
+            continue
+        kind = r.get("entry_kind")
+        if kind == "pipeline":
+            seq = [t for t in (r.get("launch_ts"), r.get("ready_ts"),
+                               r.get("go_ts"), r.get("exit_ts")) if t is not None]
+            if seq != sorted(seq):
+                errors.append(f"{r.get('name')}: pipeline timestamps not ordered "
+                              f"(launch<=ready<=go<=exit)")
+        elif kind == "serial":
+            lo, hi = r.get("launch_ts"), r.get("exit_ts")
+            if lo is not None and hi is not None and hi < lo:
+                errors.append(f"{r.get('name')}: serial exit precedes launch")
+
+    report = {
+        "max_executing": peak,
+        "executed_entries": executed,
+        "total_records": len(records),
+        "ok": not errors,
+    }
+    return (not errors, report, errors)
+
+
 def topline_counts(records):
     """Count PASSED/FAILED/SKIPPED over only the top-line records."""
     counts = {RESULT_PASSED: 0, RESULT_FAILED: 0, RESULT_SKIPPED: 0}

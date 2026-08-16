@@ -492,6 +492,26 @@ def test_combined_serial_pipeline_intervals_no_overlap(tmp_path):
     assert order == ["P0", "S1", "P2"], f"cross-kind order violated: {order}"
 
 
+def test_log_isolation_no_cross_entry(tmp_path):
+    """v11 CR-9: concurrent entries each own a unique capture file; no entry's
+    markers appear in another entry's log."""
+    tl = os.path.join(str(tmp_path), "tl.txt")
+    labels = ["AAA", "BBB", "CCC"]
+    entries = _entries(tmp_path, [
+        {"label": lb, "warm": 0.1, "exec": 0.1, "code": 0} for lb in labels
+    ])
+    spawn, wait_exit, infer, terminate = _real_io(tl)
+    PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                      terminate=terminate, init_pool=3, init_timeout=30, exec_timeout=30).run()
+    assert all(e.result == "PASSED" for e in entries)
+    for e in entries:
+        body = open(e.log_path).read()
+        assert f"fake {e.label}" in body, f"{e.label} missing from its own log"
+        for other in labels:
+            if other != e.label:
+                assert f"fake {other}" not in body, f"{other} leaked into {e.label}'s log"
+
+
 def test_finish_entry_idempotent(tmp_path):
     entries = _entries(tmp_path, [{"label": "P0", "warm": 0, "exec": 0, "code": 0}])
     sched = PipelineScheduler(entries, spawn=lambda e: (_FakeProc(0), None),
