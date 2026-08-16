@@ -73,8 +73,27 @@ def test_build_pipeline_spec_sets_warmup_and_rendezvous_for_pipeline(tmp_path):
     assert env["FOO"] == "1"                       # parent env preserved
     assert env["UT_MIN_GPUS"] == "8"               # pinned sweep env merged
     assert env["RCCL_TEST_READY_GO"] == "1"        # warmup enabled
+    assert env["RCCL_TEST_WARMUP_PROFILE"] == "fork_coll"  # canonical profile (v10 §5.1)
     assert env["RCCL_TEST_RENDEZVOUS_DIR"] == os.path.abspath(rdv.dir)
     assert os.path.isabs(env["RCCL_TEST_RENDEZVOUS_DIR"])  # ranks run with a different cwd
+
+
+def test_build_pipeline_spec_go_timeout_env(tmp_path):
+    ex = _make_executor(tmp_path, go_timeout=45)
+    captured = {}
+
+    def fake_build(tcfg, suite):
+        captured[tcfg["name"]] = dict(tcfg["env_variables"])
+        return LaunchSpec(name=tcfg["name"], cmd="true", run_cwd=".",
+                          env={}, timeout=0, is_gtest=True), None
+
+    ex._build_launch_spec = fake_build
+    from lib.pipeline import Rendezvous
+    rdv = Rendezvous.for_entry(str(tmp_path), "run", 0)
+    p = PlannedEntry("M", "M", KIND_PIPELINE, "mpi_coll", {}, False)
+    ex._build_pipeline_spec(p, {}, {"M": {"name": "M", "env_variables": {}}}, rdv)
+    assert captured["M"]["RCCL_TEST_GO_TIMEOUT_SEC"] == "45"
+    assert captured["M"]["RCCL_TEST_WARMUP_PROFILE"] == "mpi_coll"
 
 
 def test_build_pipeline_spec_serial_has_no_rendezvous(tmp_path):

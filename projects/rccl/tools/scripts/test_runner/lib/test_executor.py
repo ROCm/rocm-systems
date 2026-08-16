@@ -1830,6 +1830,12 @@ class TestExecutor:
             env.update(parent.get("rerun_env_variables", {}))
         if planned.kind == KIND_PIPELINE:
             env["RCCL_TEST_READY_GO"] = "1"
+            # Canonical profile var (v10 §5.1): pipeline entries get exactly one
+            # profile; the C++ validates it against its compiled role before warmup.
+            env["RCCL_TEST_WARMUP_PROFILE"] = planned.warmup_profile
+            go_timeout = getattr(self.args, "go_timeout", 0) or 0
+            if go_timeout > 0:
+                env["RCCL_TEST_GO_TIMEOUT_SEC"] = str(go_timeout)
             if rdv is not None:
                 # Absolute: the binary/ranks run with a different cwd than the runner.
                 env["RCCL_TEST_RENDEZVOUS_DIR"] = os.path.abspath(rdv.dir)

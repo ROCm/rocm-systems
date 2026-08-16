@@ -67,28 +67,33 @@ namespace RcclUnitTesting
     return true;
   }
 
-  void Rendezvous::WaitForGo()
+  ReleaseStatus Rendezvous::WaitForGo(double timeout_sec)
   {
-    if (!Enabled()) return;
+    if (!Enabled()) return RELEASE_GO;
 
-    std::string const go = Dir() + "/go";
+    std::string const go     = Dir() + "/go";
+    std::string const cancel = Dir() + "/cancel";
 
     // Optional runner-liveness fd (inherited pipe read end). EOF/HUP means the
-    // runner died, so tear down instead of waiting forever. Best-effort: an
-    // absent or unusable fd just falls back to polling, and process-group kill
-    // from the runner remains the primary teardown mechanism.
+    // runner died. Best-effort: an absent or unusable fd just falls back to
+    // polling + the bounded timeout, and process-group kill from the runner
+    // remains the primary teardown mechanism.
     int liveFd = -1;
     if (const char* fdEnv = getenv("RCCL_TEST_LIVENESS_FD"))
     {
       liveFd = atoi(fdEnv);
     }
 
-    fprintf(stderr, "[RCCL_TEST_RENDEZVOUS] pid %d waiting for GO (%s)\n", (int)getpid(), go.c_str());
+    fprintf(stderr,
+            "[RCCL_TEST_RENDEZVOUS] pid %d waiting for GO (%s), timeout=%.1fs\n",
+            (int)getpid(), go.c_str(), timeout_sec);
     fflush(stderr);
 
     struct timespec ts;
     ts.tv_sec  = 0;
     ts.tv_nsec = 50 * 1000 * 1000; // 50 ms poll interval
+    struct timespec t0;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
 
     while (true)
     {
@@ -96,7 +101,13 @@ namespace RcclUnitTesting
       {
         fprintf(stderr, "[RCCL_TEST_RENDEZVOUS] pid %d received GO\n", (int)getpid());
         fflush(stderr);
-        return;
+        return RELEASE_GO;
+      }
+      if (access(cancel.c_str(), F_OK) == 0)
+      {
+        fprintf(stderr, "[RCCL_TEST_RENDEZVOUS] pid %d received CANCEL\n", (int)getpid());
+        fflush(stderr);
+        return RELEASE_CANCEL;
       }
 
       if (liveFd >= 0)
@@ -109,17 +120,31 @@ namespace RcclUnitTesting
         {
           if (pfd.revents & POLLNVAL)
           {
-            // Bad fd: disable the liveness check and keep polling for GO.
-            liveFd = -1;
+            liveFd = -1;  // bad fd: disable the check, keep polling
           }
           else if (pfd.revents & (POLLHUP | POLLERR))
           {
             fprintf(stderr,
-                    "[RCCL_TEST_RENDEZVOUS] pid %d: runner liveness fd closed; aborting GO wait\n",
+                    "[RCCL_TEST_RENDEZVOUS] pid %d: runner liveness fd closed (LIVENESS_LOST)\n",
                     (int)getpid());
             fflush(stderr);
-            _exit(1);
+            return RELEASE_LIVENESS_LOST;
           }
+        }
+      }
+
+      if (timeout_sec > 0.0)
+      {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        double elapsed = (now.tv_sec - t0.tv_sec) + (now.tv_nsec - t0.tv_nsec) / 1e9;
+        if (elapsed > timeout_sec)
+        {
+          fprintf(stderr,
+                  "[RCCL_TEST_RENDEZVOUS] pid %d: GO wait exceeded %.1fs (GO_TIMEOUT)\n",
+                  (int)getpid(), timeout_sec);
+          fflush(stderr);
+          return RELEASE_GO_TIMEOUT;
         }
       }
 

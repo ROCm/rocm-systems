@@ -257,6 +257,17 @@ Examples:
                  "seconds between READY and GO (0 = disabled)."
         )
         self.parser.add_argument(
+            '--go-timeout',
+            type=float,
+            default=0,
+            help="init-pipeline only: bounded GO wait (seconds) passed to each "
+                 "pipeline entry (RCCL_TEST_GO_TIMEOUT_SEC). On expiry an entry "
+                 "reports GO_TIMEOUT and all MPI ranks leave together, so a dead/"
+                 "hung runner cannot strand ranks. 0 = indefinite (rely on the "
+                 "liveness pipe / process-group teardown). Use a short value only "
+                 "for runner-death injection tests, never in production."
+        )
+        self.parser.add_argument(
             '--emit-manifest',
             action='store_true',
             default=False,

@@ -41,6 +41,17 @@ namespace RcclUnitTesting
    *       provides one; process-group teardown from the runner remains the
    *       primary orphan-avoidance mechanism.
    */
+  /// Outcome of waiting for release. Broadcast across MPI ranks so every rank
+  /// leaves the barrier with the same result (see MPIEnvironment §5.3). The
+  /// integer values are stable (they are MPI_Bcast'd as int).
+  enum ReleaseStatus
+  {
+    RELEASE_GO            = 0,  ///< the runner wrote the GO token
+    RELEASE_CANCEL        = 1,  ///< the runner wrote a CANCEL token (clean abort)
+    RELEASE_GO_TIMEOUT    = 2,  ///< bounded wait elapsed (may be delay, not death)
+    RELEASE_LIVENESS_LOST = 3   ///< the runner's liveness pipe proved closure
+  };
+
   class Rendezvous
   {
   public:
@@ -51,8 +62,10 @@ namespace RcclUnitTesting
     /// an I/O error so the caller can fail the entry rather than hang.
     static bool PublishReady();
 
-    /// Block until the GO token appears (or the runner dies). No-op when disabled.
-    static void WaitForGo();
+    /// Block until the GO (or CANCEL) token appears, the liveness pipe closes, or
+    /// `timeout_sec` elapses (0 = no timeout). Returns the outcome; never _exit()s
+    /// so the caller (e.g. MPI rank 0) can broadcast it. RELEASE_GO when disabled.
+    static ReleaseStatus WaitForGo(double timeout_sec = 0.0);
 
   private:
     static std::string Dir();

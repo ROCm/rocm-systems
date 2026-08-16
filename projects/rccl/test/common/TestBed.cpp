@@ -186,7 +186,14 @@ namespace RcclUnitTesting
           TEST_ERROR("Failed to publish READY token");
           FAIL();
         }
-        Rendezvous::WaitForGo();
+        double goTimeout = 0.0;  // 0 = indefinite (rely on liveness pipe / process group)
+        if (const char* t = getenv("RCCL_TEST_GO_TIMEOUT_SEC")) { goTimeout = atof(t); }
+        ReleaseStatus rel = Rendezvous::WaitForGo(goTimeout);
+        if (rel != RELEASE_GO)
+        {
+          TEST_ERROR("GO not received (release status %d)", (int)rel);
+          FAIL();
+        }
       }
     }
 

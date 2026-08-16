@@ -49,108 +49,102 @@ void MPIEnvironment::warmup_device_code()
         return;
     }
 
-    // Device init must have succeeded on this rank before we touch the GPU.
-    // (A failed initialize_devices() already set retCode and desynchronized the
-    // job via its own error paths; do not add a new collective on that path.)
-    if(retCode != 0)
-    {
-        std::fprintf(stderr,
-                     "[RCCL_TEST_WARMUP] rank %d pid %d: skipped (device init failed)\n",
-                     world_rank,
-                     static_cast<int>(getpid()));
-        std::fflush(stderr);
-        return;
-    }
+    // One uniform state machine every rank runs on success AND failure, so no
+    // rank is ever stranded (the verified pre-v10 bug: rank 0 returned on a
+    // PublishReady failure while ranks 1..N blocked forever at MPI_Bcast). See
+    // plan v10 §5.3.
+    const pid_t pid = getpid();
 
-    // This rank's assigned device == the current device after
-    // initialize_devices()'s hipSetDevice(assigned_device).
-    int         assigned_device = -1;
-    int         local_ok        = 1;
-    const pid_t pid             = getpid();
-    if(hipGetDevice(&assigned_device) != hipSuccess)
+    // ---- Step 1: local device-code warmup. Retain status; NEVER early-return
+    // (every rank must reach the collectives below). ----
+    int local_ok = (retCode == 0) ? 1 : 0;  // device init already failed -> not ok
+    if(local_ok)
     {
-        local_ok = 0;
-    }
-    else
-    {
-        // Diagnostic for the Gate A2 same-PID proof: the process that warms a
-        // device MUST be the process that later runs the test on it. Emitted
-        // unconditionally (not behind NCCL_DEBUG) so the validity gate can rely
-        // on it. MPI does not fork, so pid here == the executing rank's pid.
-        std::fprintf(stderr,
-                     "[RCCL_TEST_WARMUP] rank %d pid %d device %d: start\n",
-                     world_rank,
-                     static_cast<int>(pid),
-                     assigned_device);
-        std::fflush(stderr);
-
-        const auto   t0   = std::chrono::steady_clock::now();
-        ncclComm_t   warm = nullptr;
-        ncclResult_t nr   = ncclCommInitAll(&warm, 1, &assigned_device);
-        if(nr == ncclSuccess && warm != nullptr)
-        {
-            ncclCommDestroy(warm);
-        }
-        else
+        int assigned_device = -1;
+        if(hipGetDevice(&assigned_device) != hipSuccess)
         {
             local_ok = 0;
         }
-        (void)hipDeviceSynchronize();
-        const auto ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0)
-                .count();
-        std::fprintf(stderr,
-                     "[RCCL_TEST_WARMUP] rank %d pid %d device %d: %s (%lld ms)\n",
-                     world_rank,
-                     static_cast<int>(pid),
-                     assigned_device,
-                     local_ok ? "ok" : "FAILED",
-                     static_cast<long long>(ms));
-        std::fflush(stderr);
+        else
+        {
+            // Same-PID proof diagnostic: the process that warms a device is the
+            // process that runs the test on it (MPI does not fork).
+            std::fprintf(stderr, "[RCCL_TEST_WARMUP] rank %d pid %d device %d: start\n",
+                         world_rank, static_cast<int>(pid), assigned_device);
+            std::fflush(stderr);
+
+            const auto   t0   = std::chrono::steady_clock::now();
+            ncclComm_t   warm = nullptr;
+            ncclResult_t nr   = ncclCommInitAll(&warm, 1, &assigned_device);
+            if(nr == ncclSuccess && warm != nullptr) { ncclCommDestroy(warm); }
+            else                                     { local_ok = 0; }
+            (void)hipDeviceSynchronize();
+            const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - t0).count();
+            std::fprintf(stderr, "[RCCL_TEST_WARMUP] rank %d pid %d device %d: %s (%lld ms)\n",
+                         world_rank, static_cast<int>(pid), assigned_device,
+                         local_ok ? "ok" : "FAILED", static_cast<long long>(ms));
+            std::fflush(stderr);
+        }
     }
 
-    // Uniform failure: rank 0 must NOT proceed if ANY rank failed warmup.
-    int all_ok = 0;
-    MPICHECK(MPI_Allreduce(&local_ok, &all_ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
-    if(!all_ok)
+    // ---- Step 2: converge warmup status across ranks (MIN). ----
+    int all_warmup_ok = 0;
+    MPICHECK(MPI_Allreduce(&local_ok, &all_warmup_ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!all_warmup_ok)
     {
-        if(world_rank == 0)
-        {
-            TEST_WARN("MPI device-code warmup failed on at least one rank");
-        }
-        // SetUp() returns void, so it cannot "return failure". Every rank takes
-        // this same branch (all_ok is the MIN across ranks): set retCode and
-        // raise a fatal GoogleTest assertion so no rank runs the collectives and
-        // the process exits nonzero with a reliable failed result.
+        if(world_rank == 0) TEST_WARN("MPI device-code warmup failed on at least one rank");
         retCode = 1;
-        ASSERT_TRUE(false) << "RCCL_TEST_READY_GO: MPI device-code warmup failed";
+        ASSERT_TRUE(false) << "MPI device-code warmup failed on at least one rank";
         return;
     }
 
-    // Barrier so every rank is warm before the rendezvous / RUN_ALL_TESTS.
-    MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
-
-    // READY/GO rendezvous (Phase 2). Only rank 0 talks to the runner's
-    // filesystem rendezvous (the runner writes GO / reads READY, and MPI_Bcast
-    // only covers rank0 -> others), then broadcasts GO so all ranks are released
-    // together. No-op unless RCCL_TEST_RENDEZVOUS_DIR is set, so the Phase-1.2
-    // warmup-only behavior is preserved when the runner does not drive a barrier.
-    // The real cross-rank communicators are built by the tests themselves, after
-    // GO.
-    if (RcclUnitTesting::Rendezvous::Enabled())
+    // Warmup-only mode (READY_GO set, no rendezvous dir): everyone is warm; sync
+    // and continue -- no runner barrier.
+    if(!RcclUnitTesting::Rendezvous::Enabled())
     {
-        if (world_rank == 0)
-        {
-            if (!RcclUnitTesting::Rendezvous::PublishReady())
-            {
-                retCode = 1;
-                ASSERT_TRUE(false) << "RCCL_TEST_READY_GO: failed to publish READY token";
-                return;
-            }
-            RcclUnitTesting::Rendezvous::WaitForGo();
-        }
-        int go = 1;
-        MPICHECK(MPI_Bcast(&go, 1, MPI_INT, 0, MPI_COMM_WORLD));
+        MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
+        return;
+    }
+
+    // ---- Step 3: rank 0 publishes exactly one entry-level READY. ----
+    int ready_publish_ok = 1;
+    if(world_rank == 0)
+    {
+        ready_publish_ok = RcclUnitTesting::Rendezvous::PublishReady() ? 1 : 0;
+    }
+    // ---- Step 4: broadcast READY-publish status to EVERY rank. ----
+    MPICHECK(MPI_Bcast(&ready_publish_ok, 1, MPI_INT, 0, MPI_COMM_WORLD));
+
+    // ---- Step 5: on any failure so far, ALL ranks take the same cleanup path;
+    // no rank polls GO. ----
+    if(!ready_publish_ok)
+    {
+        if(world_rank == 0) TEST_WARN("rank 0 failed to publish READY token");
+        retCode = 1;
+        ASSERT_TRUE(false) << "rank 0 failed to publish READY token";
+        return;
+    }
+
+    // ---- Steps 6-7: rank 0 polls GO (bounded, runner-derived), then broadcasts
+    // the release status so all ranks leave together. ----
+    int release = static_cast<int>(RcclUnitTesting::RELEASE_GO);
+    if(world_rank == 0)
+    {
+        double go_timeout = 0.0;  // 0 = indefinite (rely on liveness pipe / process group)
+        if(const char* t = std::getenv("RCCL_TEST_GO_TIMEOUT_SEC")) { go_timeout = std::atof(t); }
+        release = static_cast<int>(RcclUnitTesting::Rendezvous::WaitForGo(go_timeout));
+    }
+    MPICHECK(MPI_Bcast(&release, 1, MPI_INT, 0, MPI_COMM_WORLD));
+
+    // ---- Step 8: uniformly return from SetUp() (test bodies then run inside the
+    // already-running RUN_ALL_TESTS) or take the common cleanup path. ----
+    if(release != static_cast<int>(RcclUnitTesting::RELEASE_GO))
+    {
+        if(world_rank == 0) TEST_WARN("MPI release was not GO (status=%d)", release);
+        retCode = 1;
+        ASSERT_TRUE(false) << "MPI release was not GO (status=" << release << ")";
+        return;
     }
 }
 
