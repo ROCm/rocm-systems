@@ -153,15 +153,22 @@ public:
   /// @param[in] co Code object to analyze.
   /// @param[in] decoder Decoder for the target ISA.
   /// @param[in] arch ISA architecture used to match static PC builders.
-  /// @param[in] extra_leaders Byte offsets that must start a basic block.
+  /// @param[in] extra_leaders Byte offsets that must start a basic block AND are entered from
+  /// outside the decoded graph. Under ExplicitOnly these become the external-entry set, so an
+  /// offset listed here has no incoming caller facts.
   /// @param[in] entry_policy Whether predecessorless blocks are inferred to be
   /// external function entries. Use ExplicitOnly only when extra_leaders
   /// enumerates every externally reachable entry.
+  /// @param[in] extra_split_points Byte offsets that must start a basic block but are NOT external
+  /// entries. Function-entry symbols and stored-pointer targets belong here: they are genuine
+  /// boundaries, yet most are ordinary helpers whose callers reach them by a decoded edge, and
+  /// calling them external would throw those caller facts away.
   /// @returns Ordered list of basic blocks with their decoded instructions.
   static std::vector<std::unique_ptr<BasicBlock>>
   build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
         std::span<const uint64_t> extra_leaders = {},
-        ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless);
+        ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
+        std::span<const uint64_t> extra_split_points = {});
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);

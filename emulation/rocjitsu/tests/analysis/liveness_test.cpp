@@ -3707,6 +3707,107 @@ TEST(CfgAnalysis, Gfx1250DoesNotReuseStashFromSkippedFallthroughPredecessor) {
   EXPECT_TRUE(fixups.empty()) << "must-dataflow must not reuse a skipped-path stash";
 }
 
+// A getpc reseeding a pair the previous builder still owns is a stable point for that builder: no
+// later arithmetic can reach the old chain. Publishing it is what lets code that materializes
+// several function pointers through one scratch pair -- build, spill, rebuild -- still satisfy a
+// whole-object "every code address is relocated" claim. A COMPLETED chain must therefore survive
+// the reseed as a resolved builder.
+/// @brief Decode a hand-assembled gfx1250 word list and run indirect-branch discovery over it.
+///
+/// @details Mirrors BasicBlock::build's decode loop, including its skip of zero alignment padding,
+/// so a fixture written as raw encodings reaches the pass the same way real `.text` does.
+void run_indirect_discovery_for_test(std::vector<uint32_t> words,
+                                     std::vector<PcAddressBuilder> *builders) {
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  const auto *sec = co.text_sections().front();
+  const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
+  const size_t inst_data_size = sec->size() / sizeof(uint32_t);
+  std::vector<std::unique_ptr<Instruction>> owned;
+  for (size_t pc = 0, byte_offset = 0; pc < inst_data_size;) {
+    if (inst_data[pc] == 0) {
+      ++pc;
+      byte_offset += sizeof(uint32_t);
+      continue;
+    }
+    std::unique_ptr<Instruction> inst(decoder->decode(&inst_data[pc], byte_offset));
+    ASSERT_NE(inst, nullptr);
+    const uint32_t inst_words = static_cast<uint32_t>(inst->size()) / sizeof(uint32_t);
+    byte_offset += inst->size();
+    pc += inst_words;
+    owned.push_back(std::move(inst));
+  }
+  std::vector<const Instruction *> decoded_insts;
+  decoded_insts.reserve(owned.size());
+  for (const auto &inst : owned)
+    decoded_insts.push_back(inst.get());
+  const auto text =
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(sec->data()), sec->size());
+
+  (void)discover_indirect_branch_edges(
+      std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size()), text,
+      ROCJITSU_CODE_ARCH_GFX1250, {}, ExternalEntryPolicy::InferPredecessorless, builders);
+}
+
+TEST(IndirectBranchDiscovery, ReusedPairPublishesTheCompletedBuilderItReplaces) {
+  constexpr uint16_t kPair = 0;
+  constexpr uint16_t kLiteral = 255;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  std::vector<uint32_t> words = {
+      build_s_getpc_b64(kPair, kArch),
+      build_s_add_u32(kPair, kPair, kLiteral, kArch),
+      0x00000010u,                                        // literal
+      build_s_addc_u32(kPair + 1, kPair + 1, 128, kArch), // closes the 64-bit edit
+      build_s_getpc_b64(kPair, kArch),                    // reseeds the same pair
+      build_s_add_u32(kPair, kPair, kLiteral, kArch),
+      0x00000008u, // literal
+      build_s_addc_u32(kPair + 1, kPair + 1, 128, kArch),
+      // A consumer is what makes the pass report builders at all.
+      build_s_setpc_b64(kPair, kArch),
+      build_s_endpgm(kArch),
+  };
+
+  std::vector<PcAddressBuilder> builders;
+  run_indirect_discovery_for_test(std::move(words), &builders);
+
+  ASSERT_EQ(builders.size(), 2u);
+  EXPECT_EQ(builders[0].source_getpc_offset, 0u);
+  EXPECT_TRUE(builders[0].resolved) << "a completed chain must survive its pair being reused";
+  EXPECT_FALSE(builders[0].poisoned);
+}
+
+// The same reseed, but the first chain never got its s_addc_u32. The high half is unwritten, so the
+// pair does not hold the address the low add implies. Publishing it would let the patcher
+// regenerate [begin, end) -- which stops before the missing carry -- and claim an address the
+// program never computed, so this one has to fail closed instead.
+TEST(IndirectBranchDiscovery, ReusedPairPoisonsAnAbandonedHalfBuiltBuilder) {
+  constexpr uint16_t kPair = 0;
+  constexpr uint16_t kLiteral = 255;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  std::vector<uint32_t> words = {
+      build_s_getpc_b64(kPair, kArch),
+      build_s_add_u32(kPair, kPair, kLiteral, kArch), // low half only -- no s_addc_u32
+      0x00000010u,                                    // literal
+      build_s_getpc_b64(kPair, kArch),                // abandons the half-built chain
+      build_s_add_u32(kPair, kPair, kLiteral, kArch),
+      0x00000008u, // literal
+      build_s_addc_u32(kPair + 1, kPair + 1, 128, kArch),
+      build_s_setpc_b64(kPair, kArch),
+      build_s_endpgm(kArch),
+  };
+
+  std::vector<PcAddressBuilder> builders;
+  run_indirect_discovery_for_test(std::move(words), &builders);
+
+  ASSERT_FALSE(builders.empty());
+  const auto abandoned = std::ranges::find(builders, 0u, &PcAddressBuilder::source_getpc_offset);
+  ASSERT_NE(abandoned, builders.end());
+  EXPECT_TRUE(abandoned->poisoned) << "a chain abandoned before its carry must not be published";
+  EXPECT_FALSE(abandoned->resolved);
+}
+
 TEST(CfgAnalysis, ReversePostOrderStraightLine) {
   auto blocks =
       build_test_blocks({TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::UseSgpr4});

@@ -39,6 +39,26 @@ void write_kernel_descriptor_for_test(void *descriptor, const TestKernelDescript
     std::optional<size_t> function_pointer_table_target_words = std::nullopt,
     bool name_function_pointer_table_with_symbol = true);
 [[nodiscard]] std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text();
+/// @brief One sized `STT_FUNC` body in the fixture's `.text`.
+struct TestTextFunction {
+  size_t offset_word = 0;
+  size_t words = 0;
+};
+
+/// @brief Two kernels, N sized local device functions, and one pointer slot naming each.
+///
+/// @details The two-descriptor helper above has no `.text` symbols and no relocation table, and
+/// the single-descriptor helper has both but only one scope. Three properties are needed together
+/// here: two scopes, so a body can be adopted by one and reached from the other; sized `STT_FUNC`
+/// symbols, because adoption now requires a declared entry; and `R_AMDGPU_RELATIVE64` slots, which
+/// are what make a body address-taken to begin with.
+///
+/// Kernel 0 entry is word 0 and kernel 1 entry is @p kernel1_entry_word.
+
+[[nodiscard]] std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
+    const std::vector<uint32_t> &text_words, size_t kernel1_entry_word,
+    const std::vector<TestTextFunction> &functions);
+
 [[nodiscard]] std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors(
     const std::vector<uint32_t> &text_words = {0xBF810000u, 0xBF810000u});
 [[nodiscard]] std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry();
