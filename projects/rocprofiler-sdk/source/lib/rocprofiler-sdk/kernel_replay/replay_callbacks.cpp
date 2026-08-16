@@ -179,8 +179,13 @@ execute_config_phase_enter(const hsa::Queue&              queue,
     plan.replay_continue_cb       = plan.config_data.replay_continue_cb;
     plan.config_contexts          = std::move(config_contexts);
     plan.external_correlation_ids = std::move(extern_corr_ids);
+    // pass_count_cb and replay_continue_cb are written through the shared config_data payload;
+    // when multiple contexts are configured, each callback overwrites the field, so the last
+    // registered context wins.  Select user_data from the same (last) context so that
+    // pass_count_cb and the user_data it receives originate from the same registration, avoiding
+    // a mismatch where pass_count_cb comes from context N while user_data comes from context 0.
     plan.user_data                = plan.config_contexts.empty() ? tracing::empty_user_data
-                                                                 : plan.config_contexts.front().user_data;
+                                                                 : plan.config_contexts.back().user_data;
 
     if(!plan.pass_count_cb)
     {
