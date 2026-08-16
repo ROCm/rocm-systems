@@ -39,6 +39,7 @@ RJ_DIAGNOSTIC_POP
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <new>
@@ -70,6 +71,14 @@ public:
   static std::mutex *backing_atomic_mutex_for(const void *address) {
     return &GpuMemory::backing_atomic_mutex(reinterpret_cast<uintptr_t>(address));
   }
+
+#if defined(RJ_AMDGPU_VM_TEST_WITH_ASAN)
+  static void set_page_table_unlocked_hook(GpuMemory &memory, std::function<void()> *hook) {
+    memory.asan_page_table_unlocked_hook_.store(hook, std::memory_order_release);
+  }
+
+  static constexpr size_t metadata_retry_limit() { return GpuMemory::kMaxMetadataRetries; }
+#endif
 };
 
 } // namespace rocjitsu::amdgpu
@@ -984,6 +993,318 @@ TEST(GpuMemoryTest, SanitizedMappedExtentTracksCurrentShadowState) {
   memory.write32(kBaseVa + kLaterLiveOffset, 0x55555555, kPid);
   EXPECT_EQ(memory.read32(kBaseVa + kLaterLiveOffset, kPid), 0x55555555u);
   __asan_unpoison_memory_region(allocation.get() + kInteriorPoisonOffset, kInteriorPoisonBytes);
+}
+
+TEST(GpuMemoryTest, SanitizedUnlockedQueryPreservesOuterWalkAcrossReentry) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kOuterVa = 0x40000000;
+  constexpr uint64_t kNestedVa = 0x50000000;
+
+  KfdProcess process(kPid);
+  auto outer_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  auto nested_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  outer_page[0] = 0x11;
+  nested_page[0] = 0x22;
+  process.map_pages(kOuterVa, outer_page.get(), KfdProcess::kPageSize);
+  process.map_pages(kNestedVa, nested_page.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  std::function<void()> query_hook = [&] {
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    memory.unregister_process(kPid);
+    memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                            process.page_table_generation());
+    EXPECT_EQ(memory.read8(kNestedVa, kPid), 0x22);
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  EXPECT_EQ(memory.read8(kOuterVa, kPid), 0x11);
+}
+
+TEST(GpuMemoryTest, SanitizedUnlockedQueryRetriesAfterRemap) {
+  for (const bool use_generation : {false, true}) {
+    SCOPED_TRACE(use_generation ? "generation" : "legacy-exact-pte");
+    amdgpu::GpuMemory memory("memory");
+    constexpr uint32_t kPid = 7;
+    constexpr uint64_t kBaseVa = 0x40000000;
+
+    KfdProcess process(kPid);
+    auto old_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+    auto new_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+    old_page[0] = 0x11;
+    new_page[0] = 0x22;
+    process.map_pages(kBaseVa, old_page.get(), KfdProcess::kPageSize);
+    memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                            use_generation ? process.page_table_generation() : nullptr);
+
+    uint8_t *current_page = old_page.get();
+    size_t hook_calls = 0;
+    std::function<void()> query_hook = [&] {
+      ++hook_calls;
+      if (hook_calls == 4) {
+        amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+        return;
+      }
+      auto *next_page = current_page == old_page.get() ? new_page.get() : old_page.get();
+      process.remap_page_host_ptrs(kBaseVa, current_page, next_page, KfdProcess::kPageSize);
+      current_page = next_page;
+    };
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+    EXPECT_EQ(memory.read8(kBaseVa, kPid), 0x22);
+    EXPECT_EQ(hook_calls, 4u);
+  }
+}
+
+TEST(GpuMemoryTest, SanitizedRetryLimitKeepsMappedAccessOutOfFallback) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kLiveOffset = 128;
+
+  KfdProcess process(kPid);
+  auto first_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  auto second_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  std::fill_n(first_page.get(), KfdProcess::kPageSize, 0x5a);
+  std::fill_n(second_page.get(), KfdProcess::kPageSize, 0x5a);
+  process.map_pages(kBaseVa, first_page.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  uint8_t *current_page = first_page.get();
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    ++hook_calls;
+    auto *next_page = current_page == first_page.get() ? second_page.get() : first_page.get();
+    process.remap_page_host_ptrs(kBaseVa, current_page, next_page, KfdProcess::kPageSize);
+    current_page = next_page;
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  memory.write8(kBaseVa + kLiveOffset, 0xa5, kPid);
+  EXPECT_EQ(hook_calls, amdgpu::GpuMemoryTestAccess::metadata_retry_limit());
+  EXPECT_EQ(first_page[kLiveOffset], 0x5a);
+  EXPECT_EQ(second_page[kLiveOffset], 0x5a);
+
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+  memory.write8(kBaseVa + kLiveOffset, 0xa5, kPid);
+  EXPECT_EQ(current_page[kLiveOffset], 0xa5);
+  memory.write8(kBaseVa + kLiveOffset, 0x3c, kPid);
+  EXPECT_EQ(current_page[kLiveOffset], 0x3c);
+  EXPECT_EQ(memory.read8(kBaseVa + kLiveOffset, kPid), 0x3c);
+  EXPECT_EQ(memory.read8(kBaseVa + kLiveOffset, kPid), 0x3c);
+  process.unmap_pages(kBaseVa, KfdProcess::kPageSize);
+  EXPECT_EQ(memory.read8(kBaseVa + kLiveOffset, kPid), 0u);
+}
+
+TEST(GpuMemoryTest, SanitizedRegistryRetryLimitKeepsMappedAccessOutOfFallback) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint32_t kChurnPid = 8;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kLiveOffset = 128;
+
+  KfdProcess process(kPid);
+  KfdProcess churn_process(kChurnPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  std::fill_n(allocation.get(), KfdProcess::kPageSize, 0x5a);
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  bool churn_registered = false;
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    ++hook_calls;
+    if (churn_registered)
+      memory.unregister_process(kChurnPid);
+    else
+      memory.register_process(kChurnPid, &churn_process.page_table_,
+                              &churn_process.page_table_mutex_,
+                              churn_process.page_table_generation());
+    churn_registered = !churn_registered;
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  memory.write8(kBaseVa + kLiveOffset, 0xa5, kPid);
+  EXPECT_EQ(hook_calls, amdgpu::GpuMemoryTestAccess::metadata_retry_limit());
+  EXPECT_EQ(allocation[kLiveOffset], 0x5a);
+
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+  if (churn_registered)
+    memory.unregister_process(kChurnPid);
+  memory.write8(kBaseVa + kLiveOffset, 0xa5, kPid);
+  EXPECT_EQ(allocation[kLiveOffset], 0xa5);
+  EXPECT_EQ(memory.read8(kBaseVa + kLiveOffset, kPid), 0xa5);
+}
+
+TEST(GpuMemoryTest, SanitizedFindHostRangeQueriesWithoutPageTableLocks) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOtherVa = 0x50000000;
+  constexpr size_t kOffset = 128;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  auto other_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    ++hook_calls;
+    process.map_pages(kOtherVa, other_page.get(), KfdProcess::kPageSize);
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  const auto [range, size] = memory.find_host_range(kBaseVa + kOffset, kPid);
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(range, reinterpret_cast<uint64_t>(allocation.get()));
+  EXPECT_EQ(size, KfdProcess::kPageSize);
+}
+
+TEST(GpuMemoryTest, SanitizedFindHostRangeRetriesTargetRemap) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kOffset = 128;
+
+  KfdProcess process(kPid);
+  auto old_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  auto new_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  process.map_pages(kBaseVa, old_page.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    ++hook_calls;
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    process.remap_page_host_ptrs(kBaseVa, old_page.get(), new_page.get(), KfdProcess::kPageSize);
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  const auto [range, size] = memory.find_host_range(kBaseVa + kOffset, kPid);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(range, reinterpret_cast<uint64_t>(new_page.get()));
+  EXPECT_EQ(size, KfdProcess::kPageSize);
+}
+
+TEST(GpuMemoryTest, SanitizedFindHostRangeRejectsTargetUnmap) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kOffset = 128;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    ++hook_calls;
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    process.unmap_pages(kBaseVa, KfdProcess::kPageSize);
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  const auto [range, size] = memory.find_host_range(kBaseVa + kOffset, kPid);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(range, 0u);
+  EXPECT_EQ(size, 0u);
+}
+
+TEST(GpuMemoryTest, SanitizedFindHostRangeRetriesVmidReplacement) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kOffset = 128;
+
+  KfdProcess old_process(kPid);
+  KfdProcess new_process(kPid);
+  auto old_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  auto new_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  old_process.map_pages(kBaseVa, old_page.get(), KfdProcess::kPageSize);
+  new_process.map_pages(kBaseVa, new_page.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &old_process.page_table_, &old_process.page_table_mutex_,
+                          old_process.page_table_generation());
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    ++hook_calls;
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    memory.unregister_process(kPid);
+    memory.register_process(kPid, &new_process.page_table_, &new_process.page_table_mutex_,
+                            new_process.page_table_generation());
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  const auto [range, size] = memory.find_host_range(kBaseVa + kOffset, kPid);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(range, reinterpret_cast<uint64_t>(new_page.get()));
+  EXPECT_EQ(size, KfdProcess::kPageSize);
+}
+
+TEST(GpuMemoryTest, SanitizedUnrelatedMappingChurnDoesNotLoseStableWrites) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kChurnVa = 0x50000000;
+  constexpr size_t kOffset = 128;
+  constexpr size_t kIterations = 64;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  auto churn_page = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  std::atomic<size_t> requested{0};
+  std::atomic<size_t> completed{0};
+  std::atomic<bool> stop{false};
+  std::jthread writer([&] {
+    size_t handled = 0;
+    bool mapped = false;
+    while (true) {
+      requested.wait(handled, std::memory_order_acquire);
+      if (stop.load(std::memory_order_acquire))
+        return;
+      const size_t target = requested.load(std::memory_order_acquire);
+      while (handled < target) {
+        if (mapped)
+          process.unmap_pages(kChurnVa, KfdProcess::kPageSize);
+        else
+          process.map_pages(kChurnVa, churn_page.get(), KfdProcess::kPageSize);
+        mapped = !mapped;
+        completed.store(++handled, std::memory_order_release);
+        completed.notify_all();
+      }
+    }
+  });
+  auto churn_once = [&] {
+    const size_t token = requested.fetch_add(1, std::memory_order_acq_rel) + 1;
+    requested.notify_one();
+    size_t observed = completed.load(std::memory_order_acquire);
+    while (observed < token) {
+      completed.wait(observed, std::memory_order_acquire);
+      observed = completed.load(std::memory_order_acquire);
+    }
+  };
+  std::function<void()> query_hook = churn_once;
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+
+  for (size_t i = 0; i < kIterations; ++i) {
+    churn_once();
+    const auto value = static_cast<uint8_t>(i + 1);
+    memory.write8(kBaseVa + kOffset, value, kPid);
+    EXPECT_EQ(allocation[kOffset], value);
+    EXPECT_EQ(memory.read8(kBaseVa + kOffset, kPid), value);
+  }
+
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+  stop.store(true, std::memory_order_release);
+  requested.fetch_add(1, std::memory_order_release);
+  requested.notify_one();
 }
 
 TEST(GpuMemoryTest, SanitizedCacheLinePreservesLiveBytesAfterInteriorGap) {

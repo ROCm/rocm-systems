@@ -290,6 +290,8 @@ public:
     size_t host_backed_bytes = 0;
     /// GPU-page offset that corresponds to host_ptr.
     size_t gpu_page_offset = 0;
+
+    bool operator==(const HostExtent &) const = default;
   };
 
   /// @brief One inline host extent, spilling to dynamic storage only for split pages.
@@ -313,6 +315,7 @@ public:
         move_from(std::move(other));
       return *this;
     }
+    bool operator==(const HostExtentList &) const = default;
 
     [[nodiscard]] size_t size() const {
       if (std::holds_alternative<std::monostate>(storage_))
@@ -447,6 +450,8 @@ public:
 
     amdgpu::Mtype mtype = amdgpu::Mtype::RW;
     HostExtentList host_extents;
+
+    bool operator==(const PageTableEntry &) const = default;
   };
 
   /// @brief Per-process GPU page table (GPU VA page number → PTE).
