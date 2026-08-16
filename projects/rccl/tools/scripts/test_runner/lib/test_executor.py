@@ -32,6 +32,18 @@ try:
 except ImportError:
     from test_config import expand_env_vars
 
+# Init-pipeline scheduler + planning (opt-in via --exec-mode=init-pipeline).
+try:
+    from lib.pipeline import (
+        PipelineScheduler, Rendezvous, SchedEntry, KIND_PIPELINE, KIND_SERIAL,
+    )
+    from lib.pipeline_runner import plan_entries, assemble_records
+except ImportError:
+    from pipeline import (
+        PipelineScheduler, Rendezvous, SchedEntry, KIND_PIPELINE, KIND_SERIAL,
+    )
+    from pipeline_runner import plan_entries, assemble_records
+
 # Make stdout unbuffered to prevent output ordering issues with subprocesses
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -1787,6 +1799,164 @@ class TestExecutor:
             "exit_code": int(rc),
         }
 
+    def _infer_pipeline_result(self, spec, rc):
+        """Map an exit code to a result for an init-pipeline entry (same rule as
+        the serial _wait_and_infer). A crash/nonzero rc is never PASSED."""
+        if spec.is_gtest:
+            return infer_gtest_result_from_json_file(spec.gtest_json_path or "",
+                                                     rc if rc is not None else -1)
+        if rc == ExitCode.EXIT_SUCCESS:
+            return TestResult.RESULT_PASSED.value
+        if rc == ExitCode.EXIT_TIMEOUT:
+            return TestResult.RESULT_TIMEOUT.value
+        return TestResult.RESULT_FAILED.value
+
+    def _build_pipeline_spec(self, planned, suite_config, base_by_name, rdv):
+        """Build the LaunchSpec for one planned init-pipeline entry.
+
+        Starts from the parent test config, merges the pinned sweep env
+        (planned.env_overrides) and -- for a pipeline entry -- turns on the
+        warmup + rendezvous (RCCL_TEST_READY_GO + a per-entry
+        RCCL_TEST_RENDEZVOUS_DIR). A serial entry gets neither, so it just runs.
+        Returns (spec, early_result) like _build_launch_spec.
+        """
+        parent = base_by_name[planned.parent_name]
+        tcfg = copy.deepcopy(parent)
+        env = dict(tcfg.get("env_variables", {}))
+        env.update(planned.env_overrides)
+        if planned.kind == KIND_PIPELINE:
+            env["RCCL_TEST_READY_GO"] = "1"
+            if rdv is not None:
+                env["RCCL_TEST_RENDEZVOUS_DIR"] = rdv.dir
+        tcfg["env_variables"] = env
+        tcfg["name"] = planned.name  # sub-entry name drives its log + records
+        return self._build_launch_spec(tcfg, suite_config)
+
+    def _run_suite_init_pipeline(self, suite_config, suite_name, tests):
+        """Run a suite in init-pipeline mode: overlap entries' device-code init
+        behind a READY/GO barrier, execute one at a time (no co-tenancy), and roll
+        split sweep sub-entries back into a parent summary.
+
+        Needs a real build to validate end to end (it drives the actual test
+        binaries); the planning, scheduler and roll-up it composes are host-tested
+        separately.
+        """
+        # Apply the same name / MPI-skip filters as the serial path.
+        filtered = []
+        for test in tests:
+            name = test.get("name")
+            if self.args.test_name and not glob_filter_matches(name, self.args.test_name):
+                continue
+            test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
+            is_auto = isinstance(test_ranks, str) and test_ranks.strip().lower() == "auto"
+            is_mpi = is_auto or (not isinstance(test_ranks, str) and test_ranks > 1)
+            if self.args.skip_mpi_check and is_mpi:
+                continue
+            filtered.append(test)
+        if not filtered:
+            return []
+
+        base_by_name = {t.get("name"): t for t in filtered}
+        planned = plan_entries(filtered, exec_mode="init-pipeline")
+
+        run_uuid = Rendezvous.new_run_uuid()
+        specs = {}
+        proc_to_spec = {}
+        sched_entries = []
+        results_by_name = {}
+        gtest_jsons = []
+        rdvs = []
+        seq = 0
+        for p in planned:
+            rdv = Rendezvous.for_entry(self.log_dir, run_uuid, seq) if p.kind == KIND_PIPELINE else None
+            spec, early = self._build_pipeline_spec(p, suite_config, base_by_name, rdv)
+            if early is not None:
+                results_by_name[p.name] = {**early, "suite": suite_name}
+                if rdv is not None:
+                    rdv.cleanup()
+                continue
+            if not spec.emit_log_path:
+                spec.emit_log_path = self._emit_log_path(p.name)
+            if spec.gtest_json_path:
+                gtest_jsons.append(spec.gtest_json_path)
+            sched_entries.append(SchedEntry(seq=seq, label=p.name, kind=p.kind,
+                                            rendezvous=rdv, log_path=spec.emit_log_path))
+            specs[seq] = spec
+            if rdv is not None:
+                rdvs.append(rdv)
+            seq += 1
+
+        def spawn(entry):
+            spec = specs[entry.seq]
+            proc, fd = self._spawn_captured(spec)
+            proc_to_spec[id(proc)] = spec
+            return proc, fd
+
+        def wait_exit(proc, deadline):
+            spec = proc_to_spec.get(id(proc))
+            timeout = spec.timeout if (spec and spec.timeout and spec.timeout > 0) else None
+            try:
+                return proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                return "timeout"
+
+        def infer(entry, rc):
+            return self._infer_pipeline_result(specs[entry.seq], rc)
+
+        def terminate(proc):
+            self._terminate_process_group(proc)
+
+        try:
+            if sched_entries:
+                sched = PipelineScheduler(
+                    sched_entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                    terminate=terminate,
+                    init_pool=getattr(self.args, "init_pool", 2),
+                    init_timeout=(self.args.init_timeout or None),
+                    exec_timeout=None,  # per-entry timeout enforced in wait_exit
+                    log=(print if self.args.verbose else (lambda *a: None)),
+                )
+                sched.run()
+                for entry in sched_entries:
+                    spec = specs[entry.seq]
+                    dur = (entry.t_exit - entry.t_launch) if (entry.t_launch and entry.t_exit) else 0
+                    rec = {
+                        "result": entry.result, "duration": dur, "suite": suite_name,
+                        "log_file": spec.emit_log_path, "exit_code": entry.exit_code,
+                        "phase": entry.phase, "binary": spec.binary, "is_gtest": spec.is_gtest,
+                        "num_nodes": spec.num_nodes, "num_gpus": spec.num_gpus,
+                        "num_ranks": spec.num_ranks, "exec_mode": spec.exec_mode,
+                    }
+                    if getattr(self.args, "phase_timings", False):
+                        rec["phase_timings"] = entry.phase_timings()
+                    results_by_name[entry.label] = rec
+                if sched.failed():
+                    print("WARNING: init-pipeline recorded a scheduler/launch fault "
+                          "(INFRA_ERROR); see per-entry results.")
+        finally:
+            for j in gtest_jsons:
+                try:
+                    os.unlink(j)
+                except OSError:
+                    pass
+            for r in rdvs:
+                r.cleanup()
+
+        # Fold sub-entries into parent summaries; only top-line records feed the
+        # run totals so a split sweep is never double-counted.
+        records = assemble_records(planned, results_by_name)
+        results = []
+        for rec in records:
+            results.append(rec)
+            if rec.get("counts_toward_topline"):
+                self.test_names.append(rec.get("test_name"))
+                self.test_results.append(rec.get("result"))
+                self.test_durations.append(rec.get("duration", 0) or 0)
+                self.test_suites.append(suite_name)
+            if self.emit_enabled:
+                self.test_records.append(rec)
+        return results
+
     def run_test_suite(self, suite_config):
         """
         Run all tests in a test suite
@@ -1808,6 +1978,11 @@ class TestExecutor:
         if not tests:
             print(f"WARNING: No tests defined for test suite '{suite_name}'")
             return []
+
+        # Init-pipeline execution mode: overlap init behind a READY/GO barrier and
+        # execute one entry at a time. Opt-in; the serial path below is untouched.
+        if getattr(self.args, "exec_mode", "serial") == "init-pipeline":
+            return self._run_suite_init_pipeline(suite_config, suite_name, tests)
 
         results = []
         skipped_count = 0

@@ -41,8 +41,9 @@ except ImportError:  # allow "import lib.*" from the runner root
 RESULT_PASSED = "PASSED"
 RESULT_SKIPPED = "SKIPPED"
 
-# Results that make a parent roll-up FAILED.
-_FAIL_RESULTS = frozenset({RESULT_FAILED, RESULT_TIMED_OUT, RESULT_INFRA_ERROR})
+# Results that make a parent roll-up FAILED. Includes both the scheduler's
+# "TIMED_OUT" and the gtest-inference "TIMEOUT" spellings.
+_FAIL_RESULTS = frozenset({RESULT_FAILED, RESULT_TIMED_OUT, RESULT_INFRA_ERROR, "TIMEOUT"})
 
 
 @dataclass
