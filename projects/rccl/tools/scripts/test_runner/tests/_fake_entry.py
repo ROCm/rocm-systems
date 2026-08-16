@@ -40,23 +40,25 @@ def main():
         print(f"[fake {label}] exiting before READY", flush=True)
         sys.exit(exit_code)
 
-    # Publish READY atomically (temp + rename), exactly like the C++ helper.
-    ready_tmp = os.path.join(rdv, "ready.tmp")
-    ready = os.path.join(rdv, "ready")
-    with open(ready_tmp, "w") as f:
-        f.write("ready\n")
-    os.replace(ready_tmp, ready)
-    t_ready = time.monotonic()
-    print(f"[fake {label}] READY", flush=True)
+    # A serial entry has no rendezvous: just warm + execute (no READY/GO).
+    if rdv:
+        # Publish READY atomically (temp + rename), exactly like the C++ helper.
+        ready_tmp = os.path.join(rdv, "ready.tmp")
+        ready = os.path.join(rdv, "ready")
+        with open(ready_tmp, "w") as f:
+            f.write("ready\n")
+        os.replace(ready_tmp, ready)
+        t_ready = time.monotonic()
+        print(f"[fake {label}] READY", flush=True)
 
-    # Block until the runner writes GO.
-    go = os.path.join(rdv, "go")
-    while not os.path.exists(go):
-        time.sleep(0.01)
-    t_go = time.monotonic()
-    # GO must never be observed before READY was published.
-    assert t_go >= t_ready, f"{label}: GO observed before READY"
-    print(f"[fake {label}] GO", flush=True)
+        # Block until the runner writes GO.
+        go = os.path.join(rdv, "go")
+        while not os.path.exists(go):
+            time.sleep(0.01)
+        t_go = time.monotonic()
+        # GO must never be observed before READY was published.
+        assert t_go >= t_ready, f"{label}: GO observed before READY"
+        print(f"[fake {label}] GO", flush=True)
 
     # Execute: record the interval so the test can prove serial (non-overlapping)
     # execution across entries.

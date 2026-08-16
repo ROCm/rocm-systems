@@ -30,7 +30,9 @@ real runner supplies process-group-aware implementations.
 """
 
 import os
+import queue
 import shutil
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -38,9 +40,15 @@ from dataclasses import dataclass
 READY_TOKEN = "ready"
 GO_TOKEN = "go"
 
-# Terminal results for entries that never reached execution.
-RESULT_FAILED = "FAILED"        # exited before READY
-RESULT_TIMED_OUT = "TIMED_OUT"  # init- or exec-phase timeout
+# Terminal results.
+RESULT_FAILED = "FAILED"         # exited before READY, or a failing exec exit code
+RESULT_TIMED_OUT = "TIMED_OUT"   # init- or exec-phase timeout
+RESULT_CANCELLED = "CANCELLED"   # loader stopped before admitting the entry
+RESULT_INFRA_ERROR = "INFRA_ERROR"  # scheduler/launch fault (distinct from a test failure)
+
+# Entry kinds for the mixed-mode scheduler.
+KIND_PIPELINE = "pipeline"  # loader-launched, warms to READY, executor sends GO
+KIND_SERIAL = "serial"      # executor-launched only (never stops at READY)
 
 
 class Rendezvous:
@@ -217,3 +225,309 @@ def run_overlap_batch(entries, *, spawn, wait_exit, infer, terminate,
         _close_fd(e)
 
     return entries
+
+
+@dataclass
+class SchedEntry:
+    """A unit scheduled by PipelineScheduler.
+
+    kind == KIND_PIPELINE: the loader launches it, it warms and parks at READY,
+    the executor sends GO. Its init overlaps other entries.
+    kind == KIND_SERIAL: the loader never launches it; the executor launches it
+    only when it owns the sole execution slot (so a non-protocol binary can never
+    begin executing while another entry executes).
+    """
+    seq: int
+    label: str
+    kind: str = KIND_PIPELINE
+    rendezvous: Rendezvous = None   # pipeline entries only
+    log_path: str = None
+    parent: object = None           # optional parent-config id for roll-up/ordering
+    # runtime process state
+    proc: object = None
+    capture_fd: object = None
+    # runner-observed monotonic stamps
+    t_launch: float = None
+    t_ready: float = None
+    t_go: float = None
+    t_exit: float = None
+    result: str = None
+    phase: str = None               # 'pending' | 'init' | 'exec'
+    exit_code: int = None
+    # ownership / lifecycle flags -- ALL guarded by PipelineScheduler.state_lock
+    finalized: bool = False
+    settled: bool = False
+    slot_owned: bool = False
+    executor_owned: bool = False
+
+    def phase_timings(self):
+        def _d(a, b):
+            return (b - a) if (a is not None and b is not None) else None
+        return {
+            "time_to_ready": _d(self.t_launch, self.t_ready),
+            "ready_queue_wait": _d(self.t_ready, self.t_go),
+            "execution_time": _d(self.t_go, self.t_exit),
+            "total": _d(self.t_launch, self.t_exit),
+        }
+
+
+class PipelineScheduler:
+    """Mixed-mode init-pipeline scheduler (plan section 5).
+
+    One loader thread, one watcher thread per in-flight pipeline entry, and a
+    single executor thread, coordinated by a bounded slot semaphore and a
+    per-entry filesystem rendezvous. Invariants:
+
+      * INITIALIZING + READY <= init_pool  (one BoundedSemaphore; pipeline only)
+      * EXECUTING <= 1                      (a single executor thread)
+      * every entry reaches exactly one terminal state (Model A accounting)
+
+    Pipeline entries overlap their init with the currently-executing entry; a
+    serial entry never begins executing while another entry executes (the loader
+    never launches it -- only the executor does, when it owns the sole slot).
+
+    Process I/O is injected so the concurrency logic is unit-testable with a fake
+    entry, while the real runner supplies process-group-aware implementations:
+      spawn(entry) -> (proc, capture_fd)
+      wait_exit(proc, deadline) -> int | 'timeout'
+      infer(entry, rc) -> result string
+      terminate(proc) -> None
+    """
+
+    _SENTINEL = object()
+
+    def __init__(self, entries, *, spawn, wait_exit, infer, terminate,
+                 init_pool=2, init_timeout=None, exec_timeout=None,
+                 poll_interval=0.05, monotonic=time.monotonic, log=lambda *a: None):
+        self.entries = list(entries)
+        self.total = len(self.entries)
+        self._spawn = spawn
+        self._wait_exit = wait_exit
+        self._infer = infer
+        self._terminate = terminate
+        self.init_pool = max(1, int(init_pool))
+        self.init_timeout = init_timeout
+        self.exec_timeout = exec_timeout
+        self.poll_interval = poll_interval
+        self.monotonic = monotonic
+        self.log = log
+
+        self.slot = threading.BoundedSemaphore(self.init_pool)
+        self.exec_q = queue.Queue()
+        self.state_lock = threading.Lock()
+        self.stop_flag = threading.Event()
+        self.completed = threading.Event()
+        self.worker_exc = queue.Queue()
+        self.terminal = 0     # entries whose terminal state has been CLAIMED
+        self.settled = 0      # entries whose cleanup has FINISHED
+        self._visited = set()  # seqs the loader has admitted/handled (loader thread only)
+        self._watchers = []
+
+    # ---- helpers -----------------------------------------------------------
+    def _close_fd(self, entry):
+        if entry.capture_fd is not None:
+            try:
+                entry.capture_fd.close()
+            except OSError:
+                pass
+            entry.capture_fd = None
+
+    def _release_slot_if_owned(self, entry):
+        with self.state_lock:
+            if not entry.slot_owned:
+                return
+            entry.slot_owned = False
+        self.slot.release()
+
+    def _finish_entry(self, entry, result, phase, *, terminate):
+        """Idempotent terminal transition. Split so completion is only signalled
+        after teardown is SETTLED (plan section 5 #11): claim `terminal` under the
+        lock, then terminate/close/record OUTSIDE it, then bump `settled` in a
+        finally and signal completion only when settled == total."""
+        with self.state_lock:
+            if entry.finalized:
+                return
+            entry.finalized = True
+            self.terminal += 1
+        try:
+            if terminate and entry.proc is not None:
+                self._terminate(entry.proc)
+            self._release_slot_if_owned(entry)
+            self._close_fd(entry)
+            entry.result = result
+            entry.phase = phase
+        finally:
+            with self.state_lock:
+                self.settled += 1
+                reached = (self.settled == self.total)
+            if reached and not self.completed.is_set():
+                self.completed.set()
+                self.exec_q.put(self._SENTINEL)
+
+    # ---- threads -----------------------------------------------------------
+    def _loader(self):
+        try:
+            for entry in self.entries:
+                try:
+                    if self.stop_flag.is_set():
+                        self._visited.add(entry.seq)
+                        self._finish_entry(entry, RESULT_CANCELLED, "pending", terminate=False)
+                        continue
+                    if entry.kind == KIND_SERIAL:
+                        # Hand to executor; the loader NEVER spawns a serial unit.
+                        self._visited.add(entry.seq)
+                        self.exec_q.put(entry)
+                        continue
+                    # Pipeline: block on a slot (INITIALIZING+READY <= init_pool).
+                    got = False
+                    while not self.stop_flag.is_set():
+                        if self.slot.acquire(timeout=self.poll_interval):
+                            got = True
+                            break
+                    if not got:
+                        self._visited.add(entry.seq)
+                        self._finish_entry(entry, RESULT_CANCELLED, "pending", terminate=False)
+                        continue
+                    with self.state_lock:
+                        entry.slot_owned = True
+                    self._visited.add(entry.seq)
+                    entry.t_launch = self.monotonic()
+                    entry.proc, entry.capture_fd = self._spawn(entry)
+                    self._start_watcher(entry)
+                    self.log(f"[sched] launched pipeline entry {entry.seq} ({entry.label})")
+                except BaseException as e:  # noqa: BLE001 -- contain per-entry launch faults
+                    self._visited.add(entry.seq)
+                    self._finish_entry(entry, RESULT_INFRA_ERROR, "init", terminate=True)
+                    self.worker_exc.put(e)
+                    self.stop_flag.set()
+        finally:
+            # Finalize every entry the loop never reached, so settled can reach
+            # total even on an outer exception (plan section 5 #3).
+            for entry in self.entries:
+                if entry.seq not in self._visited:
+                    self._finish_entry(entry, RESULT_CANCELLED, "pending", terminate=False)
+
+    def _start_watcher(self, entry):
+        t = threading.Thread(target=self._watcher, args=(entry,), daemon=True)
+        self._watchers.append(t)
+        t.start()
+
+    def _watcher(self, entry):
+        try:
+            deadline = None if self.init_timeout is None else entry.t_launch + self.init_timeout
+            while True:
+                if entry.rendezvous is not None and entry.rendezvous.ready():
+                    with self.state_lock:
+                        entry.t_ready = self.monotonic()
+                    self.exec_q.put(entry)      # slot still owned; executor takes over
+                    return
+                if entry.proc.poll() is not None:
+                    entry.t_exit = self.monotonic()
+                    entry.exit_code = entry.proc.returncode
+                    self._finish_entry(entry, RESULT_FAILED, "init", terminate=False)
+                    return
+                if deadline is not None and self.monotonic() > deadline:
+                    self._finish_entry(entry, RESULT_TIMED_OUT, "init", terminate=True)
+                    return
+                if self.stop_flag.is_set():
+                    return                       # shutdown() will finalize it
+                time.sleep(self.poll_interval)
+        except BaseException as e:  # noqa: BLE001
+            self._finish_entry(entry, RESULT_INFRA_ERROR, "init", terminate=True)
+            self.worker_exc.put(e)
+            self.stop_flag.set()
+
+    def _executor(self):
+        while True:
+            unit = self.exec_q.get()
+            if unit is self._SENTINEL:
+                return
+            # Atomic READY->EXECUTING handoff (plan section 5 #5): claim ownership
+            # or skip an already-finalized (e.g. cancelled) unit.
+            with self.state_lock:
+                if unit.finalized:
+                    skip = True
+                else:
+                    unit.executor_owned = True
+                    skip = False
+            if skip:
+                self._release_slot_if_owned(unit)
+                continue
+            try:
+                if unit.kind == KIND_SERIAL:
+                    unit.t_launch = self.monotonic()
+                    unit.proc, unit.capture_fd = self._spawn(unit)
+                    unit.t_go = unit.t_launch     # no queue wait for a serial unit
+                    deadline = None if self.exec_timeout is None else self.monotonic() + self.exec_timeout
+                    rc = self._wait_exit(unit.proc, deadline)
+                else:
+                    self._release_slot_if_owned(unit)  # free slot -> loader refills NOW (overlap)
+                    unit.t_go = self.monotonic()
+                    unit.rendezvous.write_go()
+                    deadline = None if self.exec_timeout is None else self.monotonic() + self.exec_timeout
+                    rc = self._wait_exit(unit.proc, deadline)
+                unit.t_exit = self.monotonic()
+                if rc == "timeout":
+                    self._finish_entry(unit, RESULT_TIMED_OUT, "exec", terminate=True)
+                else:
+                    unit.exit_code = rc
+                    self._finish_entry(unit, self._infer(unit, rc), "exec", terminate=False)
+            except BaseException as e:  # noqa: BLE001 -- contain GO/wait/infer faults
+                self._finish_entry(unit, RESULT_INFRA_ERROR, "exec", terminate=True)
+                self.worker_exc.put(e)
+                self.stop_flag.set()
+
+    def _shutdown(self):
+        """Finalize entries abandoned on stop. An executor-owned entry is only
+        terminated (its owning executor records the result); everything else that
+        is not yet finalized is cancelled/infra-errored here (plan section 5 #4/#5)."""
+        self.stop_flag.set()
+        for e in self.entries:
+            with self.state_lock:
+                owned = e.executor_owned
+                fin = e.finalized
+            if fin:
+                continue
+            if owned:
+                if e.proc is not None:
+                    self._terminate(e.proc)
+            else:
+                result = RESULT_CANCELLED if e.t_go is None else RESULT_INFRA_ERROR
+                self._finish_entry(e, result, e.phase or "pending", terminate=True)
+
+    def request_stop(self):
+        """Ask the scheduler to stop launching new work (e.g. Ctrl-C / fatal)."""
+        self.stop_flag.set()
+
+    # ---- driver ------------------------------------------------------------
+    def run(self):
+        """Run to completion; return the entries (each with a terminal result).
+
+        Raises nothing for test failures (those are per-entry results). If a
+        scheduler/launch fault occurred, the exception(s) are available via
+        ``worker_exc`` and the caller should treat the run as an infra error.
+        """
+        loader_t = threading.Thread(target=self._loader, daemon=True)
+        exec_t = threading.Thread(target=self._executor, daemon=True)
+        loader_t.start()
+        exec_t.start()
+        try:
+            loader_t.join()
+            # If a fault stopped the run, finalize whatever the watchers abandoned
+            # so `settled` can reach `total` (otherwise completion never arrives).
+            if self.stop_flag.is_set():
+                self._shutdown()
+            self.completed.wait()
+        except KeyboardInterrupt:
+            self._shutdown()
+            self.completed.wait()
+            raise
+        finally:
+            exec_t.join()
+            for w in self._watchers:
+                w.join(timeout=1.0)
+        return self.entries
+
+    def failed(self):
+        """True if any scheduler/launch fault was recorded (not a test failure)."""
+        return not self.worker_exc.empty()
