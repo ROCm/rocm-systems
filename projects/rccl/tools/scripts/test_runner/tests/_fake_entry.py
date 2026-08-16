@@ -29,6 +29,10 @@ def main():
     timeline = sys.argv[5]
     skip_ready = "--skip-ready" in sys.argv[6:]
 
+    # A rerun can flip a failure to a pass via rerun_env_variables={"FORCE_PASS":"1"}.
+    if os.environ.get("FORCE_PASS"):
+        exit_code = 0
+
     rdv = os.environ.get("RCCL_TEST_RENDEZVOUS_DIR", "")
     print(f"[fake {label}] pid {os.getpid()} start rdv={rdv}", flush=True)
 

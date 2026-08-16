@@ -137,5 +137,39 @@ def test_run_suite_init_pipeline_end_to_end(tmp_path):
     assert ex.test_results.count("PASSED") == 3
 
 
+@POSIX_ONLY
+def test_rerun_failed_converges_split_sweep(tmp_path):
+    """A fork sweep whose first sub-entry fails (fail-fast cancels the rest) must,
+    under --rerun-failed with a flip env, rerun the failed+cancelled sub-entries in
+    order and roll the parent up to PASSED."""
+    ex = _make_executor(tmp_path, rerun_failed=True)
+    timeline = os.path.join(str(tmp_path), "tl.txt")
+
+    def fake_build(tcfg, suite):
+        name = tcfg["name"]
+        env = {**os.environ, **{k: str(v) for k, v in tcfg.get("env_variables", {}).items()}}
+        # First sibling (g8_sp) fails on the initial pass; FORCE_PASS (injected by
+        # the rerun env) makes the fake exit 0 on the rerun.
+        code = 1 if "g8_sp" in name else 0
+        cmd = (f"{shlex.quote(sys.executable)} {shlex.quote(FAKE)} 0.05 0.05 "
+               f"{code} {shlex.quote(name)} {shlex.quote(timeline)}")
+        return LaunchSpec(name=name, cmd=cmd, run_cwd=str(tmp_path), env=env,
+                          timeout=0, is_gtest=False, gtest_json_path="", emit_log_path=None), None
+
+    ex._build_launch_spec = fake_build
+    suite_config = {"suite_details": {"name": "S"},
+                    "rerun_env_variables": {"FORCE_PASS": "1"}}
+    tests = [{"name": "AR", "warmup_profile": "fork_coll",
+              "fork_expand": {"num_gpus": [8], "process_mask": 3, "max_ranks_per_gpu": 1}}]
+    records = ex._run_suite_init_pipeline(suite_config, "S", tests)
+
+    by = {r["name"]: r for r in records}
+    # After rerun both sub-entries pass and the parent rolls up PASSED.
+    assert by["AR.g8_sp_r1"]["result"] == "PASSED"
+    assert by["AR.g8_mp_r1"]["result"] == "PASSED"
+    assert by["AR"]["record_type"] == "parent_summary" and by["AR"]["result"] == "PASSED"
+    assert ex.test_results == ["PASSED"]  # one top-line entry, now passing
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

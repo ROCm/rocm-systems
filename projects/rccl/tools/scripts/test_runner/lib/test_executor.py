@@ -1811,19 +1811,23 @@ class TestExecutor:
             return TestResult.RESULT_TIMEOUT.value
         return TestResult.RESULT_FAILED.value
 
-    def _build_pipeline_spec(self, planned, suite_config, base_by_name, rdv):
+    def _build_pipeline_spec(self, planned, suite_config, base_by_name, rdv, rerun=False):
         """Build the LaunchSpec for one planned init-pipeline entry.
 
         Starts from the parent test config, merges the pinned sweep env
         (planned.env_overrides) and -- for a pipeline entry -- turns on the
         warmup + rendezvous (RCCL_TEST_READY_GO + a per-entry
         RCCL_TEST_RENDEZVOUS_DIR). A serial entry gets neither, so it just runs.
-        Returns (spec, early_result) like _build_launch_spec.
+        When ``rerun`` is set, the suite/test rerun_env_variables are merged on top
+        (matching the serial --rerun-failed path). Returns (spec, early_result).
         """
         parent = base_by_name[planned.parent_name]
         tcfg = copy.deepcopy(parent)
         env = dict(tcfg.get("env_variables", {}))
         env.update(planned.env_overrides)
+        if rerun:
+            env.update(suite_config.get("rerun_env_variables", {}))
+            env.update(parent.get("rerun_env_variables", {}))
         if planned.kind == KIND_PIPELINE:
             env["RCCL_TEST_READY_GO"] = "1"
             if rdv is not None:
@@ -1833,36 +1837,16 @@ class TestExecutor:
         tcfg["name"] = planned.name  # sub-entry name drives its log + records
         return self._build_launch_spec(tcfg, suite_config)
 
-    def _run_suite_init_pipeline(self, suite_config, suite_name, tests):
-        """Run a suite in init-pipeline mode: overlap entries' device-code init
-        behind a READY/GO barrier, execute one at a time (no co-tenancy), and roll
-        split sweep sub-entries back into a parent summary.
+    def _execute_pipeline_plan(self, planned, suite_config, suite_name, base_by_name, rerun=False):
+        """Run one batch of planned units through the PipelineScheduler and return
+        ``results_by_name`` (entry name -> result record).
 
-        Needs a real build to validate end to end (it drives the actual test
-        binaries); the planning, scheduler and roll-up it composes are host-tested
-        separately.
+        Shared by the main pass and the --rerun-failed pass. Sibling grouping is
+        computed over the given ``planned`` list, so a rerun *subset* is re-indexed
+        0..k-1 per parent and its legacy order is preserved among the reruns.
         """
-        # Apply the same name / MPI-skip filters as the serial path.
-        filtered = []
-        for test in tests:
-            name = test.get("name")
-            if self.args.test_name and not glob_filter_matches(name, self.args.test_name):
-                continue
-            test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
-            is_auto = isinstance(test_ranks, str) and test_ranks.strip().lower() == "auto"
-            is_mpi = is_auto or (not isinstance(test_ranks, str) and test_ranks > 1)
-            if self.args.skip_mpi_check and is_mpi:
-                continue
-            filtered.append(test)
-        if not filtered:
-            return []
-
-        base_by_name = {t.get("name"): t for t in filtered}
-        planned = plan_entries(filtered, exec_mode="init-pipeline")
-
-        # Sibling grouping for legacy per-parent ordering: index each planned unit
-        # within its parent (config order) so the scheduler can keep a split
-        # sweep's sub-entries in order and fail-fast on the first failure.
+        # Sibling grouping for legacy per-parent ordering (config order within the
+        # batch): keep a split sweep's sub-entries in order + fail-fast.
         _groups = {}
         for _p in planned:
             _groups.setdefault(_p.parent_name, []).append(_p)
@@ -1871,11 +1855,7 @@ class TestExecutor:
             for _i, _p in enumerate(_members):
                 sib_info[_p.name] = (_parent, _i, len(_members))
 
-        # Resolve the init (launch->READY) timeout. A finite default is important:
-        # if an entry never publishes READY (stale binary without the rendezvous,
-        # a rendezvous dir rank 0 cannot see on a multi-node/non-shared FS, a bad
-        # env value, ...) an indefinite wait would hang the WHOLE run with orphans
-        # instead of failing just that entry. 0 = indefinite (explicitly opt-in).
+        # Finite init timeout so a stuck READY fails one entry, not the whole run.
         init_timeout = self.args.init_timeout if (getattr(self.args, "init_timeout", 0) or 0) > 0 else None
         if init_timeout is None:
             print("WARNING: --init-timeout 0 (indefinite): a stuck READY handshake "
@@ -1883,17 +1863,16 @@ class TestExecutor:
                   "entry instead.")
 
         run_uuid = Rendezvous.new_run_uuid()
-        # ABSOLUTE base: the test binary runs with cwd=build_dir/test (and MPI
-        # ranks may run on other nodes), so a relative RCCL_TEST_RENDEZVOUS_DIR
-        # would resolve to a different path than the runner watches -> the READY
-        # token would be written where the runner never looks (deadlock). Anchor
-        # it absolutely (and under log_dir, which is NFS-shared on OCI so rank 0
-        # can reach it).
+        # ABSOLUTE base: the binary runs with cwd=build_dir/test (MPI ranks may be
+        # on other nodes), so a relative RCCL_TEST_RENDEZVOUS_DIR would resolve to a
+        # path the runner never watches (deadlock). Anchor it under log_dir.
         rdv_root = os.path.abspath(self.log_dir)
         rdv_base = os.path.join(rdv_root, "rendezvous", run_uuid)
-        print(f"  init-pipeline: init_pool={getattr(self.args, 'init_pool', 2)}, "
+        print(f"  init-pipeline{' rerun' if rerun else ''}: "
+              f"init_pool={getattr(self.args, 'init_pool', 2)}, "
               f"init_timeout={'indefinite' if init_timeout is None else f'{init_timeout:g}s'}, "
               f"rendezvous={rdv_base}")
+
         specs = {}
         proc_to_spec = {}
         sched_entries = []
@@ -1905,7 +1884,7 @@ class TestExecutor:
             rdv = Rendezvous.for_entry(rdv_root, run_uuid, seq) if p.kind == KIND_PIPELINE else None
             if rdv is not None and self.args.verbose:
                 print(f"    entry {seq} {p.name}: rendezvous={rdv.dir}")
-            spec, early = self._build_pipeline_spec(p, suite_config, base_by_name, rdv)
+            spec, early = self._build_pipeline_spec(p, suite_config, base_by_name, rdv, rerun=rerun)
             if early is not None:
                 results_by_name[p.name] = {**early, "suite": suite_name}
                 if rdv is not None:
@@ -1967,9 +1946,8 @@ class TestExecutor:
                         "num_nodes": spec.num_nodes, "num_gpus": spec.num_gpus,
                         "num_ranks": spec.num_ranks, "exec_mode": spec.exec_mode,
                     }
-                    # Timings are collected unconditionally (so --queue-wait-warn
-                    # works regardless); --phase-timings only gates the aggregate
-                    # presentation below.
+                    # Collected unconditionally so --queue-wait-warn works; the
+                    # aggregate presentation is gated on --phase-timings.
                     rec["phase_timings"] = entry.phase_timings()
                     results_by_name[entry.label] = rec
                 if sched.failed():
@@ -1983,6 +1961,51 @@ class TestExecutor:
                     pass
             for r in rdvs:
                 r.cleanup()
+        return results_by_name
+
+    def _run_suite_init_pipeline(self, suite_config, suite_name, tests):
+        """Run a suite in init-pipeline mode: overlap entries' device-code init
+        behind a READY/GO barrier, execute one at a time (no co-tenancy), and roll
+        split sweep sub-entries back into a parent summary.
+
+        Needs a real build to validate end to end (it drives the actual test
+        binaries); the planning, scheduler and roll-up it composes are host-tested
+        separately.
+        """
+        # Apply the same name / MPI-skip filters as the serial path.
+        filtered = []
+        for test in tests:
+            name = test.get("name")
+            if self.args.test_name and not glob_filter_matches(name, self.args.test_name):
+                continue
+            test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
+            is_auto = isinstance(test_ranks, str) and test_ranks.strip().lower() == "auto"
+            is_mpi = is_auto or (not isinstance(test_ranks, str) and test_ranks > 1)
+            if self.args.skip_mpi_check and is_mpi:
+                continue
+            filtered.append(test)
+        if not filtered:
+            return []
+
+        base_by_name = {t.get("name"): t for t in filtered}
+        planned = plan_entries(filtered, exec_mode="init-pipeline")
+
+        results_by_name = self._execute_pipeline_plan(planned, suite_config, suite_name, base_by_name)
+
+        # --rerun-failed: re-run the failed/cancelled sub-entries (with rerun env)
+        # in legacy order; prior-passed siblings keep their results, so the parent
+        # roll-up converges to the same coverage a clean serial sweep would (§9).
+        if getattr(self.args, "rerun_failed", False):
+            fail_set = {TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value,
+                        "TIMED_OUT", "CANCELLED", "INFRA_ERROR"}
+            rerun_planned = [p for p in planned
+                             if (results_by_name.get(p.name) or {}).get("result") in fail_set]
+            if rerun_planned:
+                print(f"\n{'='*80}\nRERUNNING {len(rerun_planned)} FAILED init-pipeline "
+                      f"sub-entrie(s) in suite '{suite_name}'\n{'='*80}")
+                rerun_results = self._execute_pipeline_plan(
+                    rerun_planned, suite_config, suite_name, base_by_name, rerun=True)
+                results_by_name.update(rerun_results)  # overwrite reruns; prior-passed kept
 
         # Fold sub-entries into parent summaries; only top-line records feed the
         # run totals so a split sweep is never double-counted.
