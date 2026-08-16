@@ -112,20 +112,22 @@ def main():
                     for _e in _errors:
                         print(f"  - {_e}")
                     sys.exit(2)
-
-            # Run only enabled (and name-matched) test suites
-            # Note: Reruns happen immediately within run_test_suite() if --rerun-failed is set
-            for suite in test_suites:
-                suite_name = suite["suite_details"]["name"]
-                enabled = suite["suite_details"].get("enabled", True)
-                if not enabled:
-                    continue
-                if args.suite_name and not glob_filter_matches(suite_name, args.suite_name):
-                    continue
-                executor.run_test_suite(suite)
-
-            # Print summary once at the end
-            executor.print_summary()
+                # v11 CR-6: ONE run-wide scheduler across all suites (not per-suite).
+                executor.run_all_suites_init_pipeline(test_suites)
+                executor.print_summary()
+            else:
+                # Serial (and --expand-sweeps) stay per-suite.
+                # Note: Reruns happen immediately within run_test_suite() if --rerun-failed is set
+                for suite in test_suites:
+                    suite_name = suite["suite_details"]["name"]
+                    enabled = suite["suite_details"].get("enabled", True)
+                    if not enabled:
+                        continue
+                    if args.suite_name and not glob_filter_matches(suite_name, args.suite_name):
+                        continue
+                    executor.run_test_suite(suite)
+                # Print summary once at the end
+                executor.print_summary()
 
         # Generate coverage report
         if not args.coverage_report:

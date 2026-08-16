@@ -2079,6 +2079,184 @@ class TestExecutor:
             print(json.dumps(row, default=str))
         return resolved
 
+    def run_all_suites_init_pipeline(self, test_suites):
+        """One run-wide init-pipeline scheduler across ALL suites (v11 CR-6).
+
+        Resolves + expands every enabled/filtered suite into one ordered plan,
+        drives them through a SINGLE PipelineScheduler (so execution intervals
+        cannot overlap across suites and later suites' init can overlap an earlier
+        suite's execution), then reports per suite. Entry labels/parents are
+        suite-qualified so identity, logs, and legacy sibling ordering stay correct.
+        """
+        # ---- Build the ordered run plan across suites ----
+        plan = []  # each: {planned, suite, suite_config, base, sib}
+        for suite in test_suites:
+            sd = suite.get("suite_details", {})
+            if not sd.get("enabled", True):
+                continue
+            sname = sd.get("name")
+            _sfilter = getattr(self.args, "suite_name", None)
+            if _sfilter and not glob_filter_matches(sname, _sfilter):
+                continue
+            filtered = []
+            for test in suite.get("tests", []):
+                tname = test.get("name")
+                if getattr(self.args, "test_name", None) and not glob_filter_matches(tname, self.args.test_name):
+                    continue
+                tr = test.get("num_ranks", suite.get("num_ranks", 1))
+                is_auto = isinstance(tr, str) and tr.strip().lower() == "auto"
+                is_mpi = is_auto or (not isinstance(tr, str) and tr > 1)
+                if self.args.skip_mpi_check and is_mpi:
+                    continue
+                filtered.append(test)
+            if not filtered:
+                continue
+            base_by_name = {t.get("name"): t for t in filtered}
+            planned = plan_entries(filtered, exec_mode="init-pipeline")
+            groups = {}
+            for p in planned:
+                groups.setdefault(p.parent_name, []).append(p)
+            sib = {}
+            for parent, members in groups.items():
+                for i, p in enumerate(members):
+                    sib[p.name] = (parent, i, len(members))
+            for p in planned:
+                plan.append({"planned": p, "suite": sname, "suite_config": suite,
+                             "base": base_by_name, "sib": sib})
+        if not plan:
+            print("WARNING: init-pipeline resolved no runnable entries")
+            return []
+
+        init_timeout = self.args.init_timeout if (getattr(self.args, "init_timeout", 0) or 0) > 0 else None
+        run_uuid = Rendezvous.new_run_uuid()
+        rdv_root = os.path.abspath(self.log_dir)
+        print(f"  init-pipeline (run-wide): entries={len(plan)}, "
+              f"init_pool={getattr(self.args, 'init_pool', 2)}, "
+              f"init_timeout={'indefinite' if init_timeout is None else f'{init_timeout:g}s'}")
+
+        specs, proc_to_spec, sched_entries = {}, {}, []
+        results_by_key, gtest_jsons, rdvs = {}, [], []
+        seq = 0
+        for item in plan:
+            p, sname, scfg, base, sib = (item["planned"], item["suite"],
+                                         item["suite_config"], item["base"], item["sib"])
+            key = f"{sname}::{p.name}"
+            rdv = Rendezvous.for_entry(rdv_root, run_uuid, seq) if p.kind == KIND_PIPELINE else None
+            spec, early = self._build_pipeline_spec(p, scfg, base, rdv)
+            if early is not None:
+                results_by_key[key] = {**early, "suite": sname}
+                if rdv is not None:
+                    rdv.cleanup()
+                continue
+            if not spec.emit_log_path:
+                spec.emit_log_path = self._emit_log_path(f"{sname}_{p.name}")
+            if spec.gtest_json_path:
+                gtest_jsons.append(spec.gtest_json_path)
+            parent, idx, total = sib.get(p.name, (p.parent_name, 0, 1))
+            perf = bool(base.get(p.parent_name, {}).get("perf_sensitive", False))
+            sched_entries.append(SchedEntry(
+                seq=seq, label=key, kind=p.kind, rendezvous=rdv, log_path=spec.emit_log_path,
+                parent=f"{sname}::{parent}", sibling_index=idx, sibling_total=total,
+                perf_sensitive=perf))
+            specs[seq] = spec
+            if rdv is not None:
+                rdvs.append(rdv)
+            seq += 1
+
+        def spawn(entry):
+            spec = specs[entry.seq]
+            proc, fd = self._spawn_captured(spec)
+            proc_to_spec[id(proc)] = spec
+            return proc, fd
+
+        def wait_exit(proc, deadline):
+            spec = proc_to_spec.get(id(proc))
+            timeout = spec.timeout if (spec and spec.timeout and spec.timeout > 0) else None
+            try:
+                return proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                return "timeout"
+
+        def infer(entry, rc):
+            return self._infer_pipeline_result(specs[entry.seq], rc)
+
+        try:
+            if sched_entries:
+                sched = PipelineScheduler(
+                    sched_entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                    terminate=lambda proc: self._terminate_process_group(proc),
+                    init_pool=getattr(self.args, "init_pool", 2), init_timeout=init_timeout,
+                    exec_timeout=None,
+                    fork_sweep_policy=getattr(self.args, "fork_sweep_policy", "legacy"),
+                    release_order=getattr(self.args, "release_order", "ready"),
+                    loader_policy=getattr(self.args, "loader_policy", "continuous"),
+                    log=(print if self.args.verbose else (lambda *a: None)))
+                sched.run()
+                for entry in sched_entries:
+                    spec = specs[entry.seq]
+                    dur = (entry.t_exit - entry.t_launch) if (entry.t_launch and entry.t_exit) else 0
+                    is_serial = (entry.kind == KIND_SERIAL)
+                    rec = {
+                        "result": entry.result, "duration": dur, "exit_code": entry.exit_code,
+                        "phase": entry.phase, "binary": spec.binary, "is_gtest": spec.is_gtest,
+                        "num_nodes": spec.num_nodes, "num_gpus": spec.num_gpus,
+                        "num_ranks": spec.num_ranks, "exec_mode": spec.exec_mode,
+                        "log_file": spec.emit_log_path,
+                        "entry_kind": "serial" if is_serial else "pipeline",
+                        "exec_start_reason": "serial_spawned" if is_serial else "go_issued",
+                        "exec_start": entry.t_launch if is_serial else entry.t_go,
+                        "exec_end": entry.t_exit, "launch_ts": entry.t_launch,
+                        "ready_ts": entry.t_ready, "go_ts": entry.t_go, "exit_ts": entry.t_exit,
+                        "phase_timings": entry.phase_timings(),
+                    }
+                    ok = entry.result in ("PASSED", "SKIPPED")
+                    if entry.rendezvous is not None:
+                        if ok:
+                            entry.rendezvous.cleanup()
+                        else:
+                            rec["rendezvous_dir"] = entry.rendezvous.dir
+                    results_by_key[entry.label] = rec
+        finally:
+            for j in gtest_jsons:
+                try:
+                    os.unlink(j)
+                except OSError:
+                    pass
+
+        # ---- Per-suite reporting (v11 CR-6) ----
+        all_records = []
+        results = []
+        by_suite = {}
+        for item in plan:
+            by_suite.setdefault(item["suite"], []).append(item["planned"])
+        for sname, planned_list in by_suite.items():
+            suite_results = {p.name: results_by_key.get(f"{sname}::{p.name}", {})
+                             for p in planned_list}
+            records = assemble_records(planned_list, suite_results)
+            for rec in records:
+                rec["suite"] = sname
+                results.append(rec)
+                all_records.append(rec)
+                if rec.get("counts_toward_topline"):
+                    self.test_names.append(rec.get("test_name"))
+                    self.test_results.append(rec.get("result"))
+                    self.test_durations.append(rec.get("duration", 0) or 0)
+                    self.test_suites.append(sname)
+                if self.emit_enabled:
+                    self.test_records.append(rec)
+
+        # Run-wide execution-serialization + timing validity (v11 CR-8).
+        okv, ival_report, ival_errors = validate_execution_intervals(all_records)
+        print(f"  init-pipeline run-wide interval validation: "
+              f"max_executing={ival_report['max_executing']} "
+              f"executed={ival_report['executed_entries']} ok={okv}")
+        for e in ival_errors:
+            print(f"    INTERVAL-VALIDATION FAILURE: {e}")
+        if not hasattr(self, "interval_validation"):
+            self.interval_validation = []
+        self.interval_validation.append({"scope": "run", **ival_report, "errors": ival_errors})
+        return results
+
     def _run_suite_serial_expanded(self, suite_config, suite_name, tests):
         """Serial per-config baseline for the correctness gate (plan §12).
 

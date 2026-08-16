@@ -157,6 +157,41 @@ def test_run_suite_init_pipeline_end_to_end(tmp_path):
     assert ex.test_results.count("PASSED") == 3
 
 
+@POSIX_ONLY
+def test_run_wide_scheduler_spans_two_suites(tmp_path):
+    """v11 CR-6: pipeline entries in DIFFERENT suites share one scheduler; their
+    combined execution intervals never overlap and per-suite reports are correct."""
+    ex = _make_executor(tmp_path)
+    timeline = os.path.join(str(tmp_path), "tl.txt")
+
+    def fake_build(tcfg, suite):
+        name = tcfg["name"]
+        env = {**os.environ, **{k: str(v) for k, v in tcfg.get("env_variables", {}).items()}}
+        cmd = (f"{shlex.quote(sys.executable)} {shlex.quote(FAKE)} 0.1 0.15 0 "
+               f"{shlex.quote(name)} {shlex.quote(timeline)}")
+        return LaunchSpec(name=name, cmd=cmd, run_cwd=str(tmp_path), env=env,
+                          timeout=0, is_gtest=False, gtest_json_path="", emit_log_path=None), None
+
+    ex._build_launch_spec = fake_build
+    test_suites = [
+        {"suite_details": {"name": "suiteA", "enabled": True},
+         "tests": [{"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll",
+                    "test_filter": "M.C"}]},
+        {"suite_details": {"name": "suiteB", "enabled": True},
+         "tests": [{"name": "F", "binary": "rccl-UnitTests", "warmup_profile": "fork_coll",
+                    "test_filter": "F.C",
+                    "fork_expand": {"num_gpus": [8], "process_mask": 1, "ranks_per_gpu": 1}}]},
+    ]
+    records = ex.run_all_suites_init_pipeline(test_suites)
+
+    suites = {r["suite"] for r in records if r.get("counts_toward_topline")}
+    assert suites == {"suiteA", "suiteB"}                       # both suites reported
+    assert all(r["result"] == "PASSED" for r in records if r.get("counts_toward_topline"))
+    # Interval validation ran run-wide and found no overlap across suites.
+    assert ex.interval_validation[-1]["max_executing"] == 1
+    assert ex.interval_validation[-1]["ok"]
+
+
 def test_serial_expanded_emits_per_config_rows(tmp_path):
     """--expand-sweeps runs each pinned sub-entry serially via run_test (no warmup)
     and emits per-config sub_entry rows + a parent_summary."""
