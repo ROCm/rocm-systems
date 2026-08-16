@@ -1933,6 +1933,7 @@ class TestExecutor:
                     init_timeout=init_timeout,
                     exec_timeout=None,  # per-entry timeout enforced in wait_exit
                     fork_sweep_policy=getattr(self.args, "fork_sweep_policy", "legacy"),
+                    release_order=getattr(self.args, "release_order", "ready"),
                     log=(print if self.args.verbose else (lambda *a: None)),
                 )
                 sched.run()

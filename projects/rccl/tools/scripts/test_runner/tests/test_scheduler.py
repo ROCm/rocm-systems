@@ -370,6 +370,55 @@ def test_independent_policy_runs_all_no_fail_fast(tmp_path):
     assert _max_overlap([(e.t_go, e.t_exit) for e in entries]) <= 1
 
 
+def test_release_order_config_executes_in_seq_order(tmp_path):
+    """With --release-order=config, entries execute in config (seq) order even when
+    later entries reach READY first."""
+    tl = os.path.join(str(tmp_path), "tl.txt")
+    # e0 warms slowest, e2 fastest -> READY order is e2,e1,e0; config order is e0,e1,e2.
+    entries = _entries(tmp_path, [
+        {"label": "e0", "warm": 0.5, "exec": 0.05, "code": 0},
+        {"label": "e1", "warm": 0.25, "exec": 0.05, "code": 0},
+        {"label": "e2", "warm": 0.05, "exec": 0.05, "code": 0},
+    ])
+    spawn, wait_exit, infer, terminate = _real_io(tl)
+    PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                      terminate=terminate, init_pool=3, init_timeout=30, exec_timeout=30,
+                      release_order="config").run()
+    assert all(e.result == "PASSED" for e in entries)
+    order = [r[0] for r in sorted(_parse_intervals(tl), key=lambda r: r[1])]
+    assert order == ["e0", "e1", "e2"], f"config order violated: {order}"
+
+
+def test_release_order_ready_is_ready_order(tmp_path):
+    """Default --release-order=ready executes as entries become READY (contrast)."""
+    tl = os.path.join(str(tmp_path), "tl.txt")
+    entries = _entries(tmp_path, [
+        {"label": "e0", "warm": 0.5, "exec": 0.05, "code": 0},
+        {"label": "e1", "warm": 0.25, "exec": 0.05, "code": 0},
+        {"label": "e2", "warm": 0.05, "exec": 0.05, "code": 0},
+    ])
+    spawn, wait_exit, infer, terminate = _real_io(tl)
+    PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                      terminate=terminate, init_pool=3, init_timeout=30, exec_timeout=30,
+                      release_order="ready").run()
+    order = [r[0] for r in sorted(_parse_intervals(tl), key=lambda r: r[1])]
+    assert order == ["e2", "e1", "e0"], f"ready order not observed: {order}"
+
+
+def test_release_order_config_still_serial(tmp_path):
+    """Config order must keep executions non-overlapping (single executor)."""
+    tl = os.path.join(str(tmp_path), "tl.txt")
+    entries = _entries(tmp_path, [
+        {"label": f"e{i}", "warm": 0.1, "exec": 0.2, "code": 0} for i in range(3)
+    ])
+    spawn, wait_exit, infer, terminate = _real_io(tl)
+    PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                      terminate=terminate, init_pool=3, init_timeout=30, exec_timeout=30,
+                      release_order="config").run()
+    assert _max_overlap([(e.t_go, e.t_exit) for e in entries]) <= 1
+    _assert_model_a(entries)
+
+
 def test_finish_entry_idempotent(tmp_path):
     entries = _entries(tmp_path, [{"label": "P0", "warm": 0, "exec": 0, "code": 0}])
     sched = PipelineScheduler(entries, spawn=lambda e: (_FakeProc(0), None),

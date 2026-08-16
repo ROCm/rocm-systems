@@ -313,7 +313,7 @@ class PipelineScheduler:
 
     def __init__(self, entries, *, spawn, wait_exit, infer, terminate,
                  init_pool=2, init_timeout=None, exec_timeout=None,
-                 fork_sweep_policy="legacy",
+                 fork_sweep_policy="legacy", release_order="ready",
                  poll_interval=0.05, monotonic=time.monotonic, log=lambda *a: None):
         self.entries = list(entries)
         self.total = len(self.entries)
@@ -328,9 +328,21 @@ class PipelineScheduler:
         # (serial-equivalent); 'independent' runs sub-entries in READY order with no
         # fail-fast (max overlap, different semantics).
         self.fork_sweep_policy = fork_sweep_policy
+        # Cross-entry release order: 'ready' executes entries as they reach READY
+        # (per-parent legacy ordering still applies within a split sweep);
+        # 'config' executes strictly in config (seq) order across all entries --
+        # deterministic, with intentional head-of-line blocking on the next seq.
+        self.release_order = release_order
         self.poll_interval = poll_interval
         self.monotonic = monotonic
         self.log = log
+
+        # Cross-entry config-order gate (release_order='config'): entries execute
+        # in ascending seq; only the lowest not-yet-finished seq is eligible.
+        self._by_seq = {e.seq: e for e in self.entries}
+        self._ordered_seqs = sorted(self._by_seq)
+        self._exec_ptr = 0
+        self._ready_seqs = set()
 
         # Per-parent ordering state for legacy fork sweeps: only the next expected
         # sibling of a parent is executor-eligible; a sibling failure cancels the
@@ -446,6 +458,60 @@ class PipelineScheduler:
         for e in to_cancel:
             self._finish_entry(e, RESULT_CANCELLED, "pending", terminate=True)
 
+    # ---- cross-entry config-order gate (release_order='config') -------------
+    def _config_next_locked(self):
+        """Advance the exec pointer past finalized seqs; return the current
+        next-eligible seq, or None. Caller must hold state_lock."""
+        while (self._exec_ptr < len(self._ordered_seqs)
+               and self._by_seq[self._ordered_seqs[self._exec_ptr]].finalized):
+            self._exec_ptr += 1
+        if self._exec_ptr < len(self._ordered_seqs):
+            return self._ordered_seqs[self._exec_ptr]
+        return None
+
+    def _config_on_ready(self, entry):
+        """Config-order gate: register the entry as ready-to-execute and release it
+        only if it is the next expected seq; otherwise hold it."""
+        with self.state_lock:
+            self._ready_seqs.add(entry.seq)
+            return "release" if self._config_next_locked() == entry.seq else "wait"
+
+    def _advance_config(self, entry):
+        """After a terminal result under config order: apply legacy fork fail-fast
+        (cancel later siblings of a failed split sweep), then release the next
+        config-eligible entry if it is ready."""
+        to_cancel = []
+        if (self.fork_sweep_policy == "legacy" and entry.sibling_total > 1
+                and entry.result not in ("PASSED", "SKIPPED")):
+            with self.state_lock:
+                g = self._parents.get(entry.parent)
+                if g is not None:
+                    g.cancelled = True
+                for e in self.entries:
+                    if (e.parent == entry.parent and e.sibling_total > 1
+                            and e.sibling_index > entry.sibling_index and not e.finalized):
+                        to_cancel.append(e)
+        for e in to_cancel:
+            self._finish_entry(e, RESULT_CANCELLED, "pending", terminate=True)
+        to_release = []
+        with self.state_lock:
+            nxt = self._config_next_locked()
+            if nxt is not None:
+                e = self._by_seq[nxt]
+                if nxt in self._ready_seqs and not e.executor_owned and not e.finalized:
+                    to_release.append(e)
+        for e in to_release:
+            self.exec_q.put(e)
+
+    def _on_ready_dispatch(self, entry):
+        return self._config_on_ready(entry) if self.release_order == "config" else self._on_ready(entry)
+
+    def _advance_dispatch(self, entry):
+        if self.release_order == "config":
+            self._advance_config(entry)
+        else:
+            self._advance_parent(entry)
+
     # ---- threads -----------------------------------------------------------
     def _loader(self):
         try:
@@ -461,8 +527,13 @@ class PipelineScheduler:
                         continue
                     if entry.kind == KIND_SERIAL:
                         # Hand to executor; the loader NEVER spawns a serial unit.
+                        # Under config order it is gated to its seq position.
                         self._visited.add(entry.seq)
-                        self.exec_q.put(entry)
+                        if self.release_order == "config":
+                            if self._config_on_ready(entry) == "release":
+                                self.exec_q.put(entry)
+                        else:
+                            self.exec_q.put(entry)
                         continue
                     if self._grouped(entry) and self._parent_cancelled(entry):
                         # Legacy fail-fast: don't launch a cancelled parent's sibling.
@@ -514,22 +585,22 @@ class PipelineScheduler:
                 if entry.rendezvous is not None and entry.rendezvous.ready():
                     with self.state_lock:
                         entry.t_ready = self.monotonic()
-                    decision = self._on_ready(entry)
+                    decision = self._on_ready_dispatch(entry)
                     if decision == "release":
                         self.exec_q.put(entry)   # slot still owned; executor takes over
                     elif decision == "cancel":
                         self._finish_entry(entry, RESULT_CANCELLED, "init", terminate=True)
-                    # 'wait': held; _advance_parent releases it when its turn comes.
+                    # 'wait': held; the advance path releases it when its turn comes.
                     return
                 if entry.proc.poll() is not None:
                     entry.t_exit = self.monotonic()
                     entry.exit_code = entry.proc.returncode
                     self._finish_entry(entry, RESULT_FAILED, "init", terminate=False)
-                    self._advance_parent(entry)  # a sibling died in init -> fail-fast rest
+                    self._advance_dispatch(entry)  # a sibling died in init -> advance/fail-fast
                     return
                 if deadline is not None and self.monotonic() > deadline:
                     self._finish_entry(entry, RESULT_TIMED_OUT, "init", terminate=True)
-                    self._advance_parent(entry)
+                    self._advance_dispatch(entry)
                     return
                 if self.stop_flag.is_set():
                     return                       # shutdown() will finalize it
@@ -574,8 +645,8 @@ class PipelineScheduler:
                 else:
                     unit.exit_code = rc
                     self._finish_entry(unit, self._infer(unit, rc), "exec", terminate=False)
-                # Legacy ordering: promote the next sibling, or fail-fast the rest.
-                self._advance_parent(unit)
+                # Promote the next unit: per-parent (ready order) or per-seq (config).
+                self._advance_dispatch(unit)
             except BaseException as e:  # noqa: BLE001 -- contain GO/wait/infer faults
                 self._finish_entry(unit, RESULT_INFRA_ERROR, "exec", terminate=True)
                 self.worker_exc.put(e)
