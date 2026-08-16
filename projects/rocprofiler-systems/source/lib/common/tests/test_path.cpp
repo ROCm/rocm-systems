@@ -85,39 +85,6 @@ TEST_F(PathTest, ParentPath_MultipleSlashes)
     EXPECT_EQ(parent_path("/a/b/c/d/e"), "/a/b/c/d");
 }
 
-TEST_F(PathTest, Exists_ExistingFile)
-{
-    std::string file_path = create_file("existing_file.txt");
-    EXPECT_TRUE(exists(file_path));
-}
-
-TEST_F(PathTest, Exists_NonexistentFile)
-{
-    EXPECT_FALSE(exists(m_test_dir + "/nonexistent_file.txt"));
-}
-
-TEST_F(PathTest, Exists_ExistingDirectory) { EXPECT_TRUE(exists(m_test_dir)); }
-
-TEST_F(PathTest, Exists_NonexistentDirectory)
-{
-    EXPECT_FALSE(exists("/nonexistent/path/to/dir"));
-}
-
-TEST_F(PathTest, Exists_SymbolicLink)
-{
-    std::string target    = create_file("target.txt");
-    std::string link_path = create_symlink(target, "link_to_target");
-    EXPECT_TRUE(exists(link_path));
-}
-
-TEST_F(PathTest, Exists_BrokenSymlink)
-{
-    std::string link_path = create_symlink("/nonexistent/target", "broken_link");
-    EXPECT_TRUE(exists(link_path));
-}
-
-TEST_F(PathTest, Exists_EmptyPath) { EXPECT_FALSE(exists("")); }
-
 TEST_F(PathTest, ReadSymlink_SymbolicLink)
 {
     std::string target    = create_file("read_symlink_target.txt");
@@ -287,6 +254,74 @@ TEST_F(PathTest, IsDirectory_RelativePath)
     ASSERT_EQ(chdir(saved_cwd), 0);
 }
 
+TEST_F(PathTest, IsRegularFile_ExistingFile)
+{
+    std::string file_path = create_file("isregular_file.txt");
+    EXPECT_TRUE(is_regular_file(file_path));
+}
+
+TEST_F(PathTest, IsRegularFile_NonexistentFile)
+{
+    EXPECT_FALSE(is_regular_file(m_test_dir + "/nonexistent_file.txt"));
+}
+
+TEST_F(PathTest, IsRegularFile_Directory) { EXPECT_FALSE(is_regular_file(m_test_dir)); }
+
+TEST_F(PathTest, IsRegularFile_NonexistentPath)
+{
+    EXPECT_FALSE(is_regular_file("/nonexistent/path"));
+}
+
+TEST_F(PathTest, IsRegularFile_SymlinkToFile)
+{
+    std::string target    = create_file("isregular_target.txt");
+    std::string link_path = create_symlink(target, "isregular_link_to_file");
+    EXPECT_TRUE(is_regular_file(link_path));
+}
+
+TEST_F(PathTest, IsRegularFile_SymlinkToDirectory)
+{
+    std::string subdir    = create_subdir("isregular_target_dir");
+    std::string link_path = create_symlink(subdir, "isregular_link_to_dir");
+    EXPECT_FALSE(is_regular_file(link_path));
+}
+
+TEST_F(PathTest, IsRegularFile_BrokenSymlink)
+{
+    std::string link_path =
+        create_symlink("/nonexistent/target", "isregular_broken_link");
+    EXPECT_FALSE(is_regular_file(link_path));
+}
+
+TEST_F(PathTest, IsRegularFile_EmptyPath) { EXPECT_FALSE(is_regular_file("")); }
+
+TEST_F(PathTest, IsRegularFile_SpecialCharactersInPath)
+{
+    std::string file_path = create_file("isregular file with spaces.txt");
+    EXPECT_TRUE(is_regular_file(file_path));
+}
+
+TEST_F(PathTest, IsRegularFile_Fifo)
+{
+    std::string fifo_path = m_test_dir + "/isregular_fifo";
+    ASSERT_EQ(mkfifo(fifo_path.c_str(), 0644), 0);
+    EXPECT_FALSE(is_regular_file(fifo_path));
+}
+
+TEST_F(PathTest, IsRegularFile_RelativePath)
+{
+    const std::string file_name = "isregular_relative_file.txt";
+    create_file(file_name);
+
+    char saved_cwd[PATH_MAX];
+    ASSERT_NE(getcwd(saved_cwd, sizeof(saved_cwd)), nullptr);
+    ASSERT_EQ(chdir(m_test_dir.c_str()), 0);
+
+    EXPECT_TRUE(is_regular_file(file_name));
+
+    ASSERT_EQ(chdir(saved_cwd), 0);
+}
+
 TEST_F(PathTest, GetRocprofsysRoot_ReturnsNonEmptyAbsolute)
 {
     std::string root = get_rocprofsys_root();
@@ -319,24 +354,24 @@ TEST_F(PathTest, GetInternalLibpath_ContainsLib)
     EXPECT_NE(libpath.find("lib"), std::string::npos);
 }
 
-TEST_F(PathTest, FindPath_AbsoluteExisting)
+TEST_F(PathTest, FindLibrary_AbsoluteExisting)
 {
     std::string file_path = create_file("findpath_test.txt");
-    std::string result    = find_path(file_path, 0, "");
+    std::string result    = find_library(file_path, 0, "");
     EXPECT_EQ(result, file_path);
 }
 
-TEST_F(PathTest, FindPath_NonexistentReturnsOriginal)
+TEST_F(PathTest, FindLibrary_NonexistentReturnsOriginal)
 {
     std::string nonexistent = "nonexistent_file_xyz.txt";
-    std::string result      = find_path(nonexistent, 0, m_test_dir);
+    std::string result      = find_library(nonexistent, 0, m_test_dir);
     EXPECT_EQ(result, nonexistent);
 }
 
-TEST_F(PathTest, FindPath_InSearchPath)
+TEST_F(PathTest, FindLibrary_InSearchPath)
 {
     std::string file_path = create_file("searchable.txt");
-    std::string result    = find_path("searchable.txt", 0, m_test_dir);
+    std::string result    = find_library("searchable.txt", 0, m_test_dir);
     EXPECT_EQ(result, file_path);
 }
 
@@ -362,12 +397,6 @@ TEST_F(PathTest, ChainedSymlinks)
     EXPECT_EQ(resolved, target);
 }
 
-TEST_F(PathTest, Exists_SpecialCharactersInPath)
-{
-    std::string file_path = create_file("file with spaces.txt");
-    EXPECT_TRUE(exists(file_path));
-}
-
 TEST_F(PathTest, ParentPath_RocprofsysTypicalPath)
 {
     std::string path   = "/opt/rocm-6.0.0/lib/rocprofiler-systems/librocprof-sys-dl.so";
@@ -383,9 +412,9 @@ TEST_F(PathTest, NestedDirectories)
     std::string subdir3 = subdir2 + "/level3";
     mkdir(subdir3.c_str(), 0755);
 
-    EXPECT_TRUE(exists(subdir1));
-    EXPECT_TRUE(exists(subdir2));
-    EXPECT_TRUE(exists(subdir3));
+    EXPECT_TRUE(is_directory(subdir1));
+    EXPECT_TRUE(is_directory(subdir2));
+    EXPECT_TRUE(is_directory(subdir3));
 
     EXPECT_EQ(parent_path(subdir3), subdir2);
     EXPECT_EQ(parent_path(subdir2), subdir1);
@@ -435,4 +464,38 @@ TEST_F(PathTest, ParentPath_RealExe_TwoLevels)
     std::string result = parent_path(realpath("/proc/self/exe"), 2);
     EXPECT_FALSE(result.empty());
     EXPECT_EQ(result.front(), '/');
+}
+
+TEST_F(PathTest, Filename_StandardPath) { EXPECT_EQ(filename("/a/b.so"), "b.so"); }
+
+TEST_F(PathTest, Filename_NoSlash) { EXPECT_EQ(filename("filename"), "filename"); }
+
+TEST_F(PathTest, Filename_TrailingSlash) { EXPECT_EQ(filename("/a/b/"), ""); }
+
+TEST_F(PathTest, Filename_TrailingDoubleSlash) { EXPECT_EQ(filename("/a/b//"), ""); }
+
+TEST_F(PathTest, Filename_Root) { EXPECT_EQ(filename("/"), ""); }
+
+TEST_F(PathTest, Filename_EmptyString) { EXPECT_EQ(filename(""), ""); }
+
+TEST_F(PathTest, Filename_Dot) { EXPECT_EQ(filename("."), "."); }
+
+TEST_F(PathTest, Filename_DotDot) { EXPECT_EQ(filename(".."), ".."); }
+
+TEST_F(PathTest, Filename_DoubleSlash) { EXPECT_EQ(filename("/a//b"), "b"); }
+
+TEST_F(PathTest, Filename_RedundantInteriorSlash) { EXPECT_EQ(filename("/a///b"), "b"); }
+
+TEST_F(PathTest, Filename_MultipleExtensions)
+{
+    EXPECT_EQ(filename("/a/b.tar.gz"), "b.tar.gz");
+}
+
+TEST_F(PathTest, Filename_Dotfile) { EXPECT_EQ(filename("/a/.bashrc"), ".bashrc"); }
+
+TEST_F(PathTest, Filename_RelativePath) { EXPECT_EQ(filename("a/b/c"), "c"); }
+
+TEST_F(PathTest, Filename_AcceptsTemporary)
+{
+    EXPECT_EQ(filename(std::string("/a/b/c.so")), "c.so");
 }

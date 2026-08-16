@@ -29,6 +29,17 @@ in the following table.
       - | String path to configuration file
         | Default: ``~/.rccl.conf`` or ``/etc/rccl.conf``
 
+    * - | ``NCCL_IBVERBS_LIB``
+        | Specifies the libibverbs shared object that RCCL loads at runtime for
+          the InfiniBand/RoCE (IB verbs) transport. Use it when rdma-core is
+          installed in a non-default prefix, such as inside a container or an
+          HPC software module, where the loader cannot find the library by its
+          default name. When the override is unset or fails to load, RCCL falls
+          back to ``libibverbs.so`` and then ``libibverbs.so.1``. ``NCCL_LIBIBVERBS_SO``
+          is accepted as an alias and is used when ``NCCL_IBVERBS_LIB`` is unset.
+      - | String path or soname of the libibverbs shared object
+        | Default: unset (loads ``libibverbs.so`` or ``libibverbs.so.1``)
+
     * - | ``NCCL_HOSTID``
         | Sets the host identifier for multi-node communication.
       - | String value for host identification
@@ -46,9 +57,11 @@ in the following table.
           which is required for ``ncclCommSuspend`` and ``ncclCommResume`` to
           release the physical GPU memory of a suspended communicator. See
           :ref:`suspend-resume` for the full prerequisites.
-      - | ``0``: Disabled (default).
-        | ``1``: Enabled.
-        | ``-2``: Auto-detect; enable when the platform supports VMM.
+      - | ``0``: Disabled.
+        | ``1``: Enabled on any architecture.
+        | ``-2``: Auto-detect (default); enable when the platform supports VMM.
+          Auto-detect is limited to gfx1250, the only architecture where the VMM
+          path is validated. Use ``1`` to force it on elsewhere.
 
     * - | ``NCCL_MIN_CTAS``
         | Minimum number of CTAs (channels) used for a collective. Overrides
@@ -61,6 +74,12 @@ in the following table.
           the ``maxCTAs`` field of ``ncclConfig_t``.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
+
+    * - | ``NCCL_ALLGATHERV_ENABLE``
+        | Fuses grouped multi-root ``ncclBroadcast`` calls into a single AllGatherV
+          ring kernel when two or more distinct roots appear in a group.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
 
 Logging and debugging
 =====================
@@ -212,14 +231,38 @@ in the following table.
       - | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch (default).
         | ``1``: Detect and continue, logging the mismatch at ``INFO`` level.
 
+    * - | ``NCCL_IB_MERGE_NICS``
+        | Enables RCCL to combine several physical IB NICs that are close to the
+          same GPU into a single logical network device (NIC Fusion). This allows
+          RCCL to aggregate the bandwidth of those NICs. Use
+          ``NCCL_NET_MERGE_LEVEL`` and ``NCCL_NET_FORCE_MERGE`` to control which
+          NICs are combined.
+      - | ``1``: Enabled (default).
+        | ``0``: Disabled.
+        | On AINIC with the ``IB-CAST`` transport, merging is off unless this
+          variable is explicitly set to ``1``.
+
     * - | ``NCCL_NET_MERGE_LEVEL``
-        | Controls network device merging behavior.
-      - | Integer value specifying merge level
-        | Default: ``PATH_PORT``
+        | Sets the maximum topological distance between two NICs that can be
+          merged into a single logical device. NICs farther apart than this level
+          are left separate.
+      - | ``LOC``: Same device only, which disables merging.
+        | ``PORT``: Two ports of the same NIC (default).
+        | ``PIX``: Under the same PCIe switch.
+        | ``PXB``: Multiple PCIe bridges, without crossing the PCIe host bridge.
+        | ``P2C``, ``PXN``: Accepted, with the same effect as ``PXB`` for NIC pairs.
+        | ``PHB``: Under the same CPU socket.
+        | ``SYS``: Anywhere in the node, including across NUMA nodes.
+        | The value is a string, so ``PATH_PORT`` is not valid. An unrecognized
+          value falls back to ``LOC`` and disables merging.
 
     * - | ``NCCL_NET_FORCE_MERGE``
-        | Forces merging of network devices.
-      - | String specifying forced merge configuration
+        | Merges the listed groups of NICs regardless of
+          ``NCCL_NET_MERGE_LEVEL``. NICs that are not listed are then merged
+          automatically.
+      - | Semicolon-separated list of groups, each a comma-separated list of
+          device names in ``NCCL_IB_HCA`` notation.
+        | Default: unset.
 
     * - | ``NCCL_NETDEVS_POLICY``
         | Controls how many of a GPU's locally reachable NICs are used on the
@@ -241,6 +284,17 @@ in the following table.
         | This variable can be leveraged when NIC Fusion (``NCCL_NET_MERGE_LEVEL``) and/or data splitting on QPs (``NCCL_IB_SPLIT_DATA_ON_QPS``) is enabled.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
+
+    * - | ``NCCL_NCHANNELS_PER_NET_PEER``
+        | Sets the number of channels used per network (remote) peer.
+        | This overrides the value of the ``nChannelsPerNetPeer`` field in
+        | ``ncclConfig_t``. When neither this variable nor the config field is
+        | set, RCCL auto-tunes the per-peer channel count based on the
+        | available NIC bandwidth and rank count.
+      - | Integer value, ``1`` to ``MAXCHANNELS`` (default: unset/auto-tuned)
+        | Values ``<= 0`` are ignored and a warning is logged.
+        | Values ``> MAXCHANNELS`` set through ``ncclConfig_t`` are rejected
+        | with ``ncclInvalidArgument`` at communicator initialization.
 
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.

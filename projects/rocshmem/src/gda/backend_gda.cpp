@@ -81,8 +81,16 @@ void GDABackend::init() {
 
   type = BackendType::GDA_BACKEND;
 
-  // Initialize QP allocator to finegrained allocator
-  qp_allocator_ = new HIPAllocatorFinegrained();
+  // dmabuf mode: use host-pinned memory for QP/CQ control buffers.
+  // bnxt and mlx5 DV umem_reg only accepts host-accessible memory for these
+  // structures when dmabuf is enabled; device memory (finegrained) causes EIO
+  // from the kernel driver on create_cq/create_qp ioctls.
+  // Legacy peermem mode: retain finegrained device memory as before.
+  if (ibv.is_dmabuf_supported()) {
+    qp_allocator_ = new HIPAllocator(hipHostMalloc, hipFree, hipHostMallocDefault);
+  } else {
+    qp_allocator_ = new HIPAllocatorFinegrained();
+  }
 
   select_nics();
 

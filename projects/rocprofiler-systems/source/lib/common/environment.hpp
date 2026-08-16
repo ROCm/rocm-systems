@@ -9,14 +9,13 @@
 #include "logger/debug.hpp"
 #include <spdlog/fmt/fmt.h>
 
-#include <timemory/utility/filepath.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -484,7 +483,7 @@ discover_llvm_libdir_for_ompt()
 
     auto has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";
-        return ::tim::filepath::exists(so);
+        return path::is_regular_file(so);
     };
 
     // Pick the first candidate that contains libomptarget.so
@@ -507,10 +506,7 @@ is_python_interpreter(std::string_view executable)
 {
     if(executable.empty()) return false;
 
-    const auto slash_pos = executable.rfind('/');
-    const auto basename  = (slash_pos != std::string_view::npos)
-                               ? executable.substr(slash_pos + 1)
-                               : executable;
+    const auto basename = path::filename(executable);
 
     if(basename == "python" || basename == "python3") return true;
 

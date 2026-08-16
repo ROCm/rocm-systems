@@ -58,18 +58,18 @@ void thread_run(const int iThread) {
   float* gpuTransposeMatrix = nullptr;
   hipDeviceProp_t devProp;
   memset(&devProp, 0, sizeof(devProp));
-  HIP_CHECK(hipGetDeviceProperties(&devProp, iThread));
+  HIP_CHECK_THREAD(hipGetDeviceProperties(&devProp, iThread));
   fprintf(stderr, "[%d] device name = %s\n", iThread, devProp.name);
 
-  HIP_CHECK(hipSetDevice(iThread));
+  HIP_CHECK_THREAD(hipSetDevice(iThread));
   hipEvent_t start, stop;
 
   auto time = timeNanos();
-  HIP_CHECK(hipEventCreate(&start));
+  HIP_CHECK_THREAD(hipEventCreate(&start));
   fprintf(stderr, "[%d] hipEventCreate(&start) cost cpu time %6.3fms\n", iThread,
           (timeNanos() - time) / 1000000.0);
 
-  HIP_CHECK(hipEventCreate(&stop));
+  HIP_CHECK_THREAD(hipEventCreate(&stop));
 
   matrix = (float*)malloc(NUM * sizeof(float));
   transposeMatrix = (float*)malloc(NUM * sizeof(float));
@@ -81,32 +81,32 @@ void thread_run(const int iThread) {
   }
 
   // allocate the memory on the device side
-  HIP_CHECK(hipMalloc((void**)&gpuMatrix, NUM * sizeof(float)));
-  HIP_CHECK(hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float)));
+  HIP_CHECK_THREAD(hipMalloc((void**)&gpuMatrix, NUM * sizeof(float)));
+  HIP_CHECK_THREAD(hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float)));
 
   time = timeNanos();
   // Record the start event
   // The first call of hipEventRecord will trigger VirtualDevice creation that will trigger building
   // of BlitLinearSourceCode, which will cost 200+ ms.
-  HIP_CHECK(hipEventRecord(start));
+  HIP_CHECK_THREAD(hipEventRecord(start));
   fprintf(stderr, "[%d] hipEventRecord(&start) cost cpu time %6.3fms\n", iThread,
           (timeNanos() - time) / 1000000.0);
 
   time = timeNanos();
   // Memory transfer from host to device
-  HIP_CHECK(hipMemcpy(gpuMatrix, matrix, NUM * sizeof(float), hipMemcpyHostToDevice));
+  HIP_CHECK_THREAD(hipMemcpy(gpuMatrix, matrix, NUM * sizeof(float), hipMemcpyHostToDevice));
 
   // Record the stop event
-  HIP_CHECK(hipEventRecord(stop));
-  HIP_CHECK(hipEventSynchronize(stop));
+  HIP_CHECK_THREAD(hipEventRecord(stop));
+  HIP_CHECK_THREAD(hipEventSynchronize(stop));
 
-  HIP_CHECK(hipEventElapsedTime(&eventMs, start, stop));
+  HIP_CHECK_THREAD(hipEventElapsedTime(&eventMs, start, stop));
 
   fprintf(stderr, "[%d] hipMemcpyHostToDevice cost gpu time %6.3fms, cpu time %6.3fms\n", iThread,
           eventMs, (timeNanos() - time) / 1000000.0);
 
   // Record the start event
-  HIP_CHECK(hipEventRecord(start));
+  HIP_CHECK_THREAD(hipEventRecord(start));
 
   time = timeNanos();
   // Lauching kernel from host
@@ -114,29 +114,29 @@ void thread_run(const int iThread) {
       matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
       dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix, gpuMatrix, WIDTH);
   // Record the stop event
-  HIP_CHECK(hipEventRecord(stop));
+  HIP_CHECK_THREAD(hipEventRecord(stop));
 
   fprintf(stderr, "[%d] hipLaunchKernelGGL() cost cpu time %6.3fms\n", iThread,
           (timeNanos() - time) / 1000000.0);
 
-  HIP_CHECK(hipEventSynchronize(stop));
-  HIP_CHECK(hipEventElapsedTime(&eventMs, start, stop));
+  HIP_CHECK_THREAD(hipEventSynchronize(stop));
+  HIP_CHECK_THREAD(hipEventElapsedTime(&eventMs, start, stop));
 
   fprintf(stderr, "[%d] kernel Execution cost gpu time %6.3fms, cpu time = %6.3fms\n", iThread,
           eventMs, (timeNanos() - time) / 1000000.0);
 
   // Record the start event
-  HIP_CHECK(hipEventRecord(start));
+  HIP_CHECK_THREAD(hipEventRecord(start));
 
   // Memory transfer from device to host
-  HIP_CHECK(
+  HIP_CHECK_THREAD(
       hipMemcpy(transposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost));
 
   // Record the stop event
-  HIP_CHECK(hipEventRecord(stop));
-  HIP_CHECK(hipEventSynchronize(stop));
+  HIP_CHECK_THREAD(hipEventRecord(stop));
+  HIP_CHECK_THREAD(hipEventSynchronize(stop));
 
-  HIP_CHECK(hipEventElapsedTime(&eventMs, start, stop));
+  HIP_CHECK_THREAD(hipEventElapsedTime(&eventMs, start, stop));
 
   fprintf(stderr, "[%d] hipMemcpyDeviceToHost cost gpu time %6.3fms\n", iThread, eventMs);
 
@@ -155,18 +155,18 @@ void thread_run(const int iThread) {
   } else {
     fprintf(stderr, "[%d] PASSED\n", iThread);
   }
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK_THREAD(hipEventDestroy(start));
+  HIP_CHECK_THREAD(hipEventDestroy(stop));
 
   // free the resources on device side
-  HIP_CHECK(hipFree(gpuMatrix));
-  HIP_CHECK(hipFree(gpuTransposeMatrix));
+  HIP_CHECK_THREAD(hipFree(gpuMatrix));
+  HIP_CHECK_THREAD(hipFree(gpuTransposeMatrix));
 
   // free the resources on host side
   free(matrix);
   free(transposeMatrix);
   free(cpuTransposeMatrix);
-  REQUIRE(errors == 0);
+  REQUIRE_THREAD(errors == 0);
 }
 
 void testEventMGpuMThreads(int nThreads = 1) {
@@ -178,6 +178,7 @@ void testEventMGpuMThreads(int nThreads = 1) {
   for (auto& t : threads) {
     t.join();
   }
+  HIP_CHECK_THREAD_FINALIZE();
 }
 
 /**
