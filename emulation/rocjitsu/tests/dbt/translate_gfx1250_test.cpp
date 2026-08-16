@@ -8351,6 +8351,12 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
   }
 
   const std::vector<uint32_t> expected = {
+      // A SOPK encoding id is the SOPK base plus the opcode, so the MODE-write
+      // separation rules sort ahead of everything else in the table.
+      (static_cast<uint32_t>(cdna5::encoding::kSopk + cdna5::kSSetregB32Sopk) << 16) |
+          cdna5::kSSetregB32Sopk,
+      (static_cast<uint32_t>(cdna5::encoding::kSopk + cdna5::kSSetregImm32B32Sopk) << 16) |
+          cdna5::kSSetregImm32B32Sopk,
       (static_cast<uint32_t>(cdna5::encoding::kSop1) << 16) | cdna5::kSBarrierSignalIsfirstSop1,
       (static_cast<uint32_t>(cdna5::encoding::kSopp) << 16) | cdna5::kSClauseSopp,
       (static_cast<uint32_t>(cdna5::encoding::kVop3p) << 16) | cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
@@ -8416,7 +8422,7 @@ TEST(BinaryTranslatorE2E, Gfx1250UsesNeutralScaledK128Fp8Bf8Wmma) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr auto completion_wait = kGfx1250WmmaCompletionWait;
 
-  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 41u);
+  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 43u);
   for (const WmmaCase &test_case : cases) {
     SCOPED_TRACE(test_case.name);
     auto source_wmma = cdna5::build_vop3p(test_case.source_opcode, fields);
@@ -10401,15 +10407,19 @@ TEST(BinaryTranslatorE2E, Gfx1250GeneratedVgprMsbTransitionsCarryPreviousState) 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   const auto decoded =
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_GE(decoded.size(), 5u);
-  EXPECT_EQ(decoded[0]->mnemonic(), "s_setreg_imm32_b32");
+  // The guest MODE write opens the block, so its separation rule puts two V_NOPs
+  // ahead of it before anything this test is about.
+  ASSERT_GE(decoded.size(), 7u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "v_nop_e32");
+  EXPECT_EQ(decoded[1]->mnemonic(), "v_nop_e32");
+  EXPECT_EQ(decoded[2]->mnemonic(), "s_setreg_imm32_b32");
   // The dependency barrier also separates the guest MODE write from the
   // generated transition. The transition retains its dedicated memory drain.
-  EXPECT_EQ(decoded[1]->mnemonic(), "s_wait_idle");
-  EXPECT_EQ(decoded[2]->mnemonic(), "s_wait_xcnt");
-  EXPECT_EQ(decoded[3]->mnemonic(), "s_set_vgpr_msb");
-  ASSERT_NE(decoded[3]->raw_encoding(), nullptr);
-  EXPECT_EQ(decoded[3]->raw_encoding()[0] & 0xffffu, 0x0100u);
+  EXPECT_EQ(decoded[3]->mnemonic(), "s_wait_idle");
+  EXPECT_EQ(decoded[4]->mnemonic(), "s_wait_xcnt");
+  EXPECT_EQ(decoded[5]->mnemonic(), "s_set_vgpr_msb");
+  ASSERT_NE(decoded[5]->raw_encoding(), nullptr);
+  EXPECT_EQ(decoded[5]->raw_encoding()[0] & 0xffffu, 0x0100u);
 
   // Every generated s_set_vgpr_msb must be immediately preceded by an s_wait_xcnt.
   std::vector<uint16_t> generated_modes;
@@ -12771,6 +12781,137 @@ TEST(BinaryTranslatorE2E, Gfx1250TerminatesFallthroughIntoZeroPadding) {
                                                      /*guest_offset=*/4));
 }
 
+// On this target an s_setreg* naming MODE requires two V_NOPs immediately ahead of it to be ordered
+// against the instructions that precede it, and the compiler emits none. The requirement is
+// specific to MODE, so a write naming any other hardware register must stay untouched. Both
+// spellings carry the selector the same way, so both are covered: the immediate form (opcode 19,
+// which carries a literal) and the register-source form (opcode 18, which does not).
+TEST(BinaryTranslatorE2E, Gfx1250SeparatesModeWriteWithLeadingVNops) {
+  // s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 0, 32), 0 -- register id 1.
+  constexpr uint32_t kSetregWaveMode = 0xb980f801u;
+  // The same write naming HW_REG_WAVE_STATUS -- register id 2.
+  constexpr uint32_t kSetregWaveStatus = 0xb980f802u;
+  // s_setreg_b32 hwreg(HW_REG_WAVE_MODE, 0, 32), s0 -- register id 1, no literal.
+  constexpr uint32_t kSetregB32WaveMode = 0xb900f801u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {kSetregWaveMode, 0u, kSetregWaveStatus, 0u, kSetregB32WaveMode, kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_EQ(decoded.size(), 8u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "v_nop_e32");
+  EXPECT_EQ(decoded[1]->mnemonic(), "v_nop_e32");
+  ASSERT_NE(decoded[2]->raw_encoding(), nullptr);
+  EXPECT_EQ(decoded[2]->raw_encoding()[0], kSetregWaveMode)
+      << "the MODE write itself must be preserved, only separated";
+  // The status write follows the MODE write with no V_NOPs of its own, which is what proves the
+  // rule discriminates on the hardware-register selector rather than the mnemonic.
+  ASSERT_NE(decoded[3]->raw_encoding(), nullptr);
+  EXPECT_EQ(decoded[3]->raw_encoding()[0], kSetregWaveStatus);
+  // The register-source form is separated on the same terms. Its predecessor is the status write
+  // rather than a V_NOP, so it receives a fresh pair rather than counting anything.
+  EXPECT_EQ(decoded[4]->mnemonic(), "v_nop_e32");
+  EXPECT_EQ(decoded[5]->mnemonic(), "v_nop_e32");
+  ASSERT_NE(decoded[6]->raw_encoding(), nullptr);
+  EXPECT_EQ(decoded[6]->mnemonic(), "s_setreg_b32");
+  EXPECT_EQ(decoded[6]->raw_encoding()[0], kSetregB32WaveMode);
+  EXPECT_EQ(decoded[7]->mnemonic(), "s_endpgm");
+
+  // Separation already present must be counted, or a repeated translation would keep prepending.
+  rocjitsu::BinaryTranslator verifier(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto second = verifier.translate(translated);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+  EXPECT_EQ(second.elf_bytes, result.elf_bytes);
+}
+
+// Counting V_NOPs that are already present is only sound inside one basic block: a V_NOP that a
+// branch can jump past does not run before the write on every path that reaches it. The write here
+// is a branch target, so its textual predecessors are in another block and must not be counted,
+// even though they are canonical V_NOPs sitting immediately in front of it.
+TEST(BinaryTranslatorE2E, Gfx1250IgnoresLeadingVNopsAcrossABlockBoundary) {
+  constexpr uint32_t kSetregWaveMode = 0xb980f801u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const uint32_t v_nop = cdna5::build_vop1(cdna5::kVNopVop1)[0];
+
+  // s_cbranch_scc0 +2 lands on the MODE write, so the two V_NOPs it skips open no path to it.
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 2})[0], v_nop, v_nop, kSetregWaveMode,
+       0u, kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_EQ(decoded.size(), 7u)
+      << "the write must receive a fresh pair, not count the skipped ones";
+  EXPECT_EQ(decoded[0]->mnemonic(), "s_cbranch_scc0");
+  for (size_t i = 1; i < 5; ++i)
+    EXPECT_EQ(decoded[i]->mnemonic(), "v_nop_e32") << "at index " << i;
+  ASSERT_NE(decoded[5]->raw_encoding(), nullptr);
+  EXPECT_EQ(decoded[5]->raw_encoding()[0], kSetregWaveMode);
+  EXPECT_EQ(decoded[6]->mnemonic(), "s_endpgm");
+
+  // The branch must land on the separation rather than on the bare write, or the path through it
+  // would reach the write with no V_NOPs in front at all -- the case this rule exists to prevent.
+  ASSERT_NE(decoded[0]->raw_encoding(), nullptr);
+  const size_t landing_word =
+      1 + static_cast<size_t>(static_cast<int16_t>(decoded[0]->raw_encoding()[0] & 0xffffu));
+  size_t word = 0;
+  size_t landing_index = 0;
+  while (landing_index < decoded.size() && word < landing_word) {
+    word += static_cast<size_t>(decoded[landing_index]->size()) / sizeof(uint32_t);
+    ++landing_index;
+  }
+  ASSERT_EQ(word, landing_word) << "the branch must land on an instruction boundary";
+  ASSERT_LT(landing_index + 2, decoded.size());
+  EXPECT_EQ(decoded[landing_index]->mnemonic(), "v_nop_e32");
+  EXPECT_EQ(decoded[landing_index + 1]->mnemonic(), "v_nop_e32");
+  ASSERT_NE(decoded[landing_index + 2]->raw_encoding(), nullptr);
+  EXPECT_EQ(decoded[landing_index + 2]->raw_encoding()[0], kSetregWaveMode)
+      << "exactly two V_NOPs must separate the branch target from the write";
+
+  // Retargeting moved the write, so this is the case where a second pass could disagree with the
+  // first about which V_NOPs belong to the write's own block.
+  rocjitsu::BinaryTranslator verifier(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto second = verifier.translate(translated);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+  EXPECT_EQ(second.elf_bytes, result.elf_bytes);
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250TerminatesSetupFallthroughIntoZeroPadding) {
   // clang emits this one-instruction body for rocPRIM target-specialized
   // trampolines whose source ends in __builtin_unreachable(). The following
@@ -12794,18 +12935,21 @@ TEST(BinaryTranslatorE2E, Gfx1250TerminatesSetupFallthroughIntoZeroPadding) {
   ASSERT_FALSE(translated.text_sections().empty());
   const auto decoded =
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_EQ(decoded.size(), 2u)
+  // The MODE write opens its block, so its separation rule contributes both V_NOPs here.
+  ASSERT_EQ(decoded.size(), 4u)
       << "the synthesized endpgm must be the only instruction after the stub body";
-  ASSERT_NE(decoded[0]->raw_encoding(), nullptr);
-  EXPECT_EQ(decoded[0]->mnemonic(), "s_setreg_imm32_b32");
-  EXPECT_EQ(decoded[0]->raw_encoding()[0], kSetReplayMode);
-  EXPECT_EQ(decoded[0]->raw_encoding()[1], kLiteralOne);
-  EXPECT_EQ(decoded[1]->mnemonic(), "s_endpgm");
+  EXPECT_EQ(decoded[0]->mnemonic(), "v_nop_e32");
+  EXPECT_EQ(decoded[1]->mnemonic(), "v_nop_e32");
+  ASSERT_NE(decoded[2]->raw_encoding(), nullptr);
+  EXPECT_EQ(decoded[2]->mnemonic(), "s_setreg_imm32_b32");
+  EXPECT_EQ(decoded[2]->raw_encoding()[0], kSetReplayMode);
+  EXPECT_EQ(decoded[2]->raw_encoding()[1], kLiteralOne);
+  EXPECT_EQ(decoded[3]->mnemonic(), "s_endpgm");
 
   const auto kernel_symbol =
       rocjitsu::test_support::find_elf_symbol_for_test(result.elf_bytes, "kernel");
   ASSERT_TRUE(kernel_symbol.has_value());
-  EXPECT_EQ(kernel_symbol->st_size, 3 * sizeof(uint32_t))
+  EXPECT_EQ(kernel_symbol->st_size, 5 * sizeof(uint32_t))
       << "the translated function extent must include its synthesized terminator";
 }
 
@@ -12833,15 +12977,18 @@ TEST(BinaryTranslatorE2E, Gfx1250TerminatesPrefetchSetupFallthroughIntoZeroPaddi
   ASSERT_FALSE(translated.text_sections().empty());
   const auto decoded =
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_EQ(decoded.size(), 4u)
+  // The prologue's own V_NOP counts toward the MODE write's separation, so it needs
+  // only one more rather than a fresh pair.
+  ASSERT_EQ(decoded.size(), 5u)
       << "the synthesized endpgm must be the only instruction after the stub body";
   EXPECT_EQ(decoded[0]->mnemonic(), "global_prefetch_b8");
   EXPECT_EQ(decoded[1]->mnemonic(), "v_nop_e32");
-  EXPECT_EQ(decoded[2]->mnemonic(), "s_setreg_imm32_b32");
-  ASSERT_NE(decoded[2]->raw_encoding(), nullptr);
-  EXPECT_EQ(decoded[2]->raw_encoding()[0], kSetReplayMode[0]);
-  EXPECT_EQ(decoded[2]->raw_encoding()[1], kSetReplayMode[1]);
-  EXPECT_EQ(decoded[3]->mnemonic(), "s_endpgm");
+  EXPECT_EQ(decoded[2]->mnemonic(), "v_nop_e32");
+  EXPECT_EQ(decoded[3]->mnemonic(), "s_setreg_imm32_b32");
+  ASSERT_NE(decoded[3]->raw_encoding(), nullptr);
+  EXPECT_EQ(decoded[3]->raw_encoding()[0], kSetReplayMode[0]);
+  EXPECT_EQ(decoded[3]->raw_encoding()[1], kSetReplayMode[1]);
+  EXPECT_EQ(decoded[4]->mnemonic(), "s_endpgm");
 }
 
 // A stub whose last instruction ends exactly at the end of `.text` has no padding after it, but it
@@ -12865,9 +13012,11 @@ TEST(BinaryTranslatorE2E, Gfx1250MaterializesSectionFinalClangUnreachableKernelS
   rocjitsu::AmdGpuCodeObject first_output(first.elf_bytes.data(), first.elf_bytes.size());
   const auto decoded =
       decode_text_instructions(*first_output.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_EQ(decoded.size(), 2u);
-  EXPECT_EQ(decoded[0]->mnemonic(), "s_setreg_imm32_b32");
-  EXPECT_EQ(decoded[1]->mnemonic(), "s_endpgm");
+  ASSERT_EQ(decoded.size(), 4u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "v_nop_e32");
+  EXPECT_EQ(decoded[1]->mnemonic(), "v_nop_e32");
+  EXPECT_EQ(decoded[2]->mnemonic(), "s_setreg_imm32_b32");
+  EXPECT_EQ(decoded[3]->mnemonic(), "s_endpgm");
   // Section end is the same inferred boundary as padding, so it must be reported the same way.
   EXPECT_TRUE(rocjitsu::test_support::has_warning_at(first, rocjitsu::DiagnosticKind::Legalization,
                                                      "synthesized s_endpgm boundary",
