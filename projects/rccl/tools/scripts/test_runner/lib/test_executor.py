@@ -1860,6 +1860,17 @@ class TestExecutor:
         base_by_name = {t.get("name"): t for t in filtered}
         planned = plan_entries(filtered, exec_mode="init-pipeline")
 
+        # Sibling grouping for legacy per-parent ordering: index each planned unit
+        # within its parent (config order) so the scheduler can keep a split
+        # sweep's sub-entries in order and fail-fast on the first failure.
+        _groups = {}
+        for _p in planned:
+            _groups.setdefault(_p.parent_name, []).append(_p)
+        sib_info = {}
+        for _parent, _members in _groups.items():
+            for _i, _p in enumerate(_members):
+                sib_info[_p.name] = (_parent, _i, len(_members))
+
         # Resolve the init (launch->READY) timeout. A finite default is important:
         # if an entry never publishes READY (stale binary without the rendezvous,
         # a rendezvous dir rank 0 cannot see on a multi-node/non-shared FS, a bad
@@ -1904,8 +1915,11 @@ class TestExecutor:
                 spec.emit_log_path = self._emit_log_path(p.name)
             if spec.gtest_json_path:
                 gtest_jsons.append(spec.gtest_json_path)
+            _parent, _idx, _total = sib_info.get(p.name, (p.parent_name, 0, 1))
             sched_entries.append(SchedEntry(seq=seq, label=p.name, kind=p.kind,
-                                            rendezvous=rdv, log_path=spec.emit_log_path))
+                                            rendezvous=rdv, log_path=spec.emit_log_path,
+                                            parent=_parent, sibling_index=_idx,
+                                            sibling_total=_total))
             specs[seq] = spec
             if rdv is not None:
                 rdvs.append(rdv)
@@ -1939,6 +1953,7 @@ class TestExecutor:
                     init_pool=getattr(self.args, "init_pool", 2),
                     init_timeout=init_timeout,
                     exec_timeout=None,  # per-entry timeout enforced in wait_exit
+                    fork_sweep_policy=getattr(self.args, "fork_sweep_policy", "legacy"),
                     log=(print if self.args.verbose else (lambda *a: None)),
                 )
                 sched.run()

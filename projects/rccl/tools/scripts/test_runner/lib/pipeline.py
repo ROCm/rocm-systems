@@ -243,6 +243,8 @@ class SchedEntry:
     rendezvous: Rendezvous = None   # pipeline entries only
     log_path: str = None
     parent: object = None           # optional parent-config id for roll-up/ordering
+    sibling_index: int = 0          # position within the parent's sweep (legacy/config order)
+    sibling_total: int = 1          # sub-entries for this parent (1 = not a split sweep)
     # runtime process state
     proc: object = None
     capture_fd: object = None
@@ -269,6 +271,19 @@ class SchedEntry:
             "execution_time": _d(self.t_go, self.t_exit),
             "total": _d(self.t_launch, self.t_exit),
         }
+
+
+@dataclass
+class _ParentGroup:
+    """Legacy-ordering state for one split fork sweep (plan section 5 #10)."""
+    total: int
+    next_index: int = 0                 # the only sibling index currently eligible
+    cancelled: bool = False             # a sibling failed -> fail-fast the rest
+    ready_by_index: dict = None         # sibling_index -> entry that reached READY early
+
+    def __post_init__(self):
+        if self.ready_by_index is None:
+            self.ready_by_index = {}
 
 
 class PipelineScheduler:
@@ -298,6 +313,7 @@ class PipelineScheduler:
 
     def __init__(self, entries, *, spawn, wait_exit, infer, terminate,
                  init_pool=2, init_timeout=None, exec_timeout=None,
+                 fork_sweep_policy="legacy",
                  poll_interval=0.05, monotonic=time.monotonic, log=lambda *a: None):
         self.entries = list(entries)
         self.total = len(self.entries)
@@ -308,9 +324,22 @@ class PipelineScheduler:
         self.init_pool = max(1, int(init_pool))
         self.init_timeout = init_timeout
         self.exec_timeout = exec_timeout
+        # 'legacy' preserves each split sweep's original sub-entry order + fail-fast
+        # (serial-equivalent); 'independent' runs sub-entries in READY order with no
+        # fail-fast (max overlap, different semantics).
+        self.fork_sweep_policy = fork_sweep_policy
         self.poll_interval = poll_interval
         self.monotonic = monotonic
         self.log = log
+
+        # Per-parent ordering state for legacy fork sweeps: only the next expected
+        # sibling of a parent is executor-eligible; a sibling failure cancels the
+        # parent's later siblings (fail-fast), matching the serial isCorrect
+        # short-circuit. Groups are keyed by parent; singletons are never gated.
+        self._parents = {}
+        for e in self.entries:
+            if e.sibling_total > 1 and e.parent not in self._parents:
+                self._parents[e.parent] = _ParentGroup(total=e.sibling_total)
 
         self.slot = threading.BoundedSemaphore(self.init_pool)
         self.exec_q = queue.Queue()
@@ -364,6 +393,59 @@ class PipelineScheduler:
                 self.completed.set()
                 self.exec_q.put(self._SENTINEL)
 
+    # ---- legacy per-parent ordering (plan section 5 #10) --------------------
+    def _grouped(self, entry):
+        """True if this entry is a sibling of a split fork sweep under legacy
+        ordering (singletons and 'independent' policy are never gated)."""
+        return (self.fork_sweep_policy == "legacy"
+                and entry.sibling_total > 1
+                and entry.parent in self._parents)
+
+    def _parent_cancelled(self, entry):
+        if not self._grouped(entry):
+            return False
+        with self.state_lock:
+            return self._parents[entry.parent].cancelled
+
+    def _on_ready(self, entry):
+        """Decide what to do when a grouped entry reaches READY: 'release'
+        (its turn -> execute), 'wait' (a lower-index sibling goes first), or
+        'cancel' (the parent already failed-fast). Ungrouped -> always release."""
+        if not self._grouped(entry):
+            return "release"
+        with self.state_lock:
+            g = self._parents[entry.parent]
+            if g.cancelled:
+                return "cancel"
+            g.ready_by_index[entry.sibling_index] = entry
+            return "release" if entry.sibling_index == g.next_index else "wait"
+
+    def _advance_parent(self, entry):
+        """After a grouped entry reaches a terminal result, promote the next
+        sibling (on pass/skip) or fail-fast the parent's remaining siblings.
+        Preserves the serial nested-loop order + isCorrect short-circuit."""
+        if not self._grouped(entry):
+            return
+        to_release, to_cancel = [], []
+        with self.state_lock:
+            g = self._parents[entry.parent]
+            if entry.result in ("PASSED", "SKIPPED"):
+                g.next_index = entry.sibling_index + 1
+                nxt = g.ready_by_index.get(g.next_index)
+                if nxt is not None and not nxt.finalized:
+                    to_release.append(nxt)     # it was waiting; now it's its turn
+            else:
+                g.cancelled = True             # fail-fast: cancel every later sibling
+                for e in self.entries:
+                    if (e.parent == entry.parent and e.sibling_total > 1
+                            and e.sibling_index > entry.sibling_index
+                            and not e.finalized):
+                        to_cancel.append(e)
+        for e in to_release:
+            self.exec_q.put(e)
+        for e in to_cancel:
+            self._finish_entry(e, RESULT_CANCELLED, "pending", terminate=True)
+
     # ---- threads -----------------------------------------------------------
     def _loader(self):
         try:
@@ -373,10 +455,19 @@ class PipelineScheduler:
                         self._visited.add(entry.seq)
                         self._finish_entry(entry, RESULT_CANCELLED, "pending", terminate=False)
                         continue
+                    if entry.finalized:
+                        # Already cancelled by a sibling's fail-fast (or elsewhere).
+                        self._visited.add(entry.seq)
+                        continue
                     if entry.kind == KIND_SERIAL:
                         # Hand to executor; the loader NEVER spawns a serial unit.
                         self._visited.add(entry.seq)
                         self.exec_q.put(entry)
+                        continue
+                    if self._grouped(entry) and self._parent_cancelled(entry):
+                        # Legacy fail-fast: don't launch a cancelled parent's sibling.
+                        self._visited.add(entry.seq)
+                        self._finish_entry(entry, RESULT_CANCELLED, "pending", terminate=False)
                         continue
                     # Pipeline: block on a slot (INITIALIZING+READY <= init_pool).
                     got = False
@@ -416,18 +507,29 @@ class PipelineScheduler:
         try:
             deadline = None if self.init_timeout is None else entry.t_launch + self.init_timeout
             while True:
+                if self._grouped(entry) and self._parent_cancelled(entry):
+                    # A sibling failed while this one was initializing: fail-fast it.
+                    self._finish_entry(entry, RESULT_CANCELLED, "init", terminate=True)
+                    return
                 if entry.rendezvous is not None and entry.rendezvous.ready():
                     with self.state_lock:
                         entry.t_ready = self.monotonic()
-                    self.exec_q.put(entry)      # slot still owned; executor takes over
+                    decision = self._on_ready(entry)
+                    if decision == "release":
+                        self.exec_q.put(entry)   # slot still owned; executor takes over
+                    elif decision == "cancel":
+                        self._finish_entry(entry, RESULT_CANCELLED, "init", terminate=True)
+                    # 'wait': held; _advance_parent releases it when its turn comes.
                     return
                 if entry.proc.poll() is not None:
                     entry.t_exit = self.monotonic()
                     entry.exit_code = entry.proc.returncode
                     self._finish_entry(entry, RESULT_FAILED, "init", terminate=False)
+                    self._advance_parent(entry)  # a sibling died in init -> fail-fast rest
                     return
                 if deadline is not None and self.monotonic() > deadline:
                     self._finish_entry(entry, RESULT_TIMED_OUT, "init", terminate=True)
+                    self._advance_parent(entry)
                     return
                 if self.stop_flag.is_set():
                     return                       # shutdown() will finalize it
@@ -472,6 +574,8 @@ class PipelineScheduler:
                 else:
                     unit.exit_code = rc
                     self._finish_entry(unit, self._infer(unit, rc), "exec", terminate=False)
+                # Legacy ordering: promote the next sibling, or fail-fast the rest.
+                self._advance_parent(unit)
             except BaseException as e:  # noqa: BLE001 -- contain GO/wait/infer faults
                 self._finish_entry(unit, RESULT_INFRA_ERROR, "exec", terminate=True)
                 self.worker_exc.put(e)

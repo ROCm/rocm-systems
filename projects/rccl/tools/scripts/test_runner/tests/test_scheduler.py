@@ -115,6 +115,17 @@ def _assert_model_a(entries):
         assert e.result is not None, f"entry {e.seq} has no result"
 
 
+def _parse_intervals(timeline):
+    rows = []
+    if os.path.exists(timeline):
+        with open(timeline) as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) == 3:
+                    rows.append((parts[0], float(parts[1]), float(parts[2])))
+    return rows
+
+
 # --------------------------------------------------------------------------- #
 # Real-subprocess invariant tests
 # --------------------------------------------------------------------------- #
@@ -272,6 +283,91 @@ def test_cancellation_all_terminal(tmp_path):
     assert sched.terminal == sched.settled == sched.total
     # At least some entries were cancelled (never admitted after stop).
     assert any(e.result == RESULT_CANCELLED for e in entries)
+
+
+def _grouped_entries(tmp_path, parent, specs):
+    base = str(tmp_path)
+    run = Rendezvous.new_run_uuid()
+    n = len(specs)
+    out = []
+    for i, s in enumerate(specs):
+        rdv = Rendezvous.for_entry(base, run, i)
+        e = SchedEntry(seq=i, label=s["label"], kind=KIND_PIPELINE, rendezvous=rdv,
+                       log_path=os.path.join(base, f"e{i}.log"),
+                       parent=parent, sibling_index=i, sibling_total=n)
+        e._params = s
+        out.append(e)
+    return out
+
+
+def test_legacy_in_order_despite_out_of_order_ready(tmp_path):
+    """s1 reaches READY well before s0, but legacy ordering must still execute
+    s0 first (its config order)."""
+    tl = os.path.join(str(tmp_path), "tl.txt")
+    entries = _grouped_entries(tmp_path, "P", [
+        {"label": "s0", "warm": 0.5, "exec": 0.1, "code": 0},   # slow to READY
+        {"label": "s1", "warm": 0.05, "exec": 0.1, "code": 0},  # READY first
+    ])
+    spawn, wait_exit, infer, terminate = _real_io(tl)
+    PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                      terminate=terminate, init_pool=2, init_timeout=30, exec_timeout=30,
+                      fork_sweep_policy="legacy").run()
+    assert all(e.result == "PASSED" for e in entries)
+    order = [r[0] for r in sorted(_parse_intervals(tl), key=lambda r: r[1])]
+    assert order == ["s0", "s1"], f"legacy order violated: {order}"
+
+
+def test_legacy_fail_fast_cancels_later_siblings(tmp_path):
+    tl = os.path.join(str(tmp_path), "tl.txt")
+    entries = _grouped_entries(tmp_path, "P", [
+        {"label": "s0", "warm": 0.05, "exec": 0.05, "code": 1},  # fails
+        {"label": "s1", "warm": 0.05, "exec": 0.05, "code": 0},
+        {"label": "s2", "warm": 0.05, "exec": 0.05, "code": 0},
+    ])
+    spawn, wait_exit, infer, terminate = _real_io(tl)
+    PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                      terminate=terminate, init_pool=3, init_timeout=30, exec_timeout=30,
+                      fork_sweep_policy="legacy").run()
+    r = {e.label: e.result for e in entries}
+    assert r["s0"] == RESULT_FAILED
+    assert r["s1"] == RESULT_CANCELLED and r["s2"] == RESULT_CANCELLED
+    _assert_model_a(entries)
+    ran = [x[0] for x in _parse_intervals(tl)]
+    assert "s1" not in ran and "s2" not in ran  # cancelled siblings never executed
+
+
+def test_legacy_fail_fast_on_init_failure(tmp_path):
+    tl = os.path.join(str(tmp_path), "tl.txt")
+    entries = _grouped_entries(tmp_path, "P", [
+        {"label": "s0", "warm": 0.05, "exec": 0.0, "code": 7, "skip_ready": True},  # dies pre-READY
+        {"label": "s1", "warm": 0.05, "exec": 0.05, "code": 0},
+        {"label": "s2", "warm": 0.05, "exec": 0.05, "code": 0},
+    ])
+    spawn, wait_exit, infer, terminate = _real_io(tl)
+    PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                      terminate=terminate, init_pool=3, init_timeout=30, exec_timeout=30,
+                      fork_sweep_policy="legacy").run()
+    r = {e.label: e.result for e in entries}
+    assert r["s0"] == RESULT_FAILED
+    assert r["s1"] == RESULT_CANCELLED and r["s2"] == RESULT_CANCELLED
+    _assert_model_a(entries)
+
+
+def test_independent_policy_runs_all_no_fail_fast(tmp_path):
+    tl = os.path.join(str(tmp_path), "tl.txt")
+    entries = _grouped_entries(tmp_path, "P", [
+        {"label": "s0", "warm": 0.05, "exec": 0.05, "code": 1},  # fails
+        {"label": "s1", "warm": 0.05, "exec": 0.05, "code": 0},
+        {"label": "s2", "warm": 0.05, "exec": 0.05, "code": 0},
+    ])
+    spawn, wait_exit, infer, terminate = _real_io(tl)
+    PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                      terminate=terminate, init_pool=3, init_timeout=30, exec_timeout=30,
+                      fork_sweep_policy="independent").run()
+    r = {e.label: e.result for e in entries}
+    assert r["s0"] == RESULT_FAILED and r["s1"] == "PASSED" and r["s2"] == "PASSED"
+    # still no overlap (single executor)
+    assert _max_overlap([(e.t_go, e.t_exit) for e in entries]) <= 1
 
 
 def test_finish_entry_idempotent(tmp_path):
