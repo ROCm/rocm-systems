@@ -82,9 +82,36 @@ void MPIEnvironment::warmup_device_code()
     // plan v10 §5.3.
     const pid_t pid = getpid();
 
+    // ---- Step 0: converge DEVICE-SETUP status across ranks (v11 CR-4).
+    // initialize_devices() ran per rank and set retCode on a rank-local failure;
+    // in pipeline mode it skips its own final barrier so this Allreduce is the
+    // sync point (no rank stranded). A test-only hook can fail a target rank's
+    // setup to exercise the convergence path.
+    int local_setup_ok = (retCode == 0) ? 1 : 0;
+    if(local_setup_ok)
+    {
+        // Also catch a rank whose device was never set (a device-init failure that
+        // asserted without setting retCode) so it does not warm on a bad context.
+        int dev = -1;
+        if(hipGetDevice(&dev) != hipSuccess) local_setup_ok = 0;
+    }
+    if(const char* r = std::getenv("RCCL_TEST_INJECT_SETUP_FAIL_RANK"))
+    {
+        if(std::atoi(r) == world_rank) local_setup_ok = 0;
+    }
+    int all_setup_ok = 0;
+    MPICHECK(MPI_Allreduce(&local_setup_ok, &all_setup_ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!all_setup_ok)
+    {
+        if(world_rank == 0) TEST_WARN("MPI device setup failed on at least one rank");
+        retCode = 1;
+        ASSERT_TRUE(false) << "MPI device setup failed on at least one rank";
+        return;
+    }
+
     // ---- Step 1: local device-code warmup. Retain status; NEVER early-return
     // (every rank must reach the collectives below). ----
-    int local_ok = (retCode == 0) ? 1 : 0;  // device init already failed -> not ok
+    int local_ok = 1;  // setup converged OK above
     if(local_ok)
     {
         int assigned_device = -1;
@@ -114,6 +141,11 @@ void MPIEnvironment::warmup_device_code()
             std::fflush(stderr);
         }
     }
+    // Test-only warmup-failure injection on a target rank (v11 CR-4).
+    if(const char* r = std::getenv("RCCL_TEST_INJECT_WARMUP_FAIL_RANK"))
+    {
+        if(std::atoi(r) == world_rank) local_ok = 0;
+    }
 
     // ---- Step 2: converge warmup status across ranks (MIN). ----
     int all_warmup_ok = 0;
@@ -134,6 +166,7 @@ void MPIEnvironment::warmup_device_code()
     if(world_rank == 0)
     {
         ready_publish_ok = RcclUnitTesting::Rendezvous::PublishReady() ? 1 : 0;
+        if(std::getenv("RCCL_TEST_INJECT_READY_FAIL")) ready_publish_ok = 0;  // test-only
     }
     // ---- Step 4: broadcast READY-publish status to EVERY rank. ----
     MPICHECK(MPI_Bcast(&ready_publish_ok, 1, MPI_INT, 0, MPI_COMM_WORLD));
@@ -153,9 +186,16 @@ void MPIEnvironment::warmup_device_code()
     int release = static_cast<int>(RcclUnitTesting::RELEASE_GO);
     if(world_rank == 0)
     {
-        double go_timeout = 0.0;  // 0 = indefinite (rely on liveness pipe / process group)
-        if(const char* t = std::getenv("RCCL_TEST_GO_TIMEOUT_SEC")) { go_timeout = std::atof(t); }
-        release = static_cast<int>(RcclUnitTesting::Rendezvous::WaitForGo(go_timeout));
+        if(std::getenv("RCCL_TEST_INJECT_GO_TIMEOUT"))
+        {
+            release = static_cast<int>(RcclUnitTesting::RELEASE_GO_TIMEOUT);  // test-only
+        }
+        else
+        {
+            double go_timeout = 0.0;  // 0 = indefinite (rely on liveness pipe / process group)
+            if(const char* t = std::getenv("RCCL_TEST_GO_TIMEOUT_SEC")) { go_timeout = std::atof(t); }
+            release = static_cast<int>(RcclUnitTesting::Rendezvous::WaitForGo(go_timeout));
+        }
     }
     MPICHECK(MPI_Bcast(&release, 1, MPI_INT, 0, MPI_COMM_WORLD));
 
@@ -333,8 +373,15 @@ void MPIEnvironment::initialize_devices()
     // Clean up node communicator
     MPI_Comm_free(&node_comm);
 
-    // Ensure all ranks have set their devices before proceeding
-    MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
+    // Ensure all ranks have set their devices before proceeding. In init-pipeline
+    // mode this barrier is SKIPPED (v11 CR-4): a rank-local failure above returns
+    // before reaching here, which would strand healthy ranks at this barrier;
+    // warmup_device_code()'s setup-status MPI_Allreduce is the convergence point
+    // instead, so every rank (healthy or failed) meets there.
+    if(std::getenv("RCCL_TEST_WARMUP_PROFILE") == nullptr)
+    {
+        MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
+    }
 
     devices_initialized = true;
 
