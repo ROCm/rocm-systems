@@ -92,8 +92,13 @@ try:
     import atexit
 
     def _finalize_at_exit():
-        if is_initialized() and not is_finalized():
-            finalize()
+        bindings = sys.modules.get(f"{__name__}.libpyrocprofsys")
+        if (
+            bindings is not None
+            and bindings.is_initialized()
+            and not bindings.is_finalized()
+        ):
+            bindings.finalize()
 
     atexit.register(_finalize_at_exit)
 
