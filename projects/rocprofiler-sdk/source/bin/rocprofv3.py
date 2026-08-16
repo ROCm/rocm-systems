@@ -616,6 +616,11 @@ For attachment profiling of running processes:
     )
     add_parser_bool_argument(
         basic_tracing_options,
+        "--hip-event-trace",
+        help="Trace HIP event record and stream wait barriers on the GPU",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
         "--memory-copy-trace",
         help="For collecting Memory Copy Traces. This was part of HIP and HSA traces in previous rocprof versions but is now a separate option",
     )
@@ -1824,6 +1829,7 @@ def run(app_args, args, **kwargs):
             "rocjpeg_trace",
             "rocshmem_trace",
             "hipfile_trace",
+            "hip_event_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1842,6 +1848,7 @@ def run(app_args, args, **kwargs):
             "rocjpeg_trace",
             "rocshmem_trace",
             "hipfile_trace",
+            "hip_event_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1894,6 +1901,7 @@ def run(app_args, args, **kwargs):
             ["kfd_queue_trace", "KFD_QUEUE_TRACE"],
             ["kfd_dropped_events_trace", "KFD_DROPPED_EVENTS_TRACE"],
             ["scratch_memory_trace", "SCRATCH_MEMORY_TRACE"],
+            ["hip_event_trace", "HIP_EVENT_TRACE"],
             ["group_by_queue", "GROUP_BY_QUEUE"],
         ]
     ).items():

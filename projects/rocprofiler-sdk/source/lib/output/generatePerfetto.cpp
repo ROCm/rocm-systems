@@ -80,7 +80,8 @@ write_perfetto(
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<tool_buffer_tracing_memory_allocation_ext_record_t>&    memory_allocation_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
-    const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>&       rocjpeg_api_gen)
+    const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>&       rocjpeg_api_gen,
+    const generator<tool_buffer_tracing_hip_event_ext_record_t>&            hip_event_gen)
 {
     namespace sdk = ::rocprofiler::sdk;
 
@@ -196,6 +197,13 @@ write_perfetto(
                 {
                     agent_thread_ids[itr.dst_agent_id].emplace(itr.thread_id);
                 }
+            }
+
+        for(auto ditr : hip_event_gen)
+            for(auto itr : hip_event_gen.get(ditr))
+            {
+                tids.emplace(itr.thread_id);
+                agent_stream_ids.emplace(itr.stream_id);
             }
 
         for(auto ditr : memory_allocation_gen)
@@ -585,6 +593,39 @@ write_perfetto(
                     itr.stream_id.handle);
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::memory_copy>::name,
                                 *_track,
+                                itr.end_timestamp);
+
+                tracing_session->FlushBlocking();
+            }
+
+        for(auto ditr : hip_event_gen)
+            for(auto itr : hip_event_gen.get(ditr))
+            {
+                auto name = tool_metadata.buffer_names.at(itr.kind, itr.operation);
+
+                auto& _track = stream_tracks.at(itr.stream_id);
+
+                TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::hip_event>::name,
+                                  ::perfetto::StaticString(name.data()),
+                                  _track,
+                                  itr.start_timestamp,
+                                  ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
+                                  "begin_ns",
+                                  itr.start_timestamp,
+                                  "end_ns",
+                                  itr.end_timestamp,
+                                  "delta_ns",
+                                  (itr.end_timestamp - itr.start_timestamp),
+                                  "kind",
+                                  itr.kind,
+                                  "operation",
+                                  itr.operation,
+                                  "hip_event_handle",
+                                  itr.hip_event_handle,
+                                  "source_queue_id",
+                                  itr.source_queue_id.handle);
+                TRACE_EVENT_END(sdk::perfetto_category<sdk::category::hip_event>::name,
+                                _track,
                                 itr.end_timestamp);
 
                 tracing_session->FlushBlocking();

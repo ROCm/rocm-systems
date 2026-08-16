@@ -277,10 +277,11 @@ struct buffer_ids
     rocprofiler_buffer_id_t hip_graph_trace         = {};
     rocprofiler_buffer_id_t rocshmem_api_trace      = {};
     rocprofiler_buffer_id_t hipfile_api_trace       = {};
+    rocprofiler_buffer_id_t hip_event_trace         = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 17>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 18>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -296,7 +297,8 @@ struct buffer_ids
                                                        ompt_trace,
                                                        hip_graph_trace,
                                                        rocshmem_api_trace,
-                                                       hipfile_api_trace};
+                                                       hipfile_api_trace,
+                                                       hip_event_trace};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -1271,6 +1273,16 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     tool::tool_buffer_tracing_memory_copy_ext_record_t{
                         *record, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
                     domain_type::MEMORY_COPY);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_EVENT)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_hip_event_record_t*>(header->payload);
+
+                auto attr = get_ext_attribution(record);
+                tool::write_ring_buffer(
+                    tool::tool_buffer_tracing_hip_event_ext_record_t{*record, attr.stream_id},
+                    domain_type::HIP_EVENT);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
             {
@@ -3092,7 +3104,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                             ompt_ops},
                       buffer_service_config{tool::get_config().hip_graph_trace,
                                             ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,
-                                            get_buffers().hip_graph_trace}})
+                                            get_buffers().hip_graph_trace},
+                      buffer_service_config{tool::get_config().hip_event_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                                            get_buffers().hip_event_trace}})
 
     {
         if(itr.option)
@@ -3821,7 +3836,7 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
     // tallied so that rocpd/JSON output is produced even when one of these is the only
     // active trace domain.
     if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM &&
-                 DomainT != domain_type::HIPFILE)
+                 DomainT != domain_type::HIPFILE && DomainT != domain_type::HIP_EVENT)
     {
         if(tool::get_config().stats || tool::get_config().summary_output)
         {
@@ -3883,6 +3898,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
     auto rocjpeg_output  = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
     auto rocshmem_output = tool::rocshmem_buffered_output_t{tool::get_config().rocshmem_api_trace};
     auto hipfile_output  = tool::hipfile_buffered_output_t{tool::get_config().hipfile_api_trace};
+    auto hip_event_output =
+        tool::hip_event_buffered_output_ext_t{tool::get_config().hip_event_trace};
     auto pc_sampling_stochastic_output =
         tool::pc_sampling_stochastic_buffered_output_t{tool::get_config().pc_sampling_stochastic};
 
@@ -3930,6 +3947,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
     generate_output(hip_graph_output, outdata, contributions, cleanups, skip_output);
     generate_output(rocshmem_output, outdata, contributions, cleanups, skip_output);
     generate_output(hipfile_output, outdata, contributions, cleanups, skip_output);
+    generate_output(hip_event_output, outdata, contributions, cleanups, skip_output);
 
     if(!skip_output && tool::get_config().advanced_thread_trace &&
        !tool_metadata->att_filenames.empty())
@@ -3998,7 +4016,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                          spm_counters_output.get_generator(),
                          hip_graph_output.get_generator(),
                          rocshmem_output.get_generator(),
-                         hipfile_output.get_generator());
+                         hipfile_output.get_generator(),
+                         hip_event_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -4020,7 +4039,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                              rccl_output.get_generator(),
                              memory_allocation_output.get_generator(),
                              rocdecode_output.get_generator(),
-                             rocjpeg_output.get_generator());
+                             rocjpeg_output.get_generator(),
+                             hip_event_output.get_generator());
     }
 
     if(tool::get_config().rocpd_output && outdata.num_output > 0 &&
@@ -4044,7 +4064,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                           ompt_output.get_generator(),
                           hip_graph_output.get_generator(),
                           rocshmem_output.get_generator(),
-                          hipfile_output.get_generator());
+                          hipfile_output.get_generator(),
+                          hip_event_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&

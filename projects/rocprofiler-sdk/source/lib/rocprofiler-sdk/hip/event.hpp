@@ -52,12 +52,12 @@ get_ids();
 using profiling_time = tracing::profiling_time;
 
 void
-barrier_complete(tracing::tracing_data&                               tracing_data_v,
-                 rocprofiler_thread_id_t                              tid,
-                 uint64_t                                             internal_corr_id,
-                 uint64_t                                             ancestor_corr_id,
-                 profiling_time                                       barrier_time,
-                 rocprofiler_hip_event_operation_t                    operation,
+barrier_complete(tracing::tracing_data&                        tracing_data_v,
+                 rocprofiler_thread_id_t                       tid,
+                 uint64_t                                      internal_corr_id,
+                 uint64_t                                      ancestor_corr_id,
+                 profiling_time                                barrier_time,
+                 rocprofiler_hip_event_operation_t             operation,
                  rocprofiler_callback_tracing_hip_event_data_t callback_record);
 }  // namespace event
 }  // namespace hip

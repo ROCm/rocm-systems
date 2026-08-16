@@ -136,6 +136,7 @@ struct config : output_config
     bool   ompt_trace                    = get_env("ROCPROF_OMPT_TRACE", false);
     bool   rocshmem_api_trace            = get_env("ROCPROF_ROCSHMEM_API_TRACE", false);
     bool   hipfile_api_trace             = get_env("ROCPROF_HIPFILE_API_TRACE", false);
+    bool   hip_event_trace               = get_env("ROCPROF_HIP_EVENT_TRACE", false);
     bool   list_metrics                  = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file      = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   advanced_thread_trace         = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
