@@ -59,15 +59,26 @@ GIN_SDMA_AG_HD inline bool chunkUsesLsaTier(size_t chunkBytes_, size_t sdmaThres
   return chunkBytes_ <= sdmaThreshold;
 }
 
-// Resolve the effective SDMA crossover threshold the kernel reads from the GIN
-// Anvil-SDMA device context: use the context value only when the context is
-// present and its layout magic validated; otherwise fall back to the compiled
-// default. Mirrors AllGatherGetSdmaThreshold() so the fallback path is testable
-// without a live device context.
-GIN_SDMA_AG_HD inline size_t resolveSdmaThreshold(bool ctxPresent, bool magicValid,
-                                                  size_t ctxThreshold, size_t defaultThreshold) {
-  if (ctxPresent && magicValid) return ctxThreshold;
-  return defaultThreshold;
+// Compiled default AllGather LSA<->SDMA crossover (bytes per rank). 32 KiB is the
+// measured crossover on 8x MI355X (gfx950): LSA-direct xGMI stores win at/below
+// it (plateau ~6.3 GB/s), Anvil-SDMA copy engines win above it (scale to
+// ~390 GB/s). Used when neither the per-collective nor the global env override
+// is set. Decoupled from the backend gin.put inline threshold
+// (NCCL_GIN_ANVIL_SDMA_THRESHOLD / ctx->sdmaThreshold), which stays global.
+static constexpr size_t kAllGatherSdmaThresholdDefault = 32768;
+
+// Resolve the per-collective AllGather crossover threshold with precedence:
+// per-collective env (NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER) > global env
+// (NCCL_GIN_ANVIL_SDMA_THRESHOLD) > compiled default. "Set" means the env var was
+// present and parsed (an explicit 0 is honored, forcing the all-SDMA tier). Pure
+// so the precedence is unit-testable without the environment; the getenv/parse
+// wrapper lives host-side in AllGatherResolveSdmaThreshold() (all_gather.cu).
+GIN_SDMA_AG_HD inline size_t pickSdmaThreshold(bool perCollSet, unsigned long long perCollVal,
+                                               bool globalSet, unsigned long long globalVal,
+                                               size_t compiledDefault) {
+  if (perCollSet) return (size_t)perCollVal;
+  if (globalSet) return (size_t)globalVal;
+  return compiledDefault;
 }
 
 // AllGather algorithm / bus bandwidth (GB/s) given the per-rank element count,
