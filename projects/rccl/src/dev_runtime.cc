@@ -40,7 +40,7 @@ NCCL_PARAM(RMADisable, "RMA_DISABLE", 0);
 // alloc.h). Treat both as a CPU-backed (sysmem) segment so the elastic-buffer
 // consumer paths recognize AMD host segments.
 static inline bool ncclSymIsHostSegment(CUmemLocationType type) {
-  if (type == CU_MEM_LOCATION_TYPE_HOST_NUMA) return true;
+  if (ncclIsHostNumaLocationType(type)) return true;
 #if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION >= 71200
   if (type == CU_MEM_LOCATION_TYPE_HOST) return true;
 #endif
@@ -413,8 +413,9 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
   for (int segment = 0; segment < numSegments; segment++) {
     symLsaMessage* msg = messages + devr->lsaSelf * maxSegments + segment;
     NCCLCHECKGOTO(symMemoryExportSegmentHandle(comm, msg, mem->memHandles[segment], segmentSizes[segment]), ret, fail);
-    INFO(NCCL_REG, "[%d] Segment %d, Type : %d, numSegments : %d, Segment size : %ld, memHandle : %lld", devr->lsaSelf,
-         segment, msg->type, numSegments, msg->segmentSize, msg->memHandle);
+    INFO(NCCL_REG, "[%d] Segment %d, Type : %d, numSegments : %d, Segment size : %zu, memHandle : 0x%llx",
+         devr->lsaSelf, segment, msg->type, numSegments, msg->segmentSize,
+         (unsigned long long)(uintptr_t)msg->memHandle);
   }
 
   NCCLCHECKGOTO(bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, messages,
@@ -603,7 +604,6 @@ static void symTeamDestroyAll(struct ncclComm* comm) {
 static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrMemory* mem) {
   ncclResult_t ret = ncclSuccess;
   int numSegmentsRegistered = 0;
-  size_t offset = 0;
   CUmemLocationType* segmentTypes = nullptr;
   size_t* paddedSegmentSizes = nullptr;
   size_t* globalPaddedSegmentSizes = nullptr;
@@ -1386,7 +1386,7 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
 
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
   free(memHandles);
-  cudaThreadExchangeStreamCaptureMode(&captureMode);
+  (void)cudaThreadExchangeStreamCaptureMode(&captureMode);
   return ret;
 
 fail_locReg_memHandle_mem_stream_win:
@@ -1406,7 +1406,7 @@ fail_locReg_memHandle:
 fail_locReg:
   ncclCommDeregister(comm, localRegHandle);
 fail:
-  cudaThreadExchangeStreamCaptureMode(&captureMode);
+  (void)cudaThreadExchangeStreamCaptureMode(&captureMode);
   *outWinDev = nullptr;
   return ret;
 }
@@ -1561,7 +1561,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   struct ncclDevrWindow* win = nullptr;
   struct ncclWindow_vidmem* winHost = nullptr;
   size_t ginSignalShadowsOffset = 0;
-  size_t ginAnvilNetSignalsOffset = 0;
+  [[maybe_unused]] size_t ginAnvilNetSignalsOffset = 0;
   int nGinContextsTotal = 0;
   void* outDevCommPreserve = nullptr;
   struct ncclDevComm outDevCommTmp;
@@ -1809,7 +1809,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   if (outDevCommPreserve) {
     NCCLCHECKGOTO(devCompat->devCommCopyNewToOld(comm, outDevCommPreserve, outDevComm), ret, fail_stream_mem_win);
   }
-  cudaThreadExchangeStreamCaptureMode(&captureMode);
+  (void)cudaThreadExchangeStreamCaptureMode(&captureMode);
   return ret;
 
 fail_stream_mem_win:
@@ -1823,7 +1823,7 @@ fail_stream_mem:
 fail_stream:
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail:
-  cudaThreadExchangeStreamCaptureMode(&captureMode);
+  (void)cudaThreadExchangeStreamCaptureMode(&captureMode);
   return ret;
 }
 
@@ -1966,7 +1966,7 @@ fail_dev_stream:
 fail_dev:
   CUDACHECKIGNORE(cudaSetDevice(saveDev));
 fail:
-  cudaThreadExchangeStreamCaptureMode(&captureMode);
+  (void)cudaThreadExchangeStreamCaptureMode(&captureMode);
 exit:
   return ret;
 }

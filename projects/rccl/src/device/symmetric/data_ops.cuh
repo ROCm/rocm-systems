@@ -252,7 +252,7 @@ static __device__ __forceinline__ void accumulateLoads(Red<Acc> red, bool inPlac
 
   if (srcIx < nSrcs) {
     EltPack tmp[UnrollSrcs - 1 ? UnrollSrcs - 1 : 1][UnrollData] = {};
-    NVCC_PRAGMA_UNROLL((UnrollSrcs - 1 ? UnrollSrcs - 1 : 1))
+    NVCC_PRAGMA_UNROLL(UnrollSrcs - 1 ? UnrollSrcs - 1 : 1)
     for (int su = 0; su < UnrollSrcs - 1; su++) {
       EltPack* srcPtr = getSrc(srcIx + su);
       if (!(su != 0 && nSrcs <= srcIx + su)) {
@@ -264,7 +264,7 @@ static __device__ __forceinline__ void accumulateLoads(Red<Acc> red, bool inPlac
         }
       }
     }
-    NVCC_PRAGMA_UNROLL((UnrollSrcs - 1 ? UnrollSrcs - 1 : 1))
+    NVCC_PRAGMA_UNROLL(UnrollSrcs - 1 ? UnrollSrcs - 1 : 1)
     for (int su = 0; su < UnrollSrcs - 1; su++) {
       if (su != 0 && nSrcs <= srcIx + su) break;
       NVCC_PRAGMA_UNROLL(UnrollData)

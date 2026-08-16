@@ -82,6 +82,13 @@
 #define NCCL_HOST_DEVICE_INLINE inline __attribute__((always_inline))
 #endif
 
+// Compare through int to avoid enum-range warnings when HIP's enum does not
+// model CUDA's host-NUMA enumerator on older ROCm.
+template <typename MemLocationT>
+NCCL_HOST_DEVICE_INLINE bool ncclIsHostNumaLocationType(MemLocationT type) {
+  return static_cast<int>(type) == static_cast<int>(CU_MEM_LOCATION_TYPE_HOST_NUMA);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Architecture detection
 //

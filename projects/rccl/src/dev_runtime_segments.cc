@@ -74,7 +74,7 @@ ncclResult_t ncclDevrValidateHandleLocationType(CUmemGenericAllocationHandle mem
   ncclResult_t ret = ncclSuccess;
   CUmemAllocationProp prop;
   CUCHECKGOTO(cuMemGetAllocationPropertiesFromHandle(&prop, memHandle), ret, exit);
-  if (prop.location.type != CU_MEM_LOCATION_TYPE_HOST_NUMA && prop.location.type != CU_MEM_LOCATION_TYPE_DEVICE) {
+  if (!ncclIsHostNumaLocationType(prop.location.type) && prop.location.type != CU_MEM_LOCATION_TYPE_DEVICE) {
     WARN("Segment %d has unsupported location type %d. Symmetric memory currently only supports "
          "CU_MEM_LOCATION_TYPE_HOST_NUMA and CU_MEM_LOCATION_TYPE_DEVICE.",
          segment, (int)prop.location.type);
