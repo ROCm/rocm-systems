@@ -1958,28 +1958,50 @@ class TestExecutor:
                 for entry in sched_entries:
                     spec = specs[entry.seq]
                     dur = (entry.t_exit - entry.t_launch) if (entry.t_launch and entry.t_exit) else 0
+                    is_serial = (entry.kind == KIND_SERIAL)
                     rec = {
                         "result": entry.result, "duration": dur, "suite": suite_name,
                         "log_file": spec.emit_log_path, "exit_code": entry.exit_code,
                         "phase": entry.phase, "binary": spec.binary, "is_gtest": spec.is_gtest,
                         "num_nodes": spec.num_nodes, "num_gpus": spec.num_gpus,
                         "num_ranks": spec.num_ranks, "exec_mode": spec.exec_mode,
+                        # Combined-interval execution-serialization evidence
+                        # (review amendment 1): pipeline exec = [GO, reap]; serial
+                        # exec = [spawn, reap] (whole lifetime owns the slot). Both
+                        # kinds feed one max-EXECUTING==1 check. Monotonic stamps.
+                        "entry_kind": "serial" if is_serial else "pipeline",
+                        "exec_start_reason": "serial_spawned" if is_serial else "go_issued",
+                        "exec_start": entry.t_launch if is_serial else entry.t_go,
+                        "exec_end": entry.t_exit,
+                        "launch_ts": entry.t_launch, "ready_ts": entry.t_ready,
+                        "go_ts": entry.t_go, "exit_ts": entry.t_exit,
                     }
                     # Collected unconditionally so --queue-wait-warn works; the
                     # aggregate presentation is gated on --phase-timings.
                     rec["phase_timings"] = entry.phase_timings()
+                    # Preserve a failed entry's rendezvous artifacts for postmortem
+                    # (v10 §7): clean up only on a clean pass/skip.
+                    ok = entry.result in ("PASSED", "SKIPPED")
+                    if entry.rendezvous is not None:
+                        if ok:
+                            entry.rendezvous.cleanup()
+                        else:
+                            rec["rendezvous_dir"] = entry.rendezvous.dir
+                            print(f"  init-pipeline: retained rendezvous for failed "
+                                  f"{entry.label}: {entry.rendezvous.dir}")
                     results_by_name[entry.label] = rec
                 if sched.failed():
                     print("WARNING: init-pipeline recorded a scheduler/launch fault "
                           "(INFRA_ERROR); see per-entry results.")
         finally:
+            # gtest JSON temp files are always safe to remove; rendezvous dirs are
+            # cleaned per-entry above (retained on failure). Any rdv left when the
+            # scheduler itself raised is also retained (not cleaned here).
             for j in gtest_jsons:
                 try:
                     os.unlink(j)
                 except OSError:
                     pass
-            for r in rdvs:
-                r.cleanup()
         return results_by_name
 
     def plan_init_pipeline_run(self, test_suites):

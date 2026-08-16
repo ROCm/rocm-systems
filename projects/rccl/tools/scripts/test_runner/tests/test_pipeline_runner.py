@@ -21,6 +21,7 @@ from lib.pipeline_runner import (  # noqa: E402
     assemble_records,
     classify_errors,
     eligibility_from_test,
+    max_concurrent_execution,
     plan_entries,
     planning_summary,
     resolve_test,
@@ -212,6 +213,25 @@ def test_overbroad_default_guard():
     row["provenance"] = "fallback"  # simulate an implicit non-none default
     errs = run_guards([row], exec_mode="init-pipeline")
     assert any("implicit" in e for e in errs)
+
+
+def test_max_concurrent_execution_combined_kinds():
+    # pipeline [10,12], serial [12,14], pipeline [14,16] -> never 2 (serial slots in).
+    recs = [
+        {"entry_kind": "pipeline", "exec_start": 10.0, "exec_end": 12.0},
+        {"entry_kind": "serial", "exec_start": 12.0, "exec_end": 14.0},
+        {"entry_kind": "pipeline", "exec_start": 14.0, "exec_end": 16.0},
+        {"entry_kind": "pipeline", "exec_start": None, "exec_end": None},  # rejected -> skipped
+    ]
+    assert max_concurrent_execution(recs) == 1
+
+
+def test_max_concurrent_execution_detects_overlap():
+    recs = [
+        {"exec_start": 10.0, "exec_end": 13.0},
+        {"exec_start": 12.0, "exec_end": 15.0},  # overlaps the first
+    ]
+    assert max_concurrent_execution(recs) == 2
 
 
 def test_planning_summary_counts_subentries():

@@ -39,6 +39,20 @@ from lib.pipeline import (  # noqa: E402
     RESULT_TIMED_OUT,
     SchedEntry,
 )
+from lib.pipeline_runner import max_concurrent_execution  # noqa: E402
+
+
+def _exec_records(entries):
+    """Build the combined-interval records the runner emits (both kinds)."""
+    out = []
+    for e in entries:
+        is_serial = (e.kind == KIND_SERIAL)
+        out.append({
+            "entry_kind": "serial" if is_serial else "pipeline",
+            "exec_start": e.t_launch if is_serial else e.t_go,
+            "exec_end": e.t_exit,
+        })
+    return out
 
 FAKE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_fake_entry.py")
 
@@ -454,6 +468,28 @@ def test_continuous_launches_during_exec(tmp_path):
                       loader_policy="continuous").run()
     perf, e1 = entries[0], entries[1]
     assert e1.t_launch < perf.t_exit, "continuous should launch e1 during perf exec"
+
+
+def test_combined_serial_pipeline_intervals_no_overlap(tmp_path):
+    """Review amendment 1: a serial control ordered between two pipeline entries;
+    the combined execution intervals of BOTH kinds must never overlap (one
+    executor). Uses --release-order=config so the serial runs in the middle."""
+    tl = os.path.join(str(tmp_path), "tl.txt")
+    entries = _entries(tmp_path, [
+        {"label": "P0", "warm": 0.15, "exec": 0.2, "code": 0, "kind": KIND_PIPELINE},
+        {"label": "S1", "warm": 0.05, "exec": 0.2, "code": 0, "kind": KIND_SERIAL},
+        {"label": "P2", "warm": 0.15, "exec": 0.2, "code": 0, "kind": KIND_PIPELINE},
+    ])
+    spawn, wait_exit, infer, terminate = _real_io(tl)
+    PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                      terminate=terminate, init_pool=2, init_timeout=30, exec_timeout=30,
+                      release_order="config").run()
+    assert all(e.result == "PASSED" for e in entries)
+    # Combined intervals (pipeline [go,exit] + serial [spawn,exit]) never overlap.
+    assert max_concurrent_execution(_exec_records(entries)) == 1
+    # And config order held across kinds.
+    order = [r[0] for r in sorted(_parse_intervals(tl), key=lambda r: r[1])]
+    assert order == ["P0", "S1", "P2"], f"cross-kind order violated: {order}"
 
 
 def test_finish_entry_idempotent(tmp_path):

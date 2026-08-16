@@ -365,6 +365,28 @@ def aggregate_phase_timings(records):
     return out
 
 
+def max_concurrent_execution(records):
+    """Max overlap of execution intervals across BOTH entry kinds (review
+    amendment 1): pipeline exec = [go, reap], serial exec = [spawn, reap]. The
+    run-wide invariant is EXECUTING <= 1, so this must be 1. Records without an
+    execution interval (rejected/cancelled before exec) are skipped. Uses the
+    ``exec_start``/``exec_end`` monotonic stamps the runner records."""
+    events = []
+    for r in records:
+        a = r.get("exec_start")
+        b = r.get("exec_end")
+        if a is None or b is None or b <= a:
+            continue
+        events.append((a, 1))
+        events.append((b, -1))
+    events.sort(key=lambda x: (x[0], x[1]))  # close before open at a tie
+    cur = peak = 0
+    for _, delta in events:
+        cur += delta
+        peak = max(peak, cur)
+    return peak
+
+
 def topline_counts(records):
     """Count PASSED/FAILED/SKIPPED over only the top-line records."""
     counts = {RESULT_PASSED: 0, RESULT_FAILED: 0, RESULT_SKIPPED: 0}

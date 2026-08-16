@@ -1,0 +1,34 @@
+{
+  "_comment": "Curated init-pipeline warm-gate config (plan v10 §9). Exactly three entries: one known-safe MPI collective (mpi_coll), one pinned single-generation fork collective (fork_coll), and one host-only serial control (none). Fault-injection / timeout / GDR-flush / visibility-mismatch / plugin-lifecycle / first-init-semantics tests are deliberately EXCLUDED (warmup changes the state they probe). Run the exact commands in INIT_PIPELINE_WARMGATE_COMMANDS.md.",
+  "test_suites": [
+    {
+      "suite_details": { "name": "init_pipeline_warmgate", "enabled": true },
+      "tests": [
+        {
+          "name": "AllReduce.OutOfPlace",
+          "binary": "rccl-UnitTests",
+          "warmup_profile": "fork_coll",
+          "fork_expand": { "num_gpus": [8], "process_mask": 1, "max_ranks_per_gpu": 1 },
+          "num_ranks": 1,
+          "timeout": 600
+        },
+        {
+          "name": "AllReduceMPITest.OutOfPlaceKnownSafe",
+          "binary": "rccl-UnitTestsMPI",
+          "warmup_profile": "mpi_coll",
+          "num_ranks": 8,
+          "timeout": 600,
+          "_comment": "Replace with a specific known-safe AllReduce MPI test that PASSED in phase0j; must NOT be a fault-injection / GDR-flush / visibility-mismatch / first-init-semantics case."
+        },
+        {
+          "name": "BitOpsTests.HostOnlySerialControl",
+          "binary": "rccl-UnitTestsFixtures",
+          "warmup_profile": "none",
+          "num_ranks": 1,
+          "timeout": 300,
+          "_comment": "Host-only serial control: must receive NEITHER RCCL_TEST_WARMUP_PROFILE NOR rendezvous env, and must never be launched by the loader. Replace name/binary with a real host-only test in your build."
+        }
+      ]
+    }
+  ]
+}
