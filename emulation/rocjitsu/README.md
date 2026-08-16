@@ -24,7 +24,7 @@ real hardware. Supports three execution strategies:
 | RDNA1&trade; | gfx1010 | GFX10 | Experimental |
 | RDNA2&trade; | gfx1030 | GFX10 | Experimental |
 | RDNA3&trade; | gfx110x | GFX11 | Beta |
-| RDNA3.5&trade; | gfx1150 | GFX11.5 | Experimental |
+| RDNA3.5&trade; | gfx1151 | GFX11.5 | Experimental |
 | RDNA4&trade; | gfx120x | GFX12 | Beta |
 | RISC-V | RV64I | RV | Experimental |
 
