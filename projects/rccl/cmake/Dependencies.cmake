@@ -79,40 +79,9 @@ elseif(GTest_FOUND AND BUILD_TESTS)
     set(GMOCK_BOTH_LIBRARIES "GTest::gmock;GTest::gmock_main")
 endif()
 
-# Find or download/install rocm-cmake project
-set( PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern )
-find_package(ROCM 0.7.3 QUIET CONFIG PATHS /opt/rocm)
-if(NOT ROCM_FOUND)
-    set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
-    file(
-        DOWNLOAD https://github.com/ROCm/rocm-cmake/archive/${rocm_cmake_tag}.zip
-        ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}.zip
-        STATUS rocm_cmake_download_status LOG rocm_cmake_download_log
-    )
-    list(GET rocm_cmake_download_status 0 rocm_cmake_download_error_code)
-    if(rocm_cmake_download_error_code)
-        message(FATAL_ERROR "Error: downloading "
-            "https://github.com/ROCm/rocm-cmake/archive/${rocm_cmake_tag}.zip failed "
-            "error_code: ${rocm_cmake_download_error_code} "
-            "log: ${rocm_cmake_download_log} "
-        )
-    endif()
-
-    execute_process(
-        COMMAND ${CMAKE_COMMAND} -E tar xzf ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}.zip
-        WORKING_DIRECTORY ${PROJECT_EXTERN_DIR}
-        RESULT_VARIABLE rocm_cmake_unpack_error_code
-    )
-    execute_process( COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_PREFIX=${PROJECT_EXTERN_DIR}/rocm-cmake .
-      WORKING_DIRECTORY ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag} )
-    execute_process( COMMAND ${CMAKE_COMMAND} --build rocm-cmake-${rocm_cmake_tag} --target install
-      WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-
-    if(rocm_cmake_unpack_error_code)
-        message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/rocm-cmake-${rocm_cmake_tag}.zip failed")
-    endif()
-    find_package( ROCM 0.7.3 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
-endif()
+# Find ROCm CMake build tools.
+# find_package(ROCM) has been deprecated since ROCm 6.4.
+find_package(ROCmCMakeBuildTools REQUIRED CONFIG PATHS /opt/rocm)
 
 set(CMAKE_INSTALL_LIBDIR lib CACHE STRING "Define install directory for libraries" FORCE)
 
