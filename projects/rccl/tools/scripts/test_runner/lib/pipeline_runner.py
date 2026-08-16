@@ -134,6 +134,14 @@ def planning_summary(resolved):
     }
 
 
+def stable_id(row):
+    """Stable per-entry identity (v11 CR-7): suite + runner label + binary +
+    test_filter (+ the label already carries expanded fork selectors). Used for
+    duplicate detection and to key correctness diffs."""
+    parts = [row.get("suite"), row.get("name"), row.get("binary"), row.get("test_filter")]
+    return "|".join("" if p is None else str(p) for p in parts)
+
+
 def run_guards(resolved, *, exec_mode, allow_serial_only=False):
     """Whole-run guardrails (v10 §7 / v11 CR-2). Returns a deduped list of fatal
     error messages; a non-empty list means the runner must exit BEFORE spawning
@@ -148,6 +156,16 @@ def run_guards(resolved, *, exec_mode, allow_serial_only=False):
             ident = f"{r.get('suite', '?')}/{r.get('name')}"
             reason = r.get("error") or r.get("exclusion_reason") or "rejected"
             errors.append(f"{ident}: rejected -- {reason}")
+
+    # Duplicate stable identity -> fatal (v11 CR-7): two entries that resolve to
+    # the same suite/label/binary/filter would collide in results + diffs.
+    seen_ids = {}
+    for r in resolved:
+        sid = stable_id(r)
+        if sid in seen_ids:
+            errors.append(f"duplicate stable id {sid!r} ({seen_ids[sid]} and {r.get('name')})")
+        else:
+            seen_ids[sid] = r.get("name")
 
     executable = sum(r["pipeline_subentries"] for r in resolved if r["disposition"] == "pipeline")
     if executable == 0 and not allow_serial_only:

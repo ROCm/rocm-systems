@@ -250,6 +250,17 @@ def test_rejected_entry_is_globally_fatal():
     assert any("N" in e and "rejected" in e for e in errs)
 
 
+def test_duplicate_stable_id_is_fatal():
+    from lib.pipeline_runner import stable_id
+    a = resolve_test({"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll",
+                      "test_filter": "M.C"}, exec_mode="init-pipeline")
+    b = resolve_test({"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll",
+                      "test_filter": "M.C"}, exec_mode="init-pipeline")
+    a["suite"] = b["suite"] = "S"
+    assert stable_id(a) == stable_id(b)
+    assert any("duplicate stable id" in e for e in run_guards([a, b], exec_mode="init-pipeline"))
+
+
 def test_serial_entry_not_fatal_in_mixed_run():
     resolved = [
         resolve_test({"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll",

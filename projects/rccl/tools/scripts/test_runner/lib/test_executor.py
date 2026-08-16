@@ -2055,6 +2055,17 @@ class TestExecutor:
         print(f"  serial entries:              {s['serial_entries']}")
         print(f"  executable pipeline entries: {s['executable_pipeline_entries']}")
 
+        # Persist the manifest as an artifact (v11 CR-7), not only stdout.
+        try:
+            from lib.pipeline_runner import stable_id
+            manifest = [{"stable_id": stable_id(r), **r} for r in resolved]
+            mpath = os.path.join(self.log_dir, "init_pipeline_manifest.json")
+            with open(mpath, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2, default=str)
+            print(f"  init-pipeline manifest written: {mpath}")
+        except OSError as e:
+            print(f"WARNING: could not persist init-pipeline manifest: {e}")
+
         errors = run_guards(resolved, exec_mode="init-pipeline",
                             allow_serial_only=getattr(self.args, "allow_serial_only", False))
         return resolved, errors
