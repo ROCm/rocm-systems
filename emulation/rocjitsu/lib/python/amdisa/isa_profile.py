@@ -231,7 +231,17 @@ class IsaProfile(ABC):
 
     @property
     def generated_arch_name(self) -> str | None:
-        """Override for the generated C++ architecture namespace/directory."""
+        """Override for the logical architecture name used by code generation."""
+        return None
+
+    @property
+    def generated_dir_name(self) -> str | None:
+        """Override for the generated and handwritten filesystem directory."""
+        return None
+
+    @property
+    def cpp_namespace(self) -> str | None:
+        """Override for the generated C++ architecture namespace."""
         return None
 
     @property
@@ -702,6 +712,15 @@ class _AmdgpuProfileBase(IsaProfile):
     _SKIP_DPP_SDWA: bool = False
 
     @property
+    def split_execution_sources(self) -> bool:
+        """Split every built-in AMDGPU target into model and execution sources.
+
+        Custom profiles may override this for compatibility with the generator's
+        non-split fallback, which remains covered independently.
+        """
+        return True
+
+    @property
     def flt_name_map(self) -> dict[float, str]:
         return _FLOAT_NAME_MAP
 
@@ -854,6 +873,16 @@ class _AmdgpuProfileBase(IsaProfile):
         return 256
 
     @property
+    def descriptor_vgpr_count_granule_wave32(self) -> int:
+        """Wave32 VGPR count granule encoded in compute descriptors."""
+        return 0
+
+    @property
+    def descriptor_vgpr_count_granule_wave64(self) -> int:
+        """Wave64 VGPR count granule encoded in compute descriptors."""
+        return 4
+
+    @property
     def descriptor_sgpr_count_encoded(self) -> bool:
         """Whether zero SGPR granule fields still use descriptor encoding."""
         return True
@@ -925,6 +954,26 @@ class _AmdgpuProfileBase(IsaProfile):
     def vopd_slot_ops(self) -> tuple[VopdSlotOp, ...]:
         """MRISA V_DUAL_* slot opcode table for generated VOPD support."""
         return ()
+
+    @property
+    def vopd_x_slot_opcodes(self) -> frozenset[int]:
+        """Opcode values accepted in the VOPD X slot."""
+        return frozenset(op.opcode for op in self.vopd_slot_ops)
+
+    @property
+    def vopd_y_slot_opcodes(self) -> frozenset[int]:
+        """Opcode values accepted in the VOPD Y slot."""
+        return frozenset(op.opcode for op in self.vopd_slot_ops)
+
+    @property
+    def vopd3_x_slot_opcodes(self) -> frozenset[int]:
+        """Opcode values accepted in the VOPD3 X slot."""
+        return frozenset()
+
+    @property
+    def vopd3_y_slot_opcodes(self) -> frozenset[int]:
+        """Opcode values accepted in the VOPD3 Y slot."""
+        return frozenset()
 
     @property
     def coherency_model(self) -> MemoryCoherencyModel:
@@ -1093,6 +1142,14 @@ class CdnaProfile(_AmdgpuProfileBase):
         return 256
 
     @property
+    def descriptor_vgpr_count_granule_wave32(self) -> int:
+        return 0
+
+    @property
+    def descriptor_vgpr_count_granule_wave64(self) -> int:
+        return 8
+
+    @property
     def flat_scratch_mechanism(self) -> str:
         return 'hwreg'  # CDNA3/4 use HW register for scratch base
 
@@ -1129,6 +1186,14 @@ class Cdna1Profile(CdnaProfile):
     @property
     def max_acc_vgprs(self) -> int:
         return 0
+
+    @property
+    def descriptor_vgpr_count_granule_wave32(self) -> int:
+        return 0
+
+    @property
+    def descriptor_vgpr_count_granule_wave64(self) -> int:
+        return 4
 
     @property
     def flat_scratch_mechanism(self) -> str:
@@ -1172,6 +1237,14 @@ class Cdna2Profile(CdnaProfile):
     @property
     def acc_vgpr_encoding_base(self) -> int:
         return 512  # CDNA2: AccVGPR range starts at encoding 512
+
+    @property
+    def descriptor_vgpr_count_granule_wave32(self) -> int:
+        return 0
+
+    @property
+    def descriptor_vgpr_count_granule_wave64(self) -> int:
+        return 8
 
     @property
     def flat_scratch_mechanism(self) -> str:
@@ -1260,6 +1333,14 @@ class Rdna1Profile(_AmdgpuProfileBase):
         return False
 
     @property
+    def descriptor_vgpr_count_granule_wave32(self) -> int:
+        return 8
+
+    @property
+    def descriptor_vgpr_count_granule_wave64(self) -> int:
+        return 4
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx10'
 
@@ -1291,15 +1372,9 @@ class Rdna1Profile(_AmdgpuProfileBase):
 class Rdna2Profile(Rdna1Profile):
     """ISA profile for RDNA2 (GFX10.3, Navi2x).
 
-    Inherits all properties from ``Rdna1Profile`` except:
-
-    - Wave64 is not supported: ``wave_size_max == 32``.
-    - DPP/SDWA variants still skipped (``_SKIP_DPP_SDWA = True``).
+    Inherits the RDNA1 Wave32 default and Wave64 maximum. DPP/SDWA variants
+    remain skipped (``_SKIP_DPP_SDWA = True``).
     """
-
-    @property
-    def wave_size_max(self) -> int:
-        return 32
 
 
 class Rdna3Profile(_AmdgpuProfileBase):
@@ -1382,6 +1457,14 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return False
 
     @property
+    def descriptor_vgpr_count_granule_wave32(self) -> int:
+        return 8
+
+    @property
+    def descriptor_vgpr_count_granule_wave64(self) -> int:
+        return 4
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx11'
 
@@ -1396,6 +1479,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
     @property
     def vopd_slot_ops(self) -> tuple[VopdSlotOp, ...]:
         return _RDNA3_VOPD_SLOT_OPS
+
+    @property
+    def vopd_x_slot_opcodes(self) -> frozenset[int]:
+        return frozenset(range(14))
 
     @property
     def coherency_model(self) -> MemoryCoherencyModel:
@@ -1527,6 +1614,14 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return False
 
     @property
+    def descriptor_vgpr_count_granule_wave32(self) -> int:
+        return 8
+
+    @property
+    def descriptor_vgpr_count_granule_wave64(self) -> int:
+        return 4
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx12'
 
@@ -1541,6 +1636,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def vopd_slot_ops(self) -> tuple[VopdSlotOp, ...]:
         return _RDNA4_VOPD_SLOT_OPS
+
+    @property
+    def vopd_x_slot_opcodes(self) -> frozenset[int]:
+        return frozenset(range(14))
 
     @property
     def coherency_model(self) -> MemoryCoherencyModel:
@@ -1612,14 +1711,22 @@ class Rdna4Profile(_AmdgpuProfileBase):
 class Gfx1250Profile(Rdna4Profile):
     """ISA profile for gfx1250.
 
-    The gfx1250 encoding model is RDNA4/GFX12-like. Keep it as a named target
-    profile so generated C++ lands under ``amdgpu/gfx1250`` while reusing the
-    RDNA4 parser/codegen rules.
+    The gfx1250 encoding model is RDNA4/GFX12-like. Keep ``gfx1250`` as the
+    logical target used by parser/codegen rules while generated and handwritten
+    C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
 
     @property
     def generated_arch_name(self) -> str | None:
         return 'gfx1250'
+
+    @property
+    def generated_dir_name(self) -> str | None:
+        return 'cdna5'
+
+    @property
+    def cpp_namespace(self) -> str | None:
+        return 'cdna5'
 
     @property
     def semantic_class_overrides(self) -> dict[str, str]:
@@ -1697,6 +1804,19 @@ class Gfx1250Profile(Rdna4Profile):
         return 1024
 
     @property
+    def descriptor_vgpr_count_granule_wave32(self) -> int:
+        # Matches LLVM AMDGPUBaseInfo::getVGPREncodingGranule():
+        # gfx1250 has Feature1024AddressableVGPRs, so Wave32 descriptors
+        # encode VGPR counts in 16-register blocks. The separate
+        # s_set_vgpr_msb high-bank indexing needed above v255 is modeled by
+        # uses_vgpr_msb_indexing.
+        return 16
+
+    @property
+    def descriptor_vgpr_count_granule_wave64(self) -> int:
+        return 0
+
+    @property
     def vopd_encoding_prefixes(self) -> tuple[VopdEncodingPrefix, ...]:
         return super().vopd_encoding_prefixes + (
             VopdEncodingPrefix(0xCF, 8, is_vopd3=True),
@@ -1707,15 +1827,27 @@ class Gfx1250Profile(Rdna4Profile):
         return _GFX1250_VOPD_SLOT_OPS
 
     @property
+    def vopd_x_slot_opcodes(self) -> frozenset[int]:
+        return frozenset(range(12))
+
+    @property
+    def vopd_y_slot_opcodes(self) -> frozenset[int]:
+        return frozenset((*range(12), 16, 17, *range(20, 25)))
+
+    @property
+    def vopd3_x_slot_opcodes(self) -> frozenset[int]:
+        return frozenset((0, *range(3, 12), 16, 17, *range(19, 23), *range(32, 37)))
+
+    @property
+    def vopd3_y_slot_opcodes(self) -> frozenset[int]:
+        return frozenset((0, *range(3, 12), *range(16, 25)))
+
+    @property
     def uses_vgpr_msb_indexing(self) -> bool:
         return True
 
     @property
     def uses_packed_16bit_e32_source_selectors(self) -> bool:
-        return True
-
-    @property
-    def split_execution_sources(self) -> bool:
         return True
 
     @property

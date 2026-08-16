@@ -4,6 +4,7 @@
 #include "common/preset_registry.hpp"
 
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "embedded_presets.hpp"
 
 #include <spdlog/fmt/fmt.h>
@@ -28,21 +29,21 @@ find_preset_directory()
     if(preset_dir_env && std::strlen(preset_dir_env) > 0)
     {
         auto dir = std::string{ preset_dir_env };
-        if(common::path::exists(dir)) return dir;
+        if(path::is_directory(dir)) return dir;
     }
 
     auto root = common::path::get_rocprofsys_root();
     if(!root.empty())
     {
         auto candidate = fmt::format("{}/share/rocprofiler-systems/presets", root);
-        if(common::path::exists(candidate)) return candidate;
+        if(path::is_directory(candidate)) return candidate;
     }
 
     const auto* rocm_path = std::getenv("ROCM_PATH");
     if(rocm_path && std::strlen(rocm_path) > 0)
     {
         auto candidate = fmt::format("{}/share/rocprofiler-systems/presets", rocm_path);
-        if(common::path::exists(candidate)) return candidate;
+        if(path::is_directory(candidate)) return candidate;
     }
 
     return {};

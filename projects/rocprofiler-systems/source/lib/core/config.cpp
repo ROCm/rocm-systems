@@ -843,7 +843,9 @@ configure_settings(bool _init)
         std::string, env_vars::SAMPLING_GPUS,
         "Devices to query when ROCPROFSYS_USE_AMD_SMI=ON. Values should be separated by "
         "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies "
-        "'all' and 'none' suppresses all GPU sampling",
+        "'all' and 'none' suppresses all GPU sampling. The "
+        "selection is further restricted to GPUs visible to the ROCm runtime "
+        "(ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES)",
         std::string{ "all" }, "amd_smi", "rocm", "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -1405,7 +1407,8 @@ configure_settings(bool _init)
         // Prevent Timemory's read() silently dropping JSON config files without proper
         // root. Non-existing JSONs should not throw: default ROCPROFSYS_CONFIG_FILE
         // includes '~/.rocprofiler-systems.json' that can be missing
-        if(expanded_filename.ends_with(".json") && filepath::exists(expanded_filename) &&
+        if(expanded_filename.ends_with(".json") &&
+           path::is_regular_file(expanded_filename) &&
            !json_has_project_name_root(expanded_filename))
         {
             throw std::runtime_error(
@@ -3335,7 +3338,7 @@ tmp_file::~tmp_file()
 void
 tmp_file::touch() const
 {
-    if(!filepath::exists(filename))
+    if(!path::is_regular_file(filename))
     {
         // if the filepath does not exist, open in out mode to create it
         auto _ofs = std::ofstream{};
@@ -3460,7 +3463,7 @@ tmp_file::remove()
     if(m_pid != getpid()) return false;
 
     close();
-    if(filepath::exists(filename))
+    if(path::is_regular_file(filename))
     {
         LOG_DEBUG("Removing temporary file '{}'...", filename);
         auto _ret = ::remove(filename.c_str());
