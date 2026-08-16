@@ -1258,8 +1258,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   double timeUsec = 0.0;
   if (!skipMetricRow) {
-    timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
-    writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, report_timestamps, in_place==0);
+    int useCputimeCol = report_cputime && (deviceImpl == 0);
+    timeUsec = (useCputimeCol ? cputimeSec : deltaSec)*1.0E6;
+    writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, useCputimeCol, report_timestamps, in_place==0);
 
     auto largestMessageSize = std::max(args->sendBytes, args->expectedBytes);
     if (args->reporter) {
