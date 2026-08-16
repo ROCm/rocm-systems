@@ -54,7 +54,8 @@ def _entries(tmp_path, specs):
         kind = s.get("kind", KIND_PIPELINE)
         rdv = Rendezvous.for_entry(base, run, i) if kind == KIND_PIPELINE else None
         e = SchedEntry(seq=i, label=s["label"], kind=kind, rendezvous=rdv,
-                       log_path=os.path.join(base, f"e{i}.log"))
+                       log_path=os.path.join(base, f"e{i}.log"),
+                       perf_sensitive=s.get("perf", False))
         e._params = s
         out.append(e)
     return out
@@ -417,6 +418,42 @@ def test_release_order_config_still_serial(tmp_path):
                       release_order="config").run()
     assert _max_overlap([(e.t_go, e.t_exit) for e in entries]) <= 1
     _assert_model_a(entries)
+
+
+def test_quiescent_exec_pauses_launches_during_perf_entry(tmp_path):
+    """With --loader-policy=quiescent_exec and init_pool=1, a later entry must not
+    be launched until the perf-sensitive entry finishes executing."""
+    tl = os.path.join(str(tmp_path), "tl.txt")
+    entries = _entries(tmp_path, [
+        {"label": "perf", "warm": 0.1, "exec": 0.4, "code": 0, "perf": True},
+        {"label": "e1", "warm": 0.05, "exec": 0.05, "code": 0},
+    ])
+    spawn, wait_exit, infer, terminate = _real_io(tl)
+    PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                      terminate=terminate, init_pool=1, init_timeout=30, exec_timeout=30,
+                      loader_policy="quiescent_exec").run()
+    perf, e1 = entries[0], entries[1]
+    assert perf.result == "PASSED" and e1.result == "PASSED"
+    # e1 was launched only after the perf entry finished executing.
+    assert e1.t_launch >= perf.t_exit - 0.02, (
+        f"e1 launched during perf exec (quiescent violated): "
+        f"e1.launch={e1.t_launch:.3f} perf.exit={perf.t_exit:.3f}")
+
+
+def test_continuous_launches_during_exec(tmp_path):
+    """Default continuous: with init_pool=1 the later entry launches as soon as the
+    slot frees (during the perf entry's execution)."""
+    tl = os.path.join(str(tmp_path), "tl.txt")
+    entries = _entries(tmp_path, [
+        {"label": "perf", "warm": 0.1, "exec": 0.4, "code": 0, "perf": True},
+        {"label": "e1", "warm": 0.05, "exec": 0.05, "code": 0},
+    ])
+    spawn, wait_exit, infer, terminate = _real_io(tl)
+    PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                      terminate=terminate, init_pool=1, init_timeout=30, exec_timeout=30,
+                      loader_policy="continuous").run()
+    perf, e1 = entries[0], entries[1]
+    assert e1.t_launch < perf.t_exit, "continuous should launch e1 during perf exec"
 
 
 def test_finish_entry_idempotent(tmp_path):

@@ -245,6 +245,7 @@ class SchedEntry:
     parent: object = None           # optional parent-config id for roll-up/ordering
     sibling_index: int = 0          # position within the parent's sweep (legacy/config order)
     sibling_total: int = 1          # sub-entries for this parent (1 = not a split sweep)
+    perf_sensitive: bool = False    # pause new warmups during its exec under quiescent_exec
     # runtime process state
     proc: object = None
     capture_fd: object = None
@@ -314,6 +315,7 @@ class PipelineScheduler:
     def __init__(self, entries, *, spawn, wait_exit, infer, terminate,
                  init_pool=2, init_timeout=None, exec_timeout=None,
                  fork_sweep_policy="legacy", release_order="ready",
+                 loader_policy="continuous",
                  poll_interval=0.05, monotonic=time.monotonic, log=lambda *a: None):
         self.entries = list(entries)
         self.total = len(self.entries)
@@ -333,6 +335,13 @@ class PipelineScheduler:
         # 'config' executes strictly in config (seq) order across all entries --
         # deterministic, with intentional head-of-line blocking on the next seq.
         self.release_order = release_order
+        # 'continuous' (default) keeps warming entries while one executes;
+        # 'quiescent_exec' pauses NEW launches while a perf-sensitive entry
+        # executes, so its measured numbers are not distorted by concurrent
+        # warmups (best effort: already-in-flight warmups still complete).
+        self.loader_policy = loader_policy
+        self._launch_allowed = threading.Event()
+        self._launch_allowed.set()
         self.poll_interval = poll_interval
         self.monotonic = monotonic
         self.log = log
@@ -541,9 +550,20 @@ class PipelineScheduler:
                         self._finish_entry(entry, RESULT_CANCELLED, "pending", terminate=False)
                         continue
                     # Pipeline: block on a slot (INITIALIZING+READY <= init_pool).
+                    # Under quiescent_exec, also wait while launches are paused (a
+                    # perf-sensitive entry is executing).
                     got = False
                     while not self.stop_flag.is_set():
+                        if not self._launch_allowed.is_set():
+                            self._launch_allowed.wait(timeout=self.poll_interval)
+                            continue
                         if self.slot.acquire(timeout=self.poll_interval):
+                            # A perf entry may have started executing (pausing
+                            # launches) during the blocking acquire above -- if so,
+                            # give the slot back and keep waiting.
+                            if not self._launch_allowed.is_set():
+                                self.slot.release()
+                                continue
                             got = True
                             break
                     if not got:
@@ -626,6 +646,11 @@ class PipelineScheduler:
             if skip:
                 self._release_slot_if_owned(unit)
                 continue
+            # quiescent_exec: pause NEW launches while a perf-sensitive entry runs.
+            quiesce = (self.loader_policy == "quiescent_exec"
+                       and getattr(unit, "perf_sensitive", False))
+            if quiesce:
+                self._launch_allowed.clear()
             try:
                 if unit.kind == KIND_SERIAL:
                     unit.t_launch = self.monotonic()
@@ -651,6 +676,9 @@ class PipelineScheduler:
                 self._finish_entry(unit, RESULT_INFRA_ERROR, "exec", terminate=True)
                 self.worker_exc.put(e)
                 self.stop_flag.set()
+            finally:
+                if quiesce:
+                    self._launch_allowed.set()  # resume launches
 
     def _shutdown(self):
         """Finalize entries abandoned on stop. An executor-owned entry is only

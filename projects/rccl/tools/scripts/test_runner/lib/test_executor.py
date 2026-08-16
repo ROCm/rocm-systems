@@ -1895,10 +1895,11 @@ class TestExecutor:
             if spec.gtest_json_path:
                 gtest_jsons.append(spec.gtest_json_path)
             _parent, _idx, _total = sib_info.get(p.name, (p.parent_name, 0, 1))
+            _perf = bool(base_by_name.get(p.parent_name, {}).get("perf_sensitive", False))
             sched_entries.append(SchedEntry(seq=seq, label=p.name, kind=p.kind,
                                             rendezvous=rdv, log_path=spec.emit_log_path,
                                             parent=_parent, sibling_index=_idx,
-                                            sibling_total=_total))
+                                            sibling_total=_total, perf_sensitive=_perf))
             specs[seq] = spec
             if rdv is not None:
                 rdvs.append(rdv)
@@ -1934,6 +1935,7 @@ class TestExecutor:
                     exec_timeout=None,  # per-entry timeout enforced in wait_exit
                     fork_sweep_policy=getattr(self.args, "fork_sweep_policy", "legacy"),
                     release_order=getattr(self.args, "release_order", "ready"),
+                    loader_policy=getattr(self.args, "loader_policy", "continuous"),
                     log=(print if self.args.verbose else (lambda *a: None)),
                 )
                 sched.run()

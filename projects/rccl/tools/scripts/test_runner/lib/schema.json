@@ -234,6 +234,10 @@
           "enum": ["fork_coll", "mpi_coll", "netib_plugin", "none"],
           "description": "init-pipeline eligibility: which READY/GO device-code warmup boundary this test uses. Absent or 'none' routes the test to the serial path (also used when --exec-mode=serial)."
         },
+        "perf_sensitive": {
+          "type": "boolean",
+          "description": "init-pipeline: mark a measured/perf test so --loader-policy=quiescent_exec pauses new device warmups while it executes (cleaner numbers)."
+        },
         "fork_expand": {
           "type": "object",
           "additionalProperties": false,
@@ -288,6 +292,7 @@
         "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
         "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
         "warmup_profile": { "$ref": "#/$defs/test_defaults/properties/warmup_profile" },
+        "perf_sensitive": { "$ref": "#/$defs/test_defaults/properties/perf_sensitive" },
         "fork_expand":    { "$ref": "#/$defs/test_defaults/properties/fork_expand" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
@@ -361,6 +366,7 @@
         "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
         "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
         "warmup_profile": { "$ref": "#/$defs/test_defaults/properties/warmup_profile" },
+        "perf_sensitive": { "$ref": "#/$defs/test_defaults/properties/perf_sensitive" },
         "fork_expand":    { "$ref": "#/$defs/test_defaults/properties/fork_expand" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
@@ -412,6 +418,7 @@
         "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
         "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
         "warmup_profile": { "$ref": "#/$defs/test_defaults/properties/warmup_profile" },
+        "perf_sensitive": { "$ref": "#/$defs/test_defaults/properties/perf_sensitive" },
         "fork_expand":    { "$ref": "#/$defs/test_defaults/properties/fork_expand" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
