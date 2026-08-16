@@ -44,8 +44,8 @@ import sys
 
 import pytest
 
-# Tolerate the in-flight rename of the per-pass index field (replay_pass <-> n).
-_PASS_KEYS = ("replay_pass", "n")
+# Tolerate a missing replay_pass only by failing loudly -- the field is replay_pass.
+_PASS_KEY = "replay_pass"
 
 # Launch dims of the kernel-replay app's three kernels (grid_size = grid blocks x block threads):
 #   vecAdd<<<1024,1024>>>, saxpy<<<512,512>>>, vecScale<<<256,256>>>.
@@ -98,11 +98,10 @@ def _counter_records(sdk):
 
 
 def _pass_index(record):
-    for key in _PASS_KEYS:
-        if key in record and record[key] is not None:
-            return int(record[key])
+    if _PASS_KEY in record and record[_PASS_KEY] is not None:
+        return int(record[_PASS_KEY])
     raise AssertionError(
-        f"no replay-pass field {_PASS_KEYS} in counter record keys={list(record.keys())}"
+        f"no replay-pass field {_PASS_KEY!r} in counter record keys={list(record.keys())}"
     )
 
 
@@ -178,7 +177,11 @@ def _records_by_dispatch(sdk):
                 "passes": {},
             },
         )
-        entry["passes"][_pass_index(rec)] = _aggregated_named_counters(
+        pidx = _pass_index(rec)
+        assert pidx not in entry["passes"], (
+            f"dispatch {did} already has replay_pass {pidx}; a pass index must appear once"
+        )
+        entry["passes"][pidx] = _aggregated_named_counters(
             rec, counter_id_to_name
         )
     assert table, "no counter records found"

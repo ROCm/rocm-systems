@@ -84,37 +84,52 @@ rocprofiler_configure_callback_tracing_service(
 
 ## Callback Flow
 
+CONFIG and PASS callbacks run on the dispatch's **launch thread inside WriteInterceptor**.
+Tools must not call the global `rocprofiler_start_context` / `rocprofiler_stop_context`
+from those callbacks (the interceptor may already be draining services). Use the
+localized start/stop pointers on the PASS payload instead.
+
 ```
 CONFIG PHASE_ENTER
   tool sets: pass_count_cb (tool-provided), optionally replay_continue_cb
   SDK calls pass_count_cb (if set) to get N
     - pass_count_cb left null -> dispatch runs once, no replay (opt-out)
-  SDK validates: N==0 && replay_continue_cb==NULL -> error
+    - N==0 without replay_continue_cb -> warning, run once (not an error)
+    - N==1 -> not replayed (one execution, no snapshot)
+  CONFIG PHASE_EXIT fires immediately on every decline above
 
   drain queue
-  snapshot device memory
+  snapshot device memory (agent-wide tracked coarse-grained footprint + module vars)
 
-  loop (i = 0..N, or indefinitely if N==0):
+  loop (i = 0..N-1, or indefinitely if N==0 with continue):
     PASS PHASE_ENTER  (current_pass=i, total_passes=N)
     submit kernel
     wait for completion
     PASS PHASE_EXIT
-    if replay_continue_cb provided and returns 0 -> break
+    if this is the final fixed pass -> do not call replay_continue_cb
+    else if replay_continue_cb provided and returns 0 -> break
     if not last pass -> restore device memory
 
-CONFIG PHASE_EXIT
+CONFIG PHASE_EXIT   (also fires after a real replay loop)
 fire application's original completion signal
 ```
 
 ## Pass Count Semantics
 
+These match the **implemented** SDK behavior (`execute_config_phase_enter` /
+`should_continue_replay`), not an earlier design that treated N==0 without
+continue as `ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT`.
+
 | pass_count_cb  | replay_continue_cb | Behavior |
 |----------------|--------------------|----------|
-| NULL (not set) | (n/a)              | Not replayed: dispatch runs once, execution continues as usual (no snapshot) |
-| returns N > 0  | NULL               | Fixed loop of exactly N passes |
-| returns N > 0  | fn                 | Up to N passes; fn can break early |
-| returns 0      | fn (required)      | Indefinite loop until fn returns 0 |
-| returns 0      | NULL               | Error: ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT |
+| NULL (not set) | (n/a)              | Not replayed: dispatch runs once (no snapshot). CONFIG EXIT fires. |
+| returns N > 1  | NULL               | Fixed loop of exactly N passes. Continue is not called after the last pass. |
+| returns N > 1  | fn                 | Up to N passes; fn may break early. fn is **not** called after the final fixed pass. |
+| returns 1      | NULL or fn         | Not replayed (N==1 is a single execution). CONFIG EXIT fires. |
+| returns 0      | fn (required)      | Indefinite loop until fn returns 0. |
+| returns 0      | NULL               | Warning; dispatch runs once (no snapshot). CONFIG EXIT fires. |
+
+CONFIG PHASE_EXIT fires on every decline **and** after a completed replay loop.
 
 ## Interaction with Other Services
 
@@ -127,11 +142,11 @@ some passes, through the localized context control described below.
 ## Localized Context Control
 
 Tools frequently want different services active on different passes -- e.g.
-collect kernel timing / PC sampling / ATT only once, but hardware counters on
+collect kernel timing / dispatch thread trace only once, but hardware counters on
 every pass. Rather than calling the global `rocprofiler_start_context` /
 `rocprofiler_stop_context` (which would leak into other, non-replayed
-dispatches), the tool uses the localized equivalents provided in the PASS
-payload:
+dispatches, and is illegal from CONFIG/PASS callbacks), the tool uses the
+localized equivalents provided in the PASS payload:
 
 ```c
 rocprofiler_status_t (*replay_local_start_context_cb)(rocprofiler_context_id_t context_id);
@@ -146,10 +161,18 @@ Semantics:
 - **Scoped to the replay loop.** Each context's pre-replay active/inactive state
   is restored once the loop completes; global context state is never modified.
 - **Sticky across passes.** A context disabled in one pass stays disabled until
-  it is re-enabled within the same loop. This avoids redundant work -- notably,
-  PC sampling requires reprogramming hardware, so a non-sticky design would
-  toggle the hardware on/off every pass (e.g. 16 passes where only 1 collects PC
-  sampling would otherwise reprogram the hardware 15 extra times).
+  it is re-enabled within the same loop.
+- **Cannot promote a globally inactive context.** Local start of a registered
+  context that is not in the active set returns
+  `ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED`. Dispatch-counter collection
+  honors a local *stop* of a globally enabled context, but will not instrument a
+  globally stopped context even if local start is attempted.
+- **Services that honor the override:** kernel-dispatch tracing, dispatch
+  counter collection, dispatch thread trace.
+- **Services that ignore the override (no-op):** PC sampling, SPM, device-wide
+  counters. Starting a context that has only those services returns
+  `ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED`. PC sampling is not wired for
+  per-pass hardware enable/disable.
 
 ### Implementation notes
 
@@ -157,29 +180,14 @@ Semantics:
   (`replay_local_start_context_cb` / `replay_local_stop_context_cb`): because their
   signatures mirror the global functions (context id only), the SDK routes each call
   to the in-flight replay loop via an internal, thread-scoped pointer set around each
-  PASS callback. This is SDK-internal and not exposed to tools. If a tool-facing
-  handle parameter proves cleaner in practice, the signature may gain one -- this is
-  the one shape decision still open. (`pass_count_cb` and `replay_continue_cb` are
-  plain SDK->tool upcalls and need no such routing.)
-- Kernel dispatch tracing (timestamps): the interceptor already queries the
-  active contexts and filters them, so disabling is trivial -- copy the
-  active-context array for the pass and clear the entries to disable.
-- Counter collection, PC sampling, and ATT: these services are already
-  agent-specific, and because kernel replay serializes execution on the agent,
-  the SDK can disable a context for that agent via internal calls during the
-  replay loop. Localized toggling is therefore feasible with the current design.
-- Kernel replay is NOT gated on removing the queue callback registration
-  mechanism. That removal (a separate, older PR) would make per-pass enable/
-  disable cleaner and is a planned future improvement, but the feature works
-  without it.
-
-The per-pass toggling is performed via the `replay_local_start_context_cb` /
-`replay_local_stop_context_cb` function pointers already present in
-`rocprofiler_callback_tracing_kernel_replay_data_t`; wiring them into the replay
-loop lands in upcoming commits.
-
-Upcoming commits: Services will be locally-toggleable with additional function 
-callbacks tht are added to the `rocprofiler_callback_tracing_kernel_replay_data_t` structure. 
+  PASS callback. This is SDK-internal and not exposed to tools.
+  (`pass_count_cb` and `replay_continue_cb` are plain SDK->tool upcalls and need no
+  such routing.)
+- Kernel dispatch tracing: the interceptor copies the active-context list for the
+  pass and drops entries whose override is forced off.
+- Dispatch counters and dispatch thread trace consult `local_context_override()`
+  at dispatch time. The counter path treats the override as a disable-only mask
+  on top of the global enabled flag. 
 
 ## Future Work
 
@@ -262,8 +270,23 @@ above removes the tracker-side teardown fault. Any residual teardown crash under
 concurrency is expected to be a facet of the multi-queue race above (a GPU fault
 mid-run surfacing at teardown), not a separate bug.
 
-### Still unwired
+### Snapshot envelope (supported / unsupported)
 
-- **Localized per-pass context control.** The `replay_local_start/stop_context_cb`
-  fields exist in the payload but are not yet wired (see "Localized Context
-  Control" above); the free-function + TLS design is the intended shape.
+Replay snapshots the agent's **tracked coarse-grained HSA pool/region allocations**
+plus loaded-module variables (`HSA_SYMBOL_KIND_VARIABLE`). It does not discover
+"memory the kernel touches."
+
+**Not restored** (carve-outs, not bugs): unified/managed memory, the HSA virtual
+memory path (`hsa_amd_vmem_map` / `hipMallocAsync`), and allocations created with
+`HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG`. Replay is **single AQL packet** only; HIP
+graph launches are rejected. Host caches, atomics, host RAM, and the HBM envelope
+around a restore are outside the contract.
+
+Only one process-wide `KERNEL_REPLAY` subscriber is permitted; a second configure
+returns `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`.
+
+### Still out of scope
+
+- Disk / dirty-page snapshots (RAM-backed restore only).
+- `hsa_amd_vmem_map` tracking (documented carve-out).
+- Per-pass PC-sampling hardware enable/disable.

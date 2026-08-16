@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
@@ -76,8 +77,17 @@ set_replay_service_configured(bool enabled)
 }
 
 bool
+is_replay_service_configured()
+{
+    return replay_service_configured_flag().load(std::memory_order_relaxed);
+}
+
+bool
 has_active_replay_contexts()
 {
+    // The active-context list and the replay-service flag are torn down during finalize.
+    // WriteInterceptor can still run on in-flight HSA queues; do not walk destroyed state.
+    if(registration::get_fini_status() != 0) return false;
     // Cheap common-case rejection: if no replay service was ever configured, skip the context walk.
     if(!replay_service_configured_flag().load(std::memory_order_relaxed)) return false;
     return !context::get_active_contexts(context_has_kernel_replay).empty();

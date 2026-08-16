@@ -114,8 +114,28 @@ constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
 std::shared_mutex&
 agent_replay_mutex(rocprofiler_agent_id_t agent_id)
 {
-    using lock_map_t    = std::unordered_map<uint64_t, std::unique_ptr<std::shared_mutex>>;
-    static auto*& locks = common::static_object<common::Synchronized<lock_map_t>>::construct();
+    using lock_map_t = std::unordered_map<uint64_t, std::unique_ptr<std::shared_mutex>>;
+    using object_t   = common::static_object<common::Synchronized<lock_map_t>>;
+
+    auto* locks = object_t::get();
+    if(!locks)
+    {
+        // After destroy_static_objects the map is gone. Do not reconstruct it during
+        // finalize -- WriteInterceptor already no-ops when get_fini_status() > 0.
+        if(registration::get_fini_status() != 0)
+        {
+            static std::shared_mutex dummy;
+            return dummy;
+        }
+        static std::once_flag once;
+        std::call_once(once, []() { object_t::construct(); });
+        locks = object_t::get();
+        if(!locks)
+        {
+            static std::shared_mutex dummy;
+            return dummy;
+        }
+    }
 
     std::shared_mutex* mtx = nullptr;
     locks->wlock([&](lock_map_t& _map) {

@@ -30,6 +30,12 @@
 // lock) observe them. Service consumers query local_context_override() at dispatch time to honor
 // it.
 //
+// Local start cannot promote a globally inactive context (returns CONTEXT_NOT_STARTED for a
+// registered context that is not active). Dispatch counters treat the override as disable-only.
+// PC sampling, SPM, and device-wide counters ignore the override; starting a context that has
+// only those services returns NOT_IMPLEMENTED. Fake (unregistered) ids used by host-only unit
+// tests skip those checks.
+//
 // Two thread-local scopes are involved, both managed by the SDK (never by the tool):
 //  - loop scope (scoped_local_context_control): the override map is live for the whole replay loop,
 //    so services can query it while a pass dispatches. The map persists across passes, which gives

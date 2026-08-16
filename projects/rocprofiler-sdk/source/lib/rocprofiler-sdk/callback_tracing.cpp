@@ -161,6 +161,14 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
     if(ctx->callback_tracer->callback_data.at(kind).callback)
         return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
 
+    // Kernel replay is process-wide: a second KERNEL_REPLAY subscriber on any context would
+    // race one shared CONFIG payload (last writer wins) and one shared user_data. Reject it
+    // here rather than combining two planners. Per-context double-config is already rejected
+    // above.
+    if(kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY &&
+       rocprofiler::kernel_replay::is_replay_service_configured())
+        return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+
     RETURN_STATUS_ON_FAIL(rocprofiler::context::add_domain(ctx->callback_tracer->domains, kind));
 
     ctx->callback_tracer->callback_data.at(kind) = {callback, callback_args};

@@ -67,11 +67,15 @@ struct pass_context_state_t
     tracing::external_correlation_id_map_t external_correlation_ids{};
 };
 
-// Set once when a tool configures a KERNEL_REPLAY callback-tracing service. Acts as a cheap
-// process-global fast-path gate so has_active_replay_contexts() (and thus WriteInterceptor) does
-// not walk the active-context list on every dispatch when replay is never used.
+// Process-global KERNEL_REPLAY gate. Set true when a tool successfully configures the service
+// (only one subscriber is permitted) and cleared in registration::finalize().
+// has_active_replay_contexts() uses this as a cheap skip so WriteInterceptor does not walk the
+// active-context list on every dispatch when replay is never used.
 void
 set_replay_service_configured(bool enabled);
+
+bool
+is_replay_service_configured();
 
 bool
 has_active_replay_contexts();
@@ -81,6 +85,10 @@ make_dispatch_info(const hsa::Queue&              queue,
                    const hsa::rocprofiler_packet& pkt,
                    rocprofiler_dispatch_id_t      dispatch_id);
 
+// CONFIG PHASE_ENTER: invoke tool callbacks, read pass_count_cb, decide whether this dispatch
+// is replayed. Declines (NULL callback, N==0 without continue, N==1) fire CONFIG PHASE_EXIT
+// before returning replay_requested=false. A real replay leaves CONFIG open until the loop
+// finishes so EXIT still brackets the whole sequence.
 replay_plan_t
 execute_config_phase_enter(const hsa::Queue&              queue,
                            const hsa::rocprofiler_packet& pkt,
@@ -89,6 +97,8 @@ execute_config_phase_enter(const hsa::Queue&              queue,
                            uint64_t                       ancestor_corr_id,
                            rocprofiler_dispatch_id_t      dispatch_id);
 
+// CONFIG PHASE_EXIT. thr_id / correlation ids are accepted for symmetry with ENTER (and with
+// the WriteInterceptor call sites) but the tracing exit helper does not consume them.
 void
 execute_config_phase_exit(const replay_plan_t&    plan,
                           rocprofiler_thread_id_t thr_id,

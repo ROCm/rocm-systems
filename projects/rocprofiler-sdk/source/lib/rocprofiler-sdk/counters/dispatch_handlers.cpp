@@ -75,14 +75,18 @@ queue_cb(const context::context*                                  ctx,
     if(!ctx || !ctx->dispatch_counter_collection) return {nullptr, false};
 
     // Effective collection state for this dispatch: the context's enabled flag, then the kernel-
-    // replay per-pass override (a replay pass may force this context on/off; no-op outside a replay
-    // loop). Computed as a single value so the override is part of "is_enabled" -- not a separable
-    // step that could drift below the check. See kernel_replay/local_context.hpp.
+    // replay per-pass override (a replay pass may force this context off; no-op outside a replay
+    // loop). The override can disable a globally enabled context for the pass but cannot promote
+    // a globally inactive one -- stopped callbacks stay unregistered / their thread is gone.
+    // See kernel_replay/local_context.hpp.
     const bool is_enabled = [&] {
         bool enabled = false;
         ctx->dispatch_counter_collection->enabled.rlock([&](const auto& c) { enabled = c; });
-        if(auto ov = kernel_replay::local_context_override({.handle = ctx->context_idx}))
-            enabled = *ov;
+        if(enabled)
+        {
+            if(auto ov = kernel_replay::local_context_override({.handle = ctx->context_idx}))
+                enabled = *ov;
+        }
         return enabled;
     }();
 

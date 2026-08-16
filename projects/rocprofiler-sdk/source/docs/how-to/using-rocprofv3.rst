@@ -1152,7 +1152,7 @@ In multi-pass counter collection, each pass generates its output in a separate `
 Kernel replay (beta)
 ++++++++++++++++++++
 
-By default, multiple ``--pmc`` groups are collected using *application replay*: the application is re-run from start to finish once per counter group (as described in the preceding section). The ``--kernel-replay-beta-enabled`` flag switches to *kernel replay* instead, collecting all ``--pmc`` groups within a **single** application run. Each kernel dispatch is replayed once per counter group in-process, and the device memory it touches is snapshotted and restored between passes so every group observes identical inputs.
+By default, multiple ``--pmc`` groups are collected using *application replay*: the application is re-run from start to finish once per counter group (as described in the preceding section). The ``--kernel-replay-beta-enabled`` flag switches to *kernel replay* instead, collecting all ``--pmc`` groups within a **single** application run. Each kernel dispatch is replayed once per counter group in-process. Between passes the SDK snapshots and restores the **agent-wide tracked coarse-grained device footprint** (HSA pool/region allocations owned by that GPU) plus loaded-module variables -- not a precise "memory the kernel touches" set, and not managed/VMEM/``hipMallocAsync`` allocations. Every group therefore observes identical inputs for that tracked envelope.
 
 This is useful when re-running the whole application per group is expensive or non-deterministic. Without the flag, multiple ``--pmc`` groups use application replay as usual.
 
@@ -1167,6 +1167,8 @@ The preceding command collects both counter groups in a single run of ``<applica
    - ``--kernel-replay-beta-enabled`` requires ``--pmc``.
 
    - This feature is in beta.
+
+   - Snapshot/restore covers the agent's tracked coarse-grained HSA pool/region allocations plus module variables. Unified/managed memory, ``hipMallocAsync`` / VMEM, executable-flag allocations, HIP graphs, and multi-packet submissions are not supported.
 
 .. _extra-counters:
 

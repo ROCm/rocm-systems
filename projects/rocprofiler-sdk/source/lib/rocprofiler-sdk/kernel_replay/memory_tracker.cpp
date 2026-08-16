@@ -174,7 +174,10 @@ memory_tracker_init(hsa::hsa_core_table_t* table, uint64_t lib_instance)
 
     // Install only for the first library instance. A later instance would capture our own wrapper
     // as next_memory_allocate and recurse. (Keying on lib_instance matches the copy/update_table
-    // convention -- see scratch_memory.cpp.)
+    // convention -- see scratch_memory.cpp.) Wrappers are installed at HSA table update, not when
+    // KERNEL_REPLAY is configured, so allocations that occur after HSA is up still pass through
+    // them. Population of the inventory stays gated on set_tracking_enabled() (set at configure),
+    // so the unused-replay path pays only a relaxed atomic load per alloc/free.
     if(lib_instance > 0) return;
 
     memory_tracker::next_memory_allocate = table->hsa_memory_allocate_fn;
@@ -190,7 +193,9 @@ memory_tracker_init(hsa::hsa_amd_ext_table_t* table, uint64_t lib_instance)
 
     // Install only for the first library instance. A later instance would capture our own wrapper
     // as next_pool_allocate and recurse. (Keying on lib_instance matches the copy/update_table
-    // convention -- see scratch_memory.cpp.)
+    // convention -- see scratch_memory.cpp.) Same HSA-table-update install as the core wrappers
+    // above: the hooks are in place before KERNEL_REPLAY configure so later allocs are visible
+    // once tracking is enabled.
     if(lib_instance > 0) return;
 
     memory_tracker::next_pool_allocate     = table->hsa_amd_memory_pool_allocate_fn;

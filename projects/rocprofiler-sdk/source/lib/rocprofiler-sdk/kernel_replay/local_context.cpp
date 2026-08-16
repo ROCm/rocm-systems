@@ -22,6 +22,8 @@
 
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 
+#include "lib/rocprofiler-sdk/context/context.hpp"
+
 namespace rocprofiler
 {
 namespace kernel_replay
@@ -36,6 +38,17 @@ thread_local local_context_control_t* tl_control = nullptr;
 // Whether the tool-facing toggle callbacks are currently legal (true only during the tool's PASS
 // PHASE_ENTER callback; set by set_toggles_armed()).
 thread_local bool tl_toggles_armed = false;
+
+bool
+context_supports_local_replay_toggle(const context::context* ctx)
+{
+    // Localized start/stop is wired for dispatch-scoped services only. PC sampling, SPM, and
+    // device-wide counters ignore the override; starting a context that has none of the supported
+    // services is rejected as NOT_IMPLEMENTED.
+    return ctx->dispatch_counter_collection != nullptr || ctx->dispatch_thread_trace != nullptr ||
+           ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) ||
+           ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
+}
 
 rocprofiler_status_t
 record_override(rocprofiler_context_id_t context_id, bool active)
@@ -61,6 +74,19 @@ set_toggles_armed(bool armed)
 rocprofiler_status_t
 replay_local_start_context(rocprofiler_context_id_t context_id)
 {
+    if(tl_control == nullptr || !tl_toggles_armed) return ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR;
+
+    // Fake ids used by host-only unit tests are not registered; skip the promotion / service
+    // checks so those tests still exercise the override map. Real contexts cannot be promoted
+    // from globally inactive, and PC/SPM/device-counter-only contexts are not toggleable.
+    if(const auto* ctx = context::get_registered_context(context_id))
+    {
+        if(context::get_active_context(context_id) == nullptr)
+            return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
+        if(!context_supports_local_replay_toggle(ctx))
+            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    }
+
     return record_override(context_id, true);
 }
 
