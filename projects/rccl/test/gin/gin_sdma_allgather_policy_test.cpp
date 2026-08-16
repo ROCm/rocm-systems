@@ -75,26 +75,38 @@ TEST(AllGatherPolicyTier, AboveThresholdIsSdma) {
   EXPECT_TRUE(chunkUsesLsaTier(0, 0));
 }
 
-// ---- resolveSdmaThreshold: context value only when present + magic valid -----
+// ---- pickSdmaThreshold: per-collective > global env > compiled default -------
 
-TEST(AllGatherPolicyThreshold, UsesContextWhenPresentAndValid) {
-  EXPECT_EQ(resolveSdmaThreshold(/*ctxPresent=*/true, /*magicValid=*/true,
-                                 /*ctxThreshold=*/4096, /*default=*/128),
+TEST(AllGatherPolicyThreshold, PerCollectiveWins) {
+  // Per-collective override dominates the global env and the compiled default.
+  EXPECT_EQ(pickSdmaThreshold(/*perCollSet=*/true, /*perCollVal=*/4096,
+                              /*globalSet=*/true, /*globalVal=*/65536,
+                              /*compiledDefault=*/kAllGatherSdmaThresholdDefault),
             4096u);
 }
 
-TEST(AllGatherPolicyThreshold, FallsBackWhenContextAbsent) {
-  EXPECT_EQ(resolveSdmaThreshold(false, false, 4096, 128), 128u);
-  EXPECT_EQ(resolveSdmaThreshold(false, true, 4096, 128), 128u);  // absent dominates
+TEST(AllGatherPolicyThreshold, GlobalUsedWhenNoPerCollective) {
+  EXPECT_EQ(pickSdmaThreshold(false, 0, true, 65536, kAllGatherSdmaThresholdDefault), 65536u);
 }
 
-TEST(AllGatherPolicyThreshold, FallsBackWhenMagicInvalid) {
-  EXPECT_EQ(resolveSdmaThreshold(true, false, 4096, 128), 128u);
+TEST(AllGatherPolicyThreshold, CompiledDefaultWhenNothingSet) {
+  EXPECT_EQ(pickSdmaThreshold(false, 0, false, 0, kAllGatherSdmaThresholdDefault),
+            kAllGatherSdmaThresholdDefault);
+  EXPECT_EQ(kAllGatherSdmaThresholdDefault, 32768u);  // tuned MI355X crossover
 }
 
-TEST(AllGatherPolicyThreshold, ContextZeroIsHonoredWhenValid) {
-  // An explicit context threshold of 0 (all-SDMA) is honored, not overridden.
-  EXPECT_EQ(resolveSdmaThreshold(true, true, 0, 128), 0u);
+TEST(AllGatherPolicyThreshold, ExplicitZeroIsHonored) {
+  // An explicit 0 (all-SDMA tier) is honored at either precedence level.
+  EXPECT_EQ(pickSdmaThreshold(true, 0, true, 65536, kAllGatherSdmaThresholdDefault), 0u);
+  EXPECT_EQ(pickSdmaThreshold(false, 0, true, 0, kAllGatherSdmaThresholdDefault), 0u);
+}
+
+TEST(AllGatherPolicyThreshold, LargeValueDoesNotWrap) {
+  // Host resolution is 64-bit, so a >2 GiB threshold survives (unlike the
+  // backend's int-typed inline-put threshold).
+  const unsigned long long big = 4ull * 1024 * 1024 * 1024;  // 4 GiB
+  EXPECT_EQ(pickSdmaThreshold(true, big, false, 0, kAllGatherSdmaThresholdDefault),
+            (size_t)big);
 }
 
 // ---- bandwidthGBps: algBw counts all ranks, busBw applies (n-1)/n ------------
