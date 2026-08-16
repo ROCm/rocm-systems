@@ -1861,7 +1861,13 @@ void* ncclProxyService(void* _args) {
     /* Even if local comm aborts, we cannot let proxy thread exit if we still have peer
      * connections. Need to wait until all other related comms call abort and safely exit
      * together, or we could face segmentation fault. */
+    /* Fallback stop path: if loopback stop message is missed, honor atomic stop flag. */
+    if (COMPILER_ATOMIC_LOAD(&proxyState->stop, std::memory_order_acquire)) {
+      stop = PROXY_STOP;
+    }
+
     if (COMPILER_ATOMIC_LOAD(proxyState->abortFlag, std::memory_order_acquire) != 0) stop = PROXY_ABORT;
+
     /* never let proxy service thread blocks in poll, or it cannot receive abortFlag. */
     int ret = 0;
     const int timeout = asyncOpCount ? 0 : 500;
@@ -2213,8 +2219,14 @@ ncclResult_t ncclProxyStop(struct ncclComm* comm) {
         int type = ncclProxyMsgStop;
         NCCLCHECK(ncclSocketInit(&sock, sharedProxyState->peerAddresses + comm->topParentRanks[comm->rank],
                                  comm->sharedRes->magic, ncclSocketTypeProxy, comm->abortFlag));
-        if (ncclSocketConnect(&sock) == ncclSuccess) {
-          (void)ncclSocketSend(&sock, &type, sizeof(int));
+        ncclResult_t stopRes = ncclSocketConnect(&sock);
+        if (stopRes == ncclSuccess) {
+          stopRes = ncclSocketSend(&sock, &type, sizeof(int));
+          if (stopRes != ncclSuccess) {
+            WARN("ncclProxyStop: failed to send stop msg comm %p rank %d res %d", comm, comm->rank, stopRes);
+          }
+        } else {
+          WARN("ncclProxyStop: failed to connect stop socket comm %p rank %d res %d", comm, comm->rank, stopRes);
         }
         (void)ncclSocketClose(&sock);
       }

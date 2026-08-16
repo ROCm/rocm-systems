@@ -68,6 +68,9 @@ void ncclDumpProxyState(int signal);
 // Defined in proxy.cc, not exported through proxy.h.
 ncclResult_t ncclProxyPost(struct ncclProxyOpsPool* pool, int nextOps, int nextOpsEnd);
 ncclResult_t ncclProxyProgressDestroy(struct ncclProxyState* proxyState);
+void* ncclProxyService(void* _args);
+
+#include <netinet/in.h>
 
 #define PROXYARGS_ALLOCATE_SIZE NCCL_MAX_OPS
 
@@ -741,6 +744,84 @@ TEST(ProxyTests, ProxyProgressDestroyJoinsAndFreesPools)
     EXPECT_EQ(ps.pools, nullptr) << "destroy must free the entire pools chain";
 
     TEST_INFO("[ProxyTests] ProxyProgressDestroyJoinsAndFreesPools PASSED");
+}
+
+/**
+ * Validates the atomic stop fallback path in ncclProxyService.
+ *
+ * Scenario: ncclProxyStop() sends ncclProxyMsgStop over a loopback socket,
+ * but if that socket send fails, the proxy service thread would hang forever.
+ * The fix adds a fallback check of proxyState->stop (atomic flag) so the
+ * service thread exits even if the socket message is missed.
+ *
+ * This test:
+ * 1. Starts ncclProxyService with a minimal proxyState (no socket message sent)
+ * 2. Sets proxyState->stop = 1 atomically (simulating fallback path)
+ * 3. Verifies the service thread exits promptly instead of hanging
+ */
+TEST(ProxyTests, ProxyServiceHonorsAtomicStopWithoutStopMessage)
+{
+    RUN_ISOLATED_TEST(
+        "ProxyServiceHonorsAtomicStopWithoutStopMessage",
+        []()
+        {
+            TEST_INFO("[ProxyTests] ProxyServiceHonorsAtomicStopWithoutStopMessage Start");
+
+            auto* proxyState = new ncclProxyState{};
+            ASSERT_NE(proxyState, nullptr);
+
+            auto* listenSock = (ncclSocket*)calloc(1, sizeof(ncclSocket));
+            ASSERT_NE(listenSock, nullptr);
+
+            uint32_t abortFlag = 0;
+
+            proxyState->abortFlag = &abortFlag;
+            proxyState->listenSock = listenSock;
+            proxyState->tpRank = 0;
+            proxyState->tpnRanks = 1;
+            proxyState->tpLocalnRanks = 1;
+            proxyState->cudaDev = 0;
+            proxyState->stop = 0;
+            proxyState->directMode = false;
+            proxyState->proxyOps = nullptr;
+            proxyState->peerSocks = nullptr;
+            proxyState->sharedDevMems = nullptr;
+            proxyState->peerAddresses = nullptr;
+            proxyState->peerAddressesUDS = nullptr;
+
+            union ncclSocketAddress listenAddr;
+            memset(&listenAddr, 0, sizeof(listenAddr));
+            listenAddr.sin.sin_family = AF_INET;
+            listenAddr.sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            listenAddr.sin.sin_port = 0;
+
+            ASSERT_EQ(
+                ncclSocketInit(
+                    listenSock,
+                    &listenAddr,
+                    NCCL_SOCKET_MAGIC,
+                    ncclSocketTypeProxy,
+                    &abortFlag),
+                ncclSuccess);
+            ASSERT_EQ(ncclSocketListen(listenSock), ncclSuccess);
+
+            std::thread svc([proxyState]() { (void)ncclProxyService(proxyState); });
+
+            // Let proxy thread enter poll loop. 600ms accommodates slow CI.
+            std::this_thread::sleep_for(std::chrono::milliseconds(600));
+
+            // Simulate ncclProxyStop() fallback: set atomic stop without socket message.
+            COMPILER_ATOMIC_STORE(&proxyState->stop, 1, std::memory_order_release);
+
+            // Before fix: hangs indefinitely. After fix: exits within ~500ms poll cycle.
+            svc.join();
+
+            proxyState->listenSock = nullptr;
+            delete proxyState;
+
+            TEST_INFO("[ProxyTests] ProxyServiceHonorsAtomicStopWithoutStopMessage PASSED");
+        }
+    );
 }
 
 } // namespace RcclUnitTesting
