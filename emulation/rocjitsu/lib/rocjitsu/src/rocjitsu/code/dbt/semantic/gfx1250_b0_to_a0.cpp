@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
@@ -24,6 +25,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -395,6 +397,113 @@ ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t
 
   const auto nop = cdna5::build_sopp(cdna5::kSNopSopp, {.simm16 = 0});
   return ExpandResult::success(std::vector<uint32_t>(nop.begin(), nop.end()));
+}
+
+/// @brief Count canonical V_NOPs adjacent to @p inst inside its own basic block.
+///
+/// @details @p step picks the side to count. `previous_instruction` counts words
+/// before @p inst, `next_instruction` counts words after it. Both stop at the
+/// block boundary, and that is what makes the count usable: a counted word is in
+/// the same block and therefore stays adjacent to @p inst after layout, whereas
+/// a branch landing between the two would have started a new block and ended the
+/// walk. Counting stops at @p limit, and a noncanonical NOP ends it, so credit is
+/// never overstated.
+[[nodiscard]] int count_adjacent_canonical_v_nops(const Instruction &inst, int limit,
+                                                  const Instruction *(Instruction::*step)() const) {
+  const uint32_t v_nop = cdna5::build_vop1(cdna5::kVNopVop1)[0];
+  int counted = 0;
+  for (const Instruction *at = (inst.*step)();
+       counted < limit && at != nullptr && at->size() == static_cast<int>(sizeof(uint32_t)) &&
+       at->raw_encoding() != nullptr && at->raw_encoding()[0] == v_nop;
+       at = (at->*step)())
+    ++counted;
+  return counted;
+}
+
+/// @brief Give a MODE-register write its required leading V_NOP separation.
+///
+/// @details On this target an `s_setreg*` naming the MODE register requires two
+/// V_NOPs immediately before it to be ordered against the instructions that
+/// precede it. Compiler output does not supply that separation. The write is
+/// commonly the first instruction of a kernel or device function, and sometimes
+/// follows a short prefetch prologue.
+///
+/// The filler is V_NOP because the requirement names it, and because the
+/// separation is required in the VALU pipeline, so it has to occupy VALU issue
+/// slots. A scalar wait does not -- `s_nop 1` inserts two wait states in the
+/// scalar path and orders nothing in the vector one -- so it is not a substitute
+/// despite executing unconditionally. An arbitrary independent VALU instruction
+/// is worse than V_NOP rather than better, being skipped outright under an empty
+/// mask.
+///
+/// A V_NOP has no architectural result, so emitting the missing ones cannot
+/// change what the program computes; it supplies the ordering distance and
+/// nothing else.
+///
+/// Under EXEC==0 the filler contributes no VALU spacing, and the setreg still
+/// executes -- but ordinary VALU is skipped under an empty mask, so there is
+/// correspondingly little VALU work in flight. The separation is therefore
+/// effective where EXEC != 0 and best effort in fully inactive control flow, and
+/// no filler this translator may emit improves on that without touching EXEC,
+/// which it must not do. The IU8 spacing rule below rests on the same reasoning.
+///
+/// Every MODE write gets the separation rather than some subset, because the
+/// requirement is stated for the register and not for individual fields within
+/// it.
+///
+/// The scope is the `s_setreg*` instruction, not the MODE register as a
+/// location, so the other instructions that write MODE state are deliberately
+/// excluded: `s_set_vgpr_msb`, whose banks this profile models as MODE fields,
+/// and the SOPP writers `s_round_mode` and `s_denorm_mode`. What has to be
+/// separated is the setreg's own execution against the instructions ahead of it;
+/// a different opcode reaching the same fields is a different case and is not
+/// covered by widening this rule. Writes naming any other hardware register are
+/// declined and copied through unchanged.
+///
+/// V_NOPs already immediately before the write are counted and only the missing
+/// slots are emitted, so a second translation is a fixed point. A counted V_NOP
+/// reaches the target unchanged and with nothing appended to it: it matches no
+/// expansion rule, takes no legalization entry, and needs no completion wait, so
+/// it can only take the verbatim copy path.
+///
+/// TODO: Count separation an adjacent rule is about to emit, not just what the
+/// source already holds. A dense IU8 WMMA immediately followed by a MODE write
+/// yields eleven V_NOPs -- nine from the spacing rule, then two here -- where
+/// nine already separate the write. It is a fixed point and costs only two issue
+/// slots, and no corpus object has that adjacency. Fixing it needs the emitted
+/// stream rather than the source, which is the same whole-kernel pass the IU8
+/// rule's own TODO asks for; do both together.
+ExpandResult expand_gfx1250_setreg_mode_ordering(const Instruction &inst, uint32_t, uint64_t,
+                                                 std::span<const uint8_t>, const LivenessAnalysis &,
+                                                 TranslationContext &, const LaneLayout *,
+                                                 const LaneLayout *) {
+  constexpr int kRequiredLeadingVNops = 2;
+
+  if (inst.mnemonic() != "s_setreg_b32" && inst.mnemonic() != "s_setreg_imm32_b32")
+    return ExpandResult::failed("gfx1250 MODE setreg rule received an unsupported instruction");
+  const int size_bytes = inst.size();
+  if (size_bytes < static_cast<int>(sizeof(uint32_t)) ||
+      size_bytes % static_cast<int>(sizeof(uint32_t)) != 0 || inst.raw_encoding() == nullptr)
+    return ExpandResult::failed("gfx1250 MODE setreg rule received an unsupported encoding");
+
+  // SOPK carries the hardware-register selector in SIMM16. Only MODE requires
+  // the separation, so the mnemonic alone cannot decide this.
+  const uint16_t simm16 = static_cast<uint16_t>(inst.raw_encoding()[0] & 0xffffu);
+  if (amdgpu::decode_vgpr_msb_hwreg(simm16).id != amdgpu::MODE_HWREG)
+    return ExpandResult::not_handled();
+
+  const int existing_slots = count_adjacent_canonical_v_nops(inst, kRequiredLeadingVNops,
+                                                             &Instruction::previous_instruction);
+  if (existing_slots == kRequiredLeadingVNops)
+    return ExpandResult::not_handled();
+
+  const size_t words_in_encoding = static_cast<size_t>(size_bytes) / sizeof(uint32_t);
+  std::vector<uint32_t> words;
+  words.reserve(words_in_encoding + kRequiredLeadingVNops);
+  words.insert(words.end(), static_cast<size_t>(kRequiredLeadingVNops - existing_slots),
+               cdna5::build_vop1(cdna5::kVNopVop1)[0]);
+  words.insert(words.end(), inst.raw_encoding(), inst.raw_encoding() + words_in_encoding);
+  return ExpandResult::success(std::move(words));
 }
 
 /// @brief Decline the one barrier id this profile excludes.
@@ -1098,6 +1207,15 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
 /// the missing slots. Limiting credit to the block guarantees that every
 /// credited word remains adjacent after layout. Noncanonical NOPs and following
 /// control-flow successors conservatively receive no credit.
+///
+/// The slots are VALU issue slots, so this shares the MODE separation rule's
+/// filler reasoning: an ordinary VALU instruction is skipped when EXEC==0, and a
+/// V_NOP still issues but occupies no slot there, which makes V_NOP the best
+/// available filler rather than a guarantee. The exposure is narrower here than
+/// at the MODE write, because the producer is itself EXEC-masked: a wholly
+/// inactive shadow ran no WMMA and so has nothing to separate. What remains is
+/// an EXEC clear between the WMMA and its shadow, which is the case the TODO
+/// below has to rule out before it can count anything but a V_NOP.
 ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, uint64_t,
                                              std::span<const uint8_t>, const LivenessAnalysis &,
                                              TranslationContext &, const LaneLayout *,
@@ -1111,20 +1229,15 @@ ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, 
   std::vector<uint32_t> words(inst.raw_encoding(),
                               inst.raw_encoding() + inst.size() / sizeof(uint32_t));
   const int required_slots = inst.mnemonic() == "v_wmma_i32_16x16x64_iu8" ? 9 : 5;
-  const uint32_t v_nop = cdna5::build_vop1(cdna5::kVNopVop1)[0];
-  int existing_slots = 0;
-  const Instruction *next = inst.next_instruction();
-  while (existing_slots < required_slots && next != nullptr &&
-         next->size() == static_cast<int>(sizeof(uint32_t)) && next->raw_encoding() != nullptr &&
-         next->raw_encoding()[0] == v_nop) {
-    ++existing_slots;
-    next = next->next_instruction();
-  }
+  const int existing_slots =
+      count_adjacent_canonical_v_nops(inst, required_slots, &Instruction::next_instruction);
 
   // TODO: Replace canonical V_NOP counting with whole-kernel scheduling that
-  // can also credit independent VALU in each reachable successor.
-  for (int slot = existing_slots; slot < required_slots; ++slot)
-    words.push_back(v_nop);
+  // can also credit independent VALU in each reachable successor. Crediting real
+  // VALU needs EXEC != 0 proved on the credited path first; without that proof
+  // only V_NOP counts, because ordinary VALU is skipped under an empty mask.
+  words.insert(words.end(), static_cast<size_t>(required_slots - existing_slots),
+               cdna5::build_vop1(cdna5::kVNopVop1)[0]);
   return ExpandResult::success(std::move(words));
 }
 
@@ -2319,9 +2432,25 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
 }
 
 // The semantic translator binary-searches this table, so entries must stay
-// sorted by the full encoding ID and then opcode. VDS encoding IDs include the
-// high opcode bits, hence the four consecutive kVdsOpHi* groups below.
-inline constexpr std::array<TranslationRule, 41> kGfx1250B0ToA0ExpandRules = {{
+// sorted by the full encoding ID and then opcode; the static_assert after the
+// table enforces that. VDS encoding IDs include the high opcode bits, hence the
+// four consecutive kVdsOpHi* groups below.
+// An encoding id is the top nine bits of the first word, so a SOPK id is the
+// SOPK base plus its opcode. The generated header names only the ids the ISA
+// description needed, which is why one of these two has no constant to use; the
+// assertions below pin the derivation against the one that does.
+constexpr uint16_t kSetregB32EncodingId = cdna5::encoding::kSopk + cdna5::kSSetregB32Sopk;
+constexpr uint16_t kSetregImm32B32EncodingId = cdna5::encoding::kSopk + cdna5::kSSetregImm32B32Sopk;
+static_assert(kSetregB32EncodingId == cdna5::encoding::kSopkOpHi18,
+              "SOPK encoding ids must remain the SOPK base plus the opcode");
+static_assert(kSetregImm32B32EncodingId == kSetregB32EncodingId + 1,
+              "consecutive SOPK opcodes must yield consecutive encoding ids");
+
+inline constexpr std::array<TranslationRule, 43> kGfx1250B0ToA0ExpandRules = {{
+    {kSetregB32EncodingId, cdna5::kSSetregB32Sopk, RuleAction::Expand, 0, 0, nullptr,
+     expand_gfx1250_setreg_mode_ordering, nullptr, nullptr, false},
+    {kSetregImm32B32EncodingId, cdna5::kSSetregImm32B32Sopk, RuleAction::Expand, 0, 0, nullptr,
+     expand_gfx1250_setreg_mode_ordering, nullptr, nullptr, false},
     {cdna5::encoding::kSop1, cdna5::kSBarrierSignalIsfirstSop1, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_barrier_signal_isfirst, nullptr, nullptr, false},
     {cdna5::encoding::kSopp, cdna5::kSClauseSopp, RuleAction::Expand, 0, 0, nullptr,
@@ -2405,6 +2534,9 @@ inline constexpr std::array<TranslationRule, 41> kGfx1250B0ToA0ExpandRules = {{
     {cdna5::encoding::kVglobal, cdna5::kClusterLoadAsyncToLdsB128Vglobal, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_cluster_load, nullptr, nullptr},
 }};
+
+static_assert(translation_rules_sorted(kGfx1250B0ToA0ExpandRules),
+              "the gfx1250 B0-to-A0 rule table must stay sorted by (encoding id, opcode)");
 
 } // namespace
 
