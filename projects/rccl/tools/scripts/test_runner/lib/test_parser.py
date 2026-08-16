@@ -192,6 +192,89 @@ Examples:
             help="PostgreSQL connect + statement timeout in seconds for --db-push (default: 10)."
         )
 
+        # --- init-pipeline execution mode (opt-in; default stays serial) ---
+        self.parser.add_argument(
+            '--exec-mode',
+            choices=['serial', 'init-pipeline'],
+            default='serial',
+            help="Execution mode. 'serial' (default) runs tests one at a time. "
+                 "'init-pipeline' overlaps entries' RCCL device-code init behind a "
+                 "READY/GO barrier and executes them one at a time (no co-tenancy). "
+                 "Experimental."
+        )
+        self.parser.add_argument(
+            '--init-pool',
+            type=int,
+            default=2,
+            help="init-pipeline only: max entries INITIALIZING+READY at once "
+                 "(experimental default 2, ceiling 8). The executing entry sits "
+                 "outside this bound, so worst-case live process trees = N+1."
+        )
+        self.parser.add_argument(
+            '--loader-policy',
+            choices=['continuous', 'quiescent_exec'],
+            default='continuous',
+            help="init-pipeline only: 'continuous' (default) keeps warming entries "
+                 "while one executes (max overlap); 'quiescent_exec' pauses device "
+                 "warmups while a perf/dashboard entry executes (cleaner numbers)."
+        )
+        self.parser.add_argument(
+            '--init-timeout',
+            type=float,
+            default=0,
+            help="init-pipeline only: seconds to wait for an entry to reach READY "
+                 "before failing it (0 = wait indefinitely)."
+        )
+        self.parser.add_argument(
+            '--release-order',
+            choices=['ready', 'config'],
+            default='ready',
+            help="init-pipeline only: order in which READY entries are executed - "
+                 "'ready' (default) as they become ready, 'config' in config order."
+        )
+        self.parser.add_argument(
+            '--fork-sweep-policy',
+            choices=['legacy', 'independent'],
+            default='legacy',
+            help="init-pipeline only: 'legacy' (default) preserves each fork test's "
+                 "original nested-loop sub-entry order + fail-fast (serial-equivalent); "
+                 "'independent' drops order/fail-fast for maximum overlap (opt-in)."
+        )
+        self.parser.add_argument(
+            '--phase-timings',
+            action='store_true',
+            default=False,
+            help="init-pipeline only: report per-entry/aggregate init/queue-wait/"
+                 "execution phase timings."
+        )
+        self.parser.add_argument(
+            '--queue-wait-warn',
+            type=float,
+            default=0,
+            help="init-pipeline only: warn if an entry waits longer than this many "
+                 "seconds between READY and GO (0 = disabled)."
+        )
+        self.parser.add_argument(
+            '--emit-manifest',
+            action='store_true',
+            default=False,
+            help="init-pipeline only: print the side-effect-free sub-entry expansion "
+                 "manifest (eligibility + pinned selectors) and exit, without running."
+        )
+
+    def validate_init_pipeline(self, args):
+        """Validate init-pipeline flags; returns a list of error strings (empty ok)."""
+        errors = []
+        if args.exec_mode == 'init-pipeline':
+            if args.init_pool < 1:
+                errors.append(f"--init-pool must be >= 1 (got {args.init_pool})")
+            if args.init_pool > 8:
+                print(f"WARNING: --init-pool {args.init_pool} exceeds the experimental "
+                      f"ceiling of 8; proceed only for a Gate A5 sweep.")
+            if args.init_timeout < 0:
+                errors.append(f"--init-timeout must be >= 0 (got {args.init_timeout})")
+        return errors
+
     def parse_arguments(self):
         """Parse command-line arguments"""
         return self.parser.parse_args()
@@ -200,6 +283,9 @@ Examples:
         """Process and validate command-line arguments"""
         self.add_arguments()
         args = self.parse_arguments()
+        errors = self.validate_init_pipeline(args)
+        if errors:
+            self.parser.error("; ".join(errors))
         self.handle_arguments(args)
         return args
 

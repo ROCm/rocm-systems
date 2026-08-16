@@ -228,6 +228,37 @@
         "requirements": {
           "type": "string",
           "description": "For pytest tests with setup_venv: requirements file to install (default: <test_dir>/requirements.txt)."
+        },
+        "warmup_profile": {
+          "type": "string",
+          "enum": ["fork_coll", "mpi_coll", "netib_plugin", "none"],
+          "description": "init-pipeline eligibility: which READY/GO device-code warmup boundary this test uses. Absent or 'none' routes the test to the serial path (also used when --exec-mode=serial)."
+        },
+        "fork_expand": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "For warmup_profile=fork_coll: how the runner expands this test into single-generation sub-entries (pins UT_MIN_GPUS/UT_MAX_GPUS/UT_POW2_GPUS, UT_PROCESS_MASK, UT_RANKS_PER_GPU). See lib/sweep.py::enumerate_sweep.",
+          "properties": {
+            "num_gpus": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 1 },
+              "minItems": 1,
+              "description": "GPU counts to sweep (each becomes a pinned sub-entry)."
+            },
+            "process_mask": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3,
+              "description": "UT_PROCESS_MASK bits: 1=single-process, 2=multi-process, 3=both."
+            },
+            "max_ranks_per_gpu": { "type": "integer", "minimum": 1 },
+            "ranks_per_gpu": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Exact ranks-per-GPU to pin (0 = sweep 1..max_ranks_per_gpu)."
+            },
+            "only_pow2": { "type": "boolean" }
+          }
         }
       }
     },
@@ -256,6 +287,8 @@
         "setup_venv":   { "$ref": "#/$defs/test_defaults/properties/setup_venv" },
         "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
         "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
+        "warmup_profile": { "$ref": "#/$defs/test_defaults/properties/warmup_profile" },
+        "fork_expand":    { "$ref": "#/$defs/test_defaults/properties/fork_expand" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Environment variables applied to every test in this configuration (merged on top of global env_variables)"
@@ -327,6 +360,8 @@
         "setup_venv":   { "$ref": "#/$defs/test_defaults/properties/setup_venv" },
         "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
         "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
+        "warmup_profile": { "$ref": "#/$defs/test_defaults/properties/warmup_profile" },
+        "fork_expand":    { "$ref": "#/$defs/test_defaults/properties/fork_expand" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Test-specific environment variables (highest priority, merged on top of all other levels)"
@@ -376,6 +411,8 @@
         "setup_venv":   { "$ref": "#/$defs/test_defaults/properties/setup_venv" },
         "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
         "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
+        "warmup_profile": { "$ref": "#/$defs/test_defaults/properties/warmup_profile" },
+        "fork_expand":    { "$ref": "#/$defs/test_defaults/properties/fork_expand" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Suite-level environment variable overrides (between configuration-level and test-level in priority)"
