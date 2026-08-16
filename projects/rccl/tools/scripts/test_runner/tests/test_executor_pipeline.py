@@ -73,7 +73,8 @@ def test_build_pipeline_spec_sets_warmup_and_rendezvous_for_pipeline(tmp_path):
     assert env["FOO"] == "1"                       # parent env preserved
     assert env["UT_MIN_GPUS"] == "8"               # pinned sweep env merged
     assert env["RCCL_TEST_READY_GO"] == "1"        # warmup enabled
-    assert env["RCCL_TEST_RENDEZVOUS_DIR"] == rdv.dir
+    assert env["RCCL_TEST_RENDEZVOUS_DIR"] == os.path.abspath(rdv.dir)
+    assert os.path.isabs(env["RCCL_TEST_RENDEZVOUS_DIR"])  # ranks run with a different cwd
 
 
 def test_build_pipeline_spec_serial_has_no_rendezvous(tmp_path):

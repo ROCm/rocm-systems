@@ -221,9 +221,11 @@ Examples:
         self.parser.add_argument(
             '--init-timeout',
             type=float,
-            default=0,
+            default=600,
             help="init-pipeline only: seconds to wait for an entry to reach READY "
-                 "before failing it (0 = wait indefinitely)."
+                 "before failing it (default 600). 0 = wait indefinitely -- NOT "
+                 "recommended: a stuck/mis-configured handshake then hangs the whole "
+                 "run instead of failing that one entry."
         )
         self.parser.add_argument(
             '--release-order',

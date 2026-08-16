@@ -1827,7 +1827,8 @@ class TestExecutor:
         if planned.kind == KIND_PIPELINE:
             env["RCCL_TEST_READY_GO"] = "1"
             if rdv is not None:
-                env["RCCL_TEST_RENDEZVOUS_DIR"] = rdv.dir
+                # Absolute: the binary/ranks run with a different cwd than the runner.
+                env["RCCL_TEST_RENDEZVOUS_DIR"] = os.path.abspath(rdv.dir)
         tcfg["env_variables"] = env
         tcfg["name"] = planned.name  # sub-entry name drives its log + records
         return self._build_launch_spec(tcfg, suite_config)
@@ -1859,7 +1860,29 @@ class TestExecutor:
         base_by_name = {t.get("name"): t for t in filtered}
         planned = plan_entries(filtered, exec_mode="init-pipeline")
 
+        # Resolve the init (launch->READY) timeout. A finite default is important:
+        # if an entry never publishes READY (stale binary without the rendezvous,
+        # a rendezvous dir rank 0 cannot see on a multi-node/non-shared FS, a bad
+        # env value, ...) an indefinite wait would hang the WHOLE run with orphans
+        # instead of failing just that entry. 0 = indefinite (explicitly opt-in).
+        init_timeout = self.args.init_timeout if (getattr(self.args, "init_timeout", 0) or 0) > 0 else None
+        if init_timeout is None:
+            print("WARNING: --init-timeout 0 (indefinite): a stuck READY handshake "
+                  "will hang the whole run. Set a finite --init-timeout to fail the "
+                  "entry instead.")
+
         run_uuid = Rendezvous.new_run_uuid()
+        # ABSOLUTE base: the test binary runs with cwd=build_dir/test (and MPI
+        # ranks may run on other nodes), so a relative RCCL_TEST_RENDEZVOUS_DIR
+        # would resolve to a different path than the runner watches -> the READY
+        # token would be written where the runner never looks (deadlock). Anchor
+        # it absolutely (and under log_dir, which is NFS-shared on OCI so rank 0
+        # can reach it).
+        rdv_root = os.path.abspath(self.log_dir)
+        rdv_base = os.path.join(rdv_root, "rendezvous", run_uuid)
+        print(f"  init-pipeline: init_pool={getattr(self.args, 'init_pool', 2)}, "
+              f"init_timeout={'indefinite' if init_timeout is None else f'{init_timeout:g}s'}, "
+              f"rendezvous={rdv_base}")
         specs = {}
         proc_to_spec = {}
         sched_entries = []
@@ -1868,7 +1891,9 @@ class TestExecutor:
         rdvs = []
         seq = 0
         for p in planned:
-            rdv = Rendezvous.for_entry(self.log_dir, run_uuid, seq) if p.kind == KIND_PIPELINE else None
+            rdv = Rendezvous.for_entry(rdv_root, run_uuid, seq) if p.kind == KIND_PIPELINE else None
+            if rdv is not None and self.args.verbose:
+                print(f"    entry {seq} {p.name}: rendezvous={rdv.dir}")
             spec, early = self._build_pipeline_spec(p, suite_config, base_by_name, rdv)
             if early is not None:
                 results_by_name[p.name] = {**early, "suite": suite_name}
@@ -1912,7 +1937,7 @@ class TestExecutor:
                     sched_entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
                     terminate=terminate,
                     init_pool=getattr(self.args, "init_pool", 2),
-                    init_timeout=(self.args.init_timeout or None),
+                    init_timeout=init_timeout,
                     exec_timeout=None,  # per-entry timeout enforced in wait_exit
                     log=(print if self.args.verbose else (lambda *a: None)),
                 )
