@@ -3926,6 +3926,88 @@ def test_gfx1250_cluster_load_generators_force_request_l1_bypass():
     assert 'd->request_force_l1_bypass = true;' not in global_async_body
 
 
+def test_gfx1250_async_lds_generators_apply_signed_ioffset():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1250',
+        profile=Gfx1250Profile(),
+    )
+
+    expected_load_address = (
+        'd->per_lane_lds_addr[lane] = '
+        'async_lds_lane_address(inst_, wf, lane_lds_addr, 4);'
+    )
+
+    global_async = SimpleNamespace(
+        name='GLOBAL_LOAD_ASYNC_TO_LDS_B32',
+        elem_size=4,
+        num_elems=1,
+    )
+    global_async_body = codegen._gen_global_load_async_to_lds([], [], global_async)
+    assert expected_load_address in global_async_body
+
+    cluster_async_cases = [
+        ('CLUSTER_LOAD_ASYNC_TO_LDS_B8', 1, 1),
+        ('CLUSTER_LOAD_ASYNC_TO_LDS_B32', 4, 1),
+        ('CLUSTER_LOAD_ASYNC_TO_LDS_B64', 4, 2),
+        ('CLUSTER_LOAD_ASYNC_TO_LDS_B128', 4, 4),
+    ]
+    for name, elem_size, num_elems in cluster_async_cases:
+        cluster_async = SimpleNamespace(
+            name=name,
+            elem_size=elem_size,
+            num_elems=num_elems,
+        )
+        cluster_async_body = codegen._gen_global_load_async_to_lds(
+            [], [], cluster_async
+        )
+        assert (
+            'd->per_lane_lds_addr[lane] = '
+            f'async_lds_lane_address(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
+            in cluster_async_body
+        )
+
+    global_store_cases = [
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B8', 1, 1),
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B32', 4, 1),
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B64', 4, 2),
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B128', 4, 4),
+    ]
+    for name, elem_size, num_elems in global_store_cases:
+        global_store = SimpleNamespace(
+            name=name,
+            elem_size=elem_size,
+            num_elems=num_elems,
+        )
+        global_store_body = codegen._gen_global_store_async_from_lds(
+            [], [], global_store
+        )
+        assert (
+            'uint32_t lds_addr = '
+            f'async_lds_lane_address(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
+            in global_store_body
+        )
+
+    addtid_lines = []
+    codegen._append_global_addtid_addresses(addtid_lines)
+    assert (
+        '    int64_t offset = static_cast<int64_t>(signed_ioffset(inst_.ioffset));'
+        in addtid_lines
+    )
+
+    rdna4_codegen = object.__new__(CodeGenerator)
+    rdna4_codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1201',
+        profile=Rdna4Profile(),
+    )
+    rdna4_addtid_lines = []
+    rdna4_codegen._append_global_addtid_addresses(rdna4_addtid_lines)
+    assert (
+        '    int64_t offset = static_cast<int64_t>('
+        'static_cast<int32_t>(inst_.ioffset << 8) >> 8);' in rdna4_addtid_lines
+    )
+
+
 def test_gfx1250_buffer_cmpswap_payload_width_is_independent_of_element_width():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(

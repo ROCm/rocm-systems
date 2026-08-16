@@ -311,7 +311,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 }
 
 [[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) {
-  return arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250;
+  return !arch_descriptor_encodes_sgpr_allocation(arch);
 }
 
 [[nodiscard]] std::optional<uint32_t>

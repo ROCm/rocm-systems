@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
@@ -92,11 +93,13 @@ public:
   /// the executable LOAD segment that contains .text, preserves LOAD alignment,
   /// updates moved symbols and relocation places, and keeps descriptor-relative
   /// entries coherent with explicit descriptor patches applied by DBT.
-  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
-                                  std::span<const TextOffsetRelocation> text_relocations = {},
-                                  std::span<const PcRelativeDataRelocation> data_relocations = {},
-                                  std::span<const PcRelativeTextRelocation> code_relocations = {},
-                                  bool require_every_text_symbol_mapped = false);
+  [[nodiscard]] bool replace_text(
+      std::span<const uint8_t> new_text,
+      std::span<const TextOffsetRelocation> text_relocations = {},
+      std::span<const PcRelativeDataRelocation> data_relocations = {},
+      std::span<const PcRelativeTextRelocation> code_relocations = {},
+      bool require_every_text_symbol_mapped = false,
+      const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement = nullptr);
 
   /// @brief True if any relocation's place (r_offset) falls inside .text.
   ///
