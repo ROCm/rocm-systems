@@ -190,6 +190,15 @@ def test_classify_pipeline_requires_nonwildcard_filter():
     assert ok == []
 
 
+def test_classify_rejects_runner_owned_env_override():
+    for var in ("RCCL_TEST_READY_GO", "RCCL_TEST_WARMUP_PROFILE",
+                "RCCL_TEST_RENDEZVOUS_DIR", "RCCL_TEST_GO_TIMEOUT_SEC"):
+        bad = classify_errors([{"name": "M", "binary": "rccl-UnitTestsMPI",
+                                "warmup_profile": "mpi_coll", "test_filter": "M.C",
+                                "env_variables": {var: "x"}}], exec_mode="init-pipeline")
+        assert any("runner-owned" in m for _, m in bad), var
+
+
 def test_classify_serial_mode_only_checks_unknown():
     # In serial mode, profile/binary compat isn't enforced (nothing is piped).
     assert classify_errors([{"name": "M", "warmup_profile": "mpi_coll",

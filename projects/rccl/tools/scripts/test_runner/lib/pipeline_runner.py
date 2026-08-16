@@ -190,6 +190,13 @@ def classify_errors(tests, *, exec_mode):
             continue
         if exec_mode != "init-pipeline":
             continue
+        # The runner owns the pipeline env vars; a test/suite may not override them.
+        user_env = t.get("env_variables", {}) or {}
+        for k in ("RCCL_TEST_WARMUP_PROFILE", "RCCL_TEST_READY_GO",
+                  "RCCL_TEST_RENDEZVOUS_DIR", "RCCL_TEST_GO_TIMEOUT_SEC"):
+            if k in user_env:
+                errors.append((name, f"env_variables may not set runner-owned '{k}' "
+                                     f"(the init-pipeline runner constructs it)"))
         if prof == PROFILE_NETIB:
             errors.append((name, "warmup_profile 'netib_plugin' is rejected until its "
                                  "READY boundary is implemented (v10 §5.4)"))

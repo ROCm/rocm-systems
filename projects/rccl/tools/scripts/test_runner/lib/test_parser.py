@@ -284,6 +284,14 @@ Examples:
                  "is a hard error (catches mis-classification)."
         )
         self.parser.add_argument(
+            '--allow-indefinite-go-wait',
+            action='store_true',
+            default=False,
+            help="init-pipeline only: permit --go-timeout 0 (indefinite GO wait). "
+                 "Without it, init-pipeline requires a positive --go-timeout so a "
+                 "dead/hung runner cannot strand MPI ranks (v11 CR-5)."
+        )
+        self.parser.add_argument(
             '--expand-sweeps',
             action='store_true',
             default=False,
@@ -305,6 +313,11 @@ Examples:
                       f"ceiling of 8; proceed only for a Gate A5 sweep.")
             if args.init_timeout < 0:
                 errors.append(f"--init-timeout must be >= 0 (got {args.init_timeout})")
+            # v11 CR-5: a positive GO timeout is required for init-pipeline runs
+            # unless explicitly overridden -- a dead runner must not strand ranks.
+            if (getattr(args, "go_timeout", 0) or 0) <= 0 and not getattr(args, "allow_indefinite_go_wait", False):
+                errors.append("--go-timeout must be > 0 for init-pipeline "
+                              "(pass --allow-indefinite-go-wait to override)")
         return errors
 
     def parse_arguments(self):

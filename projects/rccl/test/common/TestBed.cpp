@@ -68,17 +68,29 @@ namespace RcclUnitTesting
   {
     InteractiveWait("Starting InitComms");
 
-    // Canonical profile contract (v10 §5.1): validate RCCL_TEST_WARMUP_PROFILE
-    // against this binary's compiled role BEFORE forking / any HIP/RCCL warmup.
-    // A mismatch is a configuration error (mis-routed test) -> exit with a
-    // distinct code (before fork, so no orphaned children).
-    if (const char* profile = getenv("RCCL_TEST_WARMUP_PROFILE"))
+    // Full environment-contract validation BEFORE forking / any HIP/RCCL warmup
+    // (v11 CR-3). The runner owns these four vars; a pipeline entry must present a
+    // complete, consistent set. Any inconsistency -> configuration error (exit 42),
+    // before the fork so no children are orphaned.
     {
-      if (strcmp(profile, "fork_coll") != 0)
+      const char* profile = getenv("RCCL_TEST_WARMUP_PROFILE");
+      const bool  readyGo = getenv("RCCL_TEST_READY_GO") != nullptr;
+      const char* rdvDir  = getenv("RCCL_TEST_RENDEZVOUS_DIR");
+      const char* goTo    = getenv("RCCL_TEST_GO_TIMEOUT_SEC");
+      const bool  anyVar  = profile || readyGo || (rdvDir && rdvDir[0]) || goTo;
+      if (anyVar)
       {
-        TEST_ERROR("[RCCL_TEST_CONFIG_ERROR] rccl-UnitTests received "
-                   "RCCL_TEST_WARMUP_PROFILE=%s (expected fork_coll)", profile);
-        _exit(RCCL_TEST_CONFIG_ERROR);
+        const char* why = nullptr;
+        if (!profile)                              why = "READY_GO/rendezvous set without RCCL_TEST_WARMUP_PROFILE";
+        else if (strcmp(profile, "fork_coll"))     why = "wrong RCCL_TEST_WARMUP_PROFILE for this binary (expected fork_coll)";
+        else if (!readyGo)                         why = "RCCL_TEST_WARMUP_PROFILE set without RCCL_TEST_READY_GO";
+        else if (!(rdvDir && rdvDir[0]))           why = "pipeline profile without RCCL_TEST_RENDEZVOUS_DIR";
+        else if (goTo && (goTo[0] == '\0' || atof(goTo) < 0.0)) why = "invalid RCCL_TEST_GO_TIMEOUT_SEC";
+        if (why)
+        {
+          TEST_ERROR("[RCCL_TEST_CONFIG_ERROR] rccl-UnitTests: %s", why);
+          _exit(RCCL_TEST_CONFIG_ERROR);
+        }
       }
     }
 
