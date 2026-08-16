@@ -37,12 +37,12 @@ try:
     from lib.pipeline import (
         PipelineScheduler, Rendezvous, SchedEntry, KIND_PIPELINE, KIND_SERIAL,
     )
-    from lib.pipeline_runner import plan_entries, assemble_records
+    from lib.pipeline_runner import plan_entries, assemble_records, aggregate_phase_timings
 except ImportError:
     from pipeline import (
         PipelineScheduler, Rendezvous, SchedEntry, KIND_PIPELINE, KIND_SERIAL,
     )
-    from pipeline_runner import plan_entries, assemble_records
+    from pipeline_runner import plan_entries, assemble_records, aggregate_phase_timings
 
 # Make stdout unbuffered to prevent output ordering issues with subprocesses
 sys.stdout.reconfigure(line_buffering=True)
@@ -1967,8 +1967,10 @@ class TestExecutor:
                         "num_nodes": spec.num_nodes, "num_gpus": spec.num_gpus,
                         "num_ranks": spec.num_ranks, "exec_mode": spec.exec_mode,
                     }
-                    if getattr(self.args, "phase_timings", False):
-                        rec["phase_timings"] = entry.phase_timings()
+                    # Timings are collected unconditionally (so --queue-wait-warn
+                    # works regardless); --phase-timings only gates the aggregate
+                    # presentation below.
+                    rec["phase_timings"] = entry.phase_timings()
                     results_by_name[entry.label] = rec
                 if sched.failed():
                     print("WARNING: init-pipeline recorded a scheduler/launch fault "
@@ -1995,6 +1997,28 @@ class TestExecutor:
                 self.test_suites.append(suite_name)
             if self.emit_enabled:
                 self.test_records.append(rec)
+
+        # Queue-wait warnings (READY->GO held longer than the threshold): a
+        # measured/perf entry distorted by a long park is worth flagging.
+        qw = getattr(self.args, "queue_wait_warn", 0) or 0
+        if qw > 0:
+            for rec in records:
+                pt = rec.get("phase_timings") or {}
+                w = pt.get("ready_queue_wait")
+                if w is not None and w > qw:
+                    print(f"  WARNING: {rec.get('name')} waited {w:.1f}s READY->GO (> {qw:g}s)")
+
+        # Aggregate phase timings (init / queue-wait / execution): refines the
+        # ledger's init_overhead by splitting warmup from post-GO time.
+        if getattr(self.args, "phase_timings", False):
+            agg = aggregate_phase_timings(records)
+            print(f"\n  init-pipeline phase timings for suite '{suite_name}' (seconds):")
+            for p in ("time_to_ready", "ready_queue_wait", "execution_time", "total"):
+                st = agg.get(p)
+                if st:
+                    print(f"    {p:16s} n={st['count']:<4d} min={st['min']:.2f} "
+                          f"med={st['median']:.2f} p95={st['p95']:.2f} "
+                          f"max={st['max']:.2f} sum={st['sum']:.1f}")
         return results
 
     def run_test_suite(self, suite_config):

@@ -17,6 +17,7 @@ if _RUNNER_ROOT not in sys.path:
 
 from lib.pipeline import KIND_PIPELINE, KIND_SERIAL, RESULT_FAILED, RESULT_TIMED_OUT  # noqa: E402
 from lib.pipeline_runner import (  # noqa: E402
+    aggregate_phase_timings,
     assemble_records,
     eligibility_from_test,
     plan_entries,
@@ -129,6 +130,43 @@ def test_assemble_mixed_suite_topline():
     # 3 top-line: AR parent_summary + M + S
     assert sum(1 for r in recs if r["counts_toward_topline"]) == 3
     assert topline_counts(recs) == {"PASSED": 3, "FAILED": 0, "SKIPPED": 0}
+
+
+# --------------------------------------------------------------------------- #
+# phase-timing aggregation
+# --------------------------------------------------------------------------- #
+def test_aggregate_phase_timings_basic():
+    records = [
+        {"phase_timings": {"time_to_ready": 1.0, "ready_queue_wait": 0.0,
+                           "execution_time": 2.0, "total": 3.0}},
+        {"phase_timings": {"time_to_ready": 3.0, "ready_queue_wait": 4.0,
+                           "execution_time": 6.0, "total": 13.0}},
+        {"record_type": "parent_summary"},  # no phase_timings -> skipped
+    ]
+    agg = aggregate_phase_timings(records)
+    assert agg["time_to_ready"]["count"] == 2
+    assert agg["time_to_ready"]["min"] == 1.0
+    assert agg["time_to_ready"]["max"] == 3.0
+    assert agg["time_to_ready"]["median"] == 2.0
+    assert agg["execution_time"]["sum"] == 8.0
+
+
+def test_aggregate_skips_unavailable_phases():
+    records = [
+        {"phase_timings": {"time_to_ready": 1.0, "ready_queue_wait": None,
+                           "execution_time": None, "total": None}},
+    ]
+    agg = aggregate_phase_timings(records)
+    assert agg["time_to_ready"]["count"] == 1
+    assert agg["ready_queue_wait"] is None  # never reached -> not counted as 0
+    assert agg["execution_time"] is None
+
+
+def test_aggregate_empty():
+    assert aggregate_phase_timings([]) == {
+        "time_to_ready": None, "ready_queue_wait": None,
+        "execution_time": None, "total": None,
+    }
 
 
 if __name__ == "__main__":

@@ -183,6 +183,49 @@ def assemble_records(planned, results):
     return records
 
 
+_PHASES = ("time_to_ready", "ready_queue_wait", "execution_time", "total")
+
+
+def _percentile(sorted_vals, q):
+    """Linear-interpolated percentile (q in [0,1]) of a pre-sorted list."""
+    if not sorted_vals:
+        return None
+    if len(sorted_vals) == 1:
+        return sorted_vals[0]
+    idx = q * (len(sorted_vals) - 1)
+    lo = int(idx)
+    hi = min(lo + 1, len(sorted_vals) - 1)
+    frac = idx - lo
+    return sorted_vals[lo] * (1 - frac) + sorted_vals[hi] * frac
+
+
+def aggregate_phase_timings(records):
+    """Aggregate per-entry ``phase_timings`` into count/min/median/p95/max/sum for
+    each phase (init-pipeline §9). Records without phase_timings (e.g. parent
+    summaries, serial-path rows) and unavailable (None) phases are skipped, so the
+    counts reflect only entries that actually reached that phase."""
+    acc = {p: [] for p in _PHASES}
+    for r in records:
+        pt = r.get("phase_timings")
+        if not pt:
+            continue
+        for p in _PHASES:
+            v = pt.get(p)
+            if v is not None:
+                acc[p].append(v)
+    out = {}
+    for p, vals in acc.items():
+        if not vals:
+            out[p] = None
+            continue
+        s = sorted(vals)
+        out[p] = {
+            "count": len(s), "min": s[0], "median": _percentile(s, 0.5),
+            "p95": _percentile(s, 0.95), "max": s[-1], "sum": sum(s),
+        }
+    return out
+
+
 def topline_counts(records):
     """Count PASSED/FAILED/SKIPPED over only the top-line records."""
     counts = {RESULT_PASSED: 0, RESULT_FAILED: 0, RESULT_SKIPPED: 0}
