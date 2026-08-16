@@ -689,6 +689,13 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDrvMemDiscardAndPrefetchBatchAsync_f
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemGetDefaultMemPool_fn, 541);
 #endif
 
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 32
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphAddExtMemcpyBatchNode_fn, 542);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphExtMemcpyBatchNodeGetParams_fn, 543);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphExtMemcpyBatchNodeSetParams_fn, 544);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphExecExtMemcpyBatchNodeSetParams_fn, 545);
+#endif
+
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 442)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 1
@@ -753,6 +760,8 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 537)
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 541)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 542)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 32
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 546)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 0)
 #endif

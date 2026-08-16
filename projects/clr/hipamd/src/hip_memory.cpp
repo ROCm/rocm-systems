@@ -2956,6 +2956,29 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, 
   return metadata;
 }
 
+// Builds the batch command covering one device's operation list. `operations` is consumed.
+template <typename Command, typename Operation>
+static amd::Command* CreateBatchCommand(std::vector<Operation>& operations,
+                                        cl_command_type command_type, hip::Stream& queue_stream,
+                                        const amd::Command::EventWaitList& wait_list) {
+  if constexpr (std::is_same_v<Operation, amd::BatchWriteMemoryOp>) {
+    std::vector<std::vector<char>> host_snapshots;
+    if (!AMD_DIRECT_DISPATCH) {
+      for (Operation& op : operations) {
+        if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderDuringApiCall) {
+          host_snapshots.emplace_back(op.size);
+          std::memcpy(host_snapshots.back().data(), op.src_host, op.size);
+          op.src_host = host_snapshots.back().data();
+        }
+      }
+    }
+    return new amd::BatchWriteMemoryCommand(queue_stream, command_type, wait_list,
+                                            std::move(operations), std::move(host_snapshots));
+  } else {
+    return new Command(queue_stream, command_type, wait_list, std::move(operations));
+  }
+}
+
 template <typename Command, typename Operation>
 static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& operations_by_device,
                                        cl_command_type command_type, hip::Stream& stream,
@@ -2975,23 +2998,8 @@ static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& oper
       wait_list.push_back(stream_wait_cmd);
     }
 
-    Command* batch_cmd = nullptr;
-    if constexpr (std::is_same_v<Operation, amd::BatchWriteMemoryOp>) {
-      std::vector<std::vector<char>> host_snapshots;
-      if (!AMD_DIRECT_DISPATCH) {
-        for (Operation& op : operations) {
-          if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderDuringApiCall) {
-            host_snapshots.emplace_back(op.size);
-            std::memcpy(host_snapshots.back().data(), op.src_host, op.size);
-            op.src_host = host_snapshots.back().data();
-          }
-        }
-      }
-      batch_cmd = new amd::BatchWriteMemoryCommand(
-          *queue_stream, command_type, wait_list, std::move(operations), std::move(host_snapshots));
-    } else {
-      batch_cmd = new Command(*queue_stream, command_type, wait_list, std::move(operations));
-    }
+    amd::Command* batch_cmd =
+        CreateBatchCommand<Command>(operations, command_type, *queue_stream, wait_list);
     if (batch_cmd == nullptr) {
       return hipErrorOutOfMemory;
     }
@@ -3018,9 +3026,25 @@ static inline unsigned int getBatchCopyFlags(hipMemcpyAttributes* attrs, size_t*
 }
 
 // ================================================================================================
-hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count,
-                           hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
-                           hip::Stream& stream, bool isAsync) {
+// Per-device operation lists produced by classifying a batch of 1D copies.
+struct BatchCopyClassification {
+  std::vector<std::vector<amd::BatchCopyOp>> copy_ops_by_device;
+  std::vector<std::vector<amd::BatchWriteMemoryOp>> write_ops_by_device;
+  std::vector<std::vector<amd::BatchReadMemoryOp>> read_ops_by_device;
+  std::vector<size_t> host_to_host_indices;
+
+  BatchCopyClassification()
+      : copy_ops_by_device(g_devices.size()),
+        write_ops_by_device(g_devices.size()),
+        read_ops_by_device(g_devices.size()) {}
+};
+
+// Validates a batch of 1D copies and sorts every entry into the operation list of the device
+// whose queue will run it. Shared by the immediate submission path and the graph node path.
+static hipError_t ClassifyMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count,
+                                      hipMemcpyAttributes* attrs, size_t* attrsIdxs,
+                                      size_t numAttrs, hip::Stream& stream, bool isAsync,
+                                      BatchCopyClassification& classification) {
   // Pre-compute memory objects once per copy to avoid repeated expensive
   // getMemoryObject calls later in validation, classification, and submission.
   std::vector<amd::Memory*> srcMemories(count, nullptr);
@@ -3098,11 +3122,9 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
   }
 
-  // Classify copies by type and group them by the queue device that will execute each batch.
-  std::vector<std::vector<amd::BatchCopyOp>> copy_ops_by_device(g_devices.size());
-  std::vector<std::vector<amd::BatchWriteMemoryOp>> write_ops_by_device(g_devices.size());
-  std::vector<std::vector<amd::BatchReadMemoryOp>> read_ops_by_device(g_devices.size());
-  std::vector<size_t> hostToHostIndices;
+  auto& copy_ops_by_device = classification.copy_ops_by_device;
+  auto& write_ops_by_device = classification.write_ops_by_device;
+  auto& read_ops_by_device = classification.read_ops_by_device;
 
   // The ExtOp flags (hipMemcpyFlagExtOpSwap / hipMemcpyFlagExtOpIndirect*) are
   // only honored by the SDMA batch path (BatchCopyMemoryCommand ->
@@ -3168,7 +3190,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
         break;
       }
       case hipHostToHost:
-        hostToHostIndices.push_back(i);
+        classification.host_to_host_indices.push_back(i);
         break;
       case hipWriteBuffer: {
         const int device_id = dstMemories[i]->getUserData().deviceId;
@@ -3185,12 +3207,28 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
   }
 
-  hipError_t status = hipSuccess;
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count,
+                           hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                           hip::Stream& stream, bool isAsync) {
+  BatchCopyClassification classification;
+  hipError_t status = ClassifyMemcpyBatch(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs,
+                                          stream, isAsync, classification);
+  if (status != hipSuccess) {
+    return status;
+  }
+
+  auto& copy_ops_by_device = classification.copy_ops_by_device;
+  auto& write_ops_by_device = classification.write_ops_by_device;
+  auto& read_ops_by_device = classification.read_ops_by_device;
 
   // Handle Host-to-Host copies synchronously
-  if (!hostToHostIndices.empty()) {
+  if (!classification.host_to_host_indices.empty()) {
     stream.finish();  // Wait for prior work before CPU copy
-    for (size_t idx : hostToHostIndices) {
+    for (size_t idx : classification.host_to_host_indices) {
       memcpy(dsts[idx], srcs[idx], sizes[idx]);
     }
   }
@@ -3242,11 +3280,75 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
 }
 
 // ================================================================================================
+hipError_t ihipMemcpyBatchCreateCommands(void** dsts, void** srcs, size_t* sizes, size_t count,
+                                         hipMemcpyAttributes* attrs, size_t* attrsIdxs,
+                                         size_t numAttrs, hip::Stream& stream,
+                                         std::vector<amd::Command*>& commands) {
+  BatchCopyClassification classification;
+  hipError_t status = ClassifyMemcpyBatch(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs,
+                                          stream, /*isAsync=*/true, classification);
+  if (status != hipSuccess) {
+    return status;
+  }
+
+  // A graph node is a set of commands on one stream. The two shapes the immediate path handles
+  // outside that model - a CPU memcpy after draining the stream, and submissions to another
+  // device's null stream joined by a marker - have no equivalent here.
+  if (!classification.host_to_host_indices.empty()) {
+    return hipErrorNotSupported;
+  }
+  const size_t stream_device = static_cast<size_t>(stream.DeviceId());
+  for (size_t device_id = 0; device_id < classification.copy_ops_by_device.size(); ++device_id) {
+    if (device_id != stream_device &&
+        (!classification.copy_ops_by_device[device_id].empty() ||
+         !classification.write_ops_by_device[device_id].empty() ||
+         !classification.read_ops_by_device[device_id].empty())) {
+      return hipErrorNotSupported;
+    }
+  }
+
+  const amd::Command::EventWaitList wait_list;
+  std::vector<amd::Command*> batch_commands;
+  auto& copy_ops = classification.copy_ops_by_device[stream_device];
+  auto& write_ops = classification.write_ops_by_device[stream_device];
+  auto& read_ops = classification.read_ops_by_device[stream_device];
+
+  if (!copy_ops.empty()) {
+    batch_commands.push_back(CreateBatchCommand<amd::BatchCopyMemoryCommand>(
+        copy_ops, ROCCLR_COMMAND_BATCH_COPY_BUFFER, stream, wait_list));
+  }
+  if (!write_ops.empty()) {
+    batch_commands.push_back(CreateBatchCommand<amd::BatchWriteMemoryCommand>(
+        write_ops, ROCCLR_COMMAND_BATCH_WRITE_BUFFER, stream, wait_list));
+  }
+  if (!read_ops.empty()) {
+    batch_commands.push_back(CreateBatchCommand<amd::BatchReadMemoryCommand>(
+        read_ops, ROCCLR_COMMAND_BATCH_READ_BUFFER, stream, wait_list));
+  }
+
+  for (amd::Command* command : batch_commands) {
+    if (command == nullptr) {
+      for (amd::Command* created : batch_commands) {
+        if (created != nullptr) {
+          created->release();
+        }
+      }
+      return hipErrorOutOfMemory;
+    }
+  }
+
+  commands.insert(commands.end(), batch_commands.begin(), batch_commands.end());
+  return hipSuccess;
+}
+
+// ================================================================================================
 hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t count,
                                hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                                size_t* failIdx, hipStream_t stream) {
   HIP_INIT_API(hipMemcpyBatchAsync, dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, failIdx,
                stream);
+  STREAM_CAPTURE(hipMemcpyBatchAsync, stream, dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs,
+                 failIdx);
   // validate stream
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidResourceHandle);

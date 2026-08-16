@@ -937,6 +937,16 @@ hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
 hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
                                    hipMemAllocationType type);
+hipError_t hipGraphAddExtMemcpyBatchNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                         const hipGraphNode_t* pDependencies,
+                                         size_t numDependencies,
+                                         const hipExtMemcpyBatchNodeParams* nodeParams);
+hipError_t hipGraphExtMemcpyBatchNodeGetParams(hipGraphNode_t node,
+                                               hipExtMemcpyBatchNodeParams* pNodeParams);
+hipError_t hipGraphExtMemcpyBatchNodeSetParams(hipGraphNode_t node,
+                                               const hipExtMemcpyBatchNodeParams* pNodeParams);
+hipError_t hipGraphExecExtMemcpyBatchNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+                                                   const hipExtMemcpyBatchNodeParams* pNodeParams);
 }  // namespace hip
 
 namespace hip {
@@ -1521,6 +1531,13 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipExecutionCtxSynchronize_fn = hip::hipExecutionCtxSynchronize;
   ptrDispatchTable->hipExecutionCtxWaitEvent_fn = hip::hipExecutionCtxWaitEvent;
   ptrDispatchTable->hipMemGetDefaultMemPool_fn = hip::hipMemGetDefaultMemPool;
+  ptrDispatchTable->hipGraphAddExtMemcpyBatchNode_fn = hip::hipGraphAddExtMemcpyBatchNode;
+  ptrDispatchTable->hipGraphExtMemcpyBatchNodeGetParams_fn =
+      hip::hipGraphExtMemcpyBatchNodeGetParams;
+  ptrDispatchTable->hipGraphExtMemcpyBatchNodeSetParams_fn =
+      hip::hipGraphExtMemcpyBatchNodeSetParams;
+  ptrDispatchTable->hipGraphExecExtMemcpyBatchNodeSetParams_fn =
+      hip::hipGraphExecExtMemcpyBatchNodeSetParams;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2256,15 +2273,20 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipMemDiscardAndPrefetchBatchAsync_fn, 539);
 HIP_ENFORCE_ABI(HipDispatchTable, hipDrvMemDiscardAndPrefetchBatchAsync_fn, 540);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemGetDefaultMemPool_fn, 541);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 32
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphAddExtMemcpyBatchNode_fn, 542);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphExtMemcpyBatchNodeGetParams_fn, 543);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphExtMemcpyBatchNodeSetParams_fn, 544);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphExecExtMemcpyBatchNodeSetParams_fn, 545);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 542)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 546)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 31,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 32,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

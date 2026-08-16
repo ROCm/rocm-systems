@@ -28,6 +28,11 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
                              size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
                              size_t dstOffset, size_t srcOffset, bool isAsync = true);
 
+hipError_t ihipMemcpyBatchCreateCommands(void** dsts, void** srcs, size_t* sizes, size_t count,
+                                         hipMemcpyAttributes* attrs, size_t* attrsIdxs,
+                                         size_t numAttrs, hip::Stream& stream,
+                                         std::vector<amd::Command*>& commands);
+
 void ihipHtoHMemcpy(void* dst, const void* src, size_t sizeBytes, hip::Stream& stream);
 
 bool IsHtoHMemcpy(void* dst, const void* src);

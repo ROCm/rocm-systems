@@ -3673,4 +3673,108 @@ class hipGraphBatchMemOpNode : public GraphNode {
   }
 };
 
+// A batch of 1D copies executed as a single node. The batch is submitted as one or more
+// amd::Batch*MemoryCommand, so the copies within it are unordered with respect to each other.
+class GraphExtMemcpyBatchNode : public GraphNode {
+  std::vector<void*> dsts_;
+  std::vector<void*> srcs_;
+  std::vector<size_t> sizes_;
+  std::vector<hipMemcpyAttributes> attrs_;
+  std::vector<size_t> attrsIdxs_;
+
+  void copyParams(const hipExtMemcpyBatchNodeParams* params) {
+    // Deep-copy every array: the caller's storage may be freed before the graph is launched.
+    dsts_.assign(params->dsts, params->dsts + params->count);
+    srcs_.assign(params->srcs, params->srcs + params->count);
+    sizes_.assign(params->sizes, params->sizes + params->count);
+    if (params->numAttrs > 0) {
+      attrs_.assign(params->attrs, params->attrs + params->numAttrs);
+      attrsIdxs_.assign(params->attrsIdxs, params->attrsIdxs + params->numAttrs);
+    } else {
+      attrs_.clear();
+      attrsIdxs_.clear();
+    }
+  }
+
+ protected:
+  // Copy constructor is needed for cloning the node, but it should not be used for any other
+  // purpose. To prevent accidental misuse, the copy-assignment operator is deleted.
+  GraphExtMemcpyBatchNode(const GraphExtMemcpyBatchNode& rhs)
+      : GraphNode(rhs),
+        dsts_(rhs.dsts_),
+        srcs_(rhs.srcs_),
+        sizes_(rhs.sizes_),
+        attrs_(rhs.attrs_),
+        attrsIdxs_(rhs.attrsIdxs_) {}
+
+ public:
+  GraphExtMemcpyBatchNode(const hipExtMemcpyBatchNodeParams* params)
+      : GraphNode(hipGraphNodeTypeExtMemcpyBatch, "solid", "rectangle", "EXT_MEMCPY_BATCH_NODE") {
+    copyParams(params);
+  }
+
+  // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
+  GraphExtMemcpyBatchNode& operator=(const GraphExtMemcpyBatchNode&) = delete;
+
+  GraphNode* clone() const override { return new GraphExtMemcpyBatchNode(*this); }
+
+  size_t GetCount() const { return sizes_.size(); }
+
+  hipError_t CreateCommand(hip::Stream* stream) override {
+    hipError_t status = GraphNode::CreateCommand(stream);
+    if (status != hipSuccess) {
+      return status;
+    }
+    if (!isEnabled_) {
+      return hipSuccess;
+    }
+    return ihipMemcpyBatchCreateCommands(
+        dsts_.data(), srcs_.data(), sizes_.data(), sizes_.size(),
+        attrs_.empty() ? nullptr : attrs_.data(),
+        attrsIdxs_.empty() ? nullptr : attrsIdxs_.data(), attrs_.size(), *stream, commands_);
+  }
+
+  // The returned arrays alias the node's own storage, matching the documented contract that they
+  // are owned by the node and valid until it is destroyed or its parameters change.
+  void GetParams(hipExtMemcpyBatchNodeParams* params) {
+    params->dsts = dsts_.data();
+    params->srcs = srcs_.data();
+    params->sizes = sizes_.data();
+    params->count = sizes_.size();
+    params->attrs = attrs_.empty() ? nullptr : attrs_.data();
+    params->attrsIdxs = attrsIdxs_.empty() ? nullptr : attrsIdxs_.data();
+    params->numAttrs = attrs_.size();
+  }
+
+  hipError_t SetParams(const hipExtMemcpyBatchNodeParams* params) {
+    copyParams(params);
+    return hipSuccess;
+  }
+
+  // Used by hipGraphExecUpdate to copy the updated graph node's parameters onto the executable
+  // node. The batch size is part of the work the executable node was built for, so a batch that
+  // grew or shrank is reported as a parameter change rather than silently applied.
+  hipError_t SetParams(GraphNode* node) override {
+    const GraphExtMemcpyBatchNode* batchNode = static_cast<GraphExtMemcpyBatchNode const*>(node);
+    if (batchNode->sizes_.size() != sizes_.size()) {
+      return hipErrorInvalidValue;
+    }
+    dsts_ = batchNode->dsts_;
+    srcs_ = batchNode->srcs_;
+    sizes_ = batchNode->sizes_;
+    attrs_ = batchNode->attrs_;
+    attrsIdxs_ = batchNode->attrsIdxs_;
+    return hipSuccess;
+  }
+
+  virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
+    size_t total_bytes = 0;
+    for (size_t size : sizes_) {
+      total_bytes += size;
+    }
+    return std::to_string(GetID()) + "\n" + label_ + "\n" + std::to_string(sizes_.size()) +
+        " copies, " + std::to_string(total_bytes) + " bytes";
+  }
+};
+
 }  // namespace hip
