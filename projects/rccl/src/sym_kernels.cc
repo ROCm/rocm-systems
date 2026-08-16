@@ -64,7 +64,7 @@ constexpr uint32_t kernelMask_RS = 1 << ncclSymkKernelId_ReduceScatter_LD | 1 <<
                                    1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
                                    1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC;
 
-constexpr uint32_t kernelMask_LSA =
+[[maybe_unused]] constexpr uint32_t kernelMask_LSA =
   1 << ncclSymkKernelId_AllReduce_AGxLL_R | 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R |
   1 << ncclSymkKernelId_AllReduce_RSxLD_AGxST | 1 << ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
   1 << ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST | 1 << ncclSymkKernelId_AllGather_LL |

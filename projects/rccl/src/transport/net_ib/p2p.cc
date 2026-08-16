@@ -166,7 +166,6 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   uint32_t sendOffsets[NCCL_NET_IB_MAX_RECVS] = {0};
   // For small messages (< splitDataThreshold) with multiple QPs, avoid splitting:
   // send the entire payload through one QP selected via round-robin, post zero-length WRs on the rest.
-  int smallMsgActiveQp = comm->base.fifoHead % nqps;
   int64_t splitDataThreshold = rcclParamIbSplitDataThreshold();
   int qpIndex = -1;
   ncclIbQp* qp = NULL;
@@ -200,7 +199,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 
       // Compute per-QP chunk size: for small messages, only the active QP carries data.
       // i==0 always corresponds to the active QP because ncclIbCommBaseGetQpForRequest
-      // rotates by req->id, so qpIndex=(id+i)%nqps; at i=0 that equals id%nqps==smallMsgActiveQp.
+      // rotates by req->id, so qpIndex=(id+i)%nqps; at i=0 that equals id%nqps.
       int chunkSize;
       if (reqs[r]->send.size < splitDataThreshold) {
         chunkSize = (i == 0) ? reqs[r]->send.size : 0;

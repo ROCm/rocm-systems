@@ -72,7 +72,7 @@ public:
   }
 
 private:
-  int nBlocks_;
+  [[maybe_unused]] int nBlocks_;
   FlagType* flags_;
 
   __device__ inline int getFlagIdx(int rank, int block) {
@@ -133,7 +133,7 @@ public:
   }
 
 private:
-  int nBlocks_{-1};
+  [[maybe_unused]] int nBlocks_{-1};
   int selfRank_{-1};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
 

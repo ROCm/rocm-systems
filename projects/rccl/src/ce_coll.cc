@@ -207,15 +207,15 @@ fail:
   comm->ceColl.signalBuffer = nullptr;
   comm->ceColl.signalWin = nullptr;
   if (comm->ceColl.d_barrierSync != nullptr) {
-    hipFree(comm->ceColl.d_barrierSync);
+    CUDACHECKIGNORE(hipFree(comm->ceColl.d_barrierSync));
     comm->ceColl.d_barrierSync = nullptr;
   }
   if (comm->ceColl.scatterStream != nullptr) {
-    cudaStreamDestroy(comm->ceColl.scatterStream);
+    CUDACHECKIGNORE(cudaStreamDestroy(comm->ceColl.scatterStream));
     comm->ceColl.scatterStream = nullptr;
   }
   if (comm->ceColl.synceEvent != nullptr) {
-    cudaEventDestroy(comm->ceColl.synceEvent);
+    CUDACHECKIGNORE(cudaEventDestroy(comm->ceColl.synceEvent));
     comm->ceColl.synceEvent = nullptr;
   }
   goto exit;
@@ -437,7 +437,6 @@ fail:
 
 ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct ncclCeCollArgs* args) {
   ncclResult_t ret = ncclSuccess;
-  void* ceSyncHandle = NULL;
   int lsaSize = comm->devrState.lsaSize;
 
   // Get pointers to the ready and complete synchronization arrays
@@ -1693,7 +1692,6 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   uint8_t* outShard = (uint8_t*)recvbuff + (size_t)comm->rank * shardBytes; // kernel writes reduced shard here
   uint32_t* signalBuffer = ceColl->signalBuffer;
   void* peerSig = nullptr;
-  void* peerSignalAddr = nullptr;
   bool fastPath = false;
   size_t mySlotOffset = 0;
   uint8_t* myRecvSlot = nullptr;

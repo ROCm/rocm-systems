@@ -34,7 +34,6 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
   bool newBatch = true;
   if (planner->nTasksBcast > 0) {
     uint32_t batchTasks = 0;
-    size_t sumBcastBytes = 0;
     size_t maxBcastBytes = 0;
 
     // Make a batch consisting of one bcast from each peer.
@@ -50,7 +49,6 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
           batchTasks + 1 == maxitem) {
         break;
       }
-      sumBcastBytes += t->count;
       maxBcastBytes = std::max(maxBcastBytes, t->count);
       batchTasks += 1;
     }
@@ -139,7 +137,6 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
       int sendSlices = 0, recvSlices = 0;
       int maxSendSlices = 0, maxRecvSlices = 0;
       // Add each task to the batch in ring depth order.
-      int nBcasts = 0;
       int slices = 0;
 
       for (int ringDepth = minRingDepth; ringDepth <= maxRingDepth; ringDepth++) {
@@ -178,7 +175,6 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
             }
             channelWorkBytes[channelId] += sizeof(ncclDevWorkBcast);
           }
-          nBcasts += 1;
           ncclAddWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeBcast, funcIndex, plan->workBytes,
                                  /*p2pEpoch=*/-1, /*p2pRound=*/-1, newBatch);
           newBatch = false;

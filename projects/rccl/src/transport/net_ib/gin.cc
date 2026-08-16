@@ -11,7 +11,7 @@
 #include "gin.h"
 
 const int NCCL_GIN_IB_ALLGATHER_TAG = 0xa0;
-const int NCCL_GIN_IB_ALLTOALL_TAG = 0xa1;
+[[maybe_unused]] const int NCCL_GIN_IB_ALLTOALL_TAG = 0xa1;
 
 // Check GDR support for GIN. This is run at init, so we don't know yet whether the GPU will support DMA-BUF.
 static ncclResult_t ncclGinIbGdrSupport(bool* gdrSupport, bool gdaki) {

@@ -688,7 +688,7 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
 
   // count must divide evenly so every rank owns an equal shard.
   if (count == 0 || count % (size_t)comm->nRanks != 0) {
-    WARN("Skipping CE AllReduce: count (%zu) is not divisible by nRanks (%d)", count, comm->nRanks);
+    WARN("Skipping CE AllReduce: count (%zu) is not divisible by nRanks (%d)", (size_t)count, comm->nRanks);
     return false;
   }
 
@@ -697,12 +697,13 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
   if (force) {
     if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
       WARN("Skipping CE AllReduce despite RCCL_FORCE_CE_ALLREDUCE=1: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)",
-           msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
+           (size_t)msgBytes, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
       return false;
     }
   }
   if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
-    WARN("Skipping CE AllReduce: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)", msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
+    WARN("Skipping CE AllReduce: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)", (size_t)msgBytes,
+         (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
     return false;
   }
 

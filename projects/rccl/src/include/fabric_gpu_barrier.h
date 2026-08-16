@@ -93,7 +93,7 @@ public:
   }
 
 private:
-  int nBlocks_{-1};
+  [[maybe_unused]] int nBlocks_{-1};
   int selfRank_{-1};
   int nRanks_{-1};
   FlagType** peerFlags_{nullptr};
