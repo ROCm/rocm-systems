@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include <cstdlib>
+#include <cstring>
 #include <unistd.h>
 #include "TestBed.hpp"
 #include "Rendezvous.hpp"
@@ -66,6 +67,20 @@ namespace RcclUnitTesting
                           bool                          const  useBlocking)
   {
     InteractiveWait("Starting InitComms");
+
+    // Canonical profile contract (v10 §5.1): validate RCCL_TEST_WARMUP_PROFILE
+    // against this binary's compiled role BEFORE forking / any HIP/RCCL warmup.
+    // A mismatch is a configuration error (mis-routed test) -> exit with a
+    // distinct code (before fork, so no orphaned children).
+    if (const char* profile = getenv("RCCL_TEST_WARMUP_PROFILE"))
+    {
+      if (strcmp(profile, "fork_coll") != 0)
+      {
+        TEST_ERROR("[RCCL_TEST_CONFIG_ERROR] rccl-UnitTests received "
+                   "RCCL_TEST_WARMUP_PROFILE=%s (expected fork_coll)", profile);
+        _exit(RCCL_TEST_CONFIG_ERROR);
+      }
+    }
 
     // Defense-in-depth (init-pipeline): when RCCL_TEST_READY_GO is set, each
     // entry must be pinned to exactly ONE child generation (Option B). A second

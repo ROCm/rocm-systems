@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <thread>
 #include <unistd.h>
 
@@ -43,13 +44,32 @@ void MPIEnvironment::SetUp()
 
 void MPIEnvironment::warmup_device_code()
 {
+    // Canonical profile contract (v10 §5.1): validate RCCL_TEST_WARMUP_PROFILE
+    // against this binary's compiled role BEFORE any HIP/RCCL warmup. A mismatch
+    // is a configuration error (mis-routed test), not a test failure -> exit with
+    // a distinct code. All ranks share the same env, so all exit uniformly.
+    if(const char* profile = std::getenv("RCCL_TEST_WARMUP_PROFILE"))
+    {
+        if(std::strcmp(profile, "mpi_coll") != 0)
+        {
+            if(world_rank == 0)
+            {
+                std::fprintf(stderr,
+                    "[RCCL_TEST_CONFIG_ERROR] rccl-UnitTestsMPI received "
+                    "RCCL_TEST_WARMUP_PROFILE=%s (expected mpi_coll)\n", profile);
+                std::fflush(stderr);
+            }
+            _exit(RcclUnitTesting::RCCL_TEST_CONFIG_ERROR);
+        }
+    }
+
     // Opt-in: no-op unless the init-pipeline feature is enabled by the runner.
     if(std::getenv("RCCL_TEST_READY_GO") == nullptr)
     {
         return;
     }
 
-    // One uniform state machine every rank runs on success AND failure, so no
+    // One uniform state machine every rank runs on SUCCESS AND failure, so no
     // rank is ever stranded (the verified pre-v10 bug: rank 0 returned on a
     // PublishReady failure while ranks 1..N blocked forever at MPI_Bcast). See
     // plan v10 §5.3.

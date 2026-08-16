@@ -23,7 +23,8 @@ from dataclasses import dataclass, field
 
 try:
     from lib.sweep import (
-        Eligibility, PROFILE_FORK, PROFILE_NONE, expand_fork_entry,
+        Eligibility, PROFILE_FORK, PROFILE_MPI, PROFILE_NETIB, PROFILE_NONE,
+        expand_fork_entry,
     )
     from lib.pipeline import (
         KIND_PIPELINE, KIND_SERIAL,
@@ -31,7 +32,8 @@ try:
     )
 except ImportError:  # allow "import lib.*" from the runner root
     from sweep import (
-        Eligibility, PROFILE_FORK, PROFILE_NONE, expand_fork_entry,
+        Eligibility, PROFILE_FORK, PROFILE_MPI, PROFILE_NETIB, PROFILE_NONE,
+        expand_fork_entry,
     )
     from pipeline import (
         KIND_PIPELINE, KIND_SERIAL,
@@ -40,6 +42,44 @@ except ImportError:  # allow "import lib.*" from the runner root
 
 RESULT_PASSED = "PASSED"
 RESULT_SKIPPED = "SKIPPED"
+
+# Distinct exit code the C++ binaries use for a profile/role mismatch (must match
+# RcclUnitTesting::RCCL_TEST_CONFIG_ERROR in test/common/Rendezvous.hpp).
+CONFIG_ERROR_EXIT_CODE = 42
+_VALID_PROFILES = frozenset({PROFILE_FORK, PROFILE_MPI, PROFILE_NETIB, PROFILE_NONE})
+
+
+def classify_errors(tests, *, exec_mode):
+    """Planner-side (pre-spawn) classification checks (v10 §5.1/§5.4).
+
+    Returns a list of (test_name, message). A non-empty list means the runner must
+    NOT spawn those entries; it records them as INFRA_ERROR/configuration_error
+    instead. Checks: unknown warmup_profile; netib_plugin rejected until its READY
+    boundary exists; and binary/profile compatibility (mpi_coll needs an MPI
+    binary; fork_coll needs a fork rccl-UnitTests binary).
+    """
+    errors = []
+    for t in tests:
+        name = t.get("name")
+        prof = t.get("warmup_profile", PROFILE_NONE)
+        if prof not in _VALID_PROFILES:
+            errors.append((name, f"unknown warmup_profile '{prof}' "
+                                 f"(expected one of {sorted(_VALID_PROFILES)})"))
+            continue
+        if exec_mode != "init-pipeline":
+            continue
+        if prof == PROFILE_NETIB:
+            errors.append((name, "warmup_profile 'netib_plugin' is rejected until its "
+                                 "READY boundary is implemented (v10 §5.4)"))
+            continue
+        binary = str(t.get("binary", "") or "")
+        if prof == PROFILE_MPI and "MPI" not in binary:
+            errors.append((name, f"warmup_profile 'mpi_coll' requires an MPI binary, "
+                                 f"got '{binary}'"))
+        elif prof == PROFILE_FORK and ("MPI" in binary or "rccl-UnitTests" not in binary):
+            errors.append((name, f"warmup_profile 'fork_coll' requires a fork "
+                                 f"rccl-UnitTests binary, got '{binary}'"))
+    return errors
 
 # Results that make a parent roll-up FAILED. Includes both the scheduler's
 # "TIMED_OUT" and the gtest-inference "TIMEOUT" spellings.

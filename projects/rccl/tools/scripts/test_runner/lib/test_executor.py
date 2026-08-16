@@ -37,12 +37,18 @@ try:
     from lib.pipeline import (
         PipelineScheduler, Rendezvous, SchedEntry, KIND_PIPELINE, KIND_SERIAL,
     )
-    from lib.pipeline_runner import plan_entries, assemble_records, aggregate_phase_timings
+    from lib.pipeline_runner import (
+        plan_entries, assemble_records, aggregate_phase_timings, classify_errors,
+        CONFIG_ERROR_EXIT_CODE,
+    )
 except ImportError:
     from pipeline import (
         PipelineScheduler, Rendezvous, SchedEntry, KIND_PIPELINE, KIND_SERIAL,
     )
-    from pipeline_runner import plan_entries, assemble_records, aggregate_phase_timings
+    from pipeline_runner import (
+        plan_entries, assemble_records, aggregate_phase_timings, classify_errors,
+        CONFIG_ERROR_EXIT_CODE,
+    )
 
 # Make stdout unbuffered to prevent output ordering issues with subprocesses
 sys.stdout.reconfigure(line_buffering=True)
@@ -1802,6 +1808,10 @@ class TestExecutor:
     def _infer_pipeline_result(self, spec, rc):
         """Map an exit code to a result for an init-pipeline entry (same rule as
         the serial _wait_and_infer). A crash/nonzero rc is never PASSED."""
+        # A binary that self-rejects a mis-routed profile (v10 §5.1) is a
+        # configuration error, not a test failure.
+        if rc == CONFIG_ERROR_EXIT_CODE:
+            return "INFRA_ERROR"
         if spec.is_gtest:
             return infer_gtest_result_from_json_file(spec.gtest_json_path or "",
                                                      rc if rc is not None else -1)
@@ -2049,6 +2059,15 @@ class TestExecutor:
         if not filtered:
             return []
 
+        # Planner validation (v10 §5.1/§5.4): reject unknown profiles, netib, and
+        # binary/profile mismatches BEFORE spawn -> record as configuration errors,
+        # never launch them.
+        config_errors = classify_errors(filtered, exec_mode="init-pipeline")
+        bad_names = {name for name, _ in config_errors}
+        for name, msg in config_errors:
+            print(f"ERROR (init-pipeline config): {name}: {msg}")
+        filtered = [t for t in filtered if t.get("name") not in bad_names]
+
         base_by_name = {t.get("name"): t for t in filtered}
         planned = plan_entries(filtered, exec_mode="init-pipeline")
 
@@ -2072,6 +2091,16 @@ class TestExecutor:
         # Fold sub-entries into parent summaries; only top-line records feed the
         # run totals so a split sweep is never double-counted.
         records = assemble_records(planned, results_by_name)
+
+        # Planner-rejected (mis-classified) tests: emitted as configuration errors,
+        # never spawned. Distinct from a test FAILED.
+        for name, msg in config_errors:
+            records.append({
+                "record_type": "entry", "suite": suite_name, "test_name": name,
+                "name": name, "result": "INFRA_ERROR", "reason": "configuration_error",
+                "error": msg, "counts_toward_topline": True,
+            })
+
         results = []
         for rec in records:
             results.append(rec)

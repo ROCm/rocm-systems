@@ -19,6 +19,7 @@ from lib.pipeline import KIND_PIPELINE, KIND_SERIAL, RESULT_FAILED, RESULT_TIMED
 from lib.pipeline_runner import (  # noqa: E402
     aggregate_phase_timings,
     assemble_records,
+    classify_errors,
     eligibility_from_test,
     plan_entries,
     rollup_result,
@@ -130,6 +131,46 @@ def test_assemble_mixed_suite_topline():
     # 3 top-line: AR parent_summary + M + S
     assert sum(1 for r in recs if r["counts_toward_topline"]) == 3
     assert topline_counts(recs) == {"PASSED": 3, "FAILED": 0, "SKIPPED": 0}
+
+
+# --------------------------------------------------------------------------- #
+# planner classification validation (v10 §5.1/§5.4)
+# --------------------------------------------------------------------------- #
+def test_classify_unknown_profile_rejected():
+    errs = classify_errors([{"name": "T", "warmup_profile": "bogus"}], exec_mode="init-pipeline")
+    assert len(errs) == 1 and "unknown warmup_profile" in errs[0][1]
+
+
+def test_classify_netib_rejected():
+    errs = classify_errors([{"name": "N", "warmup_profile": "netib_plugin",
+                             "binary": "rccl-UnitTestsMPI"}], exec_mode="init-pipeline")
+    assert len(errs) == 1 and "netib_plugin" in errs[0][1]
+
+
+def test_classify_mpi_profile_needs_mpi_binary():
+    bad = classify_errors([{"name": "M", "warmup_profile": "mpi_coll",
+                            "binary": "rccl-UnitTests"}], exec_mode="init-pipeline")
+    assert len(bad) == 1 and "requires an MPI binary" in bad[0][1]
+    ok = classify_errors([{"name": "M", "warmup_profile": "mpi_coll",
+                           "binary": "rccl-UnitTestsMPI"}], exec_mode="init-pipeline")
+    assert ok == []
+
+
+def test_classify_fork_profile_needs_fork_binary():
+    bad = classify_errors([{"name": "F", "warmup_profile": "fork_coll",
+                            "binary": "rccl-UnitTestsMPI"}], exec_mode="init-pipeline")
+    assert len(bad) == 1 and "requires a fork" in bad[0][1]
+    ok = classify_errors([{"name": "F", "warmup_profile": "fork_coll",
+                           "binary": "rccl-UnitTests"}], exec_mode="init-pipeline")
+    assert ok == []
+
+
+def test_classify_serial_mode_only_checks_unknown():
+    # In serial mode, profile/binary compat isn't enforced (nothing is piped).
+    assert classify_errors([{"name": "M", "warmup_profile": "mpi_coll",
+                             "binary": "rccl-UnitTests"}], exec_mode="serial") == []
+    assert len(classify_errors([{"name": "X", "warmup_profile": "bogus"}],
+                               exec_mode="serial")) == 1
 
 
 # --------------------------------------------------------------------------- #

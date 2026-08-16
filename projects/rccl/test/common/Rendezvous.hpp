@@ -41,6 +41,12 @@ namespace RcclUnitTesting
    *       provides one; process-group teardown from the runner remains the
    *       primary orphan-avoidance mechanism.
    */
+  /// Distinct process exit code for an init-pipeline CONFIGURATION error (a
+  /// binary was launched with an RCCL_TEST_WARMUP_PROFILE that does not match its
+  /// compiled role). The runner maps this to INFRA_ERROR/configuration_error, NOT
+  /// a test FAILED. Chosen high to avoid clashing with gtest (1) / signals.
+  static const int RCCL_TEST_CONFIG_ERROR = 42;
+
   /// Outcome of waiting for release. Broadcast across MPI ranks so every rank
   /// leaves the barrier with the same result (see MPIEnvironment §5.3). The
   /// integer values are stable (they are MPI_Bcast'd as int).
