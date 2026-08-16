@@ -2213,6 +2213,14 @@ ncclResult_t ncclProxyStop(struct ncclComm* comm) {
     struct ncclProxyState* sharedProxyState = comm->proxyState;
 
     if ((comm->proxyRefCountOld = ncclAtomicRefCountDecrement(&sharedProxyState->refCount)) == 0) {
+      // Cleanup below can return early. Always publish the stop request before leaving this scope.
+      struct ProxyStopSignal {
+        struct ncclProxyState* state;
+        ~ProxyStopSignal() {
+          COMPILER_ATOMIC_STORE(&state->stop, 1, std::memory_order_release);
+        }
+      } stopSignal{sharedProxyState};
+
       if (*comm->abortFlag == 0 && sharedProxyState->peerAddresses) {
         // We need to send a ncclProxyMsgStop message to our own proxy
         struct ncclSocket sock;
@@ -2251,8 +2259,6 @@ ncclResult_t ncclProxyStop(struct ncclComm* comm) {
           }
         }
       }
-      // Now we notify proxy service and UDS thread to exit.
-      COMPILER_ATOMIC_STORE(&comm->proxyState->stop, 1, std::memory_order_release);
     }
   }
 
