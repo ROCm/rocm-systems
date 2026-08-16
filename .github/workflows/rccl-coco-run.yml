@@ -146,16 +146,8 @@ jobs:
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - name: Set up Python
+        if: contains(inputs.runs_on, 'ruby')
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        env:
-          # Some runners' _work directory lives on an NFS mount that does
-          # unstable (non-sync) writes under load; extracting the Python
-          # toolchain's few thousand small files there has been observed to
-          # silently truncate a file's tail while still reporting the
-          # correct length (e.g. a torn ensurepip pip wheel that fails to
-          # open as a zip). Redirect the tool cache to the runner host's
-          # local disk, which isn't subject to that failure mode.
-          RUNNER_TOOL_CACHE: /tmp/gh-tool-cache-${{ runner.name }}
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -189,7 +181,7 @@ jobs:
           PR_SHA: ${{ inputs.pr_sha }}
           SOFTWARE: ${{ inputs.software }}
           PR_STACKS: ${{ inputs.pr_stacks }}
-          COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+          COCO_DATABASE_URL: ${{ secrets.RCCL_COCO_DB_URL }}
           COCO_VENV: ${{ env.COCO_DIR }}/venv
           COCO_OUTPUT: ${{ env.COCO_OUTPUT }}
         run: |
@@ -197,7 +189,7 @@ jobs:
           unset VIRTUAL_ENV PYTHONHOME pythonLocation Python_ROOT_DIR Python3_ROOT_DIR
           PATH="$(printf '%s' "${PATH}" | tr ':' '\n' | grep -vE '/_work/_tool/Python/' | paste -sd: -)"
           export PATH
-          if [[ -z "${COCO_DB_URL:-}" ]]; then
+          if [[ -z "${COCO_DATABASE_URL:-}" ]]; then
             echo "::warning::RCCL_COCO_DB_URL is empty; this run will not publish results to the coco database."
           fi
 

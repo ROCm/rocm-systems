@@ -51,14 +51,9 @@ if(NOT CMAKE_BUILD_TYPE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
-  # -gdwarf-4  -- generate debugging information, dwarf-4 for making valgrind work
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O0 -gdwarf-4)
 else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
 endif()
 
 # Set supported GPU Targets
@@ -112,9 +107,8 @@ if(HIP_FOUND AND rocdecode_FOUND AND rocprofiler-register_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} rocdecodenegativetest.cpp rocdecode_api_negative_tests.cpp)
-    # --all-warnings/-Wall Enable most warning messages
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
     add_executable(${PROJECT_NAME} ${SOURCES})
+    target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS} -Wall)
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 else()
     message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")

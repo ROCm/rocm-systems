@@ -187,7 +187,16 @@ static int ginAnvilEnvInt(const char* name, int defaultVal) {
 }
 
 static int ginAnvilSdmaThresholdFromEnv() {
-  return ginAnvilEnvInt("NCCL_GIN_ANVIL_SDMA_THRESHOLD", (int)NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT);
+  // Unlike ginAnvilEnvInt (which treats 0 as "unset" and falls back to the
+  // default), an explicit NCCL_GIN_ANVIL_SDMA_THRESHOLD=0 must propagate as 0 so
+  // the AllGather hybrid kernel (-D 3) can be forced onto the all-SDMA put tier
+  // (chunkBytes <= 0 is never true) for the all-SDMA gate.
+  const char* e = getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD");
+  if (e && e[0]) {
+    int v = atoi(e);
+    if (v >= 0) return v;
+  }
+  return (int)NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
 }
 
 static int ginAnvilSdmaNumChannels() {

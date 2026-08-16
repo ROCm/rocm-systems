@@ -3917,8 +3917,8 @@ inline void execute_v_cls_i32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
     util::native<uint32_t> u = a;
     util::stdx::where((a & 0x80000000u) != 0u, u) = ~a;
-    auto c = util::clz_u32_simd(u) - 1u;
-    util::stdx::where(u == 0u, c) = 31u;
+    auto c = util::clz_u32_simd(u);
+    util::stdx::where(u == 0u, c) = 0xFFFFFFFFu;
     return c;
   });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -3928,7 +3928,7 @@ inline void execute_v_cls_i32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane, [&]() {
       auto s = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
       uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);
-      return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1;
+      return a == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(a));
     }());
   }
 }
@@ -3938,8 +3938,8 @@ inline void execute_v_cls_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
     util::native<uint32_t> u = a;
     util::stdx::where((a & 0x80000000u) != 0u, u) = ~a;
-    auto c = util::clz_u32_simd(u) - 1u;
-    util::stdx::where(u == 0u, c) = 31u;
+    auto c = util::clz_u32_simd(u);
+    util::stdx::where(u == 0u, c) = 0xFFFFFFFFu;
     return c;
   });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -3949,7 +3949,7 @@ inline void execute_v_cls_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane, [&]() {
       auto s = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
       uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);
-      return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1;
+      return a == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(a));
     }());
   }
 }

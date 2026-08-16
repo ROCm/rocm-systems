@@ -51,14 +51,9 @@ if(NOT CMAKE_BUILD_TYPE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
-  # -gdwarf-4  -- generate debugging information, dwarf-4 for making valgrind work
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O0 -gdwarf-4)
 else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
 endif()
 
 # Set supported GPU Targets
@@ -127,6 +122,7 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND Threads_FOUND AND rocprofi
       list(APPEND SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/ffmpegvideodecode/ffmpeg_video_dec.cpp)
     endif()
     add_executable(${PROJECT_NAME} ${SOURCES})
+    target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
     if(rocdecode-host_FOUND)
       # rocdecode-host
       include_directories(${rocdecode-host_INCLUDE_DIR})
