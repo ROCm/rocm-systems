@@ -233,6 +233,12 @@ namespace RcclUnitTesting
     verbose        = GetEnvVar("UT_VERBOSE"     , 0);
     printValues    = GetEnvVar("UT_PRINT_VALUES", 0);
     maxRanksPerGpu = GetEnvVar("UT_MAX_RANKS_PER_GPU", 1);
+    // Exact ranks-per-GPU selector (0 = unset). When set (>0) it pins the
+    // RunSimpleSweep ranks-per-GPU loop to exactly this value so a fork test
+    // collapses to a single child generation (init-pipeline Option B). Unset
+    // reproduces the original 1..UT_MAX_RANKS_PER_GPU sweep. Validated where it
+    // is used (TestBed::RunSimpleSweep).
+    ranksPerGpu    = GetEnvVar("UT_RANKS_PER_GPU", 0);
     showTiming     = GetEnvVar("UT_SHOW_TIMING",  1);
     useInteractive = GetEnvVar("UT_INTERACTIVE",  0);
     timeoutUs      = GetEnvVar("UT_TIMEOUT_US" ,  5000000);
@@ -381,6 +387,7 @@ namespace RcclUnitTesting
         std::make_tuple("UT_REDOPS"           , -1            , "List of reduction ops to test"),
         std::make_tuple("UT_DATATYPES"        , -1            , "List of datatypes to test"),
         std::make_tuple("UT_MAX_RANKS_PER_GPU", maxRanksPerGpu, "Maximum number of ranks using the same GPU"),
+        std::make_tuple("UT_RANKS_PER_GPU"    , ranksPerGpu   , "Exact ranks-per-GPU to pin (0 = sweep 1..MAX)"),
         std::make_tuple("UT_PRINT_VALUES"     , printValues   , "Print array values (-1 for all)"),
         std::make_tuple("UT_SHOW_TIMING"      , showTiming    , "Show timing table"),
         std::make_tuple("UT_INTERACTIVE"      , useInteractive, "Run in interactive mode"),
