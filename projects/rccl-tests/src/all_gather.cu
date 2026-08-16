@@ -6,6 +6,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <cstdlib>
 #include "cuda_runtime.h"
 #include "common.h"
 #include "gin_sdma_allgather_policy.h"
@@ -111,18 +112,30 @@ bool AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* re
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-__device__ size_t AllGatherGetSdmaThreshold(struct ncclDevComm const& devComm) {
-  using nccl::utility::loadConst;
-  const bool ctxPresent =
-      (devComm.ginConnectionCount != 0 && devComm.ginHandles[0] != nullptr);
-  ncclGinAnvilSdmaGPUContext* rsCtx =
-      ctxPresent ? (ncclGinAnvilSdmaGPUContext*)devComm.ginHandles[0] : nullptr;
-  const bool magicValid =
-      (rsCtx != nullptr) &&
-      (loadConst(&rsCtx->layoutMagic) == NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC);
-  const size_t ctxThreshold = magicValid ? (size_t)loadConst(&rsCtx->sdmaThreshold) : 0;
-  return gin_sdma_allgather::resolveSdmaThreshold(
-      ctxPresent, magicValid, ctxThreshold, NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT);
+// Host-resolve the AllGather LSA<->SDMA crossover (bytes/rank). Per-collective
+// NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER overrides the global
+// NCCL_GIN_ANVIL_SDMA_THRESHOLD, which overrides the compiled default. Parsed as
+// a 64-bit size_t (an explicit 0 is honored -> forces the all-SDMA tier; large
+// values do not wrap, unlike the backend's int-typed inline-put threshold). The
+// resolved value is passed to the kernel, so the AllGather tier is decoupled from
+// the backend gin.put inline-vs-copy-engine threshold (ctx->sdmaThreshold).
+static size_t AllGatherResolveSdmaThreshold() {
+  auto parseEnv = [](const char* name, bool* isSet, unsigned long long* val) {
+    const char* e = getenv(name);
+    if (e && e[0]) {
+      char* end = nullptr;
+      unsigned long long v = strtoull(e, &end, 10);
+      if (end != e) { *isSet = true; *val = v; return; }
+    }
+    *isSet = false; *val = 0;
+  };
+  bool perCollSet = false, globalSet = false;
+  unsigned long long perCollVal = 0, globalVal = 0;
+  parseEnv("NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER", &perCollSet, &perCollVal);
+  parseEnv("NCCL_GIN_ANVIL_SDMA_THRESHOLD", &globalSet, &globalVal);
+  return gin_sdma_allgather::pickSdmaThreshold(
+      perCollSet, perCollVal, globalSet, globalVal,
+      gin_sdma_allgather::kAllGatherSdmaThresholdDefault);
 }
 
 template <typename T>
@@ -142,9 +155,8 @@ __device__ void AllGatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, nccl
 //   chunkBytes <= sdmaThreshold: direct LSA (all CTAs).
 //   chunkBytes >  sdmaThreshold: direct all-peers GIN puts (proven MI355X path).
 template <typename T>
-__global__ void GinHybridAllGatherKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+__global__ void GinHybridAllGatherKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, size_t sdmaThreshold, struct ncclDevComm devComm) {
   const size_t chunkBytes = count * sizeof(T);
-  const size_t sdmaThreshold = AllGatherGetSdmaThreshold(devComm);
 
   if (gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold)) {
     ncclTeam lsa = ncclTeamLsa(devComm);
@@ -179,6 +191,22 @@ __global__ void GinHybridAllGatherKernel(ncclWindow_t sendwin, size_t sendoffset
   gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
   gin.flush(ncclCoopCta());
 }
+
+// AllGather-specific launch: mirrors testLaunchDeviceKernel() but threads the
+// host-resolved per-collective sdmaThreshold into the kernel (the shared launcher
+// has a fixed signature used by the other collectives, so it is left untouched).
+template <typename F>
+static testResult_t AllGatherLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset,
+                                                void* recvbuff, size_t recvoffset, size_t count,
+                                                int root, ncclComm_t comm, cudaStream_t stream,
+                                                size_t sdmaThreshold) {
+  if (kernel == nullptr) return testNotImplemented;
+  ncclDevComm* devComm = (ncclDevComm*)comm;
+  ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
+  ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
+  kernel<<<deviceCtaCount, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, sdmaThreshold, *devComm);
+  return testSuccess;
+}
 #endif
 #endif
 
@@ -189,9 +217,9 @@ testResult_t AllGatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
     NCCLCHECK(ncclAllGather(sptr, rptr, count, type, comm, stream));
   } else {
     switch(deviceImpl) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
       case 3:
-        TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinHybridAllGatherKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
+        TESTCHECK(AllGatherLaunchDeviceKernel(SPECIALIZE_KERNEL(GinHybridAllGatherKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, root, comm, stream, AllGatherResolveSdmaThreshold()));
         return testSuccess;
 #endif
       default:
