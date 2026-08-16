@@ -1982,6 +1982,52 @@ class TestExecutor:
                 r.cleanup()
         return results_by_name
 
+    def plan_init_pipeline_run(self, test_suites):
+        """Whole-run pre-pass for init-pipeline (v10 §7). Resolves every test's
+        classification across all suites, prints the planning summary, and runs the
+        run-wide guardrails (zero-pipeline, overbroad-default). Returns
+        (resolved_rows, fatal_errors). Callers must abort the run if fatal_errors.
+        The manifest is authoritative and side-effect-free (no spawn)."""
+        from lib.pipeline_runner import resolve_test, planning_summary, run_guards
+        resolved = []
+        for suite in test_suites:
+            sd = suite.get("suite_details", {})
+            if not sd.get("enabled", True):
+                continue
+            sname = sd.get("name")
+            if self.args.suite_name and not glob_filter_matches(sname, self.args.suite_name):
+                continue
+            for test in suite.get("tests", []):
+                tname = test.get("name")
+                if self.args.test_name and not glob_filter_matches(tname, self.args.test_name):
+                    continue
+                row = resolve_test(test, exec_mode="init-pipeline")
+                row["suite"] = sname
+                resolved.append(row)
+
+        s = planning_summary(resolved)
+        print("\nPlanning summary (--exec-mode init-pipeline):")
+        print(f"  mpi_coll pipeline entries:   {s['mpi_pipeline_entries']}")
+        print(f"  fork_coll parent descriptors:{s['fork_parent_descriptors']}   "
+              f"(+{s['fork_resolved_subentries']} resolved sub-entries)")
+        print(f"  netib rejected:              {s['netib_rejected']}   (rejected until implemented)")
+        print(f"  other rejected (config):     {s['rejected_total'] - s['netib_rejected']}")
+        print(f"  serial entries:              {s['serial_entries']}")
+        print(f"  executable pipeline entries: {s['executable_pipeline_entries']}")
+
+        errors = run_guards(resolved, exec_mode="init-pipeline",
+                            allow_serial_only=getattr(self.args, "allow_serial_only", False))
+        return resolved, errors
+
+    def emit_init_pipeline_manifest(self, test_suites):
+        """Print the classification manifest (one JSON object per resolved test)
+        and return the resolved rows. Used by --emit-manifest."""
+        resolved, _ = self.plan_init_pipeline_run(test_suites)
+        print("\n# init-pipeline manifest (one JSON row per resolved test):")
+        for row in resolved:
+            print(json.dumps(row, default=str))
+        return resolved
+
     def _run_suite_serial_expanded(self, suite_config, suite_name, tests):
         """Serial per-config baseline for the correctness gate (plan §12).
 

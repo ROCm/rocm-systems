@@ -49,6 +49,105 @@ CONFIG_ERROR_EXIT_CODE = 42
 _VALID_PROFILES = frozenset({PROFILE_FORK, PROFILE_MPI, PROFILE_NETIB, PROFILE_NONE})
 
 
+# Exclusion-reason enum (v10 §7): why a test is not a pipeline entry.
+EXCLUSION_REASONS = frozenset({
+    "no_rendezvous_hook", "first_init_semantics", "intentional_init_failure",
+    "fault_injection", "device_visibility_mismatch", "multiple_generations",
+    "runtime_or_profiler_lifecycle", "netib_boundary_unimplemented",
+    "unknown_binary", "unclassified",
+})
+
+
+def resolve_test(test, *, exec_mode):
+    """Resolve one test's init-pipeline disposition (pure, pre-launch).
+
+    Returns a manifest row: name, binary, planner_profile, provenance
+    (entry | suite | fallback), disposition (pipeline | serial | rejected),
+    effective_profile (the value the launched process gets, or 'absent'/'disabled'
+    for serial), pipeline_subentries, exclusion_reason, error.
+    """
+    name = test.get("name")
+    binary = str(test.get("binary", "") or "")
+    explicit = "warmup_profile" in test
+    # suite-level provenance is honored only if the config marks it explicitly.
+    suite_scoped = bool(test.get("_warmup_profile_from_suite"))
+    prof = test.get("warmup_profile", PROFILE_NONE)
+    provenance = "entry" if explicit and not suite_scoped else ("suite" if suite_scoped else "fallback")
+
+    row = {
+        "name": name, "binary": binary, "planner_profile": prof,
+        "provenance": provenance, "disposition": "serial",
+        "effective_profile": "absent", "pipeline_subentries": 0,
+        "exclusion_reason": None, "error": None,
+    }
+    if exec_mode != "init-pipeline":
+        return row
+
+    errs = classify_errors([test], exec_mode="init-pipeline")
+    if errs:
+        row["disposition"] = "rejected"
+        row["error"] = errs[0][1]
+        if prof == PROFILE_NETIB:
+            row["exclusion_reason"] = "netib_boundary_unimplemented"
+        elif prof not in _VALID_PROFILES:
+            row["exclusion_reason"] = "unclassified"
+        else:
+            row["exclusion_reason"] = "unknown_binary"
+        return row
+
+    if prof == PROFILE_NONE:
+        row["exclusion_reason"] = "no_rendezvous_hook"
+        return row
+
+    subs = plan_entries([test], exec_mode="init-pipeline")
+    row["disposition"] = "pipeline"
+    row["effective_profile"] = prof
+    row["pipeline_subentries"] = sum(1 for p in subs if p.kind == KIND_PIPELINE)
+    return row
+
+
+def planning_summary(resolved):
+    """Counts for the pre-execution planning summary (executable sub-entries, not
+    parent descriptors)."""
+    def _pipe(r):
+        return r["disposition"] == "pipeline"
+    mpi_subs = sum(r["pipeline_subentries"] for r in resolved if _pipe(r) and r["planner_profile"] == PROFILE_MPI)
+    fork_parents = sum(1 for r in resolved if _pipe(r) and r["planner_profile"] == PROFILE_FORK)
+    fork_subs = sum(r["pipeline_subentries"] for r in resolved if _pipe(r) and r["planner_profile"] == PROFILE_FORK)
+    netib_rejected = sum(1 for r in resolved if r["disposition"] == "rejected" and r["planner_profile"] == PROFILE_NETIB)
+    rejected = sum(1 for r in resolved if r["disposition"] == "rejected")
+    serial = sum(1 for r in resolved if r["disposition"] == "serial")
+    executable_pipeline = mpi_subs + fork_subs
+    return {
+        "mpi_pipeline_entries": mpi_subs,
+        "fork_parent_descriptors": fork_parents,
+        "fork_resolved_subentries": fork_subs,
+        "netib_rejected": netib_rejected,
+        "rejected_total": rejected,
+        "serial_entries": serial,
+        "executable_pipeline_entries": executable_pipeline,
+    }
+
+
+def run_guards(resolved, *, exec_mode, allow_serial_only=False):
+    """Whole-run guardrails (v10 §7). Returns a list of fatal error messages."""
+    errors = []
+    if exec_mode != "init-pipeline":
+        return errors
+    executable = sum(r["pipeline_subentries"] for r in resolved if r["disposition"] == "pipeline")
+    if executable == 0 and not allow_serial_only:
+        errors.append("--exec-mode init-pipeline resolved ZERO pipeline entries over the whole run; "
+                      "pass --allow-serial-only if a serial-only run is intended")
+    # Overbroad-default guard: a pipeline entry from an implicit (non-explicit)
+    # fallback is rejected -- classification must be entry- or approved-suite-level.
+    for r in resolved:
+        if r["disposition"] == "pipeline" and r["provenance"] not in ("entry", "suite"):
+            errors.append(f"{r['name']}: pipeline classification came from an implicit "
+                          f"'{r['provenance']}' default; classification must be explicit "
+                          f"(entry or approved suite level)")
+    return errors
+
+
 def classify_errors(tests, *, exec_mode):
     """Planner-side (pre-spawn) classification checks (v10 §5.1/§5.4).
 

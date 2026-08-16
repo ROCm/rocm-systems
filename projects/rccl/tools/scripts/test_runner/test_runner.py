@@ -99,6 +99,20 @@ def main():
                 elif args.suite_name and not glob_filter_matches(suite_name, args.suite_name):
                     print(f"SKIP: Test suite '{suite_name}' (does not match --suite-name '{args.suite_name}')")
 
+            # init-pipeline pre-pass (v10 §7): classify the whole run, print the
+            # planning summary, and enforce the run-wide guardrails BEFORE spawning
+            # anything. --emit-manifest prints the manifest and exits.
+            if getattr(args, "exec_mode", "serial") == "init-pipeline":
+                if getattr(args, "emit_manifest", False):
+                    executor.emit_init_pipeline_manifest(test_suites)
+                    sys.exit(0)
+                _resolved, _errors = executor.plan_init_pipeline_run(test_suites)
+                if _errors:
+                    print("\nERROR: init-pipeline planning failed:")
+                    for _e in _errors:
+                        print(f"  - {_e}")
+                    sys.exit(2)
+
             # Run only enabled (and name-matched) test suites
             # Note: Reruns happen immediately within run_test_suite() if --rerun-failed is set
             for suite in test_suites:

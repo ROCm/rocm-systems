@@ -22,7 +22,10 @@ from lib.pipeline_runner import (  # noqa: E402
     classify_errors,
     eligibility_from_test,
     plan_entries,
+    planning_summary,
+    resolve_test,
     rollup_result,
+    run_guards,
     topline_counts,
 )
 
@@ -171,6 +174,58 @@ def test_classify_serial_mode_only_checks_unknown():
                              "binary": "rccl-UnitTests"}], exec_mode="serial") == []
     assert len(classify_errors([{"name": "X", "warmup_profile": "bogus"}],
                                exec_mode="serial")) == 1
+
+
+# --------------------------------------------------------------------------- #
+# resolution / provenance / guards / summary (v10 §7)
+# --------------------------------------------------------------------------- #
+def test_resolve_serial_and_provenance():
+    r = resolve_test({"name": "S"}, exec_mode="init-pipeline")
+    assert r["disposition"] == "serial" and r["provenance"] == "fallback"
+    assert r["effective_profile"] == "absent" and r["exclusion_reason"] == "no_rendezvous_hook"
+
+
+def test_resolve_pipeline_fork_counts_subentries():
+    r = resolve_test({"name": "AR", "binary": "rccl-UnitTests", "warmup_profile": "fork_coll",
+                      "fork_expand": {"num_gpus": [8], "process_mask": 3, "max_ranks_per_gpu": 1}},
+                     exec_mode="init-pipeline")
+    assert r["disposition"] == "pipeline" and r["provenance"] == "entry"
+    assert r["effective_profile"] == "fork_coll" and r["pipeline_subentries"] == 2
+
+
+def test_resolve_rejected_netib():
+    r = resolve_test({"name": "N", "binary": "rccl-UnitTestsMPI", "warmup_profile": "netib_plugin"},
+                     exec_mode="init-pipeline")
+    assert r["disposition"] == "rejected" and r["exclusion_reason"] == "netib_boundary_unimplemented"
+
+
+def test_zero_pipeline_guard():
+    resolved = [resolve_test({"name": "S"}, exec_mode="init-pipeline")]
+    assert run_guards(resolved, exec_mode="init-pipeline")           # zero pipeline -> error
+    assert not run_guards(resolved, exec_mode="init-pipeline", allow_serial_only=True)
+
+
+def test_overbroad_default_guard():
+    # A pipeline entry whose profile came from an implicit fallback is rejected.
+    row = resolve_test({"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll"},
+                       exec_mode="init-pipeline")
+    row["provenance"] = "fallback"  # simulate an implicit non-none default
+    errs = run_guards([row], exec_mode="init-pipeline")
+    assert any("implicit" in e for e in errs)
+
+
+def test_planning_summary_counts_subentries():
+    resolved = [
+        resolve_test({"name": "AR", "binary": "rccl-UnitTests", "warmup_profile": "fork_coll",
+                      "fork_expand": {"num_gpus": [8], "process_mask": 3, "max_ranks_per_gpu": 1}},
+                     exec_mode="init-pipeline"),
+        resolve_test({"name": "M", "binary": "rccl-UnitTestsMPI", "warmup_profile": "mpi_coll"},
+                     exec_mode="init-pipeline"),
+        resolve_test({"name": "S"}, exec_mode="init-pipeline"),
+    ]
+    s = planning_summary(resolved)
+    assert s["fork_resolved_subentries"] == 2 and s["mpi_pipeline_entries"] == 1
+    assert s["serial_entries"] == 1 and s["executable_pipeline_entries"] == 3
 
 
 # --------------------------------------------------------------------------- #

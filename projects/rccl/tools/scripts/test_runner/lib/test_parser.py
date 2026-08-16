@@ -271,8 +271,17 @@ Examples:
             '--emit-manifest',
             action='store_true',
             default=False,
-            help="init-pipeline only: print the side-effect-free sub-entry expansion "
-                 "manifest (eligibility + pinned selectors) and exit, without running."
+            help="init-pipeline only: print the side-effect-free classification "
+                 "manifest (per-entry profile/provenance/binary/disposition/"
+                 "expansion) and exit, without running."
+        )
+        self.parser.add_argument(
+            '--allow-serial-only',
+            action='store_true',
+            default=False,
+            help="init-pipeline only: permit a run that resolves to zero pipeline "
+                 "entries (all serial). Without it, a zero-pipeline init-pipeline run "
+                 "is a hard error (catches mis-classification)."
         )
         self.parser.add_argument(
             '--expand-sweeps',
