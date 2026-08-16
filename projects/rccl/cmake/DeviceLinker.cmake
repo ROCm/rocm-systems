@@ -74,6 +74,12 @@ set(DL_INHERITED_FLAGS "")
 get_target_property(_rccl_copts rccl COMPILE_OPTIONS)
 if(_rccl_copts)
   foreach(_opt IN LISTS _rccl_copts)
+    # Keep this one warning suppression for generated symmetric kernels whose
+    # unroll hints are not always realizable by the optimizer.
+    if(_opt STREQUAL "-Wno-pass-failed" OR _opt STREQUAL "-Wno-pass-failed=transform-warning")
+      list(APPEND DL_INHERITED_FLAGS "${_opt}")
+      continue()
+    endif()
     if(_opt MATCHES "^(-x|hip|-fgpu-rdc|--offload-host-only|--offload-compress|--offload-arch=.*|-parallel-jobs=.*|-w|-W.*)$")
       continue()
     endif()
@@ -456,10 +462,9 @@ add_custom_command(
 # ===========================================================================
 set(COMMON_FAT_OBJ "${DEVICE_BUILD_DIR}/common.o")
 
+# --offload-compress is not consumed by --offload-host-only compilation and
+# emits unused-argument warnings; keep compression on device/link stages only.
 set(DL_HOST_COMPRESS "")
-if(ENABLE_COMPRESS)
-  set(DL_HOST_COMPRESS "--offload-compress")
-endif()
 
 # Gather include flags for host compile (same paths as device)
 set(_host_inc_flags "")
