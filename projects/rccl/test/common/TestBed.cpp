@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <unistd.h>
 #include "TestBed.hpp"
+#include "Rendezvous.hpp"
 #include <rccl/rccl.h>
 
 #define PIPE_WRITE(childId, val)                                        \
@@ -171,6 +172,21 @@ namespace RcclUnitTesting
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
       {
         PIPE_CHECK(childId);
+      }
+
+      // READY/GO rendezvous (Phase 2). The TestBed parent -- the process the
+      // runner launched -- publishes READY once every child is warm, then blocks
+      // until the runner writes GO before the real ncclCommInitRank below. The
+      // parent does only CPU/file I/O here (warmup ran in the forked children),
+      // so it stays fork-safe. No-op unless RCCL_TEST_RENDEZVOUS_DIR is set.
+      if (Rendezvous::Enabled())
+      {
+        if (!Rendezvous::PublishReady())
+        {
+          TEST_ERROR("Failed to publish READY token");
+          FAIL();
+        }
+        Rendezvous::WaitForGo();
       }
     }
 

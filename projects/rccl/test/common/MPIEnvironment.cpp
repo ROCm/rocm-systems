@@ -11,6 +11,7 @@
 
 #include "MPIEnvironment.hpp"
 #include "MPITestBase.hpp"
+#include "Rendezvous.hpp"
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -126,10 +127,31 @@ void MPIEnvironment::warmup_device_code()
         return;
     }
 
-    // Phase 1.2: no READY/GO rendezvous yet. Barrier so every rank is warm
-    // before RUN_ALL_TESTS proceeds; the real cross-rank communicators are built
-    // by the tests themselves (after this point).
+    // Barrier so every rank is warm before the rendezvous / RUN_ALL_TESTS.
     MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
+
+    // READY/GO rendezvous (Phase 2). Only rank 0 talks to the runner's
+    // filesystem rendezvous (the runner writes GO / reads READY, and MPI_Bcast
+    // only covers rank0 -> others), then broadcasts GO so all ranks are released
+    // together. No-op unless RCCL_TEST_RENDEZVOUS_DIR is set, so the Phase-1.2
+    // warmup-only behavior is preserved when the runner does not drive a barrier.
+    // The real cross-rank communicators are built by the tests themselves, after
+    // GO.
+    if (RcclUnitTesting::Rendezvous::Enabled())
+    {
+        if (world_rank == 0)
+        {
+            if (!RcclUnitTesting::Rendezvous::PublishReady())
+            {
+                retCode = 1;
+                ASSERT_TRUE(false) << "RCCL_TEST_READY_GO: failed to publish READY token";
+                return;
+            }
+            RcclUnitTesting::Rendezvous::WaitForGo();
+        }
+        int go = 1;
+        MPICHECK(MPI_Bcast(&go, 1, MPI_INT, 0, MPI_COMM_WORLD));
+    }
 }
 
 /**
