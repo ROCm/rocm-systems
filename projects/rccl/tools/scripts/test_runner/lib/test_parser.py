@@ -263,6 +263,16 @@ Examples:
             help="init-pipeline only: print the side-effect-free sub-entry expansion "
                  "manifest (eligibility + pinned selectors) and exit, without running."
         )
+        self.parser.add_argument(
+            '--expand-sweeps',
+            action='store_true',
+            default=False,
+            help="serial mode only: split fork sweeps into the SAME pinned "
+                 "per-configuration sub-entries the init-pipeline uses (run serially, "
+                 "no warmup/overlap) and emit per-config records. Produces the "
+                 "per-config SERIAL BASELINE to diff against an init-pipeline run "
+                 "(see tools/compare_results.py)."
+        )
 
     def validate_init_pipeline(self, args):
         """Validate init-pipeline flags; returns a list of error strings (empty ok)."""

@@ -1966,6 +1966,59 @@ class TestExecutor:
                 r.cleanup()
         return results_by_name
 
+    def _run_suite_serial_expanded(self, suite_config, suite_name, tests):
+        """Serial per-config baseline for the correctness gate (plan §12).
+
+        Expands fork sweeps into the SAME pinned per-config sub-entries the
+        init-pipeline uses (via plan_entries), but runs each one serially through
+        the normal run_test path -- NO warmup, NO rendezvous, NO overlap -- and
+        folds the results into per-config records with a parent_summary. Diffing
+        this run's tests.jsonl against an init-pipeline run gives a true
+        per-configuration pass/fail/skip comparison (not just the roll-up).
+        """
+        filtered = []
+        for test in tests:
+            name = test.get("name")
+            if self.args.test_name and not glob_filter_matches(name, self.args.test_name):
+                continue
+            test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
+            is_auto = isinstance(test_ranks, str) and test_ranks.strip().lower() == "auto"
+            is_mpi = is_auto or (not isinstance(test_ranks, str) and test_ranks > 1)
+            if self.args.skip_mpi_check and is_mpi:
+                continue
+            filtered.append(test)
+        if not filtered:
+            return []
+
+        base_by_name = {t.get("name"): t for t in filtered}
+        # Expand exactly as the pipeline does (fork -> per-generation sub-entries;
+        # mpi/netib/unprofiled -> one entry).
+        planned = plan_entries(filtered, exec_mode="init-pipeline")
+
+        results_by_name = {}
+        for p in planned:
+            base = base_by_name[p.parent_name]
+            tcfg = copy.deepcopy(base)
+            env = dict(tcfg.get("env_variables", {}))
+            env.update(p.env_overrides)          # pinned selectors only; no warmup/rendezvous
+            tcfg["env_variables"] = env
+            tcfg["name"] = p.name
+            res = self.run_test(tcfg, suite_config)
+            results_by_name[p.name] = {**res, "suite": suite_name}
+
+        records = assemble_records(planned, results_by_name)
+        results = []
+        for rec in records:
+            results.append(rec)
+            if rec.get("counts_toward_topline"):
+                self.test_names.append(rec.get("test_name"))
+                self.test_results.append(rec.get("result"))
+                self.test_durations.append(rec.get("duration", 0) or 0)
+                self.test_suites.append(suite_name)
+            if self.emit_enabled:
+                self.test_records.append(rec)
+        return results
+
     def _run_suite_init_pipeline(self, suite_config, suite_name, tests):
         """Run a suite in init-pipeline mode: overlap entries' device-code init
         behind a READY/GO barrier, execute one at a time (no co-tenancy), and roll
@@ -2073,6 +2126,12 @@ class TestExecutor:
         # execute one entry at a time. Opt-in; the serial path below is untouched.
         if getattr(self.args, "exec_mode", "serial") == "init-pipeline":
             return self._run_suite_init_pipeline(suite_config, suite_name, tests)
+
+        # Serial per-config baseline: same sub-entry expansion as the pipeline, run
+        # serially with no warmup/overlap, emitting per-config rows to diff against
+        # an init-pipeline run (plan §12). Opt-in; plain serial is unchanged.
+        if getattr(self.args, "expand_sweeps", False):
+            return self._run_suite_serial_expanded(suite_config, suite_name, tests)
 
         results = []
         skipped_count = 0

@@ -137,6 +137,36 @@ def test_run_suite_init_pipeline_end_to_end(tmp_path):
     assert ex.test_results.count("PASSED") == 3
 
 
+def test_serial_expanded_emits_per_config_rows(tmp_path):
+    """--expand-sweeps runs each pinned sub-entry serially via run_test (no warmup)
+    and emits per-config sub_entry rows + a parent_summary."""
+    ex = _make_executor(tmp_path, exec_mode="serial", expand_sweeps=True)
+    seen = {}
+
+    def fake_run_test(tcfg, suite):
+        # Capture the pinned env + name each sub-entry runs with, and NO warmup.
+        seen[tcfg["name"]] = dict(tcfg.get("env_variables", {}))
+        return {"name": tcfg["name"], "result": "PASSED", "duration": 1.0}
+
+    ex.run_test = fake_run_test
+    suite_config = {"suite_details": {"name": "S"}}
+    tests = [{"name": "AR", "warmup_profile": "fork_coll",
+              "fork_expand": {"num_gpus": [8], "process_mask": 3, "max_ranks_per_gpu": 1}}]
+    records = ex._run_suite_serial_expanded(suite_config, "S", tests)
+
+    by = {r["name"]: r for r in records}
+    assert by["AR.g8_sp_r1"]["record_type"] == "sub_entry"
+    assert by["AR.g8_mp_r1"]["record_type"] == "sub_entry"
+    assert by["AR"]["record_type"] == "parent_summary" and by["AR"]["result"] == "PASSED"
+    # Pinned per-config selectors were applied, and NO warmup/rendezvous env.
+    assert seen["AR.g8_sp_r1"]["UT_PROCESS_MASK"] == "1"
+    assert seen["AR.g8_mp_r1"]["UT_PROCESS_MASK"] == "2"
+    assert "RCCL_TEST_READY_GO" not in seen["AR.g8_sp_r1"]
+    assert "RCCL_TEST_RENDEZVOUS_DIR" not in seen["AR.g8_sp_r1"]
+    # One top-line row (the parent), counted once.
+    assert ex.test_results == ["PASSED"]
+
+
 @POSIX_ONLY
 def test_rerun_failed_converges_split_sweep(tmp_path):
     """A fork sweep whose first sub-entry fails (fail-fast cancels the rest) must,

@@ -68,6 +68,7 @@ and an **absolute** per-entry `RCCL_TEST_RENDEZVOUS_DIR`.
 | `--phase-timings` | off | print per-suite init/queue-wait/exec aggregate |
 | `--queue-wait-warn S` | `0` | warn if READY→GO wait exceeds S |
 | `--emit-manifest` | off | print the sub-entry expansion and exit |
+| `--expand-sweeps` | off | serial mode: split fork sweeps into the same per-config sub-entries (no warmup/overlap) — the per-config serial baseline |
 
 ---
 
@@ -87,12 +88,20 @@ sides). Totals across differently-configured runs are not comparable.
 - **A5 (scale & perf):** sweep `--init-pool ∈ {1,2,4,6,8}` × `--loader-policy`;
   correctness must equal serial per-config first, then read wall time.
 
-**Per-config correctness diff** (the decisive gate):
+**Per-config correctness diff** (the decisive gate). First produce a *per-config*
+serial baseline (fork sweeps split into the same pinned sub-entries, run serially
+with no warmup), then diff the init-pipeline run against it:
 ```
-python tools/compare_results.py SERIAL/tests.jsonl PIPELINE/tests.jsonl \
-    --exclude '*_CuMem1'
+# per-config serial baseline
+python test_runner.py -c configs/<cfg>.json --exec-mode serial --expand-sweeps --emit-results ...
+# init-pipeline run
+python test_runner.py -c configs/<cfg>.json --exec-mode init-pipeline --init-pool 2 --emit-results ...
+# diff (exits non-zero on any regression or dropped coverage)
+python tools/compare_results.py SERIAL/tests.jsonl PIPELINE/tests.jsonl --exclude '*_CuMem1'
 ```
-Exits non-zero on any regression or dropped coverage.
+Without `--expand-sweeps` the serial run emits one monolithic row per fork sweep,
+so the diff can only match at the parent/roll-up level; `--expand-sweeps` gives
+true per-configuration rows.
 
 **Scale sweep driver:**
 ```
