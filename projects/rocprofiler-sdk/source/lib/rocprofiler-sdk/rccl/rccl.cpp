@@ -186,11 +186,12 @@ rccl_api_impl<TableIdx, OpIdx>::functor(Args... args)
             return;
     }
 
-    auto  buffer_record    = common::init_public_api_struct(buffered_api_data_t{});
-    auto  tracer_data      = common::init_public_api_struct(callback_api_data_t{});
-    auto* corr_id          = tracing::correlation_service::construct(ref_count);
-    auto  internal_corr_id = corr_id->internal;
-    auto  ancestor_corr_id = corr_id->internal;
+    auto  buffer_record = common::init_public_api_struct(buffered_api_data_t{});
+    auto  tracer_data   = common::init_public_api_struct(callback_api_data_t{});
+    auto* corr_id       = tracing::correlation_service::construct(ref_count);
+    RETURN_UNTRACED_ON_NULL_CORRELATION_ID(corr_id, info_type::get_table_func());
+    auto internal_corr_id = corr_id->internal;
+    auto ancestor_corr_id = corr_id->internal;
 
     tracing::populate_external_correlation_ids(external_corr_ids,
                                                thr_id,

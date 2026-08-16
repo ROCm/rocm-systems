@@ -35,6 +35,19 @@
 #include <unordered_map>
 #include <vector>
 
+// construct() returns nullptr once finalization has begun. Rather than dereference it, run the
+// underlying API untraced and return. Use inside an interceptor functor (needs `exec`, `RetT`,
+// `args`).
+#define RETURN_UNTRACED_ON_NULL_CORRELATION_ID(CORRELATION_ID, TABLE_FUNC)                         \
+    if(!(CORRELATION_ID))                                                                          \
+    {                                                                                              \
+        [[maybe_unused]] auto _untraced_ret = exec((TABLE_FUNC), std::forward<Args>(args)...);     \
+        if constexpr(!std::is_void<RetT>::value)                                                   \
+            return _untraced_ret;                                                                  \
+        else                                                                                       \
+            return;                                                                                \
+    }
+
 namespace rocprofiler
 {
 namespace tracing
