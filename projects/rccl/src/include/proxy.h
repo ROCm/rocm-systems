@@ -388,6 +388,9 @@ struct ncclProxyState {
   struct ncclSocket* listenSock;
   struct ncclIpcSocket ipcSock;
   int stop;
+#ifdef ENABLE_FAULT_INJECTION
+  int testServiceLoopEntered;
+#endif
   ncclResult_t asyncResult;
 
   // Used by main thread
@@ -520,5 +523,16 @@ ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm* comm, struct n
 ncclResult_t ncclProxyStop(struct ncclComm* comm);
 ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm);
 ncclResult_t ncclProxyDestroy(struct ncclComm* comm);
+
+#ifdef ENABLE_FAULT_INJECTION
+enum ncclProxyStopFault {
+  ncclProxyStopFaultNone = 0,
+  ncclProxyStopFaultSocketInit,
+  ncclProxyStopFaultSocketConnect,
+  ncclProxyStopFaultSocketSend
+};
+
+void ncclProxyTestArmStopFault(enum ncclProxyStopFault fault);
+#endif
 
 #endif
