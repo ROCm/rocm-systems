@@ -308,9 +308,10 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       }
     }
 #endif
-    // The post timestamp exists only to feed telemetry latencies.
+    // The post timestamp exists only to feed telemetry latencies, and reads the
+    // clock only for the WQEs 1-in-N sampling selects.
     if (rcclTelemetryOn() && i == 0) {
-      int64_t _tel_ns = rcclTelemetryGetNs();
+      int64_t _tel_ns = rcclTelemetryPostTs(qp->telQpStats);
       for (int r=0; r<nreqs; r++) reqs[r]->tel_post_ts = _tel_ns;
     }
 
@@ -655,8 +656,9 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       if (comm->prepostReceiveWorkRequests) {
         continue;
       }
-      // The post timestamp exists only to feed telemetry latencies.
-      if (rcclTelemetryOn() && i == 0) req->tel_post_ts = rcclTelemetryGetNs();
+      // The post timestamp exists only to feed telemetry latencies, and reads
+      // the clock only for the WQEs 1-in-N sampling selects.
+      if (rcclTelemetryOn() && i == 0) req->tel_post_ts = rcclTelemetryPostTs(qp->telQpStats);
       // Post receive work request on the QP
       if (comm->base.recvMatchingScheme != BY_ORDER) {
         if (comm->base.rxPosts[qpIndex] < NET_IB_MAX_REQUESTS) {

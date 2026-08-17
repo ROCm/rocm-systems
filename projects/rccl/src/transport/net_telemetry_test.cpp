@@ -28,6 +28,13 @@
  * division for every input, which is checked exhaustively at small magnitudes
  * and by wide randomized sampling over the whole int64 range.
  *
+ * Completion latency is sampled 1 posting in N, decided on the post path and
+ * carried to the completion path in the post timestamp itself. Four things must
+ * hold and are tested here: selection is exactly 1 in N, the postTs == 1
+ * sentinel is told apart from both 0 and a real reading, every counter other
+ * than the histogram and min/max is untouched by N, and N == 1 is not a special
+ * case of the new code but literally the old behaviour, bucket for bucket.
+ *
  * net_telemetry.cc depends only on libc + pthread, so this links directly
  * against it with no RCCL build system and no hardware:
  *
@@ -102,7 +109,15 @@ static void resetState(void) {
   rcclTelemetryCfg.histogram_max_buckets = 5;
   rcclTelemetryCfg.histogram_bucket_interval_ns = 30000;
   rcclTelemetryConfigDeriveHistogram();
+  rcclTelemetryLatencySampleN = 1;
+  rcclTelemetryLatencySampleMask = 0;
   rcclTelemetryEnabled = 1;
+}
+
+/* What rcclTelemetryInit() does for a power-of-two RCCL_TELEMETRY_LATENCY_SAMPLE. */
+static void setSampleN(int n) {
+  rcclTelemetryLatencySampleN = n;
+  rcclTelemetryLatencySampleMask = (uint64_t)n - 1;
 }
 
 /* ---- block index decomposition -------------------------------------- */
@@ -570,10 +585,257 @@ static void testConfigLayout(void) {
   CHECK_EQ(first / RCCL_TELEMETRY_CACHELINE, last / RCCL_TELEMETRY_CACHELINE);
 }
 
+/* ---- 1-in-N completion-latency sampling ----------------------------- */
+
+/* One posting-to-completion cycle exactly as the data path performs it: the
+ * post timestamp comes from rcclTelemetryPostTs() and is handed unchanged to
+ * the completion hook. A sampled timestamp is backdated first, so the latency
+ * is a known positive quantity instead of however long two clock reads happen
+ * to take, and the histogram bucket it lands in is decided by the test. */
+static void drivePostComplete(RcclQpStats* qp, int nWqe, int64_t backdateNs) {
+  for (int i = 0; i < nWqe; i++) {
+    int64_t ts = rcclTelemetryPostTs(qp);
+    if (ts > RCCL_TELEMETRY_TS_UNSAMPLED) ts -= backdateNs;
+    rcclTelemetryQpWqeComplete(qp, ts);
+  }
+}
+
+static uint64_t histogramSum(const RcclQpStats* qp) {
+  uint64_t n = 0;
+  for (int b = 0; b < RCCL_TELEMETRY_HISTOGRAM_SIZE; b++) n += qp->wqe_completion_histogram[b];
+  return n;
+}
+
+/* Selection is exactly 1 in N, and it is the N-th posting that is sampled, not
+ * an arbitrary one in each window. At N == 1 nothing is selected against and
+ * the sequence counter is not even touched, which is what makes the default
+ * path identical to the one that had no sampling in it. */
+static void testSamplingSelection(void) {
+  std::printf("testSamplingSelection\n");
+  resetState();
+  int n = 0;
+  rcclTelemetrySetupChannel(0, 0, 1, &n);
+  RcclQpStats* qp = rcclTelemetryResolveQp(0, 0, 0);
+  CHECK(qp != nullptr);
+
+  /* Default: every posting sampled, no state written, and the value is a real
+   * clock reading bracketed by two of its own. */
+  for (int i = 0; i < 1000; i++) {
+    int64_t before = rcclTelemetryGetNs();
+    int64_t ts = rcclTelemetryPostTs(qp);
+    int64_t after = rcclTelemetryGetNs();
+    CHECK(ts > RCCL_TELEMETRY_TS_UNSAMPLED);
+    CHECK(ts >= before && ts <= after);
+  }
+  CHECK_EQ_U(qp->latency_sample_seq, 0);
+
+  static const int Ns[] = {2, 4, 8, 16, 64, 1024};
+  for (size_t ni = 0; ni < sizeof(Ns) / sizeof(Ns[0]); ni++) {
+    const int N = Ns[ni];
+    qp->latency_sample_seq = 0;
+    setSampleN(N);
+    int sampled = 0;
+    const int posts = 8 * N;
+    for (int k = 1; k <= posts; k++) {
+      int64_t ts = rcclTelemetryPostTs(qp);
+      int wantSampled = (k % N) == 0;
+      if (wantSampled) {
+        CHECK(ts > RCCL_TELEMETRY_TS_UNSAMPLED);
+        sampled++;
+      } else {
+        CHECK_EQ(ts, RCCL_TELEMETRY_TS_UNSAMPLED);
+      }
+      CHECK_EQ_U(qp->latency_sample_seq, (uint64_t)k);
+      if (g_failures) return;
+    }
+    CHECK_EQ(sampled, posts / N);
+  }
+
+  /* An untracked QP carries no handle. It must cost no clock read once
+   * sampling is on, and must not be dereferenced. */
+  setSampleN(16);
+  CHECK_EQ(rcclTelemetryPostTs(nullptr), RCCL_TELEMETRY_TS_UNSAMPLED);
+  /* At the default it keeps behaving as it always did: the guard is the
+   * interval, tested before the handle, so nothing changes for N == 1. */
+  setSampleN(1);
+  CHECK(rcclTelemetryPostTs(nullptr) > RCCL_TELEMETRY_TS_UNSAMPLED);
+  resetState();
+}
+
+/* The three post-timestamp values the completion hook has to tell apart, and
+ * what each one is allowed to change. This is the whole reason the sentinel
+ * exists: 1 must behave like a real timestamp for the counters and like 0 for
+ * the latency. */
+static void testSamplingSentinel(void) {
+  std::printf("testSamplingSentinel\n");
+  resetState();
+  int n = 0;
+  rcclTelemetrySetupChannel(0, 0, 3, &n);
+  CHECK_EQ(n, 3);
+
+  /* postTs == 0: not matched to a tracked posting. */
+  RcclQpStats* unmatched = rcclTelemetryResolveQp(0, 0, 0);
+  rcclTelemetryQpWqeComplete(unmatched, 0);
+  CHECK_EQ(unmatched->num_wqe_rcvd, 1);
+  CHECK_EQ(unmatched->num_wqe_completed, 0);
+  CHECK_EQ_U(histogramSum(unmatched), 0);
+  CHECK_EQ(unmatched->wqe_completion_ns_min, 0);
+  CHECK_EQ(unmatched->wqe_completion_ns_max, 0);
+
+  /* postTs == 1: matched, but not sampled. Counted, no latency. */
+  RcclQpStats* skipped = rcclTelemetryResolveQp(0, 0, 1);
+  rcclTelemetryQpWqeComplete(skipped, RCCL_TELEMETRY_TS_UNSAMPLED);
+  CHECK_EQ(skipped->num_wqe_rcvd, 1);
+  CHECK_EQ(skipped->num_wqe_completed, 1);
+  CHECK_EQ_U(histogramSum(skipped), 0);
+  CHECK_EQ(skipped->wqe_completion_ns_min, 0);
+  CHECK_EQ(skipped->wqe_completion_ns_max, 0);
+  CHECK_EQ_U(rcclTelemetryQpSampledCount(skipped), 0);
+
+  /* A real timestamp: counted and measured. */
+  RcclQpStats* measured = rcclTelemetryResolveQp(0, 0, 2);
+  rcclTelemetryQpWqeComplete(measured, rcclTelemetryGetNs() - 45000);
+  CHECK_EQ(measured->num_wqe_rcvd, 1);
+  CHECK_EQ(measured->num_wqe_completed, 1);
+  CHECK_EQ_U(histogramSum(measured), 1);
+  CHECK_EQ_U(rcclTelemetryQpSampledCount(measured), 1);
+  /* 45 us with the default 30 us interval is bucket 1. */
+  CHECK_EQ_U(measured->wqe_completion_histogram[1], 1);
+  CHECK(measured->wqe_completion_ns_min >= 45000);
+  CHECK(measured->wqe_completion_ns_max >= 45000);
+
+  /* The sentinel must not be reachable from the histogram side either: a
+   * latency of exactly 1 ns is a real measurement and lands in bucket 0. */
+  rcclTelemetryQpWqeComplete(measured, rcclTelemetryGetNs());
+  CHECK_EQ(measured->num_wqe_completed, 2);
+}
+
+/* The counters that must not move with N, and the one relationship that must
+ * hold for the ones that do. */
+static void testSamplingCounters(void) {
+  std::printf("testSamplingCounters\n");
+  static const int Ns[] = {1, 2, 4, 16, 64, 256};
+  const int POSTS = 4096;
+
+  uint64_t reference[4] = {0, 0, 0, 0};
+  for (size_t ni = 0; ni < sizeof(Ns) / sizeof(Ns[0]); ni++) {
+    const int N = Ns[ni];
+    resetState();
+    int n = 0;
+    rcclTelemetrySetupChannel(0, 0, 4, &n);
+    CHECK_EQ(n, 4);
+    setSampleN(N);
+
+    RcclChannelStats* ch = rcclTelemetryChannel(0, 0);
+    for (int q = 0; q < 4; q++) {
+      RcclQpStats* qp = rcclTelemetryResolveQp(0, 0, q);
+      /* Also exercise the counters sampling must not touch. */
+      for (int i = 0; i < POSTS; i++) rcclTelemetryQpSendPosted(qp, i & 1);
+      for (int i = 0; i < POSTS; i++) rcclTelemetryQpRecvPosted(qp);
+      for (int i = 0; i < POSTS; i++) rcclTelemetryQpCtsSent(qp, i & 1);
+      drivePostComplete(qp, POSTS, 45000);
+    }
+
+    RcclChannelAggregate agg;
+    rcclTelemetryChannelAggregate(ch, &agg);
+
+    /* Exact, and the same for every N. */
+    CHECK_EQ_U(agg.num_wqe_sent, (uint64_t)4 * POSTS);
+    CHECK_EQ_U(agg.num_recv_wqe, (uint64_t)4 * POSTS);
+    CHECK_EQ_U(agg.num_cts_sent, (uint64_t)4 * POSTS);
+    CHECK_EQ_U(agg.num_wqe_rcvd, (uint64_t)4 * POSTS);
+    CHECK_EQ_U(agg.num_wqe_completed, (uint64_t)4 * POSTS);
+
+    /* Sampled, and exactly 1 in N of the postings. */
+    CHECK_EQ_U(agg.num_wqe_sampled, (uint64_t)4 * POSTS / (uint64_t)N);
+
+    /* The invariant a consumer relies on to read the histogram honestly. */
+    uint64_t bucketSum = 0, qpSampled = 0;
+    for (int q = 0; q < 4; q++) {
+      RcclQpStats* qp = rcclTelemetryQp(ch, q);
+      bucketSum += histogramSum(qp);
+      qpSampled += rcclTelemetryQpSampledCount(qp);
+      CHECK_EQ_U(rcclTelemetryQpSampledCount(qp), (uint64_t)POSTS / (uint64_t)N);
+      /* Sampling shrinks the sample, never the counters. */
+      CHECK_EQ_U(qp->num_wqe_completed, (uint64_t)POSTS);
+      CHECK(qp->wqe_completion_ns_min > 0);
+      CHECK(qp->wqe_completion_ns_max >= qp->wqe_completion_ns_min);
+    }
+    CHECK_EQ_U(bucketSum, agg.num_wqe_sampled);
+    CHECK_EQ_U(qpSampled, agg.num_wqe_sampled);
+
+    if (N == 1) {
+      reference[0] = agg.num_wqe_sent;
+      reference[1] = agg.num_wqe_rcvd;
+      reference[2] = agg.num_wqe_completed;
+      reference[3] = agg.num_cts_sent;
+      /* Nothing is sampled away at the default, so the histogram still covers
+       * every matched completion, exactly as it did before sampling existed. */
+      CHECK_EQ_U(agg.num_wqe_sampled, agg.num_wqe_completed);
+    } else {
+      CHECK_EQ_U(agg.num_wqe_sent, reference[0]);
+      CHECK_EQ_U(agg.num_wqe_rcvd, reference[1]);
+      CHECK_EQ_U(agg.num_wqe_completed, reference[2]);
+      CHECK_EQ_U(agg.num_cts_sent, reference[3]);
+    }
+    if (g_failures) return;
+  }
+  resetState();
+}
+
+/* N == 1 has to be the code that was there before, not a special case of the
+ * code that replaced it: driving one QP through rcclTelemetryPostTs() and
+ * another through the bare clock read it used to make must leave the two
+ * indistinguishable on every counter, including the histogram. */
+static void testSamplingDefaultIsIdentity(void) {
+  std::printf("testSamplingDefaultIsIdentity\n");
+  resetState();
+  int n = 0;
+  rcclTelemetrySetupChannel(0, 0, 2, &n);
+  CHECK_EQ(n, 2);
+  RcclQpStats* viaSampling = rcclTelemetryResolveQp(0, 0, 0);
+  RcclQpStats* viaClock = rcclTelemetryResolveQp(0, 0, 1);
+
+  const int POSTS = 2000;
+  for (int i = 0; i < POSTS; i++) {
+    int64_t backdate = 1000 + (i % 7) * 25000;
+
+    int64_t sampledTs = rcclTelemetryPostTs(viaSampling);
+    CHECK(sampledTs > RCCL_TELEMETRY_TS_UNSAMPLED);
+    rcclTelemetryQpWqeComplete(viaSampling, sampledTs - backdate);
+
+    /* Exactly what the post path did before rcclTelemetryPostTs() existed. */
+    int64_t clockTs = rcclTelemetryGetNs();
+    rcclTelemetryQpWqeComplete(viaClock, clockTs - backdate);
+  }
+
+  uint64_t a[12], b[12];
+  qpSnapshot(viaSampling, a);
+  qpSnapshot(viaClock, b);
+  for (int f = 0; f < 11; f++) CHECK_EQ_U(a[f], b[f]);
+  CHECK_EQ_U(a[2], (uint64_t)POSTS);
+  CHECK_EQ_U(a[3], (uint64_t)POSTS);
+  CHECK_EQ_U(a[10], (uint64_t)POSTS);
+
+  /* Bucket for bucket, not just in total: the same backdates must produce the
+   * same distribution through both paths. */
+  for (int bkt = 0; bkt < RCCL_TELEMETRY_HISTOGRAM_SIZE; bkt++)
+    CHECK_EQ_U(viaSampling->wqe_completion_histogram[bkt], viaClock->wqe_completion_histogram[bkt]);
+
+  /* And the default writes no sampling state at all. */
+  CHECK_EQ_U(viaSampling->latency_sample_seq, 0);
+}
+
 /* ---- concurrent growth vs. reads (run under TSan/ASan) -------------- */
 static void testConcurrent(void) {
   std::printf("testConcurrent\n");
   resetState();
+  /* Sampling on, so the relaxed load/store pair on latency_sample_seq is
+   * driven by four threads sharing the same QP slots. It is deliberately not
+   * an atomic read-modify-write, so threads do lose updates to each other;
+   * what must hold is that this changes only which postings get sampled, and
+   * never a reported count, which is what checkInvariant() below verifies. */
+  setSampleN(16);
   const int START = 8;
   const int MAX = 600;
   int n = 0;
@@ -586,9 +848,16 @@ static void testConcurrent(void) {
   for (int q = 0; q < START; q++) pinned[q] = rcclTelemetryResolveQp(0, 0, q);
   RcclChannelStats* pinnedCh = rcclTelemetryResolveChannel(0, 0);
 
+  const int NUM_WORKERS = 4;
   std::atomic<bool> stop{false};
+  std::atomic<int> ready{0};
 
   std::thread grower([&]() {
+    /* Hold off until every worker is in its loop. The grower is short enough
+     * that it can otherwise finish, and set stop, while the workers are still
+     * being spawned — which leaves them with nothing to do and this test
+     * exercising no concurrency at all. */
+    while (ready.load(std::memory_order_acquire) < NUM_WORKERS) std::this_thread::yield();
     for (int target = START + 8; target <= MAX; target += 8) {
       int got = 0;
       rcclTelemetrySetupChannel(0, 0, 8, &got);
@@ -598,9 +867,10 @@ static void testConcurrent(void) {
   });
 
   std::vector<std::thread> workers;
-  for (int w = 0; w < 4; w++) {
+  for (int w = 0; w < NUM_WORKERS; w++) {
     workers.emplace_back([&, w]() {
       unsigned int seed = 0x1234 + w;
+      ready.fetch_add(1, std::memory_order_release);
       while (!stop.load(std::memory_order_acquire)) {
         int live = __atomic_load_n(&ch->num_qps, __ATOMIC_ACQUIRE);
         if (live <= 0) continue;
@@ -617,7 +887,9 @@ static void testConcurrent(void) {
           RcclQpStats* qp = rcclTelemetryResolveQp(0, 0, (int)(seed % (unsigned int)live));
           rcclTelemetryQpSendPosted(qp, i & 1);
           rcclTelemetryQpRecvPosted(qp);
-          rcclTelemetryQpWqeComplete(qp, 0);
+          /* The data-path shape: the post timestamp decides sampling, and the
+           * completion consumes exactly the value the post produced. */
+          rcclTelemetryQpWqeComplete(qp, rcclTelemetryPostTs(qp));
           rcclTelemetryQpCtsSent(qp, i & 1);
           rcclTelemetryQpSendPosted(pinned[w], i & 1);
           rcclTelemetryChRequestCompleted(pinnedCh);
@@ -635,6 +907,17 @@ static void testConcurrent(void) {
   for (int q = 0; q < START; q++) CHECK(pinned[q] == rcclTelemetryResolveQp(0, 0, q));
   CHECK(pinnedCh == rcclTelemetryResolveChannel(0, 0));
   CHECK(ch->num_req_completed > 0);
+
+  /* Whatever the threads did to each other's sequence counters, the derived
+   * sample size still is the histogram, and still cannot exceed the matched
+   * completions it is a sample of. */
+  RcclChannelAggregate agg;
+  rcclTelemetryChannelAggregate(ch, &agg);
+  uint64_t bucketSum = 0;
+  for (int q = 0; q < ch->num_qps; q++) bucketSum += histogramSum(rcclTelemetryQp(ch, q));
+  CHECK_EQ_U(agg.num_wqe_sampled, bucketSum);
+  CHECK(agg.num_wqe_sampled <= agg.num_wqe_completed);
+  resetState();
 }
 
 int main(void) {
@@ -651,6 +934,10 @@ int main(void) {
   testHandleStableAcrossGrowth();
   testLatencyBucket();
   testConfigLayout();
+  testSamplingSelection();
+  testSamplingSentinel();
+  testSamplingCounters();
+  testSamplingDefaultIsIdentity();
   testConcurrent();
 
   if (g_failures == 0) {

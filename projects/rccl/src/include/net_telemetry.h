@@ -87,6 +87,10 @@ typedef struct {
   uint64_t recv_wqe;      /* receive WQEs posted */
   uint64_t wqe_rcvd;      /* completions drained from the CQ */
   uint64_t wqe_completed; /* completions matched to a tracked posting */
+  uint64_t wqe_sampled;   /* of those, the ones whose latency was measured;
+                         * equals wqe_completed unless 1-in-N latency
+                         * sampling is on, and always equals the sum of
+                         * wqe_completion_histogram below */
   int64_t  wqe_completion_ns_min;   /* min across QPs (0 = none seen) */
   int64_t  wqe_completion_ns_max;   /* max across QPs */
   uint64_t wqe_completion_histogram[RCCL_TELEMETRY_HISTOGRAM_SIZE]; /* summed across channels/QPs */
@@ -125,6 +129,49 @@ typedef struct {
 } RcclTelemetryConfig;
 
 extern RcclTelemetryConfig rcclTelemetryCfg;
+
+/* ------------------------------------------------------------------ */
+/* 1-in-N completion-latency sampling                                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Everything except the latency of a WQE is a counter increment. The latency
+ * costs two clock_gettime() calls per WQE — one on the post path, one on the
+ * completion path — plus the bucket computation and the two min/max CAS loops,
+ * and that family is the bulk of the measured per-WQE cost. Sampling one
+ * posting in N removes all of it for the other N-1.
+ *
+ * The decision has to be made at post time, because that is where the first
+ * timestamp would be taken. It is carried to the completion path in the post
+ * timestamp itself, using a sentinel so that no existing counter changes
+ * meaning:
+ *
+ *   postTs == 0   completion not matched to a tracked posting  (unchanged)
+ *   postTs == 1   matched, but this WQE was not sampled        (new)
+ *   postTs >  1   matched and sampled; a real CLOCK_MONOTONIC reading
+ *
+ * num_wqe_completed therefore still counts every postTs > 0 and stays exact
+ * for any N, while all latency work is confined to postTs > 1. The second
+ * clock read already sits inside the postTs > 0 branch, so an unsampled WQE
+ * ends up reading the clock zero times on both sides.
+ *
+ * A real reading is nanoseconds since boot, so it can only collide with the
+ * sentinel in the first nanosecond of uptime, before any QP exists.
+ */
+#define RCCL_TELEMETRY_TS_UNSAMPLED 1
+
+/*
+ * N - 1, so the test is a mask. 0 means N == 1, i.e. sample everything, which
+ * is the default and reproduces the un-sampled behaviour exactly. Written once
+ * during rcclTelemetryInit(), before the enable flag is published, and only
+ * read afterwards. RCCL_TELEMETRY_LATENCY_SAMPLE sets it; see net_telemetry.cc
+ * for how a non-power-of-two request is rounded.
+ */
+extern uint64_t rcclTelemetryLatencySampleMask;
+
+/* The N actually in effect (a power of two, >= 1), reported in the JSON so a
+ * consumer never has to guess what the histogram covers. */
+extern int rcclTelemetryLatencySampleN;
 
 /* Fixed-point position of histogram_recip. */
 #define RCCL_TELEMETRY_RECIP_SHIFT 63
@@ -171,6 +218,10 @@ typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
   uint64_t num_recv_wqe;
   uint64_t num_wqe_rcvd;
   uint64_t num_wqe_completed;
+  /* Postings counted for 1-in-N latency sampling; see rcclTelemetryPostTs().
+   * Deliberately on the first line, next to the counters the same post already
+   * writes, so selecting a WQE costs no cache line the hook did not own. */
+  uint64_t latency_sample_seq;
   uint64_t num_slot_miss;
   uint64_t num_cts_sent;
   uint64_t num_cts_sent_signalled;
@@ -342,6 +393,10 @@ void rcclTelemetryGetEthDevice(const char* roce_device, char* eth_device, size_t
 /*    - Update histogram bucket based on latency                       */
 /*    - Update min/max latency values                                  */
 /*                                                                     */
+/* The timestamps in 1 and 2, and everything in 3 that depends on      */
+/* them, are subject to 1-in-N sampling; see rcclTelemetryPostTs().    */
+/* The counters are not.                                               */
+/*                                                                     */
 /* 4. ERROR PATH (on CQ error):                                        */
 /*    - Increment cq_errors counter                                    */
 /*                                                                     */
@@ -441,12 +496,35 @@ typedef struct {
   uint64_t num_recv_wqe;
   uint64_t num_wqe_rcvd;
   uint64_t num_wqe_completed;
+  uint64_t num_wqe_sampled;
   uint64_t num_cts_sent;
 } RcclChannelAggregate;
 
+/*
+ * Completions on this QP whose latency was actually measured.
+ *
+ * Not a stored counter, and deliberately so: it is the sum of the QP's latency
+ * histogram, which is by construction exactly the set of completions that
+ * produced a latency sample. Deriving it makes the "bucket sum == sampled
+ * count" invariant true by definition rather than by agreement between two
+ * counters, and it keeps the sampled path from growing an extra atomic that
+ * the default N == 1 would then pay on every single completion.
+ *
+ * Summing all RCCL_TELEMETRY_HISTOGRAM_SIZE buckets is the same as summing
+ * only the histogram_max_buckets that are emitted, because
+ * rcclTelemetryLatencyBucket() clamps every index below that bound.
+ */
+static inline uint64_t rcclTelemetryQpSampledCount(RcclQpStats* qp) {
+  uint64_t n = 0;
+  if (qp == NULL) return 0;
+  for (int b = 0; b < RCCL_TELEMETRY_HISTOGRAM_SIZE; b++)
+    n += __atomic_load_n(&qp->wqe_completion_histogram[b], __ATOMIC_RELAXED);
+  return n;
+}
+
 static inline void rcclTelemetryChannelAggregate(RcclChannelStats* ch, RcclChannelAggregate* agg) {
   agg->num_wqe_sent = agg->num_recv_wqe = agg->num_wqe_rcvd = 0;
-  agg->num_wqe_completed = agg->num_cts_sent = 0;
+  agg->num_wqe_completed = agg->num_wqe_sampled = agg->num_cts_sent = 0;
   if (ch == NULL) return;
   int numQps = __atomic_load_n(&ch->num_qps, __ATOMIC_ACQUIRE);
   for (int q = 0; q < numQps; q++) {
@@ -456,6 +534,7 @@ static inline void rcclTelemetryChannelAggregate(RcclChannelStats* ch, RcclChann
     agg->num_recv_wqe += __atomic_load_n(&qp->num_recv_wqe, __ATOMIC_RELAXED);
     agg->num_wqe_rcvd += __atomic_load_n(&qp->num_wqe_rcvd, __ATOMIC_RELAXED);
     agg->num_wqe_completed += __atomic_load_n(&qp->num_wqe_completed, __ATOMIC_RELAXED);
+    agg->num_wqe_sampled += rcclTelemetryQpSampledCount(qp);
     agg->num_cts_sent += __atomic_load_n(&qp->num_cts_sent, __ATOMIC_RELAXED);
   }
 }
@@ -511,6 +590,56 @@ static inline RcclChannelStats* rcclTelemetryResolveChannel(int devIdx, int chId
 }
 
 /*
+ * Post timestamp for one WQE about to be posted on `qp`: either a real
+ * CLOCK_MONOTONIC reading, or RCCL_TELEMETRY_TS_UNSAMPLED for a WQE this
+ * sampling interval skips. Call it on the post path, in place of the bare
+ * rcclTelemetryGetNs() it replaced, under the same rcclTelemetryOn() guard.
+ *
+ * At the default N == 1 this is a load of a never-written global, a compare and
+ * a perfectly-predicted branch ahead of the clock read that used to be
+ * unconditional, and nothing else: no counter is touched, so the default path
+ * is what it always was.
+ *
+ * Above N == 1 the selection rides a per-QP sequence counter. Two alternatives
+ * were rejected. The value returned by the existing __atomic_fetch_add on
+ * num_wqe_sent is free, but it is not available in time: that counter is
+ * incremented after ibv_post_send, while the timestamp has to be taken before
+ * it, and moving the increment would change what the counter means when a post
+ * fails. A thread_local counter needs no memory of its own, but in a shared
+ * library it defaults to the global-dynamic TLS model and reaches the variable
+ * through a __tls_get_addr call; forcing initial-exec to avoid that risks
+ * failing to load under dlopen once the static TLS surplus is gone.
+ *
+ * Measured cost of this decision, per call, in a dlopen'd shared object at
+ * N == 16 (median of 9 trials of 20M calls each, MI300X node): per-QP counter
+ * 3.8 ns, thread_local global-dynamic 5.0 ns, thread_local initial-exec
+ * 3.4 ns, __atomic_fetch_add on the same counter 9.4 ns. So the per-QP counter
+ * costs 0.4 ns more than the TLS model that cannot safely be used and 1.2 ns
+ * less than the one that can, and an atomic read-modify-write would cost more
+ * than twice as much. All of them replace an unconditional clock read of
+ * 18.9 ns. At N == 1 every variant measures 18.3-18.5 ns, i.e. the clock read
+ * and nothing else.
+ *
+ * The counter is read and written with relaxed atomics rather than an atomic
+ * read-modify-write: a lost update between two threads driving one QP only
+ * shifts which postings are sampled, never a reported count, so nothing on the
+ * hot path needs a lock prefix. Relaxed atomic accesses are still race-free,
+ * so this stays clean under ThreadSanitizer.
+ *
+ * qp may be NULL (an untracked QP); the completion hook is a no-op for it, so
+ * there is no reason to spend a clock read on it.
+ */
+static inline int64_t rcclTelemetryPostTs(RcclQpStats* qp) {
+  uint64_t mask = rcclTelemetryLatencySampleMask;
+  if (__builtin_expect(mask == 0, 1)) return rcclTelemetryGetNs();
+  if (qp == NULL) return RCCL_TELEMETRY_TS_UNSAMPLED;
+  uint64_t seq = __atomic_load_n(&qp->latency_sample_seq, __ATOMIC_RELAXED) + 1;
+  __atomic_store_n(&qp->latency_sample_seq, seq, __ATOMIC_RELAXED);
+  if ((seq & mask) != 0) return RCCL_TELEMETRY_TS_UNSAMPLED;
+  return rcclTelemetryGetNs();
+}
+
+/*
  * Histogram bucket for a completion latency.
  *
  * Bit-identical to what it replaced,
@@ -561,6 +690,11 @@ static inline void rcclTelemetryQpWqeComplete(RcclQpStats* qp, int64_t postTs) {
   if (postTs <= 0) return;
 
   __atomic_fetch_add(&qp->num_wqe_completed, 1, __ATOMIC_RELAXED);
+  /* Matched, so it counts; not sampled, so it carries no latency. Placed above
+   * the clock read on purpose: an unsampled WQE costs no clock read on either
+   * side. */
+  if (postTs == RCCL_TELEMETRY_TS_UNSAMPLED) return;
+
   int64_t latency_ns = rcclTelemetryGetNs() - postTs;
   if (latency_ns <= 0) return;
 
@@ -672,9 +806,13 @@ static inline void rcclTelemetryCqError(int devIdx) {
  * - Increments num_wqe_rcvd for every completion, send or recv
  * - Increments num_wqe_completed only when the completion is matched to a
  *   tracked posting (postTs > 0), mirroring the ANP wqe_id_tracker lookup
- * - Computes latency from post_ts to now for matched completions
+ * - Computes latency from post_ts to now for matched, sampled completions
  * - Updates the latency histogram bucket
  * - Updates min/max latency atomically
+ *
+ * num_wqe_completed is independent of the sampling interval: a WQE the
+ * interval skipped still arrives here with postTs == RCCL_TELEMETRY_TS_UNSAMPLED
+ * and is still counted. Only the histogram and min/max shrink to the sample.
  *
  * Both counters are per-QP only. The matching channel totals are derived from
  * the QP slots by rcclTelemetryChannelAggregate() at flush time, so a channel
@@ -687,7 +825,10 @@ static inline void rcclTelemetryCqError(int devIdx) {
  * @param devIdx   Device index in rcclTelemetryDevs array
  * @param chIdx    Channel index
  * @param qpIdx    Queue pair index within channel
- * @param postTs   Timestamp when work request was posted (0 if unmatched)
+ * @param postTs   Timestamp when the work request was posted: 0 if the
+ *                 completion matched no tracked posting,
+ *                 RCCL_TELEMETRY_TS_UNSAMPLED if it matched one that latency
+ *                 sampling skipped, a real reading otherwise
  */
 static inline void rcclTelemetryWqeComplete(int devIdx, int chIdx, int qpIdx, int64_t postTs) {
   rcclTelemetryQpWqeComplete(rcclTelemetryResolveQp(devIdx, chIdx, qpIdx), postTs);

@@ -29,11 +29,22 @@
  * RcclTelemetryConfig::output_dir plus a hostname and a pid. */
 #define RCCL_TEL_PATH_MAX 1024
 
+/* Upper bound on RCCL_TELEMETRY_LATENCY_SAMPLE. Well past the point where the
+ * latency work has stopped costing anything; it exists so that the round-up to
+ * a power of two cannot be handed an absurd value. */
+#define RCCL_TEL_LATENCY_SAMPLE_MAX (1 << 24)
+
 /* Global telemetry state */
 int rcclTelemetryEnabled = 0;
 RcclTelemetryConfig rcclTelemetryCfg;
 RcclDeviceStats rcclTelemetryDevs[RCCL_TELEMETRY_MAX_DEVS];
 int rcclTelemetryNumDevs = 0;
+
+/* 1-in-N completion-latency sampling; see net_telemetry.h. The defaults are
+ * "sample everything", so an un-configured run behaves and reports exactly as
+ * it did before sampling existed. */
+uint64_t rcclTelemetryLatencySampleMask = 0;
+int rcclTelemetryLatencySampleN = 1;
 
 /* Internal state */
 static int rcclTelemetryInitialized = 0;
@@ -718,6 +729,33 @@ void rcclTelemetryInit(void) {
    * in place of a division. */
   rcclTelemetryConfigDeriveHistogram();
 
+  /* 1-in-N completion-latency sampling. The hot path selects a WQE with a
+   * mask, so N has to be a power of two. Anything else is rounded up to the
+   * next power of two and said out loud, rather than silently behaving as some
+   * other interval; the value that ends up in effect is also written to the
+   * JSON, so a consumer never has to reconstruct it from the environment. */
+  env_val = getenv("RCCL_TELEMETRY_LATENCY_SAMPLE");
+  if (env_val != NULL && env_val[0] != '\0') {
+    long long requested = strtoll(env_val, NULL, 10);
+    if (requested < 1) {
+      fprintf(stderr,
+              "RCCL NET_TELEMETRY: RCCL_TELEMETRY_LATENCY_SAMPLE=\"%s\" is not a positive integer; "
+              "keeping 1 (every WQE sampled)\n",
+              env_val);
+    } else {
+      long long clamped = requested > RCCL_TEL_LATENCY_SAMPLE_MAX ? RCCL_TEL_LATENCY_SAMPLE_MAX : requested;
+      long long n = 1;
+      while (n < clamped) n <<= 1;
+      if (n != requested)
+        fprintf(stderr,
+                "RCCL NET_TELEMETRY: RCCL_TELEMETRY_LATENCY_SAMPLE=%lld is not a power of two in [1, %d]; "
+                "sampling 1 WQE in %lld\n",
+                requested, RCCL_TEL_LATENCY_SAMPLE_MAX, n);
+      rcclTelemetryLatencySampleN = (int)n;
+      rcclTelemetryLatencySampleMask = (uint64_t)n - 1;
+    }
+  }
+
   env_val = getenv("RCCL_TELEMETRY_HW_COUNTERS");
   if (env_val != NULL) {
     strncpy(rcclTelemetryCfg.hw_counter_list, env_val, sizeof(rcclTelemetryCfg.hw_counter_list) - 1);
@@ -866,6 +904,7 @@ int rcclTelemetrySwCapture(RcclTelemetrySwSnapshot* out, int maxDevs) {
     s->rx_bytes      = __atomic_load_n(&dev->rx_bytes,      __ATOMIC_RELAXED);
     s->num_cq_errors = __atomic_load_n(&dev->num_cq_errors, __ATOMIC_RELAXED);
     s->wqe_sent = s->recv_wqe = s->wqe_rcvd = s->wqe_completed = 0;
+    s->wqe_sampled = 0;
     s->wqe_completion_ns_min = 0;
     s->wqe_completion_ns_max = 0;
     for (int b = 0; b < RCCL_TELEMETRY_HISTOGRAM_SIZE; b++)
@@ -891,9 +930,11 @@ int rcclTelemetrySwCapture(RcclTelemetrySwSnapshot* out, int maxDevs) {
         if (qmax > s->wqe_completion_ns_max)
           s->wqe_completion_ns_max = qmax;
 
-        for (int b = 0; b < RCCL_TELEMETRY_HISTOGRAM_SIZE; b++)
-          s->wqe_completion_histogram[b] +=
-            __atomic_load_n(&qp->wqe_completion_histogram[b], __ATOMIC_RELAXED);
+        for (int b = 0; b < RCCL_TELEMETRY_HISTOGRAM_SIZE; b++) {
+          uint64_t count = __atomic_load_n(&qp->wqe_completion_histogram[b], __ATOMIC_RELAXED);
+          s->wqe_completion_histogram[b] += count;
+          s->wqe_sampled += count;
+        }
       }
     }
   }
@@ -1461,6 +1502,13 @@ static void rcclTelemetryWriteJson(FILE* fp) {
     transport = rcclTelemetryDevs[0].transport;
   fprintf(fp, "  \"transport\": \"%s\",\n", transport);
 
+  /* Only when sampling is actually on. At the default N == 1 the histogram
+   * covers every completion, num_wqe_sampled would repeat num_wqe_completed,
+   * and the file stays byte-for-byte what it was before sampling existed. */
+  const int sampleN = rcclTelemetryLatencySampleN;
+  const int sampled = sampleN > 1;
+  if (sampled) fprintf(fp, "  \"latency_sample_interval\": %d,\n", sampleN);
+
   fprintf(fp, "  \"devices\": [\n");
 
   int devsPrinted = 0;
@@ -1528,6 +1576,7 @@ static void rcclTelemetryWriteJson(FILE* fp) {
       fprintf(fp, "          \"num_recv_wqe\": %lu,\n", (unsigned long)agg.num_recv_wqe);
       fprintf(fp, "          \"num_wqe_rcvd\": %lu,\n", (unsigned long)agg.num_wqe_rcvd);
       fprintf(fp, "          \"num_wqe_completed\": %lu,\n", (unsigned long)agg.num_wqe_completed);
+      if (sampled) fprintf(fp, "          \"num_wqe_sampled\": %lu,\n", (unsigned long)agg.num_wqe_sampled);
       fprintf(fp, "          \"num_cts_sent\": %lu,\n", (unsigned long)agg.num_cts_sent);
       fprintf(fp, "          \"num_req_completed\": %lu,\n", (unsigned long)ch->num_req_completed);
       fprintf(fp, "          \"num_data_qp\": %d,\n", ch->num_data_qp);
@@ -1555,6 +1604,10 @@ static void rcclTelemetryWriteJson(FILE* fp) {
                 (unsigned long)qp->num_cts_sent_unsignalled);
         fprintf(fp, "              \"num_write_wqe\": %lu,\n", (unsigned long)qp->num_write_wqe);
         fprintf(fp, "              \"num_write_imm_wqe\": %lu,\n", (unsigned long)qp->num_write_imm_wqe);
+        /* The size of the sample the three latency fields below are computed
+         * from, and by construction the sum of that histogram. */
+        if (sampled)
+          fprintf(fp, "              \"num_wqe_sampled\": %lu,\n", (unsigned long)rcclTelemetryQpSampledCount(qp));
         fprintf(fp, "              \"wqe_completion_ns_min\": %ld,\n", (long)qp->wqe_completion_ns_min);
         fprintf(fp, "              \"wqe_completion_ns_max\": %ld,\n", (long)qp->wqe_completion_ns_max);
 
