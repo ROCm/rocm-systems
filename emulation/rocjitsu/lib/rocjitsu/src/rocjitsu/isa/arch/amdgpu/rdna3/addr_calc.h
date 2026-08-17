@@ -4,7 +4,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_RDNA3_ADDR_CALC_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_RDNA3_ADDR_CALC_H_
 
-#include "rocjitsu/isa/arch/amdgpu/rdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
 #include <cstdint>

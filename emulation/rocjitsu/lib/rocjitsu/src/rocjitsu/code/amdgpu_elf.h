@@ -181,14 +181,34 @@ inline constexpr uint32_t SHT_DYNSYM = 11;
 inline constexpr uint32_t R_AMDGPU_ABS64 = 3;
 inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 13;
 
+inline constexpr uint8_t kElfSymbolBindLocal = 0;
 inline constexpr uint8_t kElfSymbolBindGlobal = 1;
-inline constexpr uint8_t kElfSymbolTypeNone = 0;    // STT_NOTYPE
-inline constexpr uint8_t kElfSymbolTypeObject = 1;  // STT_OBJECT
-inline constexpr uint8_t kElfSymbolTypeFunc = 2;    // STT_FUNC
-inline constexpr uint8_t kElfSymbolTypeSection = 3; // STT_SECTION
+inline constexpr uint8_t kElfSymbolBindWeak = 2;
+inline constexpr uint8_t kElfSymbolVisibilityHidden = 2;   // STV_HIDDEN
+inline constexpr uint8_t kElfSymbolVisibilityInternal = 1; // STV_INTERNAL
+inline constexpr uint8_t kElfSymbolTypeNone = 0;           // STT_NOTYPE
+inline constexpr uint8_t kElfSymbolTypeObject = 1;         // STT_OBJECT
+inline constexpr uint8_t kElfSymbolTypeFunc = 2;           // STT_FUNC
+inline constexpr uint8_t kElfSymbolTypeSection = 3;        // STT_SECTION
 
 inline constexpr uint8_t elf_symbol_bind(uint8_t info) { return info >> 4; }
 inline constexpr uint8_t elf_symbol_type(uint8_t info) { return info & 0xf; }
+inline constexpr uint8_t elf_symbol_visibility(uint8_t other) { return other & 0x3; }
+
+/// @brief Whether a host could resolve this symbol by name and obtain its address.
+///
+/// @details Only external linkage reaches a loader: the HSA executable-symbol API and the dynamic
+/// linker expose `STB_GLOBAL`/`STB_WEAK` definitions that are not hidden or internal. A local
+/// symbol names a compilation-unit-private body -- an anonymous-namespace device function, say --
+/// and no interface hands its address out, so the only way its address can enter the machine is
+/// through this object's own code or relocations.
+inline constexpr bool elf_symbol_is_externally_resolvable(uint8_t info, uint8_t other) {
+  const uint8_t bind = elf_symbol_bind(info);
+  if (bind != kElfSymbolBindGlobal && bind != kElfSymbolBindWeak)
+    return false;
+  const uint8_t visibility = elf_symbol_visibility(other);
+  return visibility != kElfSymbolVisibilityHidden && visibility != kElfSymbolVisibilityInternal;
+}
 inline constexpr uint8_t elf_symbol_info(uint8_t bind, uint8_t type) {
   return static_cast<uint8_t>((bind << 4) | (type & 0xf));
 }

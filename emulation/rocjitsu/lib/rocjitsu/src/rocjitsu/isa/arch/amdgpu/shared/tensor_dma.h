@@ -58,6 +58,7 @@ struct TensorDmaDescriptor {
   std::array<uint32_t, 8> d1{};
   std::array<uint32_t, 4> d2{};
   std::array<uint32_t, 4> d3{};
+  uint32_t count = 0;
   uint64_t global_base = 0;
   uint32_t lds_base = 0;
   uint32_t elem_size = 0;
@@ -77,6 +78,8 @@ struct TensorDmaDescriptor {
   bool atomic_barrier = false;
   bool iterate = false;
   bool pad = false;
+
+  bool active() const { return count != 0; }
 
   uint32_t rank() const {
     if (gather) {
@@ -112,6 +115,7 @@ inline TensorDmaDescriptor parse_descriptor(std::array<uint32_t, 4> d0, std::arr
 
   // Descriptor bit layout follows LLVM MLIR's gfx1250 TDM lowering in
   // mlir/lib/Conversion/AMDGPUToROCDL/AMDGPUToROCDL.cpp.
+  desc.count = d0[0] & 0x3u;
   desc.gather_indices_32bit = (d0[0] & (1u << 30)) != 0;
   desc.gather = (d0[0] & (1u << 31)) != 0;
   desc.lds_base = d0[1];
@@ -180,6 +184,10 @@ inline TensorDmaDescriptor parse_descriptor(std::array<uint32_t, 4> d0, std::arr
 }
 
 inline void validate_supported_descriptor(const TensorDmaDescriptor &desc, bool store_from_lds) {
+  // The in-tree HIP descriptor API and LLVM lowering only produce the boolean
+  // count encodings 0 (disabled) and 1 (active).
+  if (desc.count > 1)
+    throw util::UnimplementedInst("tensor DMA count encoding");
   // LLVM MLIR's AMDGPU dialect documents padding only for memory-to-LDS copies.
   if (desc.pad && store_from_lds)
     throw util::UnimplementedInst("tensor DMA padded store descriptor");
@@ -340,22 +348,25 @@ TensorDmaDescriptor read_descriptor(const Inst &inst, const Wavefront &wf) {
                           read_sgpr_group<4>(wf, inst.vaddr3.encoding_value(), true));
 }
 
+template <typename Inst>
+void execute_tensor_dma(const Inst &inst, Wavefront &wf, bool store_from_lds) {
+  ScopedWaitCounter counter(wf, WaitCounterType::TENSORCNT);
+  const auto desc = read_descriptor(inst, wf);
+  if (!desc.active())
+    return;
+  copy_tensor(desc, wf, store_from_lds);
+  if (desc.atomic_barrier)
+    arrive_atomic_barrier(desc, wf);
+}
+
 } // namespace tensor_dma_detail
 
 template <typename Inst> void execute_tensor_load_to_lds(const Inst &inst, Wavefront &wf) {
-  tensor_dma_detail::ScopedWaitCounter counter(wf, WaitCounterType::TENSORCNT);
-  const auto desc = tensor_dma_detail::read_descriptor(inst, wf);
-  tensor_dma_detail::copy_tensor(desc, wf, false);
-  if (desc.atomic_barrier)
-    tensor_dma_detail::arrive_atomic_barrier(desc, wf);
+  tensor_dma_detail::execute_tensor_dma(inst, wf, false);
 }
 
 template <typename Inst> void execute_tensor_store_from_lds(const Inst &inst, Wavefront &wf) {
-  tensor_dma_detail::ScopedWaitCounter counter(wf, WaitCounterType::TENSORCNT);
-  const auto desc = tensor_dma_detail::read_descriptor(inst, wf);
-  tensor_dma_detail::copy_tensor(desc, wf, true);
-  if (desc.atomic_barrier)
-    tensor_dma_detail::arrive_atomic_barrier(desc, wf);
+  tensor_dma_detail::execute_tensor_dma(inst, wf, true);
 }
 
 } // namespace amdgpu

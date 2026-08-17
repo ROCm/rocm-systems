@@ -30,10 +30,10 @@ struct ncclInfo {
   int chunkSteps;
   int sliceSteps;
   const void* acc;
-#ifdef ENABLE_ROCSHMEM
-  // Optional per-operation metadata for rocSHMEM collectives.
+
+  // Optional per-operation metadata (e.g., rocSHMEM collectives, CE AlltoAllv).
   size_t* sizes;
-#endif
+
   bool useDirect;
   // One-sided ops
   size_t peerWinOffset;
@@ -43,6 +43,12 @@ struct ncclInfo {
   unsigned int flags;
   int nDesc;
   ncclWaitSignalDesc_t* signalDescs;
+  // CE AllReduce graph-capture decision, precomputed by ncclAllReduce_impl()
+  // and reused by taskAppend() to avoid recomputing it. Valid only when
+  // ceGraphDecisionValid is true (false for non-AllReduce collectives).
+  bool ceCapturing;
+  bool ceArGraphAllowed;
+  bool ceGraphDecisionValid;
 };
 
 #endif

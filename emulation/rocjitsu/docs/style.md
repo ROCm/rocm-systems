@@ -135,9 +135,16 @@ Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repet
 
 ## Logging
 
-- Never use `fprintf`, `printf`, or `std::cerr`. Use `Logger` from `util/log.h`
-  (`Logger::print<>()`), which supports compile-time group filters for building
-  with or without tracing.
+- Use `Logger` from `util/log.h`. `Logger::print<>()` and the per-group helpers
+  are compiled out unless the group is enabled at configure time
+  (`cmake -DRJ_LOG_GROUPS=...`; the default is `OFF`, see `cmake/rj_log.cmake`),
+  so use them for tracing only.
+- Use `Logger::warn()` for messages that must appear in a default build.
+- Do not add `fprintf`, `printf`, or `std::cerr` to library code. Existing
+  carve-outs are the CLI front end (`tools/`, user-facing `std::cerr` errors)
+  and the ROCR hook layer (`lib/rocjitsu/src/rocjitsu/hooks/`, fatal `stderr`
+  diagnostics that must survive a log-groups-OFF build, plus an
+  async-signal-safe `::write` backtrace path).
 
 ## Error Handling
 

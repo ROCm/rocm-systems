@@ -378,7 +378,7 @@ impl Lib {
     }
 
     /// Load and attach the execution plugins declared in `config_json`
-    /// (its `plugins` / `sinks` / `profiled` sections) to `vm`.
+    /// (its `plugins` / `sinks` sections) to `vm`.
     ///
     /// `plugin_dir`, when non-empty, is a trusted directory the plugin
     /// shared objects are loaded from by explicit path — required in

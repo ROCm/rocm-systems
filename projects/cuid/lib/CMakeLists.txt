@@ -83,17 +83,11 @@ set(CUID_HEADERS
 )
 
 add_library(amdcuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})
-add_library(amdcuid_shared SHARED ${CUID_SOURCES} ${CUID_HEADERS})
 
 set_property(TARGET amdcuid_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(
     amdcuid_static
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-target_include_directories(
-    amdcuid_shared
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -105,33 +99,12 @@ target_compile_definitions(
     amdcuid_static
     PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
 )
-target_compile_definitions(
-    amdcuid_shared
-    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
-)
 
 if(WIN32)
-    target_link_libraries(amdcuid_shared PRIVATE bcrypt)
     target_link_libraries(amdcuid_static PUBLIC bcrypt)
 else()
-    target_link_libraries(amdcuid_shared PRIVATE OpenSSL::Crypto)
     target_link_libraries(amdcuid_static PUBLIC OpenSSL::Crypto)
 endif()
-
-# Shared library
-install(
-    TARGETS amdcuid_shared
-    RUNTIME
-        DESTINATION
-            ${CMAKE_INSTALL_BINDIR} # Windows DLLs go here
-    LIBRARY
-        DESTINATION
-            ${CMAKE_INSTALL_LIBDIR} # Linux .so
-    ARCHIVE
-        DESTINATION
-            ${CMAKE_INSTALL_LIBDIR} # Static libs & Windows import libs
-        COMPONENT ${LIB_COMPONENT}
-)
 
 # Static library
 install(
