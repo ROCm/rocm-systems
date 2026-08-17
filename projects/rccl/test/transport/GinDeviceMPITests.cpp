@@ -107,13 +107,17 @@ ncclDevCommRequirements defaultGinReqs() {
 }
 
 // Bounded stream drain: poll with a deadline so a device-side hang becomes a
-// reported timeout instead of an infinite hipStreamSynchronize.
-bool syncStreamWithinTimeout(hipStream_t stream, int seconds) {
+// reported timeout instead of an infinite hipStreamSynchronize. Returns the
+// final stream status so the caller can distinguish the three outcomes:
+//   hipSuccess       - stream completed cleanly
+//   hipErrorNotReady - deadline elapsed while the stream was still busy (hang)
+//   any other error  - a genuine device/launch error, propagated as-is
+hipError_t syncStreamWithinTimeout(hipStream_t stream, int seconds) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
   for (;;) {
     hipError_t q = hipStreamQuery(stream);
-    if (q != hipErrorNotReady) return true;  // done, or a real error the caller will observe
-    if (std::chrono::steady_clock::now() >= deadline) return false;
+    if (q != hipErrorNotReady) return q;  // hipSuccess or a real error
+    if (std::chrono::steady_clock::now() >= deadline) return hipErrorNotReady;  // timed out
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
   }
 }
@@ -583,15 +587,19 @@ TEST_F(GinMPIDeviceTests, Put_CoopCta_Regression) {
   }
 
   // Bounded drain: a hang never completes, so cap the wait and fail instead of blocking.
-  const bool drained = syncStreamWithinTimeout(stream, /*seconds=*/60);
+  const hipError_t drainStatus = syncStreamWithinTimeout(stream, /*seconds=*/60);
 
   // Surface the timeout on both ranks so neither is left waiting at the barrier.
-  int localTimedOut = drained ? 0 : 1;
+  int localTimedOut = (drainStatus == hipErrorNotReady) ? 1 : 0;
   int anyTimedOut   = 0;
   MPI_Allreduce(&localTimedOut, &anyTimedOut, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
   ASSERT_EQ(0, anyTimedOut)
       << "cooperative gin.put(ncclCoopCta) did not complete within the timeout "
          "(missing coop->ncclCoopThread fix)";
+
+  // A genuine device/launch error must fail loudly rather than be treated as success.
+  ASSERT_EQ(hipSuccess, drainStatus)
+      << "stream drain reported a device error: " << hipGetErrorString(drainStatus);
 
   MPI_Barrier(MPI_COMM_WORLD);
 
@@ -700,14 +708,18 @@ TEST_F(GinMPIDeviceTests, Put_CoopWarpSpan_Regression_AMD) {
         kSigIdx, /*expectedSignalValue=*/1, devComm);
   }
 
-  const bool drained = syncStreamWithinTimeout(stream, /*seconds=*/60);
+  const hipError_t drainStatus = syncStreamWithinTimeout(stream, /*seconds=*/60);
 
-  int localTimedOut = drained ? 0 : 1;
+  int localTimedOut = (drainStatus == hipErrorNotReady) ? 1 : 0;
   int anyTimedOut   = 0;
   MPI_Allreduce(&localTimedOut, &anyTimedOut, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
   ASSERT_EQ(0, anyTimedOut)
       << "cooperative gin.put(ncclCoopWarpSpan) did not complete within the timeout "
          "(missing coop->ncclCoopThread fix)";
+
+  // A genuine device/launch error must fail loudly rather than be treated as success.
+  ASSERT_EQ(hipSuccess, drainStatus)
+      << "stream drain reported a device error: " << hipGetErrorString(drainStatus);
 
   MPI_Barrier(MPI_COMM_WORLD);
 
