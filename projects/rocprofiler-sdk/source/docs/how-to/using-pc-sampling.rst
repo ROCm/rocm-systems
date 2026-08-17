@@ -46,6 +46,11 @@ The following table lists the AMD Instinct™ GPUs supporting PC sampling and sh
     - ✅
     - ✅
 
+  * - MI350P
+    - CDNA4
+    - ✅
+    - ✅
+
   * - MI325X
     - CDNA3
     - ✅
@@ -75,6 +80,10 @@ The following table lists the AMD Instinct™ GPUs supporting PC sampling and sh
     - CDNA2
     - ❌
     - ✅
+
+.. note::
+
+   AMD Instinct MI100 (CDNA1, gfx908) is not listed because it lacks the hardware support that PC sampling requires.
 
 PC sampling availability and configuration
 ===========================================
