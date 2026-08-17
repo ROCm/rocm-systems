@@ -30,6 +30,7 @@ struct ncclInfo {
   int chunkSteps;
   int sliceSteps;
   const void* acc;
+
   // Optional per-operation metadata (e.g., rocSHMEM collectives, CE AlltoAllv).
   size_t* sizes;
 
