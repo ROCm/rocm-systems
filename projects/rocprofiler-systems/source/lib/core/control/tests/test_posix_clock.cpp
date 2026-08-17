@@ -42,7 +42,7 @@ wait_until_active(session& s, bool expected)
 TEST(posix_clock_test, now_returns_advancing_time_points)
 {
     using namespace std::chrono_literals;
-    posix clk{ CLOCK_REALTIME };
+    const posix clk{ CLOCK_REALTIME };
 
     const auto t0 = clk.now();
     std::this_thread::sleep_for(5ms);
