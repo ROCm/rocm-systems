@@ -41,7 +41,9 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-          sparse-checkout: projects/amdsmi/tests/abi_check
+          sparse-checkout: |
+            projects/amdsmi/include/amd_smi/amdsmi.h
+            projects/amdsmi/tests/abi_check
 
       # Vendor abi_check.py from the trusted base ref so the fork's copy is never executed.
       - name: Checkout base ref to vendor ABI check script
