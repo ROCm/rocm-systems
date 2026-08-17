@@ -7,6 +7,7 @@
  // Note: InPlace is not supported for All-To-All
 
 #include "TestBed.hpp"
+#include "StandaloneUtils.hpp"
 
 namespace RcclUnitTesting
 {
@@ -113,9 +114,16 @@ namespace RcclUnitTesting
     }
   }
 
-#if HIP_VERSION >= 71260540
+
   TEST(AlltoAll, SingleProcMemReg)
   {
+    int hipRuntimeVer = 0;
+    HIPCALL(hipRuntimeGetVersion(&hipRuntimeVer));
+    if (hipRuntimeVer < 71260540) {
+      GTEST_SKIP() << "Skipping SingleProcMemReg: HIP runtime version (" 
+                   << hipRuntimeVer << ") is lower than 71260540";
+    }
+
     TestBed testBed;
 
     // Configuration
@@ -137,11 +145,15 @@ namespace RcclUnitTesting
     unsetenv("NCCL_SINGLE_PROC_MEM_REG_ENABLE");
     unsetenv("NCCL_CUMEM_ENABLE");
   }
-#endif
 
-#if HIP_VERSION >= 71260540
   TEST(AlltoAll, SingleProcMemRegGraph)
   {
+    int hipRuntimeVer = 0;
+    HIPCALL(hipRuntimeGetVersion(&hipRuntimeVer));
+    if (hipRuntimeVer < 71260540) {
+      GTEST_SKIP() << "Skipping SingleProcMemReg: HIP runtime version (" 
+                   << hipRuntimeVer << ") is lower than 71260540";
+    }
     TestBed testBed;
 
     // Configuration
@@ -149,7 +161,7 @@ namespace RcclUnitTesting
     std::vector<ncclDataType_t> const dataTypes       = {ncclUint8,ncclUint32,ncclUint64};
     std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {1,4096,4314};
+    std::vector<int>            const numElements     = {1,4096,5003,5012};
     std::vector<bool>           const inPlaceList     = {false};
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true};
@@ -163,5 +175,4 @@ namespace RcclUnitTesting
     unsetenv("NCCL_SINGLE_PROC_MEM_REG_ENABLE");
     unsetenv("NCCL_CUMEM_ENABLE");
   }
-#endif
 }

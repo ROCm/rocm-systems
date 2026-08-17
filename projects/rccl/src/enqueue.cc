@@ -1183,6 +1183,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   bool netRegistered[2] = {false, false};
   bool ipcRegistered[2] = {false, false};
 
+  // Check Pointer & Length Alignment (Direct DMA requires at least 16-byte alignment)
+  const bool isAligned = ((uintptr_t)sendAddr % 16 == 0) && (sendBytes % 16 == 0) && ((uintptr_t)recvAddr % 16 == 0) && (recvBytes % 16 == 0);
+
   for (int dir = 0; dir < 2; dir++) { // 0=recv, 1=send
     // Assume SIMPLE protocol to start with to determine number of channels
     stepSize[dir] = comm->p2pChunkSize;
@@ -1229,7 +1232,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     chunkSize[dir] = chunkDataSize[dir];
     if (protocol[dir] == NCCL_PROTO_LL) chunkSize[dir] *= 2;
 
-    if (p2pTasks[dir] && p2pTasks[dir]->allowUB) {
+    if (p2pTasks[dir] && p2pTasks[dir]->allowUB && isAligned ) {
       if (network[dir]) {
         bool pxnUsed = !ncclPxnDisable(comm) && comm->isAllNvlink && comm->maxLocalRanks > 1;
         if (bytes[dir] > 0 && proxySameProcess[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && (!pxnUsed)) {
@@ -3668,7 +3671,12 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
                                 &sendReg));
           NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
                                 &recvReg));
-          allowUB = false; //!isOverlapping && (captured || (sendReg != NULL && recvReg != NULL));
+          /**
+           * To do : using allowUB = (captured || (sendReg != NULL && recvReg != NULL)); for alltoall, 
+           * with symmetric memory, in Graphmode, with sequence of buffer sizes where max is not aligned 
+           * to 128 bytes, results in data validation errors. setting this to false, until it is resolved.
+           */
+          allowUB = false; // (captured || (sendReg != NULL && recvReg != NULL))
           for (int r = 0; r < comm->nRanks; r++) {
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI,
                                     (void*)((char*)info->sendbuff + r * info->count * ncclTypeSize(info->datatype)),
@@ -3704,7 +3712,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           }
         } else if (info->coll == ncclFuncScatter) {
           size_t offset = 0;
-          allowUB = false; //captured;
+          allowUB = captured ;
           if (comm->rank == info->root) {
             for (int r = 0; r < comm->nRanks; r++) {
               void* buff = (void*)((char*)info->sendbuff + offset);

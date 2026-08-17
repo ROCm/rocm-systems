@@ -5,6 +5,7 @@
  ************************************************************************/
 #include "TestBed.hpp"
 #include "CallCollectiveForked.hpp"
+#include "StandaloneUtils.hpp"
 
 namespace RcclUnitTesting
 {
@@ -122,9 +123,14 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
-#if HIP_VERSION >= 71260540
   TEST(AllGather, SingleProcMemReg)
   {
+    int hipRuntimeVer = 0;
+    HIPCALL(hipRuntimeGetVersion(&hipRuntimeVer));
+    if (hipRuntimeVer < 71260540) {
+      GTEST_SKIP() << "Skipping SingleProcMemReg: HIP runtime version (" 
+                   << hipRuntimeVer << ") is lower than 71260540";
+    }
     TestBed testBed;
 
     // Configuration
@@ -146,7 +152,6 @@ namespace RcclUnitTesting
     unsetenv("NCCL_SINGLE_PROC_MEM_REG_ENABLE");
     unsetenv("NCCL_CUMEM_ENABLE");
   }
-  #endif
   
   TEST(AllGather, UserBufferRegistration)
   {          
