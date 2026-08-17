@@ -916,10 +916,10 @@ WriteInterceptor(const void* packets,
     // replay dispatch"; the normal path then mints its own id.
     rocprofiler_dispatch_id_t replay_dispatch_id = 0;
     // A graph node's dispatch is never replayed. Snapshot/restore around a graph's runtime-managed
-    // memory and ordering is undefined, and graph replay is future work. Excluding graph_launch_active
-    // from the gate declines the graph gracefully instead of aborting: it falls through to the
-    // ordinary path and runs once, and the one-shot warning above already told the tool. Non-graph
-    // single dispatches replay as usual below.
+    // memory and ordering is undefined, and graph replay is future work. Excluding
+    // graph_launch_active from the gate declines the graph gracefully instead of aborting: it falls
+    // through to the ordinary path and runs once, and the one-shot warning above already told the
+    // tool. Non-graph single dispatches replay as usual below.
     if(has_kernel_replay && pkt_count == 1 && num_dispatch_packets == 1 && !graph_launch_active)
     {
         const auto thr_id           = corr_id->thread_idx;

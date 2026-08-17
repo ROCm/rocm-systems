@@ -89,6 +89,16 @@ has_active_replay_contexts()
     return !context::get_active_contexts(context_has_kernel_replay).empty();
 }
 
+bool
+has_registered_replay_context()
+{
+    // Skip during finalization (the context registry is a static_object that may be gone); mirrors
+    // has_active_replay_contexts. Uses the registered set, not the active one, because replay
+    // services are configured before any context is started.
+    if(registration::get_fini_status() > 0) return false;
+    return !context::get_registered_contexts(context_has_kernel_replay).empty();
+}
+
 rocprofiler_kernel_dispatch_info_t
 make_dispatch_info(const hsa::Queue&              queue,
                    const hsa::rocprofiler_packet& pkt,
