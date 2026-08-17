@@ -16,11 +16,14 @@ if [[ -z "${MPI_IMPL}" ]]; then
     exit 1
 fi
 
-# OpenMPI download URL, defaulting to the OpenMPI download URL.
-OPENMPI_URL="${OPENMPI_URL:-https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.10.tar.gz}"
+# OpenMPI version and download URL, derived from OPENMPI_VERSION.
+OPENMPI_VERSION="${OPENMPI_VERSION:-5.0.10}"
+OPENMPI_SERIES="${OPENMPI_VERSION%.*}" # Extract the major.minor version from the version string.
+OPENMPI_URL="${OPENMPI_URL:-https://download.open-mpi.org/release/open-mpi/v${OPENMPI_SERIES}/openmpi-${OPENMPI_VERSION}.tar.gz}"
 
-# MPICH download URL, defaulting to the MPICH download URL.
-MPICH_URL="${MPICH_URL:-https://www.mpich.org/static/downloads/5.0.1/mpich-5.0.1.tar.gz}"
+# MPICH version and download URL, derived from MPICH_VERSION.
+MPICH_VERSION="${MPICH_VERSION:-5.0.1}"
+MPICH_URL="${MPICH_URL:-https://www.mpich.org/static/downloads/${MPICH_VERSION}/mpich-${MPICH_VERSION}.tar.gz}"
 
 # MPI installation directories, defaulting to /opt/ompi and /opt/mpich, overridden by the MPI_ROOT environment variable.
 OPENMPI_ROOT="${MPI_ROOT:-/opt/ompi}"

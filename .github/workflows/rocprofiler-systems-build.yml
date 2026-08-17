@@ -361,7 +361,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ matrix.mpi-impl == 'openmpi' && '/opt/ompi' || '/opt/mpich' }}
-          key: mpi-${{ matrix.mpi-impl }}-rhel-${{ matrix.os-release }}-openmpi-5.0.10-mpich-5.0.1-${{ matrix.rocm-version }}
+          key: mpi-${{ matrix.mpi-impl }}-rhel-${{ matrix.os-release }}-mpi-check-${{ matrix.rocm-version }}-${{ hashFiles('projects/rocprofiler-systems/scripts/ci/setup-mpi.sh') }}
 
       - name: Setup MPI (${{ matrix.mpi-impl }})
         timeout-minutes: 45
