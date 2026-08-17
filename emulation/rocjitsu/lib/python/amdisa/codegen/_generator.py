@@ -4007,6 +4007,36 @@ class CodeGenerator:
     _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64', 'S_RFE_I64')
     _TRAP_SENDMSG_NAMES = ('S_SENDMSG', 'S_SENDMSGHALT')
 
+    def _sleep_body(self, sem: InstructionSemantics) -> str:
+        """execute() body for S_SLEEP / S_SLEEP_VAR.
+
+        The MR ISA gives these no pseudocode, so they derive as `true_nop` and
+        the generator used to emit the yield alone. The delay *is* the whole
+        instruction -- there is no result register -- so retiring it in one step
+        leaves it with no effect and lets a sleep loop spin at the speed of its
+        own scalar code. That is not only a performance detail: an asynchronous
+        debugger suspend then lands uniformly across the loop body instead of
+        overwhelmingly on the sleep, and -O0 loop bodies are full of short
+        windows where the compiler has forced EXEC to all lanes to spill an
+        AGPR. Stopping inside one reports every lane active, which
+        gdb.rocm/lane-info.exp catches by comparing the stopped lane states
+        against the ones it recorded at a breakpoint. That expect test is the
+        only guard -- the C++ ISA harness lists s_sleep in SKIP_PREFIXES -- so
+        the policy belongs here, where a regeneration cannot drop it.
+        """
+        # S_SLEEP idles the wave for 64 * SIMM16[6:0] clocks; S_SLEEP_VAR takes
+        # the same 7-bit count from a scalar operand instead of the literal.
+        count = (
+            'static_cast<uint32_t>(simm16.encoding_value_)'
+            if sem.name == 'S_SLEEP'
+            else 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)'
+        )
+        return (
+            '  constexpr uint32_t kSleepClocksPerUnit = 64;\n'
+            f'  wf.set_sleep_cycles(kSleepClocksPerUnit * ({count} & 0x7Fu));\n'
+            '  wf.cu().request_functional_yield();'
+        )
+
     def _trap_control_body(self, sem: InstructionSemantics) -> str | None:
         """execute() body for a trap-handler control op, or None if not one.
 
@@ -4023,9 +4053,15 @@ class CodeGenerator:
             # into the high half, and the instruction size is subtracted
             # because the interpreter advances the PC after execute() returns.
             return (
-                '  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0);\n'
+                # Bare operand and size_ spellings: that is the arch-local form
+                # every generated execute_impl() uses, and
+                # _write_shared_execute_templates() lifts them to inst.ssrc0 /
+                # inst.size() for the shared template. Writing the lifted form
+                # here instead compiles only on the ISAs that happen to share
+                # the body -- S_RFE_I64 is gfx1250-only, so it does not.
+                '  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);\n'
                 '  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;\n'
-                '  wf.pc = (saved_pc & kPcAddressMask) - inst.size();\n'
+                '  wf.pc = (saved_pc & kPcAddressMask) - size_;\n'
                 '\n'
                 '  // Returning from the handler puts the interrupted EXEC back. The handler runs\n'
                 '  // under its own mask -- it parks a doorbell id in EXEC_LO on the way to\n'
@@ -4045,6 +4081,11 @@ class CodeGenerator:
                 '  if ((wf.status_raw() & kStatusHalt) != 0) {\n'
                 '    wf.set_debug_single_step(false);\n'
                 '    wf.set_debug_halted(true);\n'
+                '  } else {\n'
+                '    // Nothing is halting the wave any more, so an s_sendmsghalt marker\n'
+                '    // left over from an earlier stop is stale. Leaving it set would make\n'
+                '    // the next resume clear a HALT the handler raises later.\n'
+                '    wf.set_self_halted(false);\n'
                 '  }'
             )
 
@@ -4052,7 +4093,7 @@ class CodeGenerator:
             # MSG_INTERRUPT (id 1) from inside the trap handler is how the wave
             # tells KFD it has stopped; the CU turns it into a debug event.
             body = (
-                '  const uint32_t message = static_cast<uint32_t>(inst.simm16.encoding_value_);\n'
+                '  const uint32_t message = static_cast<uint32_t>(simm16.encoding_value_);\n'
                 '  if (wf.in_trap_handler() && (message & 0xFu) == 1u)\n'
                 '    wf.set_trap_interrupt_sent(true);\n'
                 '  wf.cu().handle_sendmsg(wf, message);'
@@ -4071,7 +4112,13 @@ class CodeGenerator:
                     '  // scheduler flag in step -- s_rfe consults STATUS.HALT on the way out.\n'
                     '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
                     '  wf.set_status_raw(wf.status_raw() | kStatusHalt);\n'
-                    '  wf.set_debug_halted(true);'
+                    '  wf.set_debug_halted(true);\n'
+                    '  // Remember who raised the bit. The trap handler also raises HALT, via\n'
+                    '  // s_setreg just before it returns, and there it means "keep the wave\n'
+                    '  // stopped" -- the opposite of what it means here, where the wave has\n'
+                    '  // already reported and is waiting to be resumed. The CWSR record cannot\n'
+                    '  // distinguish the two, so the resume path reads this instead.\n'
+                    '  wf.set_self_halted(true);'
                 )
             return body
 
@@ -4410,7 +4457,7 @@ class CodeGenerator:
             # execution must return to the event loop so peer CUs can make
             # progress.
             if sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
-                return '  wf.cu().request_functional_yield();'
+                return self._sleep_body(sem)
             return self._trap_control_body(sem) or '  (void)wf;'
 
         if cls == 'gpr_idx':

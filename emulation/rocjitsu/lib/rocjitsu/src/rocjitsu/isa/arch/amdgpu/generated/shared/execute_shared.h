@@ -2411,6 +2411,11 @@ inline void execute_s_rfe_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   if ((wf.status_raw() & kStatusHalt) != 0) {
     wf.set_debug_single_step(false);
     wf.set_debug_halted(true);
+  } else {
+    // Nothing is halting the wave any more, so an s_sendmsghalt marker
+    // left over from an earlier stop is stale. Leaving it set would make
+    // the next resume clear a HALT the handler raises later.
+    wf.set_self_halted(false);
   }
 }
 
@@ -2514,6 +2519,12 @@ inline void execute_s_sendmsghalt_sopp([[maybe_unused]] Inst &inst,
   constexpr uint32_t kStatusHalt = 1u << 13;
   wf.set_status_raw(wf.status_raw() | kStatusHalt);
   wf.set_debug_halted(true);
+  // Remember who raised the bit. The trap handler also raises HALT, via
+  // s_setreg just before it returns, and there it means "keep the wave
+  // stopped" -- the opposite of what it means here, where the wave has
+  // already reported and is waiting to be resumed. The CWSR record cannot
+  // distinguish the two, so the resume path reads this instead.
+  wf.set_self_halted(true);
 }
 
 template <typename Inst>
@@ -2577,19 +2588,9 @@ inline void execute_s_sext_i32_i8_sop1([[maybe_unused]] Inst &inst,
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
 }
 
-// S_SLEEP idles the wave for 64 * SIMM16[6:0] clocks. The delay is the whole
-// instruction -- there is no result register -- so retiring it in one step
-// leaves it with no effect and lets a sleep loop spin at the speed of its own
-// scalar code. That is not just a performance detail for a debugger: an
-// asynchronous suspend then lands uniformly across the loop body instead of
-// overwhelmingly on the sleep, and -O0 loop bodies are full of short windows
-// where the compiler has forced EXEC to all lanes to spill an AGPR. Stopping
-// inside one reports every lane active (gdb.rocm/lane-info.exp checks the
-// stopped lane states against the ones it recorded at a breakpoint).
-constexpr uint32_t kSleepClocksPerUnit = 64;
-
 template <typename Inst>
 inline void execute_s_sleep_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  constexpr uint32_t kSleepClocksPerUnit = 64;
   wf.set_sleep_cycles(kSleepClocksPerUnit *
                       (static_cast<uint32_t>(inst.simm16.encoding_value_) & 0x7Fu));
   wf.cu().request_functional_yield();
@@ -2597,6 +2598,7 @@ inline void execute_s_sleep_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] W
 
 template <typename Inst>
 inline void execute_s_sleep_var_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  constexpr uint32_t kSleepClocksPerUnit = 64;
   wf.set_sleep_cycles(kSleepClocksPerUnit *
                       (amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0) & 0x7Fu));
   wf.cu().request_functional_yield();

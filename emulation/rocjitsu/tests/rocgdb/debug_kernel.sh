@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 #
 # rocgdb wave-debugging demo + CI harness for the rocjitsu emulator.
 #
@@ -207,6 +210,13 @@ else
   fi
 fi
 
+# The interior breakpoint, the displaced-step check and the watchpoint check all
+# want the line that actually stores to data[i]. Derive it rather than spell it
+# out three times: adding a licence header to add_one.hip moves it, and two of
+# the scenarios below would then fail on a line number instead of on behaviour.
+store_line="$(grep -nE 'data\[i\] \+= 1' "$here/add_one.hip" | head -1 | cut -d: -f1)"
+[[ -z "$store_line" ]] && store_line=18
+
 # --- Second scenario: interior breakpoint + continue (displaced stepping) -----
 # Continuing past a breakpoint whose original instruction dbgapi cannot simulate
 # forces amd_dbgapi_displaced_stepping: dbgapi copies the instruction into the
@@ -219,7 +229,7 @@ outfile2="$workdir/rocgdb2.out"
 timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
   rocgdb --batch \
     -ex 'set breakpoint pending on' \
-    -ex 'break add_one.hip:15' \
+    -ex "break add_one.hip:${store_line}" \
     -ex 'run' \
     -ex 'info registers pc' \
     -ex 'continue' \
@@ -241,7 +251,7 @@ check2() { # <regex> <description>  (checks the second run's output)
     fail=1
   fi
 }
-check2 'hit Breakpoint 1, .*add_one .*at .*:15' 'stopped at the interior line breakpoint'
+check2 "hit Breakpoint 1, .*add_one .*at .*:${store_line}" 'stopped at the interior line breakpoint'
 check2 'add_one done: host\[0\]=1 host\[63\]=1' 'kernel completed after displaced-stepping the breakpoint'
 check2 'Inferior 1 .*exited normally' 'inferior exited normally after interior breakpoint'
 if grep -qaE 'Per-queue memory reserved for the debugger is missing' <<<"$out2"; then
@@ -259,7 +269,7 @@ fi
 # the host breakpoint (on the launch line, before the launch executes) lets us
 # read the device pointer `d` — no hard-coded VA.
 launch_line="$(grep -nE 'add_one<<<' "$here/add_one.hip" | head -1 | cut -d: -f1)"
-[[ -z "$launch_line" ]] && launch_line=27
+[[ -z "$launch_line" ]] && launch_line=30
 echo "running rocgdb (GPU address watchpoint, launch line $launch_line) ..."
 outfile3="$workdir/rocgdb3.out"
 timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
@@ -293,7 +303,7 @@ check3() { # <regex> <description>  (checks the third run's output)
 check3 'hit (Hardware )?watchpoint [0-9]+' 'the GPU address watchpoint triggered'
 check3 'Old value = 0' 'watchpoint captured the pre-write value'
 check3 'New value = 1' 'watchpoint captured the post-write value'
-check3 'add_one .*at .*:15' 'stopped at the store that wrote the watched address'
+check3 "add_one .*at .*:${store_line}" 'stopped at the store that wrote the watched address'
 
 # --- Fourth scenario: illegal instruction -------------------------------------
 # Single-step once past the entry breakpoint to a clean instruction boundary,
@@ -443,7 +453,7 @@ if hipcc --offload-arch="$arch" -g -O0 -o "$mwapp" "$here/multi_wave.hip" 2>"$wo
   echo "running rocgdb (multi-wave workgroup correlation) ..."
   # Break on the store line so both waves have computed `i` and `local`.
   mw_line="$(grep -nE 'data\[i\] = local' "$here/multi_wave.hip" | head -1 | cut -d: -f1)"
-  [[ -z "$mw_line" ]] && mw_line=18
+  [[ -z "$mw_line" ]] && mw_line=19
   outfile7="$workdir/rocgdb7.out"
   timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
     rocgdb --batch \

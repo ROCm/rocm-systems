@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+//
 // Minimal HIP workload used by the rocgdb wave-debugging demo and CI harness
 // (tests/rocgdb/debug_kernel.sh). It launches a single `add_one` kernel over one
 // 64-lane wavefront and prints a deterministic result, so a debugger can set a

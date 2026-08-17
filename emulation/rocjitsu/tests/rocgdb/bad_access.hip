@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+//
 // Minimal HIP workload that deliberately faults, used by the rocgdb
 // wave-debugging CI harness (tests/rocgdb/debug_kernel.sh) to exercise GPU
 // memory-violation reporting. The kernel stores through a pointer to an

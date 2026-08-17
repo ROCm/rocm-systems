@@ -517,6 +517,10 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
         active->set_trap_saved_status(active->status_raw());
         active->set_trap_saved_exec(active->exec());
         active->set_trap_interrupt_sent(false);
+        // A fresh handler entry owns the halt state from here on; a marker left
+        // over from a previous stop would attribute this entry's HALT to an
+        // s_sendmsghalt that has already been resumed past.
+        active->set_self_halted(false);
         active->set_in_trap_handler(true);
         active->pc = config->tba;
         delete inst;

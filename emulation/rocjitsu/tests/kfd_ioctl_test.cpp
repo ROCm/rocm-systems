@@ -48,6 +48,12 @@ namespace {
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4.json";
 constexpr uint32_t kGpuId = 38144;
 
+// A part with no modelled CWSR record layout. gfx1100 is not a debug target:
+// kmd::cwsr_layout_modelled() covers gfx942/gfx950 only, and the driver has to
+// decline stops there rather than publish a record rocm-dbgapi would misparse.
+const std::string RDNA3_CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx1100_w7900.json";
+constexpr uint32_t kRdna3GpuId = 7019;
+
 class ChildProcessGuard {
 public:
   explicit ChildProcessGuard(pid_t pid) : pid_(pid) {}
@@ -124,9 +130,13 @@ uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
 
 class KfdIoctlTest : public ::testing::Test {
 protected:
-  void SetUp() override {
-    setenv("RJ_CONFIG", CONFIG_PATH.c_str(), 1);
-    loaded_ = rocjitsu::config::load_config(CONFIG_PATH.c_str(), rocjitsu::kEmbeddedSchema);
+  void SetUp() override { SetUpWithConfig(CONFIG_PATH); }
+
+  // Split out so a fixture can bring up a different part. Uses ASSERT_*, so it
+  // has to stay void-returning and be called directly from SetUp().
+  void SetUpWithConfig(const std::string &config_path) {
+    setenv("RJ_CONFIG", config_path.c_str(), 1);
+    loaded_ = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
     auto root = loaded_.take_root();
     auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
     ASSERT_NE(soc, nullptr);
@@ -176,6 +186,14 @@ protected:
   rocjitsu::SoC *soc_ = nullptr;
   rocjitsu::SimulatedKfd *driver_ = nullptr;
   std::vector<int> debug_fds_;
+};
+
+// Same driver surface, brought up on a part whose CWSR layout is not modelled.
+// Deriving does not inherit KfdIoctlTest's cases: TEST_F registers against the
+// fixture it names, so only the cases written against this one run here.
+class KfdIoctlRdna3Test : public KfdIoctlTest {
+protected:
+  void SetUp() override { SetUpWithConfig(RDNA3_CONFIG_PATH); }
 };
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
@@ -3733,6 +3751,348 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
   EXPECT_FALSE(stopped->saved_status_halt);
   EXPECT_NE(stopped->status & (1u << 13), 0u);
   EXPECT_EQ(running->status & (1u << 13), 0u);
+}
+
+// An unfetchable PC is the only wave stop that reaches the debug callbacks
+// without going through the decoder, which is what makes it usable on a part
+// whose instruction encodings this file does not otherwise touch. The cost is
+// that a declined fault here halts the wave and frees its slot, so it cannot
+// show whether a declined stop was cleanly undone -- the scalar-load fault
+// below is used for that. Returns the resident wave, halted or not.
+rocjitsu::amdgpu::Wavefront *fault_a_wave_on_an_unmapped_pc(rocjitsu::SoC *soc,
+                                                            rocjitsu::SimulatedKfd *driver,
+                                                            uint64_t unmapped_pc,
+                                                            uint32_t queue_id) {
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  soc->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (cu == nullptr && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  if (cu == nullptr)
+    return nullptr;
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, unmapped_pc, /*sgprs=*/16, /*vgprs=*/4);
+  if (wave == nullptr)
+    return nullptr;
+  wave->set_process_id(driver->local_process_id());
+  wave->set_queue_id(queue_id);
+  wave->set_dispatch_id(7);
+  for (uint32_t i = 0; i < 4 && !wave->is_halted() && !wave->debug_halted(); ++i)
+    cu->step();
+  return wave;
+}
+
+// A data-side fault instead: s_load_dword through a null sbase. A declined
+// fault leaves this wave running -- the access is re-issued at its own PC and
+// retires -- which is what makes it able to tell a stop that was rolled back
+// from one that was never attempted. gfx9 encodings, so CDNA fixtures only.
+rocjitsu::amdgpu::Wavefront *fault_a_wave_on_a_scalar_load(rocjitsu::SoC *soc,
+                                                           rocjitsu::SimulatedKfd *driver,
+                                                           uint64_t kernel_pc, uint32_t queue_id) {
+  auto *memory = soc->memory();
+  if (memory == nullptr)
+    return nullptr;
+  const uint32_t pid = driver->local_process_id();
+  memory->write32(kernel_pc, 0xC0000000u, pid);     // s_load_dword s0, s[0:1], 0x0
+  memory->write32(kernel_pc + 4, 0u, pid);          // ... its immediate offset
+  memory->write32(kernel_pc + 8, 0xBF800000u, pid); // s_nop 0
+
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  soc->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (cu == nullptr && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  if (cu == nullptr)
+    return nullptr;
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kernel_pc, /*sgprs=*/16, /*vgprs=*/4);
+  if (wave == nullptr)
+    return nullptr;
+  wave->set_process_id(pid);
+  wave->set_queue_id(queue_id);
+  wave->set_dispatch_id(7);
+  // sbase = s[0:1] = 0, an address nothing is mapped at.
+  cu->write_sgpr(wave->sgpr_alloc().base, 0);
+  cu->write_sgpr(wave->sgpr_alloc().base + 1, 0);
+  cu->step();
+  return wave;
+}
+
+// The CWSR codec reproduces the gfx9.4 record only, so on any other part a
+// published record is one rocm-dbgapi would decode against a layout that does
+// not match. Declining the stop has to happen before the wave is touched: a
+// wave stopped for a record that never appears parks forever, because the only
+// thing that could resume it is a debugger reading that record. The fault
+// therefore takes its ordinary undebugged path instead.
+TEST_F(KfdIoctlRdna3Test, DbgTrapDeclinesWaveStopsOnAPartWithNoModelledCwsrLayout) {
+  constexpr uint64_t kUnmappedAddress = 0x600200000ULL;
+  constexpr uint64_t kCwsrAddress = 0x600100000ULL;
+  constexpr uint32_t kCwsrSize = 0x40000;
+
+  std::vector<uint8_t> cwsr(kCwsrSize);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  ASSERT_NE(driver_->local_process_id(), 0u);
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kRdna3GpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  auto *wave = fault_a_wave_on_an_unmapped_pc(soc_, driver_, kUnmappedAddress, create.queue_id);
+  ASSERT_NE(wave, nullptr);
+
+  // Declined, not deferred: the wave halts the way it would with no debugger
+  // attached, and the callback leaves no half-applied stop behind it.
+  EXPECT_FALSE(wave->debug_halted());
+  EXPECT_TRUE(wave->is_halted());
+  EXPECT_EQ(wave->trapsts(), 0u);
+
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+  EXPECT_EQ(memory->read32(kCwsrAddress, driver_->local_process_id()), 0u);
+
+  uint64_t notifications = 0;
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+}
+
+// rocm-dbgapi reaches the same publication through its own request rather than
+// through a wave stop, and that route stops the waves first. Without the same
+// gate it would strand every resident wave behind the queue error it reports.
+TEST_F(KfdIoctlRdna3Test, DbgTrapSuspendQueuesOnUnmodelledArchErrsWithoutStrandingWaves) {
+  constexpr uint64_t kUnmappedAddress = 0x600200000ULL;
+  constexpr uint64_t kCwsrAddress = 0x600100000ULL;
+  constexpr uint32_t kCwsrSize = 0x40000;
+
+  std::vector<uint8_t> cwsr(kCwsrSize);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kRdna3GpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (cu == nullptr && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kUnmappedAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(driver_->local_process_id());
+  wave->set_queue_id(create.queue_id);
+
+  // SUSPEND_QUEUES rejects a queue still carrying EC_QUEUE_NEW as invalid, so
+  // acknowledge it the way a debugger does before the request under test.
+  kfd_queue_snapshot_entry snapshot_entry{};
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = static_cast<uint32_t>(getpid());
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+  snapshot.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&snapshot_entry);
+  snapshot.queue_snapshot.num_queues = 1;
+  snapshot.queue_snapshot.entry_size = sizeof(snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+
+  uint32_t queue_id = create.queue_id;
+  kfd_ioctl_dbg_trap_args control{};
+  control.pid = static_cast<uint32_t>(getpid());
+  control.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+  control.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
+  control.suspend_queues.num_queues = 1;
+  control.suspend_queues.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 0);
+  EXPECT_NE(queue_id & KFD_DBG_QUEUE_ERROR_MASK, 0u);
+
+  // Reporting the error and stranding the waves would be strictly worse than
+  // reporting it alone: the queue would never run again and never be resumable.
+  EXPECT_FALSE(wave->debug_suspended());
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+  EXPECT_EQ(memory->read32(kCwsrAddress, driver_->local_process_id()), 0u);
+}
+
+// The positive control for the two cases below: on a modelled part with an area
+// the queue's waves fit in, the same fault stops the wave, publishes a record
+// and wakes the debugger. Without this the rollback cases could pass by never
+// reaching the callback at all.
+TEST_F(KfdIoctlTest, DbgTrapMemoryViolationStopsTheWaveAndPublishesItsRecord) {
+  constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kCwsrAddress = 0x600100000ULL;
+  constexpr uint32_t kCwsrSize = 0x40000;
+
+  std::vector<uint8_t> code_page(4096);
+  std::vector<uint8_t> cwsr(kCwsrSize);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  auto *wave = fault_a_wave_on_a_scalar_load(soc_, driver_, kKernelAddress, create.queue_id);
+  ASSERT_NE(wave, nullptr);
+
+  constexpr uint32_t kTrapstsXnackError = 1u << 28;
+  EXPECT_TRUE(wave->debug_halted());
+  EXPECT_NE(wave->trapsts() & kTrapstsXnackError, 0u);
+  // Stopped past the access: a wave the debugger resumes must not re-run it.
+  EXPECT_EQ(wave->pc, kKernelAddress + 8);
+
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+  EXPECT_EQ(memory->read32(kCwsrAddress, driver_->local_process_id()), 0x100u);
+
+  uint64_t notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)))
+      << strerror(errno);
+  EXPECT_EQ(notifications, 1u);
+}
+
+// The arch gate cannot be the only check: on a modelled part serialization can
+// still fail, and the wave is already stopped by then because the serializer
+// selects waves by debug_stopped(). An area too small for the queue's waves is
+// the reachable case -- ROCr sizes it from the largest dispatch it expects, and
+// nothing validates it at CREATE_QUEUE. The stop has to come back off the wave.
+TEST_F(KfdIoctlTest, DbgTrapUnpublishableStopRollsBackInsteadOfStrandingTheWave) {
+  constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kCwsrAddress = 0x600100000ULL;
+  // Enough to map, nowhere near enough for a 16-SGPR, 4-VGPR wave plus header,
+  // control stack and LDS.
+  constexpr uint32_t kCwsrSize = 0x100;
+  constexpr uint32_t kTrapstsXnackError = 1u << 28;
+
+  std::vector<uint8_t> code_page(4096);
+  std::vector<uint8_t> cwsr(4096);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  debug_fds_.push_back(notifier);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  auto *wave = fault_a_wave_on_a_scalar_load(soc_, driver_, kKernelAddress, create.queue_id);
+  ASSERT_NE(wave, nullptr);
+
+  // Every field the callback set on the way to the failed publication is back
+  // where it was, so the wave keeps running exactly as it would with nobody
+  // debugging it. Leaving debug_halted set would park it with no record for a
+  // debugger to resume from; leaving TRAPSTS.XNACK_ERROR behind would make the
+  // next stop report a memory violation that never happened.
+  EXPECT_FALSE(wave->debug_halted());
+  EXPECT_FALSE(wave->is_halted());
+  EXPECT_EQ(wave->trapsts() & kTrapstsXnackError, 0u);
+  EXPECT_EQ(wave->pc, kKernelAddress + 8);
+
+  uint64_t notifications = 0;
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
 }
 
 // A wave parked between MSG_INTERRUPT and s_rfe is still executing the ROCr

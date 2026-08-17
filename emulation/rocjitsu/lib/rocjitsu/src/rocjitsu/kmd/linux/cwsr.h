@@ -48,6 +48,43 @@ constexpr bool cwsr_layout_modelled(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 
+/// @brief Number of scalar slots in a saved SGPR block (gfx9.4 sgpr_count).
+/// @details The block is a fixed 112 slots regardless of how many scalars the
+/// dispatch actually allocated. It is also an input to the COMPUTE_RELAUNCH
+/// state word (sgprs_field = kCwsrSavedSgprSlots / 16, which must stay inside
+/// three bits), not just to the alias arithmetic below.
+inline constexpr uint32_t kCwsrSavedSgprSlots = 112;
+/// @brief gfx9.4 scalar_register_count(): the architected scalars s0..s101.
+/// @details Selectors at or above this alias VCC, FLAT_SCRATCH and XNACK_MASK
+/// rather than naming an SGPR.
+inline constexpr uint32_t kCwsrArchScalarRegisters = 102;
+/// @brief One past the last aliased slot (+ gfx9.4 scalar_alias_count() of 6).
+inline constexpr uint32_t kCwsrAliasedSgprEnd = kCwsrArchScalarRegisters + 6; // 108
+/// @brief Slot holding VCC_LO; VCC_HI is the next one up.
+inline constexpr uint32_t kCwsrVccLoSlot = kCwsrAliasedSgprEnd - 2; // 106
+/// @brief Slot holding FLAT_SCRATCH_LO; FLAT_SCRATCH_HI is the next one up.
+inline constexpr uint32_t kCwsrFlatScratchLoSlot = kCwsrAliasedSgprEnd - 6; // 102
+static_assert(kCwsrAliasedSgprEnd <= kCwsrSavedSgprSlots,
+              "aliased slots must land inside the saved SGPR block");
+
+/// @brief Whether a saved SGPR slot is occupied by an aliased register.
+///
+/// @details VCC and FLAT_SCRATCH are written into slots near the top of the
+/// block rather than being stored separately, so those slots do not hold the
+/// SGPR their index names. Every path that walks the block by slot index must
+/// consult this: the codec (both directions) so a round trip does not read an
+/// alias back as a register, and the wave writeback so a debugger edit to a
+/// real register above @ref kCwsrArchScalarRegisters is not dropped. Note that
+/// the aliases are *not* a contiguous top range -- s104 and s105 sit between
+/// FLAT_SCRATCH and VCC and are ordinary registers -- which is why a `slot <
+/// 102` bound is not equivalent.
+/// @param slot Index into the saved SGPR block.
+/// @returns True if the slot holds an alias rather than SGPR @p slot.
+constexpr bool cwsr_sgpr_slot_is_aliased(uint32_t slot) {
+  return slot == kCwsrVccLoSlot || slot == kCwsrVccLoSlot + 1 || slot == kCwsrFlatScratchLoSlot ||
+         slot == kCwsrFlatScratchLoSlot + 1;
+}
+
 /// @brief The saved architectural state of one stopped wave.
 ///
 /// @details Register values are the live wave state; the serializer places them
@@ -91,7 +128,10 @@ struct CwsrWaveState {
   /// packet/workgroup correlation for the wave.
   bool spi_ttmps_setup = false;
 
-  uint32_t num_sgprs = 0; ///< Meaningful scalar registers (at most s0-s105).
+  /// Meaningful scalar registers, at most @ref kCwsrSavedSgprSlots. Slots for
+  /// which @ref cwsr_sgpr_slot_is_aliased holds do not round trip: they carry
+  /// VCC and FLAT_SCRATCH, which travel in their own fields.
+  uint32_t num_sgprs = 0;
   uint32_t num_vgprs = 0; ///< Meaningful wave64 vector registers (at most 256).
   /// Scalar register values, index = sgpr number.
   std::vector<uint32_t> sgprs;
@@ -132,8 +172,9 @@ struct CwsrLayout {
 /// out high-to-low as [TTMP|HWREG] / [SGPR] / [VGPR] at the offsets
 /// gfx9_architecture_t::cwsr_record_t::register_address computes.
 ///
-/// This gfx9.4 serializer requires a dword-aligned base, no more than 106
-/// meaningful SGPRs or 256 VGPRs per wave, and a non-null writer. The caller
+/// This gfx9.4 serializer requires a dword-aligned base, no more than
+/// @ref kCwsrSavedSgprSlots meaningful SGPRs or 256 VGPRs per wave, and a
+/// non-null writer. The caller
 /// must keep the queue suspended and wave/register storage alive for the whole
 /// call, serialize against a stable snapshot, and provide a writer that
 /// publishes directly to the inferior-visible coherent CWSR mapping. The

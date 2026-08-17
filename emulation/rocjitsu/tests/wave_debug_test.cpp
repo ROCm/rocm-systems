@@ -397,6 +397,101 @@ TEST(WaveDebugTest, SendmsghaltPublishesArchitecturalStatusHalt) {
   EXPECT_TRUE(wf->debug_halted());
   EXPECT_NE(wf->status_raw() & kStatusHalt, 0u)
       << "s_sendmsghalt halted the wave without publishing STATUS.HALT";
+  // Which instruction raised the bit is the only thing that separates this stop
+  // from a handler that raised HALT with s_setreg and then returned. The two
+  // want opposite treatment on resume and are identical in the CWSR record.
+  EXPECT_TRUE(wf->self_halted())
+      << "s_sendmsghalt raised STATUS.HALT without recording that it did";
+}
+
+// The other origin of STATUS.HALT. The ROCr handler raises it through s_setreg
+// on the way out, and there the bit means "keep this wave stopped" -- so a
+// resume must not clear it. Nothing in the CWSR record distinguishes that from
+// a wave halted at s_sendmsghalt, which wants exactly the opposite, so the
+// provenance marker has to come out clear on this path.
+TEST(WaveDebugTest, HandlerSetregHaltIsNotAttributedToSendmsghalt) {
+  WaveDebugFixture fx;
+  constexpr uint32_t kStatusHalt = 1u << 13;
+
+  fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
+  fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
+
+  // SOPK s_setreg_imm32_b32 (op 20), hwreg id 2 = STATUS, offset 13, size 1 --
+  // simm16 = 2 | (13 << 6) = 0x342. This is the ROCr handler's halt sequence.
+  const uint32_t handler[] = {
+      0x806C846Cu,              // s_add_u32  ttmp0, ttmp0, 4
+      0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
+      0xBA000342u, 0x00000001u, // s_setreg_imm32_b32 hwreg(STATUS, 13, 1), 1
+      0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
+  };
+  for (uint32_t i = 0; i < std::size(handler); ++i)
+    fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+
+  fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
+  });
+
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+
+  fx.cu->step(); // s_trap -> handler
+  ASSERT_TRUE(wf->in_trap_handler());
+
+  for (int i = 0; i < 4 && !wf->debug_halted(); ++i)
+    fx.cu->step();
+
+  ASSERT_NE(wf->status_raw() & kStatusHalt, 0u) << "the handler's s_setreg did not raise HALT";
+  EXPECT_FALSE(wf->self_halted())
+      << "a handler-raised HALT was attributed to s_sendmsghalt, so a resume would clear it "
+         "and lose the breakpoint";
+}
+
+// Provenance is per stop, not per wave. A marker left behind by a resumed
+// s_sendmsghalt would make the *next* stop -- one the handler halted with
+// s_setreg -- look self-halted, and the resume after that would clear a HALT it
+// must leave alone.
+TEST(WaveDebugTest, SelfHaltedMarkerDoesNotSurviveTheStopThatSetIt) {
+  WaveDebugFixture fx;
+  constexpr uint32_t kSSendmsghaltInterrupt = 0xBF910001u;
+
+  fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
+  fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
+
+  const uint32_t handler[] = {
+      0x806C846Cu,            // s_add_u32  ttmp0, ttmp0, 4
+      0x826D806Du,            // s_addc_u32 ttmp1, ttmp1, 0
+      kSSendmsghaltInterrupt, // s_sendmsghalt sendmsg(MSG_INTERRUPT)
+      0xBE801F6Cu,            // s_rfe_b64 ttmp[0:1]
+  };
+  for (uint32_t i = 0; i < std::size(handler); ++i)
+    fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+
+  fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
+  });
+  fx.cu->set_sendmsg_handler([](amdgpu::Wavefront &, uint32_t message) { return message == 1; });
+
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+
+  fx.cu->step(); // s_trap -> handler
+  for (int i = 0; i < 3 && !wf->self_halted(); ++i)
+    fx.cu->step();
+  ASSERT_TRUE(wf->self_halted());
+
+  // What a debugger resume does: drop both halves of the stop, then let the
+  // handler return.
+  wf->set_status_halt(false);
+  wf->set_self_halted(false);
+  wf->set_debug_halted(false);
+  for (int i = 0; i < 3 && wf->in_trap_handler(); ++i)
+    fx.cu->step();
+  ASSERT_FALSE(wf->in_trap_handler()) << "the handler never returned";
+  EXPECT_FALSE(wf->self_halted());
+
+  for (int i = 0; i < 4 && !wf->is_halted(); ++i)
+    fx.cu->step();
+  EXPECT_TRUE(wf->is_halted());
 }
 
 // The CWSR codec reproduces the gfx9.4 record layout only, and the differences
@@ -1014,7 +1109,10 @@ TEST(WaveDebugTest, CwsrReservesDebuggerMemoryForDisplacedStepping) {
 TEST(WaveDebugTest, CwsrRoundTripPreservesAliasedSgprsAndFlatScratch) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x40000;
-  constexpr uint32_t kMaxAcceptedSgprs = 106; // cwsr.cpp kMaxSgprs
+  // The full saved block. CDNA3/CDNA4 default to 112 SGPRs per wave
+  // (config_loader default_sgprs_per_wf), so a wave that uses the whole
+  // allocation is the ordinary case, not an extreme one.
+  constexpr uint32_t kMaxAcceptedSgprs = kmd::kCwsrSavedSgprSlots;
   constexpr uint64_t kFlatScratch = 0x0000DEAD0000BEEFULL;
 
   std::map<uint64_t, uint32_t> mem;
@@ -1042,17 +1140,48 @@ TEST(WaveDebugTest, CwsrRoundTripPreservesAliasedSgprsAndFlatScratch) {
   EXPECT_EQ(out[0].flat_scratch, kFlatScratch) << "flat_scratch was not restored";
   EXPECT_EQ(out[0].vcc, in[0].vcc);
 
-  // FLAT_SCRATCH occupies s102/s103 in this geometry; VCC sits above
-  // num_sgprs. Only the slots an alias actually covers may be lost -- clamping
-  // at the gfx9.4 architected count instead would also drop s104/s105, which
-  // are real registers on an architecture with 106 of them.
+  // FLAT_SCRATCH occupies s102/s103 and VCC s106/s107. Only the slots an alias
+  // actually covers may be lost: clamping at the gfx9.4 architected count of
+  // 102 instead would also drop s104 and s105, which sit *between* the two
+  // pairs and are ordinary registers. That is why the predicate is an explicit
+  // slot test and not a bound.
   for (uint32_t s = 0; s < kMaxAcceptedSgprs; ++s) {
-    const bool aliased = (s == 102 || s == 103);
-    if (aliased)
+    if (kmd::cwsr_sgpr_slot_is_aliased(s))
       EXPECT_EQ(out[0].sgprs[s], 0u) << "aliased slot " << s << " decoded as an SGPR";
     else
       EXPECT_EQ(out[0].sgprs[s], in[0].sgprs[s]) << "sgpr " << s << " did not survive";
   }
+  // Pin the two slots the "everything at or above 102 is an alias" shortcut
+  // would silently drop, so a future simplification back to a bound fails here.
+  EXPECT_EQ(out[0].sgprs[104], in[0].sgprs[104]);
+  EXPECT_EQ(out[0].sgprs[105], in[0].sgprs[105]);
+}
+
+// The saved block is 112 slots, and CDNA3/CDNA4 default to exactly that many
+// SGPRs per wave. When the codec accepted only 106 the geometry for a
+// default-configured wave came back not-ok, so the whole queue's CWSR publish
+// failed and the debugger saw no waves at all -- reachable from any CDNA4
+// config that simply omits sgprs_per_wf.
+TEST(WaveDebugTest, CwsrAcceptsTheFullDefaultSgprAllocation) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000;
+
+  std::map<uint64_t, uint32_t> mem;
+  auto write32 = [&](uint64_t va, uint32_t val) { mem[va] = val; };
+
+  std::vector<kmd::CwsrWaveState> in = {make_wave(0xCC02, 0x3000)};
+  in[0].num_sgprs = kmd::kCwsrSavedSgprSlots;
+  in[0].sgprs.assign(kmd::kCwsrSavedSgprSlots, 0u);
+  EXPECT_TRUE(kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, in, write32).ok)
+      << "a wave using the default " << kmd::kCwsrSavedSgprSlots << "-SGPR allocation was rejected";
+
+  // One past the block is genuinely out of range and must still be refused
+  // rather than written past the end of the SGPR area.
+  mem.clear();
+  in[0].num_sgprs = kmd::kCwsrSavedSgprSlots + 1;
+  in[0].sgprs.assign(in[0].num_sgprs, 0u);
+  EXPECT_FALSE(kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, in, write32).ok);
+  EXPECT_TRUE(mem.empty()) << "a rejected image still wrote to the ctx-save area";
 }
 
 TEST(WaveDebugTest, CwsrDeserializeRecoversSerializedWaveState) {

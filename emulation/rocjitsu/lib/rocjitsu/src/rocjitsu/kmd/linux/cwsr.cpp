@@ -19,15 +19,14 @@ namespace {
 constexpr uint32_t kHwregCount = 32; // hwreg_count()
 constexpr uint32_t kTtmpCount = 16;  // ttmps saved at the top of the hwreg block
 constexpr uint32_t kVgprLaneBytes = 64 * sizeof(uint32_t); // one VGPR = 64 lanes * 4 bytes
-constexpr uint32_t kMaxSgprs = 106;
+// The saved block holds kCwsrSavedSgprSlots scalars, so that is the ceiling a
+// wave can carry. It is deliberately not the architected count (102): s104 and
+// s105 are ordinary registers above the FLAT_SCRATCH alias, and CDNA3/CDNA4
+// default to 112 SGPRs per wave (config_loader default_sgprs_per_wf), so a
+// lower bound here would reject an ordinary dispatch and fail the queue's whole
+// CWSR publish. Slots that alias travel in their own fields either way.
+constexpr uint32_t kMaxSgprs = kCwsrSavedSgprSlots;
 constexpr uint32_t kMaxVgprs = 256;
-// gfx9.4 scalar_register_count(): the architected scalars s0..s101. Selectors
-// at or above this alias VCC, FLAT_SCRATCH and XNACK_MASK rather than naming an
-// SGPR, so only the slots below it carry real register state.
-constexpr uint32_t kArchScalarRegisters = 102;
-// + scalar_alias_count() (6). Determines where VCC/FLAT_SCRATCH alias into the
-// saved SGPR block.
-constexpr uint32_t kArchScalars = kArchScalarRegisters + 6;
 constexpr uint32_t kCwsrHeaderBytes = 10 * sizeof(uint32_t);
 constexpr uint32_t kControlStackOffset = 0x100u;
 
@@ -102,25 +101,15 @@ uint32_t encode_ttmp11(const CwsrWaveState &w) {
 struct CwsrGeometry {
   CwsrLayout layout{};
   uint32_t vgpr_count = 0;
-  uint32_t sgpr_count = 112;
-  uint32_t vcc_lo_slot = 0;
-  uint32_t flat_scratch_lo_slot = 0;
+  uint32_t sgpr_count = kCwsrSavedSgprSlots;
+  uint32_t vcc_lo_slot = kCwsrVccLoSlot;
+  uint32_t flat_scratch_lo_slot = kCwsrFlatScratchLoSlot;
   uint32_t hwreg_bytes = 0;
   uint32_t sgpr_bytes = 0;
   uint32_t vgpr_bytes = 0;
   uint32_t lds_bytes = 0;
   uint64_t per_wave = 0;
 };
-
-/// @brief Whether a saved SGPR slot is occupied by an aliased register.
-/// @details VCC and FLAT_SCRATCH are written into slots at the top of the block
-/// rather than being stored separately, so those slots do not hold the SGPR
-/// their index names. Serialize and deserialize both consult this, or a round
-/// trip reads an alias back as a register.
-constexpr bool is_alias_slot(const CwsrGeometry &geometry, uint32_t slot) {
-  return slot == geometry.vcc_lo_slot || slot == geometry.vcc_lo_slot + 1 ||
-         slot == geometry.flat_scratch_lo_slot || slot == geometry.flat_scratch_lo_slot + 1;
-}
 
 CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveState> &waves) {
   CwsrGeometry geometry{};
@@ -144,12 +133,9 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
     return geometry;
 
   geometry.vgpr_count = std::max<uint32_t>(round_up(max_vgprs, 8), 8);
-  // Alias slots, computed once so serialize and deserialize cannot disagree
-  // about where they are. FLAT_SCRATCH being written but read back from a
+  // Alias slots come from cwsr.h so the codec, the wave writeback and the tests
+  // share one definition. FLAT_SCRATCH being written but read back from a
   // separately open-coded offset is exactly how it came to be dropped.
-  const uint32_t alias_end = std::min(kArchScalars, geometry.sgpr_count);
-  geometry.vcc_lo_slot = alias_end - 2;
-  geometry.flat_scratch_lo_slot = alias_end - 6;
   geometry.hwreg_bytes = kHwregCount * sizeof(uint32_t);
   geometry.sgpr_bytes = geometry.sgpr_count * sizeof(uint32_t);
   geometry.vgpr_bytes = geometry.vgpr_count * kVgprLaneBytes;
@@ -290,18 +276,17 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
       write32(ttmps_addr + t * 4, ttmp[t]);
 
     // SGPR block. Fill meaningful scalars, then place VCC at its aliased slot.
-    // Only s0..s101 are real registers; the slots above are aliases written
-    // below. num_sgprs is allowed up to kMaxSgprs (106), so without this bound
-    // the aliases would be filled from sgprs[] first and then overwritten,
-    // and deserialize would read the alias bytes straight back as SGPRs.
-    // Skip only the slots the aliases below actually occupy, not everything
-    // above the gfx9.4 architected count: this codec is shared, and an
-    // architecture with 106 architected SGPRs still has real registers in
-    // s104/s105. Filling an aliased slot from sgprs[] first would be harmless
-    // (it is overwritten), but deserialize has to skip exactly the same set,
-    // and deriving both from one predicate is what keeps them in step.
+    // num_sgprs may reach the full block, so without this bound the aliases
+    // would be filled from sgprs[] first and then overwritten, and deserialize
+    // would read the alias bytes straight back as SGPRs. Skip only the slots
+    // the aliases below actually occupy, not everything above the gfx9.4
+    // architected count: s104/s105 sit between FLAT_SCRATCH and VCC and are
+    // real registers. Filling an aliased slot from sgprs[] first would be
+    // harmless (it is overwritten), but deserialize and the wave writeback have
+    // to skip exactly the same set, and deriving all three from one predicate
+    // is what keeps them in step.
     for (uint32_t s = 0; s < sgpr_count; ++s) {
-      const bool aliased = is_alias_slot(geometry, s);
+      const bool aliased = cwsr_sgpr_slot_is_aliased(s);
       uint32_t val = (!aliased && s < w.num_sgprs && s < w.sgprs.size()) ? w.sgprs[s] : 0u;
       write32(sgprs_addr + s * 4, val);
     }
@@ -439,7 +424,7 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
     // FLAT_SCRATCH's bytes into s102/s103 on a round trip.
     w.sgprs.assign(w.num_sgprs, 0u);
     for (uint32_t s = 0; s < w.num_sgprs; ++s)
-      if (!is_alias_slot(geometry, s))
+      if (!cwsr_sgpr_slot_is_aliased(s))
         w.sgprs[s] = read32(sgprs_addr + s * 4);
     const uint32_t vcc_lo = read32(sgprs_addr + vcc_lo_slot * 4);
     const uint32_t vcc_hi = read32(sgprs_addr + (vcc_lo_slot + 1) * 4);

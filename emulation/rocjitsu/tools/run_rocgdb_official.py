@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Run each official gdb.rocm test in a fresh verified Mirage daemon session."""
 
 from __future__ import annotations

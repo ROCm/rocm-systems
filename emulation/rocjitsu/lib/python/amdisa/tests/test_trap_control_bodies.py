@@ -33,7 +33,7 @@ def _body(name: str) -> str:
 class TestSRfeBody:
     def test_restores_the_saved_pc(self):
         body = _body('S_RFE_B64')
-        assert 'read_scalar64(inst.ssrc0)' in body
+        assert 'read_scalar64(ssrc0)' in body
         assert 'kPcAddressMask' in body
 
     def test_restores_the_interrupted_exec(self):
@@ -84,6 +84,29 @@ class TestSendmsgBody:
         assert 'wf.set_status_raw(' in body
         assert 'wf.set_debug_halted(true);' in body
 
+    def test_sendmsghalt_records_that_it_raised_the_halt(self):
+        """The trap handler raises STATUS.HALT too, with s_setreg just before it
+        returns, and there the bit means "keep the wave stopped" -- the opposite
+        of what it means here. The CWSR record cannot tell the two apart, so the
+        resume path in SimulatedKfd::apply_cwsr_to_wave reads this marker to
+        decide whether clearing HALT loses a breakpoint or unsticks a wave."""
+        body = _body('S_SENDMSGHALT')
+        assert 'wf.set_self_halted(true);' in body
+
     def test_plain_sendmsg_does_not_halt(self):
         body = _body('S_SENDMSG')
         assert 'set_debug_halted' not in body
+        assert 'set_self_halted' not in body
+
+
+class TestSelfHaltedProvenance:
+    def test_rfe_clears_a_stale_marker_when_nothing_is_halting_the_wave(self):
+        """Leaving the marker set past a resume would make the *next* stop clear
+        a STATUS.HALT the trap handler raised, silently losing that breakpoint."""
+        body = _body('S_RFE_B64')
+        assert 'wf.set_self_halted(false);' in body
+        # Only on the not-halted path: a wave staying stopped keeps its
+        # provenance, which is what the resume needs to read.
+        assert body.index('wf.set_debug_halted(true);') < body.index(
+            'wf.set_self_halted(false);'
+        )

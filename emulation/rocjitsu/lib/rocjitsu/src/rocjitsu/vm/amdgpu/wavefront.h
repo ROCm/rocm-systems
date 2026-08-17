@@ -539,6 +539,20 @@ public:
 
   bool trap_interrupt_sent() const { return trap_interrupt_sent_; }
   void set_trap_interrupt_sent(bool value) { trap_interrupt_sent_ = value; }
+
+  /// @brief Whether the live STATUS.HALT was raised by the wave's own
+  /// s_sendmsghalt rather than by the trap handler's s_setreg.
+  ///
+  /// @details Both halt the wave inside the handler and both look identical in
+  /// the CWSR record, but a debugger resume has to treat them oppositely. The
+  /// ROCr handler's s_setreg raises HALT and *then* returns, so the bit is the
+  /// handler's request that the wave stay stopped: clearing it on a resume
+  /// loses the breakpoint. A wave halted at s_sendmsghalt has already reported
+  /// and is waiting to be let go, so leaving the bit set is what strands it.
+  /// The record cannot tell them apart, so record the provenance here at the
+  /// point where it is still known.
+  bool self_halted() const { return self_halted_; }
+  void set_self_halted(bool value) { self_halted_ = value; }
   uint32_t trap_saved_status() const { return trap_saved_status_; }
   void set_trap_saved_status(uint32_t value) { trap_saved_status_ = value; }
   uint64_t trap_saved_exec() const { return trap_saved_exec_; }
@@ -638,6 +652,39 @@ public:
     single_step_ = false;
   }
 
+  /// @brief The wave state a debug stop mutates, captured so it can be undone.
+  ///
+  /// @details A driver stop is claimed before the CWSR record that describes it
+  /// can be written, because the serializer selects waves by debug_stopped().
+  /// If publication then fails there is no debugger-visible record, so the stop
+  /// has to be rolled back rather than left in place: a halted wave with no
+  /// record is one the debugger cannot see, resume, or be told about, and the
+  /// compute unit has already been told the access was handled.
+  struct DebugStopState {
+    uint32_t trapsts = 0;
+    uint32_t mode_raw = 0;
+    uint32_t trap_id = 0;
+    bool debug_halted = false;
+    bool single_step = false;
+    bool fatal_exception_pending = false;
+  };
+
+  /// @brief Capture the fields @ref restore_debug_stop_state puts back.
+  DebugStopState debug_stop_state() const {
+    return DebugStopState{trapsts_,      mode_raw_,    trap_id_,
+                          debug_halted_, single_step_, fatal_exception_pending_};
+  }
+
+  /// @brief Undo a debug stop captured by @ref debug_stop_state.
+  void restore_debug_stop_state(const DebugStopState &saved) {
+    trapsts_ = saved.trapsts;
+    set_mode_raw(saved.mode_raw);
+    trap_id_ = saved.trap_id;
+    debug_halted_ = saved.debug_halted;
+    single_step_ = saved.single_step;
+    fatal_exception_pending_ = saved.fatal_exception_pending;
+  }
+
   /// @brief Halt this wavefront and notify the CU for WG completion tracking.
   /// @details Transitions to HALTED and decrements the CU's per-WG refcount.
   /// When the refcount reaches zero (all WFs in the WG halted), the CU fires
@@ -715,6 +762,7 @@ public:
     sleep_cycles_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
+    self_halted_ = false;
     trap_saved_status_ = 0;
     trap_saved_exec_ = 0;
     debug_halted_ = false;
@@ -795,6 +843,7 @@ private:
   uint32_t sleep_cycles_ = 0;        ///< Cycles left on an in-flight S_SLEEP.
   bool in_trap_handler_ = false;     ///< Executing the configured trap-handler shader.
   bool trap_interrupt_sent_ = false; ///< Handler issued MSG_INTERRUPT for this entry.
+  bool self_halted_ = false;         ///< STATUS.HALT came from this wave's s_sendmsghalt.
   uint32_t trap_saved_status_ = 0;   ///< Interrupted STATUS restored after handler completion.
   uint64_t trap_saved_exec_ = 0;     ///< Interrupted EXEC restored after handler completion.
   bool debug_halted_ = false;        ///< Stopped by the debugger (skipped by scheduler).

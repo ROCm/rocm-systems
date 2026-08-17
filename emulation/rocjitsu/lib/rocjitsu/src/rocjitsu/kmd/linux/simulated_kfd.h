@@ -209,6 +209,12 @@ public:
     SoC *soc = nullptr;
     uint32_t gpu_id = 0;
     bool cps_initialized = false;
+    /// Whether the "no CWSR layout for this architecture" warning has been
+    /// logged for this GPU. The check now runs per faulting access rather than
+    /// once per stop, so the diagnostic is latched here -- per device, not per
+    /// ordinal, because gpu_ordinal() reports 0 for an unknown id and would
+    /// silence the real ordinal 0.
+    bool cwsr_layout_warned = false;
     kfd_process_device_apertures apertures{};
   };
 
@@ -302,9 +308,24 @@ private:
   void notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                           uint32_t gpu_id,
                           uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
-  void report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
-                           uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
-                           uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
+  /// @brief Publish a wave stop: serialize the queue, then wake the debugger.
+  /// @returns True if the CWSR record was written and the event raised. On
+  /// false nothing was published and the caller must undo the stop it claimed:
+  /// the debugger has no record to read, so a wave left halted is invisible to
+  /// it and can never be resumed.
+  [[nodiscard]] bool report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                                         uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
+                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
+
+  /// @brief Whether a wave stop on @p gpu_id could be published to a debugger.
+  /// @details Checked *before* a handler claims a stop. The CWSR codec models
+  /// the gfx9.4 record layout only (kmd/linux/cwsr.h), and serialization is the
+  /// last step of reporting a stop -- by the time it can refuse, the wave is
+  /// halted and the compute unit has been told the faulting access was handled.
+  /// Asking first lets the handler decline the stop instead, which is a path
+  /// every call site already supports.
+  /// @param gpu_id KFD GPU id of the queue whose wave would stop.
+  bool debug_stop_publishable(uint32_t gpu_id);
   int resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uint32_t num_queues);
   void apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &state);
 

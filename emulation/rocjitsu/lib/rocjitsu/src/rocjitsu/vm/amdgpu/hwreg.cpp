@@ -418,7 +418,11 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
     // Only reachable from a privileged (trap-handler) write; the policy check
     // in write_hwreg_field() refuses user-mode writes before we get here. The
     // gfx9 trap handler sets STATUS.HALT this way before returning.
+    //
+    // That makes this the other origin of STATUS.HALT, so it owns the bit now:
+    // drop any s_sendmsghalt provenance, whichever way the handler wrote it.
     wf.set_status_raw(raw_value);
+    wf.set_self_halted(false);
     return HwregAccessResult::Success;
   case HwregState::GprAllocGfx9_10:
   case HwregState::GprAllocCdna3_4:

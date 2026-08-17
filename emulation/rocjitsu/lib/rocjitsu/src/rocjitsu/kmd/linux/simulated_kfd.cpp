@@ -2540,24 +2540,12 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
   if (!gpu || !gpu->soc || ctx_base == 0)
     return false;
 
-  // Never publish a record shaped for the wrong architecture. The codec
-  // reproduces the gfx9.4 layout only (kmd/linux/cwsr.h), and the differences
-  // elsewhere are not confined to one field -- the control stack, the
-  // COMPUTE_RELAUNCH bits, the wave64 VGPR stride and the SGPR alias slots all
-  // move. rocm-dbgapi would decode the image against its own layout and act on
-  // whatever it read, so producing nothing is strictly better than producing
-  // that. Reported here rather than refused at DBG_TRAP_ENABLE: every errno
-  // that path can return except ESRCH and EALREADY becomes
-  // AMD_DBGAPI_STATUS_ERROR, which rocm-dbgapi turns into a [[noreturn]]
-  // fatal_error, so refusing there aborts the debugger instead of declining.
-  // Declining cleanly is the topology's job (HSA_CAP_TRAP_DEBUG_SUPPORT), and
-  // that surface is deliberately kept identical to the real KFD driver.
-  if (!kmd::cwsr_layout_modelled(gpu->soc->arch())) {
-    util::Logger::warn("wave stop not published: no CWSR record layout is modelled for arch=",
-                       static_cast<int>(gpu->soc->arch()),
-                       "; GPU debugging is supported on gfx942/gfx950 only");
+  // Never publish a record shaped for the wrong architecture. Handlers ask
+  // debug_stop_publishable() before claiming a stop, so reaching here on an
+  // unmodelled part means a caller skipped the gate; refuse rather than hand
+  // rocm-dbgapi an image it would decode against its own layout.
+  if (!kmd::cwsr_layout_modelled(gpu->soc->arch()))
     return false;
-  }
 
   std::vector<kmd::CwsrWaveState> waves;
   gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
@@ -2662,6 +2650,13 @@ void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
   }
   if (ctx_base == 0)
     return;
+  // The wave is already halted here by the handler's own STATUS.HALT, so there
+  // is no stop to decline -- but waking a debugger that can never be given a
+  // record only strands it. resolve_trap_handler() also withholds the debug
+  // flag on such a part, so a cooperating handler never gets this far; one that
+  // raises STATUS.HALT regardless still would.
+  if (!debug_stop_publishable(gpu_id))
+    return;
 
   // A trap interrupt is wave-local: hardware reports it without waiting for
   // every peer in the queue to stop. The debugger's ensuing SUSPEND_QUEUES
@@ -2692,6 +2687,12 @@ SimulatedKfd::resolve_trap_handler(const amdgpu::Wavefront &wave, uint32_t gpu_o
     auto session = debug_sessions_.find(proc->client_pid());
     debug_enabled = session != debug_sessions_.end() && session->second.enabled;
   }
+  // Do not tell the trap handler a debugger is attached on a part whose stops
+  // could never be published; the handler would raise STATUS.HALT and wait for
+  // a debugger that can never read it.
+  if (debug_enabled && gpu_ordinal < gpus_.size() &&
+      !debug_stop_publishable(gpus_[gpu_ordinal].gpu_id))
+    debug_enabled = false;
   return amdgpu::ComputeUnitCore::TrapHandlerConfig{tba, tma, debug_enabled};
 }
 
@@ -2724,11 +2725,47 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
   return true;
 }
 
-void SimulatedKfd::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+bool SimulatedKfd::debug_stop_publishable(uint32_t gpu_id) {
+  auto *gpu = find_gpu(gpu_id);
+  if (gpu == nullptr || gpu->soc == nullptr)
+    return false;
+  // The codec reproduces the gfx9.4 CWSR layout only (kmd/linux/cwsr.h), and
+  // the differences elsewhere are not confined to one field -- the control
+  // stack, the COMPUTE_RELAUNCH bits, the wave64 VGPR stride, the SGPR alias
+  // slots and the dispatch-identity TTMPs all move. rocm-dbgapi would decode
+  // the image against its own layout and act on whatever it read.
+  //
+  // Asked here, before the stop, rather than refused at DBG_TRAP_ENABLE: every
+  // errno that path can return except ESRCH and EALREADY becomes
+  // AMD_DBGAPI_STATUS_ERROR, which rocm-dbgapi turns into a [[noreturn]]
+  // fatal_error, so refusing there aborts the debugger instead of declining.
+  // Declining cleanly is the topology's job (HSA_CAP_TRAP_DEBUG_SUPPORT), and
+  // that surface is deliberately kept identical to the real KFD driver.
+  if (kmd::cwsr_layout_modelled(gpu->soc->arch()))
+    return true;
+  if (!gpu->cwsr_layout_warned) {
+    gpu->cwsr_layout_warned = true;
+    util::Logger::warn(
+        "wave stops not published on gpu_id=", gpu_id,
+        ": no CWSR record layout is modelled for arch=", static_cast<int>(gpu->soc->arch()),
+        "; GPU debugging is supported on gfx942/gfx950 only");
+  }
+  return false;
+}
+
+bool SimulatedKfd::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                        uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
                                        uint64_t exception_mask) {
-  serialize_queue_debug_waves(proc->process_id(), queue_id, gpu_id, ctx_base, ctx_size);
+  // Serialization must succeed before the debugger is woken. raise_debug_event
+  // latches per-queue exception status and queues an event the debugger will
+  // answer with SUSPEND_QUEUES; without a record that request can only come
+  // back as a queue error, and the wave stays halted with nothing able to
+  // resume it. The stop itself cannot be deferred until after serialization --
+  // the serializer selects waves by debug_stopped() -- so the caller undoes it.
+  if (!serialize_queue_debug_waves(proc->process_id(), queue_id, gpu_id, ctx_base, ctx_size))
+    return false;
   notify_debug_event(proc, queue_id, gpu_id, exception_mask);
+  return true;
 }
 
 void SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
@@ -2768,6 +2805,13 @@ bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
   }
   if (ctx_base == 0)
     return false;
+  if (!debug_stop_publishable(gpu_id)) {
+    // Clear single-step even while declining. The compute unit discards this
+    // callback's result and re-enters it for as long as the flag is set, so
+    // returning false without clearing it spins on every instruction.
+    wave.set_debug_single_step(false);
+    return false;
+  }
   wave.set_debug_single_step(false);
   wave.debug_trap(0);
   // gfx9.4 reports completed single-step through TRAPSTS.TRAP_AFTER_INST. This
@@ -2831,9 +2875,12 @@ bool SimulatedKfd::on_wave_watchpoint(amdgpu::Wavefront &wave, uint64_t address,
   }
   if (ctx_base == 0)
     return false;
+  if (!debug_stop_publishable(gpu_id))
+    return false;
 
   static constexpr uint32_t kTrapstsBits[] = {1u << 7, 1u << 12, 1u << 13, 1u << 14};
   constexpr uint32_t kModeExcpEnAddrWatch = 1u << 19;
+  const auto saved = wave.debug_stop_state();
   uint32_t trapsts = wave.trapsts();
   for (uint32_t slot = 0; slot < KfdProcess::DebugSession::kMaxAddressWatches; ++slot)
     if ((matched_slots & (uint32_t{1} << slot)) != 0)
@@ -2841,7 +2888,10 @@ bool SimulatedKfd::on_wave_watchpoint(amdgpu::Wavefront &wave, uint64_t address,
   wave.set_trapsts(trapsts);
   wave.set_mode_raw(wave.mode_raw() | kModeExcpEnAddrWatch);
   wave.debug_trap(0);
-  report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size);
+  if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size)) {
+    wave.restore_debug_stop_state(saved);
+    return false;
+  }
   return true;
 }
 
@@ -2869,12 +2919,18 @@ bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
   }
   if (ctx_base == 0)
     return false;
+  if (!debug_stop_publishable(gpu_id))
+    return false;
   constexpr uint32_t kTrapstsIllegalInst = 1u << 11;
+  const auto saved = wave.debug_stop_state();
   wave.set_trapsts(wave.trapsts() | kTrapstsIllegalInst);
   wave.set_fatal_exception_pending(true);
   wave.debug_trap(0);
-  report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size,
-                      KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION));
+  if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size,
+                           KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION))) {
+    wave.restore_debug_stop_state(saved);
+    return false;
+  }
   return true;
 }
 
@@ -2902,11 +2958,17 @@ bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, b
   }
   if (ctx_base == 0)
     return false;
+  if (!debug_stop_publishable(gpu_id))
+    return false;
   constexpr uint32_t kTrapstsXnackError = 1u << 28;
+  const auto saved = wave.debug_stop_state();
   wave.set_trapsts(wave.trapsts() | kTrapstsXnackError);
   wave.debug_trap(0);
-  report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size,
-                      KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION));
+  if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size,
+                           KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION))) {
+    wave.restore_debug_stop_state(saved);
+    return false;
+  }
   return true;
 }
 
@@ -2934,10 +2996,16 @@ bool SimulatedKfd::on_wave_alu_exception(amdgpu::Wavefront &wave) {
   }
   if (ctx_base == 0)
     return false;
+  if (!debug_stop_publishable(gpu_id))
+    return false;
+  const auto saved = wave.debug_stop_state();
   wave.set_fatal_exception_pending(true);
   wave.debug_trap(0);
-  report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size,
-                      KFD_EC_MASK(EC_QUEUE_WAVE_MATH_ERROR));
+  if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size,
+                           KFD_EC_MASK(EC_QUEUE_WAVE_MATH_ERROR))) {
+    wave.restore_debug_stop_state(saved);
+    return false;
+  }
   return true;
 }
 
@@ -2992,6 +3060,7 @@ void SimulatedKfd::release_debuggee_state(pid_t target_pid, KfdProcess *target_p
             // the handler return with no debugger left to resume it, and the
             // queue would never drain.
             wave->set_status_halt(false);
+            wave->set_self_halted(false);
             wake = true;
           }
         });
@@ -3072,27 +3141,36 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
     wave.set_trap_saved_status(restored_status);
   else
     wave.set_status_raw(restored_status);
-  // NOTE: the live STATUS.HALT is deliberately *not* cleared here even on a
-  // resume. While the handler is mid-flight the bit is the handler's own
-  // request to keep the wave stopped (the ROCr sequence raises it with s_setreg
-  // and only then returns), and clearing it loses the breakpoint --
-  // DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdits pins that. A
-  // wave halted *at* s_sendmsghalt is in the same window but wants the opposite,
-  // and the two are not distinguishable from the record alone. See the review
-  // note on execute_s_sendmsghalt_sopp.
+  // The live STATUS.HALT stays as it is for a handler that raised it with
+  // s_setreg: there the bit is the handler's own request to keep the wave
+  // stopped, and clearing it on a resume loses the breakpoint --
+  // DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdits pins that.
+  // A wave halted at s_sendmsghalt sits in the same window and wants the
+  // opposite: it has already reported and is waiting to be let go, so leaving
+  // the bit set strands it at the handler return. The record cannot tell the
+  // two apart, which is why the wave records who raised the bit.
+  if (!state.wave_stopped && wave.self_halted()) {
+    wave.set_status_halt(false);
+    wave.set_self_halted(false);
+  }
   wave.set_mode_raw(state.mode);
   wave.set_trapsts(state.trapsts);
   wave.set_debug_wave_id(state.wave_id);
   wave.set_aql_packet_id(state.queue_packet_id);
-  const uint64_t scratch_base = wave.scratch_base();
   const uint32_t stack_pointer = wave.debug_read_sgpr(32);
   const uint32_t stack_frame = wave.debug_read_sgpr(33);
   // rocm-dbgapi may submit a lightweight control-state update with no register
   // payload after displaced stepping. Preserve the SGPR/VGPR values produced
   // by the displaced instruction in that case rather than restoring zeros.
+  //
+  // Skip exactly the slots the codec treats as aliases, not everything above
+  // the architected count: s104/s105 sit between the FLAT_SCRATCH and VCC
+  // aliases and are ordinary registers the debugger may edit. Sharing
+  // cwsr_sgpr_slot_is_aliased() with the codec is what keeps the two ends of
+  // the round trip from disagreeing about which slots carry register state.
   if (!state.sgprs.empty())
     for (uint32_t s = 0; s < state.num_sgprs && s < state.sgprs.size(); ++s)
-      if (s != 32 && s != 33 && s < 102)
+      if (s != 32 && s != 33 && !kmd::cwsr_sgpr_slot_is_aliased(s))
         wave.debug_write_sgpr(s, state.sgprs[s]);
   if (!state.vgprs.empty())
     for (uint32_t r = 0; r < state.num_vgprs; ++r)
@@ -3101,7 +3179,11 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
         if (index < state.vgprs.size())
           wave.debug_write_vgpr(r, lane, state.vgprs[index]);
       }
-  wave.set_scratch_base(scratch_base);
+  // FLAT_SCRATCH travels in its own field because it aliases two SGPR slots the
+  // loop above skips. This used to save and re-install wave.scratch_base()
+  // around the loop, which the loop cannot reach anyway (scratch_base_ is a
+  // standalone member), so the only effect was discarding the debugger's edit.
+  wave.set_scratch_base(state.flat_scratch);
   wave.debug_write_sgpr(32, stack_pointer);
   wave.debug_write_sgpr(33, stack_frame);
   const bool single_step = !state.wave_stopped && (state.mode & kModeDebugEnMask) != 0;
@@ -3325,7 +3407,15 @@ int SimulatedKfd::suspend_debug_queues(KfdProcess *proc, uint32_t *queue_ids, ui
       queue_ids[queue.request_index] |= kQueueError;
       continue;
     }
-    uint32_t newly_suspended = 0;
+    // Ask before suspending anything. This path stops waves first and only then
+    // tries to serialize them, so on an unmodelled architecture it would strand
+    // every resident wave behind a kQueueError -- the same hole the wave-stop
+    // callbacks have, reached through the debugger's own request instead.
+    if (!debug_stop_publishable(queue.info.gpu_id)) {
+      queue_ids[queue.request_index] |= kQueueError;
+      continue;
+    }
+    std::vector<std::pair<amdgpu::ComputeUnitCore *, amdgpu::Wavefront *>> newly_suspended;
     gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
       cp->set_queue_debug_suspended(queue.queue_id, process_id, true);
       for (auto *cu : cp->compute_units()) {
@@ -3335,21 +3425,38 @@ int SimulatedKfd::suspend_debug_queues(KfdProcess *proc, uint32_t *queue_ids, ui
             if (!wave->is_halted() && !wave->debug_suspended() &&
                 wave->process_id() == process_id && wave->queue_id() == queue.queue_id) {
               wave->set_debug_suspended(true);
-              ++newly_suspended;
+              newly_suspended.emplace_back(cu, wave);
             }
           }
         });
       }
     });
-    bool serialized = newly_suspended == 0;
-    if (newly_suspended > 0 && queue.info.ctx_save_restore_address != 0)
+    bool serialized = newly_suspended.empty();
+    if (!newly_suspended.empty() && queue.info.ctx_save_restore_address != 0)
       serialized = serialize_queue_debug_waves(process_id, queue.queue_id, queue.info.gpu_id,
                                                queue.info.ctx_save_restore_address,
                                                queue.info.ctx_save_restore_area_size);
-    if (serialized)
+    if (serialized) {
       ++suspended;
-    else
-      queue_ids[queue.request_index] |= kQueueError;
+      continue;
+    }
+    // No record was published, so the debugger has nothing to resume from.
+    // Undo the suspension rather than leave the queue wedged: reporting the
+    // error and stranding the waves is strictly worse than reporting it alone.
+    gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      cp->set_queue_debug_suspended(queue.queue_id, process_id, false);
+    });
+    amdgpu::ComputeUnitCore *woken = nullptr;
+    for (auto &[cu, wave] : newly_suspended) {
+      cu->with_wave_state_locked([w = wave] { w->set_debug_suspended(false); });
+      // Entries are appended compute unit by compute unit, so comparing against
+      // the last one woken collapses a CU's waves into a single wake.
+      if (cu != woken) {
+        cu->schedule_work_async();
+        woken = cu;
+      }
+    }
+    queue_ids[queue.request_index] |= kQueueError;
   }
   return static_cast<int>(suspended);
 }
