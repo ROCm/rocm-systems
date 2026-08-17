@@ -263,20 +263,105 @@ async fn destroying_a_run_reaps_a_long_running_workload() {
     );
 }
 
+/// A process a *workload* forked, killed when the test ends however it
+/// ends.
+///
+/// The process is nobody's child once the workload exits — that is the
+/// whole point of the tests below — so nothing reaps it automatically,
+/// and a failed assertion used to leave it appending to a file in `/tmp`
+/// for as long as the machine stayed up. The lines after a failed
+/// `assert!` never run, so cleanup has to hang off `Drop`; this is the
+/// shape `mirage_core::reclaim`'s `Tagged` uses, for the same reason.
+///
+/// It also owns the scratch directory the process writes to, so the files
+/// go with it: a struct's own `drop` runs before its fields', which is
+/// the order this needs — kill first, then remove what it was writing.
+struct Forked {
+    dir: tempfile::TempDir,
+    /// Pid of the forked process, once it has announced one. Zero before
+    /// that, and no reason to signal anything.
+    pid: u32,
+}
+
+impl Forked {
+    /// A scratch directory for a workload that is about to fork.
+    fn expected() -> Self {
+        Self {
+            dir: tempfile::tempdir().expect("scratch dir"),
+            pid: 0,
+        }
+    }
+
+    /// Where the forked process writes its own pid.
+    fn pid_file(&self) -> std::path::PathBuf {
+        self.dir.path().join("forked.pid")
+    }
+
+    /// The file it appends to while it is alive, so a test can watch it
+    /// stop.
+    fn marker(&self) -> std::path::PathBuf {
+        self.dir.path().join("marker")
+    }
+
+    /// Wait for the process to announce its pid and start writing.
+    async fn started(&mut self) -> u32 {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Ok(text) = std::fs::read_to_string(self.pid_file())
+                && let Ok(pid) = text.trim().parse::<u32>()
+                && self.marker().exists()
+            {
+                self.pid = pid;
+                return pid;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the workload's forked process never started"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Whether the pid still belongs to the process that was forked,
+    /// rather than to an unrelated one the kernel handed the number to
+    /// after it died.
+    ///
+    /// Worth checking because the expected outcome of every test here is
+    /// that the process is already gone, and the cleanup is a `SIGKILL`.
+    /// The scratch path is unique to this test and appears in the forked
+    /// shell's command line, so `/proc` answers it exactly.
+    fn is_the_forked_process(&self) -> bool {
+        std::fs::read(format!("/proc/{}/cmdline", self.pid)).is_ok_and(|cmdline| {
+            String::from_utf8_lossy(&cmdline).contains(&self.marker().display().to_string())
+        })
+    }
+}
+
+impl Drop for Forked {
+    fn drop(&mut self) {
+        if self.pid == 0 || !self.is_the_forked_process() {
+            return;
+        }
+        let _ = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(self.pid as i32),
+            nix::sys::signal::Signal::SIGKILL,
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_workload_that_forks_has_its_whole_tree_reaped() {
     // Signalling only the direct child would leave the grandchild
     // running, invisible and still holding whatever it had open.
     let run = start(1).await;
-    let marker = std::env::temp_dir().join(format!("mirage-tree-{}", std::process::id()));
-    let _ = std::fs::remove_file(&marker);
+    let mut forked = Forked::expected();
     let script = format!(
-        "sh -c 'while true; do echo x >> {}; sleep 0.1; done' & sleep 600",
-        marker.display()
+        "sh -c 'echo $$ > {pid}; while true; do echo x >> {marker}; sleep 0.1; done' & sleep 600",
+        pid = forked.pid_file().display(),
+        marker = forked.marker().display()
     );
     let (exec, _output) = run.exec(&def(&run, &script, None)).await.expect("starts");
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(marker.exists(), "the grandchild must actually be running");
+    forked.started().await;
 
     tokio::time::timeout(Duration::from_secs(30), run.destroy())
         .await
@@ -289,18 +374,59 @@ async fn a_workload_that_forks_has_its_whole_tree_reaped() {
     // reaped" from "the file went away". The file provably existed a few
     // lines above, so a read failure here is a broken test, not a pass.
     let size = |what: &str| {
-        std::fs::metadata(&marker)
+        std::fs::metadata(forked.marker())
             .unwrap_or_else(|e| panic!("the marker must still be readable {what}: {e}"))
             .len()
     };
     let size_after_teardown = size("right after teardown");
     tokio::time::sleep(Duration::from_millis(500)).await;
     let size_later = size("half a second later");
-    let _ = std::fs::remove_file(&marker);
     assert_eq!(
         size_after_teardown, size_later,
         "a grandchild was still writing after its run was destroyed"
     );
+}
+
+#[tokio::test]
+async fn a_workload_that_exits_normally_takes_its_forks_with_it() {
+    // The same promise on the path nobody was watching. The workload is
+    // not cancelled and the run is not destroyed: the command simply
+    // finishes, which is what almost every run does. `mirage run -- sh -c
+    // "nohup sleep 900 & echo spawned"` exited 0, removed the session's
+    // scratch directory, and left the `sleep` running — and `mirage
+    // cleanup` then reported it as a stranded process of a session it
+    // agreed no longer existed.
+    //
+    // The workload waits for its fork to announce itself before exiting,
+    // so the process provably exists at the moment the exec ends and the
+    // assertion cannot pass by racing the fork.
+    let run = start(1).await;
+    let mut forked = Forked::expected();
+    let script = format!(
+        "sh -c 'echo $$ > {pid}; while true; do echo x >> {marker}; sleep 0.1; done' & \
+         while [ ! -s {pid} ]; do sleep 0.01; done; exit 0",
+        pid = forked.pid_file().display(),
+        marker = forked.marker().display()
+    );
+    let (exec, mut output) = run.exec(&def(&run, &script, None)).await.expect("starts");
+    let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
+    let pid = forked.started().await;
+
+    tokio::time::timeout(Duration::from_secs(30), exec.wait_finished())
+        .await
+        .expect("exec finishes");
+    let _ = drain.await;
+    assert_eq!(
+        exec.status().exit_code,
+        Some(0),
+        "the workload exited on its own, normally"
+    );
+
+    assert!(
+        mirage_supervisor::process::wait_gone(pid, Duration::from_secs(10)).await,
+        "pid {pid} was forked by a workload that exited normally and survived it"
+    );
+    run.destroy().await;
 }
 
 #[tokio::test]

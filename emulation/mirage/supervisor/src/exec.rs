@@ -371,6 +371,15 @@ async fn supervise(exec: Arc<Exec>, spawned: Vec<(u32, Spawned)>) {
             // Race the process against cancellation. Both arms end with
             // the child reaped: `wait` reaps it naturally, `terminate`
             // reaps it after escalating SIGTERM to SIGKILL.
+            //
+            // Nothing that has to happen once a process is finished
+            // belongs in one of these arms. The cancellation arm is the
+            // rare one — a workload normally just exits — so anything
+            // attached to it silently does not happen for most runs,
+            // which is exactly how the process-group sweep came to be
+            // skipped on every ordinary exit. It now hangs off the reap
+            // itself, in `Spawned::reaped`, and so does everything else
+            // of that kind.
             let natural = tokio::select! {
                 exit = child.wait() => Some(exit),
                 () = cancel.cancelled() => None,

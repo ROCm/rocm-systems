@@ -19,6 +19,15 @@
 //!    leave the grandchildren running — invisible, still holding the GPU
 //!    socket, still holding ports.
 //!
+//!    That group is swept — `SIGKILL` to the group — as part of *reaping*
+//!    the child rather than as part of teardown, so it happens however
+//!    the workload finished. The sweep used to live at the end of
+//!    [`Spawned::terminate`] alone, and the supervisor only reaches
+//!    `terminate` when a run is cancelled: a workload that exited on its
+//!    own — the ordinary case — left everything it had forked running,
+//!    reparented to init, while mirage reported the exec finished and
+//!    deleted the session out from under it.
+//!
 //!    Note this is a *safe* API. The equivalent in the old design was a
 //!    `pre_exec` closure calling `setsid()`, which required `unsafe` and
 //!    ran arbitrary code between fork and exec in a process where almost
@@ -86,6 +95,8 @@
 //! with the rank that produced it, at the price of stdin.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use nix::sys::signal::Signal;
@@ -109,6 +120,14 @@ const REAP_POLL: Duration = Duration::from_millis(20);
 /// Size of the per-stream read buffer. Output frames are chunked to at
 /// most this many bytes.
 const READ_CHUNK: usize = 64 * 1024;
+
+/// How long a pump that has stopped making progress is given before
+/// [`Spawned::drain_pumps`] concludes it never will and aborts it.
+///
+/// Only ever applied to a pump that is neither holding output nor
+/// delivering it; see [`PumpProgress`] for why a grace period alone
+/// cannot be the whole answer.
+const DRAIN_GRACE: Duration = Duration::from_millis(250);
 
 /// Where a workload really runs, when the process we supervise is only a
 /// container provider's client.
@@ -361,10 +380,11 @@ pub struct Spawned {
     child: Child,
     /// Its pid, captured at spawn time.
     pid: u32,
-    /// Tasks pumping stdout and stderr into the output channel. Empty
-    /// for a child that inherited the caller's streams, which mirage
-    /// never reads.
-    pumps: Vec<tokio::task::JoinHandle<()>>,
+    /// Tasks pumping stdout and stderr into the output channel, each with
+    /// the state [`Spawned::drain_pumps`] needs to finish it correctly.
+    /// Empty for a child that inherited the caller's streams, which
+    /// mirage never reads.
+    pumps: Vec<Pump>,
     /// Set when `child` is a container provider client, so termination
     /// reaches the workload inside the container instead of stopping at
     /// the client.
@@ -579,20 +599,15 @@ pub fn spawn(spec: &SpawnSpec, output: mpsc::Sender<OutputChunk>) -> Result<Spaw
     // to the terminal without mirage ever seeing the bytes.
     let mut pumps = Vec::with_capacity(2);
     if let Some(out) = child.stdout.take() {
-        pumps.push(tokio::spawn(pump(
+        pumps.push(Pump::start(
             out,
             spec.node,
             StdStream::Stdout,
             output.clone(),
-        )));
+        ));
     }
     if let Some(err) = child.stderr.take() {
-        pumps.push(tokio::spawn(pump(
-            err,
-            spec.node,
-            StdStream::Stderr,
-            output,
-        )));
+        pumps.push(Pump::start(err, spec.node, StdStream::Stderr, output));
     }
 
     Ok(Spawned {
@@ -668,6 +683,69 @@ fn spawn_error(command: &str, e: &std::io::Error) -> String {
     }
 }
 
+/// What a pump is doing, published for whoever is draining it.
+///
+/// A pump that is still running after its child has been reaped is in one
+/// of two states, and they call for opposite responses:
+///
+/// * **Blocked reading.** A descendant that outlived the workload still
+///   holds the write end of the pipe, so the read will never return and
+///   no amount of waiting produces another byte. The pump has to be
+///   aborted or teardown never finishes.
+/// * **Blocked delivering.** The pump has read output the workload really
+///   produced and the consumer — a terminal, a client reading the exec's
+///   stream — has not taken the previous chunk yet. Aborting here throws
+///   away bytes the workload wrote, silently.
+///
+/// A grace period on its own cannot tell them apart at any threshold: a
+/// multi-rank job printing faster than the terminal drains looks exactly
+/// like a wedged pipe, and lengthening the timeout only moves the point
+/// at which output starts disappearing. Naming the state instead makes
+/// the distinction exact and costs two atomics per stream.
+#[derive(Debug, Default)]
+struct PumpProgress {
+    /// Chunks handed over so far. A pump whose count advances is making
+    /// progress even when no single sample catches it mid-send.
+    delivered: AtomicU64,
+    /// Set while the pump holds a chunk it has read from the child and
+    /// not yet passed on.
+    holding: AtomicBool,
+}
+
+impl PumpProgress {
+    /// How many chunks the pump has delivered.
+    fn delivered(&self) -> u64 {
+        self.delivered.load(Ordering::Relaxed)
+    }
+
+    /// Whether the pump is holding output it has read but not delivered.
+    fn holding(&self) -> bool {
+        self.holding.load(Ordering::Relaxed)
+    }
+}
+
+/// One stream's pump task, paired with the state it reports.
+#[derive(Debug)]
+struct Pump {
+    /// The task itself. Joined or aborted by [`Spawned::drain_pumps`],
+    /// never merely dropped.
+    task: tokio::task::JoinHandle<()>,
+    /// What that task is currently doing.
+    progress: Arc<PumpProgress>,
+}
+
+impl Pump {
+    /// Start pumping `reader` into `tx`.
+    fn start<R>(reader: R, node: u32, stream: StdStream, tx: mpsc::Sender<OutputChunk>) -> Self
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    {
+        let progress = Arc::new(PumpProgress::default());
+        let task = tokio::spawn(pump(reader, node, stream, tx, Arc::clone(&progress)));
+        Self { task, progress }
+    }
+}
+
 /// Read one of a child's streams to EOF, forwarding it in chunks.
 ///
 /// stdout and stderr are pumped by separate tasks so a workload that
@@ -675,8 +753,17 @@ fn spawn_error(command: &str, e: &std::io::Error) -> String {
 /// single task reading them in sequence, a full pipe on the unread stream
 /// would block the writer forever. This is the classic pipe deadlock, and
 /// it is why the two get independent tasks rather than a `select!`.
-async fn pump<R>(mut reader: R, node: u32, stream: StdStream, tx: mpsc::Sender<OutputChunk>)
-where
+///
+/// Each blocking step is announced on `progress`, so a drain that finds
+/// this task still alive can tell whether it is waiting on a pipe or on
+/// the consumer. See [`PumpProgress`].
+async fn pump<R>(
+    mut reader: R,
+    node: u32,
+    stream: StdStream,
+    tx: mpsc::Sender<OutputChunk>,
+    progress: Arc<PumpProgress>,
+) where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
     let mut buf = vec![0u8; READ_CHUNK];
@@ -690,10 +777,17 @@ where
                     stream,
                     data: buf[..n].to_vec(),
                 };
+                // Announce the chunk *before* offering it, and only clear
+                // the flag once the channel has taken it: the whole point
+                // is to be visible while this `await` is what is blocking.
+                progress.holding.store(true, Ordering::Relaxed);
+                let sent = tx.send(chunk).await;
+                progress.holding.store(false, Ordering::Relaxed);
+                progress.delivered.fetch_add(1, Ordering::Relaxed);
                 // A closed receiver means the exec is being torn down and
                 // nobody is listening any more. Stop reading rather than
                 // spinning on a dead channel.
-                if tx.send(chunk).await.is_err() {
+                if sent.is_err() {
                     return;
                 }
             }
@@ -738,7 +832,7 @@ impl Spawned {
             return exit;
         }
         let status = self.child.wait().await;
-        let exit = self.record(status);
+        let exit = self.reaped(status);
         self.drain_pumps().await;
         exit
     }
@@ -851,27 +945,41 @@ impl Spawned {
                 self.child.wait().await
             }
         };
-        let exit = self.record(status);
-
-        // The direct child is gone, but a descendant that changed its own
-        // process group, or was reparented before we signalled, may still
-        // be alive. Sweep the group once more.
-        //
-        // The *group*, and only the group: the child has just been reaped,
-        // so its pid is free for the kernel to hand out again, and
-        // `signal_group`'s single-pid fallback would then deliver SIGKILL
-        // to whatever now owns that number — the hazard `Spawned::signal`
-        // refuses to take. `kill(-pid)` only reaches a group that still
-        // has a living member, which is exactly the case this sweep is
-        // for, and it fails harmlessly with ESRCH otherwise.
-        signal_process_group_only(self.pid, Signal::SIGKILL);
+        // Reaping sweeps the group, so a descendant that changed its own
+        // process group or was reparented before we signalled is caught
+        // here as well; see [`Spawned::reaped`].
+        let exit = self.reaped(status);
 
         self.drain_pumps().await;
         exit
     }
 
-    /// Record and return the outcome of a wait.
-    fn record(&mut self, status: std::io::Result<std::process::ExitStatus>) -> Exit {
+    /// Record the outcome of a wait, and sweep the group the child led.
+    ///
+    /// Every path that reaps a child funnels through here — the natural
+    /// exit in [`Spawned::wait`] and the escalation in
+    /// [`Spawned::terminate`] alike — and that is the whole reason the
+    /// sweep lives here. It used to sit at the end of `terminate`, which
+    /// the supervisor reaches on exactly one of the two arms of a
+    /// `select!`: when a workload exited on its own, nothing swept its
+    /// group and everything it had forked survived, reparented to init,
+    /// while mirage removed the session it belonged to. Attaching the
+    /// sweep to the reap itself means a new way of finishing a process
+    /// cannot forget to do it.
+    ///
+    /// The *group*, and only the group: the child has just been reaped, so
+    /// its pid is free for the kernel to hand out again, and
+    /// [`signal_group`]'s single-pid fallback would then deliver `SIGKILL`
+    /// to whatever now owns that number — the hazard [`Spawned::signal`]
+    /// refuses to take. `kill(-pid)` only reaches a group that still has a
+    /// living member, which is exactly the case the sweep is for.
+    ///
+    /// Nothing about it is visible on the ordinary path. A workload that
+    /// forked nothing leaves an empty group, the signal fails with
+    /// `ESRCH`, and that is neither waited on, reported nor logged: one
+    /// syscall, no delay and no output for the overwhelmingly common case.
+    fn reaped(&mut self, status: std::io::Result<std::process::ExitStatus>) -> Exit {
+        signal_process_group_only(self.pid, Signal::SIGKILL);
         let exit = match status {
             Ok(status) => Exit::from_status(status),
             Err(e) => {
@@ -889,9 +997,29 @@ impl Spawned {
     /// ends, which happens when the last writer to that pipe closes it.
     /// That is not always the child: a forked grandchild inherits the
     /// write end, so if one outlives its parent the pipe stays open and
-    /// the pump would wait on it indefinitely. The bounded wait keeps
-    /// teardown finite in that case, and aborting only ever discards
-    /// output from a process that already outlived the exec.
+    /// the pump would wait on it indefinitely. Reaping now sweeps the
+    /// child's whole process group ([`Spawned::reaped`]), so the ordinary
+    /// grandchild is already dead by the time this runs — but one that
+    /// left the group is not, and it is that pump the bounded wait and
+    /// the abort exist for.
+    ///
+    /// The bound applies to that state and no other. A pump can equally
+    /// still be alive because it is holding output the workload really
+    /// produced and the consumer has not taken the previous chunk yet —
+    /// a multi-rank job printing faster than the terminal drains — and
+    /// aborting there silently truncates the workload's own output. The
+    /// two are told apart by [`PumpProgress`] rather than by the clock: a
+    /// pump that is holding a chunk, or that delivered one during the
+    /// last grace period, is making progress and is waited on for as long
+    /// as it keeps doing so, while one that has done neither is blocked
+    /// on a pipe nobody will ever close and is aborted. Lengthening
+    /// [`DRAIN_GRACE`] instead would only have moved the threshold: no
+    /// fixed grace period separates a slow consumer from a wedged pipe.
+    ///
+    /// Waiting on a pump that is delivering cannot hang teardown. A send
+    /// blocks only while a receiver is alive, and when the last one goes
+    /// away the send fails and the pump returns — so the wait ends either
+    /// with the output delivered or with nobody left to deliver it to.
     ///
     /// The abort is load-bearing and must be explicit. *Dropping* a tokio
     /// `JoinHandle` detaches its task rather than cancelling it, so a
@@ -908,16 +1036,34 @@ impl Spawned {
     /// tasks the paragraph above says must never be detached. Leaving
     /// them in place means a later `terminate` finishes the job.
     async fn drain_pumps(&mut self) {
-        const DRAIN_GRACE: Duration = Duration::from_millis(250);
         let pid = self.pid;
         while let Some(pump) = self.pumps.last_mut() {
-            if tokio::time::timeout(DRAIN_GRACE, &mut *pump).await.is_err() {
-                pump.abort();
+            loop {
+                let delivered = pump.progress.delivered();
+                if tokio::time::timeout(DRAIN_GRACE, &mut pump.task)
+                    .await
+                    .is_ok()
+                {
+                    // It finished the stream by itself, which is what
+                    // happens whenever the workload's last writer closed
+                    // the pipe: the common case, and free.
+                    break;
+                }
+                // Still running. Give it another period for as long as it
+                // has output in hand or delivered some during the last
+                // one — those bytes are the workload's and dropping them
+                // is the truncation this check exists to prevent.
+                if pump.progress.holding() || pump.progress.delivered() != delivered {
+                    continue;
+                }
+                pump.task.abort();
                 tracing::debug!(
                     pid,
-                    "output pump still open after the child exited; \
-                     a descendant is holding the pipe"
+                    "output pump still open after the child exited with nothing \
+                     to deliver; a descendant outside the process group is \
+                     holding the pipe"
                 );
+                break;
             }
             self.pumps.pop();
         }
@@ -1271,21 +1417,7 @@ mod tests {
         );
         let (tx, _rx) = mpsc::channel(64);
         let mut child = spawn(&spec("/bin/sh", &["-c", &script]), tx).unwrap();
-
-        // Wait for the grandchild to announce itself.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        let grandchild = loop {
-            if let Ok(s) = std::fs::read_to_string(&marker)
-                && let Ok(pid) = s.trim().parse::<u32>()
-            {
-                break pid;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "grandchild never started"
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        };
+        let grandchild = await_pid(&marker).await;
         assert!(process_alive(grandchild));
 
         child.terminate().await;
@@ -1293,6 +1425,121 @@ mod tests {
         assert!(
             wait_gone(grandchild, Duration::from_secs(10)).await,
             "grandchild {grandchild} survived teardown; the process tree leaked"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_workload_that_exits_on_its_own_still_has_its_tree_reaped() {
+        // The other arm of the supervisor's `select!`, and by far the
+        // commoner one: the workload is not cancelled, it just finishes.
+        // The shell forks a grandchild that outlives it and then exits 0,
+        // so `wait` returns and `terminate` is never called at all. The
+        // group sweep used to live only in `terminate`, so this path left
+        // the grandchild running, reparented to init, while mirage
+        // reported the exec finished and deleted the session it belonged
+        // to — `mirage cleanup` would then call it a stranded process of
+        // a session that no longer exists.
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("grandchild.pid");
+        let script = format!(
+            "sh -c 'echo $$ > {marker}; while true; do sleep 1; done' >/dev/null 2>&1 & \
+             exit 0",
+            marker = marker.display()
+        );
+        let (tx, _rx) = mpsc::channel(64);
+        let mut child = spawn(&spec("/bin/sh", &["-c", &script]), tx).unwrap();
+        let grandchild = await_pid(&marker).await;
+        assert!(process_alive(grandchild));
+
+        let exit = tokio::time::timeout(Duration::from_secs(30), child.wait())
+            .await
+            .expect("a workload that exits on its own must still be reaped");
+        assert_eq!(exit.code, 0, "the workload exited normally");
+
+        assert!(
+            wait_gone(grandchild, Duration::from_secs(10)).await,
+            "grandchild {grandchild} outlived a workload that exited normally"
+        );
+    }
+
+    /// Read the pid a forked process wrote to `path`, waiting for it.
+    async fn await_pid(path: &std::path::Path) -> u32 {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Ok(s) = std::fs::read_to_string(path)
+                && let Ok(pid) = s.trim().parse::<u32>()
+            {
+                return pid;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "no process announced itself at {}",
+                path.display()
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_slow_consumer_does_not_lose_output() {
+        // Back-pressure, not a wedged pipe. The channel is full, so the
+        // pump is blocked handing over a chunk the workload really wrote
+        // — and a drain that reads "still running after the grace period"
+        // as "a descendant is holding the pipe" aborts it there, throwing
+        // the bytes away.
+        //
+        // Deterministic in the direction that matters: the assertion is
+        // on the bytes, and a delivering pump is waited on for as long as
+        // it keeps delivering, so stalling the consumer for longer can
+        // only widen the margin by which the old behaviour truncates.
+        let dir = tempfile::tempdir().unwrap();
+        let gate = dir.path().join("gate");
+        let script = format!(
+            "printf 'first\\n'; while [ ! -f {gate} ]; do sleep 0.01; done; \
+             printf 'second\\n'; printf 'third\\n'",
+            gate = gate.display()
+        );
+
+        // Depth one: the pump can park exactly one chunk before it has to
+        // wait for the consumer to take it.
+        let (tx, mut rx) = mpsc::channel(1);
+        // A sender the test keeps purely to observe when the channel is
+        // full. Dropped before the drain below, so it cannot hold the
+        // channel open past the pumps that feed it.
+        let watch = tx.clone();
+        let mut child = spawn(&spec("/bin/sh", &["-c", &script]), tx).unwrap();
+
+        // Let the first chunk be parked before releasing the rest. Until
+        // it is, the sends that follow would succeed immediately and the
+        // pump would never be caught holding anything.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while watch.capacity() > 0 {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the pump never delivered its first chunk"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        drop(watch);
+
+        // Release the workload: it writes the rest and exits at once, so
+        // the child is reaped with the pump still holding its output.
+        std::fs::write(&gate, b"").unwrap();
+        let waited = tokio::spawn(async move { child.wait().await });
+
+        // Stall well past the point where a timeout-only drain gives up,
+        // then take everything.
+        tokio::time::sleep(DRAIN_GRACE * 8).await;
+        let mut chunks = Vec::new();
+        while let Some(chunk) = rx.recv().await {
+            chunks.push(chunk);
+        }
+
+        assert_eq!(waited.await.unwrap().code, 0);
+        assert_eq!(
+            text(&chunks, StdStream::Stdout),
+            "first\nsecond\nthird\n",
+            "output was discarded while the consumer was catching up"
         );
     }
 
