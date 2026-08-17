@@ -2180,10 +2180,13 @@ protected:
     // the fixture helper always uses the default one.
     ncclResult_t createCommWithConfig(ncclConfig_t* config, ncclComm_t* comm)
     {
-        ncclResult_t idResult = ncclSuccess;
+        // The status travels ahead of the id: a failure known only to rank 0 would leave
+        // the other ranks blocked in ncclCommInitRankConfig for a rank that never joins.
+        int idResult = ncclSuccess;
         if (MPIEnvironment::world_rank == 0) idResult = ncclGetUniqueId(&nccl_id_);
+        MPI_Bcast(&idResult, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        if (idResult != ncclSuccess) return static_cast<ncclResult_t>(idResult);
         MPI_Bcast(&nccl_id_, sizeof(ncclUniqueId), MPI_BYTE, 0, MPI_COMM_WORLD);
-        if (idResult != ncclSuccess) return idResult;
         return ncclCommInitRankConfig(comm, MPIEnvironment::world_size, nccl_id_,
                                       MPIEnvironment::world_rank, config);
     }
