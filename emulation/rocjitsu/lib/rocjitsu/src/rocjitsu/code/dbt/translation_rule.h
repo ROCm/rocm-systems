@@ -24,8 +24,11 @@
 
 #include "util/bit.h"
 
+#include <algorithm>
+#include <array>
 #include <compare>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <span>
@@ -435,6 +438,46 @@ struct TranslationRule {
     return src_encoding_id == rhs.src_encoding_id && src_opcode == rhs.src_opcode;
   }
 };
+
+/// @brief Whether a semantic rule table is strictly ordered for binary search.
+///
+/// @details SemanticTranslator::find_expand_rule() binary-searches these tables,
+/// so an entry in the wrong place misses its own rule rather than failing.
+/// Encoding ids are derived rather than written down -- a SOPK id, for instance,
+/// is the SOPK base plus the opcode -- which makes a misplaced entry easy to
+/// introduce and silent to observe. Every table static_asserts this.
+///
+/// Strict rather than merely nondecreasing: the search takes the first match, so
+/// a duplicated (encoding id, opcode) leaves the second rule permanently
+/// unreachable -- the same silent miss, arrived at from the other direction.
+/// Catching that case depends on the comparison below ordering rules by their
+/// key alone, which is what makes two entries that share a key but differ in
+/// action or handler compare greater-equal here. Defaulting those operators
+/// would keep the out-of-order half working and silently drop the duplicate
+/// half.
+[[nodiscard]] constexpr bool translation_rules_sorted(std::span<const TranslationRule> rules) {
+  return std::ranges::adjacent_find(rules, std::ranges::greater_equal{}) == rules.end();
+}
+
+namespace translation_rule_detail {
+
+/// @brief Two rules sharing a key but differing in everything else.
+///
+/// @details The duplicate half of translation_rules_sorted() works only while
+/// the comparison ignores these trailing fields. Defaulting the operators would
+/// order this pair by them instead, so the pair would compare ascending, every
+/// table in the tree would still satisfy its own assertion, and the duplicate
+/// check would be silently gone. Pinning it here fails at the definition rather
+/// than at some future table that happens to duplicate a key.
+inline constexpr std::array<TranslationRule, 2> kSameKeyDifferentTail = {{
+    {1, 2, RuleAction::Identity, 0, 0, nullptr, nullptr, nullptr, nullptr, true},
+    {1, 2, RuleAction::Expand, 3, 0, nullptr, nullptr, nullptr, nullptr, false},
+}};
+static_assert(!translation_rules_sorted(kSameKeyDifferentTail),
+              "TranslationRule must order by (encoding id, opcode) alone, or "
+              "translation_rules_sorted() stops rejecting duplicate keys");
+
+} // namespace translation_rule_detail
 
 // ---------------------------------------------------------------------------
 // Tier 3: Lane Layout Descriptor

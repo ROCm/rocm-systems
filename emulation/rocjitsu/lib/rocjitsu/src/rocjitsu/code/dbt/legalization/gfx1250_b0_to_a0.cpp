@@ -10,10 +10,10 @@
 #include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <array>
@@ -30,6 +30,18 @@ namespace {
 /// @details Keep this list aligned with the implemented B0-to-A0 semantic
 /// rules. Prefix-classified WMMA/SWMMAC and cluster-load instructions are
 /// handled separately by family-level translation rules.
+///
+/// A rule keyed on an exact (encoding id, opcode) that only inserts spacing and
+/// leaves the opcode alone needs no entry here at all: with no classification
+/// the instruction reaches the semantic rule table on its own and, when the rule
+/// declines, takes the verbatim copy path. The MODE-write separation rule is
+/// registered that way, and the diff report is what shows it, as "expand
+/// semantic" with no legalization action.
+///
+/// An entry here does more than label the report when it is a mnemonic prefix
+/// that covers more instructions than the semantic table implements: the
+/// unimplemented siblings then fail closed instead of passing through silently.
+/// That is why the integer WMMA prefixes below keep their entry.
 ///
 /// Separately, a 64-bit source reading FLAT_SCRATCH_BASE is classified via
 /// operand inspection (see gfx1250_reads_flat_scratch_base_64bit), and the
@@ -133,13 +145,13 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
   const std::string_view mnemonic = inst.mnemonic();
   const bool affected = mnemonic == "v_cvt_pk_fp8_f32" || mnemonic == "v_cvt_sr_fp8_f32" ||
                         mnemonic.starts_with("v_cvt_f32_fp8");
-  const bool is_vop3 = inst.encoding_id() >= gfx1250::encoding::kVop3 &&
-                       inst.encoding_id() <= gfx1250::encoding::kVop3OpHi6;
-  if (!affected || !is_vop3 || inst.size() < static_cast<int>(sizeof(gfx1250::Vop3MachineInst)) ||
+  const bool is_vop3 = inst.encoding_id() >= cdna5::encoding::kVop3 &&
+                       inst.encoding_id() <= cdna5::encoding::kVop3OpHi6;
+  if (!affected || !is_vop3 || inst.size() < static_cast<int>(sizeof(cdna5::Vop3MachineInst)) ||
       inst.raw_encoding() == nullptr)
     return false;
 
-  gfx1250::Vop3MachineInst encoding{};
+  cdna5::Vop3MachineInst encoding{};
   std::memcpy(&encoding, inst.raw_encoding(), sizeof(encoding));
   return encoding.clamp != 0;
 }
@@ -226,14 +238,14 @@ void gfx1250_b0_to_a0_append_wmma_completion_wait_if_needed(
   // destinations without draining unrelated ALU dependency counters.
   // The no-wait default is 0xff9f; clearing only VA_VDST[15:12] gives 0x0f9f.
   constexpr uint16_t kWaitVaVdstZero = 0x0f9f;
-  words.push_back(gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero})[0]);
+  words.push_back(cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero})[0]);
 }
 
 bool gfx1250_b0_to_a0_is_deferred_family(std::string_view mnemonic) {
   // s_sleep and s_sleep_var are deliberately absent. They behave identically on
-  // A0 and B0: the only sleep-family A0 erratum is DEGFXMI400-12268, which is
-  // specific to s_monitor_sleep('forever') with MWAIT=0. Copying a plain sleep
-  // through is the correct translation, not an unimplemented one, so reporting
+  // A0 and B0. Only s_monitor_sleep('forever') with MWAIT=0 requires an A0
+  // translation. Copying a plain sleep through is the correct translation, not
+  // an unimplemented one, so reporting
   // it said nothing and buried the reports that do name a real gap -- one RCCL
   // all_reduce run emitted 104,831 of them.
   return mnemonic == "s_get_barrier_state" || mnemonic == "s_monitor_sleep";

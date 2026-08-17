@@ -503,8 +503,8 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
         {
             if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_64) continue;
 
-            std::string pmc_name = base_track_name + "_link" + std::to_string(i);
-            std::string track_name =
+            const std::string pmc_name = base_track_name + "_link" + std::to_string(i);
+            const std::string track_name =
                 base_track_name + " [Link " + std::to_string(i) + "]";
             insert_event_and_sample(true, pmc_name.c_str(), track_name.c_str(),
                                     static_cast<double>(arr[i]));
