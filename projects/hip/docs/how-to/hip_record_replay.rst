@@ -68,8 +68,9 @@ run. The archive is a directory, not a single file, and it holds one
 .. code-block:: text
 
   my_capture.hrr/
-    manifest.json
+    manifest.json       which processes the archive holds
     pid-<pid>/
+      manifest.json     what this process recorded, and whether it ended cleanly
       events.bin        the recorded call sequence
       blobs/            host buffers, addressed by content hash
       code_objects/     the GPU code the run used
