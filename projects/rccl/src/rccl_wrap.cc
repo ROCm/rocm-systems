@@ -1289,6 +1289,8 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     struct ncclTaskColl task;
     memset(&task, 0, sizeof(task));
     task.func = ncclFuncReduceScatter;
+    task.sendbuff = sendbuff;
+    task.recvbuff = recvbuff;
     task.count = recvcount;
     task.datatype = datatype;
     NCCLCHECK(getAlgoInfo(comm, &task, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*numPipeOps=*/1, /*simInfo=*/nullptr));
