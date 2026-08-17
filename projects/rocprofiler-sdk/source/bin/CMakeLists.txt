@@ -69,3 +69,7 @@ foreach(_EXE IN LISTS ROCPD_EXECUTABLES)
                     WORLD_READ WORLD_EXECUTE
         COMPONENT rocpd)
 endforeach()
+
+if(ROCPROFILER_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

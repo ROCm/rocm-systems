@@ -14,7 +14,6 @@
 #include <array>
 #include <string>
 #include <string_view>
-#include <sys/stat.h>
 #include <unordered_map>
 
 using settings = ::tim::settings;
@@ -339,7 +338,7 @@ process_categories(parser_t& p, const str_set_t& _category_options)
             if(_matched != itr)
             {
                 // Explicitly convert string_view to string for safe capture
-                std::string _matched_str(_matched);
+                const std::string _matched_str(_matched);
                 _shorthand_patches.emplace_back([itr, _matched_str]() {
                     category_view.erase(itr);
                     category_view.emplace(_matched_str);
@@ -403,17 +402,6 @@ remove(std::string inp, const std::set<std::string>& entries)
         }
     }
     return inp;
-}
-
-//--------------------------------------------------------------------------------------//
-
-bool
-file_exists(const std::string& _fname)
-{
-    struct stat _buffer;
-    if(stat(_fname.c_str(), &_buffer) == 0)
-        return (S_ISREG(_buffer.st_mode) != 0 || S_ISLNK(_buffer.st_mode) != 0);
-    return false;
 }
 
 //--------------------------------------------------------------------------------------//

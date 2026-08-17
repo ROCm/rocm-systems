@@ -28,6 +28,8 @@ set(SRC_FILES
   mem_manager.cc
   debug.cc
   dev_runtime.cc
+  dev_runtime_segments.cc
+  dev_runtime_internal.h
   dda_all_reduce_ipc.cu
   dda_reduce_scatter_ipc.cu
   dda_all_gather_ipc.cu
@@ -61,6 +63,7 @@ set(SRC_FILES
   sym_kernels.cc
   transport.cc
   device/all_gather.h
+  device/all_gather_v.h
   device/all_reduce.h
   device/alltoall_pivot.h
   device/alltoall_gda.h
@@ -78,10 +81,14 @@ set(SRC_FILES
   device/reduce_scatter.h
   device/rccl_metadata.h
   device/sendrecv.h
-  device/hierarchical_ag_shuffle.h
+  device/hierarchical_shuffle.h
   device/ce_reduce.cc
   device/common.cu
   device/onerank.cu
+  device/tdm/cachePolicy.h
+  device/tdm/syncPolicy.h
+  device/tdm/asyncCopy.h
+  device/tdm/tdmCopy.h
   device/network/unpack/unpack_defs.h
   device/network/unpack/unpack.h
   device/symmetric/all_gather.cuh
@@ -95,7 +102,6 @@ set(SRC_FILES
   device/symmetric/primitives.cuh
   device/symmetric/reduce_scatter.cuh
   device/symmetric/reduce_scatter_gin.cuh
-  device/symmetric/tma_ptx.cuh
   graph/connect.cc
   graph/paths.cc
   graph/rings.cc
@@ -132,6 +138,7 @@ set(SRC_FILES
   include/algorithms/alltoall/alltoall_dda_fabric_ll128.h
   include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
+  include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
   include/api_trace.h
@@ -167,6 +174,7 @@ set(SRC_FILES
   include/fabric_init.h
   include/fabric_gpu_barrier.h
   include/fabric_mem_handler.h
+  include/gdr_peermem.h
   include/gdrwrap.h
   include/git_version.h
   include/graph.h
@@ -317,6 +325,7 @@ set(SRC_FILES
   include/plugin/nccl_tuner.h
   include/plugin/nccl_env.h
   include/plugin/env/env_v1.h
+  include/plugin/env/env_v2.h
   include/plugin/plugin.h
   include/plugin/net/net_v6.h
   include/plugin/net/net_v7.h
@@ -341,19 +350,23 @@ set(SRC_FILES
   include/plugin/tuner/tuner_v5.h
   include/plugin/tuner/tuner_v6.h
   include/plugin/nccl_gin.h
-  include/plugin/gin/gin_v11.h
-  include/plugin/gin/gin_v12.h
   include/plugin/gin/gin_v13.h
+  include/plugin/gin/gin_v14.h
+  include/plugin/nccl_rma.h
+  include/plugin/rma/rma_v13.h
+  include/plugin/rma/rma_v14.h
   misc/alt_rsmi.cc
   misc/archinfo.cc
   misc/argcheck.cc
   misc/api_trace.c
   misc/api_trace.cc
 # misc/cudawrap.cc
+  misc/gdr_peermem.cc
 # misc/gdrwrap.cc
   misc/ibvsymbols.cc
   misc/ibvwrap.cc
   os/linux_ipcsocket.cc
+  os/linux_socket_pair.cc
   misc/mlx5dvsymbols.cc
   misc/mlx5dvwrap.cc
   misc/ionicdvsymbols.cc
@@ -377,6 +390,7 @@ set(SRC_FILES
   nccl_device/lsa_barrier.cc
   os/linux.cc
   include/os.h
+  include/os_socket_pair.h
   include/os/linux.h
   include/os/windows.h
   param/c_api.cc
@@ -397,6 +411,7 @@ set(SRC_FILES
   rma/rma_proxy.cc
   rma/rma_proxy_launch.cc
   rma/rma_proxy_progress.cc
+  include/rma.h
   include/rma/rma.h
   include/rma/rma_ce.h
   include/rma/rma_proxy.h
@@ -404,6 +419,8 @@ set(SRC_FILES
   plugin/net.cc
   plugin/env.cc
   plugin/env/env_v1.cc
+  plugin/env/env_v2.cc
+  plugin/env/default_env.cc
   plugin/plugin_open.cc
   plugin/profiler.cc
   plugin/tuner.cc
@@ -427,9 +444,11 @@ set(SRC_FILES
   plugin/tuner/tuner_v6.cc
   plugin/tuner/csv_tuner.cc
   plugin/gin.cc
-  plugin/gin/gin_v11.cc
-  plugin/gin/gin_v12.cc
   plugin/gin/gin_v13.cc
+  plugin/gin/gin_v14.cc
+  plugin/rma.cc
+  plugin/rma/rma_v13.cc
+  plugin/rma/rma_v14.cc
   ras/client.cc
   ras/client_support.cc
   ras/collectives.cc
@@ -454,6 +473,7 @@ set(SRC_FILES
   transport/net_ib/gin.cc
   transport/net_ib/gin.h
   transport/net_ib/init.cc
+  transport/net_ib/net_ib_flush_fault_inject.h
   transport/net_ib/p2p.cc
   transport/net_ib/p2p.h
   transport/net_ib/p2p_resiliency.cc
@@ -471,6 +491,8 @@ set(SRC_FILES
   transport/shm.cc
   gin/gin_host.cc
   gin/gin_host_proxy.cc
+  gin/proxy_gpucontext/gpucontext.h
+  gin/proxy_gpucontext/gpucontext_v1.h
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h
   include/latency_profiler/CollTraceFunc.h
@@ -648,6 +670,52 @@ foreach(_hdr common gin p2p)
 endforeach()
 add_custom_target(net_ib_header_symlinks DEPENDS ${NET_IB_HEADER_SYMLINKS})
 
+# The top-level include/rma.h and include/rma/rma.h share the basename "rma.h",
+# so add_file_unique() renames the second-listed one (include/rma/rma.h) to
+# include/rma/rma_tmp.h. comm.h (included nearly everywhere, host + device) does
+# #include "rma/rma.h", so symlink it back to the _tmp output, same as net_ib.
+set(RMA_HIPIFY_DIR "${HIPIFY_DIR}/src/include/rma")
+add_custom_command(
+  OUTPUT  "${RMA_HIPIFY_DIR}/rma.h"
+  DEPENDS "${RMA_HIPIFY_DIR}/rma_tmp.h"
+  COMMAND ${CMAKE_COMMAND} -E create_symlink
+          "rma_tmp.h" "${RMA_HIPIFY_DIR}/rma.h"
+  COMMENT "Symlinking rma/rma_tmp.h -> rma/rma.h"
+)
+add_custom_target(rma_header_symlinks DEPENDS "${RMA_HIPIFY_DIR}/rma.h")
+
+# hipify_all is the contract for "the staged tree is ready to compile against",
+# including for consumers that build it as a standalone prerequisite
+# (test/host/run_host_tests.sh). The symlinks above are part of that tree: the
+# hipified sources still #include the un-suffixed names, so staging without them
+# yields a tree that cannot compile.
+add_dependencies(hipify_all net_ib_header_symlinks rma_header_symlinks)
+
+# nccl_device/{core,comm,gin}.h share basenames with the top-level src/include/
+# {core,comm,gin}.h, so add_file_unique() renames the nccl_device copies to
+# *_tmp.h in the hipify tree. Hipified sources have their #includes rewritten to
+# the _tmp names, but the IR bitcode wrapper (bindings/ir/nccl_device_wrapper.h)
+# is staged verbatim (not hipified) and includes "nccl_device/core.h" directly.
+# Symlink the un-suffixed names back to the _tmp outputs, same as net_ib/ and
+# rma/ above, so the EMIT_LLVM_IR build can resolve them.
+set(NCCL_DEVICE_HIPIFY_DIR "${HIPIFY_DIR}/src/include/nccl_device")
+set(NCCL_DEVICE_HEADER_SYMLINKS "")
+foreach(_hdr core comm gin)
+  add_custom_command(
+    OUTPUT  "${NCCL_DEVICE_HIPIFY_DIR}/${_hdr}.h"
+    DEPENDS "${NCCL_DEVICE_HIPIFY_DIR}/${_hdr}_tmp.h"
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+            "${_hdr}_tmp.h" "${NCCL_DEVICE_HIPIFY_DIR}/${_hdr}.h"
+    COMMENT "Symlinking nccl_device/${_hdr}_tmp.h -> ${_hdr}.h"
+  )
+  list(APPEND NCCL_DEVICE_HEADER_SYMLINKS "${NCCL_DEVICE_HIPIFY_DIR}/${_hdr}.h")
+endforeach()
+add_custom_target(nccl_device_header_symlinks DEPENDS ${NCCL_DEVICE_HEADER_SYMLINKS})
+
+# Create the symlinks before the nccl_device headers are copied into
+# ${PROJECT_BINARY_DIR}/include (consumed by the IR bitcode build).
+add_dependencies(copy_nccl_device_headers nccl_device_header_symlinks)
+
 
 # Generate device/host tables and all the collective functions that are going to be in librccl.so
 #==================================================================================================
@@ -658,6 +726,7 @@ endif()
 
 set(GEN_DIR "${HIPIFY_DIR}/gensrc")
 set(GEN_SYM_DIR "${GEN_DIR}/symmetric")
+set(GEN_CE_REDUCE_DIR "${GEN_DIR}/ce_reduce")
 
 if(ONLY_FUNCS)
   message(WARNING "Using ONLY_FUNCS = ${ONLY_FUNCS}. Not meant for release builds.")
@@ -687,6 +756,20 @@ if (GENERATE_SYM_KERNELS)
     message(SEND_ERROR "Error: ${gen_sym_py_error}")
     message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/symmetric/generate.py failed")
   endif()
+endif()
+
+# Execute the python script to generate one TU per CE-reduce kernel
+# instantiation (see src/device/ce_reduce/generate.py for why this is split
+# out instead of living in a single ce_reduce.cc).
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/ce_reduce/generate.py ${GEN_CE_REDUCE_DIR}
+    WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
+    RESULT_VARIABLE gen_ce_reduce_py_result
+    ERROR_VARIABLE gen_ce_reduce_py_error
+)
+if (gen_ce_reduce_py_result)
+  message(SEND_ERROR "Error: ${gen_ce_reduce_py_error}")
+  message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/ce_reduce/generate.py failed")
 endif()
 
 # Find the generated files in the output directory
@@ -732,12 +815,12 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric_ll128\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll128\\.cu\\.cpp$")
-  # ce_reduce.cc contains the CE AllReduce __global__ kernel and its launcher;
-  # it is compiled with full HIP by the device linker step (ce_reduce.o) so the
-  # fat binary is properly embedded. ce_coll.cc (no __global__ call sites)
-  # stays in the main target and is compiled --offload-host-only as usual.
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "device/ce_reduce\\.cc$")
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, device/ce_reduce.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_all_reduce_fabric_ll.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_all_gather_fabric_ll.cu.cpp, dda_alltoall_fabric.cu.cpp)")
+  # ce_reduce.cc is now pure host code (a dispatcher calling into the
+  # per-instantiation launchers generated under gensrc/ce_reduce/, which are
+  # excluded above by the "gensrc/.*\\.cpp$" filter and compiled separately
+  # by cmake/DeviceLinker.cmake). It stays in the main target and is
+  # compiled --offload-host-only like ce_coll.cc.
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_all_reduce_fabric_ll.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_all_gather_fabric_ll.cu.cpp, dda_alltoall_fabric.cu.cpp)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
@@ -763,7 +846,7 @@ add_library(rccl ${HIP_SOURCES})
 
 ## Set RCCL dependencies
 ## Ensure git version is updated before building rccl
-add_dependencies(rccl update_git_version copy_nccl_device_headers net_ib_header_symlinks)
+add_dependencies(rccl update_git_version copy_nccl_device_headers net_ib_header_symlinks rma_header_symlinks)
 
 ## Set RCCL include directories
 target_include_directories(rccl PRIVATE ${PROJECT_BINARY_DIR}/include)        # for generated rccl.h header
@@ -1096,7 +1179,6 @@ if(RCCL_ROCPROFILER_REGISTER)
   target_link_libraries(
       rccl PRIVATE rocprofiler-register::rocprofiler-register)
 endif()
-
 # Device Linker: include pipeline and wire up dependencies
 # (placed after all target_compile_definitions so DeviceLinker.cmake
 #  can read the rccl target's definitions directly)
@@ -1104,6 +1186,9 @@ endif()
 if(ENABLE_DEVICE_LINKER)
   include(${PROJECT_SOURCE_DIR}/cmake/DeviceLinker.cmake)
   add_dependencies(rccl device_linker_build)
+  # device_linker_build compiles DDA sources that pull in comm.h -> rma/rma.h,
+  # so it needs the rma_tmp.h symlink in place before it runs.
+  add_dependencies(device_linker_build rma_header_symlinks)
   target_link_libraries(rccl PRIVATE ${DEVICE_LINKER_OBJECTS})
 endif()
 

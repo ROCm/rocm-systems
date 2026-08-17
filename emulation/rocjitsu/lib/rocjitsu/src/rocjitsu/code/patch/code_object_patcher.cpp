@@ -6,7 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
-#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -201,6 +201,31 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
 [[nodiscard]] bool image_contains_range(size_t image_size, uint64_t file_offset, uint64_t size) {
   const uint64_t limit = static_cast<uint64_t>(image_size);
   return file_offset <= limit && size <= limit - file_offset;
+}
+
+/// @brief Read a kernel descriptor struct out of the in-memory image.
+///
+/// @returns nullopt if the descriptor does not fit within the image. Shared by
+/// DBT's resource translation and DBI's narrower scratch-grow so both agree on
+/// bounds checking and struct-sized copy.
+[[nodiscard]] std::optional<KD> read_kernel_descriptor(std::span<const uint8_t> image,
+                                                       uint64_t file_offset) {
+  if (!image_contains_range(image.size(), file_offset, sizeof(KD)))
+    return std::nullopt;
+  KD desc;
+  std::memcpy(&desc, image.data() + file_offset, sizeof(desc));
+  return desc;
+}
+
+/// @brief Write a kernel descriptor struct back into the in-memory image.
+///
+/// @returns false if the descriptor does not fit within the image.
+[[nodiscard]] bool write_kernel_descriptor(std::span<uint8_t> image, uint64_t file_offset,
+                                           const KD &desc) {
+  if (!image_contains_range(image.size(), file_offset, sizeof(KD)))
+    return false;
+  std::memcpy(image.data() + file_offset, &desc, sizeof(desc));
+  return true;
 }
 
 /// @brief Write the translated resource fields into a descriptor.
@@ -559,9 +584,21 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
       // An unreferenced symbol normally may stay unmapped, because debug and tooling tables
       // legitimately label padding this translation does not emit. When the caller is relying on
       // every `.text` address being relocated, that tolerance is a hole: a host can resolve such a
-      // symbol and hand the stale address back in, so nothing may stay unmapped.
+      // symbol and hand the stale address back in, so such a symbol may not stay unmapped.
+      //
+      // The hole is only as wide as what a host can actually resolve, which is external linkage.
+      // A local symbol names a compilation-unit-private body that no loader interface hands out,
+      // so its address can only come from this object's own getpc builders or relocation addends --
+      // and those are exactly what the caller's claim already accounts for, the builders through
+      // the code-address audit and the addends through relocate_relative_text_addends(), which
+      // still fails closed on an addend it cannot map. Requiring local symbols to map too would
+      // refuse every separately compiled device library: RCCL's gfx1250 object carries 21446
+      // function symbols, of which 12 are global, and its unreferenced locals are dead bodies no
+      // scope needs to emit.
+      const bool externally_resolvable =
+          elf_symbol_is_externally_resolvable(symbol.st_info, symbol.st_other);
       const bool must_relocate =
-          require_every_text_symbol_mapped ||
+          (require_every_text_symbol_mapped && externally_resolvable) ||
           (referenced != referenced_by_symtab.end() && referenced->second.contains(i));
 
       uint64_t source_text_offset = symbol.st_value;
@@ -569,6 +606,29 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
         if (symbol.st_value < text.sh_addr) {
           if (must_relocate)
             return false;
+          // The body this symbol names was not emitted, so its old st_value now points into
+          // whatever got relocated onto that address. Left alone it masquerades as a function entry
+          // on re-translation -- passing the sized-STT_FUNC filter and being adopted as a root that
+          // the first pass never had. Undefine it instead: a symbol with no body is exactly what
+          // this is, and saying so keeps the next pass's view identical to this one's.
+          // An externally resolvable symbol is part of this object's interface -- HSA hands out
+          // indirect-function symbols -- so undefining one would delete an exported entry, and
+          // would also change what object_defines_only_kernels() sees on the next pass and with it
+          // the kernarg fence. Only a symbol nothing outside can name may be dropped.
+          //
+          // This is reached only with strict mapping off, so nothing in this translation rests on
+          // the promise that the symbol still names its body: an object that could make that
+          // promise adopts these bodies up front, under the same predicate that grants it.
+          // Refusing here instead was tried and is too strong -- it rejects objects that translate
+          // correctly and never claimed anything about the symbol. What is left open is that its
+          // st_value is now stale, which a later pass could rediscover as a sized STT_FUNC at an
+          // offset that has moved; that hazard predates this change and is not closed here.
+          if (externally_resolvable)
+            continue;
+          symbol.st_shndx = SHN_UNDEF;
+          symbol.st_value = 0;
+          symbol.st_size = 0;
+          std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
           continue;
         }
         source_text_offset = symbol.st_value - text.sh_addr;
@@ -576,12 +636,58 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
       if (source_text_offset > old_text_size) {
         if (must_relocate)
           return false;
+        // The body this symbol names was not emitted, so its old st_value now points into
+        // whatever got relocated onto that address. Left alone it masquerades as a function entry
+        // on re-translation -- passing the sized-STT_FUNC filter and being adopted as a root that
+        // the first pass never had. Undefine it instead: a symbol with no body is exactly what
+        // this is, and saying so keeps the next pass's view identical to this one's.
+        // An externally resolvable symbol is part of this object's interface -- HSA hands out
+        // indirect-function symbols -- so undefining one would delete an exported entry, and would
+        // also change what object_defines_only_kernels() sees on the next pass and with it the
+        // kernarg fence. Only a symbol nothing outside can name may be dropped.
+        //
+        // This is reached only with strict mapping off, so nothing in this translation rests on the
+        // promise that the symbol still names its body: an object that could make that promise
+        // adopts these bodies up front, under the same predicate that grants it. Refusing here
+        // instead was tried and is too strong -- it rejects objects that translate correctly and
+        // never claimed anything about the symbol. What is left open is that its st_value is now
+        // stale, which a later pass could rediscover as a sized STT_FUNC at an offset that has
+        // moved; that hazard predates this change and is not closed here.
+        if (externally_resolvable)
+          continue;
+        symbol.st_shndx = SHN_UNDEF;
+        symbol.st_value = 0;
+        symbol.st_size = 0;
+        std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
         continue;
       }
       const auto relocated_start = target_by_source.find(source_text_offset);
       if (relocated_start == target_by_source.end()) {
         if (must_relocate)
           return false;
+        // The body this symbol names was not emitted, so its old st_value now points into
+        // whatever got relocated onto that address. Left alone it masquerades as a function entry
+        // on re-translation -- passing the sized-STT_FUNC filter and being adopted as a root that
+        // the first pass never had. Undefine it instead: a symbol with no body is exactly what
+        // this is, and saying so keeps the next pass's view identical to this one's.
+        // An externally resolvable symbol is part of this object's interface -- HSA hands out
+        // indirect-function symbols -- so undefining one would delete an exported entry, and would
+        // also change what object_defines_only_kernels() sees on the next pass and with it the
+        // kernarg fence. Only a symbol nothing outside can name may be dropped.
+        //
+        // This is reached only with strict mapping off, so nothing in this translation rests on the
+        // promise that the symbol still names its body: an object that could make that promise
+        // adopts these bodies up front, under the same predicate that grants it. Refusing here
+        // instead was tried and is too strong -- it rejects objects that translate correctly and
+        // never claimed anything about the symbol. What is left open is that its st_value is now
+        // stale, which a later pass could rediscover as a sized STT_FUNC at an offset that has
+        // moved; that hazard predates this change and is not closed here.
+        if (externally_resolvable)
+          continue;
+        symbol.st_shndx = SHN_UNDEF;
+        symbol.st_value = 0;
+        symbol.st_size = 0;
+        std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
         continue;
       }
 
@@ -601,11 +707,11 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
   return true;
 }
 
-[[nodiscard]] bool
-relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
-                               std::span<const Elf64_Shdr> shdrs, size_t text_index,
-                               uint64_t old_text_size, uint64_t new_text_size,
-                               std::span<const TextOffsetRelocation> relocations) {
+[[nodiscard]] bool relocate_relative_text_addends(
+    std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr, std::span<const Elf64_Shdr> shdrs,
+    size_t text_index, uint64_t old_text_size, uint64_t new_text_size,
+    std::span<const TextOffsetRelocation> relocations,
+    const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement) {
   if (relocations.empty() || ehdr.e_type != ET_DYN)
     return true;
 
@@ -655,20 +761,42 @@ relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &eh
       if (source_offset >= old_text_size)
         continue;
 
-      // This addend IS dereferenced as a function pointer. If its source block
-      // was emitted at conflicting placements across scopes, no single rewrite is
-      // correct — fail closed rather than pick an arbitrary clone.
-      if (conflicting_sources.contains(source_offset))
+      // This addend IS dereferenced as a function pointer. If its source block was emitted at
+      // conflicting placements across scopes, nothing drawn from the placement map alone is the
+      // right answer -- a pointer holds one value and cannot choose between clones. The translator
+      // settles that by nominating one clone canonical for each address-taken body, which is the
+      // copy every stored pointer must name. Use it when the caller supplied one, and keep failing
+      // closed when it did not.
+      uint64_t canonical_target = 0;
+      bool have_canonical = false;
+      if (canonical_code_pointer_placement != nullptr) {
+        const auto canonical = canonical_code_pointer_placement->find(source_offset);
+        if (canonical != canonical_code_pointer_placement->end()) {
+          canonical_target = canonical->second;
+          have_canonical = true;
+        }
+      }
+      if (conflicting_sources.contains(source_offset) && !have_canonical)
         return false;
       const auto relocated = target_by_source.find(source_offset);
       // Leaving an in-text addend unchanged would silently preserve a stale PC.
       // Compatibility was established from the relocation form, but final
       // materialization must also prove that this exact target was emitted.
+      //
+      // The proof is unconditional. A canonical entry says WHICH clone a stored pointer must name
+      // when several were emitted; it is not evidence that any was. This helper takes the
+      // canonical map as an independent input, so treating a canonical hit as its own proof would
+      // let a stale or fabricated entry through -- the translator happens to derive both from the
+      // same placements today, which is not something this function can check.
       if (relocated == target_by_source.end())
         return false;
-      if (relocated->second > std::numeric_limits<uint64_t>::max() - text.sh_addr)
+      const uint64_t placement = have_canonical ? canonical_target : relocated->second;
+      // Whichever clone was chosen still has to lie inside the text actually emitted.
+      if (placement > new_text_size)
         return false;
-      const uint64_t target_addend = text.sh_addr + relocated->second;
+      if (placement > std::numeric_limits<uint64_t>::max() - text.sh_addr)
+        return false;
+      const uint64_t target_addend = text.sh_addr + placement;
       if (target_addend > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
         return false;
       rela.r_addend = static_cast<int64_t>(target_addend);
@@ -1087,11 +1215,12 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
   return false;
 }
 
-bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
-                                     std::span<const TextOffsetRelocation> text_relocations,
-                                     std::span<const PcRelativeDataRelocation> data_relocations,
-                                     std::span<const PcRelativeTextRelocation> code_relocations,
-                                     bool require_every_text_symbol_mapped) {
+bool CodeObjectPatcher::replace_text(
+    std::span<const uint8_t> new_text, std::span<const TextOffsetRelocation> text_relocations,
+    std::span<const PcRelativeDataRelocation> data_relocations,
+    std::span<const PcRelativeTextRelocation> code_relocations,
+    bool require_every_text_symbol_mapped,
+    const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
@@ -1257,7 +1386,8 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
     return false;
   }
   if (!relocate_relative_text_addends(image_, header, shdrs, *text_index, text_size_,
-                                      new_text.size(), text_relocations)) {
+                                      new_text.size(), text_relocations,
+                                      canonical_code_pointer_placement)) {
     return false;
   }
   // Instrumentation appends a cave without relocating the original body and
@@ -1292,17 +1422,27 @@ bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
   return true;
 }
 
+bool CodeObjectPatcher::set_private_segment_fixed_size(uint64_t descriptor_file_offset,
+                                                       uint32_t bytes) {
+  auto desc = read_kernel_descriptor(image_, descriptor_file_offset);
+  if (!desc)
+    return false;
+
+  desc->private_segment_fixed_size = bytes;
+  return write_kernel_descriptor(image_, descriptor_file_offset, *desc);
+}
+
 bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
                                                             rj_code_arch_t target_arch) {
-  if (!image_contains_range(image_.size(), translation.descriptor_file_offset, sizeof(KD)))
+  auto desc = read_kernel_descriptor(image_, translation.descriptor_file_offset);
+  if (!desc)
     return false;
 
-  KD desc;
-  std::memcpy(&desc, image_.data() + translation.descriptor_file_offset, sizeof(desc));
-  if (!apply_kernel_descriptor_resource_translation(desc, translation, target_arch))
+  if (!apply_kernel_descriptor_resource_translation(*desc, translation, target_arch))
     return false;
 
-  std::memcpy(image_.data() + translation.descriptor_file_offset, &desc, sizeof(desc));
+  if (!write_kernel_descriptor(image_, translation.descriptor_file_offset, *desc))
+    return false;
   if (!redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
                              translation.target_entry_text_offset))
     return false;
