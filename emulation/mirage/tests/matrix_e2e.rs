@@ -36,6 +36,27 @@
 //! container CLI — so the provider bring-up/teardown contract is
 //! exercised without requiring a real image or container engine,
 //! mirroring `tests/container_e2e.rs`.
+//!
+//! # What a green matrix does and does not prove
+//!
+//! The payloads are shell commands, so no cell here executes GPU code.
+//! Two of the five dimensions would therefore be free rides if nothing
+//! were done about it: `MI350X` and `MI450X` run the same `echo`, and so
+//! do `--plugin race` and no plugin, which means those rows could pass
+//! unchanged if the flags were dropped on the floor. Each combination
+//! consequently prints the emulator configuration mirage synthesised for
+//! it, and [`assert_dimensions_reached_the_emulator`] insists the GPU
+//! and the plugin selection are actually in it.
+//!
+//! That makes the two dimensions falsifiable at the layer this suite is
+//! about — the CLI wiring a profile through to the backend — and no
+//! further. It is **not** evidence that the emulator then models that
+//! GPU correctly, or that the race detector detects anything; both need
+//! a real GPU workload and belong to the emulator's own tests. The
+//! containerised rows cannot check even this much, because the
+//! configuration is remapped to an in-container path the mock provider
+//! does not create; for those rows the hardware and plugin columns are
+//! honestly just "mirage accepted the flag and the run completed".
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -113,6 +134,20 @@ impl Hardware {
             Hardware::Mi450x => "MI450X",
         }
     }
+
+    /// The field of the synthesised emulator configuration that this
+    /// agent, and only this agent, produces.
+    ///
+    /// `gfx_target_version` rather than the marketing name: it is a
+    /// number, so it cannot be a substring of some other value in the
+    /// document, and it is the field the emulated device's ISA is
+    /// actually chosen by.
+    fn config_marker(self) -> &'static str {
+        match self {
+            Hardware::Mi350x => r#""gfx_target_version":90500"#,
+            Hardware::Mi450x => r#""gfx_target_version":120500"#,
+        }
+    }
 }
 
 /// The workload (`### payload`).
@@ -148,16 +183,21 @@ impl Payload {
     /// lifecycle* (bring up, run, clean up) across the matrix, not to
     /// benchmark the emulator. The real torch fixture is driven
     /// separately by `tests/run_tiny_torch_mi350.sh`.
-    fn argv(self) -> Vec<&'static str> {
-        match self {
-            Payload::TinyTorch => vec!["/bin/sh", "-c", "echo tiny_torch_ok"],
+    fn argv(self) -> Vec<String> {
+        let body = match self {
+            Payload::TinyTorch => "echo tiny_torch_ok",
             // Each rank prints once; with two nodes the orchestrator runs
             // the command on both.
-            Payload::Rccl => vec!["/bin/sh", "-c", "echo rccl_ok"],
+            Payload::Rccl => "echo rccl_ok",
             // Simulate a crashing workload: emit output, then exit with a
             // SIGSEGV-style code. mirage must still tear the session down.
-            Payload::Crash => vec!["/bin/sh", "-c", "echo crashing; exit 139"],
-        }
+            Payload::Crash => "echo crashing; exit 139",
+        };
+        vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            format!("{DUMP_EMULATOR_CONFIG}{body}"),
+        ]
     }
 
     /// What the payload prints on stdout, once per rank.
@@ -180,6 +220,28 @@ impl Payload {
     }
 }
 
+/// The prefix every payload runs before its own body.
+///
+/// It prints the emulator configuration mirage synthesised for this
+/// session on one line, tagged so [`config_line`] can pick it out of the
+/// payload's own output. That document is where the `hardware` and
+/// `plugins` dimensions land — nothing else about a `/bin/sh` payload
+/// varies with either — so printing it is what stops those two columns
+/// of the matrix from being decoration.
+///
+/// Whitespace is stripped so the whole document is one line and the
+/// markers below can be written without worrying about how the JSON was
+/// indented. Silent when the file is unreadable: inside a node container
+/// the path is remapped to a mount the mock provider never creates, and
+/// [`run_combo`] decides whether that silence is acceptable for the row.
+const DUMP_EMULATOR_CONFIG: &str = concat!(
+    r#"__cfg="$ROCJITSU_RUNTIME_DIR/../rj_config.json"; "#,
+    r#"[ -r "$__cfg" ] && printf 'rj_config=%s\n' "$(tr -d '[:space:]' < "$__cfg")"; "#,
+);
+
+/// The tag [`DUMP_EMULATOR_CONFIG`] prints the configuration under.
+const CONFIG_TAG: &str = "rj_config=";
+
 /// Emulator plugins (`### plugins`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Plugin {
@@ -192,6 +254,31 @@ impl Plugin {
         match self {
             Plugin::None => "none",
             Plugin::Race => "race",
+        }
+    }
+
+    /// Check `cfg` — the emulator configuration, whitespace stripped —
+    /// against this plugin selection.
+    ///
+    /// Both directions, deliberately. Asserting only that `race` appears
+    /// when it was asked for would leave `--plugin` free to enable
+    /// everything always, and the `none` rows would still pass; and a
+    /// backend that quietly ignored `--plugin` would be caught by
+    /// neither half on its own.
+    fn assert_selected(self, cfg: &str, profile: &str) {
+        // Quoted, because the bare word is a substring of `trace`.
+        let race = r#""race""#;
+        match self {
+            Plugin::None => assert!(
+                !cfg.contains("\"plugins\""),
+                "[{profile}] no plugin was selected, but the emulator \
+                 configuration has a plugins section:\n{cfg}"
+            ),
+            Plugin::Race => assert!(
+                cfg.contains(race),
+                "[{profile}] `--plugin race` did not reach the emulator \
+                 configuration:\n{cfg}"
+            ),
         }
     }
 }
@@ -482,7 +569,9 @@ fn run_combo(c: &Combo, caps: &Caps) -> Outcome {
     if c.plugin == Plugin::Race {
         args.extend(["--plugin", "race"]);
     }
-    let mut run = env.base.spawn_run(&args, &c.payload.argv());
+    let payload = c.payload.argv();
+    let payload: Vec<&str> = payload.iter().map(String::as_str).collect();
+    let mut run = env.base.spawn_run(&args, &payload);
     let out = run.wait(RUN_TIMEOUT);
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
@@ -513,6 +602,9 @@ fn run_combo(c: &Combo, caps: &Caps) -> Outcome {
         c.payload.nodes(),
     );
 
+    // 2b. the two dimensions the payload itself cannot distinguish.
+    assert_dimensions_reached_the_emulator(c, &stdout, &profile);
+
     // 3. ensure nothing survived the run. A session exists exactly while
     //    the `mirage run` that created it does, so once the process has
     //    exited there must be no socket for another terminal to find and
@@ -538,6 +630,52 @@ fn run_combo(c: &Combo, caps: &Caps) -> Outcome {
     env.base.fails(&["profile", "show", &profile]);
 
     Outcome::Ran
+}
+
+/// The emulator configuration the payload printed, if it could see it.
+fn config_line(stdout: &str) -> Option<&str> {
+    stdout
+        .lines()
+        // The line is `[rank] rj_config=…` on a labelled multi-node run,
+        // so match on the tag anywhere rather than at the start.
+        .find_map(|line| line.split_once(CONFIG_TAG).map(|(_, cfg)| cfg))
+}
+
+/// Assert the `hardware` and `plugins` dimensions actually changed
+/// something.
+///
+/// These two are the matrix's weak point: the payload is a shell
+/// command, so `MI350X` and `MI450X` run identical code and so do
+/// `--plugin race` and no plugin. Without a check like this one, four of
+/// every eight rows are the same run reported four times, and deleting
+/// the code behind either flag would leave the matrix entirely green.
+///
+/// What is checked is the emulator configuration mirage synthesised —
+/// the last artefact the CLI produces before the backend takes over, and
+/// the place both dimensions land. It proves the flag was carried
+/// through; it does not prove the emulator honours it, which needs GPU
+/// code and belongs to the emulator's own suite.
+fn assert_dimensions_reached_the_emulator(c: &Combo, stdout: &str, profile: &str) {
+    let Some(cfg) = config_line(stdout) else {
+        // Two rows legitimately cannot show it, and being precise about
+        // which is the point: anything else is a payload that silently
+        // stopped reporting, and the dimensions would go back to being
+        // unfalsifiable without anyone noticing.
+        assert!(
+            c.container.is_containerized() || c.emulator != Emulator::Rocjitsu,
+            "[{profile}] the payload could not read the emulator configuration, \
+             so nothing here checks the hardware or plugin dimension\nstdout: {stdout}"
+        );
+        return;
+    };
+    assert!(
+        cfg.contains(c.hardware.config_marker()),
+        "[{profile}] the emulator configuration does not describe {}: expected \
+         {} in it\n{cfg}",
+        c.hardware.agent(),
+        c.hardware.config_marker(),
+    );
+    c.plugin.assert_selected(cfg, profile);
 }
 
 /// The session id a run announces on stderr as it starts.

@@ -194,6 +194,7 @@ impl Env {
             child: Some(child),
             socket_dir: self.run_socket_dir(),
             existing,
+            stderr: None,
         }
     }
 }
@@ -204,6 +205,38 @@ pub(crate) struct Run {
     socket_dir: PathBuf,
     /// Session ids that already had a socket when this run was spawned.
     existing: std::collections::HashSet<String>,
+    /// Live view of the run's stderr, once a test has asked for one.
+    stderr: Option<(StderrWatch, std::sync::mpsc::Receiver<()>)>,
+}
+
+/// What a run has said on stderr *so far*.
+///
+/// `mirage run` narrates its own state transitions on stderr — bring-up
+/// phases, and the "this command has finished, but N borrower(s) are
+/// still using session X" line that says it has stopped running the
+/// workload and started waiting. Those lines are the only external
+/// evidence of a transition that has no other observable effect, and a
+/// test that wants to act *at* the transition has to see them while the
+/// run is still going. [`Run::wait`] drains the pipe only once the
+/// process is over, which is too late.
+///
+/// Cloneable and cheap: it is a handle on the buffer a pump thread is
+/// filling, not a copy of it.
+#[derive(Clone)]
+pub(crate) struct StderrWatch {
+    buf: std::sync::Arc<std::sync::Mutex<String>>,
+}
+
+impl StderrWatch {
+    /// Whether the run has written `needle` to stderr yet.
+    pub(crate) fn contains(&self, needle: &str) -> bool {
+        self.text().contains(needle)
+    }
+
+    /// Everything the run has written to stderr so far.
+    pub(crate) fn text(&self) -> String {
+        self.buf.lock().expect("stderr buffer").clone()
+    }
 }
 
 impl Run {
@@ -242,6 +275,51 @@ impl Run {
             std::thread::sleep(Duration::from_millis(20));
         }
         panic!("`mirage run` did not start serving within {timeout:?}");
+    }
+
+    /// Start following this run's stderr as it is written.
+    ///
+    /// Call it before the transition you want to wait for; anything the
+    /// run said earlier is still captured, because the pump reads the
+    /// pipe from wherever it has got to and the kernel buffers the rest.
+    /// [`Run::wait`] still returns the complete stderr afterwards.
+    ///
+    /// Panics if called twice, or after the run has been waited on.
+    pub(crate) fn watch_stderr(&mut self) -> StderrWatch {
+        use std::io::Read as _;
+
+        assert!(
+            self.stderr.is_none(),
+            "a run's stderr is followed by one watcher"
+        );
+        let mut pipe = self
+            .child
+            .as_mut()
+            .expect("a run is watched while it is alive")
+            .stderr
+            .take()
+            .expect("`spawn_run` pipes stderr");
+
+        let watch = StderrWatch {
+            buf: std::sync::Arc::new(std::sync::Mutex::new(String::new())),
+        };
+        let buf = std::sync::Arc::clone(&watch.buf);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // Byte at a time rather than by line: the interesting lines
+            // are printed as the run reaches a state, and buffering one
+            // back would make the test wait for the *next* line before it
+            // could see this one.
+            let mut byte = [0u8; 1];
+            while let Ok(1) = pipe.read(&mut byte) {
+                buf.lock().expect("stderr buffer").push(char::from(byte[0]));
+            }
+            // Send, rather than just ending: `wait` uses this to know the
+            // pipe reached EOF and the buffer is complete.
+            let _ = tx.send(());
+        });
+        self.stderr = Some((watch.clone(), rx));
+        watch
     }
 
     /// This run's pid, while it is alive.
@@ -284,13 +362,27 @@ impl Run {
         std::thread::spawn(move || {
             let _ = tx.send(child.wait_with_output());
         });
-        match rx.recv_timeout(timeout) {
+        let mut out = match rx.recv_timeout(timeout) {
             Ok(out) => out.expect("collecting run output"),
             Err(_) => panic!(
                 "`mirage run` exited but its output pipes are still open after {timeout:?}: \
                  something it started outlived it and inherited them"
             ),
+        };
+
+        // A watcher owns the stderr pipe, so `wait_with_output` above saw
+        // none. Wait for its pump to reach EOF — bounded for the same
+        // reason the stdout collection is — and hand back what it read,
+        // so `wait` returns the whole stderr either way.
+        if let Some((watch, done)) = self.stderr.take() {
+            assert!(
+                done.recv_timeout(timeout).is_ok(),
+                "`mirage run` exited but its stderr pipe is still open after {timeout:?}: \
+                 something it started outlived it and inherited it"
+            );
+            out.stderr = watch.text().into_bytes();
         }
+        out
     }
 
     /// Stop the run and wait for it to go away.
@@ -385,7 +477,8 @@ pub(crate) fn skip_without_emulator() -> bool {
         return false;
     }
     eprintln!(
-        "SKIP: the `{TEST_EMULATOR}` runtime was not found, so no session          can be brought up."
+        "SKIP: the `{TEST_EMULATOR}` runtime was not found, so no session \
+         can be brought up."
     );
     true
 }
@@ -548,6 +641,32 @@ pub(crate) fn find_processes(marker: &str) -> Vec<u32> {
 /// Whether `pid` is a mirage CLI process rather than a workload.
 fn is_mirage_process(pid: u32) -> bool {
     std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|comm| comm.trim() == "mirage")
+}
+
+/// Wait for a child process to exit, returning whether it did.
+///
+/// Bounded on purpose, and the bound is the point. "The client never
+/// returns" is one of the regressions this suite exists to catch, so a
+/// test that waits on one with no deadline converts that regression into
+/// a hung test binary — no failure, no name, nothing to read but a
+/// stopped clock — instead of an assertion. On a timeout the child is
+/// killed and reaped, so a test that fails this way still leaves the
+/// machine as it found it.
+pub(crate) fn wait_for_exit(child: &mut std::process::Child, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
 }
 
 /// Wait until `cond` holds, or fail with `what`.

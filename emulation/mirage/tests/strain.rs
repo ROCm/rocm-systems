@@ -354,11 +354,28 @@ fn cleanup_dry_run_reports_without_acting() {
     );
 
     // And the real thing removes exactly what the preview named.
+    //
+    // The pids are read *before* the cleanup, not after. Reading them
+    // afterwards is how this assertion used to be written, and it could
+    // not fail: cleanup had just killed everything tagged, so the list
+    // was empty in the ordinary case and the loop body — the only check
+    // of the property this test is named for — never ran once. The
+    // non-emptiness assertion below keeps it that way on purpose, so a
+    // change that made the workload die early turns into a failure here
+    // rather than back into a loop over nothing.
+    let stranded = find_processes(&tag);
+    assert!(
+        !stranded.is_empty(),
+        "the dry run left nothing for the real cleanup to reclaim, so there \
+         is nothing to check the preview against"
+    );
     let done = env.ok(&["cleanup"]);
-    for pid in find_processes(&tag) {
+    for pid in stranded {
         assert!(
-            preview.contains(&pid.to_string()) || done.contains(&pid.to_string()),
-            "process {pid} was reclaimed but named in neither pass:\n{preview}\n{done}"
+            preview.contains(&pid.to_string()),
+            "the real cleanup reclaimed process {pid}, which the dry run did \
+             not name — a preview that omits what will be killed is worse \
+             than no preview:\npreview:\n{preview}\ncleanup:\n{done}"
         );
     }
     wait_for("the stranded workload to be reclaimed", TEARDOWN, || {
@@ -394,22 +411,51 @@ fn a_sigterm_proof_workload_is_still_killed() {
     env.create_profile("p");
     let tag = marker("sigterm-proof");
 
-    let script = format!("trap '' TERM INT; MARKER={tag}; while true; do sleep 1; done");
+    // The workload reports both states this test depends on, because
+    // neither is visible from outside otherwise: that its traps are
+    // armed, and that it has received a `SIGTERM` and declined to die of
+    // it. Handling the signal is the same refusal as ignoring it — the
+    // shell runs the handler and carries on looping — and it makes the
+    // refusal observable.
+    let armed = env.root().join("traps-armed");
+    let refused = env.root().join("term-refused");
+    let script = format!(
+        "trap 'touch {}' TERM; trap '' INT; touch {}; MARKER={tag}; \
+         while true; do sleep 1; done",
+        refused.display(),
+        armed.display()
+    );
     let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", &script]);
     run.await_ready(READY);
     wait_for_workload(&tag);
-    // Give the shell time to install its traps, so this really exercises
-    // the `SIGKILL` escalation rather than a lucky early `SIGTERM`.
-    std::thread::sleep(Duration::from_millis(500));
+    // The traps themselves, not a pause long enough that they are
+    // probably up: `pgrep` finds the workload from its argv, which
+    // contains the marker before the shell has run a single line, so
+    // "the workload started" says nothing about whether it can survive a
+    // signal yet. Interrupting too early kills it outright and the test
+    // passes without ever reaching the escalation it is named for.
+    wait_for("the workload to arm its signal traps", READY, || {
+        armed.exists()
+    });
 
-    // The first signal is forwarded to the workload, which ignores it.
+    // The first signal is forwarded to the workload, which refuses it.
     // The second says the user is not waiting any longer, and teardown
     // escalates: `SIGTERM` to the group, a bounded grace period, then
     // `SIGKILL`, which cannot be caught. Without the escalation the run
     // would hang here forever waiting for a process that will never
     // agree to exit.
     run.signal(Signal::SIGTERM);
-    std::thread::sleep(Duration::from_millis(300));
+    // Wait for the refusal rather than for an interval. Only one signal
+    // per kind is buffered pending delivery, so a second `SIGTERM` that
+    // arrives before the run has taken the first is coalesced into it —
+    // and the run then waits forever for an escalation this test
+    // believes it sent, which presents as a timeout in `run.wait` far
+    // from the line that caused it.
+    wait_for(
+        "the workload to receive and refuse the first SIGTERM",
+        READY,
+        || refused.exists(),
+    );
     run.signal(Signal::SIGTERM);
     run.wait(TEARDOWN);
 
@@ -636,8 +682,14 @@ fn stopping_an_exec_leaves_its_run_alone_and_its_own_workload_dead() {
             .unwrap();
         wait_for_workload(&exec_tag);
 
+        // Bounded: an exec that stops answering `SIGTERM` is one of the
+        // regressions this test exists to catch, and waiting on it
+        // forever would hang the strain binary rather than fail here.
         signal(client.id(), Signal::SIGTERM);
-        client.wait().unwrap();
+        assert!(
+            harness::wait_for_exit(&mut client, TEARDOWN),
+            "the exec client did not exit within {TEARDOWN:?} of being asked to stop"
+        );
 
         // The exec owned its processes, so they go with it.
         assert_no_leaks(&exec_tag);

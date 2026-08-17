@@ -20,11 +20,26 @@
 //!   also timed per emulator to isolate fixed framework + emulator
 //!   bring-up overhead from the workload cost.
 //!
+//! # It is opt-in, and that is not laziness
+//!
+//! Set `MIRAGE_BENCH=1` to run it. Left to itself it does nothing at
+//! all, because what it measures is not what `cargo test` is for. The
+//! accuracy contract at the end is a statistic over five samples of a
+//! real GPU workload, and gating every `cargo test` on it means a
+//! machine that is merely *busy* can turn the suite red — the classic
+//! way to teach a team that a red run means nothing. Worse, the timing
+//! numbers it exists to produce are meaningless from a laptop running
+//! the rest of the suite in parallel beside them.
+//!
+//! Opting in is also what makes the skips below honest. A benchmark
+//! nobody asked for has to skip quietly; one somebody asked for must
+//! either measure something or say why it could not, which is why every
+//! skip past this point defers to `MIRAGE_E2E_ALLOW_SKIP` exactly as the
+//! session suites do.
+//!
 //! The benchmark is **capability-gated**: emulators that are not
 //! installed or not supported on this host are skipped (and noted in
-//! the report), and the whole benchmark no-ops with a single
-//! `skipping: <reason>` line when `hipcc` is unavailable — it never
-//! silently passes without measuring anything.
+//! the report).
 //!
 //! On completion it writes a polished Markdown report to
 //! `target/emulator-benchmark/report.md` (override with
@@ -41,6 +56,13 @@ use std::process::Command;
 use std::time::Instant;
 
 use harness::Env;
+
+/// Environment variable that asks for the benchmark.
+///
+/// Named like the other `MIRAGE_BENCH_*` knobs in this file, and read
+/// the same way [`harness::ENV_ALLOW_SKIP`] is: presence is enough, the
+/// value is not inspected.
+const ENV_RUN_BENCH: &str = "MIRAGE_BENCH";
 
 /// Emulator backends to compare, in report order.
 const EMULATORS: &[&str] = &["rocjitsu", "hotswap"];
@@ -225,8 +247,36 @@ struct EmulatorResult {
 
 #[test]
 fn benchmark_emulators_and_write_report() {
+    if std::env::var_os(ENV_RUN_BENCH).is_none() {
+        eprintln!(
+            "SKIP: the emulator benchmark is opt-in. Set {ENV_RUN_BENCH}=1 to run it, \
+             ideally on an otherwise idle machine — it times real GPU workloads and \
+             asserts on their accuracy."
+        );
+        return;
+    }
+
+    // Asked for, and unable to comply. This used to return quietly, one
+    // line of output and a green test, which also happened to be a way
+    // round the allow-skip guard two hundred lines below: uninstall
+    // `hipcc` and the benchmark could measure nothing and still pass,
+    // which is exactly what that guard exists to prevent. The two skips
+    // now answer to the same variable, so there is one way to accept a
+    // benchmark that measured nothing and it has to be stated.
     if !hipcc_available() {
-        eprintln!("skipping: hipcc not on PATH (cannot build the GPU workload)");
+        assert!(
+            std::env::var_os(harness::ENV_ALLOW_SKIP).is_some(),
+            "the benchmark was requested with {ENV_RUN_BENCH}, but `hipcc` is not on \
+             PATH so the GPU workload cannot be built and nothing can be measured.\n\n\
+             Install ROCm's `hipcc`, or set {}=1 to accept a benchmark that measures \
+             nothing.",
+            harness::ENV_ALLOW_SKIP
+        );
+        eprintln!(
+            "SKIP: hipcc is not on PATH and {} is set; accepting a benchmark that \
+             measures nothing.",
+            harness::ENV_ALLOW_SKIP
+        );
         return;
     }
 
