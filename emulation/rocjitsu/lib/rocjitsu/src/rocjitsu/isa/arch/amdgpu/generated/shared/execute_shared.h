@@ -9,6 +9,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -1905,18 +1906,14 @@ inline void execute_s_memrealtime_smem([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   static thread_local uint64_t counter = 0;
   counter += 100;
-  uint32_t dst = wf.sgpr_alloc().base + inst.inst_.sdata;
-  amdgpu::RegisterAccess(wf).write_sgpr(dst, static_cast<uint32_t>(counter));
-  amdgpu::RegisterAccess(wf).write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));
+  amdgpu::resolve_dst_write64(wf, inst.inst_.sdata, counter);
 }
 
 template <typename Inst>
 inline void execute_s_memtime_smem([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   static thread_local uint64_t counter = 0;
   counter += 100;
-  uint32_t dst = wf.sgpr_alloc().base + inst.inst_.sdata;
-  amdgpu::RegisterAccess(wf).write_sgpr(dst, static_cast<uint32_t>(counter));
-  amdgpu::RegisterAccess(wf).write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));
+  amdgpu::resolve_dst_write64(wf, inst.inst_.sdata, counter);
 }
 
 template <typename Inst>

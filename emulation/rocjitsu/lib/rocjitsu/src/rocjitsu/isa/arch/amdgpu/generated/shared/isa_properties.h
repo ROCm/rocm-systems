@@ -24,6 +24,11 @@ struct IsaProperties {
   uint32_t max_addressable_vgprs_per_wf = 0;
   uint32_t descriptor_vgpr_count_granule_wave32 = 0;
   uint32_t descriptor_vgpr_count_granule_wave64 = 0;
+  int32_t scalar_sgpr_max_selector = -1;
+  int32_t scalar_flat_scratch_base_selector = -1;
+  int32_t scalar_xnack_mask_base_selector = -1;
+  int32_t scalar_null_selector = -1;
+  int32_t scalar_m0_selector = -1;
 };
 
 inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
@@ -41,6 +46,11 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 0,
         .descriptor_vgpr_count_granule_wave64 = 4,
+        .scalar_sgpr_max_selector = 101,
+        .scalar_flat_scratch_base_selector = 102,
+        .scalar_xnack_mask_base_selector = 104,
+        .scalar_null_selector = -1,
+        .scalar_m0_selector = 124,
     };
   case ROCJITSU_CODE_ARCH_CDNA2:
     return {
@@ -53,6 +63,11 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 0,
         .descriptor_vgpr_count_granule_wave64 = 8,
+        .scalar_sgpr_max_selector = 101,
+        .scalar_flat_scratch_base_selector = 102,
+        .scalar_xnack_mask_base_selector = 104,
+        .scalar_null_selector = -1,
+        .scalar_m0_selector = 124,
     };
   case ROCJITSU_CODE_ARCH_CDNA3:
     return {
@@ -65,6 +80,11 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 0,
         .descriptor_vgpr_count_granule_wave64 = 8,
+        .scalar_sgpr_max_selector = 101,
+        .scalar_flat_scratch_base_selector = 102,
+        .scalar_xnack_mask_base_selector = 104,
+        .scalar_null_selector = -1,
+        .scalar_m0_selector = 124,
     };
   case ROCJITSU_CODE_ARCH_CDNA4:
     return {
@@ -77,6 +97,11 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 0,
         .descriptor_vgpr_count_granule_wave64 = 8,
+        .scalar_sgpr_max_selector = 101,
+        .scalar_flat_scratch_base_selector = 102,
+        .scalar_xnack_mask_base_selector = 104,
+        .scalar_null_selector = -1,
+        .scalar_m0_selector = 124,
     };
   case ROCJITSU_CODE_ARCH_RDNA1:
     return {
@@ -89,6 +114,11 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
+        .scalar_sgpr_max_selector = 105,
+        .scalar_flat_scratch_base_selector = 104,
+        .scalar_xnack_mask_base_selector = -1,
+        .scalar_null_selector = 125,
+        .scalar_m0_selector = 124,
     };
   case ROCJITSU_CODE_ARCH_RDNA2:
     return {
@@ -101,6 +131,11 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
+        .scalar_sgpr_max_selector = 105,
+        .scalar_flat_scratch_base_selector = -1,
+        .scalar_xnack_mask_base_selector = -1,
+        .scalar_null_selector = 125,
+        .scalar_m0_selector = 124,
     };
   case ROCJITSU_CODE_ARCH_RDNA3:
     return {
@@ -113,6 +148,11 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
+        .scalar_sgpr_max_selector = 105,
+        .scalar_flat_scratch_base_selector = -1,
+        .scalar_xnack_mask_base_selector = -1,
+        .scalar_null_selector = 124,
+        .scalar_m0_selector = 125,
     };
   case ROCJITSU_CODE_ARCH_RDNA3_5:
     return {
@@ -125,6 +165,11 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
+        .scalar_sgpr_max_selector = 105,
+        .scalar_flat_scratch_base_selector = -1,
+        .scalar_xnack_mask_base_selector = -1,
+        .scalar_null_selector = 124,
+        .scalar_m0_selector = 125,
     };
   case ROCJITSU_CODE_ARCH_RDNA4:
     return {
@@ -137,6 +182,11 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
+        .scalar_sgpr_max_selector = 105,
+        .scalar_flat_scratch_base_selector = -1,
+        .scalar_xnack_mask_base_selector = -1,
+        .scalar_null_selector = 124,
+        .scalar_m0_selector = 125,
     };
   case ROCJITSU_CODE_ARCH_GFX1250:
     return {
@@ -149,6 +199,11 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .max_addressable_vgprs_per_wf = 1024,
         .descriptor_vgpr_count_granule_wave32 = 16,
         .descriptor_vgpr_count_granule_wave64 = 0,
+        .scalar_sgpr_max_selector = 105,
+        .scalar_flat_scratch_base_selector = -1,
+        .scalar_xnack_mask_base_selector = -1,
+        .scalar_null_selector = 124,
+        .scalar_m0_selector = 125,
     };
   default:
     return {};

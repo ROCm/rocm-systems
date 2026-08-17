@@ -23,7 +23,7 @@ namespace {} // namespace
 
 namespace {
 
-constexpr int kM0EncodingValue = 124;
+constexpr rj_code_arch_t kCodeArch = ROCJITSU_CODE_ARCH_CDNA4;
 
 bool is_vgpr_only_type(OperandType t) {
   return t == OperandType::OPR_VGPR || t == OperandType::OPR_VGPR_OR_ACCVGPR ||
@@ -89,12 +89,12 @@ std::optional<uint32_t> Isa::resolved_vgpr_offset(OperandType opr_type, int ev) 
 
 bool Isa::simd_capable_value(OperandType opr_type, int ev) {
   return resolved_vgpr_offset(opr_type, ev).has_value() || is_immediate_type(opr_type) ||
-         amdgpu::can_resolve_src_scalar(ev, kM0EncodingValue);
+         amdgpu::can_resolve_src_scalar(kCodeArch, ev);
 }
 
 uint32_t Isa::simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev) {
   return is_immediate_type(opr_type) ? static_cast<uint32_t>(ev)
-                                     : amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);
+                                     : amdgpu::resolve_src_scalar(wf, ev);
 }
 
 bool Operand::simd_capable_exec() const {
@@ -169,7 +169,7 @@ uint32_t Operand::read_scalar_exec(const amdgpu::Wavefront &wf) const {
     return static_cast<uint32_t>(literal64_value_);
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(encoding_value_);
-  return amdgpu::resolve_src_scalar(wf, encoding_value_, kM0EncodingValue);
+  return amdgpu::resolve_src_scalar(wf, encoding_value_);
 }
 
 uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) const {
@@ -189,8 +189,8 @@ uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) con
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(ev);
   if (size_bits_ == 16)
-    return amdgpu::resolve_src_scalar16(wf, ev, kM0EncodingValue);
-  return amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);
+    return amdgpu::resolve_src_scalar16(wf, ev);
+  return amdgpu::resolve_src_scalar(wf, ev);
 }
 
 void Operand::write_scalar_exec(amdgpu::Wavefront &wf, uint32_t val) const {
@@ -200,7 +200,7 @@ void Operand::write_scalar_exec(amdgpu::Wavefront &wf, uint32_t val) const {
   // via apply_fieldless_caps() (see fieldless_policy.py).
   if (!is_writable())
     return;
-  amdgpu::resolve_dst_write(wf, encoding_value_, val, kM0EncodingValue);
+  amdgpu::resolve_dst_write(wf, encoding_value_, val);
 }
 
 void Operand::write_lane_exec(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
@@ -239,7 +239,7 @@ uint64_t Operand::read_lane64_exec(const amdgpu::Wavefront &wf, uint32_t lane) c
     return literal64_value_;
   if (is_immediate_type(opr_type_))
     return read_immediate64(opr_type_, ev);
-  return amdgpu::resolve_src_scalar64(wf, ev, kM0EncodingValue);
+  return amdgpu::resolve_src_scalar64(wf, ev);
 }
 
 void Operand::write_lane64_exec(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {
@@ -271,7 +271,7 @@ uint64_t Operand::read_scalar64_exec(const amdgpu::Wavefront &wf) const {
     return literal64_value_;
   if (is_immediate_type(opr_type_))
     return read_immediate64(opr_type_, encoding_value_);
-  return amdgpu::resolve_src_scalar64(wf, encoding_value_, kM0EncodingValue);
+  return amdgpu::resolve_src_scalar64(wf, encoding_value_);
 }
 
 void Operand::write_scalar64_exec(amdgpu::Wavefront &wf, uint64_t val) const {
