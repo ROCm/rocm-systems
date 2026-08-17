@@ -37,9 +37,9 @@ endif()
 include(CheckCXXCompilerFlag)
 include(CheckCXXSourceCompiles)
 
-# Every flag is probed before use. Not all targets and toolchain versions
-# implement all of them, and an unsupported flag is diagnosed on every
-# translation unit.
+# Compile flags are probed because an unsupported one is a hard error on every
+# translation unit: clang and gcc reject -fstack-clash-protection outright on
+# targets that do not implement it.
 foreach(_clr_hardening_flag -fstack-protector-strong -fstack-clash-protection)
   string(MAKE_C_IDENTIFIER "CLR_HAVE${_clr_hardening_flag}" _clr_hardening_var)
   check_cxx_compiler_flag("${_clr_hardening_flag}" ${_clr_hardening_var})
@@ -48,19 +48,12 @@ foreach(_clr_hardening_flag -fstack-protector-strong -fstack-clash-protection)
   endif()
 endforeach()
 
-foreach(_clr_hardening_flag "-Wl,-z,relro,-z,now" "-Wl,-z,noexecstack")
-  string(MAKE_C_IDENTIFIER "CLR_HAVE${_clr_hardening_flag}" _clr_hardening_var)
-  # check_linker_flag() would be the natural fit but needs CMake 3.18, above
-  # the 3.16.8 floor this project declares.
-  set(CMAKE_REQUIRED_LINK_OPTIONS "${_clr_hardening_flag}")
-  check_cxx_source_compiles("int main(void) { return 0; }" ${_clr_hardening_var})
-  unset(CMAKE_REQUIRED_LINK_OPTIONS)
-  if(${_clr_hardening_var})
-    add_link_options("${_clr_hardening_flag}")
-  endif()
-endforeach()
-
 unset(_clr_hardening_var)
+
+# Every ELF linker used for ROCm (GNU ld, lld, mold) accepts these. Deliberately
+# not probed: an unsupported -z keyword is warned about and ignored rather than
+# rejected, so a link probe would succeed either way.
+add_link_options("-Wl,-z,relro,-z,now" "-Wl,-z,noexecstack")
 
 # Distributions such as Ubuntu 24.04 already default to level 3, so pinning the
 # level 2 named in the report would remove fortification rather than add it.
@@ -82,11 +75,6 @@ endif()
 add_compile_options(
   "$<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>"
   "$<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=${_clr_fortify_level}>")
-
-# CMake maps this to -fPIC for libraries and -fPIE/-pie for executables, which
-# is why the property is set instead of passing a literal flag that would apply
-# the wrong one to shared libraries.
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 message(STATUS "CLR hardening: enabled (_FORTIFY_SOURCE=${_clr_fortify_level})")
 
