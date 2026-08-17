@@ -90,6 +90,7 @@ option(ENABLE_CODE_COVERAGE                    "Enable code coverage"           
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
 option(BUILD_NCCL4PY                           "Build the nccl4py Python bindings wheel"       OFF)
 # Move .hip_fatbin to the end of librccl.so so that small-code-model host
 # relocations (PC32/PLT32/GOTPCRELX/32S) between .text and the read-only /
@@ -541,8 +542,10 @@ endif()
 
 # Check for --amdgpu-kernarg-preload-count
 check_cxx_compiler_flag("-mllvm --amdgpu-kernarg-preload-count=16" HAVE_KERNARG_PRELOAD)
-if (HAVE_KERNARG_PRELOAD)
+if (HAVE_KERNARG_PRELOAD AND NOT DISABLE_KERNARG_PRELOAD)
   message(STATUS "Kernarg preloading to SGPR enabled")
+elseif (HAVE_KERNARG_PRELOAD AND DISABLE_KERNARG_PRELOAD)
+  message(STATUS "Kernarg preloading to SGPR disabled by DISABLE_KERNARG_PRELOAD=ON")
 endif()
 
 check_cxx_compiler_flag("-parallel-jobs=12" HAVE_PARALLEL_JOBS)
@@ -659,7 +662,9 @@ if(EMIT_LLVM_IR)
   add_subdirectory(bindings/ir)
   # bindings/ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is
   # populated by the copy_nccl_device_headers target defined in src/CMakeLists.txt.
-  add_dependencies(llvm_ir copy_nccl_device_headers)
+  # nccl_device_header_symlinks provides the un-suffixed core.h/comm.h/gin.h
+  # aliases (hipify renames them to *_tmp.h) that the verbatim IR wrapper needs.
+  add_dependencies(llvm_ir copy_nccl_device_headers nccl_device_header_symlinks)
   # Convenience aggregate target: builds librccl.so together with the bitcode.
   add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
 endif()
@@ -773,21 +778,6 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/profiler/proxytrace)
   endif()
   add_subdirectory(test)
-
-  if(BUILD_SHARED_LIBS)
-    # rccl is defined in src/, so avoid TARGET-signature command here.
-    # Use an output-stamp command plus a local custom target dependency.
-    set(extract_metadata_stamp "${CMAKE_BINARY_DIR}/extract_metadata.stamp")
-    add_custom_command(
-      OUTPUT "${extract_metadata_stamp}"
-      COMMENT "Extracting metadata from librccl.so"
-      COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
-      COMMAND ${CMAKE_COMMAND} -E touch "${extract_metadata_stamp}"
-      DEPENDS rccl
-      VERBATIM
-    )
-    add_custom_target(extract_rccl_metadata ALL DEPENDS "${extract_metadata_stamp}")
-  endif()
 
 endif()
 

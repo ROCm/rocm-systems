@@ -13,16 +13,13 @@
 // Compiled as C++ (the RCCL project only enables CXX/HIP), so the plugin symbol
 // is exported with C linkage and default visibility for RCCL's dlsym() lookup.
 //
-// The vtable below is built from the vendored example net headers, which are a
-// separate copy of the v10 plugin ABI from the one getNcclNet_v10() casts the
-// dlsym'd symbol to. Keeping the plugin on v10 is deliberate, and a mismatch
-// between the two copies cannot silently weaken the test: a changed struct
-// layout makes the loader call through wrong offsets and the test fails, and if
-// v10 support is ever dropped the symbol is never looked up, the counter file
-// stays empty and the test asserts with an init count of 0.
+// RCCL_NET_TEST_PLUGIN_MODE=assign_fail selects an incompatible UNPACK device
+// version (assignment rejected after init) and records init/finalize via
+// RCCL_NET_ASSIGN_FAIL_{INIT,FINALIZE}_FILE (NCCL 2.28.7 net.cc fix).
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "net.h" // from plugins/net/example/nccl
 
 #define __hidden __attribute__((visibility("hidden")))
@@ -31,8 +28,8 @@
 
 static char kPluginName[] = "ReloadTest";
 
-static void recordLoad() {
-  const char* path = getenv("RCCL_NET_RELOAD_COUNTER_FILE");
+static void recordLine(const char* envVar) {
+  const char* path = getenv(envVar);
   if (path == nullptr) return;
 
   FILE* f = fopen(path, "a");
@@ -42,15 +39,28 @@ static void recordLoad() {
   fclose(f);
 }
 
-__hidden ncclResult_t pluginInit_v10(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
-  (void)logFunction; (void)profFunction;
-  recordLoad();
+static int assignFailMode() {
+  const char* mode = getenv("RCCL_NET_TEST_PLUGIN_MODE");
+  return mode && strcmp(mode, "assign_fail") == 0;
+}
+
+__hidden ncclResult_t pluginInit(void** ctx, uint64_t commId, ncclNetCommConfig_v12_t* config,
+                                 ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+  (void)ctx; (void)commId; (void)config; (void)logFunction; (void)profFunction;
+  recordLine("RCCL_NET_RELOAD_COUNTER_FILE");
+  recordLine("RCCL_NET_ASSIGN_FAIL_INIT_FILE");
+  return ncclSuccess;
+}
+
+__hidden ncclResult_t pluginFinalize(void* ctx) {
+  (void)ctx;
+  recordLine("RCCL_NET_ASSIGN_FAIL_FINALIZE_FILE");
   return ncclSuccess;
 }
 
 __hidden ncclResult_t pluginDevices(int* ndev) { *ndev = 1; return ncclSuccess; }
 
-__hidden ncclResult_t pluginGetProperties_v10(int dev, ncclNetProperties_v10_t* props) {
+__hidden ncclResult_t pluginGetProperties(int dev, ncclNetProperties_v12_t* props) {
   props->name = kPluginName;
   props->pciPath = nullptr;
   props->guid = 0;
@@ -62,18 +72,26 @@ __hidden ncclResult_t pluginGetProperties_v10(int dev, ncclNetProperties_v10_t* 
   props->latency = 0;
   props->maxComms = 1024 * 1024;
   props->maxRecvs = NCCL_PLUGIN_MAX_RECVS;
-  props->netDeviceType = NCCL_NET_DEVICE_HOST;
-  props->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
+  if (assignFailMode()) {
+    props->netDeviceType = NCCL_NET_DEVICE_UNPACK;
+    props->netDeviceVersion = NCCL_NET_DEVICE_UNPACK_VERSION - 1;
+  } else {
+    props->netDeviceType = NCCL_NET_DEVICE_HOST;
+    props->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
+  }
   props->vProps.ndevs = 1;
   props->vProps.devs[0] = dev;
   props->maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
   props->maxCollBytes = NCCL_MAX_NET_SIZE_BYTES;
+  props->maxMultiRequestSize = 1;
+  props->railId = NCCL_NET_ID_UNDEF;
+  props->planeId = NCCL_NET_ID_UNDEF;
   return ncclSuccess;
 }
 
-__hidden ncclResult_t pluginListen_v10(int d, void* handle, void** listenComm) { return ncclInternalError; }
-__hidden ncclResult_t pluginConnect_v10(int dev, ncclNetCommConfig_v10_t* config, void* handle, void** sendComm, ncclNetDeviceHandle_v10_t** sendDevComm) { return ncclInternalError; }
-__hidden ncclResult_t pluginAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_v10_t** recvDevComm) { return ncclInternalError; }
+__hidden ncclResult_t pluginListen(void* ctx, int dev, void* handle, void** listenComm) { return ncclInternalError; }
+__hidden ncclResult_t pluginConnect(void* ctx, int dev, void* handle, void** sendComm, ncclNetDeviceHandle_v12_t** sendDevComm) { return ncclInternalError; }
+__hidden ncclResult_t pluginAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_v12_t** recvDevComm) { return ncclInternalError; }
 __hidden ncclResult_t pluginRegMr(void* comm, void* data, size_t size, int type, void** mhandle) { return ncclInternalError; }
 __hidden ncclResult_t pluginRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) { return ncclInternalError; }
 __hidden ncclResult_t pluginDeregMr(void* comm, void* mhandle) { return ncclInternalError; }
@@ -86,15 +104,16 @@ __hidden ncclResult_t pluginCloseRecv(void* recvComm) { return ncclInternalError
 __hidden ncclResult_t pluginCloseListen(void* listenComm) { return ncclInternalError; }
 __hidden ncclResult_t pluginIrecvConsumed(void* recvComm, int n, void* request) { return ncclInternalError; }
 __hidden ncclResult_t pluginGetDeviceMr(void* comm, void* mhandle, void** dptr_mhandle) { return ncclInternalError; }
-__hidden ncclResult_t pluginMakeVDevice_v10(int* d, ncclNetVDeviceProps_v10_t* props) { return ncclInternalError; }
+__hidden ncclResult_t pluginMakeVDevice(int* d, ncclNetVDeviceProps_v12_t* props) { return ncclInternalError; }
+__hidden ncclResult_t pluginSetNetAttr(void* ctx, ncclNetAttr_v12_t* netAttr) { return ncclSuccess; }
 
-extern "C" __exported const ncclNet_v10_t ncclNetPlugin_v10 = {
+extern "C" __exported const ncclNet_v12_t ncclNetPlugin_v12 = {
   kPluginName,
-  pluginInit_v10,
+  pluginInit,
   pluginDevices,
-  pluginGetProperties_v10,
-  pluginListen_v10,
-  pluginConnect_v10,
+  pluginGetProperties,
+  pluginListen,
+  pluginConnect,
   pluginAccept,
   pluginRegMr,
   pluginRegMrDmaBuf,
@@ -108,5 +127,7 @@ extern "C" __exported const ncclNet_v10_t ncclNetPlugin_v10 = {
   pluginCloseListen,
   pluginGetDeviceMr,
   pluginIrecvConsumed,
-  pluginMakeVDevice_v10,
+  pluginMakeVDevice,
+  pluginFinalize,
+  pluginSetNetAttr,
 };

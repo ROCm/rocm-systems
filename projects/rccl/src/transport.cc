@@ -153,7 +153,7 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
   cudaStream_t hostStream, deviceStream;
 
   int count = 0;
-  int num = MAXCHANNELS / 64;
+  int num = MAXCHANNELS / CHANNELS_PER_MASK_WORD;
 
   NCCLCHECK(ncclCalloc(&data, maxPeers));
   NCCLCHECKGOTO(ncclCalloc(&recvData, maxPeers), ret, fail);
@@ -175,7 +175,8 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
     struct channelMasks recvMask = comm->connectRecv[recvPeer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)];
     struct channelMasks sendMask = comm->connectSend[sendPeer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)];
 
-    // Data[i] contains all ncclConnect information for all send and receive connections with a given send and recv peer
+    // Data[i] contains all ncclConnect information for all send and receive connections with a given send and recv
+    // peer
     // This data is packed in the array based on the number of sendChannels and recvChannels connected with these peers
     // The first N entries contain recvData, connection information for recv connections
     // The next M entries contain sendData, connection information for send connections
@@ -362,7 +363,7 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
     int recvPeer = (comm->rank - i + comm->nRanks) % comm->nRanks;
     int sendPeer = (comm->rank + i) % comm->nRanks;
 
-    for (int j = 0; j < MAXCHANNELS / 64; j++) {
+    for (int j = 0; j < MAXCHANNELS / CHANNELS_PER_MASK_WORD; j++) {
       if (recvPeer != sendPeer) {
         if (comm->connectSend[sendPeer].masks[j] != 0UL)
           NCCLCHECKGOTO(bootstrapSend(comm->bootstrap, sendPeer, bootstrapTag, NULL, 0), ret, fail);

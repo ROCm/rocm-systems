@@ -30,6 +30,9 @@ on:
       - '!projects/rocprofiler-compute/docs/**'
       - '!projects/rocprofiler-compute/docker/**'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -41,6 +44,9 @@ env:
 jobs:
   distbuild:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu:24.04-compute-ci-base
     name: Create distribution tarball
@@ -79,7 +85,7 @@ jobs:
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt install -y rocm-dev
-          apt install -y libdw-dev pkg-config
+          apt install -y libdw-dev zlib1g-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
 
       - name: Install Python
@@ -113,6 +119,8 @@ jobs:
 
   disttest:
     runs-on: ubuntu-latest
+    permissions:
+      packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu:24.04-compute-ci-base
     needs: [distbuild]
@@ -139,7 +147,7 @@ jobs:
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt install -y rocm-dev
-          apt install -y libdw-dev pkg-config
+          apt install -y libdw-dev zlib1g-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
 
       - name: Python dependency installs

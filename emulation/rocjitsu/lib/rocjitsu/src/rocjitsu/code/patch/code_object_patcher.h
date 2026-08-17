@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
@@ -92,11 +93,13 @@ public:
   /// the executable LOAD segment that contains .text, preserves LOAD alignment,
   /// updates moved symbols and relocation places, and keeps descriptor-relative
   /// entries coherent with explicit descriptor patches applied by DBT.
-  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
-                                  std::span<const TextOffsetRelocation> text_relocations = {},
-                                  std::span<const PcRelativeDataRelocation> data_relocations = {},
-                                  std::span<const PcRelativeTextRelocation> code_relocations = {},
-                                  bool require_every_text_symbol_mapped = false);
+  [[nodiscard]] bool replace_text(
+      std::span<const uint8_t> new_text,
+      std::span<const TextOffsetRelocation> text_relocations = {},
+      std::span<const PcRelativeDataRelocation> data_relocations = {},
+      std::span<const PcRelativeTextRelocation> code_relocations = {},
+      bool require_every_text_symbol_mapped = false,
+      const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement = nullptr);
 
   /// @brief True if any relocation's place (r_offset) falls inside .text.
   ///
@@ -125,6 +128,19 @@ public:
 
   [[nodiscard]] bool patch_kernel_descriptor(uint64_t file_offset,
                                              std::span<const uint8_t> descriptor);
+
+  /// @brief Overwrite one kernel descriptor's `private_segment_fixed_size`.
+  ///
+  /// @details Used by the DBI spill path to grow a kernel's per-lane scratch to
+  /// cover the appended spill zone. Reads the descriptor at @p
+  /// descriptor_file_offset, sets the scratch-size field to @p bytes, and writes
+  /// it back. Returns false if the descriptor does not fit in the image.
+  ///
+  /// Deliberately narrower than DBT's apply_kernel_descriptor_translation: a
+  /// same-arch instrument-only pass must re-encode no other descriptor field
+  /// (VGPR/SGPR granules, mode bits, USER_SGPR_COUNT, kernarg size).
+  [[nodiscard]] bool set_private_segment_fixed_size(uint64_t descriptor_file_offset,
+                                                    uint32_t bytes);
 
   /// @brief Apply a descriptor translation plan to the in-memory ELF image.
   ///

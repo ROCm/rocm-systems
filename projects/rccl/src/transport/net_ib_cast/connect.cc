@@ -413,9 +413,14 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest;
   qpInitAttr.cap.max_send_sge = 1;
   qpInitAttr.cap.max_recv_sge = 1;
-  qpInitAttr.cap.max_inline_data = IbCastUseInline ? sizeof(struct ncclIbSendFifo) * NCCL_NET_IB_MAX_RECVS : 0;
   if (createQpAttrs->isCtsEnabled) {
     qpInitAttr.cap.max_inline_data = MAX_INLINE_DATA_SIZE;
+  } else {
+    // for multi-receive scenarios, the inline payload will be a
+    // multiple of 32B ncclIbSendFifoCtsInline elements and hence
+    // effectively inline handling will be disabled. So limit the
+    // max_inline_data to single request size.
+    qpInitAttr.cap.max_inline_data = IbCastAinicCtsInlineData ? sizeof(struct ncclIbSendFifoCtsInline) : 0;
   }
   qpInitAttr.sq_sig_all |= (1 << 16);
   if (createQpAttrs->isDataQp) {
@@ -891,6 +896,9 @@ ib_recv_dev_list:
     int ibDevN = comm->base.vProps.devs[i];
     if (comm->base.resiliency) {
       IbCastResiliencyDataCqSizeGet(comm->base.resiliency, i, &cqSize);
+    }
+    if (IbCastDevs[ibDevN].maxCqe > 0) {
+      cqSize = std::min(IbCastDevs[ibDevN].maxCqe, cqSize);
     }
     NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &comm->devs[i].base, &comm->base.stats, cqSize), ret, fail);
     comm->ar = comm->ar && IbCastDevs[ibDevN].ar; // ADAPTIVE_ROUTING - if all merged devs have it enabled
@@ -1492,6 +1500,9 @@ ib_recv:
     if (rComm->base.resiliency) {
       IbCastResiliencyDataCqSizeGet(rComm->base.resiliency, i, &cqSize);
     }
+    if (IbCastDevs[ibDevN].maxCqe > 0) {
+      cqSize = std::min(IbCastDevs[ibDevN].maxCqe, cqSize);
+    }
     NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &rCommDev->base, &rComm->base.stats, cqSize), ret, fail);
     if (rComm->base.resiliency) {
       NCCLCHECKGOTO(IbCastResiliencyDevInit(rComm->base.resiliency, i, &IbCastDevs[ibDevN]), ret, fail);
@@ -1573,7 +1584,7 @@ ib_recv:
                   ret, fail);
     meta.devs[i].rkey = rCommDev->cmplsRecordsMr->rkey;
   }
-  if (IbCastUseInline && (!IbCastAinicRoce || rComm->useCtsOffload)) rComm->remCtsFifo.flags = IBV_SEND_INLINE;
+  if (IbCastUseInline) rComm->remCtsFifo.flags = IBV_SEND_INLINE;
 
   for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
     rCommDev = rComm->devs + i;
