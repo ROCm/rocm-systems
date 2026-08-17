@@ -25,10 +25,16 @@ terminal, and takes everything with it when it exits.
   rather than inferred from a file someone left behind.
 * **Nothing is left behind.** Every workload process is owned by a
   supervisor that always waits on it, runs it in its own process group,
-  and escalates `SIGTERM` to `SIGKILL` on teardown. Containers are
-  launched with `--rm` and are children of the run, so Ctrl-C, a `kill`,
-  or a crashed run all end the same way: no orphans, no zombies, no
-  stray containers.
+  and escalates `SIGTERM` to `SIGKILL` on teardown — the whole group, so
+  a workload that forked and then exited cleanly does not leave its
+  children running. Containers are launched with `--rm` and are children
+  of the run, and teardown waits for a bring-up still in flight before it
+  decides what to remove, so a Ctrl-C during an image pull takes the
+  containers that pull was still creating with it. Every exit path a
+  signal can reach ends the same way: no orphans, no zombies, no stray
+  containers. The exception is deliberate and cannot be otherwise: a
+  `SIGKILL` runs no code of mirage's at all, so its leftovers are
+  *recovered* rather than prevented — see `mirage cleanup` below.
 * **Your terminal, not a pipe.** A workload inherits your real stdin,
   stdout and stderr, so `mirage run -- bash` is a real shell: prompt,
   echo, line editing and Ctrl-C all work. There is no pseudo-terminal in
@@ -101,7 +107,9 @@ mirage exec --session <id> -- python -c 'import torch; print(torch.cuda.device_c
 `--session` may be omitted whenever exactly one `mirage run` is live —
 one terminal running the job, another exec'ing into it, which is the
 case that matters. When it would be ambiguous mirage lists the
-candidates instead of guessing.
+candidates instead of guessing. "Live" means a run that answers when
+connected to, not a socket file left on disk, so a run you `kill -9`ed
+neither breaks the guess nor turns up among the candidates.
 
 No physical GPU is needed: `rocjitsu` emulates one in software. You do
 need its runtime library — see
@@ -181,9 +189,12 @@ all, so the leak is expected and this is the recovery. Sessions whose run
 still answers are left completely alone, as is anything mirage did not
 create, so it is safe to run at any time; `--dry-run` shows what it would
 remove first. Everything it looks for is marked on the resource itself —
-`mirage.owner` and `mirage.runtime` labels on containers, `MIRAGE_SESSION`
-and `MIRAGE_RUNTIME` in every workload's environment — because that is
-what survives the death of the only process that knew about it.
+`mirage.owner`, `mirage.session` and `mirage.runtime` labels on containers
+and networks, `MIRAGE_SESSION` and `MIRAGE_RUNTIME` in every workload's
+environment — because that is what survives the death of the only process
+that knew about it. Every container engine on the machine is asked, not
+just the first one autodetection finds, and each line of the report says
+which engine is holding what.
 
 The runtime mark is what keeps this safe when two mirages share a
 machine. The sockets in one runtime directory are the whole registry of
@@ -249,6 +260,10 @@ guard off deliberately.
 * [`docs/architecture.md`](docs/architecture.md) — design and crate overview.
 * [`docs/building.md`](docs/building.md) — building mirage and rocjitsu.
 * [`docs/state-layout.md`](docs/state-layout.md) — authoritative on-disk layout reference.
+* [`docs/ddp-training.md`](docs/ddp-training.md) — tutorial: PyTorch DDP
+  across several emulated MI350X GPUs, with `torchrun`.
+* [`docs/demo-debugging-at-scale.md`](docs/demo-debugging-at-scale.md) —
+  presentation deck on debugging ROCm at scale with mirage and rocjitsu.
 
 [rocjitsu]: ../rocjitsu/
 [xdg]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html

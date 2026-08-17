@@ -5,8 +5,8 @@ This guide covers building the `mirage` CLI and (optionally) the
 
 mirage is a single Cargo workspace ([`emulation/mirage/`](../)). One
 `cargo build` produces the unified `mirage` binary from a set of crates —
-`core`, `ctl`, `supervisor`, `container`, `builtin`, `sys`, `rocjitsu_sys`,
-and the emulator backends (`rocjitsu`, `hotswap`). See
+`core`, `ctl`, `supervisor`, `container`, `builtin`, `rocjitsu_sys`, and
+the emulator backends (`rocjitsu`, `hotswap`). See
 [`architecture.md`](architecture.md) for the full crate map.
 
 ## TL;DR
@@ -27,10 +27,10 @@ merely loads at runtime.
 | Tool | Version | Needed for | Notes |
 |------|---------|------------|-------|
 | Rust + Cargo | 1.88+ (edition 2024) | everything | Install via [rustup](https://rustup.rs). 1.88 is the floor for let-chains, which the workspace uses. |
-| CMake | 3.28+ | building rocjitsu from source | Only if you want live GPU emulation. |
+| CMake | 3.22+ | building rocjitsu from source | Only if you want live GPU emulation. mirage's own wrapper needs 3.20. |
 | Ninja | any recent | building rocjitsu from source | `-G Ninja`. |
 | C++20 compiler | GCC 12+ / Clang 16+ | building rocjitsu from source | |
-| Python | 3.10+ | rocjitsu ISA codegen | Only when building rocjitsu from source. |
+| Python | 3.10+ | regenerating rocjitsu's ISA sources | Not a build prerequisite: the generated sources are checked in, and nothing in either CMake build invokes Python. Only needed to re-run the `amdisa` generator. |
 
 mirage runs on Linux. It leans on POSIX process groups and Unix domain
 sockets: each workload process leads its own group so it can be
@@ -65,7 +65,7 @@ feature flag literally adds or removes an entry from
 
 | Feature | Default | Backend |
 |---------|---------|---------|
-| `rocjitsu` | on | the rocjitsu GPU emulator |
+| `rocjitsu` | on | two entries: `rocjitsu`, the GPU emulator, and `rocjitsu-dbt`, which translates a GPU's code objects to run on a different physical GPU |
 | `hotswap` | off | the HotSwap intercept backend |
 
 ```sh
@@ -87,15 +87,18 @@ of the monorepo. It shells out to cargo:
 ```sh
 cmake -S . -B build
 cmake --build build      # cargo build --release
-ctest --test-dir build   # cargo test --release --workspace
+ctest --test-dir build   # the test suite, plus clippy and rustfmt
 ```
+
+`ctest` runs three cases, not one: `cargo_test`, and the two lint gates
+described under [Linting](#linting).
 
 Options worth knowing: `MIRAGE_CARGO_FEATURES` (comma-separated extra
 cargo features), `MIRAGE_CARGO_PROFILE` (default `release`),
 `MIRAGE_BUILD_HOTSWAP` (build HotSwap's LLVM + COMGR + ROCR stack from
-source — a long build, hence opt-in), and `MIRAGE_ALLOW_TEST_SKIP`,
-which is the `ctest` spelling of `MIRAGE_E2E_ALLOW_SKIP=1` described
-below.
+source — a long build, hence opt-in), `MIRAGE_LINT_TESTS` (on; turn it
+off to register only `cargo_test`), and `MIRAGE_ALLOW_TEST_SKIP`, which
+is the `ctest` spelling of `MIRAGE_E2E_ALLOW_SKIP=1` described below.
 
 ## Building rocjitsu
 
@@ -131,19 +134,57 @@ actually covered.
 
 ### Option A — let mirage find them
 
-mirage discovers the rocjitsu library (`librocjitsu.so`) in this order:
+Every backend resolves its runtime library through one shared search
+policy, so what works for one works for the others. For rocjitsu
+(`librocjitsu.so`) the order is:
 
-1. a sibling monorepo build, relative to the `mirage` binary
-   (`../../../rocjitsu/build`, and a level deeper again so an
-   integration-test binary in `target/<profile>/deps/` finds it too);
-2. an install layout — `<prefix>/lib` next to a `<prefix>/bin/mirage`;
-3. `$ROCM_HOME/lib`;
-4. `$(rocm-sdk path --root)/lib` (present when a ROCm Python wheel venv
+1. `$ROCJITSU_LIB`, which names the `.so` **file** itself rather than a
+   directory;
+2. every directory on `$LD_LIBRARY_PATH`;
+3. a sibling monorepo build, found by walking up from the `mirage`
+   binary and looking for a rocjitsu build under each ancestor — so an
+   integration-test binary in `target/<profile>/deps/` finds it just as
+   the CLI does, without anybody counting `..`s;
+4. `$ROCM_HOME/lib`, then `$ROCM_PATH/lib`;
+5. `$(rocm-sdk path --root)/lib` (present when a ROCm Python wheel venv
    is active);
-5. the in-container mount directory, for a containerised session where
+6. an install layout — `<prefix>/lib` next to a `<prefix>/bin/mirage`;
+7. the standard system directories: `/opt/rocm/lib`, `/usr/local/lib`,
+   `/usr/lib`, `/usr/lib/x86_64-linux-gnu`;
+8. the in-container mount directory, for a containerised session where
    the host libraries are bind-mounted in.
 
-If nothing is found mirage still builds and runs; rocjitsu is simply
+The first path that is actually a file wins. `$ROCJITSU_LIB` naming
+something that is not there is skipped rather than fatal, so an
+environment left over from another checkout degrades to the search rather
+than breaking the build.
+
+The DBT backend follows the same policy for `librocjitsu_hooks.so`, with
+`ROCJITSU_HOOKS_LIB` in place of `ROCJITSU_LIB`. HotSwap is the one that
+opts out: it takes `HOTSWAP_HOME` (an install root, with
+`lib/libhotswap_intercept.so` under it) and does not consult
+`$LD_LIBRARY_PATH` or the ROCm variables at all.
+
+Reach for the file overrides — `ROCJITSU_LIB`, `ROCJITSU_HOOKS_LIB` — when
+you have a library in a place no search would guess, or when you want to
+pin one build while another sits in the way. Reach for `ROCM_HOME` or
+`ROCM_PATH` for an ordinary install root.
+
+You do not have to reason about any of this in the dark. `mirage
+emulators -l` prints, per backend, the library it resolved — or, when it
+found none, every path it tried and the variables that would fix it:
+
+```sh
+$ mirage emulators -l
+hotswap
+  ...
+  installed: no
+  runtime:   not found (libhotswap_intercept.so)
+  searched:  /path/that/was/tried/libhotswap_intercept.so
+  set:       HOTSWAP_HOME=<install root, with lib/libhotswap_intercept.so under it>
+```
+
+If nothing is found mirage still builds and runs; the backend is simply
 reported as not installed.
 
 ### Option B — build rocjitsu yourself
@@ -199,27 +240,34 @@ trip over.
 The workspace lint policy lives in [`Cargo.toml`](../Cargo.toml) under
 `[workspace.lints]`: `unsafe_code` is forbidden everywhere except the
 `rocjitsu_sys` FFI crate, `clippy::all` is denied, and `unwrap_used`,
-`expect_used`, `panic` and `exit` are denied outside test modules.
+`expect_used`, `panic`, `exit`, `todo`, `unimplemented`, `dbg_macro` and a
+few concurrency hazards (`await_holding_lock`, `mem_forget`) are denied
+outside test modules.
 
-None of that is checked by `cargo build` or `cargo test` — cargo only
-applies the clippy half when clippy is what you ran. So run it:
+The table has two halves and only one of them is free. The `rust` half —
+`unsafe_code`, `unused_must_use`, `rust_2018_idioms` — is applied by
+rustc, so `cargo build` already enforces it. The clippy half is applied
+only when clippy is what you ran, and `cargo test` never runs clippy. So
+run it:
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
-Every flag is load-bearing. `--all-targets` reaches the test and bench
-targets, `--all-features` reaches the `hotswap` backend that the default
-feature set leaves uncompiled, and `-D warnings` is what turns the
+Every flag is load-bearing. `--all-targets` reaches the integration test
+targets under `tests/`, which are where most of the `unwrap` temptation
+lives; `--all-features` reaches the `hotswap` backend that the default
+feature set leaves uncompiled; and `-D warnings` is what turns the
 warn-level entries in the policy (`unreachable_pub`,
 `unused_qualifications`, `missing_debug_implementations`) into failures
 rather than output you scroll past.
 
 Both checks are also registered as `ctest` cases (`cargo_clippy` and
-`cargo_fmt`), so a CMake-driven build catches a lint regression the same
-way it catches a failing test. `cmake --build build --target mirage_lint`
-runs just those two without the test suite.
+`cargo_fmt`) unless `MIRAGE_LINT_TESTS` is turned off, so a CMake-driven
+build catches a lint regression the same way it catches a failing test.
+`cmake --build build --target mirage_lint` runs just those two without the
+test suite.
 
 ## Troubleshooting
 
@@ -231,7 +279,9 @@ runs just those two without the test suite.
 - **`no mirage run is serving session <id>`** — the run that owned the
   session has exited. A session exists exactly as long as its `mirage
   run` does; start one in another terminal and `mirage exec` into that.
-- **rocjitsu reported as not installed** — build rocjitsu (Option B) and
-  ensure `librocjitsu.so` is reachable (a sibling monorepo build,
-  `$ROCM_HOME/lib`, or `$(rocm-sdk path --root)/lib`), or run
-  `mirage state builtins` to extract any embedded assets.
+- **A backend reported as not installed** — run `mirage emulators -l`
+  first. It prints every path that was searched for that backend's
+  library and the environment variables that would resolve it, which is
+  faster than guessing. Then either build rocjitsu (Option B), or point
+  `ROCJITSU_LIB` (or `ROCJITSU_HOOKS_LIB`, or `HOTSWAP_HOME`) at a
+  library you already have.

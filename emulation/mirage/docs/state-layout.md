@@ -179,16 +179,29 @@ existence is its socket:
 | Question | Answer |
 | --- | --- |
 | Where do run sockets live? | `mirage paths` (the `runs:` line) |
-| Which sessions are live? | the `.sock` files in that directory |
+| Which sessions are live? | the `.sock` files in that directory that answer when connected to |
 | How do I start something in one? | `mirage exec -- <command>`, or `mirage exec -s <id> -- <command>` when several runs are up |
 | What did it print? | the terminal its `mirage run` is in; a multi-node job labels every rank's lines automatically |
 
 `mirage exec` may omit `--session` because the common case is one run in
 one terminal and an exec in another; when the guess would be ambiguous it
-lists the candidates rather than picking one. A socket left by a run that
-was `SIGKILL`ed still appears in the directory — connecting to it fails
-with a clear message, which is a better outcome than silently hiding a
-session the user believes is alive.
+lists the candidates rather than picking one.
+
+The candidates are runs that *answer*, not socket files. A `SIGKILL`ed run
+leaves its socket behind — the expected leak `mirage cleanup` exists for —
+so counting files meant a single `kill -9` broke auto-selection outright:
+beside a live run it reported "several runs are live" and offered a dead
+session, and on its own it picked the corpse and then failed to connect.
+Each candidate is therefore probed, and a socket nothing answers on is
+unlinked on the way past so the next caller does not re-test it. Only two
+errors are read as death — nothing listening, or the file already gone.
+Anything else is about *this* process rather than the run, and is read as
+"still alive", because unlinking a live run's socket on a full accept
+backlog would leave it invisible and its session eligible for reclamation.
+
+Naming a session explicitly is the exception, and deliberately so:
+`mirage exec --session <id>` never consults that list, so a session that
+has died is reported as gone rather than as never having existed.
 
 ## Atomicity guarantees
 

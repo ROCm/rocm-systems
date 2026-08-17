@@ -4,8 +4,8 @@ mirage is a single Cargo workspace that builds one unified `mirage`
 executable: the CLI, the session runtime, and a set of pluggable emulator
 backends, all in one binary. There is no second role to dispatch to.
 Every subcommand — `run`, `exec`, `profile`, `topology`, `agent`,
-`emulators`, `state`, `paths`, `about` — happens in the process you
-invoked, and `mirage [--config c.json] -- ./app` is a `rocjitsu`-shaped
+`emulators`, `state`, `cleanup`, `paths`, `about` — happens in the process
+you invoked, and `mirage [--config c.json] -- ./app` is a `rocjitsu`-shaped
 alias for `run`.
 
 The one distinction worth drawing is what a command *owns*:
@@ -69,9 +69,11 @@ are the only optional things left in the build: there is no `daemon`,
    container)                                 shared builder
 ```
 
-The socket is one connection, one request, one response, then closed. It
-lives at `$XDG_RUNTIME_DIR/mirage/run/<session>.sock` and is unlinked when
-the run exits.
+The socket lives at `$XDG_RUNTIME_DIR/mirage/run/<session>.sock` and is
+unlinked when the run exits. A `Describe` is one connection, one request,
+one response, then closed; an `Attach` is not, because the connection it
+opens *is* the borrower's lease and stays open for as long as the exec
+runs. See [Why `exec` spawns locally](#why-exec-spawns-locally) below.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
@@ -135,9 +137,10 @@ containers to remove. What falls out:
 
 * **Liveness is a fact.** "Is this session alive?" is "is that process
   alive?". No heartbeat, no staleness ladder, no map lookup that can miss.
-* **Teardown is closed-loop.** `destroy` terminates every process group,
-  waits for every child, stops the emulator daemon, removes the containers
-  and the network, and returns only when all of that has happened.
+* **Teardown is closed-loop.** `destroy` waits for any bring-up still in
+  flight, terminates every process group, waits for every child, stops the
+  emulator daemon, removes the containers and the network, and returns
+  only when all of that has happened.
 * **Nothing needs a cap.** A process that exits frees its memory by
   exiting.
 * **There is no session-manager concurrency.** There is one session, it is
@@ -149,11 +152,15 @@ scheduler — tools that already solve detachment, and solve it for
 everything, not just for mirage.
 
 The remaining failure mode is a run that is `SIGKILL`ed: it takes its
-record of every container with it. `--rm` covers the common case; `mirage
-state purge` reclaims what an interrupted engine left behind, matching on
-mirage's own label so a shared engine is safe. It refuses while any run is
-live, because killing somebody else's foreground command from a cleanup
-subcommand would be a surprise.
+record of every container with it. `--rm` covers the common case, and
+`mirage cleanup` reclaims the rest — containers, per-session network,
+stranded workloads and scratch directory — matching on marks mirage put on
+the resources themselves, so a shared engine is safe. It runs at any time
+and simply skips a session whose run still answers. `mirage state purge`
+is the same reclamation followed by removing the runtime directory, and it
+*refuses* while any run is live rather than skipping it, because killing
+somebody else's foreground command from a state-cleanup subcommand would
+be a surprise.
 
 ## Why `exec` spawns locally
 
@@ -294,15 +301,17 @@ Two consequences are worth knowing:
   re-establishes that guarantee explicitly by polling for "running" —
   otherwise the first exec races bring-up and fails with "no such
   container".
-* The client's stdin and stdout go to `/dev/null`. The container's
-  foreground process is an idle placeholder (`sleep infinity`); workloads
-  arrive later via `provider exec`, so it has nothing to say, and letting
-  it write to mirage's terminal would interleave provider chatter with
-  the output the user asked for. Its **stderr** is captured, because a
-  `podman run` that refuses says why on it — a bound port, a missing
-  device, an entrypoint the image cannot run — and that reason is the
-  most useful part of a failed bring-up. It used to go to `/dev/null`,
-  and the user was told only that the container "did not start".
+* The client's stdin goes to `/dev/null` and **both** its output streams
+  are captured rather than inherited. The container's foreground process
+  is an idle placeholder (`sleep infinity`); workloads arrive later via
+  `provider exec`, so it has nothing to say, and letting it write to
+  mirage's terminal would interleave provider chatter with the output the
+  user asked for. But a `podman run` that refuses says why — a bound
+  port, a missing device, an entrypoint the image cannot run — and that
+  reason is the most useful part of a failed bring-up. Both streams are
+  kept because a container writes its dying words to whichever one it
+  likes; discarding either meant the user was told only that the
+  container "did not start".
 
 `provider exec` passes `-i`, and `-t` when — and only when — the exec is
 the interactive shape *and* all three of the caller's streams are
@@ -329,8 +338,10 @@ Signalling needs one extra step in a container. `podman exec` puts the
 workload in the container's PID namespace and does not forward signals to
 it, so killing the client would leave the workload running, invisible and
 still holding the emulated device. The in-container command is therefore
-wrapped in `sh -c 'echo $$ > <pidfile>; exec "$0" "$@"'`: the shell records
-its own pid and then `exec`s the real program into that same pid. The file
+wrapped in `sh -c 'echo $$ > <pidfile> 2>/dev/null; exec "$0" "$@"'`: the
+shell records its own pid and then `exec`s the real program into that same
+pid. A pid file that cannot be written is not worth failing the exec for,
+which is what the discarded stderr says. The file
 lands in the session scratch directory, already bind-mounted into every
 node container, so the supervisor reads it straight off the host
 filesystem and signals back through the provider.
@@ -356,6 +367,17 @@ Every mirage process runs a single Tokio runtime created in `main`.
   `destroy` returns only once every process is reaped, every container
   removed and the scratch directory deleted, because a caller that has
   been told a session is gone must be able to rely on it.
+* **Teardown waits for a bring-up still in flight** before it collects
+  what to kill. The two race otherwise, and the race is the ordinary one:
+  Ctrl-C during a container pull. Teardown would list the containers that
+  existed *then*, remove them, and return — while the pull it could not
+  cancel went on to create the rest, which no longer had an owner. So a
+  watch flag is set before bring-up is spawned and cleared on both its
+  exits, and teardown waits for it to clear. The wait is unbounded, and a
+  second interrupt does not shorten it: the blocking call is inside
+  `podman`, aborting the task would not stop it, and returning early would
+  only restore the leak. Ctrl-C during a pull therefore returns when the
+  pull does.
 * **An exec** owns its process grid through one supervising task per
   process. Each races `Child::wait` against cancellation; both arms end
   with the child reaped. Children are also spawned with
@@ -389,7 +411,20 @@ Every mirage process runs a single Tokio runtime created in `main`.
   tries to connect to whatever is already at the path: if something
   answers, a run owns this id and we refuse; if nothing does, the file is
   a corpse and is removed. The test is direct, needs no second file, and
-  cannot be fooled by a stale lock.
+  cannot be fooled by a stale lock. `mirage exec` applies the same test
+  from the other side, which is why auto-selection is never offered a
+  session that is already dead.
+* **The socket's directory chain is private by construction.** Anyone who
+  can connect to a run socket can start processes in that session, so
+  every directory mirage creates on the way to it is created `0700` by
+  `mkdir(2)` and the socket itself is `0600`. Creating first and then
+  fixing the mode leaves a window in which the permissive directory is
+  already there, so instead each level is created at the mode it should
+  have and then *verified* — owned by us, nothing granted to group or
+  other — and a level that cannot be made private fails the bind rather
+  than being accepted with a warning. The check matters most exactly where
+  it is easiest to skip: the `$TMPDIR` fallback used when
+  `$XDG_RUNTIME_DIR` is unset is shared and world-writable to begin with.
 * **Blocking work** — container providers, emulator daemon startup and
   shutdown — runs on `spawn_blocking`, never inline on the runtime.
 
@@ -425,10 +460,26 @@ containers, which are launched from a `spawn_blocking` thread where
 pdeathsig tracks a pool thread that may retire while the run is perfectly
 healthy, and closing that would have meant a second mechanism beside it.
 So the leak is accepted and made *recoverable* instead: every container
-carries a `mirage.owner` label and every workload carries `MIRAGE_SESSION`
-in its environment, so `mirage cleanup` can find and remove whatever a
-killed run stranded. Both markers live on the resource itself, which is
-what makes them survive the death of the only process that knew about it.
+and per-session network carries the `mirage.owner`, `mirage.session` and
+`mirage.runtime` labels, and every workload carries `MIRAGE_SESSION` and
+`MIRAGE_RUNTIME` in its environment, so `mirage cleanup` can find and
+remove whatever a killed run stranded. The markers live on the resource
+itself, which is what makes them survive the death of the only process
+that knew about it.
+
+Each mark is a pair because one half is not enough to act on. The session
+half says which run a thing belonged to; the runtime half says which
+*mirage* that run was. Without the second, a cleanup reclaimed across
+runtime directories: the run sockets under one `MIRAGE_RUNTIME` are the
+entire registry of what is live there, so a cleanup running under another
+one has never heard of a perfectly healthy session and read it as a
+crashed run's wreckage — then `SIGKILL`ed it. Attribution is by resolved,
+canonicalised path rather than by the raw variable, and a resource that
+records no runtime directory at all is skipped rather than claimed,
+because "I cannot tell whose this is" is not a licence to destroy it. The
+cost is that work left by a mirage older than the mark is never reclaimed
+automatically and has to be removed by hand — an orphan you can see,
+traded for a running job you would not get back.
 
 The rule is enforced, not aspirational: `forbid` cannot be relaxed by a
 later `allow`, so an `unsafe` block anywhere outside `rocjitsu_sys` fails
