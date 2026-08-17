@@ -89,7 +89,7 @@ fn daemon_serves_handshake() {
             agent: MaybeRef::Ref(agent_name),
         }),
     };
-    let config = kmd_config(&def, None).expect("sim config should materialise");
+    let config = kmd_config(&def, tmp.path()).expect("sim config should materialise");
 
     let runtime_dir = tmp.path().join("rt");
     let Some(daemon) = start_or_skip(&lib, &config, &runtime_dir) else {
@@ -174,7 +174,7 @@ fn dropping_the_handle_stops_the_daemon() {
             agent: MaybeRef::Ref(agent_name),
         }),
     };
-    let config = kmd_config(&def, None).unwrap();
+    let config = kmd_config(&def, tmp.path()).unwrap();
     let runtime_dir = tmp.path().join("rt");
 
     let socket_path = {
@@ -218,7 +218,7 @@ fn daemon_serves_multiple_clients() {
             agent: MaybeRef::Ref(agent_name),
         }),
     };
-    let config = kmd_config(&def, None).unwrap();
+    let config = kmd_config(&def, tmp.path()).unwrap();
     let runtime_dir = tmp.path().join("rt");
     let Some(daemon) = start_or_skip(&lib, &config, &runtime_dir) else {
         return;

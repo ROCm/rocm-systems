@@ -546,7 +546,10 @@ dependencies = [
 name = "mirage_builtin"
 version = "0.2.0"
 dependencies = [
+ "inventory",
  "mirage_core",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 

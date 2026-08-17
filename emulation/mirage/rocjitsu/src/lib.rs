@@ -13,13 +13,12 @@
 //!   topology + agent references and wrapping them with rocjitsu's
 //!   required runtime fields.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 use mirage_core::agent::AgentDef;
 use mirage_core::common::{MaybeRef, SimpleMap, SimpleValue};
 use mirage_core::config::OptionDef;
+use mirage_core::discovery::LibSearch;
 use mirage_core::emulator::{
     EmulatorBackend, EmulatorBackendDef, EmulatorDaemon, EmulatorDef, EmulatorDescription,
     ExecMode, SupportStatus,
@@ -84,13 +83,13 @@ impl EmulatorBackend for Rocjitsu {
     fn shutdown(&self, _ctx: &SessionContext) {}
 
     fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String> {
-        // Building the kmd config resolves the topology + agent
-        // references; any error here is precisely what would otherwise
-        // surface at run time. No session exists at validation time, so
-        // no per-session config is written.
-        kmd_config(&def.emulator, None)
-            .map(|_| ())
-            .map_err(|e| format!("rocjitsu cannot use this profile: {e}"))
+        // Resolving the kmd config follows the topology + agent
+        // references and applies rocjitsu's own limits; any error here is
+        // precisely what would otherwise surface at run time. No session
+        // exists at validation time, so nothing is written — not into the
+        // session that does not exist yet, and not into a shared temp
+        // directory nobody would ever clean up either.
+        check_config(&def.emulator).map_err(|e| format!("rocjitsu cannot use this profile: {e}"))
     }
 
     fn installed(&self) -> bool {
@@ -136,14 +135,17 @@ impl EmulatorBackend for Rocjitsu {
 
     fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
         let def = ctx.emulator();
-        let config = kmd_config(def, Some(&ctx.runtime_dir))?;
+        let config = kmd_config(def, &ctx.runtime_dir)?;
         // Refuse to run unemulated: if the KMD interposer can't be
         // located there is nothing to emulate the workload, so fail
         // loudly rather than silently running on real hardware.
         let ld_preload = kmd_preload().ok_or_else(|| {
             MirageError::Other(format!(
                 "rocjitsu: KMD preload library ({LIB_NAME}) not found; \
-                 cannot emulate workload"
+                 cannot emulate workload. Searched ${LIB_ENV}, $LD_LIBRARY_PATH, \
+                 $ROCM_HOME/lib, $ROCM_PATH/lib, the standard ROCm library \
+                 directories and a rocjitsu build beside this checkout. Install \
+                 rocjitsu (see docs/building.md) or point {LIB_ENV} at {LIB_NAME}."
             ))
         })?;
 
@@ -167,7 +169,14 @@ impl EmulatorBackend for Rocjitsu {
         // See `plan_container` in `mirage_supervisor::session`. (Before
         // the supervisor existed, a per-node `mirage host` process inside
         // each container re-resolved the whole injection instead.)
-        let runtime_dir = write_config_discovery(&config)?;
+        //
+        // The runtime directory is the session's, whoever wrote the
+        // config: in drop-in `--config` mode `config` is a file of the
+        // user's, and deriving the runtime directory from *its* location
+        // would leave the discovery file and the daemon socket beside it,
+        // outside the session, uncleaned, and shared with any other run
+        // pointed at the same config.
+        let runtime_dir = write_config_discovery(&ctx.runtime_dir, &config)?;
 
         let mut env = std::collections::BTreeMap::new();
         env.insert(
@@ -243,12 +252,13 @@ impl EmulatorBackend for Rocjitsu {
             );
             return Ok(None);
         };
-        let config = kmd_config(ctx.emulator(), Some(&ctx.runtime_dir))?;
+        let config = kmd_config(ctx.emulator(), &ctx.runtime_dir)?;
         // The daemon binds its socket under the same runtime directory the
         // workload's interposer probes (`$ROCJITSU_RUNTIME_DIR`), which is
         // exactly what `injection_def` exports — so the workload connects
-        // to *this* daemon with no extra wiring.
-        let runtime_dir = write_config_discovery(&config)?;
+        // to *this* daemon with no extra wiring. Both live in the
+        // session's scratch directory and go away with it.
+        let runtime_dir = write_config_discovery(&ctx.runtime_dir, &config)?;
         let daemon = rocjitsu_sys::daemon::Daemon::start(&lib, &config, &runtime_dir)
             .map_err(|e| MirageError::Other(format!("rocjitsu daemon: {e}")))?;
         Ok(Some(Box::new(RocjitsuDaemon(daemon))))
@@ -281,7 +291,7 @@ pub const RUNTIME_SUBDIR: &str = "rocjitsu";
 /// In-container directory where the host-side rocjitsu libraries are
 /// bind-mounted for a containerised session. All mirage system mounts
 /// live under `/mnt/mirage`; the in-container KMD discovery searches
-/// this directory (see [`kmd_search_dirs`]).
+/// this directory (see [`kmd_preload`]).
 pub const CONTAINER_LIB_DIR: &str = "/mnt/mirage/lib";
 
 /// Name used for the rocjitsu library on disk. A single combined
@@ -374,14 +384,21 @@ impl EmulatorDaemon for RocjitsuDaemon {
 ///
 /// The interposer resolves its `SimulationConfig` by reading a
 /// `config_path` file from its per-user runtime directory; the file's
-/// contents are the path to the config JSON. This derives that runtime
-/// directory from `config`'s location, writes the discovery file, and
-/// returns the directory.
-pub fn write_config_discovery(config: &std::path::Path) -> Result<PathBuf> {
-    let runtime_dir = config
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join(RUNTIME_SUBDIR);
+/// contents are the path to the config JSON.
+///
+/// The runtime directory is always [`RUNTIME_SUBDIR`] under
+/// `session_dir` — the session's own scratch directory — and never
+/// derived from where `config` happens to live. The daemon socket lands
+/// there too, so both are owned by the session, disappear with it, and
+/// stay distinct between two runs. That matters for the drop-in
+/// `--config` mode in particular, where `config` is a file of the
+/// user's that mirage has no business writing next to and that two
+/// concurrent runs may well share.
+pub fn write_config_discovery(
+    session_dir: &std::path::Path,
+    config: &std::path::Path,
+) -> Result<PathBuf> {
+    let runtime_dir = session_dir.join(RUNTIME_SUBDIR);
     let config_path_file = runtime_dir.join("config_path");
     mirage_core::state::write_bytes(
         &config_path_file,
@@ -390,18 +407,53 @@ pub fn write_config_discovery(config: &std::path::Path) -> Result<PathBuf> {
     Ok(runtime_dir)
 }
 
+/// Environment variable naming the KMD interposer directly, as an
+/// absolute path to the `.so`. The explicit override that wins over
+/// every search location, and the counterpart of the DBT backend's
+/// `ROCJITSU_HOOKS_LIB`.
+pub const LIB_ENV: &str = "ROCJITSU_LIB";
+
 /// Returns the path mirage should pass as `LD_PRELOAD` to an
 /// rocjitsu-emulated workload.
 ///
-/// Searches, in priority order, the in-tree monorepo build output
-/// (relative to the mirage binary), `$ROCM_HOME/lib`, the ROCm SDK
-/// install root reported by `rocm-sdk path --root`, and the in-container
-/// mount directory ([`CONTAINER_LIB_DIR`]). In each location it looks
-/// for the combined `librocjitsu.so` (see [`LIB_NAME`]).
+/// Discovery goes through the shared [`mirage_core::discovery`] policy,
+/// so `$ROCJITSU_LIB`, `$LD_LIBRARY_PATH`, `$ROCM_HOME`/`$ROCM_PATH`, the
+/// `rocm-sdk` install root and the standard ROCm/system library
+/// directories all locate rocjitsu exactly as they locate every other
+/// backend's library — see that module for the order. On top of the
+/// shared policy this adds the two locations that are specific to
+/// rocjitsu: an in-tree build beside this checkout
+/// ([`in_tree_relative_dirs`]) and, last, the in-container mount
+/// directory ([`CONTAINER_LIB_DIR`]).
 pub fn kmd_preload() -> Option<PathBuf> {
-    kmd_search_dirs()
-        .iter()
-        .find_map(|dir| find_lib_in(dir, LIB_NAME))
+    with_kmd_search(mirage_core::discovery::find_emulator_lib)
+        // A containerised node reaches its bind-mounted copy through
+        // `LD_LIBRARY_PATH` above; this is the fallback for an
+        // in-container process that did not inherit it.
+        .or_else(|| find_lib_in(std::path::Path::new(CONTAINER_LIB_DIR), LIB_NAME))
+}
+
+/// Call `f` with the search policy for the KMD interposer.
+///
+/// The in-tree build locations are computed rather than listed (see
+/// [`in_tree_relative_dirs`]), so the [`LibSearch`] borrows them and
+/// cannot be returned; handing it to a callback is what lets the search
+/// and any future "we looked here" guidance share one definition.
+fn with_kmd_search<R>(f: impl FnOnce(&LibSearch<'_>) -> R) -> R {
+    let in_tree = in_tree_relative_dirs();
+    let in_tree: Vec<&str> = in_tree.iter().map(String::as_str).collect();
+    f(&LibSearch {
+        file_env: &[LIB_ENV],
+        dir_env: &[],
+        home_env: &[],
+        lib_name: LIB_NAME,
+        binary_relative_dirs: &in_tree,
+        // rocjitsu is an ordinary ROCm-adjacent shared library: unlike
+        // HotSwap it does not ship patched copies of the ROCm runtime,
+        // so picking it up from `$LD_LIBRARY_PATH` or `/opt/rocm/lib` is
+        // exactly what a user who installed it there expects.
+        system_fallbacks: true,
+    })
 }
 
 /// Sub-paths, relative to a project directory, that a rocjitsu build
@@ -413,78 +465,51 @@ pub fn kmd_preload() -> Option<PathBuf> {
 /// freshly built emulator without being told where it is.
 const ROCJITSU_BUILD_SHAPES: &[&str] = &["build", "dist/lib", "stage/lib", "lib"];
 
-/// Directories searched for the KMD interposer, in priority order:
-/// a rocjitsu build in or beside this checkout, an install layout next to
-/// the `mirage` binary, `$ROCM_HOME/lib`, the ROCm SDK root reported by
-/// `rocm-sdk path --root`, and the in-container mount directory.
+/// Places a rocjitsu *project* could sit relative to an ancestor of the
+/// `mirage` binary.
 ///
-/// The first of those is the one that matters day to day, and it is
-/// deliberately generous. A developer who has just built rocjitsu should
-/// not then have to tell mirage where it went — the failure mode when
-/// they are not told is silent and expensive, because every session test
-/// skips and a skipped test still reports `ok`.
+/// Both the sibling-checkout shape (`<root>/rocjitsu`, reached when the
+/// ancestor is `emulation/`) and the superproject shape
+/// (`<root>/build/emulation/rocjitsu`, reached when it is the repository
+/// or its parent), because a CMake build directory is conventionally
+/// either inside the checkout or immediately beside it.
+const ROCJITSU_PROJECT_DIRS: &[&str] =
+    &["rocjitsu", "emulation/rocjitsu", "build/emulation/rocjitsu"];
+
+/// Directories, relative to the `mirage` binary's own directory, holding
+/// a rocjitsu build in or beside this checkout.
+///
+/// This is the location that matters day to day, and it is deliberately
+/// generous. A developer who has just built rocjitsu should not then
+/// have to tell mirage where it went — the failure mode when they are
+/// not told is silent and expensive, because every session test skips
+/// and a skipped test still reports `ok`.
+///
+/// Each ancestor of the binary is tried as a possible repository root:
+/// `target/<profile>/mirage` is three levels down, an integration-test
+/// binary in `target/<profile>/deps/` is four, and a superproject build
+/// directory beside the checkout is further still. Walking rather than
+/// counting means none of those has to be enumerated correctly, and a
+/// layout nobody anticipated still works.
 ///
 /// Note the limit: this can only find a build that shares an ancestor
 /// with the mirage binary. A build directory somewhere else entirely
-/// still needs `$ROCM_HOME`.
-fn kmd_search_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(exe_dir) = exe.parent()
-    {
-        // Walk up from the binary, trying each ancestor as a possible
-        // repository root. `target/<profile>/mirage` is three levels
-        // down; an integration-test binary in `target/<profile>/deps/` is
-        // four; a superproject build directory beside the checkout is
-        // further still. Walking rather than counting means none of those
-        // has to be enumerated correctly, and a layout nobody anticipated
-        // still works.
-        const MAX_ANCESTORS: usize = 8;
-        for root in exe_dir.ancestors().take(MAX_ANCESTORS) {
-            for project in rocjitsu_project_dirs(root) {
-                dirs.extend(
-                    ROCJITSU_BUILD_SHAPES
-                        .iter()
-                        .map(|shape| project.join(shape)),
-                );
+/// still needs `$ROCJITSU_LIB` or `$ROCM_PATH`.
+fn in_tree_relative_dirs() -> Vec<String> {
+    const MAX_ANCESTORS: usize = 8;
+    let mut dirs = Vec::with_capacity(
+        MAX_ANCESTORS * ROCJITSU_PROJECT_DIRS.len() * ROCJITSU_BUILD_SHAPES.len(),
+    );
+    let mut up = String::from(".");
+    for _ in 0..MAX_ANCESTORS {
+        for project in ROCJITSU_PROJECT_DIRS {
+            for shape in ROCJITSU_BUILD_SHAPES {
+                dirs.push(format!("{up}/{project}/{shape}"));
             }
         }
-
-        // Install layout: a `<prefix>/bin/mirage` finds its sibling
-        // `<prefix>/lib/librocjitsu.so` (e.g. both installed to /opt/rocm
-        // by scripts/mirage-docker-build.sh).
-        dirs.push(exe_dir.join("..").join("lib"));
+        up.push_str("/..");
     }
-
-    // ROCm install root.
-    if let Some(root) = std::env::var_os("ROCM_HOME").filter(|v| !v.is_empty()) {
-        dirs.push(PathBuf::from(root).join("lib"));
-    }
-    // ROCm SDK install root reported by the `rocm-sdk` CLI (present when
-    // a ROCm Python wheel venv is active).
-    if let Some(root) = mirage_core::discovery::rocm_sdk_root() {
-        dirs.push(root.join("lib"));
-    }
-    // In-container mount: for a containerised session the host libraries
-    // are bind-mounted here (see `injection_def`).
-    dirs.push(PathBuf::from(CONTAINER_LIB_DIR));
     dirs
-}
-
-/// Places a rocjitsu *project* could sit relative to `root`.
-///
-/// Both the sibling-checkout shape (`<root>/rocjitsu`, reached when
-/// `root` is `emulation/`) and the superproject shape
-/// (`<root>/build/emulation/rocjitsu`, reached when `root` is the
-/// repository or its parent), because a CMake build directory is
-/// conventionally either inside the checkout or immediately beside it.
-fn rocjitsu_project_dirs(root: &std::path::Path) -> Vec<PathBuf> {
-    vec![
-        root.join("rocjitsu"),
-        root.join("emulation").join("rocjitsu"),
-        root.join("build").join("emulation").join("rocjitsu"),
-    ]
 }
 
 /// First existing entry named `name` inside `dir`, if any.
@@ -520,15 +545,38 @@ fn plugins_to_json(plugins: &PluginsDef) -> serde_json::Value {
     serde_json::Value::Object(object)
 }
 
-/// Synthesise a rocjitsu `SimulationConfig` JSON file from the given
-/// [`EmulatorDef`] and return its `config_path`. That path is what gets
-/// recorded in the rocjitsu `config_path` discovery file so the
-/// LD_PRELOAD'd interposer loads it.
+/// Largest per-node GPU count mirage will ask rocjitsu to emulate.
+///
+/// Every GPU in `vm.gpu.num_gpus` becomes a whole software device inside
+/// the session — its own KFD node, memory image and queues — built
+/// during bring-up and torn down again at exit, so the cost is linear in
+/// the count. Past a certain size that stops being a bigger emulated
+/// machine and becomes a session that never finishes starting and does
+/// not stop when it is asked to, which is the one thing mirage promises
+/// cannot happen. Eight GPUs is the widest physical AMD node; this
+/// leaves an order of magnitude of headroom above it.
+pub const MAX_GPUS_PER_NODE: u32 = 64;
+
+/// The rocjitsu `SimulationConfig` a profile resolves to, before any of
+/// it reaches the disk.
+#[derive(Debug)]
+enum SimConfig {
+    /// A config file of the user's own, named by the drop-in `--config`
+    /// option and used verbatim. Already on disk; mirage only reads it.
+    Supplied(PathBuf),
+    /// Config JSON synthesised from the profile's topology + agent,
+    /// still to be written into a session's scratch directory.
+    Synthesised(Vec<u8>),
+}
+
+/// Resolve the rocjitsu `SimulationConfig` `def` asks for, writing
+/// nothing.
 ///
 /// The agent JSON under `<MIRAGE_CONFIG>/agent/` only stores the
 /// `vm` + `topology` subset that mirage owns. rocjitsu's KMD shim
 /// expects a full `SimulationConfig` (max_ticks, num_threads,
-/// exec_mode, vm, topology). This function:
+/// exec_mode, vm, topology). Unless the profile supplies a config of its
+/// own, this:
 ///
 /// 1. Resolves `def.topology` (and its inner `agent`), following
 ///    [`MaybeRef`] references against the on-disk
@@ -536,18 +584,11 @@ fn plugins_to_json(plugins: &PluginsDef) -> serde_json::Value {
 /// 2. Wraps the agent's `vm` + `topology` with rocjitsu runtime
 ///    fields (`exec_mode` is taken from `def.exec_mode`; the other
 ///    fields use sane defaults).
-/// 3. Writes the result into `runtime_dir` when one is supplied (a
-///    session's scratch directory). When it is `None` — e.g. at
-///    profile-validation time, before any session exists — it falls
-///    back to a content-addressed `sim_<hash>.json` in the system temp
-///    directory so identical configs share a file and stale files are
-///    never overwritten in-place.
 ///
-/// # Errors
-///
-/// Returns an error when the topology or agent references cannot be
-/// resolved, or the config cannot be written.
-pub fn kmd_config(def: &EmulatorDef, runtime_dir: Option<&std::path::Path>) -> Result<PathBuf> {
+/// Every way a profile can fail to describe a runnable machine surfaces
+/// here, which is what lets [`check_config`] validate one without a
+/// session and without leaving a file behind.
+fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     // Drop-in `--config <path>`: when an explicit rocjitsu simulation
     // config is supplied (mirage being used as a `rocjitsu` replacement)
     // use that file verbatim instead of synthesising one from the
@@ -562,7 +603,7 @@ pub fn kmd_config(def: &EmulatorDef, runtime_dir: Option<&std::path::Path>) -> R
                 "rocjitsu config not found: {path}"
             )));
         }
-        return Ok(cfg);
+        return Ok(SimConfig::Supplied(cfg));
     }
 
     let topology: TopologyDef = match &def.topology {
@@ -577,6 +618,18 @@ pub fn kmd_config(def: &EmulatorDef, runtime_dir: Option<&std::path::Path>) -> R
         ExecMode::Functional => "functional",
         ExecMode::Clocked => "clocked",
     };
+    if topology.gpus_per_node > MAX_GPUS_PER_NODE {
+        return Err(MirageError::Other(format!(
+            "gpus-per-node {} is more than rocjitsu can emulate; the limit is \
+             {MAX_GPUS_PER_NODE} per node. Each GPU is emulated as a whole software \
+             device — its own KFD node, memory image and queues — built at bring-up \
+             and torn down at exit, so a count this large produces a session that \
+             never finishes starting and cannot be stopped promptly. The widest \
+             physical AMD node is 8 GPUs. Pass --gpus-per-node {MAX_GPUS_PER_NODE} \
+             or fewer, or spread the GPUs over more nodes with --num-nodes.",
+            topology.gpus_per_node
+        )));
+    }
     // Honour the profile's per-node GPU count: rocjitsu's config loader
     // reads `vm.gpu.num_gpus` and synthesises that many KFD devices
     // (deriving per-GPU identities from the single `device` template).
@@ -606,32 +659,51 @@ pub fn kmd_config(def: &EmulatorDef, runtime_dir: Option<&std::path::Path>) -> R
     let bytes = serde_json::to_vec_pretty(&sim).map_err(|e| {
         MirageError::Other(format!("rocjitsu kmd_config: serialize sim config: {e}"))
     })?;
-    let cfg = match runtime_dir {
-        // Runtime: write the config into the session's scratch directory.
-        // One file per session, rewritten each time so it always
-        // reflects the current profile.
-        Some(dir) => {
-            let cfg = rj_config_path(dir);
+    Ok(SimConfig::Synthesised(bytes))
+}
+
+/// Materialise the rocjitsu `SimulationConfig` for `def` in
+/// `session_dir` — the session's scratch directory — and return its
+/// path. That path is what gets recorded in the rocjitsu `config_path`
+/// discovery file so the LD_PRELOAD'd interposer loads it.
+///
+/// One file per session, rewritten on each call so it always reflects
+/// the current profile, and removed with the session. A profile that
+/// supplies its own config (drop-in `--config`) is returned as-is and
+/// nothing is written.
+///
+/// # Errors
+///
+/// Returns an error when the topology or agent references cannot be
+/// resolved, the profile asks for more GPUs than rocjitsu will emulate
+/// (see [`MAX_GPUS_PER_NODE`]), or the config cannot be written.
+pub fn kmd_config(def: &EmulatorDef, session_dir: &std::path::Path) -> Result<PathBuf> {
+    match resolve_sim_config(def)? {
+        SimConfig::Supplied(cfg) => Ok(cfg),
+        SimConfig::Synthesised(bytes) => {
+            let cfg = rj_config_path(session_dir);
             mirage_core::state::write_bytes(&cfg, &bytes)?;
-            cfg
+            Ok(cfg)
         }
-        // Validation (no session yet): fall back to a content-addressed
-        // file in the system temp directory so identical configs share a
-        // file and stale files are never overwritten in-place.
-        None => {
-            let mut hasher = DefaultHasher::new();
-            bytes.hash(&mut hasher);
-            let key = format!("{:016x}", hasher.finish());
-            let cfg = std::env::temp_dir()
-                .join(RUNTIME_SUBDIR)
-                .join(format!("sim_{key}.json"));
-            if !cfg.exists() {
-                mirage_core::state::write_bytes(&cfg, &bytes)?;
-            }
-            cfg
-        }
-    };
-    Ok(cfg)
+    }
+}
+
+/// Check that `def` describes a machine rocjitsu can stand up, without
+/// writing anything.
+///
+/// This is what profile validation needs. It runs long before any
+/// session exists — `mirage profile create`, and `mirage run`'s
+/// override handling — so it has nowhere of its own to write and must
+/// leave nothing behind; it therefore does everything [`kmd_config`]
+/// does except the final write.
+///
+/// # Errors
+///
+/// Returns an error when the topology or agent references cannot be
+/// resolved, the supplied drop-in config does not exist, or the profile
+/// asks for more GPUs than rocjitsu will emulate.
+pub fn check_config(def: &EmulatorDef) -> Result<()> {
+    resolve_sim_config(def).map(|_| ())
 }
 
 /// Returns true if rocjitsu is reachable on this machine — i.e. a
@@ -646,6 +718,22 @@ mod tests {
 
     use super::*;
 
+    /// An [`EmulatorDef`] with an owned topology of `gpus_per_node`
+    /// GPUs on a default agent, resolvable without touching the stores.
+    fn def_with_gpus(gpus_per_node: u32) -> EmulatorDef {
+        EmulatorDef {
+            emulator: "rocjitsu".to_string(),
+            plugins: Default::default(),
+            exec_mode: ExecMode::Functional,
+            options: Default::default(),
+            topology: MaybeRef::Owned(TopologyDef {
+                num_nodes: 1,
+                gpus_per_node,
+                agent: MaybeRef::Owned(AgentDef::default()),
+            }),
+        }
+    }
+
     #[test]
     fn kmd_config_requires_resolvable_topology() {
         let _g = mirage_core::paths::test_env_lock();
@@ -658,7 +746,131 @@ mod tests {
             options: Default::default(),
             topology: MaybeRef::Ref("does-not-exist".to_string()),
         };
-        assert!(kmd_config(&def, None).is_err());
+        assert!(check_config(&def).is_err());
+        assert!(kmd_config(&def, tmp.path()).is_err());
+    }
+
+    /// Validating a profile must not write anything: it happens before a
+    /// session exists, so whatever it wrote would have no owner and
+    /// nothing would ever remove it. Validation used to leave a ~5 KB
+    /// `sim_<hash>.json` in a fixed, shared, world-writable directory
+    /// under the system temp directory, one per distinct profile,
+    /// forever — so that is where this looks.
+    #[test]
+    fn check_config_writes_nothing() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        let shared = std::env::temp_dir().join(RUNTIME_SUBDIR);
+        let entries = || -> std::collections::BTreeSet<std::ffi::OsString> {
+            std::fs::read_dir(&shared)
+                .map(|dir| dir.flatten().map(|e| e.file_name()).collect())
+                .unwrap_or_default()
+        };
+        let before = entries();
+
+        // A GPU count nothing else here uses, so a file left behind for
+        // this profile cannot be one an earlier run already left.
+        check_config(&def_with_gpus(47)).expect("an owned topology validates");
+
+        assert_eq!(
+            entries(),
+            before,
+            "profile validation must leave nothing behind in {}",
+            shared.display()
+        );
+    }
+
+    /// The counterpart: with a session directory to write into, the
+    /// config lands there and nowhere else.
+    #[test]
+    fn kmd_config_writes_into_the_session_directory() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+        let session = tmp.path().join("session");
+
+        let cfg = kmd_config(&def_with_gpus(2), &session).unwrap();
+
+        assert_eq!(cfg, rj_config_path(&session));
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&cfg).unwrap()).unwrap();
+        assert_eq!(json["vm"]["gpu"]["num_gpus"], 2);
+    }
+
+    /// A drop-in `--config` is used verbatim, but its runtime directory
+    /// belongs to the session: the discovery file (and the daemon socket
+    /// beside it) must never land next to the user's config file, which
+    /// mirage does not own and cannot clean up.
+    #[test]
+    fn discovery_file_lands_in_the_session_not_beside_the_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let user_dir = tmp.path().join("mine");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        let config = user_dir.join("cfg.json");
+        std::fs::write(&config, b"{}").unwrap();
+        let session = tmp.path().join("session");
+
+        let runtime_dir = write_config_discovery(&session, &config).unwrap();
+
+        assert_eq!(runtime_dir, session.join(RUNTIME_SUBDIR));
+        assert_eq!(
+            std::fs::read_to_string(runtime_dir.join("config_path")).unwrap(),
+            format!("{}\n", config.display())
+        );
+        assert_eq!(
+            std::fs::read_dir(&user_dir).unwrap().count(),
+            1,
+            "nothing may be written beside the user's own config file"
+        );
+    }
+
+    #[test]
+    fn a_node_wider_than_the_limit_is_refused_with_the_limit_named() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        // The limit itself is fine; one more is not.
+        check_config(&def_with_gpus(MAX_GPUS_PER_NODE)).expect("the limit itself is allowed");
+        let err = check_config(&def_with_gpus(MAX_GPUS_PER_NODE + 1)).unwrap_err();
+
+        let msg = err.to_string();
+        // A good message names the offending input, the limit, and the
+        // way out.
+        assert!(msg.contains(&(MAX_GPUS_PER_NODE + 1).to_string()), "{msg}");
+        assert!(msg.contains(&MAX_GPUS_PER_NODE.to_string()), "{msg}");
+        assert!(msg.contains("--num-nodes"), "{msg}");
+        // And it must be refused before anything is written for it.
+        assert!(kmd_config(&def_with_gpus(1_000_000), tmp.path()).is_err());
+        assert!(!rj_config_path(tmp.path()).exists());
+    }
+
+    /// rocjitsu's discovery must go through the shared search policy, so
+    /// the documented locations (`$LD_LIBRARY_PATH`, `$ROCM_PATH`, the
+    /// standard ROCm directories) find it like any other backend's
+    /// library.
+    #[test]
+    fn discovery_uses_the_shared_search_policy() {
+        with_kmd_search(|search| {
+            assert_eq!(search.lib_name, LIB_NAME);
+            assert!(search.system_fallbacks, "the ROCm/system locations count");
+            assert!(search.file_env.contains(&LIB_ENV));
+            // The in-tree build shapes are still probed, relative to the
+            // mirage binary, so a fresh sibling build is found untold.
+            let candidates = search.candidate_paths();
+            assert!(
+                candidates
+                    .iter()
+                    .any(|p| p.ends_with("emulation/rocjitsu/build/librocjitsu.so")),
+                "a sibling monorepo build must remain discoverable"
+            );
+            assert!(
+                candidates.contains(&PathBuf::from("/opt/rocm/lib").join(LIB_NAME)),
+                "the standard ROCm library directories must be searched"
+            );
+        });
     }
 
     #[test]
