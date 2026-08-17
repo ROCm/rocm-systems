@@ -94,7 +94,7 @@ constexpr uint32_t make_cdna1_sop1(uint32_t sdst, uint32_t ssrc0) {
 TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
   EXPECT_EQ(sizeof(Operand), 32u);
   EXPECT_EQ(sizeof(cdna5::Operand), 80u);
-  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 528u);
+  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 512u);
 }
 
 TEST(CodeArchApiTest, PreservesExistingPublicEnumValues) {

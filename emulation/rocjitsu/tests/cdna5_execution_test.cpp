@@ -1033,7 +1033,10 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
     ASSERT_NE(typed_compare, nullptr);
     if (!force_scalar) {
       EXPECT_TRUE(amdgpu::try_execute_vopc64_vop3_int_simd<int64_t>(
-          *typed_compare, *wf, [](auto a, auto b) { return a < b; }));
+          *typed_compare, *wf, [](auto a, auto b) { return a < b; },
+          [&](uint64_t result) {
+            amdgpu::write_explicit_lane_mask(typed_compare->vdst, *wf, result);
+          }));
       EXPECT_EQ(read_wave_sgpr(*cu, *wf, 0), 0x3u);
       write_wave_sgpr(*cu, *wf, 0, 0u);
       write_wave_sgpr(*cu, *wf, 1, 0u);

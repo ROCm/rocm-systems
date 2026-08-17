@@ -14,7 +14,6 @@
 
 #include <cassert>
 #include <cstdint>
-#include <memory>
 #include <optional>
 #include <string>
 
@@ -610,53 +609,6 @@ private:
   Operand *operand_ = nullptr;
   Operand *previous_ = nullptr;
 };
-
-/// @brief Operand backed by instruction-scoped staged lane values.
-///
-/// Holds source values prepared before semantic execution, including lane
-/// permutations and sub-dword selection.
-class StagedOperand : public Operand {
-public:
-  static constexpr int MAX_LANES = 64;
-
-  StagedOperand();
-  ~StagedOperand() override;
-
-  /// @brief Construct from 32-bit staged lane values.
-  /// @param base The underlying operand (for name/size/scalar reads).
-  /// @param data Staged values (one per lane).
-  /// @param lane_count Number of valid lanes.
-  StagedOperand(const Operand &base, const uint32_t *data, int lane_count);
-
-  /// @brief Construct from 64-bit staged lane values.
-  StagedOperand(const Operand &base, const uint64_t *data, int lane_count);
-
-  std::string name() const override { return "staged_src"; }
-
-  bool simd_capable() const override { return true; }
-
-private:
-  uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
-  uint64_t read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const override;
-  uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
-  uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;
-  void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
-                       uint32_t *out) const override;
-
-  /// @brief Expose staged low dwords as read-only SIMD storage.
-  const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
-
-  amdgpu::ConstVgprStoragePair64
-  simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const override;
-
-  // Keep the execution-only storage type out of the model-facing include graph.
-  struct Storage;
-  std::unique_ptr<Storage> storage_;
-  int lane_count_ = 0;
-};
-
-// Compatibility name for generated output predating StagedOperand.
-using DppOperand = StagedOperand;
 
 } // namespace rocjitsu
 

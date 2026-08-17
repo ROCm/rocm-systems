@@ -197,7 +197,9 @@ public:
       static_assert(sizeof(T) == sizeof(uint32_t), "store_native expects 32-bit lanes");
       assert(op_ && wf_ && "OperandWriteView is empty");
       constexpr std::size_t W = util::native_width_v<T>;
-      lane_mask = RegisterAccess::checked_store_lane_mask(observed_lane_mask_, lane_base, W,
+      if (storage_)
+        lane_mask &= wf_->vgpr_write_mask() >> lane_base;
+      lane_mask = RegisterAccess::checked_store_lane_mask(permitted_write_lane_mask_, lane_base, W,
                                                           lane_mask, "OperandWriteView");
       if (storage_) {
         if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
@@ -227,7 +229,9 @@ public:
       static_assert(sizeof(T) == sizeof(uint32_t), "store_narrow expects 32-bit lanes");
       assert(op_ && wf_ && "OperandWriteView is empty");
       constexpr std::size_t W = util::native_width64;
-      lane_mask = RegisterAccess::checked_store_lane_mask(observed_lane_mask_, lane_base, W,
+      if (storage_)
+        lane_mask &= wf_->vgpr_write_mask() >> lane_base;
+      lane_mask = RegisterAccess::checked_store_lane_mask(permitted_write_lane_mask_, lane_base, W,
                                                           lane_mask, "OperandWriteView");
       if (storage_) {
         if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
@@ -260,14 +264,14 @@ public:
     friend class RegisterAccess;
 
     OperandWriteView(const Operand &op, Wavefront &wf, VgprStorage *storage,
-                     uint64_t observed_lane_mask, uint8_t byte_mask)
-        : op_(&op), wf_(&wf), storage_(storage), observed_lane_mask_(observed_lane_mask),
-          byte_mask_(byte_mask) {}
+                     uint64_t permitted_write_lane_mask, uint8_t byte_mask)
+        : op_(&op), wf_(&wf), storage_(storage),
+          permitted_write_lane_mask_(permitted_write_lane_mask), byte_mask_(byte_mask) {}
 
     const Operand *op_ = nullptr;
     Wavefront *wf_ = nullptr;
     VgprStorage *storage_ = nullptr;
-    uint64_t observed_lane_mask_ = 0;
+    uint64_t permitted_write_lane_mask_ = 0;
     uint8_t byte_mask_ = rocjitsu::ExecutionPlugin::kFullByteMask;
   };
 
@@ -282,7 +286,9 @@ public:
       static_assert(sizeof(T) == sizeof(uint64_t), "store_native expects 64-bit lanes");
       assert(op_ && wf_ && "OperandWrite64View is empty");
       constexpr std::size_t W = util::native_width64;
-      lane_mask = RegisterAccess::checked_store_lane_mask(observed_lane_mask_, lane_base, W,
+      if (storage_.lo)
+        lane_mask &= wf_->vgpr_write_mask() >> lane_base;
+      lane_mask = RegisterAccess::checked_store_lane_mask(permitted_write_lane_mask_, lane_base, W,
                                                           lane_mask, "OperandWrite64View");
       if (storage_.lo) {
         storage_.lo->template simd_store64<T>(*storage_.hi, lane_base, value, lane_mask);
@@ -305,13 +311,14 @@ public:
     friend class RegisterAccess;
 
     OperandWrite64View(const Operand &op, Wavefront &wf, VgprStoragePair64 storage,
-                       uint64_t observed_lane_mask)
-        : op_(&op), wf_(&wf), storage_(storage), observed_lane_mask_(observed_lane_mask) {}
+                       uint64_t permitted_write_lane_mask)
+        : op_(&op), wf_(&wf), storage_(storage),
+          permitted_write_lane_mask_(permitted_write_lane_mask) {}
 
     const Operand *op_ = nullptr;
     Wavefront *wf_ = nullptr;
     VgprStoragePair64 storage_{};
-    uint64_t observed_lane_mask_ = 0;
+    uint64_t permitted_write_lane_mask_ = 0;
   };
 
   class OperandReadWriteView {
@@ -351,7 +358,9 @@ public:
       static_assert(sizeof(T) == sizeof(uint32_t), "store_native expects 32-bit lanes");
       assert(op_ && wf_ && "OperandReadWriteView is empty");
       constexpr std::size_t W = util::native_width_v<T>;
-      lane_mask = RegisterAccess::checked_store_lane_mask(observed_lane_mask_, lane_base, W,
+      if (storage_)
+        lane_mask &= wf_->vgpr_write_mask() >> lane_base;
+      lane_mask = RegisterAccess::checked_store_lane_mask(permitted_write_lane_mask_, lane_base, W,
                                                           lane_mask, "OperandReadWriteView");
       if (storage_) {
         if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
@@ -381,7 +390,9 @@ public:
       static_assert(sizeof(T) == sizeof(uint32_t), "store_narrow expects 32-bit lanes");
       assert(op_ && wf_ && "OperandReadWriteView is empty");
       constexpr std::size_t W = util::native_width64;
-      lane_mask = RegisterAccess::checked_store_lane_mask(observed_lane_mask_, lane_base, W,
+      if (storage_)
+        lane_mask &= wf_->vgpr_write_mask() >> lane_base;
+      lane_mask = RegisterAccess::checked_store_lane_mask(permitted_write_lane_mask_, lane_base, W,
                                                           lane_mask, "OperandReadWriteView");
       if (storage_) {
         if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
@@ -414,10 +425,11 @@ public:
     friend class RegisterAccess;
 
     OperandReadWriteView(const Operand &op, Wavefront &wf, VgprStorage *storage,
-                         uint64_t observed_lane_mask, uint8_t read_byte_mask,
+                         uint64_t permitted_write_lane_mask, uint8_t read_byte_mask,
                          uint8_t write_byte_mask)
-        : op_(&op), wf_(&wf), storage_(storage), observed_lane_mask_(observed_lane_mask),
-          read_byte_mask_(read_byte_mask), byte_mask_(write_byte_mask) {
+        : op_(&op), wf_(&wf), storage_(storage),
+          permitted_write_lane_mask_(permitted_write_lane_mask), read_byte_mask_(read_byte_mask),
+          byte_mask_(write_byte_mask) {
       if (!storage_)
         scalar_fallback_.emplace(op.read_lane(wf, 0));
     }
@@ -430,7 +442,7 @@ public:
     Wavefront *wf_ = nullptr;
     VgprStorage *storage_ = nullptr;
     std::optional<uint32_t> scalar_fallback_;
-    uint64_t observed_lane_mask_ = 0;
+    uint64_t permitted_write_lane_mask_ = 0;
     uint8_t read_byte_mask_ = rocjitsu::ExecutionPlugin::kFullByteMask;
     uint8_t byte_mask_ = rocjitsu::ExecutionPlugin::kFullByteMask;
   };
@@ -459,7 +471,9 @@ public:
       static_assert(sizeof(T) == sizeof(uint64_t), "store_native expects 64-bit lanes");
       assert(op_ && wf_ && "OperandReadWrite64View is empty");
       constexpr std::size_t W = util::native_width64;
-      lane_mask = RegisterAccess::checked_store_lane_mask(observed_lane_mask_, lane_base, W,
+      if (storage_.lo)
+        lane_mask &= wf_->vgpr_write_mask() >> lane_base;
+      lane_mask = RegisterAccess::checked_store_lane_mask(permitted_write_lane_mask_, lane_base, W,
                                                           lane_mask, "OperandReadWrite64View");
       if (storage_.lo) {
         storage_.lo->template simd_store64<T>(*storage_.hi, lane_base, value, lane_mask);
@@ -482,9 +496,9 @@ public:
     friend class RegisterAccess;
 
     OperandReadWrite64View(const Operand &op, Wavefront &wf, VgprStoragePair64 storage,
-                           uint64_t observed_lane_mask, uint8_t read_byte_mask)
-        : op_(&op), wf_(&wf), storage_(storage), observed_lane_mask_(observed_lane_mask),
-          read_byte_mask_(read_byte_mask) {
+                           uint64_t permitted_write_lane_mask, uint8_t read_byte_mask)
+        : op_(&op), wf_(&wf), storage_(storage),
+          permitted_write_lane_mask_(permitted_write_lane_mask), read_byte_mask_(read_byte_mask) {
       if (!storage_.lo)
         scalar_fallback_.emplace(op.read_lane64(wf, 0));
     }
@@ -497,7 +511,7 @@ public:
     Wavefront *wf_ = nullptr;
     VgprStoragePair64 storage_{};
     std::optional<uint64_t> scalar_fallback_;
-    uint64_t observed_lane_mask_ = 0;
+    uint64_t permitted_write_lane_mask_ = 0;
     uint8_t read_byte_mask_ = rocjitsu::ExecutionPlugin::kFullByteMask;
   };
 
@@ -611,7 +625,9 @@ public:
       static_assert(sizeof(T) == sizeof(uint32_t), "store_native_pair expects 32-bit lanes");
       assert(op_ && wf_ && "OperandWritePair32View is empty");
       constexpr std::size_t W = util::native_width_v<T>;
-      lane_mask = RegisterAccess::checked_store_lane_mask(observed_lane_mask_, lane_base, W,
+      if (storage_.lo)
+        lane_mask &= wf_->vgpr_write_mask() >> lane_base;
+      lane_mask = RegisterAccess::checked_store_lane_mask(permitted_write_lane_mask_, lane_base, W,
                                                           lane_mask, "OperandWritePair32View");
       if (storage_.lo) {
         storage_.lo->template simd_store<T>(lane_base, lo, lane_mask);
@@ -635,13 +651,14 @@ public:
     friend class RegisterAccess;
 
     OperandWritePair32View(const Operand &op, Wavefront &wf, VgprStoragePair64 storage,
-                           uint64_t observed_lane_mask)
-        : op_(&op), wf_(&wf), storage_(storage), observed_lane_mask_(observed_lane_mask) {}
+                           uint64_t permitted_write_lane_mask)
+        : op_(&op), wf_(&wf), storage_(storage),
+          permitted_write_lane_mask_(permitted_write_lane_mask) {}
 
     const Operand *op_ = nullptr;
     Wavefront *wf_ = nullptr;
     VgprStoragePair64 storage_{};
-    uint64_t observed_lane_mask_ = 0;
+    uint64_t permitted_write_lane_mask_ = 0;
   };
 
   class VgprReadRegion {
@@ -838,7 +855,10 @@ public:
     op.write_scalar64(mutable_wavefront(), value);
   }
   void write_lane(const Operand &op, uint32_t lane, uint32_t value) const {
-    op.write_lane(mutable_wavefront(), lane, value);
+    Wavefront &wf = mutable_wavefront();
+    if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
+      return;
+    op.write_lane(wf, lane, value);
   }
   /// @brief Write selected destination bytes in one VGPR lane.
   ///
@@ -852,6 +872,8 @@ public:
     auto physical_reg = op.simd_vgpr_base_mut(wf);
     if (!storage || !physical_reg)
       throw std::logic_error("partial-byte operand write requires a VGPR destination");
+    if (!(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
+      return;
     mutable_cu().notify_vgpr_write(&wf, *physical_reg, uint64_t{1} << lane, observed_byte_mask);
     const uint32_t bit_mask = byte_bit_mask(update_byte_mask);
     uint32_t merged = ((*storage)[lane] & ~bit_mask) | (value & bit_mask);
@@ -861,7 +883,10 @@ public:
   }
 
   void write_lane64(const Operand &op, uint32_t lane, uint64_t value) const {
-    op.write_lane64(mutable_wavefront(), lane, value);
+    Wavefront &wf = mutable_wavefront();
+    if (op.simd_vgpr_storage64_mut(wf).lo && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
+      return;
+    op.write_lane64(wf, lane, value);
   }
 
   void read_chunk(const Operand &op, uint32_t lane_base, uint32_t count, uint32_t *out) const {
@@ -871,6 +896,8 @@ public:
                    uint64_t lane_mask) const {
     Wavefront &wf = mutable_wavefront();
     uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
+    if (op.simd_vgpr_storage_mut(wf))
+      lane_mask &= wf.vgpr_write_mask() >> lane_base;
     if (op.simd_capable())
       op.simd_notify_write_mut(wf, (lane_mask & full_mask) << lane_base,
                                rocjitsu::ExecutionPlugin::kFullByteMask);
@@ -915,26 +942,34 @@ public:
                 uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     Wavefront &wf = mutable_wavefront();
     VgprStorage *storage = op.simd_vgpr_storage_mut(wf);
+    const uint64_t permitted_write_lane_mask =
+        storage ? lane_mask & wf.vgpr_write_mask() : lane_mask;
     if (storage)
-      op.simd_notify_write_mut(wf, lane_mask, byte_mask);
-    return OperandWriteView(op, wf, storage, lane_mask, byte_mask);
+      op.simd_notify_write_mut(wf, permitted_write_lane_mask, byte_mask);
+    return OperandWriteView(op, wf, storage, permitted_write_lane_mask, byte_mask);
   }
 
   [[nodiscard]] OperandWrite64View write_operand64(const Operand &op, uint64_t lane_mask) const {
     Wavefront &wf = mutable_wavefront();
     VgprStoragePair64 storage = op.simd_vgpr_storage64_mut(wf);
+    const uint64_t permitted_write_lane_mask =
+        storage.lo ? lane_mask & wf.vgpr_write_mask() : lane_mask;
     if (storage.lo)
-      op.simd_notify_write64_mut(wf, lane_mask, rocjitsu::ExecutionPlugin::kFullByteMask);
-    return OperandWrite64View(op, wf, storage, lane_mask);
+      op.simd_notify_write64_mut(wf, permitted_write_lane_mask,
+                                 rocjitsu::ExecutionPlugin::kFullByteMask);
+    return OperandWrite64View(op, wf, storage, permitted_write_lane_mask);
   }
 
   [[nodiscard]] OperandWritePair32View write_operand_pair32(const Operand &op,
                                                             uint64_t lane_mask) const {
     Wavefront &wf = mutable_wavefront();
     VgprStoragePair64 storage = op.simd_vgpr_storage64_mut(wf);
+    const uint64_t permitted_write_lane_mask =
+        storage.lo ? lane_mask & wf.vgpr_write_mask() : lane_mask;
     if (storage.lo)
-      op.simd_notify_write64_mut(wf, lane_mask, rocjitsu::ExecutionPlugin::kFullByteMask);
-    return OperandWritePair32View(op, wf, storage, lane_mask);
+      op.simd_notify_write64_mut(wf, permitted_write_lane_mask,
+                                 rocjitsu::ExecutionPlugin::kFullByteMask);
+    return OperandWritePair32View(op, wf, storage, permitted_write_lane_mask);
   }
 
   [[nodiscard]] OperandReadWriteView
@@ -942,22 +977,28 @@ public:
                     uint8_t write_byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     Wavefront &wf = mutable_wavefront();
     VgprStorage *storage = op.simd_vgpr_storage_mut(wf);
+    const uint64_t permitted_write_lane_mask =
+        storage ? lane_mask & wf.vgpr_write_mask() : lane_mask;
     if (storage) {
       op.simd_notify_read_mut(wf, lane_mask, byte_mask);
-      op.simd_notify_write_mut(wf, lane_mask, write_byte_mask);
+      op.simd_notify_write_mut(wf, permitted_write_lane_mask, write_byte_mask);
     }
-    return OperandReadWriteView(op, wf, storage, lane_mask, byte_mask, write_byte_mask);
+    return OperandReadWriteView(op, wf, storage, permitted_write_lane_mask, byte_mask,
+                                write_byte_mask);
   }
 
   [[nodiscard]] OperandReadWrite64View readwrite_operand64(const Operand &op, uint64_t lane_mask,
                                                            uint8_t byte_mask = 0xF) const {
     Wavefront &wf = mutable_wavefront();
     VgprStoragePair64 storage = op.simd_vgpr_storage64_mut(wf);
+    const uint64_t permitted_write_lane_mask =
+        storage.lo ? lane_mask & wf.vgpr_write_mask() : lane_mask;
     if (storage.lo) {
       op.simd_notify_read64_mut(wf, lane_mask, byte_mask);
-      op.simd_notify_write64_mut(wf, lane_mask, rocjitsu::ExecutionPlugin::kFullByteMask);
+      op.simd_notify_write64_mut(wf, permitted_write_lane_mask,
+                                 rocjitsu::ExecutionPlugin::kFullByteMask);
     }
-    return OperandReadWrite64View(op, wf, storage, lane_mask, byte_mask);
+    return OperandReadWrite64View(op, wf, storage, permitted_write_lane_mask, byte_mask);
   }
 
   // Physical SGPR access. These APIs are for helpers that already know the
@@ -1014,6 +1055,8 @@ public:
   [[nodiscard]] VgprWriteRegion write_vgpr_region(uint32_t physical_base, uint32_t reg_count,
                                                   uint64_t lane_mask,
                                                   uint8_t byte_mask = 0xF) const {
+    if (mutable_wf_)
+      lane_mask &= mutable_wf_->vgpr_write_mask();
     observe_vgpr_write_region(physical_base, reg_count, lane_mask, byte_mask);
     return VgprWriteRegion(mutable_cu(), physical_base, reg_count, lane_mask, byte_mask);
   }

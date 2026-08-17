@@ -4060,12 +4060,15 @@ TEST(Rdna4True16Vop3Test, UnaryDpp16ScalarAndSimdMatchMaskedLaneRouting) {
   }
 
   EXPECT_EQ(outputs[0], outputs[1]);
-  const auto plan = amdgpu::dpp::make_dpp_access_plan(kWaveSize, kDppCtrl, kRowMask, kBankMask,
-                                                      /*bound_ctrl=*/0, /*fi=*/1, kExec);
+  const auto plan = amdgpu::dpp::make_dpp_plan(kWaveSize, kDppCtrl, kRowMask, kBankMask,
+                                               /*bound_ctrl=*/0, /*fi=*/1, kExec,
+                                               /*inactive_uses_bound_ctrl=*/true);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
-    const int source_lane = plan.source_lane_for_destination[lane];
+    const int source_lane = plan.source_lanes[lane];
+    const bool writes_destination =
+        (plan.row_bank_mask & plan.source_write_mask & (uint64_t{1} << lane)) != 0;
     const uint16_t expected_high =
-        source_lane == amdgpu::dpp::DppAccessPlan::kNoSourceLane
+        !writes_destination || source_lane == amdgpu::dpp::DppPlan::INVALID_LANE
             ? static_cast<uint16_t>(0x1000u + lane)
             : util::f32_to_f16(1.0f / static_cast<float>(uint32_t{1} << (source_lane % 4)));
     EXPECT_EQ(outputs[1][lane], pack16(static_cast<uint16_t>(0x5000u + lane), expected_high))
@@ -4149,12 +4152,14 @@ TEST(Rdna4True16Vop3Test, VopcDpp16ScalarAndSimdMatchMaskedLaneRouting) {
   }
 
   EXPECT_EQ(outputs[0], outputs[1]);
-  const auto plan = amdgpu::dpp::make_dpp_access_plan(kWaveSize, kDppCtrl, kRowMask, kBankMask,
-                                                      /*bound_ctrl=*/0, /*fi=*/1, kExec);
+  const auto plan = amdgpu::dpp::make_dpp_plan(kWaveSize, kDppCtrl, kRowMask, kBankMask,
+                                               /*bound_ctrl=*/0, /*fi=*/1, kExec,
+                                               /*inactive_uses_bound_ctrl=*/true);
   uint32_t expected_low = 0;
   for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
-    const int source_lane = plan.source_lane_for_destination[lane];
-    if (source_lane == amdgpu::dpp::DppAccessPlan::kNoSourceLane)
+    const int source_lane = plan.source_lanes[lane];
+    if (!(plan.row_bank_mask & plan.source_write_mask & (uint64_t{1} << lane)) ||
+        source_lane == amdgpu::dpp::DppPlan::INVALID_LANE)
       continue;
     const float source = static_cast<float>(source_lane + 1);
     const float threshold = static_cast<float>(lane + ((lane & 1u) ? 2u : 0u));

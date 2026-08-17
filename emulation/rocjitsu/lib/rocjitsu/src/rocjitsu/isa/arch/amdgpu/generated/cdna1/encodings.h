@@ -9,9 +9,9 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
-#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/decode_result.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include <array>
 #include <cstdint>
 #include <string>
@@ -417,20 +417,22 @@ inline constexpr uint16_t kVop3pMfma = 423;
 
 } // namespace encoding
 
-class Sop1 : public IsaInstruction<Isa> {
-public:
-  Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn);
+class Sop1 : public IsaInstruction<Isa>
+{
+  public:
+   Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_literal32() const;
   bool default_encoding();
   bool has_lit_0();
   using OpEncoding = Sop1MachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
-};
+} ;
 
-class Sopc : public IsaInstruction<Isa> {
-public:
-  Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn);
+class Sopc : public IsaInstruction<Isa>
+{
+  public:
+   Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_literal32() const;
   bool default_encoding();
   bool has_lit_0();
@@ -439,30 +441,33 @@ public:
   using OpEncoding = SopcMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
-};
+} ;
 
-class Sopp : public IsaInstruction<Isa> {
-public:
-  Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn);
+class Sopp : public IsaInstruction<Isa>
+{
+  public:
+   Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   using OpEncoding = SoppMachineInst;
   const OpEncoding inst_;
-};
+} ;
 
-class Sopk : public IsaInstruction<Isa> {
-public:
-  Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn);
+class Sopk : public IsaInstruction<Isa>
+{
+  public:
+   Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   bool hasImpliedLiteral();
   using OpEncoding = SopkMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
   uint32_t literal_ = 0;
-};
+} ;
 
-class Sop2 : public IsaInstruction<Isa> {
-public:
-  Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn);
+class Sop2 : public IsaInstruction<Isa>
+{
+  public:
+   Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_literal32() const;
   bool default_encoding();
   bool has_lit_0();
@@ -471,19 +476,21 @@ public:
   using OpEncoding = Sop2MachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
-};
+} ;
 
-class Smem : public IsaInstruction<Isa> {
-public:
-  Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn);
+class Smem : public IsaInstruction<Isa>
+{
+  public:
+   Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn);
   void build_modifiers(std::string &out) const override;
   using OpEncoding = SmemMachineInst;
   const OpEncoding inst_;
-};
+} ;
 
-class Vop1 : public IsaInstruction<Isa> {
-public:
-  Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+class Vop1 : public IsaInstruction<Isa>
+{
+  public:
+   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_literal32() const;
   bool has_encoded_sdwa() const;
   void implicit_uses(RegisterSet &uses) const override;
@@ -501,8 +508,6 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -519,11 +524,12 @@ public:
   uint32_t sdwa_dst_unused_ = 0;
   bool sdwa_clamp_ = false;
   uint32_t sdwa_omod_ = 0;
-};
+} ;
 
-class Vopc : public IsaInstruction<Isa> {
-public:
-  Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
+class Vopc : public IsaInstruction<Isa>
+{
+  public:
+   Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_literal32() const;
   bool has_encoded_sdwa() const;
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
@@ -539,8 +545,6 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -555,11 +559,12 @@ public:
   amdgpu::sdwa::SourceModifierFormat sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
   uint32_t sdwa_sdst_ = 106;
   bool sdwa_sd_ = false;
-};
+} ;
 
-class Vop2 : public IsaInstruction<Isa> {
-public:
-  Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+class Vop2 : public IsaInstruction<Isa>
+{
+  public:
+   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_literal32() const;
   bool has_encoded_sdwa() const;
   void implicit_uses(RegisterSet &uses) const override;
@@ -579,8 +584,6 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -597,90 +600,101 @@ public:
   uint32_t sdwa_dst_unused_ = 0;
   bool sdwa_clamp_ = false;
   uint32_t sdwa_omod_ = 0;
-};
+} ;
 
-class Vintrp : public IsaInstruction<Isa> {
-public:
-  Vintrp(std::string_view mnemonic, const VintrpMachineInst *inst, ExecuteFn exec_fn);
+class Vintrp : public IsaInstruction<Isa>
+{
+  public:
+   Vintrp(std::string_view mnemonic, const VintrpMachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   using OpEncoding = VintrpMachineInst;
   const OpEncoding inst_;
-};
+} ;
 
-class Vop3p : public IsaInstruction<Isa> {
-public:
-  Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
+class Vop3p : public IsaInstruction<Isa>
+{
+  public:
+   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;
-};
+} ;
 
-class Vop3 : public IsaInstruction<Isa> {
-public:
-  Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+class Vop3 : public IsaInstruction<Isa>
+{
+  public:
+   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop3MachineInst;
   const OpEncoding inst_;
-};
+} ;
 
-class Ds : public IsaInstruction<Isa> {
-public:
-  Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn);
+class Ds : public IsaInstruction<Isa>
+{
+  public:
+   Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
-};
+} ;
 
-class Mubuf : public IsaInstruction<Isa> {
-public:
-  Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn);
+class Mubuf : public IsaInstruction<Isa>
+{
+  public:
+   Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn);
   void build_modifiers(std::string &out) const override;
   using OpEncoding = MubufMachineInst;
   const OpEncoding inst_;
-};
+} ;
 
-class Mtbuf : public IsaInstruction<Isa> {
-public:
-  Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn);
+class Mtbuf : public IsaInstruction<Isa>
+{
+  public:
+   Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn);
   void build_modifiers(std::string &out) const override;
   using OpEncoding = MtbufMachineInst;
   const OpEncoding inst_;
-};
+} ;
 
-class Mimg : public IsaInstruction<Isa> {
-public:
-  Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
+class Mimg : public IsaInstruction<Isa>
+{
+  public:
+   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;
-};
+} ;
 
-class Exp : public IsaInstruction<Isa> {
-public:
-  Exp(std::string_view mnemonic, const ExpMachineInst *inst, ExecuteFn exec_fn);
+class Exp : public IsaInstruction<Isa>
+{
+  public:
+   Exp(std::string_view mnemonic, const ExpMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = ExpMachineInst;
   const OpEncoding inst_;
-};
+} ;
 
-class Flat : public IsaInstruction<Isa> {
-public:
-  Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
+class Flat : public IsaInstruction<Isa>
+{
+  public:
+   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   using OpEncoding = FlatMachineInst;
   const OpEncoding inst_;
   std::string owned_mnemonic_;
-};
+} ;
 
-class Vop3SdstEnc : public IsaInstruction<Isa> {
-public:
-  Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+class Vop3SdstEnc : public IsaInstruction<Isa>
+{
+  public:
+   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop3SdstEncMachineInst;
   const OpEncoding inst_;
-};
+} ;
 
-class Vop3pMfma : public IsaInstruction<Isa> {
-public:
-  Vop3pMfma(std::string_view mnemonic, const Vop3pMfmaMachineInst *inst, ExecuteFn exec_fn);
+class Vop3pMfma : public IsaInstruction<Isa>
+{
+  public:
+   Vop3pMfma(std::string_view mnemonic, const Vop3pMfmaMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop3pMfmaMachineInst;
   const OpEncoding inst_;
-};
+} ;
 
 } // namespace cdna1
 } // namespace rocjitsu

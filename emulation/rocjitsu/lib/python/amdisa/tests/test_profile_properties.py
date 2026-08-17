@@ -23,6 +23,7 @@ from amdisa.isa_profile import (
     Cdna4Profile,
     CdnaProfile,
     Cdna5Profile,
+    DppOpcodeRule,
     MemoryCoherencyModel,
     Rdna1Profile,
     Rdna2Profile,
@@ -120,6 +121,192 @@ def test_descriptor_vgpr_count_granule(profile, expected_wave32, expected_wave64
 )
 def test_amdgpu_profiles_split_execution_sources(profile):
     assert profile.split_execution_sources
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (CdnaProfile(), False),
+        (Cdna1Profile(), False),
+        (Cdna2Profile(), False),
+        (Rdna1Profile(), False),
+        (Rdna3Profile(), True),
+        (Rdna3_5Profile(), True),
+        (Rdna4Profile(), True),
+        (Gfx1250Profile(), True),
+    ],
+)
+def test_dpp_inactive_source_policy(profile, expected):
+    assert profile.dpp_bound_ctrl_applies_to_inactive_sources is expected
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (CdnaProfile(), False),
+        (Cdna1Profile(), False),
+        (Cdna2Profile(), False),
+        (Rdna1Profile(), False),
+        (Rdna3Profile(), True),
+        (Rdna3_5Profile(), True),
+        (Rdna4Profile(), True),
+        (Gfx1250Profile(), True),
+    ],
+)
+def test_dpp_suppressed_compare_policy(profile, expected):
+    assert profile.dpp_suppressed_compare_lanes_zero is expected
+
+
+@pytest.mark.parametrize(
+    ('profile', 'src0_size_bits', 'expected'),
+    [
+        (CdnaProfile(), 32, DppOpcodeRule.ALLOW),
+        (CdnaProfile(), 64, DppOpcodeRule.ROW_SELECT_ONLY),
+        (Cdna1Profile(), 64, DppOpcodeRule.ALLOW),
+        (Cdna2Profile(), 64, DppOpcodeRule.ALLOW),
+    ],
+)
+def test_cdna_64bit_input_dpp_rule(profile, src0_size_bits, expected):
+    assert (
+        profile.dpp_opcode_rule('ENC_VOP1', 'V_MOV_B64', src0_size_bits=src0_size_bits)
+        is expected
+    )
+
+
+@pytest.mark.parametrize('opcode', ['V_READFIRSTLANE_B32', 'V_CLREXCP', 'V_SWAP_B32'])
+def test_cdna3_and_4_lane_special_opcodes_do_not_accept_dpp(opcode):
+    assert (
+        CdnaProfile().dpp_opcode_rule('ENC_VOP1', opcode, src0_size_bits=32)
+        is DppOpcodeRule.FORBID
+    )
+
+
+@pytest.mark.parametrize(
+    'profile',
+    [
+        Cdna1Profile(),
+        Cdna2Profile(),
+        CdnaProfile(),
+        Rdna1Profile(),
+        Rdna2Profile(),
+    ],
+)
+@pytest.mark.parametrize(
+    'opcode',
+    [
+        'V_READFIRSTLANE_B32',
+        'V_CVT_I32_F64',
+        'V_CVT_F64_I32',
+        'V_CVT_F32_F64',
+        'V_CVT_F64_F32',
+        'V_CVT_U32_F64',
+        'V_CVT_F64_U32',
+        'V_TRUNC_F64',
+        'V_CEIL_F64',
+        'V_RNDNE_F64',
+        'V_FLOOR_F64',
+        'V_RCP_F64',
+        'V_RSQ_F64',
+        'V_SQRT_F64',
+        'V_FREXP_EXP_I32_F64',
+        'V_FREXP_MANT_F64',
+        'V_FRACT_F64',
+        'V_CLREXCP',
+        'V_SWAP_B32',
+        'V_CMP_CLASS_F64',
+        'V_CMPX_CLASS_F64',
+        'V_CMP_EQ_F64',
+        'V_CMPX_LT_I64',
+        'V_CMP_GE_U64',
+        'V_CMPX_NE_U64',
+    ],
+)
+def test_legacy_dpp_prohibition_tables(profile, opcode):
+    assert (
+        profile.dpp_opcode_rule('ENC_VOP1', opcode, src0_size_bits=64)
+        is DppOpcodeRule.FORBID
+    )
+
+
+@pytest.mark.parametrize(
+    'profile',
+    [Cdna1Profile(), Cdna2Profile(), CdnaProfile(), Rdna1Profile(), Rdna2Profile()],
+)
+@pytest.mark.parametrize('opcode', ['V_MOV_B64', 'V_CMP_EQ_U32', 'V_SWAPREL_B32'])
+def test_legacy_dpp_prohibition_tables_do_not_match_nearby_legal_opcodes(
+    profile, opcode
+):
+    src0_size_bits = 64 if opcode == 'V_MOV_B64' else 32
+    assert (
+        profile.dpp_opcode_rule('ENC_VOP1', opcode, src0_size_bits=src0_size_bits)
+        is not DppOpcodeRule.FORBID
+    )
+
+
+@pytest.mark.parametrize(
+    ('profile', 'wave', 'row_bcast', 'row_xmask'),
+    [
+        (CdnaProfile(), True, True, False),
+        (Rdna1Profile(), True, True, False),
+        (Rdna3Profile(), False, False, True),
+        (Rdna4Profile(), False, False, True),
+        (Gfx1250Profile(), False, False, True),
+    ],
+)
+def test_dpp_control_range_capabilities(profile, wave, row_bcast, row_xmask):
+    assert profile.dpp_supports_wave_controls is wave
+    assert profile.dpp_supports_row_broadcast_controls is row_bcast
+    assert profile.dpp_supports_row_xmask is row_xmask
+
+
+@pytest.mark.parametrize(
+    ('profile', 'encoding', 'opcode', 'expected'),
+    [
+        (CdnaProfile(), 'ENC_VOP3P', 'V_PK_ADD_U16', DppOpcodeRule.ALLOW),
+        (Rdna3Profile(), 'ENC_VOP1', 'V_CVT_F64_I32', DppOpcodeRule.FORBID),
+        (Rdna3Profile(), 'ENC_VOP1', 'V_MOV_B32', DppOpcodeRule.ALLOW),
+        (Rdna3Profile(), 'ENC_VOP1', 'V_NOP', DppOpcodeRule.ALLOW),
+        (Rdna3Profile(), 'ENC_VOP1', 'V_SWAPREL_B32', DppOpcodeRule.ALLOW),
+        (Rdna3Profile(), 'ENC_VOP1', 'V_SWAP_B32', DppOpcodeRule.FORBID),
+        (Rdna3Profile(), 'ENC_VOP2', 'V_FMAMK_F32', DppOpcodeRule.FORBID),
+        (Rdna3Profile(), 'ENC_VOP2', 'V_ADD_F32', DppOpcodeRule.ALLOW),
+        (Rdna3Profile(), 'ENC_VOP3P', 'V_PK_ADD_U16', DppOpcodeRule.FORBID),
+        (Rdna3Profile(), 'ENC_VOP3P', 'V_WMMA_F32_16X16X16_F16', DppOpcodeRule.FORBID),
+        (Rdna3Profile(), 'ENC_VOP3P', 'V_FMA_MIX_F32', DppOpcodeRule.ALLOW),
+        (Rdna3Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.FORBID),
+        (Rdna4Profile(), 'ENC_VOP3', 'V_MUL_LO_U32', DppOpcodeRule.FORBID),
+        (Rdna4Profile(), 'ENC_VOP1', 'V_NOP', DppOpcodeRule.FORBID),
+        (Rdna4Profile(), 'ENC_VOP1', 'V_PIPEFLUSH', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'VOP3_SDST_ENC', 'V_ADD_CO_CI_U32', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOPC', 'V_CMP_EQ_F64', DppOpcodeRule.FORBID),
+        (Rdna4Profile(), 'ENC_VOPC', 'V_CMP_EQ_U32', DppOpcodeRule.ALLOW),
+        (
+            Gfx1250Profile(),
+            'ENC_VOP3',
+            'V_ADD_F64',
+            DppOpcodeRule.ROW_SELECT_ONLY,
+        ),
+        (
+            Gfx1250Profile(),
+            'ENC_VOP3',
+            'V_MUL_LO_U32',
+            DppOpcodeRule.ROW_SELECT_ONLY,
+        ),
+        (Gfx1250Profile(), 'ENC_VOP3', 'V_TRIG_PREOP_F64', DppOpcodeRule.FORBID),
+        (
+            Gfx1250Profile(),
+            'ENC_VOP3',
+            'V_LDEXP_F64',
+            DppOpcodeRule.ROW_SELECT_ONLY,
+        ),
+        (Gfx1250Profile(), 'ENC_VOP3', 'V_CVT_SCALE_F32_F16', DppOpcodeRule.FORBID),
+        (Gfx1250Profile(), 'ENC_VOP3P', 'V_FMA_MIX_F32', DppOpcodeRule.ALLOW),
+        (Gfx1250Profile(), 'ENC_VOP3P', 'V_DOT4_F32_FP8', DppOpcodeRule.FORBID),
+    ],
+)
+def test_dpp_opcode_rules(profile, encoding, opcode, expected):
+    assert profile.dpp_opcode_rule(encoding, opcode) is expected
 
 
 def test_non_split_generation_leaves_exec_named_sources_untouched(tmp_path):

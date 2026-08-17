@@ -293,6 +293,16 @@ public:
   /// @brief Set the raw architectural EXEC register pair.
   void set_exec_raw(uint64_t val) { exec_ = val; }
 
+  /// @brief Return the execution-local mask applied to VGPR write effects.
+  /// @details DPP semantic helpers still evaluate every active lane so scalar
+  /// side results see the complete operation. This mask suppresses both the
+  /// architectural VGPR commit and its plugin observation for row/bank-masked
+  /// or invalid-source lanes.
+  uint64_t vgpr_write_mask() const { return vgpr_write_mask_ & lane_mask(); }
+
+  /// @brief Set the execution-local VGPR write-effect mask.
+  void set_vgpr_write_mask(uint64_t val) { vgpr_write_mask_ = val & lane_mask(); }
+
   /// @brief Return the raw architectural VCC register pair.
   /// @returns Raw VCC register value, including non-lane bits in wave32 mode.
   uint64_t vcc() const { return vcc_; }
@@ -784,6 +794,7 @@ public:
     sgpr_alloc_ = {};
     vgpr_alloc_ = {};
     exec_ = lane_mask();
+    vgpr_write_mask_ = lane_mask();
     vcc_ = 0;
     m0_ = 0;
     set_mode_raw(0);
@@ -868,6 +879,7 @@ private:
   uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
 
   uint64_t exec_ = ~0ULL;              ///< EXEC mask -- one bit per lane (1 = active).
+  uint64_t vgpr_write_mask_ = ~0ULL;   ///< Execution-local architectural and plugin write mask.
   uint64_t vcc_ = 0;                   ///< Vector condition code (per-lane comparison result).
   uint32_t m0_ = 0;                    ///< M0 special register (misc addressing).
   uint32_t mode_raw_ = 0;              ///< MODE register state.
