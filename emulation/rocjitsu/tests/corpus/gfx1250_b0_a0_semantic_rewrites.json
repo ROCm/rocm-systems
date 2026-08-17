@@ -1,6 +1,9 @@
 {
   "schema": 1,
   "tests": {
+    "barrier_signal_isfirst_test": {
+      "instructions_requiring_rewrite": 0
+    },
     "cluster_load_test": {
       "instructions_requiring_rewrite": 14
     },
@@ -34,8 +37,14 @@
     "wmma_scale_regular_test": {
       "instructions_requiring_rewrite": 11
     },
+    "wmma_split_f16_test": {
+      "instructions_requiring_rewrite": 6
+    },
     "wmma_split_f32_test": {
       "instructions_requiring_rewrite": 7
+    },
+    "wmma_split_fp4_test": {
+      "instructions_requiring_rewrite": 8
     }
   }
 }

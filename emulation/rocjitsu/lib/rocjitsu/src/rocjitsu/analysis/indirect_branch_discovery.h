@@ -109,6 +109,26 @@ struct PcAddressBuilder {
   friend bool operator==(const PcAddressBuilder &, const PcAddressBuilder &) = default;
 };
 
+/// @brief Whether an AMDGPU physical VGPR is callee-saved by the ABI.
+///
+/// @details A callee-saved VGPR keeps its value across a call, so a value stashed
+/// there is still the caller's after the callee returns. @p phys_vgpr is the
+/// resolved physical index; gfx1250 VGPR_MSB banking can push it past 255, and the
+/// ABI table only covers v0-v255, so a banked register above that range is not
+/// proven callee-saved and reports false. The default device and graphics
+/// conventions share this VGPR set, so unlike the SGPR rule below no explicit
+/// intersection is necessary.
+[[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr);
+
+/// @brief Whether an SGPR is preserved by every AMDGPU calling convention the
+/// translator may encounter for a device function.
+///
+/// @details Code objects do not record whether a particular helper uses the
+/// default device convention or the graphics convention. This predicate uses
+/// their intersection, so an unsummarized call cannot preserve a stale value
+/// merely because one convention saves the register.
+[[nodiscard]] bool is_callee_saved_sgpr(uint16_t sgpr);
+
 /// @brief Discover concrete targets for statically-built setpc/swappc consumers.
 ///
 /// @details This pass runs before BasicBlock storage is finalized because any
@@ -140,15 +160,6 @@ struct PcAddressBuilder {
 ///        section actually contains a recoverable indirect consumer, because a
 ///        section with no dynamic transfer has no stale-PC branch hazard to
 ///        prove anything about.
-/// @brief Whether an AMDGPU physical VGPR is callee-saved by the ABI.
-///
-/// @details A callee-saved VGPR keeps its value across a call, so a value stashed
-/// there is still the caller's after the callee returns. @p phys_vgpr is the
-/// resolved physical index; gfx1250 VGPR_MSB banking can push it past 255, and the
-/// ABI table only covers v0-v255, so a banked register above that range is not
-/// proven callee-saved and reports false.
-[[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr);
-
 /// @returns Recovered indirect branch/call metadata.
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
