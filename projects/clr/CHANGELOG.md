@@ -8,6 +8,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * New HIP APIs
     - Device Management: support for querying a device identifier.
       * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for a device
+* Batched Memcpy: Add `GPU_FORCE_BLIT_INDIRECT_SIZE` to allow tuning of when SDMA instead of Blit is used for indirect batched copies.
 
 ## HIP 10.0.0 for ROCm 10.0.0
 
