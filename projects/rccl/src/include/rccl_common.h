@@ -172,8 +172,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
                                  ncclDataType_t datatype, bool query, bool graphCapturingHint,
                                  struct rcclCollDecision* decision);
 // Single source of truth for ReduceScatter selection: symmetric -> DDA fabric
-// (LL/LL128/VMM) / DDA IPC -> Direct -> native ring/pat kernel. RS has no CE.
-// query=true fills protocol/nMaxChannels for reporting (side-effect-free).
+// (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct -> native ring/pat kernel. RS has no CE.
 ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                      ncclDataType_t datatype, ncclRedOp_t op, bool query,
                                      struct rcclCollDecision* decision);
