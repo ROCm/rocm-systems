@@ -22,8 +22,10 @@
 
 #include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/buffer_tracing.h>
@@ -34,6 +36,7 @@
 #include <hip/amd_detail/hip_api_trace.hpp>
 
 #include <string_view>
+#include <unordered_map>
 
 namespace rocprofiler
 {
@@ -196,6 +199,70 @@ namespace
 {
 thread_local active_event_context_t g_active_event_ctx = {};
 
+using event_queue_map_t    = std::unordered_map<uint64_t, rocprofiler_queue_id_t>;
+using coalesce_group_map_t = std::unordered_map<uint64_t, coalesce_group_ptr_t>;
+
+common::Synchronized<event_queue_map_t>    g_event_queue_map    = {};
+common::Synchronized<coalesce_group_map_t> g_coalesce_group_map = {};
+
+void
+check_coalesced_record(uint64_t hip_event_handle)
+{
+    if(g_active_event_ctx.barrier_captured) return;
+
+    auto group = lookup_coalesce_group(hip_event_handle);
+    if(!group) return;
+
+    auto* corr_id = context::get_latest_correlation_id();
+    if(!corr_id) return;
+
+    auto hip_event_tracing_data = tracing::tracing_data{};
+    tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
+                               ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                               hip_event_tracing_data);
+    if(hip_event_tracing_data.empty()) return;
+
+    auto thr_id = corr_id->thread_idx;
+    tracing::populate_external_correlation_ids(hip_event_tracing_data.external_correlation_ids,
+                                               thr_id,
+                                               ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_EVENT,
+                                               ROCPROFILER_HIP_EVENT_RECORD,
+                                               corr_id->internal);
+
+    auto source_queue = lookup_event_queue(hip_event_handle);
+
+    auto pending            = coalesce_pending_t{};
+    pending.tracing_data    = std::move(hip_event_tracing_data);
+    pending.callback_record = rocprofiler_callback_tracing_hip_event_data_t{
+        sizeof(rocprofiler_callback_tracing_hip_event_data_t),
+        rocprofiler_timestamp_t{0},
+        rocprofiler_timestamp_t{0},
+        rocprofiler_agent_id_t{0},
+        source_queue,
+        hip_event_handle,
+        source_queue};
+    pending.tid              = thr_id;
+    pending.internal_corr_id = corr_id->internal;
+    pending.ancestor_corr_id = corr_id->ancestor;
+
+    group->wlock([&](auto& g) {
+        if(g.completed)
+        {
+            barrier_complete(pending.tracing_data,
+                             pending.tid,
+                             pending.internal_corr_id,
+                             pending.ancestor_corr_id,
+                             g.barrier_time,
+                             ROCPROFILER_HIP_EVENT_RECORD,
+                             pending.callback_record);
+        }
+        else
+        {
+            g.pending.emplace_back(std::move(pending));
+        }
+    });
+}
+
 template <typename ApiTag, typename RetT>
 auto event_record_wrapper(RetT (*next)(hipEvent_t, hipStream_t))
 {
@@ -203,7 +270,8 @@ auto event_record_wrapper(RetT (*next)(hipEvent_t, hipStream_t))
     return +[](hipEvent_t event, hipStream_t stream) -> RetT {
         g_active_event_ctx = {
             ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false};
-        auto ret           = next_func(event, stream);
+        auto ret = next_func(event, stream);
+        check_coalesced_record(reinterpret_cast<uint64_t>(event));
         g_active_event_ctx = {};
         return ret;
     };
@@ -216,7 +284,8 @@ auto event_record_with_flags_wrapper(RetT (*next)(hipEvent_t, hipStream_t, unsig
     return +[](hipEvent_t event, hipStream_t stream, unsigned int flags) -> RetT {
         g_active_event_ctx = {
             ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false};
-        auto ret           = next_func(event, stream, flags);
+        auto ret = next_func(event, stream, flags);
+        check_coalesced_record(reinterpret_cast<uint64_t>(event));
         g_active_event_ctx = {};
         return ret;
     };
@@ -240,6 +309,38 @@ get_active_event_context()
 {
     if(g_active_event_ctx.operation == ROCPROFILER_HIP_EVENT_NONE) return nullptr;
     return &g_active_event_ctx;
+}
+
+void
+record_event_queue(uint64_t hip_event_handle, rocprofiler_queue_id_t queue_id)
+{
+    g_event_queue_map.wlock([&](auto& map) { map[hip_event_handle] = queue_id; });
+}
+
+rocprofiler_queue_id_t
+lookup_event_queue(uint64_t hip_event_handle)
+{
+    return g_event_queue_map.rlock([&](const auto& map) -> rocprofiler_queue_id_t {
+        auto it = map.find(hip_event_handle);
+        if(it != map.end()) return it->second;
+        return rocprofiler_queue_id_t{.handle = 0};
+    });
+}
+
+void
+store_coalesce_group(uint64_t hip_event_handle, coalesce_group_ptr_t group)
+{
+    g_coalesce_group_map.wlock([&](auto& map) { map[hip_event_handle] = std::move(group); });
+}
+
+coalesce_group_ptr_t
+lookup_coalesce_group(uint64_t hip_event_handle)
+{
+    return g_coalesce_group_map.rlock([&](const auto& map) -> coalesce_group_ptr_t {
+        auto it = map.find(hip_event_handle);
+        if(it != map.end()) return it->second;
+        return nullptr;
+    });
 }
 
 namespace api

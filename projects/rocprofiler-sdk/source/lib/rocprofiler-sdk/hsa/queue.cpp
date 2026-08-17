@@ -403,6 +403,29 @@ BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                      bdata.operation,
                                      bdata.callback_record);
 
+        if(bdata.operation == ROCPROFILER_HIP_EVENT_RECORD)
+        {
+            auto group = hip::event::lookup_coalesce_group(bdata.callback_record.hip_event_handle);
+            if(group)
+            {
+                group->wlock([&](auto& g) {
+                    g.barrier_time = barrier_time;
+                    g.completed    = true;
+                    for(auto& p : g.pending)
+                    {
+                        hip::event::barrier_complete(p.tracing_data,
+                                                     p.tid,
+                                                     p.internal_corr_id,
+                                                     p.ancestor_corr_id,
+                                                     barrier_time,
+                                                     ROCPROFILER_HIP_EVENT_RECORD,
+                                                     p.callback_record);
+                    }
+                    g.pending.clear();
+                });
+            }
+        }
+
         if(bdata.pooled_signal)
         {
             Queue::release_signal(bdata.pooled_signal);
@@ -674,9 +697,17 @@ WriteInterceptor(const void* packets,
 
             if(!is_kernel_dispatch && !is_ext_kernel_dispatch)
             {
-                // CLR uses BARRIER_AND for event barriers. BARRIER_OR is never
-                // used by CLR's event path and is not intercepted here.
-                const bool is_barrier = (packet_type == HSA_PACKET_TYPE_BARRIER_AND);
+                // CLR uses BARRIER_AND or vendor-specific BARRIER_VALUE for event
+                // barriers depending on device settings. BARRIER_OR is never used
+                // by CLR's event path and is not intercepted here.
+                bool is_barrier = (packet_type == HSA_PACKET_TYPE_BARRIER_AND);
+                if(!is_barrier && packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+                {
+                    const auto& vendor_hdr =
+                        reinterpret_cast<const hsa_amd_vendor_packet_header_t&>(
+                            _packets[i].ext_amd_aql_pm4.header);
+                    is_barrier = (vendor_hdr.AmdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE);
+                }
 
                 auto* event_ctx = hip::event::get_active_event_context();
 
@@ -696,6 +727,16 @@ WriteInterceptor(const void* packets,
                         event_ctx->operation,
                         internal_corr_id);
 
+                    auto source_queue = queue.get_id();
+                    if(event_ctx->operation == ROCPROFILER_HIP_EVENT_RECORD)
+                    {
+                        hip::event::record_event_queue(event_ctx->hip_event_handle, queue.get_id());
+                    }
+                    else if(event_ctx->operation == ROCPROFILER_HIP_EVENT_WAIT)
+                    {
+                        source_queue = hip::event::lookup_event_queue(event_ctx->hip_event_handle);
+                    }
+
                     _barrier_data.callback_record = rocprofiler_callback_tracing_hip_event_data_t{
                         sizeof(rocprofiler_callback_tracing_hip_event_data_t),
                         rocprofiler_timestamp_t{0},
@@ -703,7 +744,25 @@ WriteInterceptor(const void* packets,
                         queue.get_agent().get_rocp_agent()->id,
                         queue.get_id(),
                         event_ctx->hip_event_handle,
-                        queue.get_id()};
+                        source_queue};
+
+                    {
+                        auto tracer_data = _barrier_data.callback_record;
+                        tracing::execute_phase_enter_callbacks(
+                            _barrier_data.tracing_data.callback_contexts,
+                            thr_id,
+                            internal_corr_id,
+                            _barrier_data.tracing_data.external_correlation_ids,
+                            ancestor_corr_id,
+                            ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
+                            event_ctx->operation,
+                            tracer_data);
+                    }
+
+                    tracing::update_external_correlation_ids(
+                        _barrier_data.tracing_data.external_correlation_ids,
+                        thr_id,
+                        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_EVENT);
 
                     const auto& barrier_pkt                = _packets[i].barrier_and;
                     const auto  original_completion_signal = barrier_pkt.completion_signal;
@@ -730,7 +789,24 @@ WriteInterceptor(const void* packets,
                         transformed_packets.emplace_back(forwarding);
                     }
 
+                    {
+                        auto tracer_data = _barrier_data.callback_record;
+                        tracing::execute_phase_exit_callbacks(
+                            _barrier_data.tracing_data.callback_contexts,
+                            _barrier_data.tracing_data.external_correlation_ids,
+                            ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
+                            event_ctx->operation,
+                            tracer_data);
+                    }
+
                     event_ctx->barrier_captured = true;
+
+                    if(event_ctx->operation == ROCPROFILER_HIP_EVENT_RECORD)
+                    {
+                        auto group =
+                            std::make_shared<common::Synchronized<hip::event::coalesce_group_t>>();
+                        hip::event::store_coalesce_group(event_ctx->hip_event_handle, group);
+                    }
 
                     auto barrier_session_data = barrier_info_session_t::barrier_data_array_t{};
                     barrier_session_data.emplace_back(std::move(_barrier_data));

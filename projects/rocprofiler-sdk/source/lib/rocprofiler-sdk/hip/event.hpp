@@ -22,8 +22,12 @@
 
 #pragma once
 
+#include "lib/common/container/small_vector.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
+
+#include <memory>
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -71,6 +75,36 @@ struct active_event_context_t
 
 active_event_context_t*
 get_active_event_context();
+
+void
+record_event_queue(uint64_t hip_event_handle, rocprofiler_queue_id_t queue_id);
+
+rocprofiler_queue_id_t
+lookup_event_queue(uint64_t hip_event_handle);
+
+struct coalesce_pending_t
+{
+    tracing::tracing_data                         tracing_data     = {};
+    rocprofiler_callback_tracing_hip_event_data_t callback_record  = {};
+    rocprofiler_thread_id_t                       tid              = 0;
+    uint64_t                                      internal_corr_id = 0;
+    uint64_t                                      ancestor_corr_id = 0;
+};
+
+struct coalesce_group_t
+{
+    profiling_time                                         barrier_time = {};
+    bool                                                   completed    = false;
+    common::container::small_vector<coalesce_pending_t, 4> pending      = {};
+};
+
+using coalesce_group_ptr_t = std::shared_ptr<common::Synchronized<coalesce_group_t>>;
+
+void
+store_coalesce_group(uint64_t hip_event_handle, coalesce_group_ptr_t group);
+
+coalesce_group_ptr_t
+lookup_coalesce_group(uint64_t hip_event_handle);
 
 template <typename TableT>
 void
