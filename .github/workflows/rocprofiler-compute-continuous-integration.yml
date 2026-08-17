@@ -198,8 +198,10 @@ jobs:
           tarball=$(ls /opt/rocm-*-multiarch.tar.gz | head -n 1)
           tar -xf "${tarball}" -C "${{ env.ROCM_PATH }}"
           rm -f "${tarball}"
-          ROCM_PACKAGE_VERSION=$(python3 -c "import json; print(json.load(open('${{ env.ROCM_PATH }}/share/therock/therock_manifest.json'))['rocm_package_version'].split('+')[0])")
+          ROCM_PACKAGE_VERSION=$(python3 -c "import json; m=json.load(open('${{ env.ROCM_PATH }}/share/therock/therock_manifest.json')); print(m['rocm_package_version'].split('+')[0])")
+          ROCM_VERSION=$(python3 -c "import json; print(json.load(open('${{ env.ROCM_PATH }}/share/therock/therock_manifest.json'))['rocm_version'])")
           echo "ROCM_PACKAGE_VERSION=${ROCM_PACKAGE_VERSION}" >> "${GITHUB_ENV}"
+          echo "ROCM_VERSION=${ROCM_VERSION}" >> "${GITHUB_ENV}"
           echo "ROCm ${ROCM_PACKAGE_VERSION} installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
 
@@ -242,12 +244,17 @@ jobs:
           import os
           import re
           import subprocess
+          import sys
 
           def torch_sort_key(version: str) -> tuple[int, ...]:
               base = version.split("+", 1)[0]
               return tuple(int(part) for part in base.split("."))
 
+          def rocm_suffix(version: str) -> str:
+              return version.split("+rocm", 1)[1]
+
           rocm_tag = os.environ["ROCM_PACKAGE_VERSION"]
+          rocm_base = os.environ["ROCM_VERSION"]
           proc = subprocess.run(
               [
                   "pip",
@@ -261,21 +268,39 @@ jobs:
               text=True,
               check=True,
           )
-          suffix = f"+rocm{rocm_tag}"
-          matches = sorted(
-              {
-                  match
-                  for match in re.findall(r"(\d+\.\d+\.\d+\+rocm[^\s,]+)", proc.stdout)
-                  if match.endswith(suffix)
-              },
-              key=torch_sort_key,
+          all_versions = sorted(
+              set(re.findall(r"(\d+\.\d+\.\d+\+rocm[^\s,]+)", proc.stdout)),
+              key=lambda version: (rocm_suffix(version), torch_sort_key(version)),
               reverse=True,
           )
-          if not matches:
+
+          exact = [
+              version
+              for version in all_versions
+              if version.endswith(f"+rocm{rocm_tag}")
+          ]
+          if exact:
+              print(exact[0])
+              sys.exit(0)
+
+          fallback = [
+              version
+              for version in all_versions
+              if rocm_suffix(version).startswith(rocm_base)
+          ]
+          if not fallback:
               raise SystemExit(
-                  f"No torch wheel found for ROCm package version {rocm_tag!r}"
+                  "No torch wheel found for ROCm package version "
+                  f"{rocm_tag!r} or ROCm line {rocm_base!r}"
               )
-          print(matches[0])
+
+          chosen = fallback[0]
+          print(
+              f"::warning::No exact torch wheel for ROCm {rocm_tag!r}; "
+              f"falling back to {chosen} (same ROCm line {rocm_base!r})",
+              file=sys.stderr,
+          )
+          print(chosen)
           PY
           )
           echo "Installing torch ${TORCH_VERSION} for ROCm ${ROCM_PACKAGE_VERSION} (${DEVICE_EXTRA})"
