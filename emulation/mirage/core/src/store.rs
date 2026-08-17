@@ -23,7 +23,10 @@
 //! tells them apart:
 //!
 //! * A write that would replace a document mirage did not write is
-//!   refused ([`profile_put`], [`agent_put`]). Replacing a *pristine*
+//!   refused ([`profile_put`], [`topology_put`], [`agent_put`] alike --
+//!   the three resource verbs are parallel, and a user has no way to
+//!   infer that one of them destroys their work where the others refuse).
+//!   Replacing a *pristine*
 //!   builtin is fine: it is mirage's own seed and identical to the copy
 //!   still compiled into the binary.
 //! * A delete of a pristine builtin is refused, because mirage rewrites
@@ -403,6 +406,7 @@ pub fn topology_get(name: &str) -> Result<TopologyDef> {
 /// the document cannot be written.
 pub fn topology_put(name: &str, topology: &TopologyDef) -> Result<()> {
     validate_name("topology", name)?;
+    guard_overwrite(DocKind::Topology, name)?;
     validate_topology_refs(topology)?;
     crate::topology::store::put(name, topology).map(|_| ())
 }
@@ -639,6 +643,35 @@ mod tests {
         // And once it is gone, the name is free again.
         profile_delete("tuned").unwrap();
         profile_put(&profile("tuned")).unwrap();
+        crate::paths::clear_test_root();
+    }
+
+    #[test]
+    fn a_topology_is_guarded_like_a_profile_and_an_agent() {
+        // The three resource verbs are parallel, and a user has no way to
+        // infer that one of them destroys their work where the other two
+        // refuse. `topology create` was the odd one out: it went straight
+        // to disk, so an edited builtin topology could be discarded by a
+        // command that printed `created topology …` and exited 0.
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+
+        let mut mine = topology();
+        mine.gpus_per_node = 3;
+        topology_put("mine", &mine).unwrap();
+
+        let err = topology_put("mine", &topology()).unwrap_err().to_string();
+        assert!(err.contains("already exists"), "{err}");
+        assert!(err.contains("mirage topology delete mine"), "{err}");
+        assert_eq!(
+            topology_get("mine").unwrap().gpus_per_node,
+            3,
+            "the user's copy survived"
+        );
+
+        topology_delete("mine").unwrap();
+        topology_put("mine", &topology()).unwrap();
         crate::paths::clear_test_root();
     }
 

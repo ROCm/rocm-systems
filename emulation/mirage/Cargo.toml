@@ -90,8 +90,12 @@ rust-version = "1.88"
 # mechanism rather than one. The trade was taken the other way instead: a
 # `SIGKILL`ed run is allowed to strand its workloads and containers, and
 # `mirage cleanup` reclaims them. Every resource is tagged for it — a
-# `mirage.owner` label on containers, `MIRAGE_SESSION` in every workload's
+# `mirage.owner`/`mirage.session`/`mirage.runtime` label on containers and
+# networks, `MIRAGE_SESSION` and `MIRAGE_RUNTIME` in every workload's
 # environment — so the recovery needs no `unsafe` and no bookkeeping file.
+# The runtime half of the pair is what keeps a cleanup to its own state
+# directory; see `core/src/reclaim.rs` for why session alone was not
+# enough.
 #
 # `unwrap_used` / `expect_used` are denied in production code. Test modules
 # opt out locally with an inner

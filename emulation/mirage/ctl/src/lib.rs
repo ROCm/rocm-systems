@@ -362,7 +362,7 @@ pub enum CtlCmd {
     /// and dies with it.
     Exec(ExecArgsCli),
 
-    /// Manage mirage's on-disk state (builtin topologies, purge).
+    /// Manage mirage's on-disk state (builtin documents, purge).
     #[command(subcommand)]
     State(StateCmd),
 
@@ -495,7 +495,7 @@ pub enum TopologyCmd {
     List,
     /// Show a topology as JSON.
     Show { name: String },
-    /// Create or overwrite a topology.
+    /// Create a topology.
     Create {
         name: String,
         /// Agent name referenced by this topology.
@@ -621,17 +621,24 @@ pub struct ExecArgsCli {
 
 #[derive(Subcommand, Debug)]
 pub enum StateCmd {
-    /// (Re)write the builtin topologies to `<MIRAGE_CONFIG>/topology/`.
+    /// (Re)write the builtin agents, topologies and profiles under
+    /// `<MIRAGE_CONFIG>`.
     ///
-    /// On every run mirage writes any missing builtin topologies on
-    /// startup; this command additionally **overwrites** existing
-    /// ones, useful after upgrading mirage.
+    /// Every command writes back any builtin that has gone missing, so
+    /// this one exists for the case that does not cover: refreshing the
+    /// ones already on disk after upgrading mirage.
+    ///
+    /// A builtin you have edited is left alone and named, because
+    /// replacing it would destroy the only copy. Delete it first if you
+    /// want the shipped version back — that is what a delete of an
+    /// edited builtin is for.
     Builtins,
     /// Remove mirage's runtime directory and reclaim orphaned containers.
     ///
     /// Refuses while any `mirage run` is live: a run owns its session and
     /// cleans up when it exits, so stop those first. The config directory
-    /// (profiles, topologies) is left alone unless `--all` is passed.
+    /// (agents, topologies, profiles) is left alone unless `--all` is
+    /// passed.
     Purge {
         /// Don't prompt for confirmation.
         #[arg(short = 'f', long)]
@@ -701,6 +708,7 @@ pub struct RunArgs {
     #[arg(long)]
     image: Option<String>,
     /// Extra bind mount (`HOST[:CONTAINER[:ro|rw]]`). May be repeated.
+    /// Requires a containerised profile or `--image`.
     #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
     mounts: Vec<String>,
     /// Publish a container port on the host
@@ -2124,7 +2132,7 @@ async fn state_cmd(cmd: StateCmd, json: bool) -> anyhow::Result<ExitCode> {
         }
         StateCmd::Purge { force, all } => {
             let prompt = if all {
-                "purge ALL mirage state, including profiles and topologies?"
+                "purge ALL mirage state, including agents, topologies and profiles?"
             } else {
                 "purge all mirage runtime/state and stop all sessions?"
             };

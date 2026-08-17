@@ -211,9 +211,15 @@ impl RocjitsuDbt {
             .filter(|p| p.is_file())
             .or_else(hooks_preload)
             .ok_or_else(|| {
+                // Was: "not found; cannot translate workload", naming no
+                // variable at all — strictly worse than the message the
+                // rocjitsu backend prints beside it.
+                let detail = runtime_location()
+                    .explain_missing()
+                    .unwrap_or_else(|| format!("{HOOKS_LIB_NAME} was not found"));
                 MirageError::Other(format!(
-                    "rocjitsu-dbt: HSA tools hook library ({HOOKS_LIB_NAME}) not found; \
-                     cannot translate workload"
+                    "rocjitsu-dbt: HSA tools hook library ({HOOKS_LIB_NAME}) not \
+                     found; cannot translate workload — {detail}"
                 ))
             })?;
 

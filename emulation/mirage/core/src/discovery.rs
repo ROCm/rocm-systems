@@ -374,6 +374,46 @@ impl RuntimeLocation {
             }
         }
     }
+
+    /// One sentence naming what was looked for, how hard, and what to
+    /// set — for an error message rather than the `emulators -l` table.
+    ///
+    /// Returns `None` when there is nothing missing to explain.
+    ///
+    /// Backends used to write this text out by hand, and both copies had
+    /// drifted from the search they described: rocjitsu's listed six of
+    /// the nine places it looks, and the DBT translator's named no
+    /// environment variable at all. Deriving it from the same
+    /// [`RuntimeLocation`] the search produced is what stops that
+    /// happening again — a message about a search should come from the
+    /// search.
+    #[must_use]
+    pub fn explain_missing(&self) -> Option<String> {
+        let Self::Missing {
+            lib_name,
+            searched,
+            env,
+        } = self
+        else {
+            return None;
+        };
+        let count = searched.len();
+        let places = if count == 1 { "location" } else { "locations" };
+        let mut out = format!("searched {count} {places} for {lib_name}");
+        if let Some(first) = searched.first() {
+            out.push_str(&format!(" (from {}", first.display()));
+            if let Some(last) = searched.last().filter(|_| count > 1) {
+                out.push_str(&format!(" to {}", last.display()));
+            }
+            out.push(')');
+        }
+        if !env.is_empty() {
+            let hints: Vec<String> = env.iter().map(|h| h.assignment(lib_name)).collect();
+            out.push_str(&format!(". Set one of: {}", hints.join(", ")));
+        }
+        out.push_str(". `mirage emulators -l` lists every location.");
+        Some(out)
+    }
 }
 
 /// Locate the emulator library described by `search`, reporting either

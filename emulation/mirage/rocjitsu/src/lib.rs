@@ -147,12 +147,15 @@ impl EmulatorBackend for Rocjitsu {
         // located there is nothing to emulate the workload, so fail
         // loudly rather than silently running on real hardware.
         let ld_preload = kmd_preload().ok_or_else(|| {
+            // The search itself says where it looked, so this cannot
+            // drift from it the way the hand-written list did.
+            let detail = runtime_location()
+                .explain_missing()
+                .unwrap_or_else(|| format!("{LIB_NAME} was not found"));
             MirageError::Other(format!(
-                "rocjitsu: KMD preload library ({LIB_NAME}) not found; \
-                 cannot emulate workload. Searched ${LIB_ENV}, $LD_LIBRARY_PATH, \
-                 $ROCM_HOME/lib, $ROCM_PATH/lib, the standard ROCm library \
-                 directories and a rocjitsu build beside this checkout. Install \
-                 rocjitsu (see docs/building.md) or point {LIB_ENV} at {LIB_NAME}."
+                "rocjitsu: KMD preload library ({LIB_NAME}) not found; cannot \
+                 emulate workload. Install rocjitsu (see docs/building.md) — \
+                 {detail}"
             ))
         })?;
 
