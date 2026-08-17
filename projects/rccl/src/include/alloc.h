@@ -169,10 +169,14 @@ static inline ncclResult_t ncclSideStreamRelease(int cudaDev, int priority = 0) 
   pthread_mutex_lock(&sideStreamLock);
   if (auto it = sideStream.find(key); it != sideStream.end()) {
     if (--it->second.refCount == 0) {
-      INFO(NCCL_ALLOC, "Destroyed side stream %p dev %d busid %lx prio %d", it->second.stream, cudaDev, busId,
-           priority);
-      CUDACHECKGOTO(cudaStreamDestroy(it->second.stream), res, fail);
+      // Drop the map entry before destroy so a CUDACHECKGOTO failure cannot
+      // leave a refCount==0 zombie that getSideStream would still return.
+      // If destroy itself fails, the HW queue may leak until process exit, but
+      // that is preferable to handing out a dead/half-released stream later.
+      cudaStream_t stream = it->second.stream;
+      INFO(NCCL_ALLOC, "Destroyed side stream %p dev %d busid %lx prio %d", stream, cudaDev, busId, priority);
       sideStream.erase(it);
+      CUDACHECKGOTO(cudaStreamDestroy(stream), res, fail);
     } else {
       INFO(NCCL_ALLOC, "Side stream %p dev %d busid %lx prio %d dec count to %ld", it->second.stream, cudaDev, busId,
            priority, it->second.refCount);
