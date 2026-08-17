@@ -50,6 +50,24 @@ synthetic_idempotence_mismatch(const rocjitsu::tools::TranslateOptions &options)
   return result;
 }
 
+rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput>
+synthetic_residual_rewrite(const rocjitsu::tools::TranslateOptions &options) {
+  EXPECT_TRUE(options.verify_rewrite_discharge);
+
+  rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput> result;
+  result.value.rewrite_discharge_checked = true;
+  result.value.diagnostics.push_back(
+      {.severity = rocjitsu::DiagnosticSeverity::Error,
+       .kind = rocjitsu::DiagnosticKind::ResidualRewrite,
+       .guest_offset = std::nullopt,
+       .output_offset = 4,
+       .mnemonic = "s_clause",
+       .message = "registered rewrite remains actionable in final output",
+       .required_work = {}});
+  result.errors.push_back({.exit_code = 3, .message = "translation failed"});
+  return result;
+}
+
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
   names.insert(names.end(), name.begin(), name.end());
@@ -437,6 +455,42 @@ TEST(RjDbtTranslateIdempotence, ReportsSyntheticMismatchThroughCli) {
   EXPECT_TRUE(contains(stderr_text, "section '.text' first differs at 0x4")) << stderr_text;
 }
 
+TEST(RjDbtTranslateRewriteDischarge, ReportsSyntheticResidualThroughCli) {
+  std::array arguments = {
+      std::string("rj_dbt_translate"),
+      std::string("synthetic.co"),
+      std::string("--input-target"),
+      std::string("gfx1250"),
+      std::string("--input-revision"),
+      std::string("b0"),
+      std::string("--output-target"),
+      std::string("gfx1250"),
+      std::string("--output-revision"),
+      std::string("a0"),
+      std::string("--verify-rewrite-discharge"),
+      std::string("--output-mode"),
+      std::string("diff"),
+  };
+  std::vector<char *> argv;
+  argv.reserve(arguments.size());
+  for (std::string &argument : arguments)
+    argv.push_back(argument.data());
+
+  testing::internal::CaptureStdout();
+  testing::internal::CaptureStderr();
+  const int status = rocjitsu::tools::detail::run_dbt_translate_cli(
+      static_cast<int>(argv.size()), argv.data(), synthetic_residual_rewrite);
+  const std::string stderr_text = testing::internal::GetCapturedStderr();
+  const std::string stdout_text = testing::internal::GetCapturedStdout();
+
+  EXPECT_EQ(status, 3);
+  EXPECT_TRUE(contains(stdout_text, "rewrite_discharge: not-verified")) << stdout_text;
+  EXPECT_TRUE(contains(stderr_text, "residual-rewrite output:.text+0x0004 s_clause"))
+      << stderr_text;
+  EXPECT_TRUE(contains(stderr_text, "registered rewrite remains actionable in final output"))
+      << stderr_text;
+}
+
 TEST(RjDbtTranslate, Smoke) {
   const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_smoke_");
   const std::filesystem::path temp_path(temp_dir.path());
@@ -636,6 +690,85 @@ TEST(RjDbtTranslate, VerifiesGfx1250B0ToA0Idempotence) {
   EXPECT_TRUE(contains(stdout_text, "changed=1")) << stdout_text;
   EXPECT_TRUE(contains(stdout_text, "source: s_clause 4")) << stdout_text;
   EXPECT_TRUE(contains(stdout_text, "target: s_nop 0")) << stdout_text;
+}
+
+TEST(RjDbtTranslate, VerifiesGfx1250IdempotenceAndRewriteDischarge) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_rewrite_discharge_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "smoke_gfx1250.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  {
+    const std::vector<uint8_t> image = make_gfx1250_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+      "--output-revision a0 --verify-idempotence --verify-rewrite-discharge "
+      "--output-mode diff > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence: verified")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence_diagnostics: 0")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "rewrite_discharge: verified")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "changed=1")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "source: s_clause 4")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "target: s_nop 0")) << stdout_text;
+}
+
+TEST(RjDbtTranslate, RejectsInvalidRewriteDischargeOptionCombinations) {
+  rocjitsu::tools::TranslateOptions options;
+  options.verify_rewrite_discharge = true;
+  auto error = rocjitsu::tools::translation_request_error(options);
+  ASSERT_TRUE(error.has_value());
+  EXPECT_EQ(*error, "--verify-rewrite-discharge requires gfx1250 b0-to-a0 translation");
+
+  options.guest_arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.host_arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
+  options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
+  options.skip_failed_kernels = true;
+  error = rocjitsu::tools::translation_request_error(options);
+  ASSERT_TRUE(error.has_value());
+  EXPECT_EQ(*error, "--verify-rewrite-discharge cannot be combined with --skip-failed-kernels");
+}
+
+TEST(RjDbtTranslate, RejectsRewriteDischargeWithListCodeObjects) {
+  std::array arguments = {
+      std::string("rj_dbt_translate"),
+      std::string("unused.co"),
+      std::string("--list-code-objects"),
+      std::string("--verify-rewrite-discharge"),
+  };
+  std::vector<char *> argv;
+  argv.reserve(arguments.size());
+  for (std::string &argument : arguments)
+    argv.push_back(argument.data());
+
+  testing::internal::CaptureStdout();
+  testing::internal::CaptureStderr();
+  const int status = rocjitsu::tools::detail::run_dbt_translate_cli(
+      static_cast<int>(argv.size()), argv.data(), rocjitsu::tools::translate_code_object);
+  const std::string stderr_text = testing::internal::GetCapturedStderr();
+  const std::string stdout_text = testing::internal::GetCapturedStdout();
+
+  EXPECT_EQ(status, 1);
+  EXPECT_TRUE(stdout_text.empty()) << stdout_text;
+  EXPECT_TRUE(contains(stderr_text,
+                       "--verify-rewrite-discharge cannot be combined with --list-code-objects"));
 }
 
 TEST(RjDbtTranslate, VerifiesNonGfx1250SameArchitectureTranslation) {

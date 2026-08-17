@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/rocprofiler-sdk.hpp"
+#include "library/rocprofiler-sdk.hpp"
 #include "api.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "binary/analysis.hpp"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
@@ -17,13 +18,14 @@
 #include "core/output_file_registry.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
+#include "core/sdk-tracing-config-deps.hpp"
+#include "core/sdk-tracing-config.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/process_sampler.hpp"
-#include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/kfd_events.hpp"
@@ -89,6 +91,13 @@ namespace rocprofiler_sdk
 {
 namespace
 {
+// Per-name imports (not a merged alias) for the production sdk_tracing_config<Wrapper,
+// Externals> instantiation used below: keeps both template arguments visible at each call
+// site instead of collapsing them behind an opaque name.
+using rocprofiler_sdk::default_sdk_externals;
+using rocprofiler_sdk::sdk_tracing_config;
+using rocprofiler_sdk::wrapper;
+
 using tool_agent_vec_t                         = std::vector<tool_agent>;
 client_data*                    tool_data      = new client_data{};
 std::shared_ptr<roctx_client<>> g_roctx_client = {};
@@ -2471,11 +2480,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         _domains_ss << "- " << itr << "\n";
     LOG_DEBUG("Available ROCm Domains: \n {}", _domains_ss.str());
 
-    auto _callback_domains = rocprofiler_sdk::get_callback_domains();
-    auto _buffered_domain  = rocprofiler_sdk::get_buffered_domains();
-    auto _counter_events   = rocprofiler_sdk::get_rocm_events();
-    auto _version          = rocprofiler_sdk::get_version();
-    if(_version.formatted == 0)
+    auto _callback_domains =
+        sdk_tracing_config<wrapper, default_sdk_externals>::get_callback_domains();
+    auto _buffered_domain =
+        sdk_tracing_config<wrapper, default_sdk_externals>::get_buffered_domains();
+    auto _counter_events =
+        sdk_tracing_config<wrapper, default_sdk_externals>::get_rocm_events();
+    auto _version = sdk_tracing_config<wrapper, default_sdk_externals>::get_version();
+    if(_version.formatted() == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
@@ -2539,9 +2551,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         if(_callback_domains.count(itr) > 0)
         {
-            auto _ops = rocprofiler_sdk::get_operations(itr);
+            auto _ops =
+                sdk_tracing_config<wrapper, default_sdk_externals>::get_operations(itr);
             _data->backtrace_operations.emplace(
-                itr, rocprofiler_sdk::get_backtrace_operations(itr));
+                itr,
+                sdk_tracing_config<wrapper,
+                                   default_sdk_externals>::get_backtrace_operations(itr));
             ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                 _data->primary_ctx, itr, _ops.data(), _ops.size(), tool_tracing_callback,
                 _data));
@@ -2620,8 +2635,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
             ::std::abort();
         }
-        auto _ops =
-            rocprofiler_sdk::get_operations(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
+        auto _ops = sdk_tracing_config<wrapper, default_sdk_externals>::get_operations(
+            ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
 
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
             _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION, nullptr, 0,
