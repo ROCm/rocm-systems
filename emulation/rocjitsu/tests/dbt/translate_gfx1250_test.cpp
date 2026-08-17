@@ -8526,7 +8526,7 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
 TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
   const rocjitsu::RewriteRegistry registry = rocjitsu::rewrite_registry_gfx1250_b0_to_a0();
   EXPECT_TRUE(registry.has_complete_discharge());
-  ASSERT_EQ(registry.opcode_rules.size(), 41u);
+  ASSERT_EQ(registry.opcode_rules.size(), 43u);
   ASSERT_EQ(registry.instruction_rules.size(), 1u);
 
   size_t checked_rules = 0;
@@ -8552,13 +8552,17 @@ TEST(SemanticTranslator, Gfx1250RegistryHasCompleteDischargeContracts) {
       EXPECT_TRUE(rule.discharge.allows(rocjitsu::ExpandStatus::NotHandled));
     }
   }
-  EXPECT_EQ(checked_rules, 40u);
+  EXPECT_EQ(checked_rules, 42u);
   EXPECT_EQ(no_success_rules, 1u);
   const std::vector<uint32_t> expected_no_success_rule_keys = {
       (static_cast<uint32_t>(cdna5::encoding::kSop1) << 16) | cdna5::kSBarrierSignalIsfirstSop1,
   };
   EXPECT_EQ(no_success_rule_keys, expected_no_success_rule_keys);
   const std::vector<uint32_t> expected_block_context_rule_keys = {
+      (static_cast<uint32_t>(cdna5::encoding::kSopk + cdna5::kSSetregB32Sopk) << 16) |
+          cdna5::kSSetregB32Sopk,
+      (static_cast<uint32_t>(cdna5::encoding::kSopk + cdna5::kSSetregImm32B32Sopk) << 16) |
+          cdna5::kSSetregImm32B32Sopk,
       (static_cast<uint32_t>(cdna5::encoding::kVop3p) << 16) | cdna5::kVWmmaI3216x16x64Iu8Vop3p,
       (static_cast<uint32_t>(cdna5::encoding::kVop3p) << 16) | cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
       (static_cast<uint32_t>(cdna5::encoding::kVimage) << 16) | cdna5::kTensorLoadToLdsVimage,
@@ -8642,6 +8646,11 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
     samples.push_back(std::move(words));
   };
 
+  constexpr uint16_t kModeHwreg = 1u;
+  add_sample(cdna5::build_sopk(cdna5::kSSetregB32Sopk, {.simm16 = kModeHwreg, .sdst = 8}));
+  constexpr std::array<uint32_t, 1> setreg_literal = {0};
+  add_compound_sample(cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeHwreg}),
+                      setreg_literal);
   add_sample(cdna5::build_sopp(cdna5::kSClauseSopp, {.simm16 = 4}));
   add_sample(cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
                                 {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
