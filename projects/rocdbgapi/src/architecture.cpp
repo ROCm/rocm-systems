@@ -7849,6 +7849,8 @@ public:
   get_apertures (const os_agent_info_t &info) const override;
   const void *register_read_only_mask (amdgpu_regnum_t regnum) const override;
 
+  bool supports_clusters () const override { return true; }
+
 private:
   register_class_t &get_register_class (const char *class_name);
 };

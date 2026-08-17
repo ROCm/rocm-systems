@@ -19,6 +19,10 @@ Full documentation for AMD Debugger API is available at
   of a wave, and a query named `AMD_DBGAPI_WAVE_INFO_CLUSTER` to get the
   cluster a wave's workgroup belongs to.
 
+- `amd_dbgapi_dispatch_get_info` add a query named
+  `AMD_DBGAPI_DISPATCH_INFO_CLUSTER_SIZES` to get the cluster sizes in
+  work-items.
+
 ## rocm-dbgapi-0.80
 ### Added
 - amd_dbgapi_process_get_info() adds a new query to get a mask spanning

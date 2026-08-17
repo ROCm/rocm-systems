@@ -470,6 +470,8 @@ public:
   void get_info (amd_dbgapi_architecture_info_t query, size_t value_size,
                  void *value) const;
 
+  virtual bool supports_clusters () const { return false; }
+
   template <typename Object, typename... Args> auto &create (Args &&...args)
   {
     return get_base_type_element<Object> (m_handle_object_sets)
