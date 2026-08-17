@@ -111,7 +111,10 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          apt-get install -y pkg-config
+          # libdw-dev/zlib1g-dev are temporary: the sysdeps block in
+          # src/lib/CMakeLists.txt is disabled until ROCm/TheRock#7424 is
+          # fixed. Drop them when that block is restored.
+          apt-get install -y libdw-dev zlib1g-dev pkg-config
           echo "✅ Dependencies Installed!"
 
       - name: Install latest nightly ROCm

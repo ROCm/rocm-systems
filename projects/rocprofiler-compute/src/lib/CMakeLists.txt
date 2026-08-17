@@ -16,7 +16,8 @@ list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 #
 # Temporarily disabled: TheRock's bundled zlib.pc is not relocatable (its
 # prefix= is a CI build path), so pkg-config yields a non-existent include dir
-# and CMake fails to generate. Restore once TheRock ships a fixed zlib.pc.
+# and CMake fails to generate. Restore once ROCm/TheRock#7424 is fixed, and drop
+# the libdw-dev/zlib1g-dev installs the CI and sanitizer workflows added for it.
 # foreach(rocm_root IN LISTS CMAKE_PREFIX_PATH)
 #     if(IS_DIRECTORY "${rocm_root}/lib/rocm_sysdeps/lib")
 #         list(PREPEND CMAKE_LIBRARY_PATH "${rocm_root}/lib/rocm_sysdeps/lib")
