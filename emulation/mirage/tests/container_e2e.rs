@@ -11,7 +11,12 @@
 //! * the workload runs *inside* the node container, via the provider's
 //!   `exec`, and so does a `mirage exec` from another terminal;
 //! * when the run ends — cleanly or not — every container and the
-//!   network go with it.
+//!   network go with it;
+//! * and the configurations that could never work — a mount laid over
+//!   mirage's own directory in the container, a published port on a
+//!   multi-node session, an empty image, a provider that is not an
+//!   engine — are refused before anything is created, in mirage's words
+//!   rather than the engine's.
 //!
 //! # Why the mock stays in the foreground
 //!
@@ -192,6 +197,13 @@ case "$1" in
       inspect) exit 1 ;;
       *) exit 0 ;;
     esac ;;
+  build)
+    # A derived image (a profile hack). The Dockerfile arrives on stdin
+    # and has to be read: a real engine consumes it, and a mock that
+    # exited without reading would fail mirage's write with EPIPE and
+    # test a code path no engine produces.
+    cat > /dev/null
+    exit 0 ;;
   # Listing verbs, used by orphan reclamation after a run died without
   # tearing down. A real engine filters on the mirage.owner label; the
   # mock creates nothing that is not mirage's, so everything it holds is
@@ -1193,6 +1205,288 @@ fn a_mount_whose_host_path_is_missing_is_refused_before_anything_is_created() {
         env.live_containers().is_empty(),
         "containers outlived a failed bring-up: {:?}",
         env.live_containers()
+    );
+}
+
+#[test]
+fn a_mount_laid_over_mirages_own_directory_is_refused() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_containerized_profile("cp");
+
+    // Mirage bind-mounts its own binary, config and session scratch under
+    // `/mnt/mirage` in every node container. A user mount at or above
+    // that path overlaps them, and the engine resolves the overlap by
+    // creating mirage's destinations inside the user's host directory —
+    // as root, because the container writes them. The run reported
+    // success, and the user's directory came back holding `bin`,
+    // `config`, `lib` and `runtime` entries they could not delete.
+    let mine = env.base.root().join("mine");
+    std::fs::create_dir_all(&mine).unwrap();
+    let err = env.base.fails(&[
+        "run",
+        "--profile",
+        "cp",
+        "--mount",
+        &format!("{}:/mnt/mirage", mine.display()),
+        "--",
+        "/bin/true",
+    ]);
+    assert!(
+        err.contains(&mine.display().to_string()) && err.contains("/mnt/mirage"),
+        "the refusal must name both the mount and the directory it covers: {err}"
+    );
+    assert!(
+        std::fs::read_dir(&mine).unwrap().next().is_none(),
+        "something was created in the user's mount directory: {:?}",
+        std::fs::read_dir(&mine).unwrap().flatten().count()
+    );
+    let log = env.provider_log();
+    assert!(
+        !log.contains("run --rm"),
+        "a container was created for a mount that could never work:\n{log}"
+    );
+
+    // A mount *below* the reserved directory is still the user's to make;
+    // only the paths that cover mirage's own are refused. (Everything
+    // mirage itself mounts is below it, so a check that caught those
+    // would refuse every containerised session there is.)
+    let out = env.base.ok(&[
+        "run",
+        "--profile",
+        "cp",
+        "--mount",
+        &format!("{}:/mnt/mine", mine.display()),
+        "--",
+        "/bin/echo",
+        "mounted-elsewhere",
+    ]);
+    assert!(out.contains("mounted-elsewhere"), "{out}");
+}
+
+#[test]
+fn a_published_port_is_refused_on_a_multi_node_session() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_containerized_profile("cp");
+
+    // Every node runs the same container with the same argv, so all of
+    // them publish onto the same host port: the first binds it and the
+    // rest cannot. This used to be discovered by the *second* container,
+    // in the engine's own words ("Bind for 0.0.0.0:18099 failed: port is
+    // already allocated"), with node 1 already running.
+    let err = env.base.fails(&[
+        "run",
+        "--profile",
+        "cp",
+        "--port",
+        "18099:8000",
+        "--num-nodes",
+        "2",
+        "--",
+        "/bin/true",
+    ]);
+    assert!(
+        err.contains("18099:8000") && err.contains("2-node"),
+        "the refusal must name the port and the node count: {err}"
+    );
+    assert!(
+        err.contains("--num-nodes 1"),
+        "the refusal must say what to do instead: {err}"
+    );
+    let log = env.provider_log();
+    assert!(
+        !log.contains("run --rm"),
+        "a node container was started before the impossible port was noticed:\n{log}"
+    );
+    assert!(
+        env.live_containers().is_empty(),
+        "containers outlived a refused bring-up: {:?}",
+        env.live_containers()
+    );
+}
+
+#[test]
+fn one_port_asked_for_twice_is_published_once() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_containerized_profile("cp");
+
+    // Restating the profile's port on the command line, or repeating
+    // `--port`, reached the engine as two `-p` arguments and failed the
+    // container with `address already in use` — a message about somebody
+    // else's process, which is not what happened.
+    let out = env.base.ok(&[
+        "run",
+        "--profile",
+        "cp",
+        "--port",
+        "18098:8000",
+        "--port",
+        "18098:8000",
+        "--",
+        "/bin/echo",
+        "ports-deduplicated",
+    ]);
+    assert!(out.contains("ports-deduplicated"), "{out}");
+
+    let log = env.provider_log();
+    let run_line = log
+        .lines()
+        .find(|l| l.starts_with("run --rm"))
+        .unwrap_or_else(|| panic!("no container was launched:\n{log}"));
+    assert_eq!(
+        run_line.matches("-p 18098").count(),
+        1,
+        "one host port must be published once: {run_line}"
+    );
+}
+
+#[test]
+fn a_session_with_no_image_says_so_instead_of_pulling_nothing() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_containerized_profile("cp");
+
+    // `--image ""` was handed to the engine as a missing argument, and
+    // the user watched `pulling image  (this can take a while)` with a
+    // hole where the name should be.
+    let err = env
+        .base
+        .fails(&["run", "--profile", "cp", "--image", "", "--", "/bin/true"]);
+    assert!(
+        err.contains("--image") && err.contains("ubuntu:24.04"),
+        "the refusal must name the flag and show what one looks like: {err}"
+    );
+    assert!(
+        !env.provider_log().contains("pull"),
+        "the engine was asked to pull an image that was never named:\n{}",
+        env.provider_log()
+    );
+}
+
+#[test]
+fn a_provider_that_is_not_a_container_engine_is_refused_by_name() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+
+    // Executable, and not an engine. Without a check this became a bare
+    // `No such file or directory` — or, here, whatever the first provider
+    // invocation of bring-up happened to make of it.
+    let impostor = env.base.root().join("impostor.sh");
+    std::fs::write(&impostor, "#!/bin/sh\nexit 1\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&impostor, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    env.base.ok(&[
+        "profile",
+        "create",
+        "impostor",
+        "--emulator",
+        TEST_EMULATOR,
+        "--no-input",
+        "--image",
+        "img:latest",
+        "--container-provider",
+        &impostor.to_string_lossy(),
+    ]);
+
+    let err = env
+        .base
+        .fails(&["run", "--profile", "impostor", "--", "/bin/true"]);
+    assert!(
+        err.contains(&impostor.to_string_lossy().to_string()) && err.contains("--version"),
+        "the refusal must name the provider and what mirage asked it: {err}"
+    );
+}
+
+#[test]
+fn the_provider_environment_variable_loses_to_the_profile_and_says_so() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_containerized_profile("cp");
+
+    // The documented order is: what the session names (its profile, or
+    // `--container-provider`) beats `MIRAGE_CONTAINER_PROVIDER`, which
+    // beats autodetection. The bug was not the order — mirage cannot tell
+    // a profile-pinned provider from a flag-given one by the time it
+    // resolves either — it was the silence: an exported variable that did
+    // nothing at all, with the run carrying on as though it had never
+    // been set.
+    let out = env
+        .base
+        .mirage()
+        .args(["run", "--profile", "cp", "--", "/bin/echo", "profile-won"])
+        .env("MIRAGE_CONTAINER_PROVIDER", "/nonexistent/other-engine")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        out.status.success(),
+        "the profile's provider must still be the one used:\n{stderr}"
+    );
+    assert!(stdout.contains("profile-won"), "{stdout}");
+    assert!(
+        stderr.contains("MIRAGE_CONTAINER_PROVIDER=/nonexistent/other-engine")
+            && stderr.contains(&env.provider.to_string_lossy().to_string()),
+        "an ignored provider variable must say so, naming both: {stderr}"
+    );
+}
+
+#[test]
+fn a_derived_hack_image_is_labelled_like_everything_else_mirage_creates() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_containerized_profile("cp");
+
+    // A `mirage-hack-…` image is host state that outlives the session
+    // that built it, and nothing on disk records that it exists. Without
+    // a label on the image itself there is nothing to attribute it to
+    // later — no command can find it, and the user cannot tell it from
+    // any other stray image.
+    let out = env.base.ok(&[
+        "run",
+        "--profile",
+        "cp",
+        "--hack",
+        "update-gcc-via-ppa",
+        "--",
+        "/bin/echo",
+        "hacked",
+    ]);
+    assert!(out.contains("hacked"), "{out}");
+
+    let log = env.provider_log();
+    let build = log
+        .lines()
+        .find(|l| l.starts_with("build "))
+        .unwrap_or_else(|| panic!("no derived image was built:\n{log}"));
+    assert!(
+        build.contains("--label mirage.owner=mirage"),
+        "a derived image must be marked as mirage's: {build}"
+    );
+    // The runtime directory too, matched by key rather than by value: it
+    // is recorded canonicalised, and the temporary root this test runs
+    // under is not necessarily spelled the way it was handed to us.
+    assert!(
+        build.contains("--label mirage.runtime="),
+        "a derived image must say which runtime directory built it: {build}"
     );
 }
 

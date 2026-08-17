@@ -147,6 +147,13 @@ fn drain_lines(reader: impl std::io::Read + Send + 'static, sink: LineRing, drai
         for line in BufReader::new(reader)
             .lines()
             .map_while(std::result::Result::ok)
+            // Blank lines are dropped on the way in, because the ring is
+            // read back as one `; `-joined line. An engine's refusal is
+            // several paragraphs — `docker run` follows its error with an
+            // empty line and `See 'docker run --help'` — and keeping the
+            // gaps turned that into `…; ; See 'docker run --help'`, which
+            // reads as though mirage had lost something.
+            .filter(|line| !line.trim().is_empty())
         {
             // Recovered from rather than panicked on: this is a ring of
             // plain strings with no invariant a panic could have broken,
@@ -429,6 +436,123 @@ pub enum ContainerError {
         problem: String,
     },
 
+    /// A bind mount names a container path mirage has already spoken for.
+    ///
+    /// Every containerised session mounts mirage's own binary, config
+    /// directory, session scratch and emulator libraries under
+    /// [`mirage_core::container::CONTAINER_MIRAGE_DIR`]. A user mount at
+    /// or above that path is laid over them, and the engine resolves the
+    /// overlap by creating mirage's destinations *inside the user's host
+    /// directory* — as root, since the container writes them — while the
+    /// run reports success. Refused instead, naming both paths.
+    #[error(
+        "--mount {spec}: the container path `{container_path}` is at or above `{reserved}`, \
+         which is where mirage bind-mounts its own binary, configuration and session scratch \
+         inside every node container. The two overlap, and what the container creates under \
+         mirage's paths lands in `{host_path}` on the host instead — root-owned `bin`, `config`, \
+         `lib` and `runtime` entries you did not make and cannot delete. Mount it at some other \
+         path in the container; everything outside `{reserved}` is yours."
+    )]
+    ReservedMount {
+        /// The mount as the provider would have been given it
+        /// (`HOST:CONTAINER[:ro]`).
+        spec: String,
+        /// The host path the user asked to mount.
+        host_path: String,
+        /// The container path they asked to mount it at.
+        container_path: String,
+        /// The tree mirage keeps for itself.
+        reserved: &'static str,
+    },
+
+    /// Published ports were asked for on a session with several nodes.
+    ///
+    /// Every node of a session runs the same container with the same
+    /// argv, so a published port is published by all of them onto the
+    /// same host port. The first node binds it and the rest cannot, which
+    /// used to fail bring-up halfway with the engine's own words about a
+    /// port — after node 0 was already running.
+    #[error(
+        "--port {ports} cannot be published from a {nodes}-node session: every node runs the \
+         same container, so all {nodes} of them would publish onto the same host port and only \
+         the first could bind it. Refused up front rather than halfway through bring-up. Publish \
+         from a single node (`--num-nodes 1`), or drop `--port` — nodes already reach each other \
+         by container name on the session's own network."
+    )]
+    PortsMultiNode {
+        /// The published ports, as the user spelled them.
+        ports: String,
+        /// How many nodes the session was asked for.
+        nodes: u32,
+    },
+
+    /// Two different mappings want the same host port.
+    ///
+    /// Repeating an identical `--port` is deduplicated silently — saying
+    /// the same thing twice is not an error. Two mappings that disagree
+    /// are, and the engine's "address already in use" describes the
+    /// symptom of it rather than the cause.
+    #[error(
+        "--port {first} and --port {second} both publish host port {host_port}/{protocol}, and \
+         the host can only give it to one container. Pick a different host port for one of them."
+    )]
+    PortConflict {
+        /// The mapping that claimed the host port first.
+        first: String,
+        /// The mapping that wanted it as well.
+        second: String,
+        /// The host port both asked for.
+        host_port: u16,
+        /// The protocol they both asked for it on.
+        protocol: String,
+    },
+
+    /// The image reference is not one an engine can be asked for.
+    #[error("--image {image:?}: {problem}")]
+    Image {
+        /// The image reference as configured.
+        image: String,
+        /// What is wrong with it, and what to do.
+        problem: String,
+    },
+
+    /// The configured provider is not a container engine mirage can
+    /// drive.
+    ///
+    /// Checked before the session is built, because everything mirage
+    /// does with a provider is spawning it: an unusable one is otherwise
+    /// discovered as a bare `No such file or directory` from somewhere in
+    /// the middle of bring-up, attached to whichever step happened to be
+    /// first.
+    #[error("container provider `{provider}`: {problem}")]
+    Provider {
+        /// The provider as configured (a name, or a path).
+        provider: String,
+        /// What is wrong with it, and what to do.
+        problem: String,
+    },
+
+    /// The working directory an exec asked for is not in the container.
+    ///
+    /// The host-side check cannot answer this: a containerised workload
+    /// chdirs inside the container's own filesystem, where a path that
+    /// exists out here usually does not exist at all. Left to the
+    /// provider it surfaces as an OCI runtime error about `chdir to cwd`
+    /// and the container's exit code, which names neither the flag nor
+    /// the fact that the two filesystems are different.
+    #[error(
+        "--workdir {workdir}: there is no such directory inside container `{container}`. The \
+         path has to exist in the *container*, not on this machine — the image has its own \
+         filesystem, so a directory you can see here is not one the workload can enter. Name a \
+         directory the image already has, or `--mount` one there."
+    )]
+    Workdir {
+        /// The directory that was asked for.
+        workdir: String,
+        /// The container it was not found in.
+        container: String,
+    },
+
     /// The caller asked for the operation to stop before it finished.
     ///
     /// Bring-up is a chain of blocking provider invocations, and an image
@@ -523,11 +647,14 @@ fn mirage_stderr() -> Stdio {
         .map_or_else(|_| Stdio::null(), Stdio::from)
 }
 
-/// Resolve the host side of every bind mount, refusing the ones no
-/// container should be given.
+/// Resolve every bind mount, refusing the ones no container should be
+/// given.
 ///
-/// Two shapes of host path are trouble, and each is trouble differently
-/// on the two engines mirage drives:
+/// The *container* side is refused for one reason, which is that mirage
+/// mounts things there too: see
+/// [`ContainerError::ReservedMount`]. Two shapes of *host* path are
+/// trouble, and each is trouble differently on the two engines mirage
+/// drives:
 ///
 /// * **Relative** (`--mount data:/data`). Neither engine reads that as a
 ///   path. A `-v` source with no leading separator is a *named volume*,
@@ -546,13 +673,30 @@ fn resolve_mounts(mounts: &[FileMount]) -> Result<Vec<FileMount>> {
     mounts.iter().map(resolve_mount).collect()
 }
 
-/// Resolve and check one bind mount's host path.
+/// Resolve and check one bind mount.
 fn resolve_mount(mount: &FileMount) -> Result<FileMount> {
     let refuse = |path: &std::path::Path, problem: String| ContainerError::Mount {
         spec: mount.to_volume_arg(),
         path: path.display().to_string(),
         problem,
     };
+
+    // Checked first, and on the unresolved spec: this is the one failure
+    // where the *container* path is the mistake, and resolving the host
+    // side would only put a path the user did not type into the error.
+    //
+    // Mirage's own mounts are all strictly below the reserved directory
+    // and so are never caught by this — which is what makes the check
+    // safe to apply here, after the supervisor has already added them to
+    // the same list.
+    if mirage_core::container::covers_mirage_dir(&mount.container_path) {
+        return Err(ContainerError::ReservedMount {
+            spec: mount.to_volume_arg(),
+            host_path: mount.host_path.clone(),
+            container_path: mount.container_path.clone(),
+            reserved: mirage_core::container::CONTAINER_MIRAGE_DIR,
+        });
+    }
 
     let host = std::path::Path::new(&mount.host_path);
     let host = if host.is_absolute() {
@@ -582,6 +726,143 @@ fn resolve_mount(mount: &FileMount) -> Result<FileMount> {
                 .to_string(),
         )),
         Err(e) => Err(refuse(&host, format!("could not be read: {e}"))),
+    }
+}
+
+/// The protocol a `-p` mapping means when it does not say. Both engines
+/// default to TCP, so two mappings that differ only in whether they spell
+/// it out are asking for the same host port.
+const DEFAULT_PROTOCOL: &str = "tcp";
+
+/// The ports every node container publishes, refusing the sets no engine
+/// could honour and collapsing the ones that only look like two.
+///
+/// A published port is a host resource, and a session's nodes are
+/// identical containers — which makes two of the shapes a user can write
+/// impossible rather than merely unlucky:
+///
+/// * **The same port twice.** `--port 8080` on a profile that already
+///   publishes 8080, or simply typed twice, reached the engine as two
+///   `-p` arguments and failed the container with `address already in
+///   use` — a message about a port conflict with *somebody else*, which
+///   sent the user looking for a process that was not there. Saying the
+///   same thing twice is not a mistake, so the duplicate is dropped.
+/// * **Any port at all on more than one node.** Every node gets the same
+///   argv, so all of them publish onto the same host port; node 0 binds
+///   it and node 1 cannot. That used to be discovered halfway through
+///   bring-up, with the first node already running.
+///
+/// Two *different* mappings for one host port are a real conflict and are
+/// refused as one — see [`ContainerError::PortConflict`].
+fn resolve_ports(ports: &[PortMapping], node_count: u32) -> Result<Vec<PortMapping>> {
+    let protocol_of = |p: &PortMapping| p.protocol.clone().unwrap_or(DEFAULT_PROTOCOL.to_string());
+    let mut kept: Vec<PortMapping> = Vec::with_capacity(ports.len());
+    for port in ports {
+        let protocol = protocol_of(port);
+        if let Some(prior) = kept
+            .iter()
+            .find(|k| k.host_port == port.host_port && protocol_of(k) == protocol)
+        {
+            if prior.container_port == port.container_port {
+                continue;
+            }
+            return Err(ContainerError::PortConflict {
+                first: prior.to_publish_arg(),
+                second: port.to_publish_arg(),
+                host_port: port.host_port,
+                protocol,
+            });
+        }
+        kept.push(port.clone());
+    }
+    if node_count > 1 && !kept.is_empty() {
+        return Err(ContainerError::PortsMultiNode {
+            ports: kept
+                .iter()
+                .map(PortMapping::to_publish_arg)
+                .collect::<Vec<_>>()
+                .join(", "),
+            nodes: node_count,
+        });
+    }
+    Ok(kept)
+}
+
+/// Refuse an image reference no engine can be asked for.
+///
+/// Only the empty one, which is the reference a `--image ""` produces and
+/// the only one mirage can be sure about: everything else is the
+/// registry's opinion, and guessing at it here would refuse images that
+/// work. Empty is worth catching precisely because it does not look like
+/// a failure — it reaches the provider as a missing argument, and the
+/// user watches `pulling image  (this can take a while)` with a hole in
+/// the middle of it.
+fn check_image(image: &str) -> Result<()> {
+    if image.trim().is_empty() {
+        return Err(ContainerError::Image {
+            image: image.to_string(),
+            problem: "a containerised session runs every node in an image, and this names none. \
+                      Pass `--image <reference>` (for example `--image ubuntu:24.04`), or give \
+                      the profile one with `mirage profile create … --image <reference>`."
+                .to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Refuse a provider that is not an executable behaving like a container
+/// engine.
+///
+/// Everything mirage does to a container is a `Command` built around this
+/// string, so a wrong one is not caught until something is spawned — and
+/// what the user then sees is whichever step happened to be first,
+/// wearing the OS's words for it: `failed to spawn `whale pull img`: No
+/// such file or directory`. Asked here instead, once, before the session
+/// exists.
+///
+/// The probe is `--version`, and it is the weakest question that
+/// distinguishes an engine from an arbitrary executable: podman and
+/// docker both answer it in milliseconds without touching a daemon, a
+/// registry or the network, and a wrapper script around either will pass
+/// it on. Mirage deliberately does not check the *name* — the provider is
+/// allowed to be a path to a wrapper, and half this workspace's tests
+/// drive a shell script standing in for an engine.
+fn check_provider(provider: &str) -> Result<()> {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    let refuse = |problem: String| ContainerError::Provider {
+        provider: provider.to_string(),
+        problem,
+    };
+    if mirage_core::container::provider_binary(provider).is_none() {
+        return Err(refuse(format!(
+            "{}. mirage drives `podman` or `docker`; name one of those, or the path to a \
+             container engine — or name none at all and mirage will use whichever is installed",
+            if provider.contains('/') {
+                "there is no such file"
+            } else {
+                "not found on PATH"
+            }
+        )));
+    }
+    let probed = mirage_core::container::retrying_etxtbsy(|| {
+        Command::new(provider)
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+    });
+    match probed {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(refuse(format!(
+            "`{provider} --version` failed ({}), so this does not look like a container engine. \
+             mirage speaks the podman/docker command line and nothing else",
+            exit_phrase(&status.code(), &status.signal())
+        ))),
+        Err(e) => Err(refuse(format!(
+            "cannot be run: {e}. It has to be an executable mirage can spawn"
+        ))),
     }
 }
 
@@ -620,6 +901,16 @@ pub enum BringUpPhase {
     LaunchingNode { rank: u32, total: u32, name: String },
     /// Node container `rank` (0-based) of `total` has started.
     NodeStarted { rank: u32, total: u32, name: String },
+    /// Every node has reported itself up, and bring-up is giving them
+    /// [`NODE_SETTLE`] to prove they meant it.
+    ///
+    /// Its own phase because it is its own failure: a caller that names
+    /// the last phase it saw when reporting an error — which is what the
+    /// supervisor does — otherwise attributed a node dying in this window
+    /// to the phase before it, and printed
+    /// `node 1/1 (mirage-s-node-0) started failed: …` about a container
+    /// that had just stopped.
+    Settling { total: u32 },
 }
 
 impl BringUpPhase {
@@ -635,7 +926,9 @@ impl BringUpPhase {
             BringUpPhase::NetworkExists { .. } | BringUpPhase::CreatingNetwork { .. } => {
                 "networking"
             }
-            BringUpPhase::LaunchingNode { .. } | BringUpPhase::NodeStarted { .. } => "starting",
+            BringUpPhase::LaunchingNode { .. }
+            | BringUpPhase::NodeStarted { .. }
+            | BringUpPhase::Settling { .. } => "starting",
         }
     }
 
@@ -667,6 +960,14 @@ impl BringUpPhase {
             }
             BringUpPhase::NodeStarted { rank, total, name } => {
                 format!("node {}/{total} ({name}) started", rank + 1)
+            }
+            BringUpPhase::Settling { total } => {
+                let containers = if *total == 1 {
+                    "container"
+                } else {
+                    "containers"
+                };
+                format!("waiting for {total} node {containers} to stay up")
             }
         }
     }
@@ -738,11 +1039,32 @@ pub struct Engine {
 impl Engine {
     /// Resolve an engine for a containerised profile, applying the
     /// "explicit > `MIRAGE_CONTAINER_PROVIDER` > autodetect (podman then
-    /// docker)" policy. Errors with [`ContainerError::NoProvider`] when
-    /// nothing is available.
+    /// docker)" policy — see
+    /// [`resolve_provider`](mirage_core::container::resolve_provider) for
+    /// why the environment variable sits where it does. Errors with
+    /// [`ContainerError::NoProvider`] when nothing is available.
+    ///
+    /// The two things a containerised session cannot start without — an
+    /// engine that runs, and an image to run — are checked here rather
+    /// than left to the first provider invocation that trips over them.
+    /// This is the earliest point that has the whole definition in hand:
+    /// it runs before the derived-image build, before the pull, and
+    /// before anything exists to tear down again. Everything downstream
+    /// of it reports failures in the words of whichever step was
+    /// unlucky, which is how `--image ""` became `pulling image  (this
+    /// can take a while)` and a mistyped provider became a bare `No such
+    /// file or directory`.
+    ///
+    /// # Errors
+    ///
+    /// [`ContainerError::Provider`] when the configured provider is not
+    /// an executable that answers as a container engine, and
+    /// [`ContainerError::Image`] when the image reference is empty.
     pub fn resolve(def: &ContainerizedDef) -> Result<Self> {
+        check_image(&def.image)?;
         let provider = mirage_core::container::resolve_provider(def.provider.as_deref())
             .ok_or(ContainerError::NoProvider)?;
+        check_provider(&provider)?;
         Ok(Self {
             provider,
             cancel: None,
@@ -1141,15 +1463,26 @@ impl Engine {
     /// look identical to a hang. Line-buffered rather than inherited,
     /// unlike the pull: a build's output is lines, not a progress bar,
     /// and they are wanted in the error too.
+    /// The image is labelled as mirage's, like every container and
+    /// network mirage creates. A derived image is host state that
+    /// survives the run that built it — deliberately, since the point of
+    /// keying it by base image plus hacks is to build it once — so the
+    /// only thing that can ever attribute it later is a mark on the image
+    /// itself. See
+    /// [`image_labels`](mirage_core::container::image_labels) for why
+    /// those marks are the owner and the runtime directory but not a
+    /// session.
     pub fn build_image(&self, tag: &str, dockerfile: &str) -> Result<()> {
         use std::io::IsTerminal as _;
         let echo = std::io::stderr().is_terminal();
-        let args = vec![
-            "build".to_string(),
-            "-t".to_string(),
-            tag.to_string(),
-            "-".to_string(),
-        ];
+        let mut args = vec!["build".to_string(), "-t".to_string(), tag.to_string()];
+        for (k, v) in mirage_core::container::image_labels() {
+            args.push("--label".to_string());
+            args.push(format!("{k}={v}"));
+        }
+        // The build context, which is the Dockerfile on stdin and
+        // nothing else, so it stays last.
+        args.push("-".to_string());
         let mut child = spawn_retrying_etxtbsy(|| {
             Command::new(&self.provider)
                 .args(&args)
@@ -1383,6 +1716,79 @@ impl Engine {
         }
     }
 
+    /// Refuse a working directory that does not exist inside
+    /// `container`.
+    ///
+    /// The host-side `--workdir` check cannot answer this question: a
+    /// containerised workload chdirs inside the image's own filesystem,
+    /// where a directory that exists out here usually does not exist at
+    /// all — and one that does not exist out here may well be in the
+    /// image. Left to the provider, the answer arrives as
+    /// `OCI runtime exec failed: … chdir to cwd ("/nope") … no such file
+    /// or directory` and the container's exit code, which names neither
+    /// the flag the user passed nor the filesystem it was wrong about.
+    ///
+    /// # Only a positive answer counts
+    ///
+    /// The probe is a shell in the container, and the exit code it is
+    /// asked for is one the image cannot produce by accident: `3` means
+    /// "I ran, and that directory is not there". *Every* other outcome —
+    /// an image with no `/bin/sh` (127), a container that has gone away,
+    /// an engine that refused — leaves the question unanswered, and this
+    /// returns `Ok` for all of them. Refusing on an unanswered question
+    /// would mean mirage inventing a failure for a workload that was
+    /// going to run perfectly well, which is worse than the raw engine
+    /// error this exists to replace.
+    ///
+    /// # Errors
+    ///
+    /// [`ContainerError::Workdir`], naming the directory and the
+    /// container, when the container positively reports it is not there.
+    pub fn check_workdir(&self, container: &str, workdir: &str) -> Result<()> {
+        /// The exit code the probe uses for "no such directory".
+        const MISSING: i32 = 3;
+
+        let argv = Self::exec_argv(
+            container,
+            None,
+            &[],
+            "/bin/sh",
+            &[
+                "-c".to_string(),
+                format!("test -d \"$1\" || exit {MISSING}"),
+                // `$0` for the shell itself, so the path lands in `$1`
+                // as data rather than being spliced into the script.
+                "sh".to_string(),
+                workdir.to_string(),
+            ],
+            false,
+        );
+        let probed = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(&argv)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+        });
+        match probed {
+            Ok(status) if status.code() == Some(MISSING) => Err(ContainerError::Workdir {
+                workdir: workdir.to_string(),
+                container: container.to_string(),
+            }),
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::debug!(
+                    provider = %self.provider,
+                    container,
+                    workdir,
+                    "could not ask the container about its working directory: {e}"
+                );
+                Ok(())
+            }
+        }
+    }
+
     /// Block until `name` reports itself running, or `timeout` elapses.
     ///
     /// A detached `run -d` returned only once the container existed, so
@@ -1496,7 +1902,10 @@ impl Engine {
         // mistyped `--mount` is the cheapest failure in bring-up to
         // diagnose and the most expensive to wait for, and finding it
         // after ten minutes of pulling an image would be nobody's idea
-        // of a good error.
+        // of a good error. The same goes for a `--port` no engine could
+        // honour, which used to be found by the *second* node container
+        // — after the first was already running.
+        let ports = resolve_ports(&def.ports, node_count)?;
         let mounts = resolve_mounts(&def.mounts)?;
 
         // Nothing has been created yet, so an interrupt that arrived
@@ -1593,7 +2002,7 @@ impl Engine {
             network: Some(&network),
             host_gpus,
             mounts: &mounts,
-            ports: &def.ports,
+            ports: &ports,
             devices: &devices,
             groups: &groups,
             labels: &labels,
@@ -1659,6 +2068,7 @@ impl Engine {
         // reaching the caller as a healthy session whose first exec
         // fails with the engine's words about a missing container.
         if !clients.is_empty() {
+            progress(BringUpPhase::Settling { total: node_count });
             std::thread::sleep(NODE_SETTLE);
             let mut died = None;
             for client in &mut clients {
@@ -1877,12 +2287,27 @@ mod tests {
         }
     }
 
+    /// A containerised profile pointing at `provider`, with `ports`.
+    fn def_with_ports(provider: &Path, ports: Vec<PortMapping>) -> ContainerizedDef {
+        ContainerizedDef {
+            ports,
+            ..def_with(provider, vec![])
+        }
+    }
+
     /// Bring up a one-node session on `engine` with `def`, discarding the
     /// progress reports.
     fn bring_up_one(engine: &Engine, def: &ContainerizedDef) -> Result<()> {
-        engine
-            .bring_up(session(), def, false, 1, 6000, |_| vec![], |_| {})
-            .map(|_| ())
+        bring_up_nodes(engine, def, 1).map(|_| ())
+    }
+
+    /// Bring up `nodes` nodes on `engine` with `def`.
+    fn bring_up_nodes(
+        engine: &Engine,
+        def: &ContainerizedDef,
+        nodes: u32,
+    ) -> Result<(ContainerState, Vec<NodeClient>)> {
+        engine.bring_up(session(), def, false, nodes, 6000, |_| vec![], |_| {})
     }
 
     #[test]
@@ -2132,17 +2557,15 @@ mod tests {
 
     #[test]
     fn resolve_uses_explicit_provider() {
-        let def = ContainerizedDef {
-            provider: Some("docker".to_string()),
-            image: "img".to_string(),
-            mounts: vec![],
-            ports: vec![],
-            devices: vec![],
-            groups: vec![],
-            hacks: vec![],
-        };
-        let engine = Engine::resolve(&def).unwrap();
-        assert_eq!(engine.provider(), "docker");
+        // A script rather than the name of a real engine: what this is
+        // about is that the configured provider is the one used, and a
+        // test that only passes on a machine with docker installed would
+        // be about the machine.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let engine = Engine::resolve(&def_with(&provider, vec![])).unwrap();
+        assert_eq!(engine.provider(), provider.to_string_lossy());
     }
 
     #[test]
@@ -2662,7 +3085,435 @@ mod tests {
                     total: 2,
                     name: "mirage-s-node-1".to_string()
                 },
+                // The settle window is a phase of its own, so a node that
+                // dies in it is not reported against the phase that said
+                // the node had started.
+                BringUpPhase::Settling { total: 2 },
             ]
         );
+    }
+
+    #[test]
+    fn bring_up_refuses_a_mount_laid_over_mirages_own_directory() {
+        // The user's mount and mirage's own overlap, and the engine
+        // resolves the overlap by creating mirage's destinations inside
+        // the user's host directory — as root, because the container
+        // writes them. The run then reports success, and the user's
+        // directory comes back holding `bin`, `config`, `lib` and
+        // `runtime` entries they cannot delete.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+        let host = dir.path().join("mine");
+        std::fs::create_dir(&host).unwrap();
+
+        let err = bring_up_one(
+            &engine,
+            &def_with(
+                &provider,
+                vec![mount(&format!("{}:/mnt/mirage", host.display()))],
+            ),
+        )
+        .unwrap_err();
+
+        let message = err.to_string();
+        assert!(
+            matches!(err, ContainerError::ReservedMount { .. }),
+            "a mount over mirage's own tree must be refused: {message}"
+        );
+        // Both paths, because the collision is between them and the user
+        // knows only one of them exists.
+        assert!(
+            message.contains(&host.display().to_string()) && message.contains("/mnt/mirage"),
+            "the error must name the mount and the directory it covers: {message}"
+        );
+        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
+        assert!(
+            recorded.is_empty(),
+            "the provider was asked to do something for a mount that could never work:\n{recorded}"
+        );
+    }
+
+    #[test]
+    fn an_ancestor_of_mirages_directory_is_refused_too() {
+        // `--mount /host:/mnt` covers the reserved tree just as surely as
+        // naming it does, and is the spelling a user reaches for when
+        // they want "somewhere to put files".
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        let err = bring_up_one(
+            &engine,
+            &def_with(
+                &provider,
+                vec![mount(&format!("{}:/mnt", dir.path().display()))],
+            ),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ContainerError::ReservedMount { .. }), "{err}");
+    }
+
+    #[test]
+    fn the_mounts_mirage_adds_itself_are_not_refused() {
+        // Everything mirage bind-mounts lives *below* the reserved
+        // directory, and the supervisor appends those to the same list
+        // the user's mounts are in. A collision check that caught them
+        // would refuse every containerised session there is.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+        let scratch = dir.path().join("scratch");
+        std::fs::create_dir(&scratch).unwrap();
+
+        bring_up_one(
+            &engine,
+            &def_with(
+                &provider,
+                vec![
+                    mount(&format!("{}:/mnt/mirage/runtime", scratch.display())),
+                    mount(&format!("{}:/mnt/mirage/config:ro", scratch.display())),
+                ],
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_published_port_is_refused_on_a_multi_node_session() {
+        // Every node runs the same container with the same argv, so all
+        // of them publish onto the same host port: node 0 binds it and
+        // node 1 cannot. That used to be found halfway through bring-up,
+        // by the second container, in the engine's own words about a
+        // port the user had only asked for once.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        let err = bring_up_nodes(
+            &engine,
+            &def_with_ports(&provider, vec![port("8080:8000")]),
+            2,
+        )
+        .expect_err("publishing one host port from two nodes cannot work");
+
+        let message = err.to_string();
+        assert!(
+            matches!(err, ContainerError::PortsMultiNode { .. }),
+            "{message}"
+        );
+        assert!(
+            message.contains("8080:8000") && message.contains("2-node"),
+            "the error must name the port and the node count: {message}"
+        );
+        // And nothing was started on the way to finding out, which is the
+        // half of this that a user notices: the failure used to arrive
+        // with node 0 already up.
+        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
+        assert!(
+            !recorded.contains("run --rm"),
+            "a node container was started for a port mapping that could never work:\n{recorded}"
+        );
+    }
+
+    #[test]
+    fn a_single_node_session_still_publishes_its_ports() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        bring_up_one(&engine, &def_with_ports(&provider, vec![port("8080:8000")])).unwrap();
+        let recorded = log_containing(&log, "run --rm");
+        assert!(recorded.contains("-p 8080:8000"), "{recorded}");
+    }
+
+    #[test]
+    fn the_same_port_asked_for_twice_is_published_once() {
+        // Restating the profile's port on the command line, or simply
+        // repeating `--port`, used to fail the container with `address
+        // already in use` — a message about a conflict with somebody
+        // else's process, sending the user to look for one that was not
+        // there. Saying the same thing twice is not a mistake.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        bring_up_one(
+            &engine,
+            // The second spells the protocol both of them mean anyway.
+            &def_with_ports(
+                &provider,
+                vec![port("8080:8000"), port("8080:8000"), port("8080:8000/tcp")],
+            ),
+        )
+        .unwrap();
+
+        let recorded = log_containing(&log, "run --rm");
+        let run_line = recorded
+            .lines()
+            .find(|l| l.starts_with("run --rm"))
+            .unwrap_or_else(|| panic!("no container was launched:\n{recorded}"));
+        assert_eq!(
+            run_line.matches("-p 8080").count(),
+            1,
+            "one host port must be published once: {run_line}"
+        );
+    }
+
+    #[test]
+    fn two_mappings_for_one_host_port_are_refused_by_name() {
+        // Unlike a repeat, these disagree: the host can only give 8080 to
+        // one container, and the engine's "address already in use"
+        // describes the symptom rather than the two flags that caused it.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        let err = bring_up_one(
+            &engine,
+            &def_with_ports(&provider, vec![port("8080:8000"), port("8080:9000")]),
+        )
+        .unwrap_err();
+
+        let message = err.to_string();
+        assert!(
+            matches!(err, ContainerError::PortConflict { .. }),
+            "{message}"
+        );
+        assert!(
+            message.contains("8080:8000") && message.contains("8080:9000"),
+            "the error must name both mappings: {message}"
+        );
+        // The same host port on the other protocol is not a conflict at
+        // all: TCP 53 and UDP 53 are two different resources.
+        bring_up_one(
+            &engine,
+            &def_with_ports(&provider, vec![port("53:53/tcp"), port("53:53/udp")]),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn an_empty_image_is_refused_before_anything_is_asked_of_the_engine() {
+        // `--image ""` reached the provider as a missing argument, and
+        // the user watched `pulling image  (this can take a while)` with
+        // a hole where the name should be.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let def = ContainerizedDef {
+            image: String::new(),
+            ..def_with(&provider, vec![])
+        };
+
+        let err = Engine::resolve(&def).unwrap_err();
+        let message = err.to_string();
+        assert!(matches!(err, ContainerError::Image { .. }), "{message}");
+        assert!(
+            message.contains("--image") && message.contains("ubuntu:24.04"),
+            "the error must name the flag and show what one looks like: {message}"
+        );
+        assert!(
+            std::fs::read_to_string(&log).unwrap_or_default().is_empty(),
+            "the engine was asked about an image that does not exist"
+        );
+    }
+
+    #[test]
+    fn a_provider_that_is_not_a_container_engine_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Not there at all. This used to surface as a bare `No such file
+        // or directory` from whichever step spawned first.
+        let missing = dir.path().join("whale");
+        let err = Engine::resolve(&def_with(&missing, vec![])).unwrap_err();
+        let message = err.to_string();
+        assert!(matches!(err, ContainerError::Provider { .. }), "{message}");
+        assert!(
+            message.contains(&missing.display().to_string()) && message.contains("podman"),
+            "the error must name what was configured and what mirage can drive: {message}"
+        );
+
+        // There, executable, and not an engine: `--version` is the
+        // weakest question that tells the two apart, and both real
+        // engines answer it without touching a daemon or the network.
+        let impostor = scripted_provider(dir.path(), "impostor.sh", "exit 1\n");
+        let err = Engine::resolve(&def_with(&impostor, vec![])).unwrap_err();
+        let message = err.to_string();
+        assert!(matches!(err, ContainerError::Provider { .. }), "{message}");
+        assert!(
+            message.contains("--version"),
+            "the error must say what mirage asked it: {message}"
+        );
+
+        // And a script that answers is accepted, because a provider is
+        // allowed to be a wrapper around an engine — which is what every
+        // mock in this file is.
+        let log = dir.path().join("log");
+        let mock = mock_provider(dir.path(), &log);
+        Engine::resolve(&def_with(&mock, vec![])).unwrap();
+    }
+
+    #[test]
+    fn a_derived_image_is_labelled_as_mirages() {
+        // Nothing else records that a `mirage-hack-…` image exists: it is
+        // built once, keyed by base image plus hacks, and outlives every
+        // session that uses it. The label on the image is the only thing
+        // that can attribute it later.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = scripted_provider(
+            dir.path(),
+            "building-provider.sh",
+            &format!(
+                "echo \"$@\" >> {log}\n\
+                 cat > /dev/null\n\
+                 exit 0\n",
+                log = log.display()
+            ),
+        );
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        engine
+            .build_image("mirage-hack-abc:latest", "FROM img:latest\n")
+            .unwrap();
+
+        let recorded = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            recorded.contains("--label mirage.owner=mirage"),
+            "a derived image must be marked as mirage's:\n{recorded}"
+        );
+        assert!(
+            recorded.contains(&format!(
+                "--label mirage.runtime={}",
+                mirage_core::container::owning_runtime()
+            )),
+            "a derived image must say which runtime directory built it:\n{recorded}"
+        );
+        // The Dockerfile still arrives on stdin, so the context argument
+        // has to stay last.
+        assert!(recorded.trim_end().ends_with(" -"), "{recorded}");
+    }
+
+    #[test]
+    fn a_refusal_spread_over_several_lines_reads_as_one() {
+        // Engines write their refusals as paragraphs — docker follows the
+        // error with an empty line and `See 'docker run --help'`. The
+        // ring is read back `; `-joined, so the blank lines came through
+        // as `; ; ` and read as though mirage had lost something.
+        let dir = tempfile::tempdir().unwrap();
+        let provider = scripted_provider(
+            dir.path(),
+            "chatty-provider.sh",
+            "case \"$1\" in\n\
+             run) printf 'docker: invalid reference format.\\n\\nSee '\\''docker run --help'\\''.\\n\\n' >&2; \
+             exit 125 ;;\n\
+             inspect) echo false; exit 0 ;;\n\
+             *) exit 0 ;;\n\
+             esac\n",
+        );
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        let mut client = engine.launch_node("n", &bare_spec(), &[], 0).unwrap();
+        let err = engine
+            .await_running(&mut client, std::time::Duration::from_secs(30))
+            .unwrap_err();
+
+        let message = err.to_string();
+        assert!(
+            message.contains("invalid reference format")
+                && message.contains("See 'docker run --help'"),
+            "the engine's words must survive: {message}"
+        );
+        assert!(
+            !message.contains("; ;") && !message.ends_with("; "),
+            "the engine's blank lines became separators: {message}"
+        );
+    }
+
+    /// A provider whose `exec` runs the command it is given, so a
+    /// workdir probe is answered by this machine's filesystem standing in
+    /// for the container's.
+    fn executing_provider(dir: &Path) -> Engine {
+        let provider = scripted_provider(
+            dir,
+            "exec-provider.sh",
+            "case \"$1\" in\n\
+             exec)\n\
+             shift\n\
+             while [ $# -gt 0 ]; do\n\
+             case \"$1\" in -i|-t) shift ;; -w|-e) shift 2 ;; *) break ;; esac\n\
+             done\n\
+             shift\n\
+             exec \"$@\" ;;\n\
+             *) exit 0 ;;\n\
+             esac\n",
+        );
+        Engine::with_provider(provider.to_string_lossy().to_string())
+    }
+
+    #[test]
+    fn a_workdir_the_container_does_not_have_is_named_before_the_exec() {
+        // The provider's own answer is `OCI runtime exec failed: … chdir
+        // to cwd ("/nope/nope") … no such file or directory` plus the
+        // container's exit code, which mentions neither the flag nor the
+        // reason the path being on the host is beside the point.
+        let dir = tempfile::tempdir().unwrap();
+        let engine = executing_provider(dir.path());
+
+        let err = engine
+            .check_workdir("mirage-s-node-0", "/nope/nope")
+            .unwrap_err();
+        let message = err.to_string();
+        assert!(matches!(err, ContainerError::Workdir { .. }), "{message}");
+        assert!(
+            message.contains("--workdir /nope/nope") && message.contains("mirage-s-node-0"),
+            "the error must name the flag, the path and the container: {message}"
+        );
+        // And the part a user cannot guess: which filesystem was asked.
+        assert!(
+            message.contains("container"),
+            "the error must say the path has to exist inside the container: {message}"
+        );
+    }
+
+    #[test]
+    fn a_workdir_the_container_has_is_accepted() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = executing_provider(dir.path());
+        engine
+            .check_workdir("mirage-s-node-0", &dir.path().to_string_lossy())
+            .unwrap();
+    }
+
+    #[test]
+    fn a_container_that_cannot_answer_about_its_workdir_is_believed() {
+        // No `/bin/sh` in the image, an engine that refused, a container
+        // that has gone away: none of those is evidence that the
+        // directory is missing, and refusing on them would invent a
+        // failure for a workload that was going to run.
+        let dir = tempfile::tempdir().unwrap();
+        let shell_less = scripted_provider(
+            dir.path(),
+            "distroless-provider.sh",
+            "case \"$1\" in\n\
+             exec) echo 'exec: /bin/sh: not found' >&2; exit 127 ;;\n\
+             *) exit 0 ;;\n\
+             esac\n",
+        );
+        let engine = Engine::with_provider(shell_less.to_string_lossy().to_string());
+        engine
+            .check_workdir("mirage-s-node-0", "/nope/nope")
+            .unwrap();
+
+        let gone = Engine::with_provider(dir.path().join("no-such-engine").to_string_lossy());
+        gone.check_workdir("mirage-s-node-0", "/nope/nope").unwrap();
     }
 }

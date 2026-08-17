@@ -11,7 +11,9 @@
 //! * Naming helpers ([`container_name`], [`network_name`]) so every
 //!   crate derives the same deterministic names.
 //! * Provider resolution ([`detect_provider`], [`resolve_provider`])
-//!   implementing the "prefer podman, fall back to docker" policy.
+//!   implementing the "prefer podman, fall back to docker" policy, and
+//!   [`installed_providers`] for the callers that have to ask every
+//!   engine on the machine rather than the one a new session would use.
 //! * [`teardown`] — a dependency-free, best-effort removal of a
 //!   session's containers and network, run during session teardown and
 //!   again as a backstop when the daemon shuts down.
@@ -109,6 +111,43 @@ pub const ENV_LOCAL_RANK: &str = "LOCAL_RANK";
 /// node keep the same value and disambiguate by local GPU index.
 pub const ENV_NCCL_HOSTID: &str = "NCCL_HOSTID";
 
+/// The directory inside every node container that belongs to mirage.
+///
+/// A node container is not only the user's image. Mirage bind-mounts its
+/// own binary, the session's scratch directory, the config directory and
+/// the emulator's libraries into it, and every one of those lands under
+/// this prefix so that exactly one path inside the container is spoken
+/// for. The individual destinations are spelled out by
+/// `mirage_supervisor::session`, which builds them from this root.
+///
+/// A *user* mount at or above this path is therefore a collision, and
+/// [`covers_mirage_dir`] is the test for it.
+pub const CONTAINER_MIRAGE_DIR: &str = "/mnt/mirage";
+
+/// Whether a bind mount at `container_path` would be laid over
+/// [`CONTAINER_MIRAGE_DIR`].
+///
+/// True for the reserved directory itself and for every ancestor of it
+/// (`/mnt`, `/`): those are the mounts that put a host directory
+/// *underneath* mirage's own, which is how a user's `--mount` target came
+/// back holding root-owned `bin`, `config`, `lib` and `runtime` entries
+/// the container wrote through it.
+///
+/// A path strictly *below* the reserved directory is deliberately not
+/// this function's business: everything mirage itself mounts is below it,
+/// so a test that answered "yes" there could not tell mirage's own mounts
+/// from a user's and would refuse every containerised session.
+///
+/// The comparison is by path component, so `/mnt/mirage/`, `/mnt//mirage`
+/// and `/mnt/./mirage` are all read as the path they name.
+#[must_use]
+pub fn covers_mirage_dir(container_path: &str) -> bool {
+    // An empty prefix is a prefix of everything to `Path::starts_with`,
+    // and an empty container path is not a mount over anything.
+    !container_path.is_empty()
+        && std::path::Path::new(CONTAINER_MIRAGE_DIR).starts_with(container_path)
+}
+
 /// Deterministic container name for a node of a session.
 ///
 /// Doubles as the container's network hostname, so other nodes can
@@ -161,6 +200,27 @@ pub fn owner_labels(session: &SessionId) -> Vec<(String, String)> {
     vec![
         (LABEL_OWNER.to_string(), LABEL_OWNER_VALUE.to_string()),
         (LABEL_SESSION.to_string(), session.as_str().to_string()),
+        (LABEL_RUNTIME.to_string(), owning_runtime()),
+    ]
+}
+
+/// The labels stamped on a derived image mirage builds.
+///
+/// [`LABEL_SESSION`] is deliberately absent, and its absence is the
+/// difference between an image and a container: a derived image is
+/// keyed by its base plus the hacks applied to it, built once, and then
+/// reused by every later session that asks for the same combination.
+/// Stamping it with the session that happened to build it first would
+/// name an owner that has been gone for days.
+///
+/// What it does carry is the same two marks everything else mirage
+/// creates does — that a mirage made it, and which runtime directory's
+/// mirage that was — because an image is host state like any other and
+/// the alternative is an untagged `mirage-hack-…` nobody can attribute.
+#[must_use]
+pub fn image_labels() -> Vec<(String, String)> {
+    vec![
+        (LABEL_OWNER.to_string(), LABEL_OWNER_VALUE.to_string()),
         (LABEL_RUNTIME.to_string(), owning_runtime()),
     ]
 }
@@ -296,39 +356,117 @@ pub fn network_is_foreign(provider: &str, name: &str) -> bool {
     matches!(network_label(provider, name, LABEL_OWNER), Some(v) if v != LABEL_OWNER_VALUE)
 }
 
+/// Environment variable naming the container engine to use.
+///
+/// Read as a *default*: it outranks autodetection but not a provider
+/// something asked for by name. See [`resolve_provider`] for the whole
+/// order and why it is that way round.
+pub const ENV_PROVIDER: &str = "MIRAGE_CONTAINER_PROVIDER";
+
+/// The container engines mirage knows how to drive, in the order it
+/// prefers them. podman first: it is rootless by default, so a session
+/// started by an ordinary user does not need a daemon socket they may
+/// not be allowed to open.
+const KNOWN_PROVIDERS: [&str; 2] = ["podman", "docker"];
+
 /// Auto-detect a container provider on `PATH`, preferring podman.
 ///
 /// Returns the provider's bare name (`"podman"` / `"docker"`) when
 /// found, or `None` if neither is installed.
 pub fn detect_provider() -> Option<String> {
-    for candidate in ["podman", "docker"] {
-        if which_on_path(candidate).is_some() {
-            return Some(candidate.to_string());
-        }
+    KNOWN_PROVIDERS
+        .into_iter()
+        .find(|candidate| which_on_path(candidate).is_some())
+        .map(str::to_string)
+}
+
+/// Every container engine installed here, not just the one a new session
+/// would use.
+///
+/// [`detect_provider`] answers "which engine should this session run
+/// on?" and answers it with the first match, which is the wrong question
+/// for anything that has to *find* what earlier sessions left behind: a
+/// session created with `--container-provider docker` on a host that also
+/// has podman leaves containers a sweep that only asked podman never sees
+/// — and then reports success, which is the one answer that stops a user
+/// from looking.
+///
+/// [`ENV_PROVIDER`] still names one engine deliberately and is then the
+/// only candidate, which is how a test (or a user with a wrapper script)
+/// points a sweep at something that is not on the usual list at all.
+///
+/// This does not see an engine named only by an absolute path inside a
+/// profile: nothing here reads profiles. A caller that has one should add
+/// it to what this returns.
+#[must_use]
+pub fn installed_providers() -> Vec<String> {
+    if let Ok(p) = std::env::var(ENV_PROVIDER)
+        && !p.is_empty()
+    {
+        return vec![p];
     }
-    None
+    KNOWN_PROVIDERS
+        .into_iter()
+        .filter(|engine| which_on_path(engine).is_some())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Where a provider name or path resolves to a file, if anywhere.
+///
+/// A name is looked up on `PATH`; anything containing a separator is
+/// taken as the path it plainly is. Exposed so the engine can tell "you
+/// named something that is not there" from "the engine is there and
+/// refused", which are different errors with different fixes.
+#[must_use]
+pub fn provider_binary(name: &str) -> Option<std::path::PathBuf> {
+    which_on_path(name)
 }
 
 /// Resolve the provider to use, in priority order:
 ///
-/// 1. an explicit value from the profile (`"podman"`, `"docker"`, or a path),
-/// 2. the `MIRAGE_CONTAINER_PROVIDER` environment override,
+/// 1. an explicit value (`"podman"`, `"docker"`, or a path) — either
+///    `--container-provider` or the provider pinned on the profile,
+///    which reach this function as the same argument,
+/// 2. the [`ENV_PROVIDER`] environment default,
 /// 3. auto-detection ([`detect_provider`]).
 ///
 /// Returns `None` only when no provider was specified and none could be
 /// detected.
+///
+/// # Why the environment variable does not outrank the profile
+///
+/// The conventional order is flag, then environment, then configuration
+/// file — and a profile is a configuration file, so putting the variable
+/// second looks backwards. The reason it is not is that mirage cannot
+/// tell those two apart by the time it gets here: `--container-provider`
+/// is applied to the profile before the session is built, so a
+/// profile-pinned provider and a flag-given one are the same string in
+/// the same field. Ranking the variable above it would therefore let an
+/// exported `MIRAGE_CONTAINER_PROVIDER` silently beat a flag the user
+/// typed on the command line, which is a worse surprise than the one it
+/// would fix.
+///
+/// So the variable is what its name in `docs/cli.md` says: the default
+/// when nothing names an engine. What it must not be is *silent* about
+/// it, which is what a set-but-unused variable used to be — hence the
+/// warning below, naming both values and which one won.
 pub fn resolve_provider(explicit: Option<&str>) -> Option<String> {
+    let from_env = std::env::var(ENV_PROVIDER).ok().filter(|p| !p.is_empty());
     if let Some(p) = explicit
         && !p.is_empty()
     {
+        if let Some(env) = from_env.filter(|env| env != p) {
+            tracing::warn!(
+                "{ENV_PROVIDER}={env} was ignored: this session names the container \
+                 provider `{p}` (on its profile, or with --container-provider), and that \
+                 wins over the environment. Pass `--container-provider {env}` to use it \
+                 for this run."
+            );
+        }
         return Some(p.to_string());
     }
-    if let Ok(p) = std::env::var("MIRAGE_CONTAINER_PROVIDER")
-        && !p.is_empty()
-    {
-        return Some(p);
-    }
-    detect_provider()
+    from_env.or_else(detect_provider)
 }
 
 /// One container backing one node of a session.
@@ -767,6 +905,37 @@ mod tests {
     }
 
     #[test]
+    fn every_installed_engine_is_a_candidate_and_not_just_the_first() {
+        // `detect_provider` stops at the first match, which is right for
+        // "what should this session run on" and wrong for anything that
+        // has to find what an earlier session left: on a host with both
+        // engines, a docker session's containers are invisible to a sweep
+        // that only ever asked podman.
+        //
+        // `MIRAGE_CONTAINER_PROVIDER` overrides the whole list, and a
+        // test cannot set an environment variable in a workspace that
+        // forbids `unsafe` — so when the machine running the suite has
+        // one exported, only the shape of the answer is checked.
+        let candidates = installed_providers();
+        assert!(candidates.iter().all(|c| !c.is_empty()), "{candidates:?}");
+        if std::env::var_os(ENV_PROVIDER).is_some() {
+            assert_eq!(candidates.len(), 1, "{candidates:?}");
+            return;
+        }
+        assert!(
+            candidates.iter().all(|c| provider_binary(c).is_some()),
+            "an engine that is not installed was named a candidate: {candidates:?}"
+        );
+        match detect_provider() {
+            Some(first) => {
+                assert_eq!(candidates.first(), Some(&first));
+                assert!(candidates.contains(&first), "{candidates:?}");
+            }
+            None => assert!(candidates.is_empty(), "{candidates:?}"),
+        }
+    }
+
+    #[test]
     fn teardown_of_an_empty_state_is_a_no_op() {
         // A non-containerised session has nothing to remove; teardown must
         // not invent a provider invocation (or panic) for it.
@@ -857,6 +1026,61 @@ mod tests {
         // invocations started from wherever the user happened to be.
         let _runtime = PinnedRuntime::new();
         assert!(Path::new(&owning_runtime()).is_absolute());
+
+        // And again for a directory that cannot be canonicalised because
+        // it is not there — the `std::path::absolute` fallback, which is
+        // the branch this test's own comment is about and the one that
+        // runs on the first containerised run under a fresh
+        // `MIRAGE_RUNTIME`. A *relative* one, because that is the only
+        // shape where the fallback changes the answer: it is what a
+        // `MIRAGE_RUNTIME=rt` in somebody's shell profile resolves to,
+        // and recording it verbatim would name a different directory to
+        // every `mirage cleanup` started from somewhere else. Nothing is
+        // created for it; the test lock this fixture holds is what keeps
+        // the process-wide root ours to move.
+        crate::paths::set_test_root(Path::new("mirage-runtime-that-is-not-there"));
+        assert!(
+            Path::new(&owning_runtime()).is_absolute(),
+            "a runtime directory that does not exist yet was recorded as \
+             the relative path it was written as: {}",
+            owning_runtime()
+        );
+    }
+
+    #[test]
+    fn a_mount_over_mirages_own_directory_is_recognised() {
+        // The reserved tree itself and everything above it: those are the
+        // mounts that put a user's host directory underneath the binary,
+        // config and scratch mounts mirage adds to every node container.
+        assert!(covers_mirage_dir(CONTAINER_MIRAGE_DIR));
+        assert!(covers_mirage_dir("/mnt/mirage/"));
+        assert!(covers_mirage_dir("/mnt//mirage"));
+        assert!(covers_mirage_dir("/mnt/./mirage"));
+        assert!(covers_mirage_dir("/mnt"));
+        assert!(covers_mirage_dir("/"));
+
+        // Everything else is the user's to mount, including the paths
+        // *below* the reserved tree — mirage's own mounts are all down
+        // there, so a check that caught them would refuse every
+        // containerised session there is.
+        assert!(!covers_mirage_dir("/mnt/mirage/lib"));
+        assert!(!covers_mirage_dir("/mnt/mine"));
+        assert!(!covers_mirage_dir("/data"));
+        assert!(!covers_mirage_dir(""));
+    }
+
+    #[test]
+    fn a_derived_image_is_marked_as_mirages_but_not_as_a_sessions() {
+        let _runtime = PinnedRuntime::new();
+        assert_eq!(
+            image_labels(),
+            vec![
+                (LABEL_OWNER.to_string(), LABEL_OWNER_VALUE.to_string()),
+                (LABEL_RUNTIME.to_string(), owning_runtime()),
+            ],
+            "a derived image outlives the session that built it, so it \
+             must be attributable without naming one"
+        );
     }
 
     #[test]
