@@ -31,6 +31,7 @@ use mirage_core::emulator::ExecMode;
 use mirage_core::profile::{ContainerizedDef, FileMount, Hack, PortMapping, ProfileDef};
 use mirage_core::registry::EmulatorInfo;
 use mirage_core::session::SessionId;
+use mirage_core::store::{DocKind, Stored};
 
 /// The level mirage logs at when nothing asks for more.
 const DEFAULT_LOG: &str = "warn";
@@ -513,6 +514,7 @@ pub enum TopologyCmd {
     /// Delete a topology.
     Delete {
         name: String,
+        /// Don't prompt for confirmation.
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -531,6 +533,7 @@ pub enum AgentCmd {
     /// Delete an agent.
     Delete {
         name: String,
+        /// Don't prompt for confirmation.
         #[arg(short = 'f', long)]
         force: bool,
     },
@@ -830,13 +833,51 @@ impl Default for RunArgs {
 // Dispatch
 // =============================================================================
 
+/// The exit code a command uses when the user answered "no" at a
+/// confirmation prompt.
+///
+/// Nothing happened, and nothing went wrong — which are two different
+/// things, and `0` can only say one of them. A script that deletes a
+/// profile has to be able to tell "it is gone" (0) from "you were asked
+/// and said no" (this) from "mirage tried and could not" (1), and a
+/// declined delete used to be indistinguishable from a completed one.
+const DECLINED: u8 = 2;
+
 /// Dispatch a parsed [`CtlCmd`]. Returns the exit code the process
 /// should use.
 ///
+/// Under `--json` a failure is rendered as `{"error": …}` on stderr and
+/// reported as exit 1, rather than propagating to `main` to be printed as
+/// an English sentence. A caller that asked for machine-readable output
+/// and got prose on the one path it cannot parse has to fall back to
+/// scraping the text, which is exactly what `--json` exists to avoid.
+/// stdout is left alone either way: results go there, diagnostics do not,
+/// so the single JSON document a successful command promises is never
+/// mixed with an error object.
+///
 /// # Errors
 ///
-/// Returns an error if the command fails.
+/// Returns an error if the command fails and `json` is not set.
 pub async fn dispatch(cmd: CtlCmd, json: bool) -> anyhow::Result<ExitCode> {
+    match dispatch_inner(cmd, json).await {
+        Err(e) if json => {
+            // `{:#}` is what `main` prints, and walks the source chain the
+            // same way, so the sentence inside the object is the same
+            // sentence a text-mode run would have shown.
+            let doc = serde_json::json!({ "error": format!("{e:#}") });
+            match serde_json::to_string_pretty(&doc) {
+                Ok(text) => eprintln!("{text}"),
+                // A string in an object cannot fail to serialize; say
+                // something rather than swallow the failure it reports.
+                Err(_) => eprintln!("error: {e:#}"),
+            }
+            Ok(ExitCode::from(1))
+        }
+        other => other,
+    }
+}
+
+async fn dispatch_inner(cmd: CtlCmd, json: bool) -> anyhow::Result<ExitCode> {
     // Best-effort: write any missing builtin agents/topologies on
     // startup so they are always available under <MIRAGE_CONFIG>/. Errors
     // here are non-fatal; the user can recover via `mirage state
@@ -874,7 +915,9 @@ async fn profile_cmd(cmd: ProfileCmd, json: bool) -> anyhow::Result<ExitCode> {
     match cmd {
         ProfileCmd::List { long } => {
             let names = mirage_core::store::profile_list()?;
-            if json {
+            if json && long {
+                println!("{}", serde_json::to_string_pretty(&long_profiles(&names))?);
+            } else if json {
                 println!("{}", serde_json::to_string_pretty(&names)?);
             } else if long {
                 if names.is_empty() {
@@ -908,7 +951,8 @@ async fn profile_cmd(cmd: ProfileCmd, json: bool) -> anyhow::Result<ExitCode> {
             if let Err(e) = validate_profile(&p) {
                 anyhow::bail!("cannot create profile {}: {e}", p.name);
             }
-            mirage_core::store::profile_put(&p)?;
+            let stored = mirage_core::store::profile_put(&p)?;
+            report_replaced_builtin(DocKind::Profile, &p.name, stored);
             if json {
                 println!("{}", serde_json::to_string_pretty(&p)?);
             } else {
@@ -916,27 +960,70 @@ async fn profile_cmd(cmd: ProfileCmd, json: bool) -> anyhow::Result<ExitCode> {
             }
         }
         ProfileCmd::Import { file } => {
-            let bytes = if file == "-" {
-                let mut buf = Vec::new();
-                std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut buf)?;
-                buf
-            } else {
-                std::fs::read(&file)?
-            };
-            let p: ProfileDef = serde_json::from_slice(&bytes)?;
-            mirage_core::store::profile_put(&p)?;
-            report_change(json, "profile", &p.name, "imported", true)?;
+            let (bytes, from) = read_input(&file)?;
+            let p: ProfileDef = serde_json::from_slice(&bytes).map_err(|e| json_error(from, e))?;
+            let stored = mirage_core::store::profile_put(&p)?;
+            report_replaced_builtin(DocKind::Profile, &p.name, stored);
+            report_change(json, DocKind::Profile, &p.name, "imported")?;
         }
         ProfileCmd::Delete { name, force } => {
-            if !force && !confirm(&format!("delete profile {name}?"))? {
-                report_change(json, "profile", &name, "deleted", false)?;
-                return Ok(ExitCode::from(0));
-            }
-            mirage_core::store::profile_delete(&name)?;
-            report_change(json, "profile", &name, "deleted", true)?;
+            return delete_document(json, DocKind::Profile, &name, force, |name| {
+                mirage_core::store::profile_delete(name)
+            });
         }
     }
     Ok(ExitCode::from(0))
+}
+
+/// The long form of `profile list`, as JSON.
+///
+/// `--long` names the fields it exists to show, and under `--json` it
+/// used to be accepted and then drop every one of them: a script asking
+/// for the emulator and the description got the same bare array of names
+/// as one asking for neither, with nothing in the output to say so.
+fn long_profiles(names: &[String]) -> Vec<serde_json::Value> {
+    names
+        .iter()
+        .map(|n| match mirage_core::store::profile_get(n) {
+            Ok(p) => serde_json::json!({
+                "name": p.name,
+                "emulator": p.emulator.emulator,
+                "description": p.description,
+            }),
+            // The text form prints "(unreadable)" for one of these. A
+            // reader of the JSON needs the same fact, and needs it as a
+            // field rather than as a name it has to recognise — with the
+            // reason, which the text form has no room for.
+            Err(e) => serde_json::json!({
+                "name": n,
+                "unreadable": e.full_message(),
+            }),
+        })
+        .collect()
+}
+
+/// Say when a `create` or `import` consumed a builtin.
+///
+/// Replacing an untouched builtin is deliberately allowed — it is mirage's
+/// own seed, identical to the copy still in the binary, and taking the
+/// name over is how a builtin gets customised. Doing it in silence is
+/// another matter: `mirage topology create MI350X-2x8` exited 0 with
+/// nothing to say while a shipped two-node layout became whatever the
+/// flags defaulted to, which is the very thing the overwrite guard exists
+/// to prevent, one level down.
+///
+/// On stderr, so that `--json`'s single document on stdout stays a single
+/// document: this is a remark about what happened, not a result.
+fn report_replaced_builtin(kind: DocKind, name: &str, stored: Stored) {
+    if stored != Stored::ReplacedBuiltin {
+        return;
+    }
+    let kind = kind.as_str();
+    eprintln!(
+        "mirage: {name} was a builtin {kind} mirage ships, and this replaced it. \
+         Nothing you wrote was lost; `mirage {kind} delete {name}` restores the \
+         shipped version."
+    );
 }
 
 // ----- topology dispatch -----------------------------------------------------
@@ -966,9 +1053,10 @@ async fn topology_cmd(cmd: TopologyCmd, json: bool) -> anyhow::Result<ExitCode> 
             let t = mirage_core::topology::TopologyDef {
                 num_nodes,
                 gpus_per_node,
-                agent: MaybeRef::Ref(agent),
+                agent: MaybeRef::Ref(DocKind::Agent.canonical(&agent)),
             };
-            mirage_core::store::topology_put(&name, &t)?;
+            let stored = mirage_core::store::topology_put(&name, &t)?;
+            report_replaced_builtin(DocKind::Topology, &name, stored);
             if json {
                 println!("{}", serde_json::to_string_pretty(&t)?);
             } else {
@@ -976,18 +1064,17 @@ async fn topology_cmd(cmd: TopologyCmd, json: bool) -> anyhow::Result<ExitCode> 
             }
         }
         TopologyCmd::Import { name, file } => {
-            let bytes = read_input(&file)?;
-            let t: mirage_core::topology::TopologyDef = serde_json::from_slice(&bytes)?;
-            mirage_core::store::topology_put(&name, &t)?;
-            report_change(json, "topology", &name, "imported", true)?;
+            let (bytes, from) = read_input(&file)?;
+            let t: mirage_core::topology::TopologyDef =
+                serde_json::from_slice(&bytes).map_err(|e| json_error(from, e))?;
+            let stored = mirage_core::store::topology_put(&name, &t)?;
+            report_replaced_builtin(DocKind::Topology, &name, stored);
+            report_change(json, DocKind::Topology, &name, "imported")?;
         }
         TopologyCmd::Delete { name, force } => {
-            if !force && !confirm(&format!("delete topology {name}?"))? {
-                report_change(json, "topology", &name, "deleted", false)?;
-                return Ok(ExitCode::from(0));
-            }
-            mirage_core::store::topology_delete(&name)?;
-            report_change(json, "topology", &name, "deleted", true)?;
+            return delete_document(json, DocKind::Topology, &name, force, |name| {
+                mirage_core::store::topology_delete(name)
+            });
         }
     }
     Ok(ExitCode::from(0))
@@ -1012,58 +1099,149 @@ async fn agent_cmd(cmd: AgentCmd, json: bool) -> anyhow::Result<ExitCode> {
             println!("{}", serde_json::to_string_pretty(&a)?);
         }
         AgentCmd::Import { name, file } => {
-            let bytes = read_input(&file)?;
-            let a: mirage_core::agent::AgentDef = serde_json::from_slice(&bytes)?;
-            mirage_core::store::agent_put(&name, &a)?;
-            report_change(json, "agent", &name, "imported", true)?;
+            let (bytes, from) = read_input(&file)?;
+            let a: mirage_core::agent::AgentDef =
+                serde_json::from_slice(&bytes).map_err(|e| json_error(from, e))?;
+            let stored = mirage_core::store::agent_put(&name, &a)?;
+            report_replaced_builtin(DocKind::Agent, &name, stored);
+            report_change(json, DocKind::Agent, &name, "imported")?;
         }
         AgentCmd::Delete { name, force } => {
-            if !force && !confirm(&format!("delete agent {name}?"))? {
-                report_change(json, "agent", &name, "deleted", false)?;
-                return Ok(ExitCode::from(0));
-            }
-            mirage_core::store::agent_delete(&name)?;
-            report_change(json, "agent", &name, "deleted", true)?;
+            return delete_document(json, DocKind::Agent, &name, force, |name| {
+                mirage_core::store::agent_delete(name)
+            });
         }
     }
     Ok(ExitCode::from(0))
 }
 
-/// Report a one-off change to a stored document — an import, a delete.
+/// Report a stored document that changed — an import.
 ///
 /// Under `--json` stdout must be exactly one JSON document and nothing
 /// else, or the caller that asked for JSON cannot parse what it gets.
 /// These commands used to print their sentence either way, so
 /// `mirage profile import --json f.json` emitted `imported profile x`
 /// and a script's `json.load` failed on the word "imported".
-///
-/// `done` is false only for a delete the user declined at the prompt,
-/// which is a result too: a script that asked and was told no should not
-/// have to infer it from an empty stdout.
-fn report_change(json: bool, kind: &str, name: &str, verb: &str, done: bool) -> anyhow::Result<()> {
+fn report_change(json: bool, kind: DocKind, name: &str, verb: &str) -> anyhow::Result<()> {
+    let kind = kind.as_str();
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "kind": kind,
                 "name": name,
-                verb: done,
+                verb: true,
             }))?
         );
-    } else if done {
+    } else {
         println!("{verb} {kind} {name}");
     }
     Ok(())
 }
 
-fn read_input(file: &str) -> anyhow::Result<Vec<u8>> {
-    if file == "-" {
-        let mut buf = Vec::new();
-        std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut buf)?;
-        Ok(buf)
-    } else {
-        Ok(std::fs::read(file)?)
+/// Delete one stored document, having asked first unless told not to.
+///
+/// One function for all three resource verbs because everything here is
+/// the same for all three and was previously written out three times,
+/// which is how `--force` came to be documented on one of them and not
+/// the others.
+///
+/// Two things a delete has to say, and used to say neither of:
+///
+/// * A declined prompt is not a completed delete. Both exited 0, and in
+///   text mode both printed nothing at all, so `mirage profile delete x`
+///   answered with `n` was indistinguishable from one that worked. It
+///   now exits [`DECLINED`] and says so.
+/// * Deleting a builtin the user has *edited* really does remove their
+///   copy — and the shipped one immediately takes its place, by design.
+///   `deleted profile mi350x` followed by `mi350x` still being listed
+///   reads as a delete that failed. Saying which one went, and what came
+///   back, is the difference.
+fn delete_document(
+    json: bool,
+    kind: DocKind,
+    name: &str,
+    force: bool,
+    delete: impl FnOnce(&str) -> mirage_core::error::Result<()>,
+) -> anyhow::Result<ExitCode> {
+    let word = kind.as_str();
+    if !force && !confirm(&format!("delete {word} {name}?"))? {
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "kind": word,
+                    "name": name,
+                    "deleted": false,
+                    "declined": true,
+                }))?
+            );
+        } else {
+            println!("{word} {name} not deleted: you declined");
+        }
+        return Ok(ExitCode::from(DECLINED));
     }
+    // Asked before the delete, because afterwards the file mirage rewrote
+    // is indistinguishable from the one that was there.
+    let shipped_returns = mirage_core::store::shipped(kind, name).is_some();
+    delete(name)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "kind": word,
+                "name": name,
+                "deleted": true,
+                "shipped_version_restored": shipped_returns,
+            }))?
+        );
+    } else if shipped_returns {
+        println!(
+            "deleted your {word} {name}; mirage ships a builtin of that name, \
+             so the shipped version is back in its place"
+        );
+    } else {
+        println!("deleted {word} {name}");
+    }
+    Ok(ExitCode::from(0))
+}
+
+/// Read one document named on the command line, or stdin for `-`,
+/// returning its bytes and the name to blame if they do not parse.
+///
+/// An `import` failure used to surface the bare `std::io::Error`, so a
+/// missing file was `No such file or directory (os error 2)` with the
+/// filename nowhere in it — and the user had typed the filename, so it is
+/// the one word that identifies which of their commands went wrong. The
+/// config *reader* in the same binary already answers `io error on
+/// /…/x.json: No such file or directory (os error 2)`, and there is no
+/// reason for the writer's side of the same file to speak differently.
+fn read_input(file: &str) -> anyhow::Result<(Vec<u8>, std::path::PathBuf)> {
+    // Standard input has no path, and inventing one ("-") would be worse
+    // than naming what it actually is in a message a person reads.
+    let from = std::path::PathBuf::from(if file == "-" { "<stdin>" } else { file });
+    let bytes = if file == "-" {
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut buf)
+            .map_err(|e| mirage_core::error::MirageError::io(&from, e))?;
+        buf
+    } else {
+        std::fs::read(file).map_err(|e| mirage_core::error::MirageError::io(&from, e))?
+    };
+    Ok((bytes, from))
+}
+
+/// Blame the document an `import` could not parse, by name.
+///
+/// serde's own message is a line and a column of a file it does not
+/// identify, which is unreadable in a script importing several — and it
+/// leaks the Rust type it was deserializing into, which names nothing the
+/// user has. [`MirageError::Json`] is the shape the rest of mirage
+/// reports a bad document in.
+///
+/// [`MirageError::Json`]: mirage_core::error::MirageError::Json
+fn json_error(path: std::path::PathBuf, source: serde_json::Error) -> anyhow::Error {
+    anyhow::Error::new(mirage_core::error::MirageError::Json { path, source })
 }
 
 fn build_containerize(
@@ -1174,6 +1352,13 @@ fn build_profile_create(a: ProfileCreateArgs, interactive: bool) -> anyhow::Resu
     let gpus_per_node = resolve_count(a.gpus_per_node, "GPUs per node", interactive, &theme)?;
 
     // ----- agent -----
+    //
+    // Whichever branch supplies it, the name is stored in the single
+    // spelling agents are addressed by. `--agent MI350X` used to be
+    // written verbatim while the interactive picker offered the on-disk
+    // (lowercase) names, so the same profile came out as `MI350X` from a
+    // script and `mi350x` from a terminal — one document described two
+    // ways by two paths of one command.
     let agent = match a.agent {
         Some(a) => a,
         None if interactive => {
@@ -1262,7 +1447,7 @@ fn build_profile_create(a: ProfileCreateArgs, interactive: bool) -> anyhow::Resu
     let topo = mirage_core::topology::TopologyDef {
         num_nodes,
         gpus_per_node,
-        agent: MaybeRef::Ref(agent),
+        agent: MaybeRef::Ref(DocKind::Agent.canonical(&agent)),
     };
     Ok(ProfileDef {
         name,
@@ -2079,57 +2264,7 @@ async fn cleanup(dry_run: bool) -> Reclaimed {
 
 async fn state_cmd(cmd: StateCmd, json: bool) -> anyhow::Result<ExitCode> {
     match cmd {
-        StateCmd::Builtins => {
-            let agents = mirage_builtin::ensure_agents(true)?;
-            let topologies = mirage_builtin::ensure_topologies(true)?;
-            let profiles = mirage_builtin::ensure_profiles(true)?;
-            if json {
-                let entries: Vec<_> = agents
-                    .iter()
-                    .map(|(n, w)| {
-                        serde_json::json!({
-                            "kind": "agent",
-                            "name": n,
-                            "path": mirage_core::paths::agent_path(n),
-                            "written": w,
-                        })
-                    })
-                    .chain(topologies.iter().map(|(n, w)| {
-                        serde_json::json!({
-                            "kind": "topology",
-                            "name": n,
-                            "path": mirage_core::paths::topology_path(n),
-                            "written": w,
-                        })
-                    }))
-                    .chain(profiles.iter().map(|(n, w)| {
-                        serde_json::json!({
-                            "kind": "profile",
-                            "name": n,
-                            "path": mirage_core::paths::profile_path(n),
-                            "written": w,
-                        })
-                    }))
-                    .collect();
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-            } else {
-                for (name, w) in &agents {
-                    let p = mirage_core::paths::agent_path(name);
-                    let tag = if *w { "wrote" } else { "kept" };
-                    println!("{tag} agent     {} -> {}", name, p.display());
-                }
-                for (name, w) in &topologies {
-                    let p = mirage_core::paths::topology_path(name);
-                    let tag = if *w { "wrote" } else { "kept" };
-                    println!("{tag} topology  {} -> {}", name, p.display());
-                }
-                for (name, w) in &profiles {
-                    let p = mirage_core::paths::profile_path(name);
-                    let tag = if *w { "wrote" } else { "kept" };
-                    println!("{tag} profile   {} -> {}", name, p.display());
-                }
-            }
-        }
+        StateCmd::Builtins => builtins_cmd(json),
         StateCmd::Purge { force, all } => {
             let prompt = if all {
                 "purge ALL mirage state, including agents, topologies and profiles?"
@@ -2150,11 +2285,97 @@ async fn state_cmd(cmd: StateCmd, json: bool) -> anyhow::Result<ExitCode> {
                             "declined": true,
                         }))?
                     );
+                } else {
+                    println!("nothing was purged: you declined");
                 }
-                return Ok(ExitCode::from(0));
+                return Ok(ExitCode::from(DECLINED));
             }
-            return purge(all, json).await;
+            purge(all, json).await
         }
+    }
+}
+
+/// `mirage state builtins`: refresh every builtin document on disk.
+///
+/// All three kinds, always. This used to be three `?`-chained calls, so
+/// the first kind holding an edited builtin abandoned the other two — and
+/// then said "Every other builtin was refreshed", which was false, and
+/// under `--json` threw away the report of everything that *had* been
+/// refreshed. Repairing an edited agent, topology and profile therefore
+/// took three runs to even discover.
+///
+/// Exit 0 when nothing failed, edited builtins included. `--help`
+/// presents "a builtin you have edited is left alone and named" as the
+/// ordinary outcome, and it is: every document that could be refreshed
+/// was, nothing was lost, and there is nothing for the user to fix unless
+/// they want the shipped version back. A non-zero exit would make an
+/// upgrade script fail on a machine where the upgrade fully succeeded. A
+/// document that could not be *written* is a different matter and still
+/// fails.
+fn builtins_cmd(json: bool) -> anyhow::Result<ExitCode> {
+    let kinds = [
+        (DocKind::Agent, mirage_builtin::ensure_agents(true)?),
+        (DocKind::Topology, mirage_builtin::ensure_topologies(true)?),
+        (DocKind::Profile, mirage_builtin::ensure_profiles(true)?),
+    ];
+
+    if json {
+        let entries: Vec<serde_json::Value> = kinds
+            .iter()
+            .flat_map(|(kind, ensured)| {
+                ensured.documents.iter().map(move |(name, written)| {
+                    serde_json::json!({
+                        "kind": kind.as_str(),
+                        "name": name,
+                        "path": kind.path(name),
+                        "written": written,
+                        // Distinguishes "left alone because you changed
+                        // it" from a write that simply did not happen.
+                        "edited": ensured.edited.iter().any(|(n, _)| n == name),
+                    })
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&entries)?);
+    } else {
+        for (kind, ensured) in &kinds {
+            for (name, written) in &ensured.documents {
+                let tag = if *written { "wrote" } else { "kept " };
+                println!(
+                    "{tag} {:<9} {name} -> {}",
+                    kind.as_str(),
+                    kind.path(name).display()
+                );
+            }
+        }
+    }
+
+    // Every kind's edited documents, in one list, after the report of
+    // what did land. On stderr: this is a note about files mirage did not
+    // touch, and a script reading the list of what it did must not have to
+    // filter it out.
+    let edited: Vec<(DocKind, &String, &std::path::PathBuf)> = kinds
+        .iter()
+        .flat_map(|(kind, ensured)| ensured.edited.iter().map(move |(n, p)| (*kind, n, p)))
+        .collect();
+    if !edited.is_empty() {
+        eprintln!(
+            "mirage: {} builtin document{} differ{} from the one{} mirage ships and \
+             {} left alone:",
+            edited.len(),
+            if edited.len() == 1 { "" } else { "s" },
+            if edited.len() == 1 { "s" } else { "" },
+            if edited.len() == 1 { "" } else { "s" },
+            if edited.len() == 1 { "was" } else { "were" },
+        );
+        for (kind, name, path) in &edited {
+            eprintln!("  {:<9} {name} -> {}", kind.as_str(), path.display());
+        }
+        eprintln!(
+            "mirage: rewriting one would discard your edits, and everything else was \
+             refreshed. To take the shipped version of one after all, delete it \
+             (`mirage <kind> delete <name>`) and run `mirage state builtins` again."
+        );
     }
     Ok(ExitCode::from(0))
 }
@@ -2296,27 +2517,64 @@ fn purge_json(
 
 // ----- misc helpers ----------------------------------------------------------
 
+/// Ask a yes/no question on stderr and read the answer from stdin.
+///
+/// A prompt nobody can answer is a failure, not a "no". `mirage profile
+/// delete x < /dev/null` reached end-of-file on the first read, took that
+/// for a declined confirmation, deleted nothing and exited 0 — so a
+/// script that forgot `--force` was told its cleanup had run. The
+/// end-of-file case is now named and refused; a piped answer (`echo y |
+/// mirage …`) still works, because that is a stdin with somebody on the
+/// other end of it.
+///
+/// stderr rather than stdout: a prompt is not a result, and `--json`
+/// promises stdout carries exactly one document.
+///
+/// # Errors
+///
+/// Returns an error if stdin cannot be read, or if it ends without an
+/// answer.
 fn confirm(prompt: &str) -> anyhow::Result<bool> {
     use std::io::{BufRead, Write};
     eprint!("{prompt} [y/N] ");
     let _ = std::io::stderr().flush();
     let mut line = String::new();
     let stdin = std::io::stdin();
-    stdin.lock().read_line(&mut line)?;
+    if stdin.lock().read_line(&mut line)? == 0 {
+        eprintln!();
+        anyhow::bail!(
+            "there is nobody to answer \"{prompt}\": stdin ended without a reply. \
+             Pass --force to skip the question."
+        );
+    }
     Ok(matches!(
         line.trim().to_ascii_lowercase().as_str(),
         "y" | "yes"
     ))
 }
 
-fn print_paths(json: bool) {
-    let info = serde_json::json!({
+/// Every directory `mirage paths` reports, as one document.
+fn paths_json() -> serde_json::Value {
+    serde_json::json!({
         "config": mirage_core::paths::mirage_config_dir(),
         "runtime": mirage_core::paths::mirage_runtime_dir(),
         "profiles": mirage_core::paths::profile_root(),
+        "topologies": mirage_core::paths::topology_root(),
+        "agents": mirage_core::paths::agent_root(),
         "sessions": mirage_core::paths::session_runtime_root(),
         "runs": mirage_core::paths::run_socket_root(),
-    });
+    })
+}
+
+/// Print where mirage keeps things on this machine.
+///
+/// All three document directories, not just profiles. They are siblings
+/// under the config directory and a user can infer the other two — but
+/// this command exists precisely so that nobody has to infer where mirage
+/// is reading, and "I edited the agent and nothing changed" is answered
+/// by seeing the directory it is actually read from.
+fn print_paths(json: bool) {
+    let info = paths_json();
     if json {
         // A `serde_json::Value` built from string paths cannot fail to
         // serialize; print something useful rather than panicking if the
@@ -2326,23 +2584,17 @@ fn print_paths(json: bool) {
             Err(e) => eprintln!("could not render paths as JSON: {e}"),
         }
     } else {
-        println!(
-            "config:   {}",
-            mirage_core::paths::mirage_config_dir().display()
-        );
-        println!(
-            "runtime:  {}",
-            mirage_core::paths::mirage_runtime_dir().display()
-        );
-        println!("profiles: {}", mirage_core::paths::profile_root().display());
-        println!(
-            "sessions: {}",
-            mirage_core::paths::session_runtime_root().display()
-        );
-        println!(
-            "runs:     {}",
-            mirage_core::paths::run_socket_root().display()
-        );
+        for (label, dir) in [
+            ("config", mirage_core::paths::mirage_config_dir()),
+            ("runtime", mirage_core::paths::mirage_runtime_dir()),
+            ("profiles", mirage_core::paths::profile_root()),
+            ("topologies", mirage_core::paths::topology_root()),
+            ("agents", mirage_core::paths::agent_root()),
+            ("sessions", mirage_core::paths::session_runtime_root()),
+            ("runs", mirage_core::paths::run_socket_root()),
+        ] {
+            println!("{:<11} {}", format!("{label}:"), dir.display());
+        }
     }
 }
 
@@ -2824,6 +3076,173 @@ mod tests {
             format!("{:?}", code.unwrap()),
             format!("{:?}", ExitCode::from(1)),
             "a purge that could not remove the runtime directory must not exit 0"
+        );
+    }
+
+    #[test]
+    fn paths_names_every_directory_a_document_lives_in() {
+        // Profiles were the only document directory reported, so the
+        // answer to "where does mirage read the agent I edited?" was left
+        // to be inferred from a sibling — by the command that exists so
+        // nothing has to be inferred.
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+
+        let doc = paths_json();
+        for (key, dir) in [
+            ("profiles", mirage_core::paths::profile_root()),
+            ("topologies", mirage_core::paths::topology_root()),
+            ("agents", mirage_core::paths::agent_root()),
+        ] {
+            assert_eq!(
+                doc[key].as_str(),
+                Some(dir.display().to_string().as_str()),
+                "`mirage paths` must report {key}"
+            );
+        }
+
+        mirage_core::paths::clear_test_root();
+    }
+
+    #[test]
+    fn the_long_profile_list_carries_its_long_fields_into_json() {
+        // `--long --json` was accepted and then emitted the same bare
+        // array of names as `--json` alone, so the fields the flag exists
+        // to show were dropped with nothing to say they had been.
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+
+        // Written around the store: this crate links no emulator backend,
+        // so `profile_put`'s validation would refuse a profile naming one.
+        let mut p = sample_profile();
+        p.name = "described".to_string();
+        p.description = Some("six months of tuning".to_string());
+        mirage_core::state::write_json(&mirage_core::paths::profile_path(&p.name), &p).unwrap();
+
+        let listed = long_profiles(&["described".to_string()]);
+        assert_eq!(listed[0]["name"], "described");
+        assert_eq!(listed[0]["emulator"], "rocjitsu");
+        assert_eq!(listed[0]["description"], "six months of tuning");
+
+        mirage_core::paths::clear_test_root();
+    }
+
+    #[test]
+    fn an_import_failure_names_the_file_it_could_not_use() {
+        // A missing file used to be reported as a bare `No such file or
+        // directory (os error 2)`, with the filename the user typed
+        // nowhere in it, and a malformed one as a line and column of a
+        // document it did not identify.
+        let dir = tempfile::tempdir().unwrap();
+
+        let missing = dir.path().join("nope.json");
+        let e = format!("{:#}", read_input(&missing.to_string_lossy()).unwrap_err());
+        assert!(e.contains(&missing.display().to_string()), "{e}");
+        assert!(e.starts_with("io error on "), "{e}");
+
+        let broken = dir.path().join("broken.json");
+        std::fs::write(&broken, "not json at all").unwrap();
+        let (bytes, from) = read_input(&broken.to_string_lossy()).unwrap();
+        let parsed = serde_json::from_slice::<ProfileDef>(&bytes)
+            .map_err(|source| json_error(from, source))
+            .unwrap_err();
+        let e = format!("{parsed:#}");
+        assert!(e.starts_with("json error on "), "{e}");
+        assert!(e.contains(&broken.display().to_string()), "{e}");
+        // And nothing of serde's internal vocabulary: `ProfileDef` is not
+        // a thing the user has.
+        assert!(!e.contains("ProfileDef"), "{e}");
+    }
+
+    #[test]
+    fn a_failure_under_json_is_a_json_object() {
+        // Errors were English prose on every command, `--json` or not, so
+        // the one output a script cannot parse was the one it most needed
+        // to. The exit code is the observable half here; the object itself
+        // goes to stderr, which this process cannot capture from inside.
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+
+        // Blocking rather than `#[tokio::test]`: the lock guard above must
+        // not be held across an await.
+        let code = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(dispatch(
+                CtlCmd::Profile(ProfileCmd::Show {
+                    name: "ghost".to_string(),
+                }),
+                true,
+            ));
+
+        mirage_core::paths::clear_test_root();
+        assert_eq!(
+            format!("{:?}", code.unwrap()),
+            format!("{:?}", ExitCode::from(1)),
+            "a command that failed must still exit 1 under --json"
+        );
+    }
+
+    #[test]
+    fn state_builtins_refreshes_every_kind_and_survives_an_edited_one() {
+        // The three kinds were `?`-chained, so the first one holding an
+        // edited builtin abandoned the other two — and then claimed
+        // "Every other builtin was refreshed", which was false. Repairing
+        // an edited agent, topology and profile took three runs to even
+        // discover.
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+
+        ensure_builtins_present();
+        // Edit one of each kind, in the order the command visits them, so
+        // that stopping at the first would hide the other two.
+        let mut agent = mirage_core::store::agent_get("mi300x").unwrap();
+        agent.vm.gpu.num_xcds = 1;
+        mirage_core::state::write_json(&mirage_core::paths::agent_path("mi300x"), &agent).unwrap();
+        let mut topology = mirage_core::store::topology_get("MI350X-2x8").unwrap();
+        topology.num_nodes = 3;
+        mirage_core::state::write_json(&mirage_core::paths::topology_path("MI350X-2x8"), &topology)
+            .unwrap();
+        let mut profile = mirage_core::store::profile_get("mi450x").unwrap();
+        profile.description = Some("mine".to_string());
+        mirage_core::state::write_json(&mirage_core::paths::profile_path("mi450x"), &profile)
+            .unwrap();
+
+        let code = builtins_cmd(false).unwrap();
+
+        // All three survived, which is only possible if all three kinds
+        // ran, and the run is not a failure: nothing was lost and every
+        // other document was refreshed.
+        assert_eq!(
+            mirage_core::store::agent_get("mi300x")
+                .unwrap()
+                .vm
+                .gpu
+                .num_xcds,
+            1
+        );
+        assert_eq!(
+            mirage_core::store::topology_get("MI350X-2x8")
+                .unwrap()
+                .num_nodes,
+            3
+        );
+        assert_eq!(
+            mirage_core::store::profile_get("mi450x")
+                .unwrap()
+                .description,
+            Some("mine".to_string())
+        );
+        mirage_core::paths::clear_test_root();
+        assert_eq!(
+            format!("{code:?}"),
+            format!("{:?}", ExitCode::from(0)),
+            "leaving an edited builtin alone is the outcome `--help` calls normal"
         );
     }
 

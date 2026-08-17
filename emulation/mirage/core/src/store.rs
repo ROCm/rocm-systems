@@ -23,12 +23,16 @@
 //! tells them apart:
 //!
 //! * A write that would replace a document mirage did not write is
-//!   refused ([`profile_put`], [`topology_put`], [`agent_put`] alike --
+//!   refused ([`profile_put`], [`topology_put`], [`agent_put`] alike —
 //!   the three resource verbs are parallel, and a user has no way to
 //!   infer that one of them destroys their work where the others refuse).
-//!   Replacing a *pristine*
-//!   builtin is fine: it is mirage's own seed and identical to the copy
-//!   still compiled into the binary.
+//!   Replacing a *pristine* builtin is fine: it is mirage's own seed and
+//!   identical to the copy still compiled into the binary — but the
+//!   caller is told it happened ([`Stored`]), because a builtin
+//!   disappearing without a word is the same defect one level down.
+//!   The name is claimed from the filesystem rather than from a stat, so
+//!   two `create`s racing for it produce one winner and one refusal
+//!   instead of two successes (see [`write_new`]).
 //! * A delete of a pristine builtin is refused, because mirage rewrites
 //!   every missing builtin on the next command — the file would come
 //!   straight back and the "deleted" would have been a lie. Deleting one
@@ -39,7 +43,11 @@
 //!   and whether its emulator backend will accept it at all.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use serde::Serialize;
 
 use crate::agent::AgentDef;
 use crate::common::MaybeRef;
@@ -72,11 +80,24 @@ impl DocKind {
 
     /// Where a document of this kind called `name` lives.
     #[must_use]
-    pub fn path(self, name: &str) -> std::path::PathBuf {
+    pub fn path(self, name: &str) -> PathBuf {
         match self {
             DocKind::Profile => crate::paths::profile_path(name),
             DocKind::Topology => crate::paths::topology_path(name),
             DocKind::Agent => crate::paths::agent_path(name),
+        }
+    }
+
+    /// The directory every document of this kind lives in.
+    ///
+    /// The answer to "where did mirage look?", which is what a
+    /// not-found error owes its reader; see [`MirageError::not_found`].
+    #[must_use]
+    pub fn root(self) -> PathBuf {
+        match self {
+            DocKind::Profile => crate::paths::profile_root(),
+            DocKind::Topology => crate::paths::topology_root(),
+            DocKind::Agent => crate::paths::agent_root(),
         }
     }
 
@@ -85,13 +106,36 @@ impl DocKind {
     /// Profiles and agents are case-insensitive and stored lowercase;
     /// topologies are stored verbatim (`MI350X-1x8` is a topology name,
     /// not a GPU name, and the case is part of how it reads).
+    ///
+    /// Public because a *reference* to a document has to be written in
+    /// the same spelling however it was obtained. `mirage profile create`
+    /// took its agent from a flag on one path and from a picker reading
+    /// this directory on the other, and stored `MI350X` or `mi350x`
+    /// depending on which — the same profile, described two ways.
     #[must_use]
-    fn canonical(self, name: &str) -> String {
+    pub fn canonical(self, name: &str) -> String {
         match self {
             DocKind::Profile | DocKind::Agent => name.to_lowercase(),
             DocKind::Topology => name.to_string(),
         }
     }
+}
+
+/// What storing a document did to the name it was given.
+///
+/// Returned rather than discarded because the two outcomes are not the
+/// same news: one takes a free name, the other consumes mirage's own
+/// shipped definition, and a user who did the second by accident has no
+/// way to notice unless they are told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stored {
+    /// The name was free, and now holds this document.
+    Created,
+    /// The name held an untouched builtin, which this replaced. Nothing
+    /// the user wrote was lost — the replaced copy is still compiled into
+    /// the binary — but the shipped definition is no longer on disk, and
+    /// deleting this document is what brings it back.
+    ReplacedBuiltin,
 }
 
 /// The documents a linked-in provider seeds into a fresh config
@@ -148,23 +192,108 @@ pub fn is_pristine_builtin(kind: DocKind, name: &str) -> bool {
     matches!(serde_json::from_slice::<serde_json::Value>(&bytes), Ok(on_disk) if &on_disk == shipped)
 }
 
-/// Refuse to replace a document that mirage did not write.
+/// The refusal to replace a document that mirage did not write.
 ///
 /// Overwriting on request is fine; doing it without saying so is not.
 /// `mirage profile create cdna4` on a name that is already taken used to
 /// silently discard whatever was there, which for a profile someone had
 /// tuned is unrecoverable — these files are the only copy.
-fn guard_overwrite(kind: DocKind, name: &str) -> Result<()> {
-    let path = kind.path(name);
-    if !path.exists() || is_pristine_builtin(kind, name) {
-        return Ok(());
-    }
+fn already_exists(kind: DocKind, name: &str, path: &Path) -> MirageError {
     let kind = kind.as_str();
-    Err(MirageError::other(format!(
-        "{kind} {name:?} already exists at {}, and mirage will not overwrite it. \
+    let quoted = shown(name);
+    MirageError::other(format!(
+        "{kind} {quoted} already exists at {}, and mirage will not overwrite it. \
          Delete it first (`mirage {kind} delete {name}`) or choose another name.",
         path.display()
-    )))
+    ))
+}
+
+/// Store a document under `name`, refusing to destroy anything the user
+/// wrote and saying so when it takes over a builtin.
+///
+/// The one door every `create` and `import` goes through, so the rule
+/// lives here rather than three times over in the resource verbs.
+fn put_document<T: Serialize>(kind: DocKind, name: &str, value: &T) -> Result<Stored> {
+    let path = kind.path(name);
+    // Mirage's own untouched seed is not the user's work, so taking the
+    // name over is allowed — that is how a builtin gets customised. This
+    // is the one write that replaces a file, so it goes the ordinary
+    // rename way; the exclusive claim below exists to refuse exactly that.
+    if is_pristine_builtin(kind, name) {
+        crate::state::write_json(&path, value)?;
+        return Ok(Stored::ReplacedBuiltin);
+    }
+    if path.exists() {
+        return Err(already_exists(kind, name, &path));
+    }
+    write_new(kind, name, &path, value)?;
+    Ok(Stored::Created)
+}
+
+/// Scratch files get a name no other writer can be using.
+static SCRATCH: AtomicU64 = AtomicU64::new(0);
+
+/// Write a document whose name must still be free when the bytes land.
+///
+/// The existence check above reads the directory and this writes to it,
+/// and another `mirage … create` of the same name fits between the two:
+/// both processes saw a free name, both printed `created`, and the
+/// document left on disk was whichever one finished last — so the process
+/// told it had created the profile had not created the profile that
+/// exists. The exclusion is therefore taken from the filesystem instead
+/// of inferred from a stat.
+///
+/// The bytes go to a scratch file first, as [`crate::state::write_json`]
+/// does, so a concurrent reader never sees half a document; the name is
+/// then claimed with `link`, which fails rather than replaces when the
+/// target is taken. A plain `create_new` on the final path would be
+/// exclusive too, but it would publish the name before the content, and
+/// a scratch file with a fixed name would leave a crashed writer blocking
+/// the name forever.
+fn write_new<T: Serialize>(kind: DocKind, name: &str, path: &Path, value: &T) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| MirageError::io(parent, e))?;
+    }
+    let bytes = serde_json::to_vec_pretty(value).map_err(|e| MirageError::Json {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let scratch = path.with_extension(format!(
+        "new.{}.{}",
+        std::process::id(),
+        SCRATCH.fetch_add(1, Ordering::Relaxed)
+    ));
+    // Every failure below names `path`, never the scratch file: the
+    // scratch name is mirage's business, and a user told that
+    // `mi350x.new.4711.0` could not be written has been handed a filename
+    // that does not exist by the time they go looking for it.
+    std::fs::write(&scratch, &bytes).map_err(|e| MirageError::io(path, e))?;
+    let claimed = std::fs::hard_link(&scratch, path);
+    // The scratch file has served its purpose either way, and leaving one
+    // behind would put a stray `.new.<pid>.<n>` in a directory the user
+    // reads and edits by hand.
+    let _ = std::fs::remove_file(&scratch);
+    claimed.map_err(|e| match e.kind() {
+        std::io::ErrorKind::AlreadyExists => already_exists(kind, name, path),
+        _ => MirageError::io(path, e),
+    })
+}
+
+/// A name as an error may quote it back.
+///
+/// Echoing the argument verbatim turns a 5000-character name into a
+/// 5000-character error line, which scrolls the sentence explaining the
+/// problem off the screen. Long names are cut and counted instead; the
+/// prefix is what a user recognises theirs by, and the count is what tells
+/// them the shell expanded something they did not mean to pass.
+fn shown(name: &str) -> String {
+    const LIMIT: usize = 48;
+    let mut kept: String = name.chars().take(LIMIT).collect();
+    if kept.chars().count() < name.chars().count() {
+        kept.push('…');
+        return format!("{kept:?} ({} characters)", name.chars().count());
+    }
+    format!("{kept:?}")
 }
 
 /// Refuse a delete that would not stay deleted.
@@ -221,7 +350,8 @@ fn guard_delete(kind: DocKind, name: &str) -> Result<()> {
 pub fn validate_name(kind: &str, name: &str) -> Result<()> {
     let bad = |why: &str| {
         Err(MirageError::other(format!(
-            "invalid {kind} name {name:?}: {why}"
+            "invalid {kind} name {}: {why}",
+            shown(name)
         )))
     };
     if name.is_empty() {
@@ -265,11 +395,13 @@ fn validate_stored_name(kind: DocKind, name: &str) -> Result<()> {
     if canonical == name {
         return Ok(());
     }
+    let shown_name = shown(name);
+    let shown_canonical = shown(&canonical);
     let kind = kind.as_str();
     Err(MirageError::other(format!(
-        "invalid {kind} name {name:?}: {kind}s are addressed case-insensitively and \
-         stored lowercase, so mirage would save this one as {canonical:?} and every \
-         later command would show you a name you did not type. Use {canonical:?}."
+        "invalid {kind} name {shown_name}: {kind}s are addressed case-insensitively and \
+         stored lowercase, so mirage would save this one as {shown_canonical} and every \
+         later command would show you a name you did not type. Use {shown_canonical}."
     )))
 }
 
@@ -323,7 +455,7 @@ pub fn profile_get(name: &str) -> Result<ProfileDef> {
     validate_name("profile", name)?;
     let path = crate::paths::profile_path(name);
     if !path.exists() {
-        return Err(MirageError::ProfileNotFound(name.to_string()));
+        return Err(MirageError::not_found(DocKind::Profile, name));
     }
     crate::state::read_json(&path)
 }
@@ -342,15 +474,14 @@ pub fn profile_get(name: &str) -> Result<ProfileDef> {
 /// Returns an error if the name or a reference is invalid, if the
 /// emulator rejects the profile, if a profile of that name already exists
 /// and is not an untouched builtin, or if the document cannot be written.
-pub fn profile_put(profile: &ProfileDef) -> Result<()> {
+pub fn profile_put(profile: &ProfileDef) -> Result<Stored> {
     validate_name("profile", &profile.name)?;
     validate_stored_name(DocKind::Profile, &profile.name)?;
     validate_profile_refs(profile)?;
     profile
         .validate()
-        .map_err(|e| MirageError::other(format!("profile {:?}: {e}", profile.name)))?;
-    guard_overwrite(DocKind::Profile, &profile.name)?;
-    crate::state::write_json(&crate::paths::profile_path(&profile.name), profile)
+        .map_err(|e| MirageError::other(format!("profile {}: {e}", shown(&profile.name))))?;
+    put_document(DocKind::Profile, &profile.name, profile)
 }
 
 /// Delete a profile.
@@ -364,7 +495,7 @@ pub fn profile_delete(name: &str) -> Result<()> {
     validate_name("profile", name)?;
     let path = crate::paths::profile_path(name);
     if !path.exists() {
-        return Err(MirageError::ProfileNotFound(name.to_string()));
+        return Err(MirageError::not_found(DocKind::Profile, name));
     }
     guard_delete(DocKind::Profile, name)?;
     std::fs::remove_file(&path).map_err(|e| MirageError::io(path, e))
@@ -388,27 +519,27 @@ pub fn topology_get(name: &str) -> Result<TopologyDef> {
     validate_name("topology", name)?;
     let path = crate::paths::topology_path(name);
     if !path.exists() {
-        return Err(MirageError::TopologyNotFound(name.to_string()));
+        return Err(MirageError::not_found(DocKind::Topology, name));
     }
     crate::topology::store::get(name)
 }
 
-/// Write a topology under `name`, overwriting any existing one.
+/// Write a new topology under `name`.
 ///
-/// Unlike [`profile_put`] this one does replace what is there: `mirage
-/// topology create` is documented as "create or overwrite", and a
-/// topology is three numbers and a reference rather than something a user
-/// spends an afternoon tuning.
+/// Guarded exactly as [`profile_put`] is: the three resource verbs are
+/// parallel, so a topology someone edited is refused rather than
+/// discarded. This one used to be the odd one out and went straight to
+/// disk.
 ///
 /// # Errors
 ///
-/// Returns an error if the name or the agent reference is invalid, or if
-/// the document cannot be written.
-pub fn topology_put(name: &str, topology: &TopologyDef) -> Result<()> {
+/// Returns an error if the name or the agent reference is invalid, if a
+/// topology of that name already exists and is not an untouched builtin,
+/// or if the document cannot be written.
+pub fn topology_put(name: &str, topology: &TopologyDef) -> Result<Stored> {
     validate_name("topology", name)?;
-    guard_overwrite(DocKind::Topology, name)?;
     validate_topology_refs(topology)?;
-    crate::topology::store::put(name, topology).map(|_| ())
+    put_document(DocKind::Topology, name, topology)
 }
 
 /// Delete a topology.
@@ -422,7 +553,7 @@ pub fn topology_delete(name: &str) -> Result<()> {
     validate_name("topology", name)?;
     let path = crate::paths::topology_path(name);
     if !path.exists() {
-        return Err(MirageError::TopologyNotFound(name.to_string()));
+        return Err(MirageError::not_found(DocKind::Topology, name));
     }
     guard_delete(DocKind::Topology, name)?;
     std::fs::remove_file(&path).map_err(|e| MirageError::io(path, e))
@@ -446,7 +577,7 @@ pub fn agent_get(name: &str) -> Result<AgentDef> {
     validate_name("agent", name)?;
     let path = crate::paths::agent_path(name);
     if !path.exists() {
-        return Err(MirageError::AgentNotFound(name.to_string()));
+        return Err(MirageError::not_found(DocKind::Agent, name));
     }
     crate::agent::store::get(name)
 }
@@ -458,11 +589,10 @@ pub fn agent_get(name: &str) -> Result<AgentDef> {
 /// Returns an error if the name is invalid, if an agent of that name
 /// already exists and is not an untouched builtin, or if the document
 /// cannot be written.
-pub fn agent_put(name: &str, agent: &AgentDef) -> Result<()> {
+pub fn agent_put(name: &str, agent: &AgentDef) -> Result<Stored> {
     validate_name("agent", name)?;
     validate_stored_name(DocKind::Agent, name)?;
-    guard_overwrite(DocKind::Agent, name)?;
-    crate::agent::store::put(name, agent).map(|_| ())
+    put_document(DocKind::Agent, name, agent)
 }
 
 /// Delete an agent.
@@ -475,7 +605,7 @@ pub fn agent_delete(name: &str) -> Result<()> {
     validate_name("agent", name)?;
     let path = crate::paths::agent_path(name);
     if !path.exists() {
-        return Err(MirageError::AgentNotFound(name.to_string()));
+        return Err(MirageError::not_found(DocKind::Agent, name));
     }
     guard_delete(DocKind::Agent, name)?;
     std::fs::remove_file(&path).map_err(|e| MirageError::io(path, e))
@@ -486,7 +616,7 @@ pub fn agent_delete(name: &str) -> Result<()> {
 /// A missing directory reads as empty rather than as an error: it just
 /// means nothing of that kind has been written yet, which is the normal
 /// state of a fresh machine.
-fn list_json_stems(root: &std::path::Path) -> Result<Vec<String>> {
+fn list_json_stems(root: &Path) -> Result<Vec<String>> {
     if !root.exists() {
         return Ok(Vec::new());
     }
@@ -568,7 +698,7 @@ mod tests {
         crate::paths::set_test_root(dir.path());
 
         assert!(profile_list().unwrap().is_empty());
-        profile_put(&profile("a")).unwrap();
+        assert_eq!(profile_put(&profile("a")).unwrap(), Stored::Created);
         profile_put(&profile("b")).unwrap();
         assert_eq!(profile_list().unwrap(), vec!["a", "b"]);
         assert_eq!(profile_get("a").unwrap().name, "a");
@@ -577,7 +707,7 @@ mod tests {
         assert_eq!(profile_list().unwrap(), vec!["b"]);
         assert!(matches!(
             profile_get("a"),
-            Err(MirageError::ProfileNotFound(_))
+            Err(MirageError::ProfileNotFound { .. })
         ));
         crate::paths::clear_test_root();
     }
@@ -688,7 +818,9 @@ mod tests {
 
         let mut mine = profile(SEEDED_PROFILE);
         mine.description = Some("mine now".to_string());
-        profile_put(&mine).unwrap();
+        // Allowed, but never in silence: the caller has to be able to say
+        // that a shipped document just left the disk.
+        assert_eq!(profile_put(&mine).unwrap(), Stored::ReplacedBuiltin);
         assert!(!is_pristine_builtin(DocKind::Profile, SEEDED_PROFILE));
 
         let err = profile_put(&profile(SEEDED_PROFILE))
@@ -867,6 +999,61 @@ mod tests {
         );
 
         crate::paths::clear_test_root();
+    }
+
+    #[test]
+    fn only_one_of_two_racing_creates_reports_success() {
+        // The guard read the directory and the write filled it, and
+        // another `mirage … create` of the same name fitted between the
+        // two: eight workers produced two "successes", and the document
+        // left on disk was the later writer's — so the process told it had
+        // created the topology had not created the one that exists.
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+
+        const WORKERS: u32 = 8;
+        let start = std::sync::Barrier::new(WORKERS as usize);
+        let winners = std::sync::Mutex::new(Vec::new());
+        std::thread::scope(|scope| {
+            let start = &start;
+            let winners = &winners;
+            for gpus in 1..=WORKERS {
+                scope.spawn(move || {
+                    let mut mine = topology();
+                    mine.gpus_per_node = gpus;
+                    start.wait();
+                    if topology_put("contested", &mine).is_ok() {
+                        winners.lock().unwrap().push(gpus);
+                    }
+                });
+            }
+        });
+
+        let winners = winners.into_inner().unwrap();
+        assert_eq!(winners.len(), 1, "exactly one create may report success");
+        // And the winner is the document on disk, which is the half that
+        // makes the report worth anything.
+        assert_eq!(topology_get("contested").unwrap().gpus_per_node, winners[0]);
+        crate::paths::clear_test_root();
+    }
+
+    #[test]
+    fn an_enormous_name_is_cut_down_before_it_is_quoted_back() {
+        // A shell expansion that produced a 5000-character argument used
+        // to produce a 5000-character error line, which scrolls the
+        // sentence explaining the problem out of the terminal.
+        let huge = "x".repeat(5000);
+        let err = validate_name("profile", &huge).unwrap_err().to_string();
+        assert!(err.len() < 200, "{} characters", err.len());
+        assert!(err.contains("5000 characters"), "{err}");
+        assert!(err.contains("xxxx"), "the prefix identifies it: {err}");
+
+        // A name short enough to read is still quoted whole.
+        let err = validate_name("profile", "has a space")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("\"has a space\""), "{err}");
     }
 
     #[test]

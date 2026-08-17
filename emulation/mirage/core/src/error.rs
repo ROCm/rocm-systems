@@ -43,16 +43,31 @@ pub enum MirageError {
     Id(#[from] crate::session::IdError),
 
     /// No profile with that name exists.
-    #[error("profile not found: {0}")]
-    ProfileNotFound(String),
+    #[error("profile not found: {name} (mirage looked in {dir})")]
+    ProfileNotFound {
+        /// The name that was asked for.
+        name: String,
+        /// The directory profiles live in on this machine.
+        dir: PathBuf,
+    },
 
     /// No topology with that name exists.
-    #[error("topology not found: {0}")]
-    TopologyNotFound(String),
+    #[error("topology not found: {name} (mirage looked in {dir})")]
+    TopologyNotFound {
+        /// The name that was asked for.
+        name: String,
+        /// The directory topologies live in on this machine.
+        dir: PathBuf,
+    },
 
     /// No agent with that name exists.
-    #[error("agent not found: {0}")]
-    AgentNotFound(String),
+    #[error("agent not found: {name} (mirage looked in {dir})")]
+    AgentNotFound {
+        /// The name that was asked for.
+        name: String,
+        /// The directory agents live in on this machine.
+        dir: PathBuf,
+    },
 
     /// No live session with that id exists.
     #[error("session not found: {0}")]
@@ -70,11 +85,11 @@ pub enum MirageError {
     #[error("timed out: {0}")]
     Timeout(String),
 
-    /// The supervisor daemon could not be reached, started, or spoke a
-    /// protocol this build does not understand.
-    #[error("daemon: {0}")]
-    Daemon(String),
-
+    // No `Daemon` variant. There is no supervisor daemon to fail to
+    // reach: a `mirage run` holds its session in its own address space,
+    // and the one thing that does speak over a socket — `mirage exec` —
+    // reports what it could not reach in its own words. The variant was
+    // constructed by nobody and described a process that does not exist.
     /// Anything not worth its own variant.
     #[error("{0}")]
     Other(String),
@@ -86,9 +101,25 @@ impl MirageError {
         Self::Other(msg.into())
     }
 
-    /// Build a [`MirageError::Daemon`] from anything string-like.
-    pub fn daemon(msg: impl Into<String>) -> Self {
-        Self::Daemon(msg.into())
+    /// Report a document mirage could not find, naming the directory it
+    /// looked in.
+    ///
+    /// "Where did mirage look?" is the next question every one of these
+    /// raises, and it is not a question the reader can answer for
+    /// themselves: both `MIRAGE_CONFIG` and `XDG_CONFIG_HOME` move the
+    /// config directory, and a user staring at a name they know they
+    /// created is usually editing a different one. The directory belongs
+    /// in the error that knows it rather than in a sentence one call site
+    /// remembers to add.
+    #[must_use]
+    pub fn not_found(kind: crate::store::DocKind, name: impl Into<String>) -> Self {
+        let name = name.into();
+        let dir = kind.root();
+        match kind {
+            crate::store::DocKind::Profile => Self::ProfileNotFound { name, dir },
+            crate::store::DocKind::Topology => Self::TopologyNotFound { name, dir },
+            crate::store::DocKind::Agent => Self::AgentNotFound { name, dir },
+        }
     }
 
     /// Build an [`MirageError::Io`] for `path`.
@@ -127,9 +158,9 @@ impl MirageError {
     pub fn is_not_found(&self) -> bool {
         matches!(
             self,
-            Self::ProfileNotFound(_)
-                | Self::TopologyNotFound(_)
-                | Self::AgentNotFound(_)
+            Self::ProfileNotFound { .. }
+                | Self::TopologyNotFound { .. }
+                | Self::AgentNotFound { .. }
                 | Self::SessionNotFound(_)
                 | Self::ExecNotFound(_)
         )
@@ -142,13 +173,39 @@ mod tests {
 
     use super::*;
 
+    use crate::store::DocKind;
+
     #[test]
     fn not_found_classification() {
         assert!(MirageError::SessionNotFound("s".into()).is_not_found());
         assert!(MirageError::ExecNotFound("e".into()).is_not_found());
-        assert!(MirageError::ProfileNotFound("p".into()).is_not_found());
+        assert!(MirageError::not_found(DocKind::Profile, "p").is_not_found());
         assert!(!MirageError::Other("boom".into()).is_not_found());
         assert!(!MirageError::SessionExists("s".into()).is_not_found());
+    }
+
+    #[test]
+    fn a_missing_document_says_where_mirage_looked() {
+        // The next question a "not found" raises is which directory was
+        // read, and it is not one the reader can answer: MIRAGE_CONFIG and
+        // XDG_CONFIG_HOME both move it. One call site used to append the
+        // answer by hand, so every other command left it unsaid.
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+
+        for (kind, root) in [
+            (DocKind::Profile, crate::paths::profile_root()),
+            (DocKind::Topology, crate::paths::topology_root()),
+            (DocKind::Agent, crate::paths::agent_root()),
+        ] {
+            let e = MirageError::not_found(kind, "ghost").to_string();
+            assert!(e.contains("ghost"), "{e}");
+            assert!(e.contains(kind.as_str()), "{e}");
+            assert!(e.contains(&root.display().to_string()), "{e}");
+        }
+
+        crate::paths::clear_test_root();
     }
 
     #[test]
