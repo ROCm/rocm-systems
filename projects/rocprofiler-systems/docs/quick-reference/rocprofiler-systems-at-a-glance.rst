@@ -1,6 +1,6 @@
 .. meta::
-  :description: A high-level overview of ROCm Systems Profiler architecture, instrumentation modes, and command-line tools
-  :keywords: ROCm Systems Profiler overview, rocprofiler-systems, rocprof-sys, instrumentation, sampling, presets, rocpd, perfetto, MPI, OpenMP, GPU metrics
+   :description: A high-level overview of ROCm Systems Profiler architecture, instrumentation modes, and command-line tools
+   :keywords: ROCm Systems Profiler overview, rocprofiler-systems, rocprof-sys, instrumentation, sampling, presets, rocpd, perfetto, MPI, OpenMP, GPU metrics
 
 .. _rocprofiler-systems-at-a-glance:
 
@@ -12,7 +12,7 @@ ROCm Systems Profiler (``rocprofiler-systems``) captures the entire application 
 
 This system-wide view matters most when the GPU is only one part of a larger workload. In a distributed training job, for example, the GPU can appear idle not because its kernels are slow, but because a data loader is starved, an MPI collective is blocking, or Python's GIL is stalling the dispatch queue. Diagnosing these cross-domain interactions requires a tool that sees the full picture, not just the GPU in isolation.
 
-This topic orients you to how ROCm Systems Profiler is put together and how to invoke it. For the full, categorized feature catalog and use cases, see :doc:`../conceptual/rocprof-sys-feature-set`; for a narrative introduction to output formats, see :doc:`../what-is-rocprof-sys`.
+This topic orients you to how ROCm Systems Profiler is put together and how to invoke it. For the full, categorized feature catalog and use cases, see :doc:`../conceptual/rocprof-sys-feature-set`; for a narrative introduction to output formats, see :doc:`../what-is-rocprof-sys`
 
 .. _glance-key-features:
 
@@ -66,7 +66,7 @@ How it works
 
 ROCm Systems Profiler collects CPU-side data using one of two instrumentation modes, then collects GPU tracing, CPU counters, GPU metrics, MPI, OpenMP, and Python data through a shared data collection layer:
 
-.. image:: /data/how_systems_profiler_works.png
+.. image:: ../data/how_systems_profiler_works.png
    :width: 60%
    :align: center
 
