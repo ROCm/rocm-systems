@@ -52,8 +52,13 @@ _SAMPLING_WINDOW_QUERY = """
 
 def _query_sampling_window(perfetto_file: Path):
     """Return the aggregated timer_sampling extents from a Perfetto trace."""
-    from perfetto.common.exceptions import PerfettoException
-    from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
+    # check_use_perfetto() only proves that `import perfetto` succeeds, which a
+    # partial install satisfies without providing the trace_processor bindings.
+    try:
+        from perfetto.common.exceptions import PerfettoException
+        from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
+    except ImportError as exc:
+        pytest.skip(f"Perfetto trace processor bindings unavailable: {exc}")
 
     trace_processor_path = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
     config = None
