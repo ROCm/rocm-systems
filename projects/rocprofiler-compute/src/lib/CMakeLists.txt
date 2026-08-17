@@ -13,15 +13,19 @@ list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 
 # TheRock ROCm bundles elfutils and zlib under lib/rocm_sysdeps; prefer them
 # when present, otherwise fall through to the distro packages.
-foreach(rocm_root IN LISTS CMAKE_PREFIX_PATH)
-    if(IS_DIRECTORY "${rocm_root}/lib/rocm_sysdeps/lib")
-        list(PREPEND CMAKE_LIBRARY_PATH "${rocm_root}/lib/rocm_sysdeps/lib")
-        set(ENV{PKG_CONFIG_PATH}
-            "${rocm_root}/lib/rocm_sysdeps/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}"
-        )
-        break()
-    endif()
-endforeach()
+#
+# Temporarily disabled: TheRock's bundled zlib.pc is not relocatable (its
+# prefix= is a CI build path), so pkg-config yields a non-existent include dir
+# and CMake fails to generate. Restore once TheRock ships a fixed zlib.pc.
+# foreach(rocm_root IN LISTS CMAKE_PREFIX_PATH)
+#     if(IS_DIRECTORY "${rocm_root}/lib/rocm_sysdeps/lib")
+#         list(PREPEND CMAKE_LIBRARY_PATH "${rocm_root}/lib/rocm_sysdeps/lib")
+#         set(ENV{PKG_CONFIG_PATH}
+#             "${rocm_root}/lib/rocm_sysdeps/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}"
+#         )
+#         break()
+#     endif()
+# endforeach()
 
 # libdw has no upstream CMake config and the SDK's bundled Findlibdw.cmake is
 # brittle across pkg-config / multiarch layouts. Define libdw::libdw via
