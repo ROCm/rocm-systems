@@ -293,7 +293,10 @@ esac
     .replace("__LOG__", &log.display().to_string())
     .replace(
         "__STATE__",
-        &log.parent().unwrap_or(Path::new("/tmp")).display().to_string(),
+        &log.parent()
+            .unwrap_or(Path::new("/tmp"))
+            .display()
+            .to_string(),
     );
     std::fs::write(path, script).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -307,10 +310,7 @@ esac
 /// keep.
 fn sweep(tag: &str) {
     for pid in harness::find_processes(tag) {
-        let _ = nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(pid as i32),
-            Signal::SIGKILL,
-        );
+        let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), Signal::SIGKILL);
     }
 }
 
@@ -393,7 +393,10 @@ fn a_containerised_run_brings_up_executes_and_cleans_up() {
         "a containerised exec was given a host working directory:\n{exec_line}"
     );
     // Teardown removes everything bring-up created.
-    assert!(log.contains("rm -f mirage-"), "container not removed:\n{log}");
+    assert!(
+        log.contains("rm -f mirage-"),
+        "container not removed:\n{log}"
+    );
     assert!(
         log.contains("network rm mirage-"),
         "network not removed:\n{log}"
@@ -414,9 +417,10 @@ fn node_containers_are_launched_with_rm_and_are_not_detached() {
     env.create_containerized_profile("cp");
     let tag = marker("container-argv");
 
-    let mut run = env
-        .base
-        .spawn_run(&["--profile", "cp"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let mut run = env.base.spawn_run(
+        &["--profile", "cp"],
+        &["/bin/sh", "-c", &tagged_sleep(&tag)],
+    );
     let id = run.await_ready(READY);
 
     // These two flags are the whole ownership model, and neither is
@@ -460,9 +464,10 @@ fn a_container_does_not_outlive_the_run_that_created_it() {
     env.create_containerized_profile("cp");
     let tag = marker("container-orphan");
 
-    let mut run = env
-        .base
-        .spawn_run(&["--profile", "cp"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let mut run = env.base.spawn_run(
+        &["--profile", "cp"],
+        &["/bin/sh", "-c", &tagged_sleep(&tag)],
+    );
     let id = run.await_ready(READY);
     let container = format!("mirage-{id}-node-0");
     assert_eq!(env.live_containers(), vec![container.clone()]);
@@ -495,9 +500,10 @@ fn the_node_container_entrypoint_just_idles() {
     env.create_containerized_profile("cp");
     let tag = marker("container-idle");
 
-    let mut run = env
-        .base
-        .spawn_run(&["--profile", "cp"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let mut run = env.base.spawn_run(
+        &["--profile", "cp"],
+        &["/bin/sh", "-c", &tagged_sleep(&tag)],
+    );
     run.await_ready(READY);
 
     let log = env.provider_log();
@@ -527,9 +533,10 @@ fn the_container_carries_the_in_container_mirage_directories() {
     env.create_containerized_profile("cp");
     let tag = marker("container-envs");
 
-    let mut run = env
-        .base
-        .spawn_run(&["--profile", "cp"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let mut run = env.base.spawn_run(
+        &["--profile", "cp"],
+        &["/bin/sh", "-c", &tagged_sleep(&tag)],
+    );
     run.await_ready(READY);
 
     let log = env.provider_log();
@@ -603,9 +610,10 @@ fn container_state_is_never_written_to_disk_and_dies_with_the_session() {
     env.create_containerized_profile("cp");
     let tag = marker("container-state");
 
-    let mut run = env
-        .base
-        .spawn_run(&["--profile", "cp"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let mut run = env.base.spawn_run(
+        &["--profile", "cp"],
+        &["/bin/sh", "-c", &tagged_sleep(&tag)],
+    );
     let id = run.await_ready(READY);
 
     // Which containers a session has is held in the run's own memory. It
@@ -613,7 +621,10 @@ fn container_state_is_never_written_to_disk_and_dies_with_the_session() {
     // that wrote it and left teardown guessing whether the containers it
     // named were still there.
     assert!(
-        !env.base.session_scratch(&id).join("container.json").exists(),
+        !env.base
+            .session_scratch(&id)
+            .join("container.json")
+            .exists(),
         "container state must not be written to disk"
     );
 
@@ -667,8 +678,8 @@ fn a_multi_node_containerised_session_launches_one_container_per_node() {
     let log = env.provider_log();
     for rank in 0..3 {
         assert!(
-            log.lines()
-                .any(|l| l.starts_with("run --rm --name mirage-") && l.contains(&format!("-node-{rank} "))),
+            log.lines().any(|l| l.starts_with("run --rm --name mirage-")
+                && l.contains(&format!("-node-{rank} "))),
             "node {rank} container was not launched:\n{log}"
         );
     }
@@ -688,9 +699,10 @@ fn an_exec_runs_inside_the_containers_of_a_live_run() {
     env.create_containerized_profile("cp");
     let tag = marker("container-exec");
 
-    let mut run = env
-        .base
-        .spawn_run(&["--profile", "cp"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let mut run = env.base.spawn_run(
+        &["--profile", "cp"],
+        &["/bin/sh", "-c", &tagged_sleep(&tag)],
+    );
     let id = run.await_ready(READY);
 
     // Naming the session is optional while exactly one run is live,
@@ -754,9 +766,10 @@ fn ending_a_containerised_run_kills_the_workload_inside_the_container() {
     env.create_containerized_profile("cp");
     let tag = marker("container-signal");
 
-    let mut run = env
-        .base
-        .spawn_run(&["--profile", "cp"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let mut run = env.base.spawn_run(
+        &["--profile", "cp"],
+        &["/bin/sh", "-c", &tagged_sleep(&tag)],
+    );
     run.await_ready(READY);
     wait_for(
         "the containerised workload to start",
@@ -877,11 +890,17 @@ fn cleanup_reclaims_containers_no_live_run_accounts_for() {
         .env("MIRAGE_CONTAINER_PROVIDER", &env.provider)
         .output()
         .unwrap();
-    let text = String::from_utf8_lossy(&out.stdout).into_owned()
-        + &String::from_utf8_lossy(&out.stderr);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "cleanup failed:\n{text}");
-    assert!(text.contains(orphan), "the container was not reclaimed:\n{text}");
-    assert!(text.contains(network), "the network was not reclaimed:\n{text}");
+    assert!(
+        text.contains(orphan),
+        "the container was not reclaimed:\n{text}"
+    );
+    assert!(
+        text.contains(network),
+        "the network was not reclaimed:\n{text}"
+    );
 
     assert!(
         env.live_containers().is_empty(),
@@ -903,9 +922,10 @@ fn cleanup_spares_the_containers_of_a_live_run() {
     env.create_containerized_profile("cp");
     let tag = marker("cleanup-live-container");
 
-    let mut run = env
-        .base
-        .spawn_run(&["--profile", "cp"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let mut run = env.base.spawn_run(
+        &["--profile", "cp"],
+        &["/bin/sh", "-c", &tagged_sleep(&tag)],
+    );
     let id = run.await_ready(READY);
     let container = format!("mirage-{id}-node-0");
     assert_eq!(env.live_containers(), vec![container.clone()]);

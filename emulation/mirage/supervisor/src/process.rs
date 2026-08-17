@@ -492,7 +492,11 @@ pub fn spawn(spec: &SpawnSpec, output: mpsc::Sender<OutputChunk>) -> Result<Spaw
 
     let (stdin, stdout, stderr) = match spec.stdio {
         StdioMode::Inherit { stdin } => (
-            if stdin { Stdio::inherit() } else { Stdio::null() },
+            if stdin {
+                Stdio::inherit()
+            } else {
+                Stdio::null()
+            },
             Stdio::inherit(),
             Stdio::inherit(),
         ),
@@ -583,7 +587,12 @@ pub fn spawn(spec: &SpawnSpec, output: mpsc::Sender<OutputChunk>) -> Result<Spaw
         )));
     }
     if let Some(err) = child.stderr.take() {
-        pumps.push(tokio::spawn(pump(err, spec.node, StdStream::Stderr, output)));
+        pumps.push(tokio::spawn(pump(
+            err,
+            spec.node,
+            StdStream::Stderr,
+            output,
+        )));
     }
 
     Ok(Spawned {
@@ -819,9 +828,7 @@ impl Spawned {
                 // reporting the exec finished. By now the wrapper has had
                 // the client's whole lifetime to record its pid, so the
                 // lookup that failed before usually succeeds.
-                if !reached_workload
-                    && let Some(container) = self.container.clone()
-                {
+                if !reached_workload && let Some(container) = self.container.clone() {
                     container.signal_recorded(Signal::SIGKILL).await;
                 }
                 status
@@ -1118,7 +1125,8 @@ mod tests {
                 !INHERITED_ENV.contains(&k.as_str())
                     && !v.is_empty()
                     && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-                    && v.chars().all(|c| c.is_ascii_alphanumeric() || "_-./".contains(c))
+                    && v.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "_-./".contains(c))
             })
             .expect("this process must export at least one variable outside the allowlist");
 

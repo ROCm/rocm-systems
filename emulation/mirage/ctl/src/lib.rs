@@ -618,10 +618,7 @@ pub async fn dispatch(cmd: CtlCmd, json: bool) -> anyhow::Result<ExitCode> {
 
 // ----- profile dispatch ------------------------------------------------------
 
-async fn profile_cmd(
-    cmd: ProfileCmd,
-    json: bool,
-) -> anyhow::Result<ExitCode> {
+async fn profile_cmd(cmd: ProfileCmd, json: bool) -> anyhow::Result<ExitCode> {
     match cmd {
         ProfileCmd::List { long } => {
             let names = mirage_core::store::profile_list()?;
@@ -715,10 +712,7 @@ async fn profile_cmd(
 
 // ----- topology dispatch -----------------------------------------------------
 
-async fn topology_cmd(
-    cmd: TopologyCmd,
-    json: bool,
-) -> anyhow::Result<ExitCode> {
+async fn topology_cmd(cmd: TopologyCmd, json: bool) -> anyhow::Result<ExitCode> {
     match cmd {
         TopologyCmd::List => {
             let names = mirage_core::store::topology_list()?;
@@ -771,10 +765,7 @@ async fn topology_cmd(
 
 // ----- agent dispatch --------------------------------------------------------
 
-async fn agent_cmd(
-    cmd: AgentCmd,
-    json: bool,
-) -> anyhow::Result<ExitCode> {
+async fn agent_cmd(cmd: AgentCmd, json: bool) -> anyhow::Result<ExitCode> {
     match cmd {
         AgentCmd::List => {
             let names = mirage_core::store::agent_list()?;
@@ -1328,8 +1319,6 @@ fn parse_envs(entries: &[String]) -> anyhow::Result<std::collections::BTreeMap<S
     Ok(out)
 }
 
-
-
 // ----- cleanup ---------------------------------------------------------------
 
 /// What one cleanup pass found — and, unless it was a dry run, removed.
@@ -1498,10 +1487,7 @@ async fn cleanup(dry_run: bool) -> Reclaimed {
 
 // ----- state dispatch --------------------------------------------------------
 
-async fn state_cmd(
-    cmd: StateCmd,
-    json: bool,
-) -> anyhow::Result<ExitCode> {
+async fn state_cmd(cmd: StateCmd, json: bool) -> anyhow::Result<ExitCode> {
     match cmd {
         StateCmd::Builtins => {
             let agents = mirage_builtin::ensure_agents(true)?;
@@ -1592,7 +1578,10 @@ async fn purge(all: bool, json: bool) -> anyhow::Result<()> {
              Stop them first: each one owns its session and cleans up \
              when it exits.",
             live.len(),
-            live.iter().map(SessionId::as_str).collect::<Vec<_>>().join(", "),
+            live.iter()
+                .map(SessionId::as_str)
+                .collect::<Vec<_>>()
+                .join(", "),
         );
     }
 
@@ -1669,7 +1658,10 @@ fn print_paths(json: bool) {
             "sessions: {}",
             mirage_core::paths::session_runtime_root().display()
         );
-        println!("runs:     {}", mirage_core::paths::run_socket_root().display());
+        println!(
+            "runs:     {}",
+            mirage_core::paths::run_socket_root().display()
+        );
     }
 }
 

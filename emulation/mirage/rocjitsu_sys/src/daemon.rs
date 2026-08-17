@@ -152,12 +152,11 @@ impl Daemon {
             source,
         })?;
 
-        let config = std::fs::read_to_string(config_path).map_err(|source| {
-            DaemonError::Config {
+        let config =
+            std::fs::read_to_string(config_path).map_err(|source| DaemonError::Config {
                 path: config_path.to_path_buf(),
                 source,
-            }
-        })?;
+            })?;
         let json = CString::new(config)?;
         let socket_path = runtime_dir.join(SOCKET_NAME);
         let socket = CString::new(socket_path.as_os_str().as_encoded_bytes())?;
@@ -313,7 +312,9 @@ mod tests {
     fn paths_with_interior_nul_are_rejected_not_truncated() {
         // Silently truncating at the NUL would bind a socket somewhere
         // other than where the caller asked.
-        let err = CString::new("with\0nul").map_err(DaemonError::from).unwrap_err();
+        let err = CString::new("with\0nul")
+            .map_err(DaemonError::from)
+            .unwrap_err();
         assert!(matches!(err, DaemonError::Nul(_)), "{err:?}");
     }
 }

@@ -255,7 +255,11 @@ mod tests {
         // machine-wide, and the rest of this module's tests hold tagged
         // children of their own while running in parallel with it.
         let mine = mine(&session);
-        assert_eq!(mine.len(), 1, "expected exactly this test's child: {mine:?}");
+        assert_eq!(
+            mine.len(),
+            1,
+            "expected exactly this test's child: {mine:?}"
+        );
         assert_eq!(mine[0].pid, pid);
         reap(&mine);
 
@@ -291,7 +295,10 @@ mod tests {
             {
                 break pid;
             }
-            assert!(std::time::Instant::now() < deadline, "grandchild never started");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "grandchild never started"
+            );
             std::thread::sleep(std::time::Duration::from_millis(20));
         };
 

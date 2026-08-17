@@ -203,7 +203,9 @@ async fn run_owned(
 ///
 /// stderr, not stdout: this is mirage talking about itself, and it must
 /// not land in the middle of a workload's piped output.
-async fn report_progress(mut health: tokio::sync::watch::Receiver<mirage_core::session::SessionHealth>) {
+async fn report_progress(
+    mut health: tokio::sync::watch::Receiver<mirage_core::session::SessionHealth>,
+) {
     let mut last: Option<String> = None;
     loop {
         {
@@ -517,7 +519,8 @@ const DESCRIBE_TIMEOUT: Duration = Duration::from_secs(30);
 /// workload can be stopped rather than left to discover it when its
 /// container is removed.
 struct Attached {
-    framed: tokio_util::codec::Framed<tokio::net::UnixStream, tokio_util::codec::LengthDelimitedCodec>,
+    framed:
+        tokio_util::codec::Framed<tokio::net::UnixStream, tokio_util::codec::LengthDelimitedCodec>,
 }
 
 impl Attached {
@@ -721,7 +724,7 @@ struct TerminalHandoff {
 /// signal blocked for good — and, since masks survive `fork`/`exec`, that
 /// leak would be inherited by every process spawned afterwards.
 fn with_sigttou_blocked<T>(f: impl FnOnce() -> T) -> T {
-    use nix::sys::signal::{SigSet, Signal, SigmaskHow, pthread_sigmask};
+    use nix::sys::signal::{SigSet, SigmaskHow, Signal, pthread_sigmask};
 
     let mut ttou = SigSet::empty();
     ttou.add(Signal::SIGTTOU);

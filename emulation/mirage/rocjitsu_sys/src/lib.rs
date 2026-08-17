@@ -216,12 +216,7 @@ impl RjVmGpuInfo {
     /// serialisation. Sound because the struct is `#[repr(C)]` POD that
     /// matches `rj_vm_gpu_info_t` exactly.
     pub fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(
-                self as *const Self as *const u8,
-                size_of::<Self>(),
-            )
-        }
+        unsafe { std::slice::from_raw_parts(self as *const Self as *const u8, size_of::<Self>()) }
     }
 }
 

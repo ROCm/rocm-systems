@@ -99,10 +99,7 @@ pub fn find<'a>(specs: &'a [EmulatorInfo], name: &str) -> Option<&'a EmulatorInf
 /// somewhere far from the cause.
 #[must_use]
 pub fn default_emulator(specs: &[EmulatorInfo]) -> Option<&EmulatorInfo> {
-    specs
-        .iter()
-        .find(|e| e.installed)
-        .or_else(|| specs.first())
+    specs.iter().find(|e| e.installed).or_else(|| specs.first())
 }
 
 /// Build an [`EmulatorDef`] for the given registry entry, using the

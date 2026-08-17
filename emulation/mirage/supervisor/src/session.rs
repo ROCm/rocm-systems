@@ -435,7 +435,10 @@ impl Session {
     pub async fn start_exec(
         &self,
         def: &ExecDef,
-    ) -> Result<(Arc<Exec>, tokio::sync::mpsc::Receiver<crate::process::OutputChunk>)> {
+    ) -> Result<(
+        Arc<Exec>,
+        tokio::sync::mpsc::Receiver<crate::process::OutputChunk>,
+    )> {
         // Refuse until bring-up has finished. This is a correctness
         // guard, not politeness: the emulator injection and the container
         // record are both written by bring-up, and `build_specs` reads
@@ -539,7 +542,10 @@ impl Session {
         &self,
         def: &ExecDef,
         id: &ExecId,
-    ) -> Result<(Arc<Exec>, tokio::sync::mpsc::Receiver<crate::process::OutputChunk>)> {
+    ) -> Result<(
+        Arc<Exec>,
+        tokio::sync::mpsc::Receiver<crate::process::OutputChunk>,
+    )> {
         let specs = crate::spec::build_specs(&self.describe()?, def, id)?;
         Ok(Exec::start(id.clone(), def.clone(), specs))
     }
@@ -582,11 +588,7 @@ impl Session {
             // exec and any `mirage exec` in another terminal — rendezvous
             // on the same port.
             let head_port = *inner.head_port.get_or_insert_with(pick_head_port);
-            (
-                inner.injection.clone(),
-                inner.containers.clone(),
-                head_port,
-            )
+            (inner.injection.clone(), inner.containers.clone(), head_port)
         };
         let node_count = resolve_node_count(&self.ctx.profile)?;
 
@@ -836,7 +838,6 @@ impl Session {
         tracing::info!(session = %self.def.id, "session destroyed");
     }
 
-
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -962,10 +963,7 @@ fn remap_env_for_container(
 /// `provider exec` passed `-e LD_LIBRARY_PATH=<emulator's value>` and
 /// overrode the container's own — deleting the one directory the
 /// interposer's sibling libraries resolve from, for every workload.
-fn container_library_path(
-    env: &BTreeMap<String, String>,
-    runtime_dir: &std::path::Path,
-) -> String {
+fn container_library_path(env: &BTreeMap<String, String>, runtime_dir: &std::path::Path) -> String {
     match env.get("LD_LIBRARY_PATH") {
         Some(existing) if !existing.is_empty() => {
             let remapped = to_container_path(existing, runtime_dir, CONTAINER_RUNTIME_DIR);
@@ -1089,10 +1087,9 @@ pub fn plan_container(ctx: &SessionContext, injection: &InjectionDef) -> Contain
 
     // The emulator's env is computed against the host filesystem, so
     // remap anything naming the session scratch directory to its mount.
-    let mut env: Vec<(String, String)> =
-        remap_env_for_container(&injection.env, &ctx.runtime_dir)
-            .into_iter()
-            .collect();
+    let mut env: Vec<(String, String)> = remap_env_for_container(&injection.env, &ctx.runtime_dir)
+        .into_iter()
+        .collect();
 
     // `LD_PRELOAD` must name the *in-container* path: the host path does
     // not exist inside the container, and `ld.so` fails the whole process
@@ -1148,9 +1145,9 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
-    use std::path::PathBuf;
     use mirage_core::emulator::{EmulatorDef, ExecMode};
     use mirage_core::topology::TopologyDef;
+    use std::path::PathBuf;
 
     fn ctx(runtime_dir: PathBuf) -> SessionContext {
         SessionContext {
@@ -1277,7 +1274,10 @@ mod tests {
             .iter()
             .map(|m| m.container_path.as_str())
             .collect();
-        assert!(paths.contains(&"/mnt/mirage/lib/librocjitsu.so"), "{paths:?}");
+        assert!(
+            paths.contains(&"/mnt/mirage/lib/librocjitsu.so"),
+            "{paths:?}"
+        );
         assert!(paths.contains(&"/mnt/mirage/lib/libextra.so"), "{paths:?}");
 
         let env: BTreeMap<_, _> = plan.env.iter().cloned().collect();

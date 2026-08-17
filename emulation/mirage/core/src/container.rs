@@ -139,7 +139,12 @@ pub fn owner_labels(session: &SessionId) -> Vec<(String, String)> {
 
 /// Read one label off a container, or `None` if it is absent.
 fn container_label(provider: &str, name: &str, label: &str) -> Option<String> {
-    inspect_label(provider, &["inspect"], name, &format!("{{{{index .Config.Labels {label:?}}}}}"))
+    inspect_label(
+        provider,
+        &["inspect"],
+        name,
+        &format!("{{{{index .Config.Labels {label:?}}}}}"),
+    )
 }
 
 /// Read one label off a network, or `None` if it is absent.
@@ -351,7 +356,10 @@ pub struct Orphan {
 pub fn orphans(provider: &str, live: &[SessionId]) -> Vec<Orphan> {
     let live: std::collections::HashSet<&str> = live.iter().map(SessionId::as_str).collect();
     let mut found = Vec::new();
-    for (verb, is_network) in [(&["ps", "--all"][..], false), (&["network", "ls"][..], true)] {
+    for (verb, is_network) in [
+        (&["ps", "--all"][..], false),
+        (&["network", "ls"][..], true),
+    ] {
         for (name, session) in labelled(provider, verb) {
             if live.contains(session.as_str()) {
                 continue;
@@ -556,8 +564,8 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
-    use std::path::Path;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
 
     /// A provider that records its argv and claims every resource is
     /// mirage's.

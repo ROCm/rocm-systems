@@ -134,7 +134,10 @@ fn run_streams_output_and_propagates_the_exit_code() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stdout.contains("to-stdout"), "stdout was: {stdout}");
-    assert!(!stdout.contains("to-stderr"), "stderr leaked into stdout: {stdout}");
+    assert!(
+        !stdout.contains("to-stderr"),
+        "stderr leaked into stdout: {stdout}"
+    );
     assert!(stderr.contains("to-stderr"), "stderr was: {stderr}");
     // And byte-exact: a single-process job's streams *are* this
     // command's, so mirage never sees the bytes and cannot decorate them.
@@ -323,16 +326,26 @@ fn a_run_waits_for_a_borrower_before_tearing_its_session_down() {
     let id = run.await_ready(Duration::from_secs(90));
 
     let mut borrower = std::process::Command::new(env.bin())
-        .args(["exec", "--session", &id, "--", "/bin/sh", "-c", &tagged_sleep(&tag)])
+        .args([
+            "exec",
+            "--session",
+            &id,
+            "--",
+            "/bin/sh",
+            "-c",
+            &tagged_sleep(&tag),
+        ])
         .envs(env.child_env())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    wait_for("the borrowed workload to start", Duration::from_secs(30), || {
-        harness::count_processes(&tag) > 0
-    });
+    wait_for(
+        "the borrowed workload to start",
+        Duration::from_secs(30),
+        || harness::count_processes(&tag) > 0,
+    );
 
     // Well past the run's own one-second command. The session has to
     // still be whole: the run is waiting, not tearing down.
@@ -388,16 +401,26 @@ fn interrupting_a_waiting_run_tears_down_and_tells_the_borrower() {
     let id = run.await_ready(Duration::from_secs(90));
 
     let mut borrower = std::process::Command::new(env.bin())
-        .args(["exec", "--session", &id, "--", "/bin/sh", "-c", &tagged_sleep(&tag)])
+        .args([
+            "exec",
+            "--session",
+            &id,
+            "--",
+            "/bin/sh",
+            "-c",
+            &tagged_sleep(&tag),
+        ])
         .envs(env.child_env())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    wait_for("the borrowed workload to start", Duration::from_secs(30), || {
-        harness::count_processes(&tag) > 0
-    });
+    wait_for(
+        "the borrowed workload to start",
+        Duration::from_secs(30),
+        || harness::count_processes(&tag) > 0,
+    );
 
     // Let the run reach its wait, then decline to wait any longer.
     std::thread::sleep(Duration::from_secs(3));
@@ -496,7 +519,9 @@ fn an_invalid_session_id_is_rejected() {
     );
     // And nothing may have been created outside the runtime root.
     assert!(
-        !env.runtime().parent().is_some_and(|p| p.join("escape").exists()),
+        !env.runtime()
+            .parent()
+            .is_some_and(|p| p.join("escape").exists()),
         "`../escape` must not have resolved to a path outside {}",
         env.runtime().display()
     );

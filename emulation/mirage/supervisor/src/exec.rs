@@ -22,7 +22,9 @@ use nix::sys::signal::Signal;
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
-use crate::process::{ContainerProc, Exit, OutputChunk, SpawnSpec, Spawned, signal_process_group_only, spawn};
+use crate::process::{
+    ContainerProc, Exit, OutputChunk, SpawnSpec, Spawned, signal_process_group_only, spawn,
+};
 
 /// Depth of the channel carrying output from the pump tasks to whoever
 /// is printing it.
@@ -433,7 +435,11 @@ fn aggregate_exit_code(status: &ExecStatus) -> i32 {
         .values()
         .filter_map(|n| n.exit_code)
         .fold(0, |worst, code| {
-            if code.abs() > worst.abs() { code } else { worst }
+            if code.abs() > worst.abs() {
+                code
+            } else {
+                worst
+            }
         })
 }
 
@@ -543,7 +549,11 @@ mod tests {
     #[tokio::test]
     async fn the_worst_exit_across_ranks_wins() {
         // Rank 0 succeeds, a worker fails: the exec must report failure.
-        let (exec, _out) = start(vec![spec(0, "exit 0"), spec(1, "exit 9"), spec(2, "exit 0")]);
+        let (exec, _out) = start(vec![
+            spec(0, "exit 0"),
+            spec(1, "exit 9"),
+            spec(2, "exit 0"),
+        ]);
         let status = finish(&exec).await;
         assert_eq!(status.exit_code, Some(9));
         assert_eq!(status.nodes.len(), 3);
@@ -733,5 +743,4 @@ mod tests {
         // rather than an unrelated process that reused the number.
         exec.signal(libc::SIGKILL).await.unwrap();
     }
-
 }

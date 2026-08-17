@@ -21,12 +21,12 @@
 
 use std::collections::BTreeMap;
 
-use mirage_core::error::{MirageError, Result};
-use mirage_core::exec::{ExecArgs, ExecDef, ExecId};
 use mirage_core::container::{
     ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_LOCAL_RANK, ENV_MASTER_ADDR, ENV_MASTER_PORT,
     ENV_NCCL_HOSTID, ENV_RANK, ENV_SESSION, ENV_TORCH_RANK, ENV_WORLD_SIZE,
 };
+use mirage_core::error::{MirageError, Result};
+use mirage_core::exec::{ExecArgs, ExecDef, ExecId};
 use mirage_core::proto::SessionDescription;
 
 use crate::process::{ContainerProc, SpawnSpec, StdioMode};
@@ -293,7 +293,10 @@ fn process_env(
 
 /// The in-container path of a rank's pid file.
 fn container_pid_file(exec: &ExecId, global: u32) -> String {
-    format!("{CONTAINER_RUNTIME_DIR}/exec/{}/{global}.pid", exec.as_str())
+    format!(
+        "{CONTAINER_RUNTIME_DIR}/exec/{}/{global}.pid",
+        exec.as_str()
+    )
 }
 
 /// Wrap a workload command so it records its own in-container pid before
@@ -485,9 +488,7 @@ mod tests {
         // A workload exporting RANK would otherwise break its own
         // rendezvous.
         let mut def = exec_def(1, None);
-        def.exec
-            .env
-            .insert("RANK".to_string(), "99".to_string());
+        def.exec.env.insert("RANK".to_string(), "99".to_string());
         let specs = build_specs(&desc(2), &def, &id()).unwrap();
         assert_eq!(specs[1].env.get("RANK").map(String::as_str), Some("1"));
     }
@@ -652,12 +653,8 @@ mod tests {
 
     #[test]
     fn a_command_with_shell_metacharacters_is_not_parsed_by_the_wrapper() {
-        let (command, argv) = pid_recording_command(
-            "/bin/echo",
-            &["a b; rm -rf /".to_string()],
-            &id(),
-            0,
-        );
+        let (command, argv) =
+            pid_recording_command("/bin/echo", &["a b; rm -rf /".to_string()], &id(), 0);
         assert_eq!(command, "/bin/sh");
         // The dangerous argument is passed positionally, never spliced
         // into the script text.

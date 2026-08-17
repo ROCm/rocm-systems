@@ -541,8 +541,7 @@ pub fn find_processes(marker: &str) -> Vec<u32> {
 
 /// Whether `pid` is a mirage CLI process rather than a workload.
 fn is_mirage_process(pid: u32) -> bool {
-    std::fs::read_to_string(format!("/proc/{pid}/comm"))
-        .is_ok_and(|comm| comm.trim() == "mirage")
+    std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|comm| comm.trim() == "mirage")
 }
 
 /// Wait until `cond` holds, or fail with `what`.

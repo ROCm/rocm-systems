@@ -454,7 +454,12 @@ impl Run {
             outcome.map_err(|e| {
                 let context = last_phase.map_or_else(
                     || format!("container bring-up failed: {e}"),
-                    |p| format!("{} failed: {e}", p.message().trim_end_matches('…').trim_end()),
+                    |p| {
+                        format!(
+                            "{} failed: {e}",
+                            p.message().trim_end_matches('…').trim_end()
+                        )
+                    },
                 );
                 MirageError::other(context)
             })
@@ -576,7 +581,10 @@ mod tests {
             }
         });
 
-        let health = run.wait_ready(TIMEOUT).await.expect("a session that is still making progress must not be timed out");
+        let health = run
+            .wait_ready(TIMEOUT)
+            .await
+            .expect("a session that is still making progress must not be timed out");
         assert!(health.healthy);
     }
 
@@ -605,8 +613,11 @@ mod tests {
         // report, so the externally-bounded phases suspend it outright.
         let dir = tempfile::tempdir().unwrap();
         let run = stalled_run(dir.path());
-        run.session
-            .set_phase(false, state::PULLING, Some("pulling image big:latest".to_string()));
+        run.session.set_phase(
+            false,
+            state::PULLING,
+            Some("pulling image big:latest".to_string()),
+        );
 
         tokio::spawn({
             let run = run.clone();

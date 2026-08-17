@@ -577,15 +577,7 @@ fn output_is_not_lost_under_churn() {
     for i in 0..EXECS {
         let payload = format!("payload-{i}");
         let script = format!("echo {payload}");
-        let out = env.ok(&[
-            "exec",
-            "-s",
-            &id,
-            "--",
-            "/bin/sh",
-            "-c",
-            &script,
-        ]);
+        let out = env.ok(&["exec", "-s", &id, "--", "/bin/sh", "-c", &script]);
         if out.contains(&payload) {
             missing.remove(&payload);
         }

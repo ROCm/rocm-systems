@@ -1549,7 +1549,10 @@ mod tests {
         // recorded is on disk before we read it.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while client.alive() {
-            assert!(std::time::Instant::now() < deadline, "the mock never exited");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the mock never exited"
+            );
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
@@ -1574,7 +1577,19 @@ mod tests {
         let engine = Engine::with_provider(provider.to_string_lossy().to_string());
 
         let mut client = engine
-            .launch_node("n", "img", None, false, &[], &[], &[], &[], &[], &labels(), 0)
+            .launch_node(
+                "n",
+                "img",
+                None,
+                false,
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &labels(),
+                0,
+            )
             .unwrap();
         client.kill();
         assert!(!client.alive());
@@ -1600,7 +1615,19 @@ mod tests {
         let engine = Engine::with_provider(provider.to_string_lossy().to_string());
 
         let mut client = engine
-            .launch_node("n", "img", None, false, &[], &[], &[], &[], &[], &labels(), 0)
+            .launch_node(
+                "n",
+                "img",
+                None,
+                false,
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &labels(),
+                0,
+            )
             .unwrap();
         let err = engine
             .await_running(&mut client, std::time::Duration::from_secs(30))

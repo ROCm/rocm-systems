@@ -121,9 +121,7 @@ impl ControlSocket {
                     accepted
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "control socket accept failed, retrying in {backoff:?}: {e}"
-                    );
+                    tracing::warn!("control socket accept failed, retrying in {backoff:?}: {e}");
                     tokio::time::sleep(backoff).await;
                     backoff = (backoff * 2).min(MAX_BACKOFF);
                     continue;
@@ -284,8 +282,14 @@ mod tests {
         );
 
         let second = ControlSocket::bind(&path).await;
-        assert!(second.is_ok(), "a corpse socket must be reclaimed: {second:?}");
-        assert!(path.exists(), "the reclaimed path must now be a live socket");
+        assert!(
+            second.is_ok(),
+            "a corpse socket must be reclaimed: {second:?}"
+        );
+        assert!(
+            path.exists(),
+            "the reclaimed path must now be a live socket"
+        );
     }
 
     #[tokio::test]
