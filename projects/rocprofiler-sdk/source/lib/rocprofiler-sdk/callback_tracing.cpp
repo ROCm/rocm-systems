@@ -161,6 +161,14 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
     if(ctx->callback_tracer->callback_data.at(kind).callback)
         return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
 
+    // Kernel replay runs one replay loop per dispatch (a single pass count + plan), so only one
+    // context may own it process-wide. Reject a second subscriber instead of silently sharing the
+    // planner -- otherwise pass_count_cb is last-writer-wins and one tool's user_data is delivered
+    // to another. Checked before mutating ctx so a rejection leaves it unconfigured.
+    if(kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY &&
+       rocprofiler::kernel_replay::has_registered_replay_context())
+        return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+
     RETURN_STATUS_ON_FAIL(rocprofiler::context::add_domain(ctx->callback_tracer->domains, kind));
 
     ctx->callback_tracer->callback_data.at(kind) = {callback, callback_args};

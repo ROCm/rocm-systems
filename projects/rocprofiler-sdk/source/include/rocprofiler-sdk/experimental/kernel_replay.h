@@ -55,12 +55,34 @@ ROCPROFILER_EXTERN_C_INIT
  * @c user_data during CONFIG PHASE_ENTER; the same value is delivered to every
  * subsequent PASS callback and to @c pass_count_cb and @c replay_continue_cb for the
  * same dispatch.
+ *
+ * Exactly one context may configure a KERNEL_REPLAY service; a second
+ * @ref rocprofiler_configure_callback_tracing_service for this domain returns
+ * @ref ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED. @c user_data written during a PASS
+ * callback is not retained -- only the value set during CONFIG @ref
+ * ROCPROFILER_CALLBACK_PHASE_ENTER is threaded through the sequence.
  */
 typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
 {
     uint64_t                           size;           ///< sizeof this struct (versioning)
     rocprofiler_kernel_dispatch_info_t dispatch_info;  ///< Kernel dispatch info (always set)
 
+    uint64_t (*pass_count_cb)(rocprofiler_kernel_dispatch_info_t dispatch_info,
+                              rocprofiler_user_data_t            user_data);
+
+    int (*replay_continue_cb)(rocprofiler_kernel_dispatch_info_t dispatch_info,
+                              uint64_t                           current_pass,
+                              uint64_t                           total_passes,
+                              rocprofiler_user_data_t            user_data);
+
+    uint64_t current_pass;
+
+    uint64_t total_passes;
+
+    rocprofiler_status_t (*replay_local_start_context_cb)(rocprofiler_context_id_t context_id);
+    rocprofiler_status_t (*replay_local_stop_context_cb)(rocprofiler_context_id_t context_id);
+
+    /// @var pass_count_cb
     /// @brief [CONFIG] Tool-provided callback returning the number of replay passes.
     /// The tool sets this during CONFIG @ref ROCPROFILER_CALLBACK_PHASE_ENTER; the SDK
     /// then calls it (if non-null) to obtain the pass count for this dispatch:
@@ -70,27 +92,24 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     ///  - returns 0     => indefinite loop (requires @c replay_continue_cb)
     /// @c dispatch_info and @c user_data are provided so the tool can pick the count
     /// per dispatch and thread per-dispatch state through the callbacks.
-    uint64_t (*pass_count_cb)(rocprofiler_kernel_dispatch_info_t dispatch_info,
-                              rocprofiler_user_data_t            user_data);
-
+    ///
+    /// @var replay_continue_cb
     /// @brief [CONFIG] Optional tool-provided callback invoked after each pass completes.
     /// Return non-zero to continue the replay loop, zero to break out.
     /// Required when @c pass_count_cb returns 0; if it returns N > 0, allows early exit.
     /// @c dispatch_info and @c user_data (the per-dispatch user data set during CONFIG
     /// PHASE_ENTER) are provided; the same @c user_data is threaded through all callbacks
     /// for this dispatch.
-    int (*replay_continue_cb)(rocprofiler_kernel_dispatch_info_t dispatch_info,
-                              uint64_t                           current_pass,
-                              uint64_t                           total_passes,
-                              rocprofiler_user_data_t            user_data);
-
+    ///
+    /// @var current_pass
     /// @brief [PASS] 0-indexed current pass number. Read-only, populated by SDK.
-    uint64_t current_pass;
-
+    ///
+    /// @var total_passes
     /// @brief [PASS] Total passes if known (the value passed to @c pass_count_cb),
     /// else 0. Read-only.
-    uint64_t total_passes;
-
+    ///
+    /// @var replay_local_start_context_cb
+    /// @var replay_local_stop_context_cb
     /// @brief [PASS] Localized context control. The SDK populates these function
     /// pointers before each PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER; the tool
     /// invokes them (in lieu of the global @ref rocprofiler_start_context /
@@ -102,8 +121,6 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     ///    redundant work such as reprogramming PC sampling hardware on every pass.
     ///  - Scoped to the replay loop: each context's pre-replay active/inactive state
     ///    is restored once the loop completes. Global context state is never modified.
-    rocprofiler_status_t (*replay_local_start_context_cb)(rocprofiler_context_id_t context_id);
-    rocprofiler_status_t (*replay_local_stop_context_cb)(rocprofiler_context_id_t context_id);
 } rocprofiler_callback_tracing_kernel_replay_data_t;
 
 /** @} */
