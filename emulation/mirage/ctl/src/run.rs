@@ -46,8 +46,21 @@ pub async fn run_cmd(a: RunArgs) -> anyhow::Result<ExitCode> {
     // Before anything that could need cleaning up. See [`Interrupts`].
     let mut interrupts = Interrupts::install()?;
 
-    let mut profile = mirage_core::store::profile_get(&a.profile)?;
+    let mut profile = mirage_core::store::profile_get(&a.profile).map_err(|e| {
+        // Where mirage looked, because the commonest cause of "profile
+        // not found" for a name the user knows exists is a config
+        // directory somewhere other than the one they are editing.
+        if e.is_not_found() {
+            anyhow::anyhow!(
+                "{e}. mirage looked in {}; `mirage profile list` shows what is there.",
+                mirage_core::paths::profile_root().display()
+            )
+        } else {
+            anyhow::Error::new(e)
+        }
+    })?;
     let profile_ref = apply_profile_overrides(&mut profile, &a)?;
+    check_run_args(&a, &profile)?;
 
     let workdir = a.workdir.clone().unwrap_or_else(|| {
         std::env::current_dir().map_or_else(|_| "/".to_string(), |p| p.display().to_string())
@@ -83,6 +96,34 @@ pub async fn run_cmd(a: RunArgs) -> anyhow::Result<ExitCode> {
     let outcome = run_owned(&run, &a, &socket, &mut interrupts).await;
     run.destroy().await;
     outcome
+}
+
+/// Refuse a `mirage run` that cannot work, before it costs a session.
+///
+/// Everything here is a filesystem stat, a string split or a
+/// multiplication, and every one of them used to be checked after
+/// bring-up: `--env NOPE` was reported by the exec, a grid too large by
+/// [`mirage_supervisor::build_specs`], and a missing `--workdir` by the
+/// spawned child's `chdir`. A run that is going to be refused had
+/// therefore already created a session, containers, a network and an
+/// emulator daemon, and torn all of it down again — several seconds to
+/// say something knowable before the first one.
+fn check_run_args(a: &RunArgs, profile: &mirage_core::profile::ProfileDef) -> anyhow::Result<()> {
+    // Parsed here for the error; `exec_def` parses it again to build the
+    // map it actually passes, which is cheap and keeps that function
+    // usable on its own.
+    parse_envs(&a.envs)?;
+    if let Some(nodes) = crate::profile_node_count(profile) {
+        crate::check_grid(nodes, a.nproc_per_node.unwrap_or(1))?;
+    }
+    // A containerised session's workdir is a path inside the container,
+    // which this filesystem knows nothing about.
+    if profile.containerize.is_none()
+        && let Some(workdir) = &a.workdir
+    {
+        crate::check_host_workdir(workdir)?;
+    }
+    Ok(())
 }
 
 /// The body of `mirage run`, with teardown guaranteed by the caller.
@@ -256,13 +297,21 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
 
     let session = match a.session.clone() {
         Some(id) => id,
-        None => sole_live_run()?,
+        None => sole_live_run().await?,
     };
     // Attach rather than merely describe: the lease is held for the whole
     // exec, so the run that owns this session waits for us instead of
     // tearing the emulator and the scratch directory down underneath a
     // live workload.
     let (desc, mut lease) = attach(&session).await?;
+
+    // Now that the session has described itself, we know whether the
+    // workdir names a directory here or one inside a container.
+    if desc.containers.is_none()
+        && let Some(workdir) = &a.workdir
+    {
+        crate::check_host_workdir(workdir)?;
+    }
 
     let def = exec_def(
         session.clone(),
@@ -337,13 +386,23 @@ fn exec_def(
     clear_env: bool,
 ) -> anyhow::Result<ExecDef> {
     let (command, args) = split_argv(argv);
+    let env = parse_envs(envs)?;
+    // Say so when a `--env` will lose. The precedence is deliberate — a
+    // rank that disagrees with the grid deadlocks its own collectives —
+    // but silence made `--env RANK=3` look like it had been applied.
+    for key in crate::mirage_owned_env(env.keys()) {
+        tracing::warn!(
+            "--env {key}=… is ignored: mirage sets {key} itself on every process, \
+             so that every rank agrees on the shape of the job"
+        );
+    }
     Ok(ExecDef {
         timestamp: chrono::Utc::now(),
         session,
         exec: ExecArgs {
             command,
             args,
-            env: parse_envs(envs)?,
+            env,
             workdir,
         },
         worker_exec: None,
@@ -571,8 +630,17 @@ async fn attach_inner(session: &SessionId) -> anyhow::Result<(SessionDescription
 /// requiring the user to copy an id for it would be friction with no
 /// purpose. When the guess would be ambiguous the error lists the
 /// candidates rather than picking one.
-fn sole_live_run() -> anyhow::Result<SessionId> {
-    let live = live_runs();
+///
+/// Candidates are runs that *answer*, not socket files. A `SIGKILL`ed run
+/// leaves its socket behind — the documented, expected leak `mirage
+/// cleanup` exists for — and counting files meant one `kill -9` broke
+/// auto-selection completely: with a corpse beside a live run this said
+/// "several runs are live" and listed a dead session as a candidate, and
+/// with a corpse alone it picked the corpse and then failed to connect to
+/// it. [`answering_runs`] is the same probe cleanup uses, and it unlinks
+/// the corpses on the way past.
+async fn sole_live_run() -> anyhow::Result<SessionId> {
+    let live = answering_runs().await;
     match live.len() {
         1 => Ok(live[0].clone()),
         0 => anyhow::bail!(
@@ -641,10 +709,12 @@ pub async fn answering_runs() -> Vec<SessionId> {
 
 /// Every session with a socket in the runtime directory.
 ///
-/// A socket may be stale — left by a run that was `SIGKILL`ed — and this
-/// does not filter those out; connecting to one fails with a clear
-/// message, which is a better outcome than silently ignoring a session
-/// the user believes is alive.
+/// The candidate set, not the answer: a socket file outlives the run that
+/// bound it, so this includes the corpses a `SIGKILL` leaves behind.
+/// [`answering_runs`] is what separates the two, and is the only caller —
+/// a session named explicitly on the command line is not looked up here
+/// at all, because `mirage exec --session <id>` should say that *that*
+/// session is gone rather than that it does not exist.
 fn live_runs() -> Vec<SessionId> {
     let Ok(entries) = std::fs::read_dir(mirage_core::paths::run_socket_root()) else {
         return Vec::new();
@@ -830,7 +900,81 @@ mod tests {
 
     #[test]
     fn a_zero_process_count_is_clamped_rather_than_starting_no_processes() {
+        // Unreachable from the CLI, which rejects `--nproc-per-node 0` at
+        // parse time, and kept as the backstop for any other caller: a
+        // grid of zero processes is a session with nothing in it.
         let def = exec_def(session(), &argv(), &[], None, Some(0), None, false).unwrap();
         assert_eq!(def.nproc_per_node, 1);
+    }
+
+    /// A single-threaded runtime for the async helpers below.
+    ///
+    /// `#[tokio::test]` would make the test body itself async, and these
+    /// hold [`mirage_core::paths::test_env_lock`] — a `MutexGuard` across
+    /// an await point, which the workspace denies for good reason.
+    /// Blocking on the future instead keeps the guard on one thread and
+    /// off the await path.
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_run_that_was_killed_is_not_a_candidate_for_exec() {
+        // The socket file outlives a `SIGKILL`ed run: that leak is
+        // documented, expected, and what `mirage cleanup` exists for. So
+        // counting files rather than answers meant a single `kill -9`
+        // broke `mirage exec` with no `--session`: with a corpse beside a
+        // live run it reported "several runs are live" and offered the
+        // dead one as a candidate.
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+        std::fs::create_dir_all(mirage_core::paths::run_socket_root()).unwrap();
+
+        let dead = SessionId::new("s-dead").unwrap();
+        let dead_path = mirage_core::paths::run_socket_path(&dead);
+        // Bound and dropped: the file stays, nothing answers on it. The
+        // listener is not unlinked on drop, which is precisely why a
+        // killed run leaves one behind.
+        drop(std::os::unix::net::UnixListener::bind(&dead_path).unwrap());
+
+        let alive = SessionId::new("s-live").unwrap();
+        let _listener =
+            std::os::unix::net::UnixListener::bind(mirage_core::paths::run_socket_path(&alive))
+                .unwrap();
+
+        let picked = runtime().block_on(sole_live_run());
+        mirage_core::paths::clear_test_root();
+
+        assert_eq!(picked.unwrap(), alive);
+        assert!(
+            !dead_path.exists(),
+            "the corpse socket should have been unlinked on the way past"
+        );
+    }
+
+    #[test]
+    fn a_corpse_alone_is_not_a_run_to_exec_into() {
+        // The other half: with only a dead socket present, auto-selection
+        // used to pick the corpse and then fail to connect to it. There
+        // is no run here at all, and that is what it should say.
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+        std::fs::create_dir_all(mirage_core::paths::run_socket_root()).unwrap();
+        let dead = SessionId::new("s-dead").unwrap();
+        drop(
+            std::os::unix::net::UnixListener::bind(mirage_core::paths::run_socket_path(&dead))
+                .unwrap(),
+        );
+
+        let picked = runtime().block_on(sole_live_run());
+        mirage_core::paths::clear_test_root();
+
+        let e = picked.unwrap_err().to_string();
+        assert!(e.contains("no `mirage run` is running"), "{e}");
     }
 }

@@ -32,20 +32,92 @@ use mirage_core::profile::{ContainerizedDef, FileMount, Hack, PortMapping, Profi
 use mirage_core::registry::EmulatorInfo;
 use mirage_core::session::SessionId;
 
-/// Initialize the global tracing subscriber. Honours `MIRAGE_LOG` if
-/// set, otherwise uses the level implied by `-v` / `-vv`.
+/// The level mirage logs at when nothing asks for more.
+const DEFAULT_LOG: &str = "warn";
+
+/// Initialize the global tracing subscriber.
+///
+/// `-v` / `-vv` wins over `MIRAGE_LOG`: one is a decision about this
+/// invocation, typed by someone watching the output, and the other is
+/// ambient state inherited from a shell profile or a CI job. A user who
+/// adds `-vv` to a command that prints too little has said what they
+/// want, and losing to an exported variable they may not know is set
+/// makes the flag look broken.
+///
+/// An unusable `MIRAGE_LOG` is reported and then ignored, rather than
+/// obeyed: it used to turn logging off altogether, which is worse than
+/// either honouring it or rejecting it, because the symptom — silence —
+/// is exactly what a mirage with nothing to say looks like.
 pub fn init_logging(verbose: u8) {
-    let level = match verbose {
-        0 => "warn",
-        1 => "info",
-        _ => "debug",
+    let explicit = match verbose {
+        0 => None,
+        1 => Some("info"),
+        _ => Some("debug"),
     };
-    let env = tracing_subscriber::EnvFilter::try_from_env("MIRAGE_LOG")
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level));
+    let filter = match (explicit, std::env::var("MIRAGE_LOG")) {
+        (Some(level), _) => tracing_subscriber::EnvFilter::new(level),
+        (None, Ok(value)) if !value.is_empty() => parse_log_filter(&value).unwrap_or_else(|why| {
+            eprintln!(
+                "mirage: MIRAGE_LOG={value:?}: {why}. Logging at the default level \
+                 ({DEFAULT_LOG}) instead. It takes a level (`info`, `debug`, `off`) or \
+                 a comma-separated list of `<target>=<level>` directives \
+                 (`warn,mirage_supervisor=debug`); `-v`/`-vv` say the same thing \
+                 without it."
+            );
+            tracing_subscriber::EnvFilter::new(DEFAULT_LOG)
+        }),
+        _ => tracing_subscriber::EnvFilter::new(DEFAULT_LOG),
+    };
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(env)
+        .with_env_filter(filter)
+        .with_ansi(stderr_wants_colour())
         .with_writer(std::io::stderr)
         .try_init();
+}
+
+/// Read a `MIRAGE_LOG` value, rejecting the ones that only look valid.
+///
+/// [`EnvFilter`] accepts a bare word as a *target* directive at trace
+/// level, so `MIRAGE_LOG=not-a-level` parses cleanly and then matches
+/// nothing mirage ever logs to — every message, at every level,
+/// discarded, with no error anywhere. A bare word here is therefore
+/// required to be a level; naming a target still works, spelled the way
+/// the filter syntax spells it (`mirage_supervisor=debug`), which is also
+/// the form that does not silently silence everything else.
+///
+/// [`EnvFilter`]: tracing_subscriber::EnvFilter
+///
+/// # Errors
+///
+/// Returns the reason the value cannot be used, as a phrase that
+/// completes "MIRAGE_LOG=…: {reason}".
+fn parse_log_filter(value: &str) -> Result<tracing_subscriber::EnvFilter, String> {
+    for directive in value.split(',') {
+        let directive = directive.trim();
+        if directive.is_empty() || directive.contains('=') {
+            continue;
+        }
+        if directive
+            .parse::<tracing_subscriber::filter::LevelFilter>()
+            .is_err()
+        {
+            return Err(format!(
+                "`{directive}` is not a log level, and as a bare word it silences \
+                 everything else"
+            ));
+        }
+    }
+    tracing_subscriber::EnvFilter::try_new(value).map_err(|e| e.to_string())
+}
+
+/// Whether log records may be coloured.
+///
+/// Escape sequences are for a terminal to interpret; written to a file or
+/// a pipe they are noise a log-reading tool has to strip, and `grep` does
+/// not. [`NO_COLOR`](https://no-color.org/) is honoured on top of that,
+/// because a user who set it means it even on a terminal.
+fn stderr_wants_colour() -> bool {
+    std::io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty())
 }
 
 /// The full emulator registry: every backend crate compiled into this
@@ -84,17 +156,36 @@ pub fn default_emulator_name() -> String {
 /// host's hardware supports it. With `json` the full descriptions are
 /// emitted as-is; otherwise a compact table (or, with `long`, a
 /// detailed block including the support reason).
+///
+/// The JSON carries every fact the text does, the default backend
+/// included: the text form marks it with `(default)` and a script reading
+/// the JSON had no way to tell, so it had to re-derive the rule
+/// ([`mirage_core::registry::default_emulator`]) from the `installed`
+/// flags and hope the two agreed.
 fn emulators_cmd(long: bool, json: bool) {
     let specs = registry();
+    let default_name = default_emulator_name();
+
     if json {
-        match serde_json::to_string_pretty(&specs) {
+        let described: Vec<serde_json::Value> = specs
+            .iter()
+            .map(|spec| {
+                let mut value = serde_json::to_value(spec).unwrap_or(serde_json::Value::Null);
+                if let Some(object) = value.as_object_mut() {
+                    object.insert(
+                        "default".to_string(),
+                        serde_json::Value::Bool(spec.name == default_name),
+                    );
+                }
+                value
+            })
+            .collect();
+        match serde_json::to_string_pretty(&described) {
             Ok(s) => println!("{s}"),
             Err(e) => eprintln!("failed to serialize emulators: {e}"),
         }
         return;
     }
-
-    let default_name = default_emulator_name();
 
     if long {
         for spec in &specs {
@@ -111,6 +202,11 @@ fn emulators_cmd(long: bool, json: bool) {
                 if spec.support.supported { "yes" } else { "no" },
                 spec.support.reason
             );
+            // The options and plugins this backend will accept, so that a
+            // rejected `-o` or `--plugin` can point here for the list
+            // rather than only naming it in the error.
+            println!("  options:   {}", name_list(option_names(spec)));
+            println!("  plugins:   {}", name_list(spec.plugins.clone()));
             println!();
         }
         return;
@@ -138,23 +234,58 @@ fn emulators_cmd(long: bool, json: bool) {
 }
 
 /// Best-effort: materialise all builtin state on disk — agents,
-/// topologies, and profiles — writing only what's missing. Errors are
-/// logged, never fatal; the user can always force a full rewrite with
-/// `mirage state builtins`.
+/// topologies, and profiles — writing only what's missing. Not fatal;
+/// the user can always force a full rewrite with `mirage state
+/// builtins`.
 ///
 /// Shared by the CLI ([`dispatch`]) and the daemon so both surfaces
 /// auto-unpack the builtins the first time they run, instead of
 /// requiring the user to invoke `mirage state builtins` by hand.
+///
+/// A failure here is said out loud rather than only `tracing::warn!`ed,
+/// because it is never local to the builtins. Everything mirage knows
+/// about profiles, agents and topologies is files in one directory, so a
+/// directory it cannot write reads as a machine with no configuration at
+/// all: `profile list` prints nothing and exits 0, and `run` then blames
+/// a missing `mi350x` — which exists, and would have been written here.
+/// [`config_dir_hint`] turns that into the sentence the user needs.
 pub fn ensure_builtins_present() {
-    if let Err(e) = mirage_builtin::ensure_agents(false) {
-        tracing::warn!("failed to preload builtin agents: {e:#}");
+    let outcome = [
+        mirage_builtin::ensure_agents(false).map(|_| ()),
+        mirage_builtin::ensure_topologies(false).map(|_| ()),
+        mirage_builtin::ensure_profiles(false).map(|_| ()),
+    ]
+    .into_iter()
+    .find_map(Result::err);
+    if let Some(e) = outcome {
+        // Through `anyhow` for its `{:#}`, which walks the source chain:
+        // the store's own message names the path it failed on and leaves
+        // the operating system's reason — "Permission denied" — in the
+        // cause, which is the half that says what to change.
+        eprintln!(
+            "mirage: could not write mirage's builtin configuration: {:#}",
+            anyhow::Error::new(e)
+        );
+        eprintln!("mirage: {}", config_dir_hint());
     }
-    if let Err(e) = mirage_builtin::ensure_topologies(false) {
-        tracing::warn!("failed to preload builtin topologies: {e:#}");
-    }
-    if let Err(e) = mirage_builtin::ensure_profiles(false) {
-        tracing::warn!("failed to preload builtin profiles: {e:#}");
-    }
+}
+
+/// What to say about the config directory when something that lives in
+/// it could not be read or written.
+///
+/// Names the directory and how it was chosen, because the two ways it
+/// moves — `MIRAGE_CONFIG` and `XDG_CONFIG_HOME` — are both inherited
+/// from the environment, and a user looking at an empty profile list is
+/// usually looking at the wrong directory rather than at an empty one.
+fn config_dir_hint() -> String {
+    let dir = mirage_core::paths::mirage_config_dir();
+    format!(
+        "profiles, agents and topologies live in {}; \
+         until it is readable and writable mirage will behave as though \
+         there are none. Fix its permissions, or point MIRAGE_CONFIG at a \
+         directory you can write.",
+        dir.display()
+    )
 }
 
 /// Validate a profile against its target emulator before it is
@@ -196,7 +327,8 @@ pub enum CtlCmd {
 
     /// List emulator backends and their install / support status.
     Emulators {
-        /// Show long form (description, runtime path, support reason).
+        /// Show long form (description, support reason, and the options
+        /// and plugins the backend accepts).
         #[arg(short = 'l', long)]
         long: bool,
     },
@@ -299,10 +431,10 @@ pub struct ProfileCreateArgs {
     #[arg(long)]
     pub agent: Option<String>,
     /// Nodes per rack.
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     pub num_nodes: Option<u32>,
     /// GPUs per node.
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     pub gpus_per_node: Option<u32>,
     /// Optional description.
     #[arg(long)]
@@ -347,10 +479,10 @@ pub enum TopologyCmd {
         #[arg(long, default_value = "MI350X")]
         agent: String,
         /// Nodes per rack.
-        #[arg(long, default_value_t = 1)]
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
         num_nodes: u32,
         /// GPUs per node.
-        #[arg(long, default_value_t = 1)]
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
         gpus_per_node: u32,
     },
     /// Import a topology from a JSON file (use `-` for stdin).
@@ -400,7 +532,7 @@ pub struct ExecArgsCli {
     pub session: Option<SessionId>,
 
     /// Number of workload processes to launch per node.
-    #[arg(long, visible_alias = "nproc_per_node")]
+    #[arg(long, visible_alias = "nproc_per_node", value_parser = clap::value_parser!(u32).range(1..))]
     pub nproc_per_node: Option<u32>,
 
     /// Run on this node only, instead of on every node in the session.
@@ -439,10 +571,22 @@ pub struct ExecArgsCli {
     pub clear_env_vars: bool,
 
     /// Extra environment variables, in `KEY=VALUE` form. May be repeated.
+    ///
+    /// These beat the emulator's own variables and anything you
+    /// exported. The exceptions are the job's identity — `MIRAGE_*`,
+    /// `RANK`, `LOCAL_RANK`, `WORLD_SIZE`, `MASTER_ADDR`, `MASTER_PORT`,
+    /// `NCCL_HOSTID` — which mirage sets last, because a rank that
+    /// disagrees with the grid deadlocks its own collectives; and
+    /// `LD_PRELOAD`, which is prepended to rather than replaced by the
+    /// emulator's interposer. Passing one of the first group is
+    /// accepted, ignored, and warned about.
     #[arg(long = "env", value_name = "KEY=VALUE")]
     pub envs: Vec<String>,
 
     /// Working directory for the command.
+    ///
+    /// On a containerised session this names a directory *inside* the
+    /// container; otherwise one on this machine, which must exist.
     #[arg(long)]
     pub workdir: Option<String>,
 
@@ -490,10 +634,10 @@ pub struct RunArgs {
     #[arg(long)]
     emulator: Option<String>,
     /// Override the profile topology's node count for this run.
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     num_nodes: Option<u32>,
     /// Override the profile topology's per-node GPU count for this run.
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     gpus_per_node: Option<u32>,
     /// Number of workload processes to launch per node (like
     /// `torchrun --nproc-per-node`). Defaults to `1`. Each process gets a
@@ -502,7 +646,7 @@ pub struct RunArgs {
     /// `torch.distributed` runs without a separate launcher. Give each
     /// node at least this many GPUs (`--gpus-per-node`) so every process
     /// can pin its own device.
-    #[arg(long, visible_alias = "nproc_per_node")]
+    #[arg(long, visible_alias = "nproc_per_node", value_parser = clap::value_parser!(u32).range(1..))]
     nproc_per_node: Option<u32>,
     // No `--session` or `--keep-session`. A run *is* its session: it
     // creates one, owns it, and destroys it on the way out, so there is
@@ -510,10 +654,23 @@ pub struct RunArgs {
     // Both flags used to be declared here and silently ignored by
     // `run_cmd`. Use `mirage exec` to join a run that is already up.
     /// Working directory.
+    ///
+    /// On a containerised session this names a directory *inside* the
+    /// container; otherwise one on this machine, which must exist.
+    /// Defaults to the directory `mirage run` was started from.
     #[arg(long)]
     workdir: Option<String>,
     /// Extra environment variables to inject into the exec, in
     /// `KEY=VALUE` form. May be repeated.
+    ///
+    /// These beat the emulator's own variables and anything you
+    /// exported. The exceptions are the job's identity — `MIRAGE_*`,
+    /// `RANK`, `LOCAL_RANK`, `WORLD_SIZE`, `MASTER_ADDR`, `MASTER_PORT`,
+    /// `NCCL_HOSTID` — which mirage sets last, because a rank that
+    /// disagrees with the grid deadlocks its own collectives; and
+    /// `LD_PRELOAD`, which is prepended to rather than replaced by the
+    /// emulator's interposer. Passing one of the first group is
+    /// accepted, ignored, and warned about.
     #[arg(long = "env", value_name = "KEY=VALUE")]
     envs: Vec<String>,
     /// Override/enable containerisation: run every node inside a
@@ -552,7 +709,17 @@ pub struct RunArgs {
     plugins: Vec<String>,
     /// Use an explicit emulator config file instead of synthesising one
     /// from the profile (the upstream `rocjitsu --config`).
-    #[arg(long, value_name = "PATH")]
+    ///
+    /// The file is handed to the backend verbatim, so the flags that
+    /// would have gone into a synthesised config — `--gpus-per-node`,
+    /// `--exec-mode`, `-o`/`--option`, `--plugin` — cannot also be
+    /// honoured and are refused rather than ignored. Put them in the
+    /// config file instead.
+    #[arg(
+        long,
+        value_name = "PATH",
+        conflicts_with_all = ["gpus_per_node", "exec_mode", "options", "plugins"]
+    )]
     config: Option<String>,
     /// Run the emulator in out-of-process daemon mode. This is the
     /// default; the flag is accepted for explicitness and for the
@@ -656,8 +823,11 @@ pub async fn dispatch(cmd: CtlCmd, json: bool) -> anyhow::Result<ExitCode> {
         CtlCmd::State(c) => state_cmd(c, json).await,
         CtlCmd::Cleanup { dry_run } => {
             let reclaimed = cleanup(dry_run).await;
+            let unfinished = reclaimed.failures.len();
             reclaimed.report(dry_run, json)?;
-            Ok(ExitCode::from(0))
+            // Zero would say the machine is clean. Something mirage set
+            // out to remove is still there.
+            Ok(ExitCode::from(u8::from(unfinished > 0)))
         }
         CtlCmd::Run(a) => run::run_cmd(a).await,
         CtlCmd::Paths => {
@@ -724,14 +894,15 @@ async fn profile_cmd(cmd: ProfileCmd, json: bool) -> anyhow::Result<ExitCode> {
             };
             let p: ProfileDef = serde_json::from_slice(&bytes)?;
             mirage_core::store::profile_put(&p)?;
-            println!("imported profile {}", p.name);
+            report_change(json, "profile", &p.name, "imported", true)?;
         }
         ProfileCmd::Delete { name, force } => {
             if !force && !confirm(&format!("delete profile {name}?"))? {
+                report_change(json, "profile", &name, "deleted", false)?;
                 return Ok(ExitCode::from(0));
             }
             mirage_core::store::profile_delete(&name)?;
-            println!("deleted profile {name}");
+            report_change(json, "profile", &name, "deleted", true)?;
         }
     }
     Ok(ExitCode::from(0))
@@ -777,14 +948,15 @@ async fn topology_cmd(cmd: TopologyCmd, json: bool) -> anyhow::Result<ExitCode> 
             let bytes = read_input(&file)?;
             let t: mirage_core::topology::TopologyDef = serde_json::from_slice(&bytes)?;
             mirage_core::store::topology_put(&name, &t)?;
-            println!("imported topology {name}");
+            report_change(json, "topology", &name, "imported", true)?;
         }
         TopologyCmd::Delete { name, force } => {
             if !force && !confirm(&format!("delete topology {name}?"))? {
+                report_change(json, "topology", &name, "deleted", false)?;
                 return Ok(ExitCode::from(0));
             }
             mirage_core::store::topology_delete(&name)?;
-            println!("deleted topology {name}");
+            report_change(json, "topology", &name, "deleted", true)?;
         }
     }
     Ok(ExitCode::from(0))
@@ -812,17 +984,45 @@ async fn agent_cmd(cmd: AgentCmd, json: bool) -> anyhow::Result<ExitCode> {
             let bytes = read_input(&file)?;
             let a: mirage_core::agent::AgentDef = serde_json::from_slice(&bytes)?;
             mirage_core::store::agent_put(&name, &a)?;
-            println!("imported agent {name}");
+            report_change(json, "agent", &name, "imported", true)?;
         }
         AgentCmd::Delete { name, force } => {
             if !force && !confirm(&format!("delete agent {name}?"))? {
+                report_change(json, "agent", &name, "deleted", false)?;
                 return Ok(ExitCode::from(0));
             }
             mirage_core::store::agent_delete(&name)?;
-            println!("deleted agent {name}");
+            report_change(json, "agent", &name, "deleted", true)?;
         }
     }
     Ok(ExitCode::from(0))
+}
+
+/// Report a one-off change to a stored document — an import, a delete.
+///
+/// Under `--json` stdout must be exactly one JSON document and nothing
+/// else, or the caller that asked for JSON cannot parse what it gets.
+/// These commands used to print their sentence either way, so
+/// `mirage profile import --json f.json` emitted `imported profile x`
+/// and a script's `json.load` failed on the word "imported".
+///
+/// `done` is false only for a delete the user declined at the prompt,
+/// which is a result too: a script that asked and was told no should not
+/// have to infer it from an empty stdout.
+fn report_change(json: bool, kind: &str, name: &str, verb: &str, done: bool) -> anyhow::Result<()> {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "kind": kind,
+                "name": name,
+                verb: done,
+            }))?
+        );
+    } else if done {
+        println!("{verb} {kind} {name}");
+    }
+    Ok(())
 }
 
 fn read_input(file: &str) -> anyhow::Result<Vec<u8>> {
@@ -1157,6 +1357,196 @@ fn parse_plugin(spec: &str) -> anyhow::Result<(String, SimpleMap)> {
     Ok((name.to_string(), SimpleMap::new()))
 }
 
+/// The option names a backend accepts, in schema order.
+fn option_names(spec: &EmulatorInfo) -> Vec<String> {
+    spec.options_schema.iter().map(|o| o.name.clone()).collect()
+}
+
+/// `a, b, c`, or `(none)` for an empty list.
+fn name_list(names: Vec<String>) -> String {
+    if names.is_empty() {
+        "(none)".to_string()
+    } else {
+        names.join(", ")
+    }
+}
+
+/// Reject `-o KEY=VALUE` for a key the backend does not know.
+///
+/// An override that overrides nothing is not an override: the key is
+/// carried into the emulator's option map, the backend reads the keys it
+/// has a schema entry for, and a misspelling is silently the same as
+/// having passed nothing at all. The backend publishes its schema (see
+/// `mirage emulators --json`), so the mistake is knowable here — and it
+/// is named the same way a bad `--emulator` is, with the list of what
+/// would have worked.
+///
+/// # Errors
+///
+/// Returns an error naming the first unknown key and every key the
+/// backend does accept.
+fn check_option_keys(emulator: &str, schema: &[String], keys: &[String]) -> anyhow::Result<()> {
+    for key in keys {
+        if schema.iter().any(|known| known == key) {
+            continue;
+        }
+        if schema.is_empty() {
+            anyhow::bail!(
+                "unknown option `{key}` for emulator `{emulator}`, which accepts no options. \
+                 What it emulates comes from its agent and topology (`mirage agent list`, \
+                 `mirage topology list`), or from a config file passed with `--config`."
+            );
+        }
+        anyhow::bail!(
+            "unknown option `{key}` for emulator `{emulator}`; \
+             it accepts: {}. See `mirage emulators -l`.",
+            schema.join(", ")
+        );
+    }
+    Ok(())
+}
+
+/// Reject `--plugin NAME` for a plugin the backend cannot load.
+///
+/// Running without the instrumentation that was asked for is worse than
+/// not running: a `--plugin race` that loads nothing produces a clean
+/// report of a racy program. The backend discovers its plugins on this
+/// host (see `mirage emulators -l`), so an unloadable name is knowable
+/// before the session exists.
+///
+/// # Errors
+///
+/// Returns an error naming the plugin and what this host has instead.
+fn check_plugin_names(
+    emulator: &str,
+    available: &[String],
+    names: &[String],
+) -> anyhow::Result<()> {
+    for name in names {
+        if available.iter().any(|known| known == name) {
+            continue;
+        }
+        if available.is_empty() {
+            anyhow::bail!(
+                "no plugin `{name}` for emulator `{emulator}`: this host has none of its \
+                 plugins installed. `mirage emulators -l` lists what was found."
+            );
+        }
+        anyhow::bail!(
+            "no plugin `{name}` for emulator `{emulator}`; \
+             this host has: {}. See `mirage emulators -l`.",
+            available.join(", ")
+        );
+    }
+    Ok(())
+}
+
+/// Check a `--workdir` that names a directory on *this* machine.
+///
+/// The operating system checks it too, at `chdir` time inside the
+/// spawned child — and by then the only thing left to blame is the
+/// program: `chdir` failing with `ENOENT` is indistinguishable, from the
+/// spawn's return value, from the command not existing. That is what a
+/// missing workdir used to be reported as (`command not found:
+/// /bin/true`, with the path that was actually missing never printed),
+/// which sends the user looking for a binary that is exactly where they
+/// left it.
+///
+/// Only for a host-side session: a containerised one runs the workload
+/// inside the container, where the path means something else entirely
+/// and this filesystem has no opinion about it.
+///
+/// # Errors
+///
+/// Returns an error naming the path and what is wrong with it.
+fn check_host_workdir(path: &str) -> anyhow::Result<()> {
+    let metadata = std::fs::metadata(path)
+        .map_err(|e| anyhow::anyhow!("--workdir {path}: {e}. Name a directory that exists."))?;
+    if !metadata.is_dir() {
+        anyhow::bail!("--workdir {path}: this is a file, not a directory.");
+    }
+    // A directory can exist and still not be one a process may sit in:
+    // entering it needs the execute bit, which is a separate answer from
+    // "it is there".
+    nix::unistd::access(path, nix::unistd::AccessFlags::X_OK)
+        .map_err(|e| anyhow::anyhow!("--workdir {path}: cannot enter this directory ({e})."))?;
+    Ok(())
+}
+
+/// Reject a process grid mirage will not start, before it has built the
+/// session it would have had to tear down again to say so.
+///
+/// The same bound the supervisor applies ([`MAX_WORLD_SIZE`]), applied
+/// where it costs nothing. Bring-up creates containers, a network and an
+/// emulator daemon; a multiplication that was always going to be refused
+/// should not cost all of that first.
+///
+/// [`MAX_WORLD_SIZE`]: mirage_supervisor::spec::MAX_WORLD_SIZE
+///
+/// # Errors
+///
+/// Returns an error naming the grid and the limit.
+fn check_grid(num_nodes: u32, nproc_per_node: u32) -> anyhow::Result<()> {
+    let max = mirage_supervisor::spec::MAX_WORLD_SIZE;
+    let world = u64::from(num_nodes) * u64::from(nproc_per_node);
+    if world > u64::from(max) {
+        anyhow::bail!(
+            "{num_nodes} nodes x {nproc_per_node} processes per node is {world} processes, \
+             more than the {max} mirage will start for one exec"
+        );
+    }
+    Ok(())
+}
+
+/// How many nodes a resolved profile describes, if that can be answered
+/// from the filesystem.
+///
+/// `None` when the topology is a by-name reference that does not resolve
+/// — which is a real error, but one the store reports far better than a
+/// grid check would, so it is left to bring-up rather than guessed at
+/// here.
+fn profile_node_count(profile: &ProfileDef) -> Option<u32> {
+    match &profile.emulator.topology {
+        MaybeRef::Owned(t) => Some(t.num_nodes),
+        MaybeRef::Ref(name) => mirage_core::store::topology_get(name)
+            .ok()
+            .map(|t| t.num_nodes),
+    }
+}
+
+/// Resolve `--config <path>` to an absolute path, having checked that it
+/// is a config file the emulator can actually be given.
+///
+/// Read here rather than trusted, because the backend's own failure is
+/// almost silent: an unreadable or malformed config makes the emulator
+/// daemon refuse to start, and the session then continues in-process with
+/// nothing on stdout, a `tracing::warn!` nobody sees without `-v`, and an
+/// exit code of zero. In-process is not a smaller version of the daemon —
+/// it cannot share GPU memory between processes, so a multi-GPU RCCL job
+/// silently becomes a different experiment.
+///
+/// # Errors
+///
+/// Returns an error naming the path and what is wrong with it.
+fn check_config_file(path: &str) -> anyhow::Result<std::path::PathBuf> {
+    let abs = std::fs::canonicalize(path).map_err(|e| {
+        anyhow::anyhow!("--config {path:?}: {e}. Name an emulator config file that exists.")
+    })?;
+    // `read` covers both halves of "can the emulator open this": a
+    // directory fails with `EISDIR`, an unreadable file with `EACCES`.
+    let bytes =
+        std::fs::read(&abs).map_err(|e| anyhow::anyhow!("--config {}: {e}", abs.display()))?;
+    serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|e| {
+        anyhow::anyhow!(
+            "--config {}: this is not a usable emulator config ({e}). \
+             It must be a JSON document — the same file the upstream \
+             `rocjitsu --config` takes.",
+            abs.display()
+        )
+    })?;
+    Ok(abs)
+}
+
 /// Apply direct CLI overrides (containerisation + emulator settings) to
 /// a profile fetched by name.
 ///
@@ -1248,21 +1638,45 @@ fn apply_profile_overrides(
     if let Some(mode) = a.exec_mode {
         profile.emulator.exec_mode = mode.into();
     }
-    for opt in &a.options {
-        let (key, value) = parse_option(opt)?;
-        profile.emulator.options.insert(key, value);
+
+    let options: Vec<(String, SimpleValue)> = a
+        .options
+        .iter()
+        .map(|opt| parse_option(opt))
+        .collect::<anyhow::Result<_>>()?;
+    let plugins: Vec<(String, SimpleMap)> = a
+        .plugins
+        .iter()
+        .map(|spec| parse_plugin(spec))
+        .collect::<anyhow::Result<_>>()?;
+
+    // Check both against the backend that will actually run them — which
+    // is the one `--emulator` just selected, if it did. A backend this
+    // build does not have compiled in is left to bring-up to report:
+    // there is no schema here to check against, and refusing on that
+    // basis would blame the option for a missing backend.
+    if let Some(spec) = find_emulator(&profile.emulator.emulator) {
+        let name = &spec.name;
+        check_option_keys(
+            name,
+            &option_names(&spec),
+            &options.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
+        )?;
+        check_plugin_names(
+            name,
+            &spec.plugins,
+            &plugins.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
+        )?;
     }
-    for spec in &a.plugins {
-        let (name, args) = parse_plugin(spec)?;
-        profile.emulator.plugins.insert(name, args);
-    }
+
+    profile.emulator.options.extend(options);
+    profile.emulator.plugins.extend(plugins);
     // Drop-in `--config <path>`: an explicit emulator config file
     // (the upstream `rocjitsu --config`). Stored as the `config`
     // emulator option (absolute, so it resolves regardless of the
     // workload's working directory) for the backend to use verbatim.
     if let Some(cfg) = &a.config {
-        let abs =
-            std::fs::canonicalize(cfg).map_err(|e| anyhow::anyhow!("--config {cfg:?}: {e}"))?;
+        let abs = check_config_file(cfg)?;
         profile.emulator.options.insert(
             "config".to_string(),
             SimpleValue::String(abs.display().to_string()),
@@ -1309,6 +1723,41 @@ fn split_argv(argv: &[String]) -> (String, Vec<String>) {
     (cmd, it.collect())
 }
 
+/// The variables mirage sets on every workload process itself, after
+/// the emulator's and the user's, and which therefore win over `--env`.
+///
+/// They are the job's identity — which session a process belongs to,
+/// which rank it is, where the rendezvous is — and a workload that
+/// exported a stale `RANK` or `WORLD_SIZE`, or a `--env` that disagreed
+/// with the grid mirage actually built, would deadlock its own
+/// collectives rather than merely misreport. Naming the constants rather
+/// than the strings keeps this list in step with
+/// [`mirage_supervisor`]'s, which is what actually applies them.
+const MIRAGE_OWNED_ENV: [&str; 11] = [
+    mirage_core::container::ENV_SESSION,
+    mirage_core::container::ENV_RUNTIME,
+    mirage_core::container::ENV_RANK,
+    mirage_core::container::ENV_TORCH_RANK,
+    mirage_core::container::ENV_HEAD_ADDR,
+    mirage_core::container::ENV_HEAD_PORT,
+    mirage_core::container::ENV_MASTER_ADDR,
+    mirage_core::container::ENV_MASTER_PORT,
+    mirage_core::container::ENV_WORLD_SIZE,
+    mirage_core::container::ENV_LOCAL_RANK,
+    mirage_core::container::ENV_NCCL_HOSTID,
+];
+
+/// Which of `env`'s keys mirage will overwrite, in the order given.
+///
+/// The precedence itself is deliberate (see [`MIRAGE_OWNED_ENV`]); what
+/// was not deliberate is that the losing side was invisible, so
+/// `--env RANK=3` looked accepted and did nothing.
+fn mirage_owned_env<'a>(env: impl IntoIterator<Item = &'a String>) -> Vec<&'static str> {
+    env.into_iter()
+        .filter_map(|key| MIRAGE_OWNED_ENV.iter().find(|owned| *owned == key).copied())
+        .collect()
+}
+
 /// Parse repeated `KEY=VALUE` pairs from the CLI into the env map
 /// used by [`ExecArgs`]. Rejects entries without an `=` so a typo
 /// surfaces immediately instead of silently being dropped.
@@ -1328,40 +1777,79 @@ fn parse_envs(entries: &[String]) -> anyhow::Result<std::collections::BTreeMap<S
 
 // ----- cleanup ---------------------------------------------------------------
 
+/// One container or network a cleanup pass found.
+///
+/// Kept whole rather than reduced to a name, because a user acts on the
+/// three facts together: what kind of thing it is, which engine holds it,
+/// and which session it came from. Reported as "container resource
+/// <id>", a network and a container were the same sentence and neither
+/// said which engine to type the id at.
+#[derive(Debug)]
+struct Resource {
+    /// The id the engine listed it under.
+    id: String,
+    /// `"container"` or `"network"`.
+    kind: &'static str,
+    /// The engine holding it (`podman`, `docker`, or a path).
+    provider: String,
+    /// The session it was created for.
+    session: String,
+}
+
 /// What one cleanup pass found — and, unless it was a dry run, removed.
 #[derive(Debug, Default)]
 struct Reclaimed {
     /// Sessions that had something to reclaim.
     sessions: std::collections::BTreeSet<String>,
-    /// Container and network names.
-    containers: Vec<String>,
+    /// Containers and networks, across every engine consulted.
+    resources: Vec<Resource>,
     /// Stranded workload processes.
     processes: Vec<mirage_core::reclaim::Stranded>,
     /// Session scratch directories.
     scratch: Vec<std::path::PathBuf>,
+    /// Things that should have been removed and were not, each already a
+    /// sentence naming what and why.
+    failures: Vec<String>,
 }
 
 impl Reclaimed {
     fn is_empty(&self) -> bool {
-        self.containers.is_empty() && self.processes.is_empty() && self.scratch.is_empty()
+        self.resources.is_empty()
+            && self.processes.is_empty()
+            && self.scratch.is_empty()
+            && self.failures.is_empty()
+    }
+
+    /// Everything this pass found, as one JSON value.
+    ///
+    /// Built rather than printed so a caller that has more to say — see
+    /// [`purge`] — can nest it and still emit a single document.
+    fn as_json(&self, dry_run: bool) -> serde_json::Value {
+        serde_json::json!({
+            "dry_run": dry_run,
+            "sessions": self.sessions,
+            "resources": self.resources
+                .iter()
+                .map(|r| serde_json::json!({
+                    "id": r.id,
+                    "kind": r.kind,
+                    "provider": r.provider,
+                    "session": r.session,
+                }))
+                .collect::<Vec<_>>(),
+            "processes": self.processes
+                .iter()
+                .map(|p| serde_json::json!({"pid": p.pid, "session": p.session}))
+                .collect::<Vec<_>>(),
+            "scratch": self.scratch,
+            "failures": self.failures,
+        })
     }
 
     /// Print what happened, in whichever form the caller asked for.
     fn report(&self, dry_run: bool, json: bool) -> anyhow::Result<()> {
         if json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "dry_run": dry_run,
-                    "sessions": self.sessions,
-                    "containers": self.containers,
-                    "processes": self.processes
-                        .iter()
-                        .map(|p| serde_json::json!({"pid": p.pid, "session": p.session}))
-                        .collect::<Vec<_>>(),
-                    "scratch": self.scratch,
-                }))?
-            );
+            println!("{}", serde_json::to_string_pretty(&self.as_json(dry_run))?);
             return Ok(());
         }
         if self.is_empty() {
@@ -1382,8 +1870,15 @@ impl Reclaimed {
                 p.session
             );
         }
-        for c in &self.containers {
-            println!("{} container resource {c}", verb("removed", "would remove"));
+        for r in &self.resources {
+            println!(
+                "{} {} {} of session {} ({})",
+                verb("removed", "would remove"),
+                r.kind,
+                r.id,
+                r.session,
+                r.provider
+            );
         }
         for s in &self.scratch {
             println!(
@@ -1392,8 +1887,45 @@ impl Reclaimed {
                 s.display()
             );
         }
+        // On stderr, and after the list: these are not results, and a
+        // script reading the list must not have to filter them out of it.
+        for failure in &self.failures {
+            eprintln!("mirage: {failure}");
+        }
         Ok(())
     }
+}
+
+/// Every container engine a session under this runtime directory could
+/// have been created on.
+///
+/// `MIRAGE_CONTAINER_PROVIDER` names one deliberately, and is then the
+/// only one consulted. Otherwise *every* engine installed here is, rather
+/// than the first one autodetection finds: detection prefers podman, so
+/// on a host with both engines a session created with
+/// `--container-provider docker` left containers this command never even
+/// asked docker about — and then reported success, which is the one
+/// answer that stops a user from looking.
+///
+/// The candidate list mirrors [`mirage_core::container::detect_provider`],
+/// which returns only the first match and so cannot be reused here.
+fn cleanup_providers() -> Vec<String> {
+    if let Ok(explicit) = std::env::var("MIRAGE_CONTAINER_PROVIDER")
+        && !explicit.is_empty()
+    {
+        return vec![explicit];
+    }
+    ["podman", "docker"]
+        .into_iter()
+        .filter(|engine| on_path(engine))
+        .map(String::from)
+        .collect()
+}
+
+/// Whether a bare executable name resolves on `PATH`.
+fn on_path(name: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(name).is_file()))
 }
 
 /// Reclaim everything belonging to a session no live `mirage run` owns.
@@ -1436,16 +1968,12 @@ async fn cleanup(dry_run: bool) -> Reclaimed {
         out.sessions.insert(p.session.as_str().to_string());
     }
 
-    // 2. Containers and networks, found by the `mirage.owner` label.
-    //
-    // `resolve_provider(None)` rather than a bare autodetect: there is no
-    // profile here to name a provider, so `MIRAGE_CONTAINER_PROVIDER` is
-    // the only way a user can say which engine their sessions were built
-    // on — and cleaning up the wrong one finds nothing while reporting
-    // success.
-    if let Some(provider) = mirage_core::container::resolve_provider(None) {
+    // 2. Containers and networks, found by the `mirage.owner` label, on
+    //    every engine this host has (see [`cleanup_providers`]).
+    for provider in cleanup_providers() {
         let found = tokio::task::spawn_blocking({
             let live = live.clone();
+            let provider = provider.clone();
             move || {
                 let orphans = mirage_core::container::orphans(&provider, &live);
                 if !dry_run {
@@ -1460,12 +1988,30 @@ async fn cleanup(dry_run: bool) -> Reclaimed {
         .await
         .unwrap_or_default();
         for orphan in found {
-            out.sessions.insert(orphan.session);
-            out.containers.push(orphan.name);
+            out.sessions.insert(orphan.session.clone());
+            out.resources.push(Resource {
+                id: orphan.name,
+                kind: if orphan.is_network {
+                    "network"
+                } else {
+                    "container"
+                },
+                provider: provider.clone(),
+                session: orphan.session,
+            });
         }
     }
 
     // 3. Scratch directories, one per session that was never torn down.
+    //
+    // Against a *fresh* answer to "what is live". Everything above shells
+    // out to a container engine, which takes as long as an engine takes,
+    // and a `mirage run` started in that window binds its socket and
+    // creates its scratch directory while this pass is still working from
+    // a list that predates it. Deleting that directory takes the emulator
+    // socket and config out from under a healthy session. Re-probing is
+    // one connect per live run, against seconds of listing.
+    let live = run::answering_runs().await;
     let live_ids: std::collections::HashSet<&str> = live.iter().map(SessionId::as_str).collect();
     if let Ok(entries) = std::fs::read_dir(mirage_core::paths::session_runtime_root()) {
         for entry in entries.flatten() {
@@ -1480,7 +2026,13 @@ async fn cleanup(dry_run: bool) -> Reclaimed {
                 continue;
             }
             if !dry_run && let Err(e) = std::fs::remove_dir_all(entry.path()) {
-                tracing::warn!(path = %entry.path().display(), "could not remove: {e}");
+                // Recorded, not just logged: a caller that reports
+                // success while the directory it named is still there is
+                // telling the user their machine is clean when it is not.
+                out.failures.push(format!(
+                    "could not remove the scratch directory {}: {e}",
+                    entry.path().display()
+                ));
                 continue;
             }
             out.sessions.insert(id.as_str().to_string());
@@ -1553,18 +2105,31 @@ async fn state_cmd(cmd: StateCmd, json: bool) -> anyhow::Result<ExitCode> {
             } else {
                 "purge all mirage runtime/state and stop all sessions?"
             };
+            // The prompt goes to stderr (see [`confirm`]), so stdout is
+            // still free to carry exactly one JSON document — including
+            // when the answer is no, which is a result a script has to be
+            // able to read rather than infer from an empty stdout.
             if !force && !confirm(prompt)? {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "purged": false,
+                            "all": all,
+                            "declined": true,
+                        }))?
+                    );
+                }
                 return Ok(ExitCode::from(0));
             }
-            purge(all, json).await?;
-            println!("purged");
+            return purge(all, json).await;
         }
     }
     Ok(ExitCode::from(0))
 }
 
 /// Stop every live run and remove mirage's on-disk state.
-async fn purge(all: bool, json: bool) -> anyhow::Result<()> {
+async fn purge(all: bool, json: bool) -> anyhow::Result<ExitCode> {
     // Ask every live run to stop, by signalling nothing: a run owns its
     // own session and tears it down when it exits, so there is no
     // "destroy session" call to make. What purge can do is remove the
@@ -1602,22 +2167,100 @@ async fn purge(all: bool, json: bool) -> anyhow::Result<()> {
     // The live-run check above has already established that there are
     // none, so every session it finds is orphaned by construction.
     let reclaimed = cleanup(false).await;
-    if !reclaimed.is_empty() {
-        reclaimed.report(false, json)?;
+
+    // Ask again, immediately before the destructive step.
+    //
+    // Everything between the first check and here shells out to a
+    // container engine, one listing and one removal at a time, and a
+    // `mirage run` started in that window is a healthy session whose
+    // socket and scratch directory both live under the directory about to
+    // be deleted. The check that mattered is the one taken last.
+    let racing = run::answering_runs().await;
+    if !racing.is_empty() {
+        anyhow::bail!(
+            "a `mirage run` started while this purge was working ({}); \
+             nothing further was removed. Stop it and run the purge again.",
+            racing
+                .iter()
+                .map(SessionId::as_str)
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
     }
 
     let mut targets = vec![mirage_core::paths::mirage_runtime_dir()];
     if all {
         targets.push(mirage_core::paths::mirage_config_dir());
     }
+    let mut removed = Vec::new();
+    let mut failures = Vec::new();
     for t in targets {
-        if t.exists()
-            && let Err(e) = std::fs::remove_dir_all(&t)
-        {
-            tracing::warn!("failed to remove {}: {e:#}", t.display());
+        if !t.exists() {
+            continue;
+        }
+        match std::fs::remove_dir_all(&t) {
+            Ok(()) => removed.push(t),
+            // Reported and counted, not merely logged. `purged` printed
+            // over a directory that is still there — the case a `chmod
+            // 500` subdirectory produces — is the one outcome a user
+            // cannot recover from, because they have been told there is
+            // nothing left to do.
+            Err(e) => failures.push(format!("could not remove {}: {e}", t.display())),
         }
     }
-    Ok(())
+
+    // A purge that left a container behind has not started this machine
+    // again from nothing either, whatever happened to the directories, so
+    // the reclamation's own failures count towards the verdict.
+    let unfinished = failures.len() + reclaimed.failures.len();
+    let ok = unfinished == 0;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&purge_json(all, &removed, &failures, &reclaimed))?
+        );
+    } else {
+        // Prints the reclamation's own failures, on stderr.
+        if !reclaimed.is_empty() {
+            reclaimed.report(false, json)?;
+        }
+        for t in &removed {
+            println!("purged {}", t.display());
+        }
+        for failure in &failures {
+            eprintln!("mirage: {failure}");
+        }
+        if !ok {
+            eprintln!(
+                "mirage: the purge is incomplete; {unfinished} thing(s) could not be removed"
+            );
+        }
+    }
+    Ok(ExitCode::from(u8::from(!ok)))
+}
+
+/// Everything a purge did, as the single JSON document `--json` promises.
+///
+/// One document and nothing else: this used to be the reclamation's JSON
+/// followed by a bare `purged` line, so `mirage state purge --json | jq`
+/// failed on the trailing word — and, worse, `purged` was printed whether
+/// or not anything had actually been removed. `purged` is now the
+/// verdict, and every failure is named beside it.
+fn purge_json(
+    all: bool,
+    removed: &[std::path::PathBuf],
+    failures: &[String],
+    reclaimed: &Reclaimed,
+) -> serde_json::Value {
+    let mut all_failures = reclaimed.failures.clone();
+    all_failures.extend_from_slice(failures);
+    serde_json::json!({
+        "purged": all_failures.is_empty(),
+        "all": all,
+        "removed": removed,
+        "reclaimed": reclaimed.as_json(false),
+        "failures": all_failures,
+    })
 }
 
 // ----- misc helpers ----------------------------------------------------------
@@ -1857,6 +2500,299 @@ mod tests {
         assert_eq!(
             w.run.plugins,
             vec!["race".to_string(), "logging".to_string()]
+        );
+    }
+
+    /// Parse `mirage run`'s arguments exactly as the real command does.
+    fn parse_run(args: &[&str]) -> Result<RunArgs, clap::Error> {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Wrap {
+            #[command(flatten)]
+            run: RunArgs,
+        }
+        let mut argv = vec!["mirage"];
+        argv.extend_from_slice(args);
+        Wrap::try_parse_from(argv).map(|w| w.run)
+    }
+
+    #[test]
+    fn a_log_filter_that_would_silence_everything_is_refused() {
+        // `EnvFilter` reads a bare word as a target at trace level, so
+        // this parses and then matches nothing mirage logs — the whole
+        // failure being an absence of output.
+        let why = parse_log_filter("not-a-level").unwrap_err();
+        assert!(why.contains("not-a-level"), "{why}");
+        assert!(why.contains("not a log level"), "{why}");
+
+        // The forms that mean something all still work.
+        for good in [
+            "info",
+            "off",
+            "warn,mirage_supervisor=debug",
+            "mirage_ctl=trace",
+        ] {
+            parse_log_filter(good).unwrap_or_else(|e| panic!("`{good}` should parse: {e}"));
+        }
+    }
+
+    #[test]
+    fn an_unknown_option_key_is_rejected_and_names_the_ones_that_work() {
+        let schema = ["target_isa".to_string(), "source_isa".to_string()];
+        let e = check_option_keys("rocjitsu-dbt", &schema, &["targt_isa".to_string()])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("targt_isa"), "the typo must be named: {e}");
+        assert!(
+            e.contains("target_isa") && e.contains("source_isa"),
+            "the error must list what would have worked: {e}"
+        );
+        check_option_keys("rocjitsu-dbt", &schema, &["target_isa".to_string()]).unwrap();
+    }
+
+    #[test]
+    fn an_option_for_a_backend_that_takes_none_says_that() {
+        // rocjitsu publishes an empty schema, so every `-o` against it
+        // was accepted, stored, and read by nobody.
+        let e = check_option_keys("rocjitsu", &[], &["gpu_model".to_string()])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("gpu_model"), "{e}");
+        assert!(e.contains("accepts no options"), "{e}");
+        check_option_keys("rocjitsu", &[], &[]).unwrap();
+    }
+
+    #[test]
+    fn a_plugin_this_host_does_not_have_is_rejected() {
+        let available = ["logging".to_string(), "race".to_string()];
+        let e = check_plugin_names("rocjitsu", &available, &["raec".to_string()])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("raec"), "{e}");
+        assert!(
+            e.contains("logging") && e.contains("race"),
+            "the error must say what this host does have: {e}"
+        );
+        check_plugin_names("rocjitsu", &available, &["race".to_string()]).unwrap();
+
+        let none = check_plugin_names("hotswap", &[], &["race".to_string()])
+            .unwrap_err()
+            .to_string();
+        assert!(none.contains("none of its plugins"), "{none}");
+    }
+
+    #[test]
+    fn a_missing_workdir_names_the_path_and_not_the_command() {
+        // Reported as `command not found: /bin/true` before, with the
+        // path that was actually missing never printed at all.
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nope");
+        let e = check_host_workdir(&missing.to_string_lossy())
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("--workdir"), "{e}");
+        assert!(e.contains(&missing.display().to_string()), "{e}");
+    }
+
+    #[test]
+    fn a_workdir_that_is_a_file_says_which_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("cfg.json");
+        std::fs::write(&file, "{}").unwrap();
+        let e = check_host_workdir(&file.to_string_lossy())
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(&file.display().to_string()), "{e}");
+        assert!(e.contains("not a directory"), "{e}");
+
+        check_host_workdir(&dir.path().to_string_lossy()).unwrap();
+    }
+
+    #[test]
+    fn a_grid_the_supervisor_would_refuse_is_refused_before_bring_up() {
+        let max = mirage_supervisor::spec::MAX_WORLD_SIZE;
+        check_grid(2, 4).unwrap();
+        check_grid(max, 1).unwrap();
+        let e = check_grid(max, 2).unwrap_err().to_string();
+        assert!(e.contains(&max.to_string()), "{e}");
+    }
+
+    #[test]
+    fn the_variables_mirage_owns_are_the_ones_reported_as_ignored() {
+        let keys = [
+            "RANK".to_string(),
+            "PYTHONPATH".to_string(),
+            "WORLD_SIZE".to_string(),
+        ];
+        assert_eq!(mirage_owned_env(keys.iter()), vec!["RANK", "WORLD_SIZE"]);
+        assert!(mirage_owned_env(["HSA_XNACK".to_string()].iter()).is_empty());
+    }
+
+    #[test]
+    fn a_config_that_is_not_a_config_is_refused_before_the_session() {
+        // An unusable config file made the emulator daemon fail to start,
+        // which was downgraded to running in-process — silently, and with
+        // an exit code of zero.
+        let dir = tempfile::tempdir().unwrap();
+        let bad = dir.path().join("cfg.json");
+        std::fs::write(&bad, "not json at all").unwrap();
+        let e = check_config_file(&bad.to_string_lossy())
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(&bad.display().to_string()), "{e}");
+
+        let missing = dir.path().join("absent.json");
+        let e = check_config_file(&missing.to_string_lossy())
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(&missing.display().to_string()), "{e}");
+
+        let good = dir.path().join("good.json");
+        std::fs::write(&good, r#"{"vm": {}}"#).unwrap();
+        assert!(
+            check_config_file(&good.to_string_lossy())
+                .unwrap()
+                .is_absolute()
+        );
+    }
+
+    #[test]
+    fn zero_of_anything_is_not_a_job() {
+        // Accepted and silently treated as one, which is a different job
+        // from the one that was asked for.
+        for flag in ["--num-nodes", "--gpus-per-node", "--nproc-per-node"] {
+            let e = parse_run(&[flag, "0", "--", "./app"])
+                .expect_err(&format!("`{flag} 0` should be refused"))
+                .to_string();
+            assert!(e.contains(flag), "{e}");
+            parse_run(&[flag, "1", "--", "./app"]).unwrap();
+        }
+    }
+
+    #[test]
+    fn config_refuses_the_flags_it_would_have_to_ignore() {
+        // `--config` hands the backend a file verbatim, so anything that
+        // would have gone into a synthesised config cannot be honoured.
+        for extra in [
+            vec!["--gpus-per-node", "2"],
+            vec!["--exec-mode", "clocked"],
+            vec!["-o", "queues=4"],
+            vec!["--plugin", "race"],
+        ] {
+            let mut argv = vec!["--config", "cfg.json"];
+            argv.extend_from_slice(&extra);
+            argv.extend_from_slice(&["--", "./app"]);
+            let e = parse_run(&argv)
+                .expect_err(&format!("`--config` with {extra:?} should be refused"))
+                .to_string();
+            assert!(e.contains(extra[0]), "{e}");
+        }
+        // `--num-nodes` is not in that set: how many nodes the emulated
+        // machine has is mirage's business, not the emulator config's.
+        parse_run(&["--config", "cfg.json", "--num-nodes", "2", "--", "./app"]).unwrap();
+    }
+
+    #[test]
+    fn a_cleanup_report_says_what_each_thing_was() {
+        // "container resource <id>" for a network, with no engine named,
+        // left a user nothing to type.
+        let reclaimed = Reclaimed {
+            resources: vec![
+                Resource {
+                    id: "9f2c1a".to_string(),
+                    kind: "container",
+                    provider: "docker".to_string(),
+                    session: "s-1".to_string(),
+                },
+                Resource {
+                    id: "mirage-s-1".to_string(),
+                    kind: "network",
+                    provider: "docker".to_string(),
+                    session: "s-1".to_string(),
+                },
+            ],
+            failures: vec!["could not remove /run/mirage/s-2: denied".to_string()],
+            ..Reclaimed::default()
+        };
+        let doc = reclaimed.as_json(false);
+        let kinds: Vec<&str> = doc["resources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, vec!["container", "network"]);
+        assert_eq!(doc["resources"][0]["provider"], "docker");
+        assert_eq!(doc["resources"][1]["session"], "s-1");
+        assert_eq!(doc["failures"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_purge_that_left_something_behind_does_not_claim_to_have_purged() {
+        let reclaimed = Reclaimed::default();
+        let ok = purge_json(
+            false,
+            &[std::path::PathBuf::from("/run/mirage")],
+            &[],
+            &reclaimed,
+        );
+        assert_eq!(ok["purged"], serde_json::json!(true));
+
+        let failed = purge_json(
+            false,
+            &[],
+            &["could not remove /run/mirage: Permission denied".to_string()],
+            &reclaimed,
+        );
+        assert_eq!(failed["purged"], serde_json::json!(false));
+        assert_eq!(failed["failures"].as_array().unwrap().len(), 1);
+
+        // A container that could not be removed counts too: the machine
+        // has not been started again from nothing either way.
+        let stuck = Reclaimed {
+            failures: vec!["could not remove the scratch directory /x: denied".to_string()],
+            ..Reclaimed::default()
+        };
+        let partial = purge_json(false, &[], &[], &stuck);
+        assert_eq!(partial["purged"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn purge_fails_when_the_runtime_directory_survives() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+        let runtime = mirage_core::paths::mirage_runtime_dir();
+        // A directory whose contents cannot be unlinked: `chmod 500` on
+        // the parent of a file is enough, and is what a stuck mount or a
+        // root-owned leftover looks like.
+        let stuck = runtime.join("stuck");
+        std::fs::create_dir_all(&stuck).unwrap();
+        std::fs::write(stuck.join("held"), "x").unwrap();
+        std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // Blocking rather than `#[tokio::test]`: the lock guard above must
+        // not be held across an await.
+        let code = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(purge(false, false));
+
+        std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let survived = runtime.exists();
+        mirage_core::paths::clear_test_root();
+
+        assert!(survived, "the test needs a directory purge cannot remove");
+        // `ExitCode` has no `PartialEq`; its `Debug` is the only thing to
+        // compare, and comparing it against a known value rather than a
+        // literal string keeps the test independent of how std renders it.
+        assert_eq!(
+            format!("{:?}", code.unwrap()),
+            format!("{:?}", ExitCode::from(1)),
+            "a purge that could not remove the runtime directory must not exit 0"
         );
     }
 
