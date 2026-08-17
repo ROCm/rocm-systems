@@ -174,6 +174,11 @@ public:
 
   size_t dispatched_count() const { return total_dispatched_; }
 
+  /// @brief Total workgroups this CP has placed on its own XCD's compute units.
+  /// @details Distinct from dispatched_count(), which counts AQL packets. Used to
+  /// observe how a grid is distributed across the XCDs of a multi-XCD SoC.
+  uint64_t dispatched_workgroups() const { return dispatched_workgroups_; }
+
   size_t next_cu_index() const { return next_cu_; }
 
   const std::vector<simdojo::Port *> &dispatch_ports() const { return dispatch_ports_; }
@@ -322,6 +327,7 @@ private:
   SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
   uint32_t next_dispatch_id_ = 1;
   size_t total_dispatched_ = 0;
+  uint64_t dispatched_workgroups_ = 0;
 
   struct ClusterWorkgroupPlacement {
     ComputeUnitCore *cu = nullptr;

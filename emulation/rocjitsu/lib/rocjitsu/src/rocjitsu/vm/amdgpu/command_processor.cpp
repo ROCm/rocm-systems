@@ -1067,6 +1067,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
 
     ++entry.dispatched_wgs;
     ++dispatched;
+    ++dispatched_workgroups_;
     return true;
   };
 
