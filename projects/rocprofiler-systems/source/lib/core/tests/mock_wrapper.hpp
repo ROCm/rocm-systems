@@ -1027,8 +1027,8 @@ struct wrapper
     static constexpr runtime_library_t MARKER_LIBRARY = 8;
 
     // ─── Callback tracing kind constants ──────────────────────────────────────
-    // static_cast<callback_tracing_kind>(N) is valid for both the real SDK C enum
-    // (C++20 allows constexpr int-to-enum cast) and kind_wrapper (uses constructor).
+    // static_cast<callback_tracing_kind>(N) is valid for the real SDK C enum
+    // (C++20 allows constexpr int-to-enum cast).
     static constexpr callback_tracing_kind CALLBACK_TRACING_NONE =
         callback_tracing_kind::CALLBACK_TRACING_NONE;
     static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_CORE_API =
@@ -1422,7 +1422,6 @@ struct wrapper
 // client_data<Wrapper> uses unordered_map keyed on Wrapper::agent_id and
 // related handle types.  All of those are aliased to handle_t, so a single
 // std::hash specialization unblocks construction of client_data<mock_backend>.
-// kind_wrapper is hashed for unordered sets keyed by callback/buffer tracing kind.
 
 namespace std
 {
