@@ -73,21 +73,15 @@ struct XcdDistributionFixture {
 
 } // namespace
 
-// One HW queue is placed on one XCD by SoC::assign_queue_cp(), which is the
-// selector the KFD CREATE_QUEUE path uses. Every workgroup of a dispatch on that
-// queue is therefore placed by that one XCD's command processor, on that one
-// XCD's compute units.
-//
-// This pins CURRENT behavior, which is a fidelity gap: a real multi-XCD part in
-// SPX mode spreads one dispatch over every XCD of the partition. The topology
-// here advertises 256 CUs, so a single-queue application reaches 1/8 of them.
-// The follow-on fan-out work flips this expectation to an even spread; see
-// SingleQueueGridSpreadsOverAllXcds below.
-TEST(XcdDistributionTest, SingleQueueGridLandsOnOneXcd) {
+// Fan-out is a property of the queue, not of the device. A queue registered
+// directly against one command processor, as a test that wants that command
+// processor's CUs to itself does, keeps the whole grid on that one XCD. The KFD
+// path opts in; see FanoutQueueGridSpreadsOverAllXcds for that behavior.
+TEST(XcdDistributionTest, QueueWithoutFanoutKeepsGridOnOneXcd) {
   XcdDistributionFixture fx;
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
 
-  auto *cp = fx.soc->assign_queue_cp();
+  auto *cp = fx.soc->assign_queue_owner_cp();
   ASSERT_NE(cp, nullptr);
   test::AqlQueue queue(fx.memory, cp);
   queue.dispatch(kKdAddr, kTotalCus * kWavefrontSize, kWavefrontSize);
@@ -112,7 +106,7 @@ TEST(XcdDistributionTest, FanoutQueueGridSpreadsOverAllXcds) {
   XcdDistributionFixture fx;
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
 
-  auto *cp = fx.soc->assign_queue_cp();
+  auto *cp = fx.soc->assign_queue_owner_cp();
   ASSERT_NE(cp, nullptr);
   test::AqlQueue queue(fx.memory, cp, test::AqlQueue::DEFAULT_RING_ADDR,
                        test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
@@ -136,8 +130,8 @@ TEST(XcdDistributionTest, FanoutIsIndependentOfOwningXcd) {
 
   // Rotate the assignment so the queue is owned by an XCD other than xcd0.
   for (uint32_t i = 0; i < 3; ++i)
-    ASSERT_NE(fx.soc->assign_queue_cp(), nullptr);
-  auto *cp = fx.soc->assign_queue_cp();
+    ASSERT_NE(fx.soc->assign_queue_owner_cp(), nullptr);
+  auto *cp = fx.soc->assign_queue_owner_cp();
   ASSERT_NE(cp, nullptr);
   ASSERT_NE(cp, fx.soc->xcd(0)->command_processor());
 
@@ -159,7 +153,7 @@ TEST(XcdDistributionTest, FanoutIsIndependentOfOwningXcd) {
 TEST(XcdDistributionTest, GridSmallerThanXcdCountIsNotSplit) {
   XcdDistributionFixture fx;
 
-  auto *cp = fx.soc->assign_queue_cp();
+  auto *cp = fx.soc->assign_queue_owner_cp();
   ASSERT_NE(cp, nullptr);
   test::AqlQueue queue(fx.memory, cp, test::AqlQueue::DEFAULT_RING_ADDR,
                        test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
@@ -178,16 +172,15 @@ TEST(XcdDistributionTest, GridSmallerThanXcdCountIsNotSplit) {
   EXPECT_EQ(xcds_used, 1u);
 }
 
-// assign_queue_cp() rotates queues across XCDs, so N queues do reach N XCDs.
-// This is the only XCD spreading that exists today, and it only helps an
-// application that opens more than one HW queue.
+// Queue ownership still rotates across XCDs. With fan-out that no longer decides
+// where the work runs, but it does spread ring reads and completion signalling.
 TEST(XcdDistributionTest, QueuesRotateAcrossXcds) {
   XcdDistributionFixture fx;
 
   constexpr uint32_t kWgsPerQueue = kCusPerXcd;
   std::vector<std::unique_ptr<test::AqlQueue>> queues;
   for (uint32_t qi = 0; qi < kTotalXcds; ++qi) {
-    auto *cp = fx.soc->assign_queue_cp();
+    auto *cp = fx.soc->assign_queue_owner_cp();
     ASSERT_NE(cp, nullptr);
     uint64_t ring = 0xF0000000ULL + qi * 0x100000ULL;
     queues.push_back(std::make_unique<test::AqlQueue>(fx.memory, cp, ring, 4096, ring + 0x10000,

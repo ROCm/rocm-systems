@@ -212,6 +212,12 @@ public:
 
   size_t next_cu_index() const { return next_cu_; }
 
+  /// @brief Hardware queues registered with this CP, including fan-out replicas.
+  size_t registered_queue_count() {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    return hw_queues_.size();
+  }
+
   const std::vector<simdojo::Port *> &dispatch_ports() const { return dispatch_ports_; }
   const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
 

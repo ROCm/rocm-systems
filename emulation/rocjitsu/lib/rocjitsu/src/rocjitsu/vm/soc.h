@@ -99,14 +99,16 @@ public:
   /// @returns Const reference to the vector of XCD pointers.
   const std::vector<amdgpu::Xcd *> &xcds() const { return xcds_; }
 
-  /// @brief MES-like round-robin queue assignment across XCD command processors.
+  /// @brief Pick the XCD command processor that will own the next HW queue.
   ///
-  /// @details On real MI300X hardware, the MES firmware distributes HW queues
-  /// across XCDs. This method emulates that behavior with round-robin assignment.
-  /// Each call returns the next XCD's CP in rotation.
+  /// @details Firmware distributes HW queues across XCDs; this rotates through
+  /// them. The owner reads the queue's ring and holds each dispatch's completion
+  /// signal. It is not the only XCD that runs the work: a queue marked
+  /// HwQueue::xcd_fanout spreads each dispatch over every XCD, and which XCD owns
+  /// the queue does not change the workgroup-to-XCD mapping.
   ///
   /// @returns Pointer to the next CommandProcessor in rotation, or nullptr if no XCDs.
-  amdgpu::CommandProcessor *assign_queue_cp() {
+  amdgpu::CommandProcessor *assign_queue_owner_cp() {
     if (xcds_.empty())
       return nullptr;
     uint32_t idx = next_xcd_assignment_++ % static_cast<uint32_t>(xcds_.size());

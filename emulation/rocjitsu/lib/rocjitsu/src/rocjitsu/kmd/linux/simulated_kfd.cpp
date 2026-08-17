@@ -1529,7 +1529,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
 
   // Select the target CP before reserving any per-process state, so a null CP
   // cannot leave a doorbell offset / queue-id bookkeeping entry orphaned.
-  auto *target_cp = gpu->soc->assign_queue_cp();
+  auto *target_cp = gpu->soc->assign_queue_owner_cp();
   if (!target_cp)
     return -EINVAL;
 
@@ -1609,6 +1609,12 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     hw.is_sdma = (args->queue_type == 1 /*KFD_IOC_QUEUE_TYPE_SDMA*/ ||
                   args->queue_type == 3 /*KFD_IOC_QUEUE_TYPE_SDMA_XGMI*/ ||
                   args->queue_type == 4 /*KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID*/);
+    // The topology advertises every XCD's compute units as one agent, so a
+    // compute dispatch must be able to reach all of them. Without this a
+    // single-queue application would only ever use the XCD that
+    // assign_queue_owner_cp() happened to pick. SDMA queues are per-engine and
+    // are not spread.
+    hw.xcd_fanout = !hw.is_sdma;
     // amd_queue_t base: write_pointer_address points to write_dispatch_id.
     if (!hw.is_sdma)
       hw.queue_desc_va = args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);

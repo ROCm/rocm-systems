@@ -130,6 +130,68 @@ protected:
   std::vector<int> debug_fds_;
 };
 
+// A compute queue created through KFD is replicated onto every XCD so its
+// dispatches can be spread across the whole device; the XCD that owns the queue
+// still reads the ring alone. An SDMA queue is per-engine and is not replicated.
+TEST_F(KfdIoctlTest, CreateQueueReplicatesComputeQueueAcrossXcds) {
+  const uint32_t num_xcds = soc_->num_xcds();
+  ASSERT_GT(num_xcds, 1u);
+
+  auto total_registered = [&]() {
+    size_t total = 0;
+    for (uint32_t xi = 0; xi < num_xcds; ++xi)
+      total += soc_->xcd(xi)->command_processor()->registered_queue_count();
+    return total;
+  };
+  ASSERT_EQ(total_registered(), 0u);
+
+  alignas(4096) static std::array<std::byte, 8192> ring{};
+  alignas(64) static std::array<uint64_t, 8> ptrs{};
+
+  kfd_ioctl_create_queue_args args{};
+  args.gpu_id = kGpuId;
+  args.queue_type = 2 /*KFD_IOC_QUEUE_TYPE_COMPUTE_AQL*/;
+  args.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  args.ring_size = static_cast<uint32_t>(ring.size());
+  args.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
+  args.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
+  args.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), 0);
+
+  EXPECT_EQ(total_registered(), num_xcds)
+      << "compute queue should be registered on every XCD's command processor";
+  for (uint32_t xi = 0; xi < num_xcds; ++xi)
+    EXPECT_EQ(soc_->xcd(xi)->command_processor()->registered_queue_count(), 1u) << "xcd" << xi;
+
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = args.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(total_registered(), 0u) << "destroying the queue should drop every replica";
+}
+
+TEST_F(KfdIoctlTest, CreateQueueDoesNotReplicateSdmaQueue) {
+  const uint32_t num_xcds = soc_->num_xcds();
+  ASSERT_GT(num_xcds, 1u);
+
+  alignas(4096) static std::array<std::byte, 8192> ring{};
+  alignas(64) static std::array<uint64_t, 8> ptrs{};
+
+  kfd_ioctl_create_queue_args args{};
+  args.gpu_id = kGpuId;
+  args.queue_type = 1 /*KFD_IOC_QUEUE_TYPE_SDMA*/;
+  args.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  args.ring_size = static_cast<uint32_t>(ring.size());
+  args.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
+  args.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
+  args.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), 0);
+
+  size_t total = 0;
+  for (uint32_t xi = 0; xi < num_xcds; ++xi)
+    total += soc_->xcd(xi)->command_processor()->registered_queue_count();
+  EXPECT_EQ(total, 1u) << "an SDMA queue belongs to one engine, not to every XCD";
+}
+
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
   kfd_ioctl_set_memory_policy_args args{};
   args.gpu_id = kGpuId;
