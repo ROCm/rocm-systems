@@ -17,6 +17,8 @@ static std::mutex& getVmmMutex() {
   return vmm_mutex;
 }
 
+NCCL_PARAM(ShadowMempoolMaxSize, "SHADOW_MEMPOOL_MAX_SIZE", 1LL << 30);
+
 NCCL_API(ncclResult_t, ncclMemAlloc, void** ptr, size_t size);
 ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
   NCCL_NVTX3_FUNC_RANGE;
@@ -75,25 +77,8 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
     CUDACHECK(cudaGetDeviceCount(&dcnt));
     ALIGN_SIZE(handleSize, memGran);
 
-#if CUDART_VERSION >= 12030
-    if (requestedHandleTypes & CU_MEM_HANDLE_TYPE_FABRIC) {
-      /* First try cuMemCreate() with FABRIC handle support and then remove if it fails */
-      CUresult err = CUPFN(cuMemCreate(&handle, handleSize, &memprop, 0));
-      if (err == CUDA_ERROR_NOT_SUPPORTED) {
-        requestedHandleTypes &= ~CU_MEM_HANDLE_TYPE_FABRIC;
-        memprop.requestedHandleTypes = (CUmemAllocationHandleType)requestedHandleTypes;
-        /* Allocate the physical memory on the device */
-        CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
-      } else if (err != CUDA_SUCCESS) {
-        // Catch and report any error from above
-        CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
-      }
-    } else
-#endif
-    {
-      /* Allocate the physical memory on the device */
-      CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
-    }
+    /* Allocate the physical memory on the device */
+    CUCHECK(cuMemCreate(&handle, handleSize, &memprop, 0));
     /* Reserve a virtual address range */
     CUCHECK(cuMemAddressReserve((CUdeviceptr*)ptr, handleSize, memGran, 0, 0));
     /* Map the virtual address range to the physical allocation */
@@ -220,7 +205,8 @@ static void insertSegment(struct ncclSpace* a, int index, int64_t lo, int64_t hi
   while (r < a->count) {
     int64_t cur = a->cuts[r++];
     a->cuts[w++] = cur;
-    if (prev == cur) { // Repeated value is an empty segment which can be deleted.
+    if (prev == cur) {
+      // Repeated value is an empty segment which can be deleted.
       // Erase last two cuts or just one if we're at the start.
       w -= w == 1 ? 1 : 2;
       // Zeros can only occur at the beginning (due to being sorted). We want to
@@ -312,18 +298,16 @@ void ncclShadowPoolConstruct(struct ncclShadowPool* pool) {
   pool->pages = nullptr;
 }
 
-ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool* pool) {
+ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool* pool, cudaStream_t stream) {
   if (pool->hbits != 0) {
-    cudaStream_t stream;
-    CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
-
     if (pool->count != 0) {
       for (int i = 0; i < 1 << pool->hbits; i++) {
         struct ncclShadowObject* obj = pool->table[i];
         while (obj != nullptr) {
           struct ncclShadowPage* page = obj->page;
           if (page != nullptr) {
-            if (page->freeMask == 0) { // Put full pages back into page list.
+            if (page->freeMask == 0) {
+              // Put full pages back into page list.
               page->freeMask = 1;
               page->next = pool->pages;
               pool->pages = page;
@@ -347,7 +331,6 @@ ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool* pool) {
     }
 
     CUDACHECKIGNORE(cudaStreamSynchronize(stream));
-    CUDACHECKIGNORE(cudaStreamDestroy(stream));
     CUDACHECKIGNORE(cudaMemPoolDestroy(pool->memPool));
   }
   return ncclSuccess;
@@ -374,6 +357,7 @@ ncclResult_t ncclShadowPoolAlloc(struct ncclShadowPool* pool, size_t size, void*
     props.handleTypes = cudaMemHandleTypeNone;
     props.location.type = cudaMemLocationTypeDevice;
     CUDACHECKIGNORE(cudaGetDevice(&props.location.id));
+    props.maxSize = (size_t)ncclParamShadowMempoolMaxSize();
     CUDACHECK(cudaMemPoolCreate(&pool->memPool, &props));
 
     pool->hbits = hbits = 4;

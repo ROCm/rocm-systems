@@ -26,7 +26,6 @@
 #include "ce_coll.h"
 #include "rma/rma.h"
 #include "argcheck.h"
-#include "mem_manager.h"
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
@@ -228,11 +227,13 @@ struct ncclTaskColl {
   int32_t nMaxChannels:16;
   bool useWarpSpeed;
 #else
-  int32_t nMaxChannels:8;
+  // 16-bit so MAXCHANNELS=256 fits without sign-bit truncation
+  // (an 8-bit signed field caps at 127).
+  int32_t nMaxChannels:16;
 #endif
-#ifdef ENABLE_ROCSHMEM
+
   size_t* sizes;
-#endif
+
   int32_t nWarps:8;
   int32_t algorithm:8, protocol:8, pipeline:8;
   uint32_t isCollnet:1, isNvls:1, isSymLast:1;
@@ -245,6 +246,11 @@ struct ncclTaskColl {
   struct ncclDevrWindow* sendWin;
   struct ncclDevrWindow* recvWin;
   ncclSymRegType_t winRegType;
+  void*
+    ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
+  size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
+  bool useDda; // true if CE is using DDA staging
+  void** ddaPeerBases; // host-side table of every rank's DDA scratch base pointer
   void* sendMhandle;
   void* recvMhandle;
   void** sendNetHandles;
@@ -261,7 +267,8 @@ struct ncclTaskColl {
   void* groupApiEventHandle;
   void* collApiEventHandle;
   void* eventHandle;
-  uint8_t nChannels;
+  // 16-bit so MAXCHANNELS=256 fits without wrap-to-zero.
+  uint16_t nChannels;
 };
 
 struct ncclTaskBcast {
@@ -474,9 +481,9 @@ struct ncclKernelPlanner {
   int nTasksP2pSend, nTasksP2pRecv;
 
   struct {
-    int minBcastPeer;  /* initialized to INT_MAX */
-    int maxBcastPeer;  /* initialized to INT_MIN */
-    int BcastPeers;  /* initialized to 0 */
+    int minBcastPeer; /* initialized to INT_MAX */
+    int maxBcastPeer; /* initialized to INT_MIN */
+    int BcastPeers; /* initialized to 0 */
   } bcast_info;
 
   bool persistent;
@@ -547,6 +554,7 @@ struct ncclPeerInfo {
   uint64_t pidHash;
   dev_t shmDev;
   int64_t busId;
+  cudaUUID_t gpuUuid;
   struct ncclComm* comm;
   int cudaCompCap;
   size_t totalGlobalMem;
@@ -566,6 +574,7 @@ struct ncclPeerInfo {
   bool crossNicSupport;
   bool rmaPluginAvailable;
   bool cuMemGdrSupport;
+  int mloPart; // MLOPart partition index, or -1 if not an MLOPart GPU
 };
 
 typedef enum ncclGroupTaskType {
@@ -604,14 +613,16 @@ struct ncclComm {
   struct ncclProxyConnector* gproxyConn;
   struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next> legacyRegCleanupQueue;
   bool peerInfoValid;
-  float minNetBw;
+  int minNetCount; // Minimum number of network devices local to a rank
+  float minNetBw; // Minimum bw of any network device local to a rank
 
   ncclNet_t* ncclNet;
   void* netContext;
   void* ginContext;
-  void* rmaGinContext;
+  void* rmaContext;
   int netPluginIndex;
   int ginPluginIndex;
+  int rmaPluginIndex;
   int ncclNetVer;
   ncclNetDeviceType netDeviceType;
   ncclCollNet_t* ncclCollNet;
@@ -623,7 +634,7 @@ struct ncclComm {
   // by both the IPC path (ncclDdaIpcCommInit) and the fabric/VMM path
   // (ncclDdaFabricCommInit); only one path is active per comm. The handler and
   // barrier-state pointers are path-specific.
-  ncclIpcMemHandler* ddaIpcMemHandler;       /* IPC path only */
+  ncclIpcMemHandler* ddaIpcMemHandler; /* IPC path only */
   ncclFabricMemHandler* ddaFabricMemHandler; /* fabric path only */
   void* ddaScratch;
   size_t ddaScratchBytes;
@@ -634,6 +645,9 @@ struct ncclComm {
   // True when ddaScratch is VMM (cuMem) backed (fabric path); selects the
   // matching deallocator at teardown.
   bool ddaScratchIsVmm;
+  // Device-resident per-block epoch cells for the LL-protocol DDA collectives,
+  uint32_t* ddaLLEpochDev;
+  int ddaLLEpochLen;
 
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;
@@ -649,24 +663,24 @@ struct ncclComm {
     magic; // Magic number for all network communication. Not a security key -- only goal is to detect mismatches.
 
   uint64_t commHash;
-  int rank;    // my rank in the communicator
-  int nRanks;  // number of GPUs in communicator
+  int rank; // my rank in the communicator
+  int nRanks; // number of GPUs in communicator
   int cudaDev; // my cuda device index
   int nvmlDev; // my nvml device index
   int compCap; // compute capability of the GPU
   int minCompCap, maxCompCap; // min/max compute capability in the communicator
-  int64_t busId;   // my PCI bus ID in int format
+  int64_t busId; // my PCI bus ID in int format
   ncclAffinity cpuAffinity; // CPU affinity of the GPU
   int WarpSize;
   int cudaArch; // matches __CUDA_ARCH__ of device
 
-  int cpuArch;   // architecture - As defined in src/include/graph.h, e.g. x86/arm/ppc/mixed
+  int cpuArch; // architecture - As defined in src/include/graph.h, e.g. x86/arm/ppc/mixed
   int cpuVendor; // vendor - As defined in src/include/graph.h
 
   int node;
   int nNodes;
   int rcclUseOneSlice; // RCCL: true if this comm is using one slice per primitive
-  int gfx9CheapFenceOff; // RCCL: true if gfx9 cheap fence is disabled
+  int cheapPostSendFenceOff; // RCCL: true if cheap post-send fence is disabled
   int localRank;
   int localRanks;
   int maxLocalRanks;
@@ -682,15 +696,16 @@ struct ncclComm {
   struct ncclComm* hierarchicalInterComm;
   bool hierarchicalCommsInitialized;
 
-  // Hierarchical AG temporary buffers
-  void* hierarchicalAGTempBuffer;
+  // Hierarchical temporary buffer
+  // Both hierarchical AG and RS use the same temp buffer,
+  // so running them concurrently on same communicator across two streams is unsafe
+  void* hierarchicalTempBuffer;
 
   // Force PAT algorithm for this communicator
   bool forcePatEnable;
 
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
-  bool isMultiRankGpu; // true when multiple ranks use the same GPU device on the same host
   struct cliqueInfo clique; // Our MNNVL clique information
   int cliqueRank; // Our rank within the MNNVL clique
 
@@ -795,6 +810,7 @@ struct ncclComm {
   uint8_t collNetSupportMatrix[4 /*sum,prod,max,min*/][ncclNumTypes];
   int* collNetHeads;
   int collNetHeadsNum;
+  int collNetChainSupport;
   int* collNetDenseToUserRank;
   int* collNetUserToDenseRank;
   /* sharable collNet proxy progress resource. */
@@ -819,7 +835,12 @@ struct ncclComm {
   struct ncclComm* groupNext[ncclGroupTaskTypeNum];
   // Subset of those in groupNext list. Holds 0x1 if not needing preconnect.
   struct ncclComm* preconnectNext;
-  int localPersistentRefs; // number of persistent plan-lists capturing this comm
+  // Number of persistent plan-lists (graph captures) referencing this comm.
+  // Incremented synchronously on plan creation; decremented asynchronously by
+  // a per-rank host callback on plan reclaim (no cross-rank sync). No
+  // internal lock: relies on the same single-writer-per-comm contract as the
+  // rest of ncclComm (serialized via the group/enqueue API).
+  int localPersistentRefs;
   struct P2pSchedulePair {
     int sendRank;
     int recvRank;
@@ -902,6 +923,9 @@ struct ncclComm {
   int symmetricSupport;
   bool useNetPXN;
   bool useGdr;
+  bool hasMloPart; // if mlopart is used
+  bool hasMultiRankNvml; // if multiple ranks are using the NVML device
+  bool isMultiRankGpu; // if multiple ranks are sharing the same GPU (bus id) on a node
   ncclGinConnectionType_t globalGinSupport;
   bool globalRmaProxySupport;
   bool hostRmaSupport;
@@ -910,7 +934,7 @@ struct ncclComm {
   struct ncclDevrState devrState; // The symmetric runtime state
   struct ncclSymkState symkState; // The symmetric kernels state (built on previous)
 
-  struct ncclMemManager* memManager;  // Memory manager
+  struct ncclMemManager* memManager; // Memory manager
   struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> suspendTaskQueue;
   struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> resumeTaskQueue;
 
@@ -942,10 +966,18 @@ struct ncclComm {
   size_t bufThreshold;
 #endif
 
+  // Added for AlltoAllv
+  void* localSizes;
+  void* gatheredSizes;
+
   // Direct Reduce Scatter [RCCL]
   bool enableDirectReduceScatter;
   // Temporary Buffer [RCCL]
   void* tempBuff;
+
+  // Heap-allocated per comm (kDdaNranks for IPC, nRanks for fabric), not a fixed
+  // array -- fabric's larger nRanks used to overflow a fixed kDdaNranks array here.
+  void** ddaPeerPtrsHost;
 
   uint64_t endMagic;
 };

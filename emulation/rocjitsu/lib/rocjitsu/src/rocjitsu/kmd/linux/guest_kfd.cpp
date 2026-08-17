@@ -163,16 +163,27 @@ void append_unique_gpu_id(std::vector<uint32_t> *ids, uint32_t gpu_id) {
 
 uint32_t max_numeric_dir(const fs::path &dir) {
   uint32_t max_id = 0;
-  std::error_code ec;
-  for (const auto &entry : fs::directory_iterator(dir, ec)) {
-    if (!entry.is_directory(ec))
+  const std::string dir_str = dir.string();
+  auto &real = libc_passthrough();
+  // Host validation can run with GuestKfd::mutex_ held. Going through the
+  // interposed directory functions for real sysfs would re-enter
+  // redirect_sysfs_path(), which takes the same mutex.
+  DIR *stream = real.opendir(dir_str.c_str());
+  if (!stream)
+    return max_id;
+
+  while (struct dirent *entry = real.readdir(stream)) {
+    std::string_view name(entry->d_name);
+    const std::string child = (dir / name).string();
+    struct stat st {};
+    if (real.stat(child.c_str(), &st) != 0 || !S_ISDIR(st.st_mode))
       continue;
-    auto name = entry.path().filename().string();
     uint32_t id = 0;
     auto [ptr, err] = std::from_chars(name.data(), name.data() + name.size(), id);
     if (err == std::errc{} && ptr == name.data() + name.size())
       max_id = std::max(max_id, id);
   }
+  real.closedir(stream);
   return max_id;
 }
 
@@ -531,8 +542,11 @@ GuestKfd::GuestKfd(config::DbtGuestConfig config, LinuxKfd *execution_driver)
       overlay_(std::make_unique<TopologyOverlay>()),
       owns_execution_driver_open_(execution_driver && execution_driver->fd() >= 0) {
   libc_passthrough().resolve();
-  guest_ = gpu_info_from_config(config_.guest_device,
-                                std::max(1u, config_.guest_device.num_shader_engines));
+  // The guest overlay describes a single synthetic node with no XCD topology
+  // behind it, so its XCC count is 1. (The argument is the XCC count, not a
+  // geometry field: passing num_shader_engines here made sysfs publish
+  // array_count * num_shader_engines and num_xcc == num_shader_engines.)
+  guest_ = gpu_info_from_config(config_.guest_device, 1u);
   guest_.drm_render_minor = choose_render_minor(guest_.drm_render_minor);
   host_gpu_id_ = config_.host.gpu_id;
 }

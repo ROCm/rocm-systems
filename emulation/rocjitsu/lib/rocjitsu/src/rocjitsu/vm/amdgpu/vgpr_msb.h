@@ -7,6 +7,6 @@
 #ifndef ROCJITSU_VM_AMDGPU_VGPR_MSB_H_
 #define ROCJITSU_VM_AMDGPU_VGPR_MSB_H_
 
-#include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 
 #endif // ROCJITSU_VM_AMDGPU_VGPR_MSB_H_

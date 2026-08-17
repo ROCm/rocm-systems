@@ -64,7 +64,7 @@ struct RelocationFunctionTable {
 /// the call and the PC-relative address builder that must remain pointed at the
 /// same data object after `.text` grows.
 struct RelocationTableDispatch {
-  /// Index into the table vector passed to `discover_relocation_table_dispatches()`.
+  /// Index into the table span passed to `analyze_relocation_pairs()`.
   size_t table_index = 0;
 
   /// Original `.text`-relative offset of the `s_swap_pc_i64` call instruction.
@@ -105,15 +105,28 @@ struct PcRelativeAddressBuilder {
   uint64_t target_vaddr = 0;
 };
 
-/// @brief Discover every proven `s_get_pc_i64` + literal-add address materialization.
+/// @brief Results collected by the shared SGPR-pair dataflow.
+struct RelocationPairAnalysis {
+  /// Dispatches sorted by `(source_call_offset, table_index)` and unique on that key.
+  std::vector<RelocationTableDispatch> dispatches;
+
+  /// Address builders sorted and unique by `source_address_add_offset`.
+  /// This complete set is independent of the supplied relocation tables.
+  std::vector<PcRelativeAddressBuilder> address_builders;
+};
+
+/// @brief Discover table dispatches and address builders in one dataflow pass.
 ///
-/// @details Shares the dataflow that resolves table dispatches, so the same guarantees apply: a
-/// chained second add, a write to either half, or a CFG join whose predecessors disagree all leave
-/// the pair untracked rather than reported. Callers decide what a target means; this reports the
-/// address arithmetic only.
-[[nodiscard]] std::vector<PcRelativeAddressBuilder>
-discover_pc_relative_address_builders(std::span<const std::unique_ptr<BasicBlock>> blocks,
-                                      uint64_t text_vaddr);
+/// @details The analysis propagates a small SGPR-pair lattice. An
+/// `s_get_pc_i64` plus literal add produces an address builder; a builder is
+/// reported before its value can be reclassified as a known table base, so
+/// `tables` affects only `dispatches`. A chained second add, a write to either
+/// half, or a CFG join whose predecessors disagree leaves the pair unreported.
+/// A table or GOT address followed by an indexed load and `s_swap_pc_i64`
+/// produces a dispatch only when every step is proven.
+[[nodiscard]] RelocationPairAnalysis
+analyze_relocation_pairs(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                         std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr);
 
 /// @brief Discover finite device-call tables from ELF symbols and relocations.
 ///
@@ -131,19 +144,69 @@ discover_pc_relative_address_builders(std::span<const std::unique_ptr<BasicBlock
 [[nodiscard]] std::vector<RelocationFunctionTable>
 discover_relocation_function_tables(const AmdGpuCodeObject &object);
 
-/// @brief Resolve decoded dynamic calls back to relocation-discovered tables.
+/// @brief `.text`-relative offsets of every sized `STT_FUNC` symbol in the code object.
 ///
-/// @details The analysis propagates only a small SGPR-pair lattice:
-/// `s_get_pc_i64 + s_add_nc_u64 literal64` produces an address. That address
-/// may name the table directly or a GOT slot whose zero-offset load produces
-/// the table base. A subsequent indexed `s_load_b64` produces an entry value,
-/// and a dispatch is reported only when that value reaches `s_swap_pc_i64`.
-/// Writes to either SGPR half kill the fact, and CFG joins retain only facts
-/// that agree on every initialized predecessor, so unproven calls remain
-/// unresolved rather than acquiring speculative table edges.
-[[nodiscard]] std::vector<RelocationTableDispatch>
-discover_relocation_table_dispatches(std::span<const std::unique_ptr<BasicBlock>> blocks,
-                                     std::span<const RelocationFunctionTable> tables,
-                                     uint64_t text_vaddr);
+/// @details These are function entries, which makes them block leaders. A separately compiled
+/// device library reaches most of its functions only through a pointer, so nothing in the decoded
+/// instruction stream names them and CFG construction would otherwise let the padding before such
+/// a function fall through into its body -- leaving the entry in the middle of a block, where it
+/// cannot be adopted as a root or seeded with the ABI's architectural entry state.
+///
+/// Like the relocation tables above, and unlike anything derived from recovered dataflow, this set
+/// is a fixed property of the input: the same symbols are found whether or not the object has
+/// already been translated, so using it to partition `.text` stays a fixed point.
+///
+/// @returns Sorted, unique offsets. Empty when the object has no symbol table, more than one
+/// `.text`, or no qualifying symbol.
+[[nodiscard]] std::vector<uint64_t>
+discover_text_function_symbol_offsets(const AmdGpuCodeObject &object);
+
+/// @brief Whether every sized `STT_FUNC` in `.text` is an AMDHSA kernel.
+///
+/// @details A kernel is `<name>` with a companion `<name>.kd` descriptor object; a device function
+/// has no companion. When this holds the object defines no device-function body, so a pointer
+/// reaching an indirect transfer can only name a body in another code object -- and this
+/// translation has none of its own to adopt as a root, retarget, or grow a descriptor for.
+///
+/// This is a scope fence, not a soundness argument. It bounds what admitting an unproven transfer
+/// would own; the proof that such a target is already relocated has to come from the transfer's
+/// own operand. It is vacuously true for an object with no such symbol, so it must never be the
+/// only gate.
+///
+/// @returns True when no sized `.text` `STT_FUNC` lacks a `<name>.kd`. False when the symbol
+/// tables cannot be read -- unlike its siblings here, an object this cannot inspect must not earn
+/// the fence.
+[[nodiscard]] bool object_defines_only_kernels(const AmdGpuCodeObject &object);
+
+/// @brief Sized `.text` `STT_FUNC` offsets whose symbol a host could resolve.
+///
+/// @details When a translation relies on the whole-object relocation permission it also promises
+/// that every externally resolvable `.text` symbol still names its body afterwards, because such a
+/// symbol is exactly what an outside holder of a code address looked it up through. Those bodies
+/// therefore have to be emitted, and a body no kernel reaches is emitted only if something adopts
+/// it. Like the other symbol-derived sets here this is a fixed property of the input, so adopting
+/// from it leaves the scope partition a fixed point.
+///
+/// @returns Sorted, unique offsets. Empty when the object has no symbol table or no such symbol.
+[[nodiscard]] std::vector<uint64_t>
+discover_externally_resolvable_text_function_offsets(const AmdGpuCodeObject &object);
+
+/// @brief Function entries named by an `R_AMDGPU_RELATIVE64` addend landing in `.text`.
+///
+/// @details Each such addend is a stored function pointer, so its target is an address-taken body
+/// that must be emitted and whose new placement the addend is rewritten to. discover_relocation_
+/// function_tables() finds only the subset held by a qualifying `STT_OBJECT`; a compiler-anonymous
+/// pointer array carries no such symbol, and its targets are just as dereferenced. Addends are ELF
+/// data, so like symbols they are a fixed property of the input and safe to partition `.text` by.
+///
+/// @param function_entry_offsets Sorted function-entry offsets, from
+///        discover_text_function_symbol_offsets(). A target is reported only when it is one of
+///        these. Callers make every target a block leader and an adopted root seeded with the
+///        ABI's entry state, which is only meaningful at a function boundary, so an addend that
+///        names a mid-function label is omitted instead of guessed at -- leaving it unadopted, and
+///        its object refused by relocate_relative_text_addends().
+[[nodiscard]] std::vector<uint64_t>
+discover_relative_text_addend_targets(const AmdGpuCodeObject &object,
+                                      std::span<const uint64_t> function_entry_offsets);
 
 } // namespace rocjitsu
