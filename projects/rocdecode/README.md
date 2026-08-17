@@ -123,14 +123,22 @@ cmake --install . --config Release
 
 After installation, the following files are available:
 
+**Linux:**
+
 * Libraries in `/opt/rocm/lib`
 * Header files in `/opt/rocm/include/rocdecode`
 * Samples in `/opt/rocm/share/rocdecode`
 * Documents in `/opt/rocm/share/doc/rocdecode`
 
+**Windows:**
+
+* Libraries in `%ROCM_PATH%\lib` and `%ROCM_PATH%\bin`
+* Header files in `%ROCM_PATH%\include\rocdecode`
+* Samples in `%ROCM_PATH%\share\rocdecode`
+
 ### Using sample application
 
-To verify your installation using a sample application, run:
+**Linux:**
 
   ```shell
   mkdir rocdecode-sample && cd rocdecode-sample
@@ -139,14 +147,34 @@ To verify your installation using a sample application, run:
   ./videodecode -i /opt/rocm/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
   ```
 
+**Windows:**
+
+  ```bat
+  mkdir rocdecode-sample && cd rocdecode-sample
+  cmake %ROCM_PATH%\share\rocdecode\samples\videoDecode -DROCM_PATH=%ROCM_PATH% -DVAON12_ROOT=%VAON12_ROOT% -DFFMPEG_ROOT=%FFMPEG_ROOT%
+  cmake --build . --config Release
+  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+  Release\videodecode.exe -i %ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.mp4
+  ```
+
 ### Using CTest
 
-To verify your installation using CTest, run:
+**Linux:**
 
   ```shell
   mkdir rocdecode-test && cd rocdecode-test
   cmake /opt/rocm/share/rocdecode/test/
   ctest -VV
+  ```
+
+**Windows:**
+
+  ```bat
+  mkdir rocdecode-test && cd rocdecode-test
+  cmake %ROCM_PATH%\share\rocdecode\test -DROCM_PATH=%ROCM_PATH% -DVAON12_ROOT=%VAON12_ROOT% -DFFMPEG_ROOT=%FFMPEG_ROOT%
+  cmake --build . --config Release
+  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+  ctest -C Release -VV
   ```
 
 ## Samples
