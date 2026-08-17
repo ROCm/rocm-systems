@@ -16,6 +16,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <chrono>
+#include <set>
 
 #include "hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 
