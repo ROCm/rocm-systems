@@ -1207,6 +1207,11 @@
             "NCCL_MIN_CTAS": "0",
             "NCCL_MAX_CTAS": "0"
           }
+        },
+        {
+          "name": "CommMPITests_GinRmaFinalizeWithSplitComm",
+          "description": "RMA and GIN hold separate contexts that a shared split child inherits and finalizes without a NULL access",
+          "test_filter": "GinRmaContextMPITest.RmaAndGinFinalizeWithSplitComm"
         }
       ]
     },
