@@ -19,3 +19,22 @@ matrix-ubuntu-ci:
   - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950' }
   # Strix Halo
   - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151' }
+
+matrix-rhel-nightly:
+  # MI355
+  - { os-release: '8.10', gpu: 'mi355', arch: 'gfx950' }
+  - { os-release: '9', gpu: 'mi355', arch: 'gfx950' }
+  # MI325
+  - { os-release: '8.10', gpu: 'mi325', arch: 'gfx94X' }
+  - { os-release: '9', gpu: 'mi325', arch: 'gfx94X' }
+  # MI200
+  - { os-release: '8.10', gpu: 'mi200', arch: 'gfx90a' }
+  - { os-release: '9', gpu: 'mi200', arch: 'gfx90a' }
+  # Strix Halo
+  - { os-release: '8.10', gpu: 'strix-halo', arch: 'gfx1151' }
+  - { os-release: '9', gpu: 'strix-halo', arch: 'gfx1151' }
+matrix-rhel-ci:
+  # MI355
+  - { os-release: '9', gpu: 'mi355', arch: 'gfx950' }
+  # Strix Halo
+  - { os-release: '9', gpu: 'strix-halo', arch: 'gfx1151' }
