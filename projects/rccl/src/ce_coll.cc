@@ -110,7 +110,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   size_t ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   int i = 0;
   int targetStreams = 0;
-
+  uint32_t graphSyncValue = GRAPH_SYNC_VALUE;
   // Symmetric memory runtime must be initialized before any window registration.
   NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
 
@@ -145,7 +145,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   // Allocate the UC barrier flag-value buffer: slot [0] tracks the running seq,
   // slot [1] holds the constant GRAPH_SYNC_VALUE for graph capture.
   NCCLCHECKGOTO(ncclCudaCalloc(&comm->ceColl.ceSeqNumDev, 2, comm->memManager), ret, fail);
-  NCCLCHECKGOTO(ncclCudaMemcpy(comm->ceColl.ceSeqNumDev + 1, (uint32_t*)&GRAPH_SYNC_VALUE, 1), ret, fail);
+  NCCLCHECKGOTO(ncclCudaMemcpy(comm->ceColl.ceSeqNumDev + 1, &graphSyncValue, 1), ret, fail);
   comm->ceColl.useCompletePtr = false;
   comm->ceColl.intraBatchSyncFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
   comm->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
@@ -221,6 +221,10 @@ fail:
   if (comm->ceColl.synceEvent != nullptr) {
     cudaEventDestroy(comm->ceColl.synceEvent);
     comm->ceColl.synceEvent = nullptr;
+  }
+  if (comm->ceColl.ceSeqNumDev != nullptr) {
+    ncclCudaFree(comm->ceColl.ceSeqNumDev, comm->memManager);
+    comm->ceColl.ceSeqNumDev = nullptr;
   }
   goto exit;
 }
