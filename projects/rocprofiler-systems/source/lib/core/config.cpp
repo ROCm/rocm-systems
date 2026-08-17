@@ -3,6 +3,7 @@
 
 #include "config.hpp"
 #include "amd_smi.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
@@ -15,7 +16,8 @@
 #include "mproc.hpp"
 #include "perf.hpp"
 #include "perfetto.hpp"
-#include "rocprofiler-sdk.hpp"
+#include "sdk-tracing-config-deps.hpp"
+#include "sdk-tracing-config.hpp"
 #include "utility.hpp"
 
 #include <timemory/backends/capability.hpp>
@@ -983,7 +985,9 @@ configure_settings(bool _init)
         std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
         "hardware_counters");
 
-    rocprofiler_sdk::config_settings(_config);
+    rocprofiler_sdk::sdk_tracing_config<
+        rocprofiler_sdk::wrapper,
+        rocprofiler_sdk::default_sdk_externals>::config_settings(_config);
     amd_smi::config_settings(_config);
 
     ROCPROFSYS_CONFIG_SETTING(size_t, env_vars::PERFETTO_SHMEM_SIZE_HINT_KB,
