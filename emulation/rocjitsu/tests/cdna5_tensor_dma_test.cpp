@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "decode_test_util.h"
 
 namespace {
 
@@ -1125,7 +1126,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitIsNoOpForSingleWaveWorkgroup) {
   ASSERT_NE(decoder, nullptr);
 
   const std::array<uint32_t, 2> wait_words = {0xBF94FFFFu, 0u};
-  std::unique_ptr<Instruction> wait_inst(decoder->decode(wait_words.data()));
+  std::unique_ptr<Instruction> wait_inst(decode_valid(*decoder, wait_words.data()));
   ASSERT_NE(wait_inst, nullptr);
   ASSERT_EQ(std::string_view(wait_inst->mnemonic()), "s_barrier_wait");
 
@@ -1152,7 +1153,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitReleasesOnlyAfterSignalQuorum) {
   ASSERT_NE(decoder, nullptr);
 
   const std::array<uint32_t, 2> wait_words = {0xBF94FFFFu, 0u};
-  std::unique_ptr<Instruction> wait_inst(decoder->decode(wait_words.data()));
+  std::unique_ptr<Instruction> wait_inst(decode_valid(*decoder, wait_words.data()));
   ASSERT_NE(wait_inst, nullptr);
   ASSERT_EQ(std::string_view(wait_inst->mnemonic()), "s_barrier_wait");
 

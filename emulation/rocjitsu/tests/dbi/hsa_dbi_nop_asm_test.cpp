@@ -75,7 +75,9 @@ protected:
     // TODO: instrument multiple instructions
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
     ASSERT_NE(decoder, nullptr);
-    auto blocks = BasicBlock::build(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA2);
+    auto block_result = BasicBlock::build(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA2);
+    ASSERT_TRUE(block_result.succeeded());
+    auto blocks = std::move(block_result).value();
 
     ASSERT_FALSE(co->text_sections().empty());
     const auto *text = co->text_sections().front();
@@ -178,7 +180,9 @@ TEST_F(HsaDbiNopAsmStatic, PatchedElfActuallyContainsInstrumentation) {
   for (uint64_t anchor_idx = 0; anchor_idx < anchor_count_; ++anchor_idx) {
     rj_code_binary_inst_t anchor_word = 0;
     std::memcpy(&anchor_word, text->data() + anchor_offsets_[anchor_idx], sizeof(anchor_word));
-    std::unique_ptr<Instruction> decoded(decoder->decode(&anchor_word));
+    auto decode_result = decoder->decode(&anchor_word);
+    ASSERT_TRUE(decode_result.succeeded());
+    std::unique_ptr<Instruction> decoded = std::move(decode_result).value();
     ASSERT_NE(decoded, nullptr);
     EXPECT_NE(decoded->mnemonic().find("s_branch"), std::string_view::npos)
         << "Anchor at offset " << anchor_offsets_[anchor_idx]

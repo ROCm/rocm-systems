@@ -167,4 +167,6 @@ private:
   FailureOrStorage<T> storage_;
 };
 
+template <typename T> FailureOr(T) -> FailureOr<T>;
+
 } // namespace util

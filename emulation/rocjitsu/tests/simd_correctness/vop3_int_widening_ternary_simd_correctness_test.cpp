@@ -15,6 +15,7 @@
 /// equal with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate
 /// in-process). In-process inactive lanes must keep the sentinel.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -150,7 +151,7 @@ void check_case(const Case &c, uint64_t exec) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257,
                 /*src2=*/(c.ternary ? 258u : 0u), words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, rot, exec);
     delete inst;
@@ -199,7 +200,7 @@ void check_mad_u32_u16_opsel_high_halves(uint64_t exec) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(/*op=*/497, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258, words,
                 kOpSelSrc0Src1High);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_mad_u32_u16_vop3 decode failed";
     fx.cu->execute_instruction(inst, *fx.wf);
     delete inst;

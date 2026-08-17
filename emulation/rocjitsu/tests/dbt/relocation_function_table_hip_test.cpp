@@ -8,6 +8,7 @@
 #error "relocation_function_table_hip_test.cpp requires a gfx1250-capable device compiler"
 #endif
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
@@ -98,7 +99,7 @@ TEST(RelocationFunctionTableHip, TranslatesEightWayDeviceDispatch) {
   auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   const auto blocks =
-      rocjitsu::BasicBlock::build(*source, *decoder, ROCJITSU_CODE_ARCH_GFX1250, source_targets);
+      rocjitsu::build_valid_blocks(*source, *decoder, ROCJITSU_CODE_ARCH_GFX1250, source_targets);
   const auto dispatches =
       rocjitsu::analyze_relocation_pairs(blocks, source_tables, source->text_sections()[0]->vaddr())
           .dispatches;
