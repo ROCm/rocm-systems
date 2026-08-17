@@ -478,6 +478,15 @@ public:
   /// must produce, so holding it would deadlock forward progress.
   std::mutex op_mutex_;
   mutable std::mutex alloc_mutex_;
+  /// @brief Serializes scratch-pool backing allocation for this process.
+  /// @details Every XCD of a fanned-out dispatch independently finds the same
+  /// process-wide pool VA unbacked and races to map it; remapping a pool that
+  /// already has live waves spilling into it would drop their data. Per-process
+  /// rather than driver-wide so daemon clients do not serialize against each
+  /// other. Lock order: hw_queue_mutex_ (held by the calling command processor)
+  /// -> scratch_backing_mutex_ -> {alloc_mutex_, owned_fds_mutex_,
+  /// page_table_mutex_}; nothing taken under it reaches a command processor.
+  std::mutex scratch_backing_mutex_;
   std::unordered_map<uint64_t, GpuAllocation> allocations_;
   uint64_t next_handle_ = 1;
   uint64_t next_gpu_va_;

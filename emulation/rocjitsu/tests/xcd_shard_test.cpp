@@ -29,7 +29,7 @@ std::vector<uint32_t> owned_ordinals(XcdShard shard, uint32_t total_chunks) {
 
 TEST(XcdShardTest, DefaultShardOwnsWholeGrid) {
   XcdShard shard;
-  EXPECT_TRUE(shard.is_whole_grid());
+  EXPECT_EQ(shard.stride, 1u);
   EXPECT_EQ(shard.owned_chunks(256), 256u);
   EXPECT_EQ(shard.nth_owned_chunk(0), 0u);
   EXPECT_EQ(shard.nth_owned_chunk(255), 255u);
@@ -70,9 +70,9 @@ TEST(XcdShardTest, ShardsPartitionTheGridExactly) {
   }
 }
 
-// A grid with fewer chunks than XCDs leaves the high-rank shards empty. Those
-// shards must not be handed to a command processor: an entry with zero
-// workgroups is indistinguishable from a barrier packet.
+// A grid with fewer chunks than XCDs leaves the high-rank shards owning nothing.
+// Those empty shards are still handed to their command processors: they are what
+// keeps every XCD's view of the queue in step for barrier ordering.
 TEST(XcdShardTest, ShardSmallerThanStrideLeavesHighRanksEmpty) {
   constexpr uint32_t kStride = 8;
   constexpr uint32_t kTotalChunks = 3;

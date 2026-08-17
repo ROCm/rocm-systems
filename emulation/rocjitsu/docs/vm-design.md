@@ -87,14 +87,28 @@ so the workgroup-to-XCD mapping does not depend on which XCD a queue landed on.
 That matters because kernels swizzle their workgroup index for cache locality
 assuming exactly this permutation.
 
-Two cases are deliberately not split: a grid with fewer chunks than XCDs (an
-empty share is indistinguishable from a barrier packet) and SDMA queues (which
-belong to one engine). A queue registered directly against one CP, as unit tests
-do, is not replicated and keeps the whole grid on that CP's XCD.
+Only SDMA queues are exempt, since they belong to one engine. A grid with fewer
+chunks than XCDs is still split: the XCDs that get nothing take an empty share.
+Those empty shares are what keep every XCD's copy of the queue in step, and
+`barrier_satisfied()` reads ordering from the entries sitting ahead of a barrier'd
+packet — an XCD that never heard about a packet would start the next one early.
+`is_non_kernel()` is true for an empty share; it completes at once and is then
+held at the head like any other shard until the grid retires.
+
+A queue registered directly against one CP, as unit tests do, is not replicated
+and keeps the whole grid on that CP's XCD.
+
+Because a replica's entry list is a subsequence of the owner's — barrier,
+barrier-value and PM4-IB packets live only on the owner — every packet type that
+is *not* replicated must either stall the fetch while it is unsatisfied or be
+enqueued already complete. Both hold today; a future packet type that is neither
+would silently let a replica run ahead.
 
 Replicas never read the ring and never poll a doorbell; shards arrive from the
 owning XCD through the engine's cross-thread event queue, so the handoff is safe
-when `partition_topology_by_xcds` has put each XCD on its own worker thread.
+when `partition_topology_by_xcds` has put each XCD on its own worker thread. A
+packet's acquire fence travels with the shard and each XCD applies it to its own
+caches on its own thread, since one XCD may not touch another's.
 
 ### Cross-XCD completion
 
@@ -106,6 +120,15 @@ signal. Publishing releases and the owner's check acquires, so no XCD's results
 are still sitting in its caches when the signal is written. Peer shards carry no
 completion signal, fire no dispatch-level plugin callbacks, and do not report the
 queue idle.
+
+Destroying a fan-out queue discards any share that has not yet been published:
+the teardown runs on the caller's thread and so cannot flush a partition's compute
+units, and publishing without that write-back would let the owner signal with an
+XCD's results still cached. Dropping them is sound **only because a fan-out queue
+is always destroyed on every XCD at once** — the KFD paths sweep every command
+processor and an owner cascades to its replicas — so no XCD is ever left holding a
+grid that can no longer retire. A future change that tears one XCD's copy down
+alone would strand the owner.
 
 ### Event-Driven Dispatch
 

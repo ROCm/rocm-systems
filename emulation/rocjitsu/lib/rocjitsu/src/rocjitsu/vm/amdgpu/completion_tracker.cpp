@@ -55,32 +55,39 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
       // release in publish_share() pairs with the acquire in grid_retired(), so
       // the XCD that fires the signal cannot do so while another XCD's results
       // are still sitting in its caches.
-      flush_caches(entry.process_id);
-      if (entry.grid_completion && !entry.grid_share_published) {
+      // Both are done exactly once per entry. A shard that finished ahead of its
+      // siblings stays parked at the head of this queue below, so the loop
+      // re-enters on it every time the tracker drains; re-flushing every CU of the
+      // XCD on each of those passes would be pure waste.
+      if (!entry.grid_share_published) {
+        // Latch only after the flush actually ran. flush_caches walks every CU and
+        // writes back; if it threw, latching first would leave this share forever
+        // unpublished and park the owner on a grid that can never retire.
+        flush_caches(entry.process_id);
         entry.grid_share_published = true;
-        entry.grid_completion->publish_share(entry.total_wgs);
-        if (grid_share_retired_cb_)
-          grid_share_retired_cb_(entry);
+        // publish_share elects a single caller as the one whose share completed
+        // the grid, so the wake happens once rather than once per racing XCD.
+        if (entry.grid_completion && entry.grid_completion->publish_share(entry.total_wgs) &&
+            grid_retired_cb_)
+          grid_retired_cb_(entry);
       }
 
-      // A peer XCD's shard carries no signal and no dispatch-level callbacks; it
-      // has done its part and retires as soon as its own share is flushed and
-      // published.
-      if (entry.is_fanout_peer()) {
-        if (qs.next_dispatch_idx > 0)
-          --qs.next_dispatch_idx;
-        qs.entries.pop_front();
-        continue;
-      }
-
-      // The owning XCD holds the head of its queue until every XCD has retired
-      // its share, so the dispatch retires once, in queue order.
-      if (entry.grid_completion && !entry.grid_completion->grid_retired())
+      // Every XCD holds the head of its queue until the dispatch is done
+      // device-wide, peers included. Popping a peer's shard as soon as its own
+      // share finished would erase the only evidence that the packet is still
+      // outstanding, and barrier_satisfied() -- which inspects the entries still
+      // sitting ahead of a barrier'd packet -- would then let this XCD start the
+      // next packet while a sibling was still running this one.
+      if (!entry.grid_fully_completed())
         break;
 
-      plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
-      if (entry.completion_signal != 0) {
-        fire_signal(entry);
+      // Only the XCD that read the packet reports the dispatch and signals it.
+      // The retired callback is per-XCD local cleanup, so every XCD runs it.
+      if (!entry.fanout_peer) {
+        plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
+        if (entry.completion_signal != 0) {
+          fire_signal(entry);
+        }
       }
       if (dispatch_retired_cb_)
         dispatch_retired_cb_(entry);

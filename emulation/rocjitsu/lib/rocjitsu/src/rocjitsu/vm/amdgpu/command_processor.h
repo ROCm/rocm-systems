@@ -157,17 +157,16 @@ public:
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
 
-  /// @brief This CP's XCD index within its SoC.
-  uint32_t xcd_rank() const { return xcd_rank_; }
-
   void register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
 
   /// @brief Take one XCD's share of a dispatch fanned out by a peer XCD.
   ///
-  /// @details Thread-safe, and safe to call from another partition's thread: the
-  /// shard is appended under this CP's queue lock and the CP is woken through the
-  /// engine's cross-thread event queue rather than dispatched inline.
+  /// @details Thread-safe, and safe to call from another partition's thread while
+  /// the caller holds its own CP's hw_queue_mutex_: the shard is parked in an inbox
+  /// guarded by a leaf mutex and the CP is woken through the engine's cross-thread
+  /// event queue rather than dispatched inline. The shard reaches the queue state
+  /// when this CP next drains the inbox on its own thread.
   /// @param shard The share of the grid this XCD is to run.
   void accept_fanout_shard(DispatchEntry shard);
   void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
@@ -203,17 +202,22 @@ public:
 
   void set_workgroup_id_offset(uint32_t offset) { workgroup_id_offset_ = offset; }
 
-  size_t dispatched_count() const { return total_dispatched_; }
+  [[nodiscard]] size_t dispatched_count() const { return total_dispatched_; }
 
   /// @brief Total workgroups this CP has placed on its own XCD's compute units.
   /// @details Distinct from dispatched_count(), which counts AQL packets. Used to
-  /// observe how a grid is distributed across the XCDs of a multi-XCD SoC.
-  uint64_t dispatched_workgroups() const { return dispatched_workgroups_; }
+  /// observe how a grid is distributed across the XCDs of a multi-XCD SoC. Atomic
+  /// because SoC::dispatched_workgroups_per_xcd() reads every XCD's counter, which
+  /// under a partitioned engine means reading counters other threads are writing.
+  /// Relaxed throughout: it is a statistic, not a synchronization point.
+  [[nodiscard]] uint64_t dispatched_workgroups() const {
+    return dispatched_workgroups_.load(std::memory_order_relaxed);
+  }
 
-  size_t next_cu_index() const { return next_cu_; }
+  [[nodiscard]] size_t next_cu_index() const { return next_cu_; }
 
   /// @brief Hardware queues registered with this CP, including fan-out replicas.
-  size_t registered_queue_count() {
+  [[nodiscard]] size_t registered_queue_count() const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     return hw_queues_.size();
   }
@@ -295,11 +299,47 @@ private:
   ///
   /// @details Narrows @p dp to this XCD's share and hands the remaining shares to
   /// the peer XCDs, all sharing one GridCompletion so the completion signal fires
-  /// once. Does nothing when the SoC has a single XCD or when the grid has fewer
-  /// chunks than XCDs — with fewer chunks some XCD would receive an empty share,
-  /// which is indistinguishable from a barrier packet.
-  /// @returns True when the dispatch was split.
-  bool fan_out_dispatch(DispatchEntry &dp);
+  /// once. Does nothing when the SoC has a single XCD.
+  ///
+  /// Every XCD gets an entry even when the grid is too small to give it any
+  /// workgroups. An empty share is what keeps the replicas' queues in step with
+  /// the owner's for the packets that are replicated, and barrier_satisfied()
+  /// reads that ordering from the entries sitting ahead of a barrier'd packet;
+  /// skipping the empty ones would leave a replica with a shorter prefix than the
+  /// owner and let it start a barrier'd packet while a sibling was still running
+  /// the one before it. A replica's entry list is only ever a subsequence of the
+  /// owner's -- see the fan-out section of docs/vm-design.md for the invariant the
+  /// non-replicated packet types have to satisfy.
+  void fan_out_dispatch(DispatchEntry &dp);
+
+  /// @brief Move shards handed over by peer XCDs into their queue states.
+  /// @details Runs on this CP's own thread, under hw_queue_mutex_. Kept separate
+  /// from accept_fanout_shard() so that no CP ever takes a peer's hw_queue_mutex_.
+  void drain_fanout_inbox();
+
+  /// @brief Schedule a doorbell on every XCD of the SoC, this one included.
+  /// @details Used when a dispatch retires device-wide: the XCD holding the
+  /// completion signal may be parked with nothing left to rouse it, and a peer may
+  /// be parked behind a barrier bit this dispatch was blocking. Replicas run no
+  /// doorbell poll thread of their own, so nothing else would re-examine them.
+  void wake_all_xcds();
+
+  /// @brief Allocate a dispatch id unique across every XCD of the SoC.
+  ///
+  /// @details Fan-out copies a dispatch id onto peer XCDs, and completion
+  /// bookkeeping (notify_wg_complete, the cluster placement keys, the CU's
+  /// per-workgroup refcounts) looks entries up by that id. If two XCDs could mint
+  /// the same id, a peer holding a shard of one dispatch and an own dispatch with
+  /// the same id would credit workgroup completions to whichever it found first.
+  /// Seeding each CP at its XCD rank and stepping by the XCD count keeps the id
+  /// spaces disjoint without a shared counter. Disjointness survives the 32-bit
+  /// wraparound only when the XCD count divides 2^32, which every shipped
+  /// configuration satisfies; it is ~2^29 dispatches per XCD away in any case.
+  uint32_t allocate_dispatch_id() {
+    uint32_t id = next_dispatch_id_;
+    next_dispatch_id_ += dispatch_id_stride_;
+    return id;
+  }
 
   /// @brief Locate the queue state for a (queue_id, process_id) pair.
   /// @returns Pointer into new_queue_states_, or null when not registered. Caller
@@ -365,8 +405,17 @@ private:
 
   uint32_t xcd_rank_ = 0;
   // Every XCD's CP in XCD index order, including this one. Empty until the SoC
-  // wires the topology, which leaves fan-out disabled.
+  // wires the topology, which leaves fan-out disabled. Raw pointers: the SoC owns
+  // every XCD and destroys them together, so a peer outlives any use of it here,
+  // including the cross-thread uses in accept_fanout_shard() and wake_all_xcds().
   std::vector<CommandProcessor *> xcd_peers_;
+
+  // Shards handed over by peer XCDs, awaiting this CP's next pass. Guarded by a
+  // leaf mutex, never hw_queue_mutex_: a peer appends here while holding its own
+  // hw_queue_mutex_, so acquiring anything else under this one would reintroduce
+  // the cross-CP lock cycle it exists to avoid.
+  std::mutex fanout_inbox_mutex_;
+  std::vector<DispatchEntry> fanout_inbox_;
 
   size_t next_cu_ = 0;
   size_t next_queue_idx_ = 0;
@@ -384,8 +433,11 @@ private:
   // the decoder cannot infer this dialect from the packet header alone.
   SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
   uint32_t next_dispatch_id_ = 1;
+  // Step between successive dispatch ids from this CP. Set to the XCD count when
+  // the SoC wires the topology so no two XCDs ever mint the same id.
+  uint32_t dispatch_id_stride_ = 1;
   size_t total_dispatched_ = 0;
-  uint64_t dispatched_workgroups_ = 0;
+  std::atomic<uint64_t> dispatched_workgroups_{0};
 
   struct ClusterWorkgroupPlacement {
     ComputeUnitCore *cu = nullptr;
@@ -399,7 +451,7 @@ private:
   std::unordered_map<uint64_t, ClusterWorkgroupPlacement> cluster_wg_placements_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
-  std::recursive_mutex hw_queue_mutex_;
+  mutable std::recursive_mutex hw_queue_mutex_;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
 

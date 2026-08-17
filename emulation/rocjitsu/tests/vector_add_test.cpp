@@ -268,11 +268,8 @@ void run_fanout_golden_reference(uint32_t num_threads) {
 
   auto *cp = soc->assign_queue_owner_cp();
   ASSERT_NE(cp, nullptr);
-  test::AqlQueue queue(memory, cp, test::AqlQueue::DEFAULT_RING_ADDR,
-                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
-                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
-                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/true);
-  queue.dispatch(kernel_object, N, WF_SIZE, KERNARG_ADDR);
+  auto queue = test::make_fanout_queue(memory, cp);
+  queue->dispatch(kernel_object, N, WF_SIZE, KERNARG_ADDR);
 
   engine->run();
   soc->flush_all();

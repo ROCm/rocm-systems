@@ -470,7 +470,12 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
 
     if (memory_ && memory_->resolve_host_ptr(wave_scratch, pkt.process_id) == nullptr &&
         scratch_allocator_) {
-      uint64_t total_scratch = per_wave_size * pkt.total_wgs * waves_per_wg;
+      // Size against the whole grid, not this XCD's share: wave_scratch above is
+      // indexed by the grid-wide workgroup id, so every XCD of a fanned-out
+      // dispatch addresses the same full-size pool. Sizing it from total_wgs would
+      // leave the tail of the grid unbacked and would re-enter the allocator, which
+      // remaps the pool VA and would drop live waves' spill data.
+      uint64_t total_scratch = per_wave_size * pkt.grid_total_wgs() * waves_per_wg;
       scratch_allocator_(pkt.process_id, scratch_pool, static_cast<size_t>(total_scratch));
     }
 
@@ -509,15 +514,7 @@ void CommandProcessor::startup() {
   completion_->set_plugin_group(plugin_group_);
   completion_->set_dispatch_retired_callback(
       [this](const DispatchEntry &entry) { erase_cluster_workgroups(entry.dispatch_id); });
-  completion_->set_grid_share_retired_callback([](const DispatchEntry &entry) {
-    // The owning XCD may have finished its own share long ago and be parked with
-    // nothing left to wake it. Re-arm its doorbell so it re-checks the grid
-    // counter and fires the completion signal. Cross-partition safe: the engine
-    // buffers the event into the owner's partition.
-    auto *owner = entry.fanout_owner;
-    if (owner && owner->engine())
-      owner->engine()->schedule_event_now(owner->doorbell_event());
-  });
+  completion_->set_grid_retired_callback([this](const DispatchEntry &) { wake_all_xcds(); });
   if (interrupt_cb_)
     completion_->set_interrupt_callback(interrupt_cb_);
 }
@@ -536,6 +533,9 @@ void CommandProcessor::set_xcd_topology(uint32_t rank, std::vector<CommandProces
   assert(peers[rank] == this && "XCD rank must be this CP's own position");
   xcd_rank_ = rank;
   xcd_peers_ = std::move(peers);
+  // Carve this XCD its own dispatch-id space; see allocate_dispatch_id().
+  dispatch_id_stride_ = static_cast<uint32_t>(xcd_peers_.size());
+  next_dispatch_id_ = 1 + rank;
 }
 
 HwQueueState *CommandProcessor::find_queue_state(uint32_t queue_id, uint32_t process_id) {
@@ -548,21 +548,18 @@ HwQueueState *CommandProcessor::find_queue_state(uint32_t queue_id, uint32_t pro
 
 void CommandProcessor::accept_fanout_shard(DispatchEntry shard) {
   {
-    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    auto *qs = find_queue_state(shard.queue_id, shard.process_id);
-    if (!qs) {
-      // The replica was torn down between the owner reading the packet and this
-      // call. Publish the share so the owner's grid counter still completes and
-      // its signal is not lost.
-      if (shard.grid_completion)
-        shard.grid_completion->publish_share(shard.total_wgs);
-      return;
-    }
     util::Logger::cp([&](auto &os) {
       os << std::format("{}: FANOUT_SHARD d={} rank={}/{} wgs={}", name(), shard.dispatch_id,
                         shard.shard.rank, shard.shard.stride, shard.total_wgs);
     });
-    qs->entries.push_back(std::move(shard));
+    // Deliberately NOT hw_queue_mutex_. The caller runs under its own CP's
+    // hw_queue_mutex_ (fan-out happens inside handle_doorbell), so taking a peer's
+    // hw_queue_mutex_ here would let two CPs fanning out concurrently acquire each
+    // other's locks in opposite orders. Nothing that can lead back to another CP's
+    // hw_queue_mutex_ is acquired while holding this one, and it is held only for
+    // the push so a peer's engine thread never blocks on it for long.
+    std::lock_guard<std::mutex> lock(fanout_inbox_mutex_);
+    fanout_inbox_.push_back(std::move(shard));
   }
   // Cross-thread and cross-partition safe: the engine buffers the event and drains
   // it into this CP's partition at its next safe point. Dispatching inline here
@@ -571,18 +568,59 @@ void CommandProcessor::accept_fanout_shard(DispatchEntry shard) {
     engine()->schedule_event_now(doorbell_event());
 }
 
-bool CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
+void CommandProcessor::drain_fanout_inbox() {
+  std::vector<DispatchEntry> inbox;
+  {
+    std::lock_guard<std::mutex> lock(fanout_inbox_mutex_);
+    inbox.swap(fanout_inbox_);
+  }
+  if (inbox.empty())
+    return;
+
+  bool grid_retired = false;
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    for (auto &shard : inbox) {
+      auto *qs = find_queue_state(shard.queue_id, shard.process_id);
+      if (qs) {
+        // Honour the packet's acquire fence on this XCD too. The owner invalidated
+        // only its own CUs; this runs on our partition's thread, so ours are safe
+        // to touch here and the peer ends up with the same view the owner has.
+        if (shard.acquire_invalidate)
+          flush_gpu_caches();
+        qs->entries.push_back(std::move(shard));
+        continue;
+      }
+      // The replica was destroyed between the owner reading the packet and this
+      // drain. Publish the share anyway so the owner's grid counter still reaches
+      // its target and the dispatch's completion signal is not lost.
+      if (shard.grid_completion && shard.grid_completion->publish_share(shard.total_wgs))
+        grid_retired = true;
+    }
+  }
+  // Wake outside our own lock, and only if one of those orphaned shares was the
+  // one that completed the grid; the owner may be parked with nothing else to
+  // rouse it.
+  if (grid_retired)
+    wake_all_xcds();
+}
+
+void CommandProcessor::wake_all_xcds() {
+  // Cross-partition safe: the engine buffers each event into the target's own
+  // partition and never re-enters the component, so this is callable while
+  // holding hw_queue_mutex_.
+  for (auto *peer : xcd_peers_) {
+    if (peer && peer->engine())
+      peer->engine()->schedule_event_now(peer->doorbell_event());
+  }
+}
+
+void CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
   const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
   if (num_xcds <= 1)
-    return false;
+    return;
 
   const uint32_t grid_wgs = dp.total_wgs;
-  const uint32_t chunk = dp.dispatch_chunk_wgs();
-  // Every XCD must end up with at least one chunk: a zero-workgroup entry is
-  // indistinguishable from a barrier packet and would retire immediately.
-  if (grid_wgs / chunk < num_xcds)
-    return false;
-
   auto grid = std::make_shared<GridCompletion>();
   grid->grid_wgs = grid_wgs;
 
@@ -591,7 +629,7 @@ bool CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
       continue;
     DispatchEntry shard = dp;
     shard.grid_completion = grid;
-    shard.fanout_owner = this;
+    shard.fanout_peer = true;
     // The peer must not fire the dispatch's completion signal; the owning XCD
     // does that once the grid counter shows every share retired.
     shard.completion_signal = 0;
@@ -601,7 +639,6 @@ bool CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
 
   dp.grid_completion = std::move(grid);
   dp.apply_shard({xcd_rank_, num_xcds}, grid_wgs);
-  return true;
 }
 
 void CommandProcessor::register_queue(HwQueue queue) {
@@ -620,9 +657,20 @@ void CommandProcessor::register_queue(HwQueue queue) {
   // and the peers' register_queue() take their own locks, and a shard can arrive
   // only after this returns, so there is no window where a peer has work but no
   // queue state.
-  bool replicate = queue.xcd_fanout && xcd_peers_.size() > 1;
+#ifndef NDEBUG
+  {
+    // Checked before replicating: a failure here must not leave replicas behind on
+    // the peers. Shard routing keys on (queue_id, process_id), so a duplicate would
+    // silently deliver every shard to whichever slot matched first.
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    assert(find_queue_state(queue.queue_id, queue.process_id) == nullptr &&
+           "queue ids must be unique per process on a CP: fan-out routes shards by that key");
+  }
+#endif
+  const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
+  bool replicate = queue.xcd_fanout && num_xcds > 1;
   if (replicate) {
-    for (uint32_t rank = 0; rank < xcd_peers_.size(); ++rank) {
+    for (uint32_t rank = 0; rank < num_xcds; ++rank) {
       if (rank == xcd_rank_)
         continue;
       HwQueue replica = queue;
@@ -672,6 +720,17 @@ void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) 
     for (size_t i = 0; i < hw_queues_.size(); ++i) {
       if (hw_queues_[i].queue_id == queue_id && hw_queues_[i].process_id == process_id) {
         drop_replicas = hw_queues_[i].xcd_fanout;
+        // Any shares still unpublished here are simply dropped. They cannot be
+        // credited to the grid from this thread: publish_share is the release edge
+        // that must follow this XCD's cache write-back, and flushing walks cus_,
+        // which belong to the engine partition rather than to the caller. Crediting
+        // without the flush would let the owner fire the completion signal with this
+        // XCD's results still cached.
+        //
+        // Dropping them is safe because a fan-out queue is only ever destroyed on
+        // every XCD at once: the KFD paths sweep all command processors, and an
+        // owner cascades to its replicas below. No XCD is left holding a grid that
+        // can no longer retire. Unregistering a lone replica is not supported.
         hw_queues_.erase(hw_queues_.begin() + static_cast<ptrdiff_t>(i));
         new_queue_states_.erase(new_queue_states_.begin() + static_cast<ptrdiff_t>(i));
         break;
@@ -682,7 +741,8 @@ void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) 
   // that peer's lock, and holding both would fix no order between two CPs whose
   // queues are being destroyed concurrently.
   if (drop_replicas) {
-    for (uint32_t rank = 0; rank < xcd_peers_.size(); ++rank) {
+    const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
+    for (uint32_t rank = 0; rank < num_xcds; ++rank) {
       if (rank != xcd_rank_)
         xcd_peers_[rank]->unregister_queue(queue_id, process_id);
     }
@@ -908,7 +968,12 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
       {
         std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
         for (size_t i = 0; i < hw_queues_.size(); ++i) {
-          if (new_queue_states_[i].entries.empty() && hw_queues_[i].process_id != 0)
+          // Skip fan-out replicas for the same reason drain_completions does: a
+          // replica does not own the queue, and its shards drain ahead of the
+          // owning XCD's, so it would report idle while the dispatch is still
+          // running elsewhere.
+          if (!hw_queues_[i].fanout_replica && new_queue_states_[i].entries.empty() &&
+              hw_queues_[i].process_id != 0)
             idle_pids.push_back(hw_queues_[i].process_id);
         }
       }
@@ -960,9 +1025,12 @@ bool CommandProcessor::barrier_satisfied(const HwQueueState &qs, size_t idx) con
   if (idx == 0 && !qs.implicit_barrier_next)
     return true;
 
-  // Barrier bit: all prior entries must be fully completed.
+  // Barrier bit: all prior entries must be fully completed, device-wide. A prior
+  // entry that is one XCD's share of a fanned-out dispatch is not done just
+  // because this XCD finished it, so gate on the whole grid or this XCD would run
+  // the next packet while a peer is still executing the previous one.
   for (size_t i = 0; i < idx; ++i) {
-    if (!qs.entries[i].fully_completed())
+    if (!qs.entries[i].grid_fully_completed())
       return false;
   }
   return true;
@@ -1100,12 +1168,14 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       [&](uint32_t local_wg_id, uint32_t global_wg_id,
           const ShaderProcessorInput::WorkgroupPlacement &placement) -> bool {
     // Fire the dispatch-execution-begin hook exactly once, on the first workgroup
-    // actually placed on a CU, guarded by the per-dispatch flag.
-    // One begin per dispatch, not per XCD: only the shard that also owns the
-    // dispatch's completion signal reports it.
+    // actually placed on a CU, guarded by the per-dispatch flag. One begin per
+    // dispatch, not per XCD. This cannot be pinned to the XCD that read the
+    // packet: when the grid is smaller than the XCD count that XCD's share may be
+    // empty, so it never places anything. Let whichever XCD places the grid's
+    // first workgroup claim the report.
     if (!entry.execution_begun) {
       entry.execution_begun = true;
-      if (!entry.is_fanout_peer())
+      if (!entry.grid_completion || entry.grid_completion->claim_execution_begin())
         plugin_group_->onAmdgpuDispatchExecutionBegin(entry.dispatch_id);
     }
     ComputeUnitCore *cu = placement.cu;
@@ -1188,7 +1258,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
 
     ++entry.dispatched_wgs;
     ++dispatched;
-    ++dispatched_workgroups_;
+    dispatched_workgroups_.fetch_add(1, std::memory_order_relaxed);
     return true;
   };
 
@@ -1442,7 +1512,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   uint32_t total_wgs = grid_wgs_x * grid_wgs_y * grid_wgs_z;
 
   DispatchEntry dp{};
-  dp.dispatch_id = next_dispatch_id_++;
+  dp.dispatch_id = allocate_dispatch_id();
   dp.profiling_start_timestamp = hsa_system_timestamp();
   dp.queue_id = queue.queue_id;
   dp.process_id = queue.process_id;
@@ -1542,8 +1612,19 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   // Process AQL acquire fence: invalidate caches so the kernel sees the
   // latest host/agent writes (kernarg data, input buffers, etc.).
   // On real hardware the CP issues GL1_INV + GL2_INV for SYSTEM/AGENT scope.
+  // Only this XCD's CUs are reachable from here; a peer XCD's caches belong to
+  // another partition and must not be touched from this thread. The shard carries
+  // the fence instead, and each peer performs the same invalidate on its own thread
+  // when it takes delivery -- see drain_fanout_inbox().
   uint32_t acquire_scope = (pkt.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) & 0x3;
-  if (acquire_scope >= HSA_FENCE_SCOPE_AGENT && !cus_.empty()) {
+  dp.acquire_invalidate = acquire_scope >= HSA_FENCE_SCOPE_AGENT;
+  if (dp.acquire_invalidate && !cus_.empty()) {
+    // Deliberately the per-CU walk, not the deduplicated flush_gpu_caches(). The
+    // two are equivalent per invocation, but collapsing the repeated sweeps on the
+    // release path caused peer ranks to hang on flags left unpublished in L2, and
+    // that mechanism is still not understood. Until it is, this path -- which
+    // predates fan-out -- keeps exactly the cache behaviour it had, and only the
+    // new peer-side fence in drain_fanout_inbox() uses the collapsed form.
     for (auto *cu : cus_)
       cu->flush_all(queue.process_id);
   }
@@ -1795,7 +1876,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
       sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
 
       DispatchEntry dp{
-          .dispatch_id = next_dispatch_id_++,
+          .dispatch_id = allocate_dispatch_id(),
           .queue_id = queue.queue_id,
           .process_id = queue.process_id,
           .completion_signal = sig,
@@ -1850,7 +1931,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
         }
 
         DispatchEntry dp{
-            .dispatch_id = next_dispatch_id_++,
+            .dispatch_id = allocate_dispatch_id(),
             .queue_id = queue.queue_id,
             .process_id = queue.process_id,
             .completion_signal = barrier.completion_signal.handle,
@@ -1910,7 +1991,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
         const uint64_t sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
 
         DispatchEntry dp{
-            .dispatch_id = next_dispatch_id_++,
+            .dispatch_id = allocate_dispatch_id(),
             .queue_id = queue.queue_id,
             .process_id = queue.process_id,
             .completion_signal = sig,
@@ -1943,6 +2024,10 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
   stall_pending_.store(false, std::memory_order_release);
   util::Logger::cp(
       [&](auto &os) { os << std::format("{}: DOORBELL queues={}", name(), hw_queues_.size()); });
+
+  // Take delivery of any shares peer XCDs handed us. Done before the lock so the
+  // inbox mutex stays a leaf; the drain acquires hw_queue_mutex_ itself.
+  drain_fanout_inbox();
 
   std::unique_lock<std::recursive_mutex> lock(hw_queue_mutex_);
 
