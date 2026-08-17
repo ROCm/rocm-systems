@@ -1312,22 +1312,11 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           const char* algoName = NULL;
           const char* protoName = NULL;
           bool haveInfo = false;
-          // Keep using getSymkInfo (preferred) until every symmetric-capable
-          // collective is migrated onto rcclSelectXxx/getCollImplInfo. Notably
-          // ReduceScatter is not yet wired into getCollImplInfo, so getSymkInfo
-          // remains the only symk reporter for it.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-          if (test_ncclVersion >= NCCL_VERSION(2,28,0) && local_register == SYMMETRIC_REGISTER && ctaPolicy != NCCL_CTA_POLICY_ZERO && rcclTestsGetSymkInfo) {
-            if (args->collTest->getSymkInfo) {
-              TESTCHECK(args->collTest->getSymkInfo(args->comms[0], args->nbytes / wordSize(type), type, op, &algo, &proto, &nchannels));
-              haveInfo = true;
-            }
-          }
-#endif
-          // Preferred over getAlgoProtoChannels when the symbol is present: reports the
-          // backend actually dispatched (CE / DDA / symmetric / kernel), op/buffer/graph
-          // aware. Absent on older librccl -> fall back below (backward compatible).
-          if (!haveInfo && rcclTestsGetCollImplInfo && args->collTest->getCollImplInfo) {
+          // Preferred reporter: reports the backend actually dispatched (CE / DDA /
+          // symmetric / kernel), op/buffer/graph aware. It already covers the
+          // symmetric case for every symmetric-capable collective, so getSymkInfo
+          // is only a fallback for older librccl that lacks this symbol.
+          if (rcclTestsGetCollImplInfo && args->collTest->getCollImplInfo) {
             int graphCapturing = (cudaGraphLaunches >= 1) ? 1 : 0;
             if (args->collTest->getCollImplInfo(args->comms[0], args->nbytes / wordSize(type), type, op,
                                                 args->sendbuffs[0], args->recvbuffs[0], graphCapturing,
@@ -1335,6 +1324,15 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
               haveInfo = true;
             }
           }
+          // Fallback symk reporter for older librccl without rcclGetCollImplInfo.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+          if (!haveInfo && test_ncclVersion >= NCCL_VERSION(2,28,0) && local_register == SYMMETRIC_REGISTER && ctaPolicy != NCCL_CTA_POLICY_ZERO && rcclTestsGetSymkInfo) {
+            if (args->collTest->getSymkInfo) {
+              TESTCHECK(args->collTest->getSymkInfo(args->comms[0], args->nbytes / wordSize(type), type, op, &algo, &proto, &nchannels));
+              haveInfo = true;
+            }
+          }
+#endif
           if (!haveInfo) {
             TESTCHECK(args->collTest->getAlgoProtoChannels(args->comms[0], args->nbytes / wordSize(type), type, &algo, &proto, &nchannels));
           }
