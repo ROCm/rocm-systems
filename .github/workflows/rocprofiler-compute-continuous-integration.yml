@@ -187,7 +187,7 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          apt install -y pkg-config
+          apt install -y pkg-config python3-dev
           echo "✅ ROCm Dependencies Installed!"
 
       - name: Install Latest Nightly ROCm
@@ -220,6 +220,31 @@ jobs:
           done
           echo "✅ pip requirements installed!"
 
+      - name: Install PyTorch (TheRock nightlies)
+        run: |
+          set -euo pipefail
+          case "${{ matrix.system.arch }}" in
+            gfx950)  DEVICE_EXTRA="device-gfx950" ;;
+            gfx1151) DEVICE_EXTRA="device-gfx1151" ;;
+            gfx94X)  DEVICE_EXTRA="device-gfx942" ;;
+            gfx90a)  DEVICE_EXTRA="device-gfx90a" ;;
+            *)
+              echo "::error::No PyTorch device mapping for arch ${{ matrix.system.arch }}"
+              exit 1
+              ;;
+          esac
+
+          for i in 1 2 3; do
+            pip install --break-system-packages --prerelease=allow \
+              --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+              "torch[${DEVICE_EXTRA}]" --timeout 120 && break
+            echo "⚠️ PyTorch install attempt $i failed, retrying..."
+            sleep 10
+          done
+
+          python3 -c "import torch; print(f'torch {torch.__version__}, cuda={torch.cuda.is_available()}')"
+          echo "✅ PyTorch installed!"
+
       - name: Configure, Build, and Test
         id: test
         continue-on-error: true
@@ -244,6 +269,8 @@ jobs:
             -DENABLE_TESTS=ON \
             -DINSTALL_TESTS=ON \
             -DPYTEST_NUMPROCS=8 \
+            -DBUILD_TORCH_TRACE_COLLECTOR=ON \
+            -DTORCH_TRACE_PYTHON=/usr/bin/python3 \
             -- \
             -L full \
             -LE full_rocprofiler_compute_ci_exclude
