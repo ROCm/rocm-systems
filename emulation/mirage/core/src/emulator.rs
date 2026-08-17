@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     common::{MaybeRef, SimpleMap},
     config::OptionDef,
+    discovery::RuntimeLocation,
     error::Result,
     exec::InjectionDef,
     plugin::PluginsDef,
@@ -88,6 +89,50 @@ impl SupportStatus {
     }
 }
 
+/// The live state of a backend's runtime on this host: whether it is
+/// usable, and where it is — or, when it is not here, where mirage
+/// looked for it.
+///
+/// The two travel together because they come from one search. Locating a
+/// backend's library means stat'ing every candidate the discovery policy
+/// names, which for a backend that hunts for a build tree beside the
+/// binary is a hundred paths; asking "installed?" and "where?" as two
+/// questions would do that walk twice on the way to printing one line.
+///
+/// `installed` is not simply "the library exists": a backend may need
+/// more than one artifact co-located (HotSwap needs its intercept, a
+/// patched ROCR and COMGR in one directory), so it is reported
+/// separately rather than derived from `location`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeStatus {
+    /// `true` if this backend's runtime is present and usable here.
+    pub installed: bool,
+    /// Where the runtime library is, or where mirage looked.
+    pub location: RuntimeLocation,
+}
+
+impl RuntimeStatus {
+    /// A status for a backend whose install *is* just "the library was
+    /// located": installed exactly when the search found it.
+    #[must_use]
+    pub fn from_location(location: RuntimeLocation) -> Self {
+        Self {
+            installed: location.is_found(),
+            location,
+        }
+    }
+
+    /// A status for a backend that needs more than a located library to
+    /// count as installed, with `installed` decided by the backend.
+    #[must_use]
+    pub fn new(installed: bool, location: RuntimeLocation) -> Self {
+        Self {
+            installed,
+            location,
+        }
+    }
+}
+
 /// The static identity of an emulator backend: its name, version, a
 /// short human-readable blurb, and the schema of options it accepts.
 /// Live runtime status (installed / supported) is reported separately
@@ -144,6 +189,24 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
 
     /// Returns true if the emulator is properly installed and can be used.
     fn installed(&self) -> bool;
+
+    /// Whether this backend's runtime is installed *and* where it was
+    /// found, or the locations that were searched when it was not.
+    ///
+    /// This is what [`crate::registry::registry`] probes with, in place
+    /// of [`Self::installed`], so that `mirage emulators` can answer the
+    /// only question a user has when a backend reports itself missing —
+    /// where mirage looked — without searching the filesystem twice to
+    /// do it.
+    ///
+    /// The default reports the backend's install flag with no location,
+    /// which is the honest answer for a backend that has no runtime
+    /// library to locate. Any backend that discovers one should override
+    /// this and return the [`RuntimeLocation`] its search produced (see
+    /// [`crate::discovery::locate_emulator_lib`]).
+    fn runtime(&self) -> RuntimeStatus {
+        RuntimeStatus::new(self.installed(), RuntimeLocation::Unknown)
+    }
 
     /// check if the emulator is supported on this host, i.e. meets the hardware/environment requirements to run. This is a stronger condition than `installed`: an emulator can be installed but unsupported (e.g. HotSwap installed on a machine with no compatible physical GPU), or supported but not installed.
     fn supported(&self) -> SupportStatus;

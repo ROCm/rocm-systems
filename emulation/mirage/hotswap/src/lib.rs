@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use mirage_core::config::OptionDef;
 use mirage_core::discovery::{self, LibSearch};
 use mirage_core::emulator::{
-    EmulatorBackend, EmulatorBackendDef, EmulatorDescription, SupportStatus,
+    EmulatorBackend, EmulatorBackendDef, EmulatorDescription, RuntimeStatus, SupportStatus,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
@@ -117,6 +117,19 @@ impl EmulatorBackend for Hotswap {
 
     fn installed(&self) -> bool {
         is_installed()
+    }
+
+    fn runtime(&self) -> RuntimeStatus {
+        // Finding the intercept is not the same as being installed here:
+        // HotSwap is three co-located libraries, and a tree missing one
+        // of them cannot emulate. Both answers come out of this one
+        // search, so `mirage emulators` still stats the candidates once.
+        let location = discovery::locate_emulator_lib(&lib_search());
+        let installed = location
+            .path()
+            .and_then(Path::parent)
+            .is_some_and(|dir| complete_tree(dir.to_path_buf()).is_ok());
+        RuntimeStatus::new(installed, location)
     }
 
     fn supported(&self) -> SupportStatus {

@@ -31,9 +31,10 @@ use std::path::PathBuf;
 use mirage_core::agent::AgentDef;
 use mirage_core::common::{MaybeRef, SimpleValue};
 use mirage_core::config::OptionDef;
-use mirage_core::discovery::{self, LibSearch};
+use mirage_core::discovery::{self, LibSearch, RuntimeLocation};
 use mirage_core::emulator::{
-    EmulatorBackend, EmulatorBackendDef, EmulatorDef, EmulatorDescription, SupportStatus,
+    EmulatorBackend, EmulatorBackendDef, EmulatorDef, EmulatorDescription, RuntimeStatus,
+    SupportStatus,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
@@ -100,6 +101,12 @@ impl EmulatorBackend for RocjitsuDbt {
 
     fn installed(&self) -> bool {
         is_installed()
+    }
+
+    fn runtime(&self) -> RuntimeStatus {
+        // The hook library is the whole of the DBT install, so one
+        // search answers both "installed?" and "where?".
+        RuntimeStatus::from_location(runtime_location())
     }
 
     fn supported(&self) -> SupportStatus {
@@ -466,6 +473,15 @@ fn hooks_lib_search() -> LibSearch<'static> {
 /// the shared discovery search.
 pub fn hooks_preload() -> Option<PathBuf> {
     discovery::find_emulator_lib(&hooks_lib_search())
+}
+
+/// Where `librocjitsu_hooks.so` is on this machine, or — when it is not
+/// here — the locations that were searched for it. The reporting form of
+/// [`hooks_preload`], so what `mirage emulators -l` shows and what the
+/// backend actually probes are the same search.
+#[must_use]
+pub fn runtime_location() -> RuntimeLocation {
+    discovery::locate_emulator_lib(&hooks_lib_search())
 }
 
 /// Returns true if the rocjitsu HSA tools hook library is reachable on

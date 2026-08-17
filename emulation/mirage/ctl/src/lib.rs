@@ -155,13 +155,24 @@ pub fn default_emulator_name() -> String {
 /// each backend with whether its runtime is installed and whether this
 /// host's hardware supports it. With `json` the full descriptions are
 /// emitted as-is; otherwise a compact table (or, with `long`, a
-/// detailed block including the support reason).
+/// detailed block including the runtime library's location and the
+/// support reason).
+///
+/// The long form answers "where did mirage look?" because that is the
+/// only question left once a backend reports `installed: no`, and it is
+/// the question the command exists to answer — the user is running it
+/// precisely because nothing will emulate. The `supported: no` line has
+/// named its requirement and what was detected all along; `installed`
+/// now does the same, naming the resolved library or the paths that were
+/// probed for it.
 ///
 /// The JSON carries every fact the text does, the default backend
 /// included: the text form marks it with `(default)` and a script reading
 /// the JSON had no way to tell, so it had to re-derive the rule
 /// ([`mirage_core::registry::default_emulator`]) from the `installed`
-/// flags and hope the two agreed.
+/// flags and hope the two agreed. The runtime location is held to the
+/// same rule — and, since the text elides the middle of a very long
+/// probe list, the JSON is the complete copy of it.
 fn emulators_cmd(long: bool, json: bool) {
     let specs = registry();
     let default_name = default_emulator_name();
@@ -197,6 +208,18 @@ fn emulators_cmd(long: bool, json: bool) {
             println!("{}{}", spec.name, default_marker);
             println!("  {}", spec.description);
             println!("  installed: {}", if spec.installed { "yes" } else { "no" });
+            // Where the runtime is, or — the case a user is in when they
+            // run this at all — where mirage looked for it and what they
+            // can set to change that. The lines come from the location
+            // itself so the search order is described in one place; an
+            // empty key continues the value column of the line above.
+            for (key, value) in spec.runtime.report() {
+                if key.is_empty() {
+                    println!("             {value}");
+                } else {
+                    println!("  {:<10} {value}", format!("{key}:"));
+                }
+            }
             println!(
                 "  supported: {}  ({})",
                 if spec.support.supported { "yes" } else { "no" },
@@ -327,8 +350,8 @@ pub enum CtlCmd {
 
     /// List emulator backends and their install / support status.
     Emulators {
-        /// Show long form (description, support reason, and the options
-        /// and plugins the backend accepts).
+        /// Show long form (description, runtime path, support reason,
+        /// and the options and plugins the backend accepts).
         #[arg(short = 'l', long)]
         long: bool,
     },

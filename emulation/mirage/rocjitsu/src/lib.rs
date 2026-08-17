@@ -18,10 +18,10 @@ use std::path::PathBuf;
 use mirage_core::agent::AgentDef;
 use mirage_core::common::{MaybeRef, SimpleMap, SimpleValue};
 use mirage_core::config::OptionDef;
-use mirage_core::discovery::LibSearch;
+use mirage_core::discovery::{LibSearch, RuntimeLocation};
 use mirage_core::emulator::{
     EmulatorBackend, EmulatorBackendDef, EmulatorDaemon, EmulatorDef, EmulatorDescription,
-    ExecMode, SupportStatus,
+    ExecMode, RuntimeStatus, SupportStatus,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
@@ -94,6 +94,13 @@ impl EmulatorBackend for Rocjitsu {
 
     fn installed(&self) -> bool {
         is_installed()
+    }
+
+    fn runtime(&self) -> RuntimeStatus {
+        // rocjitsu is installed exactly when its one library is on the
+        // machine, so the search that answers "where?" also answers
+        // "installed?" — see `runtime_location`.
+        RuntimeStatus::from_location(runtime_location())
     }
 
     fn supported(&self) -> SupportStatus {
@@ -426,11 +433,45 @@ pub const LIB_ENV: &str = "ROCJITSU_LIB";
 /// ([`in_tree_relative_dirs`]) and, last, the in-container mount
 /// directory ([`CONTAINER_LIB_DIR`]).
 pub fn kmd_preload() -> Option<PathBuf> {
-    with_kmd_search(mirage_core::discovery::find_emulator_lib)
-        // A containerised node reaches its bind-mounted copy through
-        // `LD_LIBRARY_PATH` above; this is the fallback for an
-        // in-container process that did not inherit it.
-        .or_else(|| find_lib_in(std::path::Path::new(CONTAINER_LIB_DIR), LIB_NAME))
+    runtime_location().path().map(std::path::Path::to_path_buf)
+}
+
+/// Where `librocjitsu.so` is on this machine, or — when it is not here —
+/// every location [`kmd_preload`] probed for it and the environment
+/// variables that would change the answer.
+///
+/// This is the same search [`kmd_preload`] performs, reported rather
+/// than reduced to an `Option`, so `mirage emulators -l` can tell a user
+/// whose rocjitsu is not found where mirage looked. Deriving the one
+/// from the other keeps a single definition of the search: a "we looked
+/// here" list assembled separately would be a second thing to keep in
+/// step with the policy in [`mirage_core::discovery`].
+#[must_use]
+pub fn runtime_location() -> RuntimeLocation {
+    let located = with_kmd_search(mirage_core::discovery::locate_emulator_lib);
+    let RuntimeLocation::Missing {
+        lib_name,
+        mut searched,
+        env,
+    } = located
+    else {
+        return located;
+    };
+    // A containerised node reaches its bind-mounted copy through
+    // `LD_LIBRARY_PATH`; this is the fallback for an in-container
+    // process that did not inherit it. It is part of the search, so it
+    // belongs in the list of places a failed search reports having
+    // looked.
+    let in_container = std::path::Path::new(CONTAINER_LIB_DIR).join(LIB_NAME);
+    if in_container.is_file() {
+        return RuntimeLocation::found(in_container);
+    }
+    searched.push(in_container);
+    RuntimeLocation::Missing {
+        lib_name,
+        searched,
+        env,
+    }
 }
 
 /// Call `f` with the search policy for the KMD interposer.
@@ -500,14 +541,26 @@ fn in_tree_relative_dirs() -> Vec<String> {
     let mut dirs = Vec::with_capacity(
         MAX_ANCESTORS * ROCJITSU_PROJECT_DIRS.len() * ROCJITSU_BUILD_SHAPES.len(),
     );
-    let mut up = String::from(".");
+    // The relative prefix for the ancestor being tried: empty for the
+    // binary's own directory, then one `..` per level up. Empty rather
+    // than `.` because these paths are shown to a user when discovery
+    // fails, and `<dir>/./rocjitsu/build` reads as a typo.
+    let mut up = String::new();
     for _ in 0..MAX_ANCESTORS {
         for project in ROCJITSU_PROJECT_DIRS {
             for shape in ROCJITSU_BUILD_SHAPES {
-                dirs.push(format!("{up}/{project}/{shape}"));
+                if up.is_empty() {
+                    dirs.push(format!("{project}/{shape}"));
+                } else {
+                    dirs.push(format!("{up}/{project}/{shape}"));
+                }
             }
         }
-        up.push_str("/..");
+        if up.is_empty() {
+            up.push_str("..");
+        } else {
+            up.push_str("/..");
+        }
     }
     dirs
 }
@@ -871,6 +924,30 @@ mod tests {
                 "the standard ROCm library directories must be searched"
             );
         });
+    }
+
+    /// What `mirage emulators` reports and what a workload actually
+    /// gets preloaded must be the same file, on whichever kind of host
+    /// this runs: a report that named a different library than the one
+    /// mirage loads would be worse than no report at all.
+    #[test]
+    fn the_reported_location_is_the_library_mirage_preloads() {
+        let location = runtime_location();
+        assert_eq!(location.path(), kmd_preload().as_deref());
+        assert_eq!(location.is_found(), is_installed());
+        if let RuntimeLocation::Missing {
+            lib_name, searched, ..
+        } = &location
+        {
+            assert_eq!(lib_name, LIB_NAME);
+            // Including the in-container mount, which is part of this
+            // backend's search on top of the shared policy and would
+            // otherwise be a location mirage probed without saying so.
+            assert!(
+                searched.contains(&std::path::Path::new(CONTAINER_LIB_DIR).join(LIB_NAME)),
+                "the in-container fallback is searched, so it must be reported: {searched:?}"
+            );
+        }
     }
 
     #[test]
