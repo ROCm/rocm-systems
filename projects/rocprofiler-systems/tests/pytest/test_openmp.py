@@ -253,9 +253,9 @@ class TestOpenMPTarget(RocprofsysTest):
 @pytest.mark.fortran
 @pytest.mark.class_name("openmp-fortran")
 class TestOpenMPFortran(RocprofsysTest):
-
     BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
     RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "2", "--label", "return", "args"]
+    WORKER_THREADS = 1
 
     @pytest.mark.parametrize(
         "mode",
@@ -263,7 +263,7 @@ class TestOpenMPFortran(RocprofsysTest):
     )
     def test_host(self, mode, ompt_base_env):
         env = ompt_base_env.copy()
-        env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
+        env["OMP_NUM_THREADS"] = str(self.WORKER_THREADS + 1)
 
         result = self.run_test(
             mode,
@@ -272,13 +272,48 @@ class TestOpenMPFortran(RocprofsysTest):
             binary_rewrite_args=self.BINARY_REWRITE_ARGS,
             runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
         )
-        self.assert_regex(
-            result,
-            mode,
-            binary_rewrite_pass_regex=["omp_parallel"],
-            runtime_instrument_pass_regex=["omp_parallel"],
-            sys_run_pass_regex=["omp_parallel"],
-        )
+        if mode == "baseline":
+            self.assert_regex(result)
+        else:
+            self.assert_regex(
+                result,
+                fail_regex=[
+                    r"ompt_finalize_orphan_events\(\) called while state is not Finalized"
+                ],
+            )
+
+        # Explicitly no runtime_instrument mode validation, as it does not work with perfetto
+        if mode != "baseline" and mode != "runtime_instrument":
+            # Each [incomplete] suffixed OMPT region occurs as the completion event
+            # is received after our tool finalizes
+
+            # Two implicit tasks (one per thread). The worker's will not complete
+            self.assert_perfetto(
+                result,
+                subtest_name="OMPT implicit_task validation",
+                categories=["rocm_ompt_api"],
+                labels=["omp_implicit_task", "omp_implicit_task [incomplete]"],
+                counts=[1, self.WORKER_THREADS],
+            )
+            # Four barriers (two per thread). One for "parallel" construct and the other
+            # for "do" construct. The worker's parallel barrier will not complete
+            self.assert_perfetto(
+                result,
+                subtest_name="OMPT sync_region validation",
+                categories=["rocm_ompt_api"],
+                labels=["omp_sync_region", "omp_sync_region [incomplete]"],
+                counts=[2 + self.WORKER_THREADS, self.WORKER_THREADS],
+            )
+            self.assert_perfetto(
+                result,
+                subtest_name="OMPT sync_region_wait validation",
+                categories=["rocm_ompt_api"],
+                labels=[
+                    "omp_sync_region_wait",
+                    "omp_sync_region_wait [incomplete]",
+                ],
+                counts=[2 + self.WORKER_THREADS, self.WORKER_THREADS],
+            )
 
     @pytest.mark.parametrize(
         "mode",

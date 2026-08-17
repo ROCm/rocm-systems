@@ -208,7 +208,9 @@ rocprofsys_pop_trace_hidden(const char* name)
 extern "C" void
 rocprofsys_flush_pending_region_cache_hidden()
 {
-    rocprofsys::utility::category_region<>::instance().flush_pending_cached_entries();
+    // Drains pending region entries for every thread (not just the caller) so orphaned
+    // host frames on parked worker threads are emitted, tagged "[incomplete]"
+    rocprofsys::utility::category_region<>::flush_all_pending_cached_entries();
 }
 
 //======================================================================================//

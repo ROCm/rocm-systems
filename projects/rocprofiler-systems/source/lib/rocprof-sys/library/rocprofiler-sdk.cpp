@@ -7,6 +7,7 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
+#include "common/static_object.hpp"
 #include "common/synchronized.hpp"
 #include "core/common.hpp"
 #include "core/common_types.hpp"
@@ -161,6 +162,74 @@ struct rocprofsys_ompt_data_storage_t
     rocprofiler_callback_tracing_record_t record;
     rocprofiler_timestamp_t               _beg_ts;
     function_args_t                       args;  // Required for orphan ENTER events
+};
+
+struct rocprofsys_ompt_thread_data_registry_t
+{
+    // Any OMPT callback that can be of phase ENTER or EXIT is a standard callback.
+    //  I.e. it has an ompt_scope_endpoint_t in its definition (excluding
+    //  ROCPROFILER_OMPT_ID_nest_lock as it is a mutex)
+    // std::uint64_t -> internal id from rocprofiler_correlation_id_t
+    std::unordered_map<std::uint64_t, rocprofsys_ompt_data_storage_t> standard_cb_storage;
+
+    // An OMPT parallel callback consists of ROCPROFILER_OMPT_ID_parallel_begin and
+    // ROCPROFILER_OMPT_ID_parallel_end
+    //  As the beginning and end can only occur on the same thread, they are connected
+    //  into a single track called "omp_parallel" for clarity. In this track, the
+    //  information contained within parallel_begin should be displayed as it contains all
+    //  the information that parallel_end has as well as the flags and number of
+    //  threads/teams that were requested.
+    // uintptr_t -> parallel_data (see callback definition)
+    std::unordered_map<uintptr_t, rocprofsys_ompt_data_storage_t> parallel_cb_storage;
+
+    // Instant events (beg_ts = end_ts) are not stored and are instead processed by
+    // ompt_cache_instant_event()
+};
+
+// As certain OMPT callbacks are received after our tool has already finished, certain
+// thread-specific events on the non-main threads are orphaned. Thus,
+// ompt_finalize_orphan_events() must loop through the storages on all threads, not just
+// the main one.
+// release() drops a thread's storage when it exits
+// (missing OMPT events are only caused via early finalization).
+struct rocprofsys_ompt_cb_storage_t
+{
+    std::vector<std::unique_ptr<rocprofsys_ompt_thread_data_registry_t>>
+               thread_storages{};
+    std::mutex thread_storage_mutex{};
+
+    static rocprofsys_ompt_cb_storage_t& instance()
+    {
+        // Must outlive both finalization and static destruction: release() is invoked
+        // from thread-local destructors, which can run after either has completed
+        static auto*& _instance =
+            common::static_object<rocprofsys_ompt_cb_storage_t>::construct(
+                common::do_not_destroy{});
+        return *_instance;
+    }
+
+    // Called once per thread, the first time the thread touches OMPT. Allocates a
+    // new per-thread storage on the heap and registers it
+    static rocprofsys_ompt_thread_data_registry_t* acquire()
+    {
+        auto&                       _self = instance();
+        std::lock_guard<std::mutex> _lk{ _self.thread_storage_mutex };
+        _self.thread_storages.emplace_back(
+            std::make_unique<rocprofsys_ompt_thread_data_registry_t>());
+        return _self.thread_storages.back().get();
+    }
+
+    // Called when a thread exits to remove and free its storage
+    static void release(rocprofsys_ompt_thread_data_registry_t* storage)
+    {
+        if(!storage) return;
+        auto&                       _self = instance();
+        std::lock_guard<std::mutex> _lk{ _self.thread_storage_mutex };
+        auto                        itr =
+            std::find_if(_self.thread_storages.begin(), _self.thread_storages.end(),
+                         [storage](const auto& _s) { return _s.get() == storage; });
+        if(itr != _self.thread_storages.end()) _self.thread_storages.erase(itr);
+    }
 };
 
 auto
@@ -1026,46 +1095,58 @@ ompt_cache_instant_event(
                  get_args_string(args), trait::name<category::rocm_ompt_api>::value);
 }
 
-// OMPT callbacks with no corresponding begin/end are treated as "instant"
+// OMPT callbacks with no corresponding begin/end. By default the cached region
+// has end_ts == beg_ts so the post-processor renders it as an instant event.
+// When @p end_ts is non-zero it is used as the region's end_ts.
+// When @p name_suffix is non-empty it is appended to the region's name as a suffix.
 void
 ompt_cache_orphan_event(
     const rocprofsys_ompt_data_storage_t&                     stored_data,
-    std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
+    std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data,
+    std::string_view name_suffix = {}, rocprofiler_timestamp_t end_ts = 0)
 {
     auto call_stack = get_backtrace(_bt_data);
     cache_category<category::rocm_ompt_api>();
     cache_add_thread_info(stored_data.record.thread_id);
-    cache_region(&stored_data.record, stored_data._beg_ts, stored_data._beg_ts,
-                 call_stack.dump(), get_args_string(stored_data.args),
-                 trait::name<category::rocm_ompt_api>::value);
+
+    auto name = std::string{ ompt_get_unified_name(stored_data.record) };
+    if(!name_suffix.empty()) name += fmt::format(" [{}]", name_suffix);
+
+    const auto _end_ts = (end_ts != 0) ? end_ts : stored_data._beg_ts;
+
+    cache_region(&stored_data.record, stored_data._beg_ts, _end_ts, call_stack.dump(),
+                 get_args_string(stored_data.args),
+                 trait::name<category::rocm_ompt_api>::value, name);
 }
 
-// Any OMPT callback that can be of phase ENTER or EXIT is a standard callback.
-//  I.e. it has an ompt_scope_endpoint_t in its definition (excluding
-//  ROCPROFILER_OMPT_ID_nest_lock as it is a mutex)
-auto&
-get_ompt_standard_cb_storage()
+// Owns a thread's slot in the registry: registers a storage on first use and removes it
+// when the owning thread exits
+struct rocprofsys_ompt_thread_storage_handle_t
 {
-    // std::uint64_t -> internal id from rocprofiler_correlation_id_t
-    static thread_local auto _v =
-        std::unordered_map<std::uint64_t, rocprofsys_ompt_data_storage_t>{};
-    return _v;
-}
+    rocprofsys_ompt_thread_storage_handle_t()
+    : storage{ rocprofsys_ompt_cb_storage_t::acquire() }
+    {}
+    ~rocprofsys_ompt_thread_storage_handle_t()
+    {
+        rocprofsys_ompt_cb_storage_t::release(storage);
+    }
 
-// An OMPT parallel callback consists of ROCPROFILER_OMPT_ID_parallel_begin and
-// ROCPROFILER_OMPT_ID_parallel_end
-//  As the beginning and end can only occur on the same thread, they are connected
-//  into a single track called "omp_parallel" for clarity. In this track, the
-//  information contained within parallel_begin should be displayed as it contains all
-//  the information that parallel_end has as well as the flags and number of
-//  threads/teams that were requested.
-auto&
-get_ompt_parallel_cb_storage()
+    rocprofsys_ompt_thread_storage_handle_t(
+        const rocprofsys_ompt_thread_storage_handle_t&) = delete;
+    rocprofsys_ompt_thread_storage_handle_t& operator=(
+        const rocprofsys_ompt_thread_storage_handle_t&) = delete;
+
+    rocprofsys_ompt_thread_data_registry_t* storage = nullptr;
+};
+
+// Returns this thread's OMPT storage. On the first call from a given thread the
+// storage is allocated through the shared registry and a pointer to it is cached
+// in this function's thread_local
+rocprofsys_ompt_thread_data_registry_t&
+get_ompt_per_thread_storage()
 {
-    // uintptr_t -> parallel_data (see callback definition)
-    static thread_local auto _v =
-        std::unordered_map<uintptr_t, rocprofsys_ompt_data_storage_t>{};
-    return _v;
+    static thread_local rocprofsys_ompt_thread_storage_handle_t _v{};
+    return *_v.storage;
 }
 
 void
@@ -1074,7 +1155,7 @@ ompt_push_standard_callback(const rocprofiler_callback_tracing_record_t& record,
 {
     auto args = function_args_t{};
     ompt_iterate_operation_args(record, args);
-    get_ompt_standard_cb_storage().emplace(
+    get_ompt_per_thread_storage().standard_cb_storage.emplace(
         record.correlation_id.internal,
         rocprofsys_ompt_data_storage_t{ record, _beg_ts, args });
 }
@@ -1085,10 +1166,12 @@ ompt_pop_standard_callback(
     const rocprofiler_timestamp_t&                            _end_ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
-    auto it = get_ompt_standard_cb_storage().find(record.correlation_id.internal);
+    auto& _storage = get_ompt_per_thread_storage().standard_cb_storage;
+    auto  it       = _storage.find(record.correlation_id.internal);
 
-    if(it == get_ompt_standard_cb_storage().end())
+    if(it == _storage.end())
     {
+        // End event with no corresponding begin
         auto args = function_args_t{};
         ompt_iterate_operation_args(record, args);
         ompt_cache_orphan_event(rocprofsys_ompt_data_storage_t{ record, _end_ts, args },
@@ -1097,7 +1180,7 @@ ompt_pop_standard_callback(
     }
 
     auto stored_data = it->second;
-    get_ompt_standard_cb_storage().erase(it);
+    _storage.erase(it);
 
     auto call_stack = get_backtrace(_bt_data);
     cache_category<category::rocm_ompt_api>();
@@ -1117,7 +1200,7 @@ ompt_push_parallel_callback(const rocprofiler_callback_tracing_record_t& record,
 
     auto args = function_args_t{};
     ompt_iterate_operation_args(record, args);
-    get_ompt_parallel_cb_storage().emplace(
+    get_ompt_per_thread_storage().parallel_cb_storage.emplace(
         reinterpret_cast<uintptr_t>(parallel_data_address),
         rocprofsys_ompt_data_storage_t{ record, _beg_ts, args });
 }
@@ -1132,11 +1215,12 @@ ompt_pop_parallel_callback(
         static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload);
     const void* parallel_data_address = payload_data->args.parallel_end.parallel_data;
 
-    auto it = get_ompt_parallel_cb_storage().find(
-        reinterpret_cast<uintptr_t>(parallel_data_address));
+    auto& _storage = get_ompt_per_thread_storage().parallel_cb_storage;
+    auto  it       = _storage.find(reinterpret_cast<uintptr_t>(parallel_data_address));
 
-    if(it == get_ompt_parallel_cb_storage().end())
+    if(it == _storage.end())
     {
+        // End event with no corresponding begin
         auto args = function_args_t{};
         ompt_iterate_operation_args(record, args);
         ompt_cache_orphan_event(rocprofsys_ompt_data_storage_t{ record, _end_ts, args },
@@ -1145,7 +1229,7 @@ ompt_pop_parallel_callback(
     }
 
     auto stored_data = it->second;
-    get_ompt_parallel_cb_storage().erase(it);
+    _storage.erase(it);
     auto call_stack = get_backtrace(_bt_data);
 
     cache_category<category::rocm_ompt_api>();
@@ -1155,23 +1239,48 @@ ompt_pop_parallel_callback(
                  trait::name<category::rocm_ompt_api>::value);
 }
 
+// Walks every per-thread storage in the registry, emitting any begins that
+// never received a matching end with an artificial end_ts.
 void
 ompt_finalize_orphan_events()
 {
+    // Only call this function when the tool is finalized
+    if(rocprofsys::state::process::get() != rocprofsys::state::process::Finalized)
+    {
+        LOG_WARNING("ompt_finalize_orphan_events() called while state is not "
+                    "Finalized (state={}); skipping orphan drain",
+                    rocprofsys::state::process::get());
+        return;
+    }
+
     auto empty_call_stack =
         std::optional<std::vector<tim::unwind::processed_entry>>{ std::nullopt };
-    for(const auto& [parallel_data, stored_data] : get_ompt_parallel_cb_storage())
-    {
-        ompt_cache_orphan_event(stored_data, empty_call_stack);
-    }
 
-    for(const auto& [correlation_id, stored_data] : get_ompt_standard_cb_storage())
-    {
-        ompt_cache_orphan_event(stored_data, empty_call_stack);
-    }
+    static constexpr std::string_view incomplete_suffix{ "incomplete" };
 
-    get_ompt_parallel_cb_storage().clear();
-    get_ompt_standard_cb_storage().clear();
+    // Grab a single "end of program" timestamp and use it for every drained
+    // orphan in this finalize pass
+    auto finalize_ts = rocprofiler_timestamp_t{};
+    ROCPROFILER_CALL(rocprofiler_get_timestamp(&finalize_ts));
+
+    auto&                       _registry = rocprofsys_ompt_cb_storage_t::instance();
+    std::lock_guard<std::mutex> _lk{ _registry.thread_storage_mutex };
+    for(auto& _storage : _registry.thread_storages)
+    {
+        if(!_storage) continue;
+        for(const auto& [parallel_data, stored_data] : _storage->parallel_cb_storage)
+        {
+            ompt_cache_orphan_event(stored_data, empty_call_stack, incomplete_suffix,
+                                    finalize_ts);
+        }
+        for(const auto& [correlation_id, stored_data] : _storage->standard_cb_storage)
+        {
+            ompt_cache_orphan_event(stored_data, empty_call_stack, incomplete_suffix,
+                                    finalize_ts);
+        }
+        _storage->parallel_cb_storage.clear();
+        _storage->standard_cb_storage.clear();
+    }
 }
 
 // To handle events without finalization, perfetto push must occur in start
@@ -2815,12 +2924,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 void
 finalize_sdk_common()
 {
+    flush();
+    stop();
+
 #if(ROCPROFILER_VERSION >= 600)
     ompt_finalize_orphan_events();
 #endif
-
-    flush();
-    stop();
 
     if(get_counter_storage())
     {

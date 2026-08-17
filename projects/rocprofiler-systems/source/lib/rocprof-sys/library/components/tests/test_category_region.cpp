@@ -600,6 +600,7 @@ struct gmock_region_sink
 struct gmock_thread_metadata
 {
     MOCK_METHOD(std::uint64_t, resolve_current_thread, (), (const));
+    MOCK_METHOD(std::uint64_t, resolve_thread, (std::thread::id), (const));
 };
 
 namespace test_globals
@@ -634,6 +635,10 @@ struct mock_thread_metadata_source
     std::uint64_t resolve_current_thread() const
     {
         return test_globals::g_thread_meta_gmock->resolve_current_thread();
+    }
+    std::uint64_t resolve_thread(std::thread::id tid) const
+    {
+        return test_globals::g_thread_meta_gmock->resolve_thread(tid);
     }
 };
 
@@ -677,7 +682,8 @@ TEST_F(category_region_policy_test, cache_start_records_injected_clock_without_e
     mocked_region_cache_t region;
 
     EXPECT_CALL(*test_globals::g_clock_gmock, now()).Times(1).WillOnce(Return(1234u));
-    // a push must not resolve the thread or emit a region
+    // a push only records the pending entry: it must not resolve the thread id or emit a
+    // region (thread-id resolution happens at stop/flush)
     EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread()).Times(0);
     EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _))
         .Times(0);
@@ -925,6 +931,75 @@ TEST_F(category_region_policy_test, flush_on_empty_map_emits_nothing)
         .Times(0);
 
     region.flush_pending_cached_entries();
+
+    EXPECT_TRUE(region.pending_entries().empty());
+}
+
+// ---------------------------------------------------------------------------------------
+// policy-injected: flush_all_pending_cached_entries (cross-thread orphan drain)
+// ---------------------------------------------------------------------------------------
+
+TEST_F(category_region_policy_test, flush_all_drains_orphan_via_owner_thread_id)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t                    region;
+    mocked_region_cache_t::registry_handle_t handle{ &region };
+
+    // one start (start_ts 10) then the flush-all end_ts (999)
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(10u))
+        .WillOnce(Return(999u));
+    // An orphan must be attributed to the thread that opened it via
+    // resolve_thread(owner), NOT resolve_current_thread() (which would resolve the
+    // finalizing thread instead).
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock, resolve_current_thread()).Times(0);
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock,
+                resolve_thread(std::this_thread::get_id()))
+        .Times(1)
+        .WillOnce(Return(42u));
+    // never stopped -> emitted with the "[incomplete]" suffix
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(42u, std::string{ "orphan [incomplete]" }, 10u, 999u,
+                             std::string{ "cat" }, _))
+        .Times(1);
+
+    region.cache_start("orphan", "cat");
+    mocked_region_cache_t::flush_all_pending_cached_entries();
+
+    EXPECT_TRUE(region.pending_entries().empty());
+}
+
+TEST_F(category_region_policy_test, flush_all_emits_one_incomplete_region_per_frame)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    mocked_region_cache_t                    region;
+    mocked_region_cache_t::registry_handle_t handle{ &region };
+
+    // two nested pushes on one key, never popped (start_ts 1, 2); flush-all end_ts (100)
+    EXPECT_CALL(*test_globals::g_clock_gmock, now())
+        .WillOnce(Return(1u))
+        .WillOnce(Return(2u))
+        .WillOnce(Return(100u));
+    EXPECT_CALL(*test_globals::g_thread_meta_gmock,
+                resolve_thread(std::this_thread::get_id()))
+        .Times(1)
+        .WillOnce(Return(9u));
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(9u, std::string{ "rec [incomplete]" }, 1u, 100u,
+                             std::string{ "cat" }, _))
+        .Times(1);
+    EXPECT_CALL(*test_globals::g_region_sink_gmock,
+                store_region(9u, std::string{ "rec [incomplete]" }, 2u, 100u,
+                             std::string{ "cat" }, _))
+        .Times(1);
+
+    region.cache_start("rec", "cat");
+    region.cache_start("rec", "cat");
+    mocked_region_cache_t::flush_all_pending_cached_entries();
 
     EXPECT_TRUE(region.pending_entries().empty());
 }
