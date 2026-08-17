@@ -3121,20 +3121,23 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     if (copyFlags & kExtOpFlagMask) {
       switch (type) {
         case hipCopyBuffer:
-        case hipCopyBufferSDMA:
-        case hipCopyBufferP2P: {
-          // Reject host-only pairings for swap and single-sided indirect. Dual-sided
-          // indirect skips the check: both operands are pointer-holders, which may
-          // live in host memory while the real buffers sit on device.
+        case hipCopyBufferSDMA: {
+          // Host-only pairings never reach the batch path, whether the operands are the
+          // real buffers or the pointer-holders of an indirect copy.
           amd::Memory* sMem = srcMemories[i];
           amd::Memory* dMem = dstMemories[i];
           if (sMem == nullptr || dMem == nullptr ||
-              (!isDualSidedIndirect && getMemoryType(sMem) == hipMemoryTypeHost &&
+              (getMemoryType(sMem) == hipMemoryTypeHost &&
                getMemoryType(dMem) == hipMemoryTypeHost)) {
             return hipErrorNotSupported;
           }
           break;
         }
+        case hipCopyBufferP2P:
+          if (srcMemories[i] == nullptr || dstMemories[i] == nullptr) {
+            return hipErrorNotSupported;
+          }
+          break;
         case hipHostToHost:
         case hipWriteBuffer:
         case hipReadBuffer:

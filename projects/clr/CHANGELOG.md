@@ -9,6 +9,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - Module Management: support for API parity with corresponding CUDA API.
       * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
 * Disable HRR capture feature
+* Batched Memcpy: Add `GPU_FORCE_BLIT_INDIRECT_SIZE` to allow tuning of when SDMA instead of Blit is used for indirect batched copies.
 
 ### Resolved issues
 * A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.

@@ -167,16 +167,10 @@ inline hipError_t getSwapExpectedReturn(const LinearAllocs alloc_type_a,
 inline hipError_t getIndirectExpectedReturn(const LinearAllocs alloc_type_src,
                                             const LinearAllocs alloc_type_dst,
                                             [[maybe_unused]] const int device_src = 0,
-                                            [[maybe_unused]] const int device_dst = 0,
-                                            const int stream_device = 0) {
+                                            [[maybe_unused]] const int device_dst = 0) {
   if (!extOpPairingSupported(alloc_type_src, alloc_type_dst)) {
     return hipErrorNotSupported;
   }
 
-  // Mirrors CLR's sdma_indirect_supported_ check (rocclr/device/rocm/rocsettings.cpp).
-  // Keep in sync if CLR adds architectures.
-  int major, minor;
-  HIP_CHECK(hipDeviceComputeCapability(&major, &minor, stream_device));
-
-  return (major == 12 && minor >= 5) ? hipSuccess : hipErrorNotSupported;
+  return hipSuccess;
 }
