@@ -989,6 +989,7 @@ to_string (amd_dbgapi_dispatch_info_t dispatch_info)
       CASE (DISPATCH_INFO_KERNEL_DESCRIPTOR_ADDRESS);
       CASE (DISPATCH_INFO_KERNEL_CODE_ENTRY_ADDRESS);
       CASE (DISPATCH_INFO_KERNEL_COMPLETION_ADDRESS);
+      CASE (DISPATCH_INFO_CLUSTER_SIZES);
     }
   return to_string (make_hex (dispatch_info));
 }
@@ -1027,6 +1028,7 @@ to_string (detail::query_ref<amd_dbgapi_dispatch_info_t> ref)
     case AMD_DBGAPI_DISPATCH_INFO_WORKGROUP_SIZES:
       return to_string (make_ref (static_cast<const uint16_t *> (value), 3));
     case AMD_DBGAPI_DISPATCH_INFO_GRID_SIZES:
+    case AMD_DBGAPI_DISPATCH_INFO_CLUSTER_SIZES:
       return to_string (make_ref (static_cast<const uint32_t *> (value), 3));
     case AMD_DBGAPI_DISPATCH_INFO_PRIVATE_SEGMENT_SIZE:
     case AMD_DBGAPI_DISPATCH_INFO_GROUP_SEGMENT_SIZE:

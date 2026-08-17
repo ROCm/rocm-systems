@@ -9,7 +9,6 @@ global: amd_dbgapi_address_is_in_address_class;
         amd_dbgapi_breakpoint_get_info;
         amd_dbgapi_code_object_get_info;
         amd_dbgapi_disassemble_instruction;
-        amd_dbgapi_dispatch_get_info;
         amd_dbgapi_displaced_stepping_get_info;
         amd_dbgapi_dwarf_address_class_to_address_class;
         amd_dbgapi_dwarf_address_space_to_address_space;
@@ -106,6 +105,7 @@ global: amd_dbgapi_process_get_info;
 
 @AMD_DBGAPI_NAME@_0.81 {
 global: amd_dbgapi_cluster_get_info;
+        amd_dbgapi_dispatch_get_info;
         amd_dbgapi_wave_get_info;
         amd_dbgapi_workgroup_get_info;
 } @AMD_DBGAPI_NAME@_0.80;
