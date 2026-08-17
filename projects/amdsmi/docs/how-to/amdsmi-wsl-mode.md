@@ -114,3 +114,9 @@ fields and `N/A` for the rest.
   under WSL; those queries return `AMDSMI_STATUS_NOT_SUPPORTED`.
 - PCIe info, VRAM type, subvendor/subsystem IDs, and full VBIOS fields depend on
   the installed `librocdxg` version and may show `N/A` on older drivers.
+- **Per-process GPU usage (`amd-smi process`) is not available under WSL** and
+  returns `AMDSMI_STATUS_NOT_SUPPORTED`. The WSL process-enumeration ioctl
+  reports WSL-guest (Linux) PIDs, but the per-process VRAM query expects a
+  real Windows process handle, not a bare PID — this mismatch is unverified
+  against hardware, so the query is disabled rather than risk reporting
+  incorrect per-process memory usage.

@@ -5462,6 +5462,12 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
   }
 
 #ifdef ENABLE_WSL_BACKEND
+  // rocdxg_smi_enum_processes()'s PIDs come from a WSL-only dxgkrnl ioctl
+  // (WSL-guest/Linux PIDs), but query_process_vram() passes that same value
+  // as D3DKMT_QUERYVIDEOMEMORYINFO.hProcess, which Windows documents as
+  // requiring a real process handle (from OpenProcess), not a bare PID of
+  // either OS. Unverified against hardware, so left unsupported rather than
+  // risk reporting silently wrong per-process VRAM usage.
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 

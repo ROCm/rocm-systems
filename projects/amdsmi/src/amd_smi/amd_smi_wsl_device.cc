@@ -628,12 +628,21 @@ amdsmi_status_t WSLGPUBackend::GetGpuMetricsInfo(amdsmi_gpu_metrics_t* info) {
   info->apu_metrics = nullptr;
 
   // rocdxg temperatures are in degrees C (uint32_t); amdsmi_gpu_metrics_t uses uint16_t degrees C.
-  info->temperature_edge = static_cast<uint16_t>(metrics.temperature_edge);
-  info->temperature_hotspot = static_cast<uint16_t>(metrics.temperature_hotspot);
-  info->average_gfx_activity = static_cast<uint16_t>(metrics.average_gfx_activity);
-  info->average_umc_activity = static_cast<uint16_t>(metrics.average_umc_activity);
-  info->current_socket_power = static_cast<uint16_t>(metrics.current_socket_power);
-  info->average_socket_power = static_cast<uint16_t>(metrics.current_socket_power);
+  // Guard against the UINT32_MAX sentinel rocdxg returns for an absent sensor
+  // (see rocdxg_smi_get_gpu_metrics_info) so it isn't silently truncated into
+  // a bogus reading instead of leaving the memset 0xFF "N/A" sentinel above.
+  if (metrics.temperature_edge <= 0xFFFEU)
+    info->temperature_edge = static_cast<uint16_t>(metrics.temperature_edge);
+  if (metrics.temperature_hotspot <= 0xFFFEU)
+    info->temperature_hotspot = static_cast<uint16_t>(metrics.temperature_hotspot);
+  if (metrics.average_gfx_activity <= 0xFFFEU)
+    info->average_gfx_activity = static_cast<uint16_t>(metrics.average_gfx_activity);
+  if (metrics.average_umc_activity <= 0xFFFEU)
+    info->average_umc_activity = static_cast<uint16_t>(metrics.average_umc_activity);
+  if (metrics.current_socket_power <= 0xFFFEU) {
+    info->current_socket_power = static_cast<uint16_t>(metrics.current_socket_power);
+    info->average_socket_power = static_cast<uint16_t>(metrics.current_socket_power);
+  }
   // Populate current clocks from rocdxg. Guard against UINT32_MAX sentinel
   // (rocdxg returns UINT32_MAX when a field is unsupported on this version).
   if (metrics.current_gfxclk <= 0xFFFEU) {
