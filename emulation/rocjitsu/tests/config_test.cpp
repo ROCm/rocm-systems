@@ -59,6 +59,12 @@ namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
 
+class SerialDispatchPolicyPlugin final : public rocjitsu::ExecutionPlugin {
+public:
+  SerialDispatchPolicyPlugin() : rocjitsu::ExecutionPlugin("serial_dispatch_policy") {}
+  bool requires_serial_hot_hooks() const override { return true; }
+};
+
 // \NPI new GPU: add a config-load test for its configs/<gpu>.json here.
 using namespace rocjitsu;
 
@@ -279,6 +285,21 @@ TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
 
   soc->set_dispatch_threads(1);
   EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*soc), 0u);
+}
+
+TEST(ConfigLoaderTest, SerialPluginRemovesSharedPoolAcrossProductionTopology) {
+  auto loaded =
+      config::load_config(CONFIG_DIR_PATH + "/gfx950_cdna4.json", rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+  soc->set_dispatch_threads(8);
+
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::make_unique<SerialDispatchPolicyPlugin>()));
+  soc->set_plugin_group(group);
+
+  EXPECT_EQ(soc->dispatch_threads(), 1u);
+  EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*soc), 0u);
+  soc->for_each_cp([](auto *cp) { EXPECT_EQ(cp->dispatch_threads(), 1u); });
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {

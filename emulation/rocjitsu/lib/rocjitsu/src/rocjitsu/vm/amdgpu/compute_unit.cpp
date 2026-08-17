@@ -545,7 +545,6 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
 
   auto it = active_wgs_.find(key);
   if (it != active_wgs_.end() && --it->second == 0) {
-    plugin_group_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
     active_wgs_.erase(it);
     barrier_wgs_.erase(key);
     // Queued rather than sent: notify_wg_complete() takes the CP's

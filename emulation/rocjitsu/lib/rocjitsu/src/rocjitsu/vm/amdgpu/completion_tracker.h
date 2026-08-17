@@ -53,6 +53,9 @@ public:
   /// @brief Scan all queues and fire completion signals for retired dispatches.
   void drain_completions(std::vector<HwQueueState> &queues);
 
+  /// @brief Deliver an out-of-order-ready non-kernel packet's completion.
+  void complete_non_kernel(DispatchEntry &entry);
+
   /// @brief Flush L1/L2 caches before firing a completion signal.
   void flush_caches(uint32_t vmid = 0);
 
@@ -63,6 +66,7 @@ public:
   void fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t process_id);
 
 private:
+  void deliver_completion(DispatchEntry &entry);
   void fire_signal(const DispatchEntry &entry);
 
   GpuMemory *memory_;
