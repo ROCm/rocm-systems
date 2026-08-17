@@ -221,6 +221,7 @@ jobs:
           echo "✅ pip requirements installed!"
 
       - name: Install PyTorch (TheRock nightlies)
+        shell: bash
         run: |
           set -euo pipefail
           case "${{ matrix.system.arch }}" in
