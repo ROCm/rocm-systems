@@ -605,7 +605,7 @@ class VirtualGPU : public device::VirtualDevice {
   //! Ensure a HW queue is held, acquiring one (with the last_hwq_ affinity hint) if a
   //! dynamic-queue reclaim released it. No-op for dedicated queues or when one is already held.
   //! Caller must hold the execution() lock.
-  void ensureHwQueueLocked();
+  void AcquireHwQueueIfNeeded();
 
   //! Snapshot the current HW queue as preferred for future re-acquisition (used by graph launch).
   //! Only updates if the queue is still valid — avoids clobbering a hint saved by ReleaseHwQueue.
