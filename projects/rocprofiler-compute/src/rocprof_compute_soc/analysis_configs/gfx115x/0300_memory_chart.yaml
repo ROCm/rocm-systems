@@ -242,10 +242,10 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        SARB Utilization:
+        SysArb Utilization:
           value: 100 * SUM(GCEA_SARB_BUSY_sum) / SUM(GCEA_ALWAYS_COUNT_sum)
           unit: Percent
-        SARB Stall Rate:
+        SysArb Stall Rate:
           value: 100 * SUM(GCEA_SARB_STALLED_sum) / SUM(GCEA_ALWAYS_COUNT_sum)
           unit: Percent
         DRAM Read Bandwidth:
@@ -297,7 +297,7 @@ Panel Config:
       Percentage of L2 cache requests that hit in cache. GL2 cache is the GPU's final
       on-chip cache before accessing system memory via GCEA. High hit rates reduce memory
       bandwidth pressure. Low hit rates cause traffic to system memory, increasing latency.
-    SARB Utilization: >-
+    SysArb Utilization: >-
       Percentage of cycles the System Arbiter is actively processing memory requests.
       The arbiter handles traffic between the GPU caches and system memory interface.
       High utilization indicates significant off-chip memory activity.

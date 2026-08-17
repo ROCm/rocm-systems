@@ -83,8 +83,8 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("GL2-Fabric Read BW", 64e9),
     ("GL2-Fabric Write BW", 24e9),
     # Table 309: Graphics Core Efficiency Arbiter (GCEA) to System Memory
-    ("SARB Utilization", 52.3),
-    ("SARB Stall Rate", 12.4),
+    ("SysArb Utilization", 52.3),
+    ("SysArb Stall Rate", 12.4),
     ("DRAM Read Bandwidth", 100e9),
     ("DRAM Write Bandwidth", 60e9),
 )
@@ -281,8 +281,8 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     m["gl2_fabric_read_bw"] = metric_dict.get("GL2-Fabric Read BW")
     m["gl2_fabric_write_bw"] = metric_dict.get("GL2-Fabric Write BW")
 
-    m["sarb_util"] = metric_dict.get("SARB Utilization")
-    m["sarb_stall"] = metric_dict.get("SARB Stall Rate")
+    m["sysarb_util"] = metric_dict.get("SysArb Utilization")
+    m["sysarb_stall"] = metric_dict.get("SysArb Stall Rate")
     m["dram_read_bw"] = metric_dict.get("DRAM Read Bandwidth")
     m["dram_write_bw"] = metric_dict.get("DRAM Write Bandwidth")
 
@@ -575,10 +575,10 @@ def _build_memory_columns(
     gl2_gcea_edges_text = Text.from_markup("\n".join(gl2_gcea_edges_lines))
 
     gcea_panel = Panel(
-        f"{metric_line('SARB Util', m['sarb_util'], '%', COLORS['util'])}\n"
-        f"[dim]{bar(m['sarb_util'])}[/dim]\n"
+        f"{metric_line('SysArb Util', m['sysarb_util'], '%', COLORS['util'])}\n"
+        f"[dim]{bar(m['sysarb_util'])}[/dim]\n"
         "\n"
-        f"{metric_line('SARB Stall', m['sarb_stall'], '%', COLORS['stall'])}",
+        f"{metric_line('SysArb Stall', m['sysarb_stall'], '%', COLORS['stall'])}",
         title=f"[bold {c_bl}]GCEA[/bold {c_bl}]",
         border_style=c_bl,
         width=16,
