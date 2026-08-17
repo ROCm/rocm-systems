@@ -1,6 +1,6 @@
 // MIT License
 //
-/* Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
@@ -348,6 +349,77 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     return false;
 }
 
+bool
+BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
+{
+    using session_info_t = std::shared_ptr<barrier_info_session_t>;
+
+    if(!data)
+    {
+        ROCP_FATAL << "BarrierAsyncSignalHandler called with null data pointer";
+        return true;
+    }
+
+    auto* _session_ptr = static_cast<session_info_t*>(data);
+
+    if(registration::get_fini_status() > 0)
+    {
+        _session_ptr->reset();
+        delete _session_ptr;
+        return false;
+    }
+
+    auto _cleanup = common::scope_destructor{[&_session_ptr]() {
+        _session_ptr->reset();
+        delete _session_ptr;
+        _session_ptr = nullptr;
+    }};
+
+    auto _session = *_session_ptr;
+    if(!_session.get())
+    {
+        ROCP_FATAL << "nullptr to barrier session information";
+        return true;
+    }
+
+    auto& barrier_session = *_session;
+
+    for(auto& bdata : barrier_session.barrier_data)
+    {
+        auto barrier_time = hip::event::profiling_time{.status = HSA_STATUS_SUCCESS,
+                                                       .start  = barrier_session.enqueue_ts,
+                                                       .end    = common::timestamp_ns()};
+
+        auto* _corr_id          = barrier_session.correlation_id;
+        auto  _tid              = barrier_session.tid;
+        auto  _internal_corr_id = (_corr_id) ? _corr_id->internal : 0;
+        auto  _ancestor_corr_id = (_corr_id) ? _corr_id->ancestor : 0;
+
+        hip::event::barrier_complete(bdata.tracing_data,
+                                     _tid,
+                                     _internal_corr_id,
+                                     _ancestor_corr_id,
+                                     barrier_time,
+                                     bdata.operation,
+                                     bdata.callback_record);
+
+        if(bdata.pooled_signal)
+        {
+            Queue::release_signal(bdata.pooled_signal);
+        }
+
+        if(_corr_id)
+        {
+            _corr_id->sub_kern_count();
+            _corr_id->sub_ref_count();
+        }
+    }
+
+    barrier_session.queue.async_complete();
+
+    return false;
+}
+
 /* Extract bits [last:first] from t.  */
 template <typename Integral>
 Integral
@@ -417,13 +489,15 @@ WriteInterceptor(const void* packets,
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
+    const bool event_api_active    = (hip::event::get_active_event_context() != nullptr);
     const bool no_real_consumers =
         (queue.get_notifiers() == 0 &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
 
-    if(pkt_count == 0 || (no_real_consumers && !graph_launch_active && !has_kernel_replay))
+    if(pkt_count == 0 || (no_real_consumers && !graph_launch_active && !has_kernel_replay &&
+                          !event_api_active))
     {
         writer(packets, pkt_count);
         return;
@@ -453,7 +527,8 @@ WriteInterceptor(const void* packets,
 #endif
     }
 
-    if(num_dispatch_packets == 0)
+    auto* active_event_ctx = hip::event::get_active_event_context();
+    if(num_dispatch_packets == 0 && !active_event_ctx)
     {
         writer(packets, pkt_count);
         return;
@@ -508,6 +583,11 @@ WriteInterceptor(const void* packets,
                                ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                tracing_data_v);
 
+    auto hip_event_tracing_data_v = tracing::tracing_data{};
+    tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
+                               ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                               hip_event_tracing_data_v);
+
     for(const auto* itr : context::get_active_contexts(queue_callback_context_filter))
         tracing_data_v.external_correlation_ids.emplace(itr, tracing::empty_user_data);
 
@@ -546,7 +626,11 @@ WriteInterceptor(const void* packets,
 
     using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
 
-    auto process_packet_batch = [&queue, &corr_id, tracing_data_v, has_kernel_replay](
+    auto process_packet_batch = [&queue,
+                                 &corr_id,
+                                 tracing_data_v,
+                                 hip_event_tracing_data_v,
+                                 has_kernel_replay](
                                     const rocprofiler_packet* _packets,
                                     uint64_t                  _num_packets,
                                     const packet_writer_fn_t& _writer,
@@ -565,11 +649,6 @@ WriteInterceptor(const void* packets,
                                                   .enqueue_ts     = common::timestamp_ns(),
                                                   .correlation_id = corr_id,
                                                   .packet_data    = packet_data_array_t{}};
-
-        // mark the queue as having at least one packet which will be assigned a callback to
-        // AsyncSignalHandler. This is used to determine whether we need to wait for the signal
-        // handler to complete during finalization.
-        queue.async_started();
 
         // Searching across all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
@@ -595,7 +674,98 @@ WriteInterceptor(const void* packets,
 
             if(!is_kernel_dispatch && !is_ext_kernel_dispatch)
             {
-                transformed_packets.emplace_back(_packets[i]);
+                // CLR uses BARRIER_AND for event barriers. BARRIER_OR is never
+                // used by CLR's event path and is not intercepted here.
+                const bool is_barrier = (packet_type == HSA_PACKET_TYPE_BARRIER_AND);
+
+                auto* event_ctx = hip::event::get_active_event_context();
+
+                if(is_barrier && event_ctx && !hip_event_tracing_data_v.empty())
+                {
+                    corr_id->add_ref_count();
+                    corr_id->add_kern_count();
+
+                    auto _barrier_data         = barrier_data_t{};
+                    _barrier_data.tracing_data = hip_event_tracing_data_v;
+                    _barrier_data.operation    = event_ctx->operation;
+
+                    tracing::populate_external_correlation_ids(
+                        _barrier_data.tracing_data.external_correlation_ids,
+                        thr_id,
+                        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_EVENT,
+                        event_ctx->operation,
+                        internal_corr_id);
+
+                    _barrier_data.callback_record = rocprofiler_callback_tracing_hip_event_data_t{
+                        sizeof(rocprofiler_callback_tracing_hip_event_data_t),
+                        rocprofiler_timestamp_t{0},
+                        rocprofiler_timestamp_t{0},
+                        queue.get_agent().get_rocp_agent()->id,
+                        queue.get_id(),
+                        event_ctx->hip_event_handle,
+                        queue.get_id()};
+
+                    const auto& barrier_pkt                = _packets[i].barrier_and;
+                    const auto  original_completion_signal = barrier_pkt.completion_signal;
+                    const bool  existing_completion_signal =
+                        (original_completion_signal.handle != 0);
+
+                    auto barrier_copy = _packets[i];
+                    _barrier_data.pooled_signal =
+                        queue.create_signal(0, &barrier_copy.barrier_and.completion_signal, true);
+
+                    _barrier_data.completion_signal = barrier_copy.barrier_and.completion_signal;
+
+                    get_core_table()->hsa_signal_store_screlease_fn(_barrier_data.completion_signal,
+                                                                    0);
+
+                    transformed_packets.emplace_back(barrier_copy);
+
+                    if(existing_completion_signal)
+                    {
+                        auto forwarding   = hsa_barrier_and_packet_t{};
+                        forwarding.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+                        forwarding.header |= (1 << HSA_PACKET_HEADER_BARRIER);
+                        forwarding.completion_signal = original_completion_signal;
+                        transformed_packets.emplace_back(forwarding);
+                    }
+
+                    event_ctx->barrier_captured = true;
+
+                    auto barrier_session_data = barrier_info_session_t::barrier_data_array_t{};
+                    barrier_session_data.emplace_back(std::move(_barrier_data));
+
+                    auto barrier_session =
+                        barrier_info_session_t{.queue          = queue,
+                                               .tid            = thr_id,
+                                               .enqueue_ts     = common::timestamp_ns(),
+                                               .correlation_id = corr_id,
+                                               .barrier_data   = std::move(barrier_session_data)};
+
+                    auto shared =
+                        std::make_shared<barrier_info_session_t>(std::move(barrier_session));
+
+                    const auto raw_signal = shared->barrier_data.back().pooled_signal->get().value;
+
+                    queue.async_started();
+
+                    auto status = hsa::get_amd_ext_table()->hsa_amd_signal_async_handler_fn(
+                        raw_signal,
+                        HSA_SIGNAL_CONDITION_EQ,
+                        -1,
+                        BarrierAsyncSignalHandler,
+                        new std::shared_ptr<barrier_info_session_t>(shared));
+
+                    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+                        << fmt::format("Error: hsa_amd_signal_async_handler for barrier "
+                                       "(signal={{.handle={}}}) failed with error code {}",
+                                       raw_signal.handle,
+                                       static_cast<int>(status));
+                }
+                else
+                {
+                    transformed_packets.emplace_back(_packets[i]);
+                }
                 continue;
             }
 
@@ -894,6 +1064,7 @@ WriteInterceptor(const void* packets,
             auto shared = std::make_shared<info_session_t>(std::move(_info_session));
 
             // Enqueue the signal into the handler. Will call completed_cb when signal completes.
+            queue.async_started();
             queue.signal_async_handler(last_pooled_signal,
                                        last_completion_signal,
                                        new std::shared_ptr<info_session_t>(shared));

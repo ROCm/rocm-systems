@@ -29,6 +29,9 @@
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hip/runtime_api_id.h>
+
+#include <hip/amd_detail/hip_api_trace.hpp>
 
 #include <string_view>
 
@@ -189,6 +192,91 @@ barrier_complete(tracing::tracing_data&                        tracing_data_v,
         }
     }
 }
+namespace
+{
+thread_local active_event_context_t g_active_event_ctx = {};
+
+template <typename ApiTag, typename RetT>
+auto event_record_wrapper(RetT (*next)(hipEvent_t, hipStream_t))
+{
+    static auto next_func = next;
+    return +[](hipEvent_t event, hipStream_t stream) -> RetT {
+        g_active_event_ctx = {
+            ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false};
+        auto ret           = next_func(event, stream);
+        g_active_event_ctx = {};
+        return ret;
+    };
+}
+
+template <typename ApiTag, typename RetT>
+auto event_record_with_flags_wrapper(RetT (*next)(hipEvent_t, hipStream_t, unsigned int))
+{
+    static auto next_func = next;
+    return +[](hipEvent_t event, hipStream_t stream, unsigned int flags) -> RetT {
+        g_active_event_ctx = {
+            ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false};
+        auto ret           = next_func(event, stream, flags);
+        g_active_event_ctx = {};
+        return ret;
+    };
+}
+
+template <typename ApiTag, typename RetT>
+auto stream_wait_event_wrapper(RetT (*next)(hipStream_t, hipEvent_t, unsigned int))
+{
+    static auto next_func = next;
+    return +[](hipStream_t stream, hipEvent_t event, unsigned int flags) -> RetT {
+        g_active_event_ctx = {ROCPROFILER_HIP_EVENT_WAIT, reinterpret_cast<uint64_t>(event), false};
+        auto ret           = next_func(stream, event, flags);
+        g_active_event_ctx = {};
+        return ret;
+    };
+}
+}  // namespace
+
+active_event_context_t*
+get_active_event_context()
+{
+    if(g_active_event_ctx.operation == ROCPROFILER_HIP_EVENT_NONE) return nullptr;
+    return &g_active_event_ctx;
+}
+
+namespace api
+{
+struct hipEventRecord;
+struct hipEventRecord_spt;
+struct hipEventRecordWithFlags;
+struct hipStreamWaitEvent;
+struct hipStreamWaitEvent_spt;
+}  // namespace api
+
+template <>
+void
+update_table<::HipDispatchTable>(::HipDispatchTable* table)
+{
+    if(table == nullptr) return;
+    if(table->hipEventRecord_fn)
+        table->hipEventRecord_fn =
+            event_record_wrapper<api::hipEventRecord>(table->hipEventRecord_fn);
+    if(table->hipEventRecord_spt_fn)
+        table->hipEventRecord_spt_fn =
+            event_record_wrapper<api::hipEventRecord_spt>(table->hipEventRecord_spt_fn);
+    if(table->hipEventRecordWithFlags_fn)
+        table->hipEventRecordWithFlags_fn =
+            event_record_with_flags_wrapper<api::hipEventRecordWithFlags>(
+                table->hipEventRecordWithFlags_fn);
+    if(table->hipStreamWaitEvent_fn)
+        table->hipStreamWaitEvent_fn =
+            stream_wait_event_wrapper<api::hipStreamWaitEvent>(table->hipStreamWaitEvent_fn);
+    if(table->hipStreamWaitEvent_spt_fn)
+        table->hipStreamWaitEvent_spt_fn = stream_wait_event_wrapper<api::hipStreamWaitEvent_spt>(
+            table->hipStreamWaitEvent_spt_fn);
+}
+
+template void
+update_table<::HipDispatchTable>(::HipDispatchTable*);
+
 }  // namespace event
 }  // namespace hip
 }  // namespace rocprofiler

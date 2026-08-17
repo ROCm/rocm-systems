@@ -28,6 +28,8 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <hip/hip_runtime_api.h>
+
 #include <cstdint>
 #include <vector>
 
@@ -59,6 +61,21 @@ barrier_complete(tracing::tracing_data&                        tracing_data_v,
                  profiling_time                                barrier_time,
                  rocprofiler_hip_event_operation_t             operation,
                  rocprofiler_callback_tracing_hip_event_data_t callback_record);
+
+struct active_event_context_t
+{
+    rocprofiler_hip_event_operation_t operation        = ROCPROFILER_HIP_EVENT_NONE;
+    uint64_t                          hip_event_handle = 0;
+    bool                              barrier_captured = false;
+};
+
+active_event_context_t*
+get_active_event_context();
+
+template <typename TableT>
+void
+update_table(TableT* table);
+
 }  // namespace event
 }  // namespace hip
 }  // namespace rocprofiler
