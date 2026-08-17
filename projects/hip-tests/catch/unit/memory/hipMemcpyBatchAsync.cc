@@ -1298,22 +1298,50 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect) {
 #endif
 
 #if HT_AMD
+// The three indirect modes exercised by the unaligned matrix below. Each names which side(s) the
+// batch reaches through a pointer slot; the direct side carries its own offset.
+enum class IndirectMode { Src, Dst, SrcDst };
+
+// The per-mode setup the unaligned matrix varies over: the source and destination allocation types,
+// which side(s) are indirect, the ExtOp flags, and a label for CAPTURE.
+struct IndirectModeConfig {
+  LinearAllocs src_alloc;
+  LinearAllocs dst_alloc;
+  bool indirect_src;
+  bool indirect_dst;
+  unsigned int flags;
+  const char* name;
+};
+
+inline IndirectModeConfig indirectModeConfig(IndirectMode mode) {
+  switch (mode) {
+    case IndirectMode::Src:
+      return {LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc, true, false,
+              hipMemcpyFlagExtOpIndirectSrc, "Src"};
+    case IndirectMode::Dst:
+      return {LinearAllocs::hipMalloc, LinearAllocs::hipHostMalloc, false, true,
+              hipMemcpyFlagExtOpIndirectDst, "Dst"};
+    case IndirectMode::SrcDst:
+    default:
+      return {LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc, true, true,
+              hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst, "SrcDst"};
+  }
+}
+
 /**
  * Test Description
  * ------------------------
- * - Parameterized H->D IndirectSrc copy correctness over mismatched src/dst byte
- *   offsets and two transfer sizes that straddle the GPU_FORCE_BLIT_INDIRECT_SIZE
- *   threshold (4096 routes to the shader path; 65536 routes to SDMA on gfx1250 and
- *   to the shader path on pre-gfx1250).
+ * - Parameterized indirect copy correctness over the three indirect modes (IndirectSrc H->D,
+ *   IndirectDst D->H, dual-sided H->D), mismatched src/dst byte offsets, and two transfer sizes
+ *   that straddle the GPU_FORCE_BLIT_INDIRECT_SIZE threshold (4096 routes to the shader path;
+ *   65536 routes to SDMA on gfx1250 and to the shader path on pre-gfx1250).
  *
- *   The source is passed indirectly: a sizeof(void*) pinned holder slot stores the
- *   real host source address (h_base + src_off); the destination is passed
- *   directly as d_base + dst_off. Each host/device allocation is size+64 bytes.
- *   The full host allocation is filled with 0xAA and the full device allocation
- *   with 0xBB. After the copy, the destination region [dst_off, dst_off+size) must
- *   equal 0xAA, all device bytes OUTSIDE that region (padding) must remain
- *   unchanged at 0xBB, and the host source buffer must be entirely unchanged at
- *   0xAA -- this is a copy, not a swap.
+ *   Every indirect side is passed through a sizeof(void*) pinned holder slot storing the real
+ *   (offset) address; the direct side, if any, carries its offset directly. Each allocation is
+ *   size+kPad bytes; the source is filled 0xAA and the destination 0xBB. After the copy the
+ *   destination region [dst_off, dst_off+size) must equal the source fill, the destination bytes
+ *   outside that region (padding) must keep the destination fill, and the whole source buffer must
+ *   be unchanged -- this is a copy, not a swap.
  *
  * Test source
  * ------------------------
@@ -1322,11 +1350,13 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_Src_UnalignedMatrix) {
-  constexpr uint8_t kHostFill = 0xAA;
-  constexpr uint8_t kDevFill = 0xBB;
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_UnalignedMatrix) {
+  constexpr unsigned char kSrcFill = 0xAA;
+  constexpr unsigned char kDstFill = 0xBB;
   constexpr size_t kPad = 64;
 
+  const IndirectMode mode =
+      GENERATE(IndirectMode::Src, IndirectMode::Dst, IndirectMode::SrcDst);
   const std::pair<size_t, size_t> off =
       GENERATE(std::make_pair(size_t{0}, size_t{0}), std::make_pair(size_t{4}, size_t{4}),
                std::make_pair(size_t{0}, size_t{15}), std::make_pair(size_t{1}, size_t{15}),
@@ -1336,493 +1366,48 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_Src_UnalignedMatrix) {
   const size_t size = GENERATE(size_t{4096}, size_t{65536});
   const size_t src_off = off.first;
   const size_t dst_off = off.second;
+  const IndirectModeConfig cfg = indirectModeConfig(mode);
+  CAPTURE(cfg.name, src_off, dst_off, size);
 
-  INFO("src_off=" << src_off << " dst_off=" << dst_off << " size=" << size);
+  LinearAllocGuard<unsigned char> src(cfg.src_alloc, size + kPad);
+  LinearAllocGuard<unsigned char> dst(cfg.dst_alloc, size + kPad);
+  fillBuffer(src.ptr(), std::vector<unsigned char>(size + kPad, kSrcFill), cfg.src_alloc);
+  fillBuffer(dst.ptr(), std::vector<unsigned char>(size + kPad, kDstFill), cfg.dst_alloc);
 
-  void* h_base = nullptr;
-  void* d_base = nullptr;
-  HIP_CHECK(hipHostMalloc(&h_base, size + kPad));
-  HIP_CHECK(hipMalloc(&d_base, size + kPad));
+  // Bake the offset into the address the batch sees. An indirect side hands over a pinned holder
+  // slot that dereferences to the real address; a direct side hands over the real address itself.
+  std::vector<LinearAllocGuard<void*>> slots;
+  void* real_src = src.ptr() + src_off;
+  void* real_dst = dst.ptr() + dst_off;
+  void* batch_src =
+      cfg.indirect_src ? addPointerSlot(slots, real_src, LinearAllocs::hipHostMalloc) : real_src;
+  void* batch_dst =
+      cfg.indirect_dst ? addPointerSlot(slots, real_dst, LinearAllocs::hipHostMalloc) : real_dst;
 
-  std::memset(h_base, kHostFill, size + kPad);
-  HIP_CHECK(hipMemset(d_base, kDevFill, size + kPad));
-
-  // Bake the offset into the REAL address stored behind the holder; the direct
-  // side pointer carries its own offset directly.
-  void* real_src = static_cast<uint8_t*>(h_base) + src_off;
-  void* direct_dst = static_cast<uint8_t*>(d_base) + dst_off;
-
-  void* src_slot = nullptr;
-  HIP_CHECK(hipHostMalloc(&src_slot, sizeof(void*)));
-  std::memcpy(src_slot, &real_src, sizeof(void*));
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  void* dsts[] = {direct_dst};
-  void* srcs[] = {src_slot};
+  StreamGuard stream_guard(Streams::created);
+  void* dsts[] = {batch_dst};
+  void* srcs[] = {batch_src};
   size_t sizes[] = {size};
-  size_t attrsIdxs[] = {0};
+  size_t attrs_idxs[] = {0};
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, cfg.flags};
 
-  hipMemcpyAttributes attr{};
-  attr.flags = hipMemcpyFlagExtOpIndirectSrc;
-  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-
-  size_t failIdx = 0;
-  hipError_t err = hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream);
-  if (err == hipErrorNotSupported) {
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipHostFree(src_slot));
-    HIP_CHECK(hipFree(d_base));
-    HIP_CHECK(hipHostFree(h_base));
-    SUCCEED("hipMemcpyFlagExtOpIndirectSrc is not supported on this device");
-    return;
-  }
-  HIP_CHECK(err);
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  // Copy the full device buffer back so padding can be verified too.
-  std::vector<uint8_t> devResult(size + kPad);
-  HIP_CHECK(hipMemcpy(devResult.data(), d_base, size + kPad, hipMemcpyDeviceToHost));
-  const uint8_t* hostResult = static_cast<const uint8_t*>(h_base);
-
-  for (size_t i = 0; i < size + kPad; i++) {
-    const bool in_dev_region = (i >= dst_off) && (i < dst_off + size);
-    const uint8_t expected_dev = in_dev_region ? kHostFill : kDevFill;
-    INFO("dev byte " << i << " (region=" << in_dev_region
-                     << ") = " << static_cast<int>(devResult[i]) << " expected "
-                     << static_cast<int>(expected_dev));
-    REQUIRE(devResult[i] == expected_dev);
-
-    // This is a copy, not a swap: the host source must be entirely unchanged.
-    INFO("host byte " << i << " = " << static_cast<int>(hostResult[i]) << " expected "
-                      << static_cast<int>(kHostFill));
-    REQUIRE(hostResult[i] == kHostFill);
-  }
-
-  HIP_CHECK(hipFree(d_base));
-  HIP_CHECK(hipHostFree(h_base));
-  HIP_CHECK(hipHostFree(src_slot));
-  HIP_CHECK(hipStreamDestroy(stream));
-}
-
-/**
- * Test Description
- * ------------------------
- * - Parameterized D->H IndirectDst copy correctness over mismatched src/dst byte
- *   offsets and two transfer sizes that straddle the GPU_FORCE_BLIT_INDIRECT_SIZE
- *   threshold (4096 routes to the shader path; 65536 routes to SDMA on gfx1250 and
- *   to the shader path on pre-gfx1250).
- *
- *   The destination is passed indirectly: a sizeof(void*) pinned holder slot
- *   stores the real host destination address (h_base + dst_off); the source is
- *   passed directly as d_base + src_off. Each host/device allocation is size+64
- *   bytes. The full device allocation is filled with 0xAA and the full host
- *   allocation with 0xBB. After the copy, the host region [dst_off, dst_off+size)
- *   must equal 0xAA, all host bytes OUTSIDE that region (padding) must remain
- *   unchanged at 0xBB, and the device source buffer must be entirely unchanged at
- *   0xAA -- this is a copy, not a swap.
- *
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 7.1
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_Dst_UnalignedMatrix) {
-  constexpr uint8_t kDevFill = 0xAA;
-  constexpr uint8_t kHostFill = 0xBB;
-  constexpr size_t kPad = 64;
-
-  const std::pair<size_t, size_t> off =
-      GENERATE(std::make_pair(size_t{0}, size_t{0}), std::make_pair(size_t{4}, size_t{4}),
-               std::make_pair(size_t{0}, size_t{15}), std::make_pair(size_t{1}, size_t{15}),
-               std::make_pair(size_t{3}, size_t{11}), std::make_pair(size_t{3}, size_t{9}),
-               std::make_pair(size_t{1}, size_t{0}), std::make_pair(size_t{8}, size_t{8}),
-               std::make_pair(size_t{2}, size_t{2}));
-  const size_t size = GENERATE(size_t{4096}, size_t{65536});
-  const size_t src_off = off.first;
-  const size_t dst_off = off.second;
-
-  INFO("src_off=" << src_off << " dst_off=" << dst_off << " size=" << size);
-
-  void* d_base = nullptr;
-  void* h_base = nullptr;
-  HIP_CHECK(hipMalloc(&d_base, size + kPad));
-  HIP_CHECK(hipHostMalloc(&h_base, size + kPad));
-
-  HIP_CHECK(hipMemset(d_base, kDevFill, size + kPad));
-  std::memset(h_base, kHostFill, size + kPad);
-
-  // Bake the offset into the REAL address stored behind the holder; the direct
-  // side pointer carries its own offset directly.
-  void* direct_src = static_cast<uint8_t*>(d_base) + src_off;
-  void* real_dst = static_cast<uint8_t*>(h_base) + dst_off;
-
-  void* dst_slot = nullptr;
-  HIP_CHECK(hipHostMalloc(&dst_slot, sizeof(void*)));
-  std::memcpy(dst_slot, &real_dst, sizeof(void*));
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  void* dsts[] = {dst_slot};
-  void* srcs[] = {direct_src};
-  size_t sizes[] = {size};
-  size_t attrsIdxs[] = {0};
-
-  hipMemcpyAttributes attr{};
-  attr.flags = hipMemcpyFlagExtOpIndirectDst;
-  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-
-  size_t failIdx = 0;
-  hipError_t err = hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream);
-  if (err == hipErrorNotSupported) {
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipHostFree(dst_slot));
-    HIP_CHECK(hipHostFree(h_base));
-    HIP_CHECK(hipFree(d_base));
-    SUCCEED("hipMemcpyFlagExtOpIndirectDst is not supported on this device");
-    return;
-  }
-  HIP_CHECK(err);
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  // Copy the device source back in full to confirm it is unchanged, and read
-  // the host destination directly.
-  std::vector<uint8_t> devResult(size + kPad);
-  HIP_CHECK(hipMemcpy(devResult.data(), d_base, size + kPad, hipMemcpyDeviceToHost));
-  const uint8_t* hostResult = static_cast<const uint8_t*>(h_base);
-
-  for (size_t i = 0; i < size + kPad; i++) {
-    const bool in_host_region = (i >= dst_off) && (i < dst_off + size);
-    const uint8_t expected_host = in_host_region ? kDevFill : kHostFill;
-    INFO("host byte " << i << " (region=" << in_host_region
-                      << ") = " << static_cast<int>(hostResult[i]) << " expected "
-                      << static_cast<int>(expected_host));
-    REQUIRE(hostResult[i] == expected_host);
-
-    // This is a copy, not a swap: the device source must be entirely unchanged.
-    INFO("dev byte " << i << " = " << static_cast<int>(devResult[i]) << " expected "
-                     << static_cast<int>(kDevFill));
-    REQUIRE(devResult[i] == kDevFill);
-  }
-
-  HIP_CHECK(hipFree(d_base));
-  HIP_CHECK(hipHostFree(h_base));
-  HIP_CHECK(hipHostFree(dst_slot));
-  HIP_CHECK(hipStreamDestroy(stream));
-}
-
-/**
- * Test Description
- * ------------------------
- * - Verify hipMemcpyBatchAsync with multiple independent H->D IndirectSrc ops in
- *   a single call.
- *
- *   Four independent host(holder)->device pairs are copied in one call, each with
- *   a distinct sentinel value; all four must be correct after synchronization,
- *   and each host source must remain unchanged since this is a copy, not a swap.
- *
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 7.1
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_MultiOp) {
-  constexpr size_t kNumOps = 4;
-  constexpr size_t kNumElements = 1024;
-  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
-
-  // Each op has a distinct sentinel value to confirm independence.
-  constexpr int kHostVals[kNumOps] = {10, 20, 30, 40};
-
-  void* h_bufs[kNumOps] = {};
-  void* d_bufs[kNumOps] = {};
-  void* slots[kNumOps] = {};
-
-  for (size_t op = 0; op < kNumOps; ++op) {
-    HIP_CHECK(hipHostMalloc(&h_bufs[op], kSizeBytes));
-    HIP_CHECK(hipMalloc(&d_bufs[op], kSizeBytes));
-    HIP_CHECK(hipHostMalloc(&slots[op], sizeof(void*)));
-
-    std::vector<int> hi(kNumElements, kHostVals[op]);
-    std::memcpy(h_bufs[op], hi.data(), kSizeBytes);
-    // The holder stores the REAL host source address for this op.
-    std::memcpy(slots[op], &h_bufs[op], sizeof(void*));
-  }
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  // All ops share the same IndirectSrc attribute (index 0).
-  size_t sizes[kNumOps];
-  size_t attrsIdxs[kNumOps];
-  for (size_t op = 0; op < kNumOps; ++op) {
-    sizes[op] = kSizeBytes;
-    attrsIdxs[op] = 0;
-  }
-
-  hipMemcpyAttributes attr{};
-  attr.flags = hipMemcpyFlagExtOpIndirectSrc;
-  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-
-  size_t failIdx = 0;
+  size_t fail_idx = 0;
   hipError_t err =
-      hipMemcpyBatchAsync(d_bufs, slots, sizes, kNumOps, &attr, attrsIdxs, 1, &failIdx, stream);
+      hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrs_idxs, 1, &fail_idx, stream_guard.stream());
   if (err == hipErrorNotSupported) {
-    HIP_CHECK(hipStreamDestroy(stream));
-    for (size_t op = 0; op < kNumOps; ++op) {
-      HIP_CHECK(hipHostFree(slots[op]));
-      HIP_CHECK(hipFree(d_bufs[op]));
-      HIP_CHECK(hipHostFree(h_bufs[op]));
-    }
-    SUCCEED("hipMemcpyFlagExtOpIndirectSrc is not supported on this device");
+    SUCCEED("indirect copy is not supported on this device");
     return;
   }
   HIP_CHECK(err);
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
 
-  // Verify every op independently; the host sources are unchanged (copy, not swap).
-  for (size_t op = 0; op < kNumOps; ++op) {
-    std::vector<int> resultDev(kNumElements);
-    HIP_CHECK(hipMemcpy(resultDev.data(), d_bufs[op], kSizeBytes, hipMemcpyDeviceToHost));
-    const int* resultHost = static_cast<const int*>(h_bufs[op]);
-    for (size_t i = 0; i < kNumElements; i++) {
-      INFO("op=" << op << " dev[" << i << "]=" << resultDev[i] << " (expected " << kHostVals[op]
-                 << ")");
-      REQUIRE(resultDev[i] == kHostVals[op]);
-      INFO("op=" << op << " host[" << i << "]=" << resultHost[i] << " (expected " << kHostVals[op]
-                 << ")");
-      REQUIRE(resultHost[i] == kHostVals[op]);
-    }
-  }
+  // Destination: the copied region took the source fill, the padding kept its own fill.
+  std::vector<unsigned char> dst_expected(size + kPad, kDstFill);
+  std::fill_n(dst_expected.begin() + dst_off, size, kSrcFill);
+  requireBufferEquals(dst.ptr(), dst_expected, cfg.dst_alloc);
 
-  for (size_t op = 0; op < kNumOps; ++op) {
-    HIP_CHECK(hipHostFree(slots[op]));
-    HIP_CHECK(hipFree(d_bufs[op]));
-    HIP_CHECK(hipHostFree(h_bufs[op]));
-  }
-  HIP_CHECK(hipStreamDestroy(stream));
-}
-
-/**
- * Test Description
- * ------------------------
- * - Verifies dual-sided indirect (hipMemcpyFlagExtOpIndirectSrc |
- *   hipMemcpyFlagExtOpIndirectDst) where BOTH the source and destination are
- *   pinned pointer-holders. The real source is a pinned host buffer and the real
- *   destination is a device buffer; the kernel dereferences both holders
- *   on-device (indirect_mode == 3). After the copy the real device destination
- *   must hold the pattern and the real host source must be unchanged (copy, not
- *   swap).
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 7.1
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectSrcDst) {
-  constexpr size_t copy_size = kSmallCopySize;
-  const size_t copy_elements = copy_size / sizeof(int);
-
-  StreamGuard stream_guard(Streams::created);
-  LinearAllocGuard<int> src(LinearAllocs::hipHostMalloc, copy_size);  // real source (host)
-  LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, copy_size);      // real dest (device)
-  LinearAllocGuard<char> src_slot(LinearAllocs::hipHostMalloc, sizeof(void*));
-  LinearAllocGuard<char> dst_slot(LinearAllocs::hipHostMalloc, sizeof(void*));
-
-  std::fill_n(src.host_ptr(), copy_elements, kPatternValue);
-
-  void* src_ptr = src.ptr();
-  void* dst_ptr = dst.ptr();
-  std::memcpy(src_slot.ptr(), &src_ptr, sizeof(void*));
-  std::memcpy(dst_slot.ptr(), &dst_ptr, sizeof(void*));
-
-  std::vector<void*> dst_ptrs{dst_slot.ptr()};
-  std::vector<void*> src_ptrs{src_slot.ptr()};
-  std::vector<size_t> sizes{copy_size};
-  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {},
-                           hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst};
-  size_t attrs_idx = 0;
-
-  hipError_t status = hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), 1, &attr,
-                                          &attrs_idx, 1, nullptr, stream_guard.stream());
-  if (status == hipErrorNotSupported) {
-    SUCCEED("dual-sided indirect is not supported on this device");
-  } else {
-    HIP_CHECK(status);
-    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
-    // Verify the REAL device destination, not the holder.
-    std::vector<void*> real_dst_ptrs{dst.ptr()};
-    VerifyDeviceBuffers(real_dst_ptrs, copy_size, kPatternValue, /*add_index*/ false);
-    // Copy, not swap: the real host source must be unchanged.
-    VerifyArrayFromBothEnds(src.host_ptr(), copy_elements, kPatternValue, 0);
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- * - Verifies dual-sided indirect with both real buffers on the device (D->D).
- *   This exercises the case the H<->D holder narrowing previously made
- *   unreachable: both holders are pinned host allocations (equal memory type),
- *   but the real buffers behind them are both device buffers. After the copy the
- *   real device destination must hold the pattern and the real device source must
- *   be unchanged.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 7.1
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectSrcDst_D2D) {
-  constexpr size_t copy_size = kSmallCopySize;
-  const size_t copy_elements = copy_size / sizeof(int);
-
-  StreamGuard stream_guard(Streams::created);
-  LinearAllocGuard<int> src(LinearAllocs::hipMalloc, copy_size);  // real source (device)
-  LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, copy_size);  // real dest (device)
-  LinearAllocGuard<char> src_slot(LinearAllocs::hipHostMalloc, sizeof(void*));
-  LinearAllocGuard<char> dst_slot(LinearAllocs::hipHostMalloc, sizeof(void*));
-
-  std::vector<int> host_pattern(copy_elements, kPatternValue);
-  HIP_CHECK(hipMemcpy(src.ptr(), host_pattern.data(), copy_size, hipMemcpyHostToDevice));
-
-  void* src_ptr = src.ptr();
-  void* dst_ptr = dst.ptr();
-  std::memcpy(src_slot.ptr(), &src_ptr, sizeof(void*));
-  std::memcpy(dst_slot.ptr(), &dst_ptr, sizeof(void*));
-
-  std::vector<void*> dst_ptrs{dst_slot.ptr()};
-  std::vector<void*> src_ptrs{src_slot.ptr()};
-  std::vector<size_t> sizes{copy_size};
-  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {},
-                           hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst};
-  size_t attrs_idx = 0;
-
-  hipError_t status = hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), 1, &attr,
-                                          &attrs_idx, 1, nullptr, stream_guard.stream());
-  if (status == hipErrorNotSupported) {
-    SUCCEED("dual-sided indirect is not supported on this device");
-  } else {
-    HIP_CHECK(status);
-    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
-    std::vector<void*> real_dst_ptrs{dst.ptr()};
-    std::vector<void*> real_src_ptrs{src.ptr()};
-    VerifyDeviceBuffers(real_dst_ptrs, copy_size, kPatternValue, /*add_index*/ false);
-    VerifyDeviceBuffers(real_src_ptrs, copy_size, kPatternValue, /*add_index*/ false);
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- * - Parameterized dual-sided indirect (H->D) copy correctness over mismatched
- *   src/dst byte offsets and two transfer sizes that straddle the
- *   GPU_FORCE_BLIT_INDIRECT_SIZE threshold. BOTH the source and destination are
- *   pinned pointer-holders; the offset is baked into the REAL address stored
- *   behind each holder. The device destination region must equal the host fill,
- *   the device padding must be unchanged, and the host source must be unchanged
- *   (copy, not swap).
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 7.1
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_SrcDst_UnalignedMatrix) {
-  constexpr uint8_t kHostFill = 0xAA;
-  constexpr uint8_t kDevFill = 0xBB;
-  constexpr size_t kPad = 64;
-
-  const std::pair<size_t, size_t> off =
-      GENERATE(std::make_pair(size_t{0}, size_t{0}), std::make_pair(size_t{4}, size_t{4}),
-               std::make_pair(size_t{0}, size_t{15}), std::make_pair(size_t{1}, size_t{15}),
-               std::make_pair(size_t{3}, size_t{11}), std::make_pair(size_t{3}, size_t{9}),
-               std::make_pair(size_t{1}, size_t{0}), std::make_pair(size_t{8}, size_t{8}),
-               std::make_pair(size_t{2}, size_t{2}));
-  const size_t size = GENERATE(size_t{4096}, size_t{65536});
-  const size_t src_off = off.first;
-  const size_t dst_off = off.second;
-
-  INFO("src_off=" << src_off << " dst_off=" << dst_off << " size=" << size);
-
-  void* h_base = nullptr;
-  void* d_base = nullptr;
-  HIP_CHECK(hipHostMalloc(&h_base, size + kPad));
-  HIP_CHECK(hipMalloc(&d_base, size + kPad));
-
-  std::memset(h_base, kHostFill, size + kPad);
-  HIP_CHECK(hipMemset(d_base, kDevFill, size + kPad));
-
-  // Bake each offset into the REAL address stored behind its holder.
-  void* real_src = static_cast<uint8_t*>(h_base) + src_off;
-  void* real_dst = static_cast<uint8_t*>(d_base) + dst_off;
-
-  void* src_slot = nullptr;
-  void* dst_slot = nullptr;
-  HIP_CHECK(hipHostMalloc(&src_slot, sizeof(void*)));
-  HIP_CHECK(hipHostMalloc(&dst_slot, sizeof(void*)));
-  std::memcpy(src_slot, &real_src, sizeof(void*));
-  std::memcpy(dst_slot, &real_dst, sizeof(void*));
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  void* dsts[] = {dst_slot};
-  void* srcs[] = {src_slot};
-  size_t sizes[] = {size};
-  size_t attrsIdxs[] = {0};
-
-  hipMemcpyAttributes attr{};
-  attr.flags = hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
-  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
-
-  size_t failIdx = 0;
-  hipError_t err = hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream);
-  if (err == hipErrorNotSupported) {
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipHostFree(src_slot));
-    HIP_CHECK(hipHostFree(dst_slot));
-    HIP_CHECK(hipFree(d_base));
-    HIP_CHECK(hipHostFree(h_base));
-    SUCCEED("dual-sided indirect is not supported on this device");
-    return;
-  }
-  HIP_CHECK(err);
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  // Copy the full device buffer back so padding can be verified too.
-  std::vector<uint8_t> devResult(size + kPad);
-  HIP_CHECK(hipMemcpy(devResult.data(), d_base, size + kPad, hipMemcpyDeviceToHost));
-  const uint8_t* hostResult = static_cast<const uint8_t*>(h_base);
-
-  for (size_t i = 0; i < size + kPad; i++) {
-    const bool in_dev_region = (i >= dst_off) && (i < dst_off + size);
-    const uint8_t expected_dev = in_dev_region ? kHostFill : kDevFill;
-    INFO("dev byte " << i << " (region=" << in_dev_region
-                     << ") = " << static_cast<int>(devResult[i]) << " expected "
-                     << static_cast<int>(expected_dev));
-    REQUIRE(devResult[i] == expected_dev);
-
-    // This is a copy, not a swap: the host source must be entirely unchanged.
-    INFO("host byte " << i << " = " << static_cast<int>(hostResult[i]) << " expected "
-                      << static_cast<int>(kHostFill));
-    REQUIRE(hostResult[i] == kHostFill);
-  }
-
-  HIP_CHECK(hipFree(d_base));
-  HIP_CHECK(hipHostFree(h_base));
-  HIP_CHECK(hipHostFree(src_slot));
-  HIP_CHECK(hipHostFree(dst_slot));
-  HIP_CHECK(hipStreamDestroy(stream));
+  // Copy, not swap: the source buffer is entirely unchanged.
+  requireBufferEquals(src.ptr(), std::vector<unsigned char>(size + kPad, kSrcFill), cfg.src_alloc);
 }
 #endif
 
