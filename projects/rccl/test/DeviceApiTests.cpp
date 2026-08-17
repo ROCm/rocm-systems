@@ -411,6 +411,9 @@ static void runFindWindowRemoteReadTest()
 
     ASSERT_EQ(ncclGroupStart(), ncclSuccess);
 
+    // Inside a group the per-call return is not yet the final status, so capture
+    // each ncclDevCommCreate result and validate it below once ncclGroupEnd has
+    // flushed the group (skip on ncclInvalidUsage, assert ncclSuccess otherwise).
     std::vector<ncclResult_t> createResults(resources.ranks.size(), ncclSuccess);
     for(size_t rankIdx = 0; rankIdx < resources.ranks.size(); ++rankIdx)
     {
