@@ -151,7 +151,7 @@ query_rocm_agents()
 int
 device_count()
 {
-    static int _num_devices = query_rocm_agents();
+    static const int _num_devices = query_rocm_agents();
     return _num_devices;
 }
 
@@ -184,8 +184,8 @@ initialize_amdsmi()
 bool
 reinitialize_amdsmi()
 {
-    static std::mutex           mtx;
-    std::lock_guard<std::mutex> lock(mtx);
+    static std::mutex                 mtx;
+    const std::lock_guard<std::mutex> lock(mtx);
     amdsmi_initialized.store(false);
     return amdsmi_init();
 }
