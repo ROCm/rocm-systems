@@ -34,6 +34,7 @@ constexpr char kKindTranslatorDataOnly[] = "translator-data-only";
 constexpr char kKindTranslatorNothingToTranslate[] = "translator-nothing-to-translate";
 constexpr char kKindTranslatorResourceLimit[] = "translator-resource-limit";
 constexpr char kKindTranslatorKernelSkipped[] = "translator-kernel-skipped";
+constexpr char kKindTranslatorResidualRewrite[] = "translator-residual-rewrite";
 
 const char *diagnostic_severity_name(rocjitsu::DiagnosticSeverity severity) noexcept {
   switch (severity) {
@@ -65,6 +66,8 @@ const char *diagnostic_kind_name(rocjitsu::DiagnosticKind kind) noexcept {
     return kKindTranslatorResourceLimit;
   case rocjitsu::DiagnosticKind::KernelSkipped:
     return kKindTranslatorKernelSkipped;
+  case rocjitsu::DiagnosticKind::ResidualRewrite:
+    return kKindTranslatorResidualRewrite;
   }
   return "unknown";
 }
@@ -165,6 +168,13 @@ rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size, uint8_
         ++info->changed_instruction_count;
     });
     auto result = translator.translate(source);
+    // Diagnostics are reported for every outcome, not only failures. A
+    // translation can succeed and still have something to say -- a family passed
+    // through unchanged because its A0 handling is not implemented yet is
+    // exactly the kind of gap someone triaging a misbehaving kernel needs to
+    // see, and it never reaches the caller if reporting is conditional on the
+    // object being undispatchable.
+    rocjitsu::emit_gfx1250_b0_to_a0_diagnostics(diagnostic_callback, user_data, result.diagnostics);
     // A translation that ran to completion and produced nothing dispatchable is a
     // statement about the input, not about this run: repeating it reaches the same
     // conclusion. Reporting it as such is what lets a caller distinguish it from
@@ -172,8 +182,6 @@ rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size, uint8_
     // rediscovering it. ROCJITSU_STATUS_ERROR is left to mean the translator threw,
     // which carries no such promise.
     if (result.elf_bytes.empty() || !result.dispatchable()) {
-      rocjitsu::emit_gfx1250_b0_to_a0_diagnostics(diagnostic_callback, user_data,
-                                                  result.diagnostics);
       if (result.diagnostics.empty())
         emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindResultNotDispatchable,
                         "translation produced no dispatchable code object");

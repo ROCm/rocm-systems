@@ -8,8 +8,8 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -2197,6 +2197,9 @@ constexpr uint32_t v_add_u32(uint32_t vdst, uint32_t s0, uint32_t vs1) {
 constexpr uint32_t v_cndmask_b32(uint32_t vdst, uint32_t s0, uint32_t vs1) {
   return vop2(0, vdst, s0, vs1);
 }
+constexpr uint32_t v_lshlrev_b32(uint32_t vdst, uint32_t s0, uint32_t vs1) {
+  return vop2(18, vdst, s0, vs1);
+}
 
 // VOPC: encoding[31:25]=0x3E, op[24:17], vsrc1[16:9], src0[8:0]
 constexpr uint32_t vopc(uint32_t op, uint32_t src0, uint32_t vsrc1) {
@@ -2224,6 +2227,20 @@ constexpr uint32_t flat_lo(uint32_t op, uint32_t seg = 0, uint32_t sc0 = 0) {
 }
 constexpr uint32_t flat_hi(uint32_t vdst, uint32_t data, uint32_t addr, uint32_t saddr = 0x7F) {
   return (vdst << 24) | (saddr << 16) | (data << 8) | addr;
+}
+
+// MUBUF (64-bit): CDNA layout.
+// dword0: offset[11:0], offen[12], idxen[13], sc0[14], sc1[15], lds[16], nt[17],
+//         op[24:18], encoding[31:26]=0x38
+// dword1: vaddr[7:0], vdata[15:8], srsrc[20:16], acc[23], soffset[31:24]
+constexpr uint32_t mubuf_lo(uint32_t op, uint32_t offset = 0, uint32_t offen = 0,
+                            uint32_t idxen = 0, uint32_t lds = 0) {
+  return (0x38u << 26) | (op << 18) | (lds << 16) | (idxen << 13) | (offen << 12) |
+         (offset & 0xFFFu);
+}
+constexpr uint32_t mubuf_hi(uint32_t vdata, uint32_t vaddr, uint32_t srsrc,
+                            uint32_t soffset = INLINE_CONST(0)) {
+  return (soffset << 24) | (srsrc << 16) | (vdata << 8) | vaddr;
 }
 
 constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
@@ -3070,6 +3087,61 @@ TEST(AtomicStressTest, GlobalAtomicAdd_MultiWorkgroup) {
 
   uint32_t final_val = f.mem()->read32(TARGET_ADDR);
   EXPECT_EQ(final_val, 1256u) << "1000 + 256 global atomic adds = 1256";
+}
+
+// buffer_load_dword lds: offset:0 -> LDS+0x200, offset:256 -> LDS+0x300; M0 supplies the base.
+TEST(MubufLdsTest, LoadDwordLdsAppliesInstOffset) {
+  constexpr uint64_t kSrcAddr = 0x2000ULL;
+  constexpr uint32_t kRowBytes = 64 * sizeof(uint32_t);
+  constexpr uint32_t kLdsBase = 0x200; // M0
+  constexpr uint32_t kSrd = 4;         // s[4:7]
+  constexpr uint32_t kBufferLoadDword = 20;
+  constexpr uint32_t kM0 = 124;
+  constexpr uint32_t kSentinel = 0xDEADBEEFu;
+
+  using namespace enc;
+  const uint32_t code[] = {
+      s_mov_b32(SGPR(kSrd), 255),
+      static_cast<uint32_t>(kSrcAddr), // SRD base
+      s_mov_b32(SGPR(kSrd + 1), INLINE_CONST(0)),
+      s_mov_b32(SGPR(kSrd + 2), 255),
+      2 * kRowBytes, // num_records
+      s_mov_b32(SGPR(kSrd + 3), 255),
+      0x00020000u, // word3: dword format
+      s_mov_b32(kM0, 255),
+      kLdsBase,
+      v_lshlrev_b32(1, INLINE_CONST(2), 0), // v1 = lane * 4
+      mubuf_lo(kBufferLoadDword, /*offset=*/0, /*offen=*/1, /*idxen=*/0, /*lds=*/1),
+      mubuf_hi(/*vdata=*/0, /*vaddr=*/1, kSrd / 4),
+      mubuf_lo(kBufferLoadDword, /*offset=*/kRowBytes, /*offen=*/1, /*idxen=*/0, /*lds=*/1),
+      mubuf_hi(/*vdata=*/0, /*vaddr=*/1, kSrd / 4),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+
+  for (std::string_view arch : {"cdna1", "cdna2", "cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch);
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      f.mem()->write32(kSrcAddr + lane * 4, 0xA0000000u | lane);
+      f.mem()->write32(kSrcAddr + kRowBytes + lane * 4, 0xB0000000u | lane);
+    }
+    for (uint32_t i = 0; i < 2 * kRowBytes; i += 4)
+      f.cu()->lds().write32(kLdsBase + i, kSentinel);
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+    ASSERT_NO_THROW(f.engine->run());
+
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      EXPECT_EQ(f.cu()->lds().read32(kLdsBase + lane * 4), 0xA0000000u | lane)
+          << "row 0 lane " << lane;
+      EXPECT_EQ(f.cu()->lds().read32(kLdsBase + kRowBytes + lane * 4), 0xB0000000u | lane)
+          << "row 1 lane " << lane;
+    }
+  }
 }
 
 // Verify that ds_read_b64_tr_b16 with acc=1 writes to AccVGPR (vb+256+vdst),

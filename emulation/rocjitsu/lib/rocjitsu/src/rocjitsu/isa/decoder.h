@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/execution_backend.h"
 #include "util/arena_alloc.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string_view>
@@ -31,12 +32,19 @@ struct IsaExecutionBackend;
 /// (e.g., the ComputeUnit simulation loop).
 class Decoder {
 public:
+  using Pool = util::ArenaAlloc<512, 128>;
+
   virtual ~Decoder();
 
   /// @brief Decode a binary instruction.
   /// @param[in] inst Pointer to the binary instruction encoding.
   /// @returns Decoded Instruction pointer (pool or heap allocated).
   virtual Instruction *decode(const rj_code_binary_inst_t *inst) = 0;
+
+  /// @brief Maximum encoded instruction width and decode lookahead, in 32-bit words.
+  /// @returns A nonzero bound covering both every raw-pointer read and the size of every
+  /// successfully decoded instruction.
+  virtual std::size_t max_instruction_words() const = 0;
 
   /// @brief Decode a binary instruction and record its source text offset.
   ///
@@ -71,15 +79,14 @@ public:
   }
 
   /// @brief Disable pool allocation; future allocations use the heap.
-  void disable_pool() { deactivate_pool(); }
+  void disable_pool();
 
 protected:
-  using Pool = util::ArenaAlloc<512, 128>;
   using AllocFn = void *(*)(void *, size_t);
   using DeallocFn = void (*)(void *, void *);
 
   static void activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool);
-  static void deactivate_pool();
+  static void validate_instruction_operands(const Instruction &inst);
 
   Pool pool_;
 };
@@ -95,8 +102,12 @@ public:
   Instruction *decode(const rj_code_binary_inst_t *inst) override {
     ScopedIsaExecutionBackend scope(execution_backend_);
     auto result = Isa::Decoder::decode(inst);
+    if (result)
+      validate_instruction_operands(*result);
     return result.release();
   }
+
+  std::size_t max_instruction_words() const override { return Isa::Decoder::kMaxInstructionWords; }
 
 private:
   const IsaExecutionBackend *execution_backend_;
