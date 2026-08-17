@@ -6,6 +6,12 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 
+### Added
+
+- `--detach-after <seconds>` flag on `rocprof-sys-attach` for non-interactive use; the
+  binary sleeps for the given duration after attach instead of waiting for `ENTER` on
+  stdin.
+
 ### Changed
 
 - `ROCPROFSYS_SAMPLING_GPUS` is now restricted by the GPUs the ROCm runtime exposes

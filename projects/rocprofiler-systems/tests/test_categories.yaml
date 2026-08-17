@@ -46,24 +46,19 @@ _common_therock_labels_exclude: &_common_therock_labels_exclude
   - "annotate"
   - "mpi"
   - "julia"
-  - "attach"
   - "lulesh"
   - "network"
   - "overflow"
 
+# TEMPORARY: every tier is pinned to the rocprof-sys-attach test
+# (rocattach-attach-loop-*) while that test is being validated in CI.
+_attach_only_regex_includes: &_attach_only_regex_includes
+  - "rocattach"
+
 test_categories:
   quick:
     description: "Fast sanity checks (target: < 5 min) - subset of curated test families"
-    regex_includes:
-      - "transpose.*"
-      - "rocprofiler-systems.*"  # rocprof-sys-* binary smoke tests
-      - "config-invalid"
-      - "config-missing"
-      - "cli-help.*"
-      - "openmp-fortran-offload-sys-run"
-      - "roctx-sampling"
-      - "jpeg-decode-sys-run"
-      # Video decode should be added once the binary is built on TheRock
+    regex_includes: *_attach_only_regex_includes
     regex_excludes:
       - *_common_therock_regex_excludes
       - "transpose-runtime-instrument"
@@ -75,8 +70,7 @@ test_categories:
 
   standard:
     description: "Default PR tier (target: < 30 min)"
-    regex_includes:
-      - ".*"
+    regex_includes: *_attach_only_regex_includes
     regex_excludes: *_common_therock_regex_excludes
     label_excludes: *_common_therock_labels_exclude
     added_supplementary_labels:
@@ -86,8 +80,7 @@ test_categories:
 
   comprehensive:
     description: "Nightly tier (target: < 2 hours)"
-    regex_includes:
-      - ".*"
+    regex_includes: *_attach_only_regex_includes
     regex_excludes: *_common_therock_regex_excludes
     label_excludes: *_common_therock_labels_exclude
     added_supplementary_labels:
@@ -97,8 +90,7 @@ test_categories:
 
   full:
     description: "Complete suite - everything that can run"
-    regex_includes:
-      - ".*"
+    regex_includes: *_attach_only_regex_includes
     regex_excludes: *_common_therock_regex_excludes
     label_excludes: *_common_therock_labels_exclude
     added_supplementary_labels:

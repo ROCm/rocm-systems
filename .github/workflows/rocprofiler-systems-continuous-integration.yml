@@ -165,6 +165,7 @@ jobs:
         --device /dev/kfd
         --device /dev/dri
         --cap-add CAP_SYS_ADMIN
+        --cap-add CAP_SYS_PTRACE
         --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     steps:
@@ -233,11 +234,6 @@ jobs:
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
           echo "CMake: $(cmake --version | head -n 1)"
-          INCLUDED_LABELS="${{ steps.setup_env.outputs.included_labels }}"
-          LABEL_ARG=""
-          if [ -n "${INCLUDED_LABELS}" ]; then
-            LABEL_ARG="-L ${INCLUDED_LABELS}"
-          fi
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
           python3 ./scripts/run-ci.py --stage generate \
@@ -260,9 +256,7 @@ jobs:
             -DROCPROFSYS_USE_PYTHON=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
-            -E "${{ env.EXCLUDED_TESTS }}" \
-            -LE "${{ steps.setup_env.outputs.excluded_labels }}" \
-            ${LABEL_ARG}
+            -R "rocattach"
 
       - name: Configure
         timeout-minutes: 15

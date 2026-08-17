@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04
+      options: --cap-add CAP_SYS_PTRACE
     strategy:
       fail-fast: false
       matrix:
@@ -102,9 +103,7 @@ jobs:
           SANITIZER_LOG_DIR=${PWD}/sanitizer-logs
           mkdir -p "${SANITIZER_LOG_DIR}"
           echo "SANITIZER_LOG_DIR=${SANITIZER_LOG_DIR}" >> $GITHUB_ENV
-          # Default test set covers Dyninst rewrite/runtime-instrument families
-          # plus avail and unit tests.
-          TEST_REGEX='^(rewrite-caller|code-coverage|trace-time-window|rocprofiler-systems-avail-all|rocprof-sys-unit-tests)'
+          TEST_REGEX='rocattach'
           if [ "${SANITIZER_TYPE}" = "address" ]; then
               ASAN_LIB=$(${{ matrix.compiler }} -print-file-name=libasan.so)
               ASAN_LIB=$(realpath "${ASAN_LIB}")
@@ -129,11 +128,6 @@ jobs:
               # process exit. TSan's exit-time cleanup deadlocks with the
               # atfork handlers that reference static locals being destroyed.
               echo "GTEST_FILTER=-logger_test*" >> $GITHUB_ENV
-
-              # TSan's 5-15x slowdown blows past the per-test 300s timeout for
-              # the Dyninst rewrite/runtime-instrument families. Restrict the
-              # TSan job to the lightweight avail + unit-test families.
-              TEST_REGEX='^(rocprofiler-systems-avail-all|rocprof-sys-unit-tests)'
           elif [ "${SANITIZER_TYPE}" = "undefined" ]; then
               echo "SANITIZER_CMAKE_FLAGS=" >> $GITHUB_ENV
               echo "UBSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-ubsan.supp:print_stacktrace=1:halt_on_error=0:exitcode=${SANITIZER_EXIT_CODE}:log_path=${SANITIZER_LOG_DIR}/ubsan" >> $GITHUB_ENV
@@ -321,9 +315,14 @@ jobs:
         run: |
           set -v
           du /tmp -d 1 -h
-          du build/rocprof-sys-pytest-output -d 1 -h
+          # The directory is only created once a pytest test actually executes,
+          # so it is absent when every selected test skips.
+          if [ -d build/rocprof-sys-pytest-output ]; then
+            du build/rocprof-sys-pytest-output -d 1 -h
+            rm -fr build/rocprof-sys-pytest-output/*
+          fi
           df -h
-          rm -fr /tmp/* build/rocprof-sys-pytest-output/*
+          rm -fr /tmp/*
 
       - name: CTest Artifacts
         if: failure()

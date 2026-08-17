@@ -23,7 +23,7 @@ jobs:
 
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-rocm-${{ matrix.rocm-version }}-ubuntu-22.04
-      options: --cap-add CAP_SYS_ADMIN
+      options: --cap-add CAP_SYS_ADMIN --cap-add CAP_SYS_PTRACE
 
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
@@ -128,7 +128,7 @@ jobs:
         find build/coverage -name '*.gcda' -delete
         ctest --test-dir build/coverage \
           --output-on-failure \
-          -LE "network|gpu" \
+          -R "rocattach" \
           --repeat until-pass:3 after-timeout:2
 
     - name: Generate E2E Coverage

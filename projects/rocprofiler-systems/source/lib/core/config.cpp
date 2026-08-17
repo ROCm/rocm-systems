@@ -1327,19 +1327,36 @@ configure_settings(bool _init)
         if(_fparanoid) _fparanoid >> _paranoid;
     }
 
-    auto  _cap_status        = timemory::linux::capability::cap_read(process::get_id());
-    auto* _cap_data          = &_cap_status.effective;
-    bool  _has_cap_sys_admin = false;
+    auto  _cap_status   = timemory::linux::capability::cap_read(process::get_id());
+    auto* _cap_data     = &_cap_status.effective;
+    bool  _has_perf_cap = false;
     for(auto itr : timemory::linux::capability::cap_decode(*_cap_data))
-        if(itr == CAP_SYS_ADMIN) _has_cap_sys_admin = true;
-
-    if(_paranoid > 2 && !_has_cap_sys_admin)
     {
+        if(itr == CAP_SYS_ADMIN) _has_perf_cap = true;
+            // CAP_PERFMON is a narrower grant present since linux 5.8
+#    if defined(CAP_PERFMON)
+        if(itr == CAP_PERFMON) _has_perf_cap = true;
+#    endif
+    }
+
+    if(_paranoid > 2 && !_has_perf_cap)
+    {
+        // Name only the capabilities the loop above was compiled to detect.
+#    if defined(CAP_PERFMON)
+        constexpr auto _perf_requirement = "a value <= 2, CAP_PERFMON, or CAP_SYS_ADMIN";
+        constexpr auto _perf_cap_hint    = "CAP_PERFMON (or CAP_SYS_ADMIN)";
+#    else
+        constexpr auto _perf_requirement = "a value <= 2, or CAP_SYS_ADMIN";
+        constexpr auto _perf_cap_hint    = "CAP_SYS_ADMIN";
+#    endif
+
         LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
-                    "Disabling PAPI (requires a value <= 2)",
-                    _paranoid);
+                    "Disabling PAPI (requires {})",
+                    _paranoid, _perf_requirement);
         LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
-                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2");
+                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
+                    "grant the process {}",
+                    _perf_cap_hint);
         trait::runtime_enabled<comp::papi_config>::set(false);
         trait::runtime_enabled<comp::papi_common<void>>::set(false);
         trait::runtime_enabled<comp::papi_array_t>::set(false);
