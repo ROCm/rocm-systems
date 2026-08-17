@@ -50,7 +50,7 @@ public:
     /// serializing start()/stop() calls (guarded via m_lifecycle_mutex).
     void start()
     {
-        std::scoped_lock const lk{ m_lifecycle_mutex };
+        const std::scoped_lock lk{ m_lifecycle_mutex };
         if(!has_window()) return;
         if(m_thread.joinable()) return;
         m_thread = std::thread{ [this]() { worker(); } };
@@ -63,7 +63,7 @@ public:
     /// the destructor), never from worker().
     void stop() noexcept
     {
-        std::scoped_lock const lk{ m_lifecycle_mutex };
+        const std::scoped_lock lk{ m_lifecycle_mutex };
         if(!m_thread.joinable()) return;
         m_clock.interrupt();
         m_thread.join();

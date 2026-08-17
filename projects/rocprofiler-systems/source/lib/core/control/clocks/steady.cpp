@@ -28,7 +28,7 @@ void
 steady::interrupt()
 {
     {
-        std::scoped_lock const lk{ m_mutex };
+        const std::scoped_lock lk{ m_mutex };
         m_interrupted = true;
     }
     m_cv.notify_all();

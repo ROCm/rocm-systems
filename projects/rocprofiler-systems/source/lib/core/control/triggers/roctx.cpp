@@ -47,7 +47,7 @@ roctx::on_range_start(std::uint64_t range_id, const char* message)
 
     bool was_empty = false;
     {
-        std::scoped_lock const lk{ m_mutex };
+        const std::scoped_lock lk{ m_mutex };
         was_empty = m_active_range_ids.empty();
         m_active_range_ids.insert(range_id);
         if(was_empty) m_in_region.store(true, std::memory_order_relaxed);
@@ -63,7 +63,7 @@ roctx::on_range_stop(std::uint64_t range_id)
 
     bool now_empty = false;
     {
-        std::scoped_lock const lk{ m_mutex };
+        const std::scoped_lock lk{ m_mutex };
         if(m_active_range_ids.erase(range_id) > 0)
         {
             now_empty = m_active_range_ids.empty();
@@ -89,7 +89,7 @@ roctx::on_pause()
 {
     if(filter_active())
     {
-        std::scoped_lock const lk{ m_mutex };
+        const std::scoped_lock lk{ m_mutex };
         if(m_active_range_ids.empty())
         {
             LOG_WARNING("Pause requested outside of target region - ignoring");
@@ -119,7 +119,7 @@ roctx::on_resume()
 
     if(filter_active())
     {
-        std::scoped_lock const lk{ m_mutex };
+        const std::scoped_lock lk{ m_mutex };
         if(m_active_range_ids.empty())
         {
             LOG_WARNING("Resume requested outside of target region - ignoring");
