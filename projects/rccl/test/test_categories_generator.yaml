@@ -1,0 +1,47 @@
+# RCCL CPU-only Python generator tests — shared CTest schema.
+# These tests require no GPU or compiled RCCL library.
+
+test_categories:
+  quick: &generator_tests
+    description: "Fast CPU-only validation of RCCL device-code generators."
+    test_patterns:
+      - "rccl-generate-device-table"
+      - "rccl-generate-ce-reduce"
+      - "rccl-device-compile-unit"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "generator"
+  standard:
+    <<: *generator_tests
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "generator"
+  comprehensive:
+    <<: *generator_tests
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "generator"
+  full:
+    <<: *generator_tests
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "generator"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 60
+    standard: 60
+    comprehensive: 60
+    full: 60

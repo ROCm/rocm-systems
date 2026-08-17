@@ -13,6 +13,15 @@
 
 message(STATUS "Device Linker: assembly-extract pipeline enabled (RCCLDEV language)")
 
+if(DEVICE_KERNEL_COMPILE_TIMING)
+  set(DEVICE_KERNEL_COMPILE_TIMING_LOG
+    "${PROJECT_BINARY_DIR}/device_kernel_compile_times.csv")
+  set(DL_KERNEL_TIMING_LOG_ARG "--timing-log=${DEVICE_KERNEL_COMPILE_TIMING_LOG}")
+  message(STATUS "Device Linker: kernel compile timing -> ${DEVICE_KERNEL_COMPILE_TIMING_LOG}")
+else()
+  set(DL_KERNEL_TIMING_LOG_ARG "")
+endif()
+
 # ---------------------------------------------------------------------------
 # Enable RCCLDEV custom language
 # ---------------------------------------------------------------------------
@@ -287,6 +296,9 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     # brings the per-kernel OBJECT build in line with the rest.
     -fPIC
   )
+  if(DEVICE_KERNEL_COMPILE_TIMING)
+    target_compile_options(${_dev_target} PRIVATE ${DL_KERNEL_TIMING_LOG_ARG})
+  endif()
   target_compile_definitions(${_dev_target} PRIVATE RCCL_DEVICE_LINKER)
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
 
@@ -370,6 +382,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}
       -std=c++17
+      ${DL_KERNEL_TIMING_LOG_ARG}
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
     DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_rocshmem_link_depends}

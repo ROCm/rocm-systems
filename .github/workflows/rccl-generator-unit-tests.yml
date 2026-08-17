@@ -1,0 +1,45 @@
+name: RCCL generator unit tests
+
+# Runs RCCL's CPU-only Python generator unit tests on every PR to develop that
+# touches projects/rccl/**. These cover src/device/generate.py (and the
+# ce_reduce generator) via unittest — no GPU, HIP, or compiled librccl required.
+# The workflow's own path is in the trigger so it self-runs on the PR that
+# introduces it.
+
+on:
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - 'projects/rccl/**'
+      - '.github/workflows/rccl-generator-unit-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  rccl-generator-unit-tests:
+    name: Generator unit tests (CPU-only)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout rccl
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # rocm-systems is a large monorepo; only fetch what the generator tests need.
+          sparse-checkout: projects/rccl
+
+      - name: Run device-table generator unit tests
+        run: |
+          python3 projects/rccl/src/device/test_generate_device_table.py -v
+
+      - name: Run ce_reduce generator unit tests
+        run: |
+          python3 projects/rccl/src/device/ce_reduce/test_generate_ce_reduce.py -v
+
+      - name: Run rccl-device-compile unit tests
+        run: |
+          python3 projects/rccl/tools/test_rccl_device_compile.py -v

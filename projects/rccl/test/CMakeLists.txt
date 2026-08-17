@@ -35,6 +35,14 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
+  # CPU-only unit test: rccl-device-compile still sys.exits on timed subprocess
+  # failure (timing refactor returns rc from run_timed; callers must exit).
+  add_test(
+    NAME rccl-device-compile-unit
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/tools/test_rccl_device_compile.py"
+  )
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
@@ -772,6 +780,16 @@ if(BUILD_TESTS)
     # get_filename_component(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
     include("${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
     enable_testing()
+
+    set(_rccl_test_categories_generator_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_generator.yaml")
+    if(EXISTS "${_rccl_test_categories_generator_yaml}")
+        message(STATUS "Applying test categories for RCCL generator tests")
+        apply_ctest_category_labels(
+            "${_rccl_test_categories_generator_yaml}"
+        )
+    else()
+        message(WARNING "Skipping test categories for RCCL generator tests: missing ${_rccl_test_categories_generator_yaml}")
+    endif()
 
     set(_rccl_test_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
     if(EXISTS "${_rccl_test_categories_yaml}")
