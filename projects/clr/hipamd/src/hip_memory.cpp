@@ -3125,8 +3125,16 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
         case hipCopyBufferSDMA: {
           amd::Memory* sMem = srcMemories[i];
           amd::Memory* dMem = dstMemories[i];
-          if (sMem == nullptr || dMem == nullptr ||
-              (!isDualSidedIndirect && getMemoryType(sMem) == getMemoryType(dMem))) {
+          if (sMem == nullptr || dMem == nullptr) {
+            return hipErrorNotSupported;
+          }
+          const hipMemoryType sType = getMemoryType(sMem);
+          const hipMemoryType dType = getMemoryType(dMem);
+          if (isDualSidedIndirect) {
+            if (sType == hipMemoryTypeHost && dType == hipMemoryTypeHost) {
+              return hipErrorNotSupported;
+            }
+          } else if (sType == dType) {
             return hipErrorNotSupported;
           }
           break;

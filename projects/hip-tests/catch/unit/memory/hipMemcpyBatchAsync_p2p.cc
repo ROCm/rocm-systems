@@ -183,9 +183,10 @@ static void RunIndirectCopyP2pTest(unsigned int flags, size_t count, size_t size
                                    int device_for_src, int device_for_dst) {
   const bool is_indirect_src = flags & hipMemcpyFlagExtOpIndirectSrc;
   const bool is_indirect_dst = flags & hipMemcpyFlagExtOpIndirectDst;
+  const bool is_dual_sided_indirect = is_indirect_src && is_indirect_dst;
   const hipError_t expected_error =
       getIndirectExpectedReturn(LinearAllocs::hipMalloc, LinearAllocs::hipMalloc, device_for_src,
-                                device_for_dst);
+                                device_for_dst, is_dual_sided_indirect);
 
   EnablePeerAccess({{device_for_dst, device_for_src}});
 

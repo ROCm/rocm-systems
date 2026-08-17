@@ -124,11 +124,13 @@ inline void DisablePeerAccess(const std::vector<std::pair<int, int>>& peer_pairs
   }
 }
 
-// Every ExtOp flag rides the SDMA batch path, which only carries transfers between device memory
-// and pinned host memory, plus peer device-to-device copies. Pageable memory, host-to-host and
-// same-device device-to-device pairings are rejected before the architecture is consulted.
+// Every ExtOp flag rides the batch path, which only carries transfers between device memory and
+// pinned host memory, plus peer device-to-device copies. Pageable memory and host-to-host pairings
+// are always rejected. Same-device device-to-device is rejected for swap and single-sided indirect
+// (both narrow to host<->device), but dual-sided indirect carries it through the indirect blit path.
 inline bool extOpPairingSupported(const LinearAllocs alloc_type_a, const LinearAllocs alloc_type_b,
-                                  const bool is_p2p) {
+                                  const bool is_p2p,
+                                  const bool is_dual_sided_indirect = false) {
   if (alloc_type_a == LinearAllocs::malloc || alloc_type_b == LinearAllocs::malloc) {
     return false;
   }
@@ -138,7 +140,7 @@ inline bool extOpPairingSupported(const LinearAllocs alloc_type_a, const LinearA
   }
 
   if (alloc_type_a == LinearAllocs::hipMalloc && alloc_type_b == LinearAllocs::hipMalloc &&
-      !is_p2p) {
+      !is_p2p && !is_dual_sided_indirect) {
     return false;
   }
 
@@ -174,10 +176,11 @@ inline hipError_t getSwapExpectedReturn(const LinearAllocs alloc_type_a,
 
 inline hipError_t getIndirectExpectedReturn(const LinearAllocs alloc_type_src,
                                             const LinearAllocs alloc_type_dst,
-                                            const int device_src = 0, const int device_dst = 0) {
+                                            const int device_src = 0, const int device_dst = 0,
+                                            const bool is_dual_sided_indirect = false) {
   const bool is_p2p = device_src != device_dst;
 
-  if (!extOpPairingSupported(alloc_type_src, alloc_type_dst, is_p2p)) {
+  if (!extOpPairingSupported(alloc_type_src, alloc_type_dst, is_p2p, is_dual_sided_indirect)) {
     return hipErrorNotSupported;
   }
 

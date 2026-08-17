@@ -974,7 +974,9 @@ static void RunIndirectCopyTest(unsigned int flags, size_t count, size_t size_in
                                 LinearAllocs alloc_type_src, LinearAllocs alloc_type_dst) {
   const bool is_indirect_src = flags & hipMemcpyFlagExtOpIndirectSrc;
   const bool is_indirect_dst = flags & hipMemcpyFlagExtOpIndirectDst;
-  const hipError_t expected_error = getIndirectExpectedReturn(alloc_type_src, alloc_type_dst);
+  const bool is_dual_sided_indirect = is_indirect_src && is_indirect_dst;
+  const hipError_t expected_error =
+      getIndirectExpectedReturn(alloc_type_src, alloc_type_dst, 0, 0, is_dual_sided_indirect);
 
   IndirectCopyBuffers buffers =
       makeIndirectCopyBuffers(count, size_in_bytes, alloc_type_src, alloc_type_dst);
@@ -1130,7 +1132,9 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectCopy_StreamOrderedPointer) {
 
   const bool is_indirect_src = flags & hipMemcpyFlagExtOpIndirectSrc;
   const bool is_indirect_dst = flags & hipMemcpyFlagExtOpIndirectDst;
-  const hipError_t expected_return = getIndirectExpectedReturn(alloc_type_src, alloc_type_dst);
+  const bool is_dual_sided_indirect = is_indirect_src && is_indirect_dst;
+  const hipError_t expected_return =
+      getIndirectExpectedReturn(alloc_type_src, alloc_type_dst, 0, 0, is_dual_sided_indirect);
 
   IndirectCopyBuffers buffers =
       makeIndirectCopyBuffers(count, kSizeInBytes, alloc_type_src, alloc_type_dst);
