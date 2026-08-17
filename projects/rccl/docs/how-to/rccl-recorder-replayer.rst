@@ -172,12 +172,8 @@ and discovers the per-rank files automatically.
 
 .. note::
 
-   - ``RCCL_REPLAY_FILE`` is automatically unset by the Replayer at startup to
-   prevent the replay run from recording itself.
-
-   - Depending on your MPI library, you might need to adjust flags such as
-   ``--bind-to numa`` or ``--mca pml ucx``. Check the output of your MPI
-   implementation's ``mpirun --help`` for options relevant to your cluster.
+   - ``RCCL_REPLAY_FILE`` is automatically unset by the Replayer at startup to prevent the replay run from recording itself.
+   - Depending on your MPI library, you might need to adjust flags such as ``--bind-to numa`` or ``--mca pml ucx``. Check the output of your MPI implementation's ``mpirun --help`` for options relevant to your cluster.
 
 What the Replayer does
 ----------------------

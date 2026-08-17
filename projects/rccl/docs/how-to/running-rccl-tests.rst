@@ -240,13 +240,8 @@ exclusive use of one GPU.
 
 .. note::
 
-   - ``--bind-to numa`` pins each MPI rank to the NUMA node closest to its GPU.
-   This prevents cross-NUMA memory traffic that would otherwise inflate latency
-   and reduce bandwidth.
-
-   - ``HSA_NO_SCRATCH_RECLAIM=1`` is required on gfx90a (MI200) when using ROCm
-   7.13 or later, and is recommended on all AMD Instinct™ GPUs for stable
-   benchmark results.
+   - ``--bind-to numa`` pins each MPI rank to the NUMA node closest to its GPU. This prevents cross-NUMA memory traffic that would otherwise inflate latency and reduce bandwidth.
+   - ``HSA_NO_SCRATCH_RECLAIM=1`` is required on gfx90a (MI200) when using ROCm 7.13 or later, and is recommended on all AMD Instinct™ GPUs for stable benchmark results.
 
 Test specific collective operations
 =====================================

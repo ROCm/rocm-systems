@@ -171,10 +171,10 @@ The candidate algorithms are:
   AllReduce using Ring is decomposed into two phases:
 
   1. **ReduceScatter** — each GPU reduces a slice of the data while passing
-    partial sums around the ring. After *N−1* steps, every GPU holds the
-    fully reduced result for one slice.
+     partial sums around the ring. After *N−1* steps, every GPU holds the
+     fully reduced result for one slice.
   2. **AllGather** — each GPU broadcasts its fully reduced slice around the
-    ring. After *N−1* more steps, every GPU holds all slices.
+     ring. After *N−1* more steps, every GPU holds all slices.
 
 - **Tree**: A binary reduction tree is used for latency-bound workloads (small messages). The tree converges partial results in ``log₂(N)`` steps rather than ``N−1``, so it out-performs Ring when the per-step latency dominates over the bandwidth term.
 

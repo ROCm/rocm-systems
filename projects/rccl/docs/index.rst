@@ -23,14 +23,10 @@ The RCCL public repository is located within the rocm-systems repo at `<https://
     * :doc:`Build from source <./install/building-installing>`
     * :doc:`Run RCCL using Docker <./install/docker-install>`
 
-  .. grid-item-card:: Conceptual
+  .. grid-item-card:: Tutorials
 
-    * :doc:`Collective operations in RCCL <./conceptual/collective-operations>`
-    * :doc:`Collective algorithms in RCCL <./conceptual/collective-algorithms>`
-    * :doc:`Collective protocols in RCCL <./conceptual/collective-protocols>`
-    * :doc:`Hardware-specific optimizations <./conceptual/hardware-specific-optimizations>`
-    * :doc:`Fault tolerance <./conceptual/fault-tolerance>`
-
+    * :doc:`Create a RCCL program <./tutorials/create-a-rccl-program>`
+  
   .. grid-item-card:: How to
 
     * :doc:`Run RCCL-Tests <./how-to/running-rccl-tests>`
@@ -39,9 +35,13 @@ The RCCL public repository is located within the rocm-systems repo at `<https://
     * :doc:`Use the NCCL Net plugin <./how-to/using-nccl>`
     * :doc:`RCCL usage tips <./how-to/rccl-usage-tips>`
 
-  .. grid-item-card:: Tutorials
+  .. grid-item-card:: Conceptual
 
-    * :doc:`Create a RCCL program <./tutorials/create-a-rccl-program>`
+    * :doc:`Collective operations in RCCL <./conceptual/collective-operations>`
+    * :doc:`Collective algorithms in RCCL <./conceptual/collective-algorithms>`
+    * :doc:`Collective protocols in RCCL <./conceptual/collective-protocols>`
+    * :doc:`Hardware-specific optimizations <./conceptual/hardware-specific-optimizations>`
+    * :doc:`Fault tolerance <./conceptual/fault-tolerance>`
 
   .. grid-item-card:: Reference
 
