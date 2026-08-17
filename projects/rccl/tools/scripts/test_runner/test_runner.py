@@ -91,7 +91,7 @@ def main():
             # Print skip messages for disabled or filtered-out test suites upfront.
             # --suite-name uses gtest-style glob filtering (see glob_filter_matches).
             # --scope smoke restricts the run to suites marked "smoke": true in
-            # the config; 'nightly' (or empty) runs all enabled suites.
+            # the config; 'all' (the default) or 'nightly' run all enabled suites.
             smoke_only = args.scope == 'smoke'
 
             print()

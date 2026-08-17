@@ -84,10 +84,10 @@ Examples:
         self.parser.add_argument(
             '--scope',
             type=str,
-            default='',
-            choices=['', 'nightly', 'smoke'],
+            default='all',
+            choices=['all', 'nightly', 'smoke'],
             help="Select the suite scope from the config: 'smoke' runs only suites "
-                 "marked \"smoke\": true; 'nightly' (or empty, the default) runs all "
+                 "marked \"smoke\": true; 'all' (the default) or 'nightly' run all "
                  "enabled suites. Combine with --suite-name to narrow further."
         )
         self.parser.add_argument(
