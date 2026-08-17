@@ -11,8 +11,8 @@ endif()
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(ROCclr)
 
-option(BUILD_TESTS "Enable building ROCclr unit tests" OFF)
+# BUILD_TESTS is declared -- and enable_testing() runs -- at the CLR root so
+# that `ctest` discovers these tests from the top-level build directory.
 if(BUILD_TESTS)
-  enable_testing()
   add_subdirectory(tests/unit)
 endif()
