@@ -593,36 +593,36 @@ namespace RcclUnitTesting
     numRanksToExecute = (int)localRanksToExecute.size();
  
     // =========================================================================
-  // STAGE 1: PRE-COLLECTIVE DEBUG PRINTING (BEFORE ncclGroupStart)
-  // =========================================================================
-  if (this->printValues && !useHipGraph)
-  {
-    for (int collId = 0; collId < this->numCollectivesInGroup[groupId]; ++collId)
+    // STAGE 1: PRE-COLLECTIVE DEBUG PRINTING (BEFORE ncclGroupStart)
+    // =========================================================================
+    if (this->printValues && !useHipGraph)
     {
-      for (int localRank : localRanksToExecute)
+      for (int collId = 0; collId < this->numCollectivesInGroup[groupId]; ++collId)
       {
-        CollectiveArgs& collArg = this->collArgs[groupId][localRank][collId];
-        CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+        for (int localRank : localRanksToExecute)
+        {
+          CollectiveArgs& collArg = this->collArgs[groupId][localRank][collId];
+          CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
-        int const numInputElementsToPrint = (this->printValues < 0 ? collArg.numInputElements : this->printValues);
-        PtrUnion inputCpu;
-        size_t const numInputBytes = numInputElementsToPrint * DataTypeToBytes(collArg.dataType);
-        inputCpu.AllocateCpuMem(numInputBytes);
+          int const numInputElementsToPrint = (this->printValues < 0 ? collArg.numInputElements : this->printValues);
+          PtrUnion inputCpu;
+          size_t const numInputBytes = numInputElementsToPrint * DataTypeToBytes(collArg.dataType);
+          inputCpu.AllocateCpuMem(numInputBytes);
         
-        // Safe hipMemcpy BEFORE collective launch
-        CHECK_HIP(hipMemcpy(inputCpu.ptr, collArg.inputGpu.ptr, numInputBytes, hipMemcpyDeviceToHost));
-        printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Input",
-               inputCpu.ToString(collArg.dataType, numInputElementsToPrint).c_str());
-        inputCpu.FreeCpuMem();
+          // Safe hipMemcpy BEFORE collective launch
+          CHECK_HIP(hipMemcpy(inputCpu.ptr, collArg.inputGpu.ptr, numInputBytes, hipMemcpyDeviceToHost));
+          printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Input",
+                 inputCpu.ToString(collArg.dataType, numInputElementsToPrint).c_str());
+          inputCpu.FreeCpuMem();
 
-        int const numOutputElementsToPrint = (this->printValues < 0 ? collArg.numOutputElements : this->printValues);
-        size_t const numOutputBytes = numOutputElementsToPrint * DataTypeToBytes(collArg.dataType);
-        CHECK_HIP(hipMemcpy(collArg.outputCpu.ptr, collArg.outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
-        printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Pre-Output",
-               collArg.outputCpu.ToString(collArg.dataType, numOutputElementsToPrint).c_str());
+          int const numOutputElementsToPrint = (this->printValues < 0 ? collArg.numOutputElements : this->printValues);
+          size_t const numOutputBytes = numOutputElementsToPrint * DataTypeToBytes(collArg.dataType);
+          CHECK_HIP(hipMemcpy(collArg.outputCpu.ptr, collArg.outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
+          printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Pre-Output",
+                 collArg.outputCpu.ToString(collArg.dataType, numOutputElementsToPrint).c_str());
+        }
       }
     }
-  }
 
     size_t const totalLocalDevices = this->deviceIds.size();
     this->graphs[groupId].resize(totalLocalDevices);
