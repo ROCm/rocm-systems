@@ -53,6 +53,8 @@ subtrees:
     title: Point-to-point synchronization routines
   - file: api/memory_ordering.rst
     title: Memory ordering routines
+  - file: api/tile.rst
+    title: Tile routines
 
 - caption: About
   entries:

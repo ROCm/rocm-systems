@@ -39,7 +39,7 @@ TEST_F(flush_worker_test, start_worker_in_correct_state)
 
     rocprofsys::trace_cache::flush_worker_t worker(worker_function, worker_sync,
                                                    test_file_path);
-    pid_t                                   current_pid = getpid();
+    const pid_t                             current_pid = getpid();
 
     worker.start(current_pid);
 
@@ -60,7 +60,7 @@ TEST_F(flush_worker_test, stop_worker_complete)
 
     rocprofsys::trace_cache::flush_worker_t worker(worker_function, worker_sync,
                                                    test_file_path);
-    pid_t                                   current_pid = getpid();
+    const pid_t                             current_pid = getpid();
 
     worker.start(current_pid);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -83,7 +83,7 @@ TEST_F(flush_worker_test, worker_function_called_on_stop)
 
     rocprofsys::trace_cache::flush_worker_t worker(worker_function, worker_sync,
                                                    test_file_path);
-    pid_t                                   current_pid = getpid();
+    const pid_t                             current_pid = getpid();
 
     worker.start(current_pid);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -99,7 +99,7 @@ TEST_F(flush_worker_test, multiple_stop_calls_are_safe)
 
     rocprofsys::trace_cache::flush_worker_t worker(worker_function, worker_sync,
                                                    test_file_path);
-    pid_t                                   current_pid = getpid();
+    const pid_t                             current_pid = getpid();
 
     worker.start(current_pid);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -125,12 +125,12 @@ TEST_F(flush_worker_test, worker_factory_creates_valid_object)
 
 TEST_F(flush_worker_test, worker_handles_invalid_path)
 {
-    auto        worker_function = [](rocprofsys::trace_cache::ofs_t&, bool) {};
-    std::string invalid_path    = "/invalid/path/file.bin";
+    auto              worker_function = [](rocprofsys::trace_cache::ofs_t&, bool) {};
+    const std::string invalid_path    = "/invalid/path/file.bin";
 
     rocprofsys::trace_cache::flush_worker_t worker(worker_function, worker_sync,
                                                    invalid_path);
-    pid_t                                   current_pid = getpid();
+    const pid_t                             current_pid = getpid();
 
     EXPECT_THROW(worker.start(current_pid), std::runtime_error);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -149,7 +149,7 @@ TEST_F(flush_worker_test, different_pid_start_stop)
 
     rocprofsys::trace_cache::flush_worker_t worker(worker_function, worker_sync,
                                                    test_file_path);
-    pid_t                                   parent_pid = getpid();
+    const pid_t                             parent_pid = getpid();
 
     worker.start(parent_pid);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -157,15 +157,15 @@ TEST_F(flush_worker_test, different_pid_start_stop)
     EXPECT_TRUE(worker_sync->is_running);
     EXPECT_EQ(worker_sync->origin_pid, parent_pid);
 
-    pid_t child_pid = fork();
+    const pid_t child_pid = fork();
     if(child_pid == 0)
     {
-        pid_t current_child_pid = getpid();
+        const pid_t current_child_pid = getpid();
         worker.stop(current_child_pid);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-        bool still_running = worker_sync->is_running;
-        bool exit_finished = worker_sync->exit_finished;
+        const bool still_running = worker_sync->is_running;
+        const bool exit_finished = worker_sync->exit_finished;
 
         _exit(still_running ? 1 : (exit_finished ? 2 : 0));
     }
@@ -173,7 +173,7 @@ TEST_F(flush_worker_test, different_pid_start_stop)
     {
         int status;
         waitpid(child_pid, &status, 0);
-        int child_exit_code = WEXITSTATUS(status);
+        const int child_exit_code = WEXITSTATUS(status);
 
         EXPECT_EQ(child_exit_code, 0);
         EXPECT_FALSE(worker_sync->exit_finished);
