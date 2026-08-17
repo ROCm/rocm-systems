@@ -395,7 +395,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             _generate_configs = true;
             auto _dir         = p.get<std::string>("generate-configs");
             if(!_dir.empty()) _config_folder = std::move(_dir);
-            if(!filepath::exists(_config_folder)) filepath::makedir(_config_folder);
+            if(!path::is_directory(_config_folder)) filepath::makedir(_config_folder);
         });
     parser
         .add_argument({ "--no-defaults" },
@@ -779,7 +779,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
                         << itr.second << "\n";
             };
 
-        int nwidth = (std::log10(_causal_envs_tmp.size()) + 1);
+        const int nwidth = (std::log10(_causal_envs_tmp.size()) + 1);
         for(size_t i = 0; i < _causal_envs_tmp.size(); ++i)
         {
             std::stringstream fname{};

@@ -387,10 +387,12 @@ static ncclResult_t doLaunches(struct ncclComm* head) {
       goto failure;
     }
 
-    while (true) { // Iterate rounds of launches for clique.
+    while (true) {
+      // Iterate rounds of launches for clique.
       bool moreRounds = false;
       comm = cliqueHead;
-      do { // Iterate clique members.
+      do {
+        // Iterate clique members.
         struct ncclComm* next = comm->groupNext[ncclGroupTaskTypeCollective];
         if (useBarrier) {
           // Barrier reduction result tells us if this was the final round.
@@ -418,7 +420,8 @@ static ncclResult_t doLaunches(struct ncclComm* head) {
           if (plan != nullptr) {
             NCCLCHECKGOTO(ncclLaunchKernelAfter_NoCuda(comm, plan), result, failure);
           }
-        } else { // Final round.
+        } else {
+          // Final round.
           CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), result, failure);
           NCCLCHECKGOTO(ncclLaunchFinish(comm), result, failure);
         }
@@ -491,6 +494,8 @@ static void reclaimPlannerState(struct ncclComm* comm) {
     memset(&comm->planner, 0, sizeof(comm->planner));
     comm->planner.peers = tmp;
     if (comm->planner.peers != NULL) memset(comm->planner.peers, 0, comm->nRanks * sizeof(comm->planner.peers[0]));
+    comm->planner.bcast_info.minBcastPeer = INT_MAX;
+    comm->planner.bcast_info.maxBcastPeer = INT_MIN;
   }
 }
 
@@ -517,8 +522,8 @@ static void groupCleanup(struct ncclComm** groupCommHeadPtr,
           comm->planner.peers = tmp;
           if (comm->planner.peers != NULL)
             memset(comm->planner.peers, 0, comm->nRanks * sizeof(comm->planner.peers[0]));
-       //   comm->planner.bcast_info.minBcastPeer = INT_MAX;
-       //   comm->planner.bcast_info.maxBcastPeer = INT_MIN;
+          comm->planner.bcast_info.minBcastPeer = INT_MAX;
+          comm->planner.bcast_info.maxBcastPeer = INT_MIN;
 
           comm->planner.rmaTaskQueues = tmpRmaQueues;
           if (comm->planner.rmaTaskQueues != NULL) {
