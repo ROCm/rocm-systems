@@ -44,17 +44,17 @@ std::int64_t
 compute_sleep_for_overhead()
 {
     using random_engine_t = std::mt19937_64;
-    auto   _engine        = random_engine_t{ std::random_device{}() };
-    auto   _dist          = std::uniform_int_distribution<std::int64_t>{ 0, 5 };
-    size_t _ntot          = 250;
-    size_t _nwarm         = 50;
-    auto   _stats         = tim::statistics<double>{};
+    auto         _engine  = random_engine_t{ std::random_device{}() };
+    auto         _dist    = std::uniform_int_distribution<std::int64_t>{ 0, 5 };
+    const size_t _ntot    = 250;
+    const size_t _nwarm   = 50;
+    auto         _stats   = tim::statistics<double>{};
     for(size_t i = 0; i < _ntot; ++i)
     {
-        auto         _val = _dist(_engine);
-        std::int64_t _beg = tracing::now();
+        auto               _val = _dist(_engine);
+        const std::int64_t _beg = tracing::now();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _val });
-        std::int64_t _end = tracing::now();
+        const std::int64_t _end = tracing::now();
         if(i < _nwarm) continue;
         auto _diff = (_end - _beg);
         if(_diff < _val)
