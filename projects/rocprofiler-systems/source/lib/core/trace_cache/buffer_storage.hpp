@@ -8,6 +8,7 @@
 #include "core/trace_cache/cacheable.hpp"
 
 #include "common/defines.h"
+#include "type_traits/thread_state_policy.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -82,17 +83,8 @@ struct flush_worker_factory_t
     }
 };
 
-namespace type_traits
-{
-template <typename T>
-concept thread_state_policy = requires(state::thread::State state_to_set) {
-    { T::scoped(state_to_set) } -> std::destructible;
-    { T::Internal } -> std::convertible_to<state::thread::State>;
-};
-}  // namespace type_traits
-
 template <typename WorkerFactory, typename TypeIdentifierEnum,
-          type_traits::thread_state_policy ThreadStatePolicy = state::thread>
+          rocprofsys::type_traits::thread_state_policy ThreadStatePolicy = state::thread>
 class buffer_storage
 {
     static_assert(type_traits::is_enum_class_v<TypeIdentifierEnum>,

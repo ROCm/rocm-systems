@@ -222,6 +222,26 @@ class TestTranspose(RocprofsysTest):
         )
         self.assert_regex(result)
 
+    @pytest.mark.locks
+    @pytest.mark.timeout(60)
+    def test_rw_locks(self, transpose_env):
+        """
+        Regression test for a self-deadlock: pthread_mutex_gotcha used to
+        intercept common::synchronized<>'s internal rwlock (metadata_registry's
+        m_threads), recursively re-entering it on the same thread while
+        recording the trace event for the lock acquisition itself. This
+        aborted rocprof-sys-run with SIGABRT with -I rw-locks enabled.
+        """
+        result = self.run_test(
+            "sys_run",
+            "transpose",
+            env=transpose_env,
+            sys_run_args=["-I", "rw-locks"],
+            run_args=["2", "50", "10"],
+            check_target_arch=True,
+        )
+        self.assert_regex(result)
+
     @pytest.mark.timeout(120)
     @pytest.mark.loops
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
