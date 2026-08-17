@@ -94,6 +94,13 @@ deliberately locality-agnostic. For example, two 8-XCD GPUs permit up to 16
 partitions, while `num_threads: 4` assigns XCDs from both GPUs to each
 partition.
 
+Raising `num_threads` only pays off if the work reaches more than one XCD. A
+compute queue created through KFD spreads each dispatch over every XCD (see
+*Queue ownership and XCD fan-out* in `vm-design.md`), so its workgroups land in
+every partition. A queue registered directly against one command processor, as
+unit tests do, keeps its whole grid on that XCD and leaves the other partitions
+idle no matter how `num_threads` is set.
+
 ### Topology
 
 Components are defined hierarchically under `topology.root`. Range

@@ -66,7 +66,46 @@ engine. It exposes two methods:
 ## Command Processor
 
 The CP reads dispatch packets and distributes wavefronts across registered
-compute units in round-robin order.
+compute units in round-robin order. Each XCD has its own CP, and a CP is wired
+only to its own XCD's compute units.
+
+### Queue ownership and XCD fan-out
+
+`SoC::assign_queue_owner_cp()` rotates HW queues across the XCDs. The XCD it
+returns *owns* the queue: it alone reads the ring, advances the read pointer, and
+holds each dispatch's completion signal. It is not the only XCD that runs the
+work.
+
+A queue created through KFD (`HwQueue::xcd_fanout`) is replicated onto every
+XCD at registration. Each dispatch on it is then split so that **XCD i runs the
+grid chunks congruent to i modulo the XCD count** — round-robin, one workgroup at
+a time. The chunk is one workgroup, except for a clustered dispatch where it is a
+whole cluster, so cluster peers stay co-resident on the XCD whose LDS they share.
+
+The rank is the XCD's own index, not its position relative to the queue's owner,
+so the workgroup-to-XCD mapping does not depend on which XCD a queue landed on.
+That matters because kernels swizzle their workgroup index for cache locality
+assuming exactly this permutation.
+
+Two cases are deliberately not split: a grid with fewer chunks than XCDs (an
+empty share is indistinguishable from a barrier packet) and SDMA queues (which
+belong to one engine). A queue registered directly against one CP, as unit tests
+do, is not replicated and keeps the whole grid on that CP's XCD.
+
+Replicas never read the ring and never poll a doorbell; shards arrive from the
+owning XCD through the engine's cross-thread event queue, so the handoff is safe
+when `partition_topology_by_xcds` has put each XCD on its own worker thread.
+
+### Cross-XCD completion
+
+A fanned-out dispatch retires once, after the last workgroup anywhere on the
+device. Each XCD counts its own share, flushes its own caches, then publishes the
+share to a `GridCompletion` counter shared by all shards. The owning XCD holds the
+head of its queue until that counter covers the grid, then fires the completion
+signal. Publishing releases and the owner's check acquires, so no XCD's results
+are still sitting in its caches when the signal is written. Peer shards carry no
+completion signal, fire no dispatch-level plugin callbacks, and do not report the
+queue idle.
 
 ### Event-Driven Dispatch
 
@@ -126,7 +165,8 @@ A `DispatchPacket` specifies:
 
 Wavefronts are distributed round-robin across CUs within the XCD. Each CU
 allocates a contiguous block in its physical SGPR and VGPR files for the
-wavefront.
+wavefront. For a fanned-out dispatch this walk covers only the XCD's own share
+of the grid; see *Queue ownership and XCD fan-out* above.
 
 ---
 
