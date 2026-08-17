@@ -4,22 +4,23 @@
  * SPDX-License-Identifier: MIT
  */
 
-// Unit tests for amd::EraseCoveringMemObj / amd::EraseCoveringMemObjIf -- the
-// range-aware erase primitive shared by MemObjMap::FindAndRemoveMemObj and the
-// identity-checked MemObjMap::TryRemoveMemObj.
+// Unit tests for the mem-obj map erase primitives in device/memobjmap_erase.hpp.
 //
 // These pin two invariants:
 //
-// 1. Removal uses the same [base, base + size) range test as lookup
-//    (MemObjMap::FindMemObj), so any pointer a lookup resolves -- including an
-//    interior address, not just the exact base key -- is removable. A true
-//    miss (no covering allocation) returns nullptr and erases nothing.
+// 1. EraseCoveringMemObj (behind MemObjMap::FindAndRemoveMemObj) removes with
+//    the same [base, base + size) range test lookup uses (MemObjMap::FindMemObj),
+//    so any pointer a lookup resolves -- including an interior address, not just
+//    the exact base key -- is removable. A true miss (no covering allocation)
+//    returns nullptr and erases nothing.
 //
-// 2. The predicate variant erases only when the covering entry satisfies the
-//    caller's check. TryRemoveMemObj passes an identity predicate so that a
-//    pointer whose range happens to be covered by an *unrelated* allocation
-//    (per-device VA ranges can numerically overlap the global map's entries on
-//    Windows) never de-indexes that live allocation.
+// 2. The identity-sweep primitives (behind MemObjMap::TryRemoveMemObj) let a
+//    user-facing free drop *every* alias an allocation is indexed under before
+//    the object is released (EraseEntriesWithValue), while distinguishing a
+//    base address the allocation is actually indexed under from an interior
+//    pointer or a numerically-overlapping unrelated allocation
+//    (ContainsKeyWithValue / ContainsValue), which must never be de-indexed
+//    or freed by mistake.
 
 #include "device/memobjmap_erase.hpp"
 
@@ -124,52 +125,53 @@ TEST(EraseCoveringMemObjTest, SelectsCorrectCoveringEntryAmongMany) {
   EXPECT_EQ(map.size(), 2u);
 }
 
-// When the covering entry is the object the caller expects, it is erased --
-// TryRemoveMemObj's happy path.
-TEST(EraseCoveringMemObjIfTest, MatchingPredicateErases) {
+// A free must drop every alias of the object it releases: an allocation
+// indexed under two keys (e.g. a registered host pointer plus a device VA)
+// loses both, and unrelated entries survive.
+TEST(EraseEntriesWithValueTest, ErasesEveryAliasOfValue) {
   FakeMem a{0x1000, 0x1000};
-  Map map{{a.base, &a}};
-  const FakeMem* expected = &a;
+  FakeMem b{0x4000, 0x1000};
+  Map map{{0x1000, &a}, {0x8000, &a}, {b.base, &b}};
 
-  FakeMem* removed = amd::EraseCoveringMemObjIf(
-      map, uintptr_t(0x1500), sizeOf, [expected](const FakeMem* m) { return m == expected; });
+  size_t erased = amd::EraseEntriesWithValue(map, &a);
 
-  EXPECT_EQ(removed, &a);
-  EXPECT_TRUE(map.empty());
-}
-
-// The wrong-erase regression test: a pointer covered by an *unrelated*
-// allocation (overlapping per-device VA on Windows) must not de-index that
-// live entry when the caller expected a different object.
-TEST(EraseCoveringMemObjIfTest, RejectingPredicateLeavesEntry) {
-  FakeMem a{0x1000, 0x1000};
-  FakeMem other{0x9000, 0x1000};  // what the caller actually resolved
-  Map map{{a.base, &a}};
-  const FakeMem* expected = &other;
-
-  FakeMem* removed = amd::EraseCoveringMemObjIf(
-      map, uintptr_t(0x1500), sizeOf, [expected](const FakeMem* m) { return m == expected; });
-
-  EXPECT_EQ(removed, nullptr);
-  EXPECT_EQ(map.count(0x1000), 1u);  // a survives untouched
-}
-
-// The predicate is consulted only for a covering entry; a range miss returns
-// nullptr without ever invoking it.
-TEST(EraseCoveringMemObjIfTest, PredicateNotInvokedWithoutCoveringEntry) {
-  FakeMem a{0x1000, 0x1000};
-  Map map{{a.base, &a}};
-  int calls = 0;
-
-  FakeMem* removed = amd::EraseCoveringMemObjIf(map, uintptr_t(0x3000), sizeOf,
-                                                [&calls](const FakeMem*) {
-                                                  ++calls;
-                                                  return true;
-                                                });
-
-  EXPECT_EQ(removed, nullptr);
-  EXPECT_EQ(calls, 0);
+  EXPECT_EQ(erased, 2u);
   EXPECT_EQ(map.size(), 1u);
+  EXPECT_EQ(map.count(0x4000), 1u);  // b untouched
+}
+
+// Sweeping for an object the map does not hold erases nothing.
+TEST(EraseEntriesWithValueTest, AbsentValueErasesNothing) {
+  FakeMem a{0x1000, 0x1000};
+  FakeMem other{0x9000, 0x1000};
+  Map map{{a.base, &a}};
+
+  EXPECT_EQ(amd::EraseEntriesWithValue(map, &other), 0u);
+  EXPECT_EQ(map.size(), 1u);
+}
+
+// Tracking is detected under any key the object is indexed by, not just its
+// own base -- and never for an object the map does not hold.
+TEST(ContainsValueTest, FindsValueUnderAnyKey) {
+  FakeMem a{0x1000, 0x1000};
+  FakeMem other{0x9000, 0x1000};
+  Map map{{0x8000, &a}};  // indexed under an alias, not its own base
+
+  EXPECT_TRUE(amd::ContainsValue(map, &a));
+  EXPECT_FALSE(amd::ContainsValue(map, &other));
+}
+
+// The base-address test behind rejecting bad frees: an exact key owned by the
+// object passes; an interior pointer (covered by the object's range but not a
+// key) and another object's key both fail.
+TEST(ContainsKeyWithValueTest, RequiresExactKeyAndIdentity) {
+  FakeMem a{0x1000, 0x1000};
+  FakeMem b{0x2000, 0x1000};
+  Map map{{a.base, &a}, {b.base, &b}};
+
+  EXPECT_TRUE(amd::ContainsKeyWithValue(map, uintptr_t(0x1000), &a));
+  EXPECT_FALSE(amd::ContainsKeyWithValue(map, uintptr_t(0x1500), &a));
+  EXPECT_FALSE(amd::ContainsKeyWithValue(map, uintptr_t(0x2000), &a));
 }
 
 }  // namespace

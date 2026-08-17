@@ -163,14 +163,23 @@ hipError_t ihipFree(void* ptr) {
 
       // Non SVM memory free, such as external memory
       if (memory_object->getSvmPtr() == nullptr) {
-        // User-facing free: the pointer may live only in a per-device VA map
-        // (Windows) or be external memory not indexed in the global map, so a
-        // miss is a logged no-op rather than a fatal guarantee. The erase is
-        // identity-checked against memory_object so an unrelated allocation
-        // whose range covers ptr is never de-indexed. The object itself is
-        // still released exactly once below.
-        amd::MemObjMap::TryRemoveMemObj(ptr, memory_object);
-        memory_object->release();
+        // User-facing free: atomically de-index every map entry pointing at
+        // memory_object (global map and per-device VA maps) before the release
+        // below, so no map is left holding a dangling pointer. The erase keys
+        // off identity and requires ptr to be a base address memory_object is
+        // actually indexed under: an interior pointer, or one that merely
+        // range-resolved into a covering allocation, frees nothing and is
+        // rejected per the HIP contract for invalid pointers. An object absent
+        // from every map (per-device-only VA on Windows, external memory) is
+        // tolerated: there is nothing to de-index and nothing left to dangle.
+        switch (amd::MemObjMap::TryRemoveMemObj(ptr, memory_object)) {
+          case amd::MemObjMap::RemoveStatus::kBaseMismatch:
+            return hipErrorInvalidValue;
+          case amd::MemObjMap::RemoveStatus::kRemovedAll:
+          case amd::MemObjMap::RemoveStatus::kNotTracked:
+            memory_object->release();
+            break;
+        }
       } else {
         amd::SvmBuffer::free(memory_object->getContext(), ptr);
       }

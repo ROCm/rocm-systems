@@ -6,34 +6,26 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace amd {
 
-//! Range-aware, predicate-guarded erase from an address-keyed ordered map.
+//! Range-aware erase from an address-keyed ordered map.
 //!
 //! The map is keyed by an allocation's base address and each stored value spans
 //! [base, base + size). Lookups (MemObjMap::FindMemObj) resolve *any* pointer
 //! that falls inside that interval, so a removal that wants to stay symmetric
-//! with lookup must apply the same range test rather than erasing by the exact
-//! key alone.
-//!
-//! The entry is erased only if \a pred accepts its value. Range coverage alone
-//! does not prove the entry is the one the caller means to remove: on Windows,
-//! per-device VA ranges can numerically overlap an unrelated allocation's
-//! [base, base + size) in the global map, and erasing whatever happens to
-//! cover the pointer would de-index a live allocation. Callers that hold the
-//! amd::Memory* being freed pass an identity predicate; callers that only have
-//! the pointer accept any covering entry via EraseCoveringMemObj.
+//! with lookup (MemObjMap::FindAndRemoveMemObj) must apply the same range test
+//! rather than erasing by the exact key alone.
 //!
 //! Returns the removed mapped value (a pointer) on success, or a
-//! default-constructed value (nullptr) when no entry covers \a key or \a pred
-//! rejects the covering entry (nothing is erased). \a size_of maps a stored
-//! value to its byte span. Isolating this here keeps the range logic --
-//! duplicated across the FindMemObj* helpers -- in one unit-tested place.
-template <typename Map, typename SizeFn, typename Pred>
-inline typename Map::mapped_type EraseCoveringMemObjIf(Map& map, uintptr_t key, SizeFn size_of,
-                                                       Pred pred) {
+//! default-constructed value (nullptr) when no entry covers \a key (nothing is
+//! erased). \a size_of maps a stored value to its byte span. Isolating this
+//! here keeps the range logic -- duplicated across the FindMemObj* helpers --
+//! in one unit-tested place.
+template <typename Map, typename SizeFn>
+inline typename Map::mapped_type EraseCoveringMemObj(Map& map, uintptr_t key, SizeFn size_of) {
   // upper_bound(key) is the first entry strictly above key; the entry that may
   // cover key is its immediate predecessor.
   auto it = map.upper_bound(key);
@@ -42,7 +34,7 @@ inline typename Map::mapped_type EraseCoveringMemObjIf(Map& map, uintptr_t key, 
   }
   --it;
   const uintptr_t base = it->first;
-  if (key < base || key >= base + size_of(it->second) || !pred(it->second)) {
+  if (key < base || key >= base + size_of(it->second)) {
     return nullptr;
   }
   typename Map::mapped_type value = it->second;
@@ -50,11 +42,43 @@ inline typename Map::mapped_type EraseCoveringMemObjIf(Map& map, uintptr_t key, 
   return value;
 }
 
-//! EraseCoveringMemObjIf accepting any covering entry.
-template <typename Map, typename SizeFn>
-inline typename Map::mapped_type EraseCoveringMemObj(Map& map, uintptr_t key, SizeFn size_of) {
-  return EraseCoveringMemObjIf(map, key, size_of,
-                               [](const typename Map::mapped_type&) { return true; });
+//! Erase every entry whose mapped value is \a value; returns the number erased.
+//!
+//! An allocation can be indexed under several keys at once (its base address,
+//! its host pointer, per-device virtual addresses), and a free must drop every
+//! one of them before the object is released -- any entry left behind would
+//! dangle. Erasing by identity rather than by key needs no knowledge of which
+//! aliases exist and can never touch another allocation's entry.
+template <typename Map, typename Value>
+inline size_t EraseEntriesWithValue(Map& map, const Value& value) {
+  size_t erased = 0;
+  for (auto it = map.begin(); it != map.end();) {
+    if (it->second == value) {
+      it = map.erase(it);
+      ++erased;
+    } else {
+      ++it;
+    }
+  }
+  return erased;
+}
+
+//! True if \a map holds any entry whose mapped value is \a value.
+template <typename Map, typename Value>
+inline bool ContainsValue(const Map& map, const Value& value) {
+  for (const auto& entry : map) {
+    if (entry.second == value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+//! True if \a map maps exactly \a key to \a value.
+template <typename Map, typename Value>
+inline bool ContainsKeyWithValue(const Map& map, typename Map::key_type key, const Value& value) {
+  auto it = map.find(key);
+  return it != map.end() && it->second == value;
 }
 
 }  // namespace amd

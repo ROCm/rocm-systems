@@ -370,28 +370,58 @@ size_t MemObjSpan(amd::Memory* mem) {
 }
 }  // namespace
 
-bool MemObjMap::TryRemoveMemObj(const void* k, const amd::Memory* expected) {
+MemObjMap::RemoveStatus MemObjMap::TryRemoveMemObj(const void* k, const amd::Memory* mem) {
   // Non-fatal removal for user-facing frees (hipFree), where a pointer can
   // legitimately be absent from the global map: on Windows an allocation may
-  // be tracked only in a per-device VA map, and external / host-registered
-  // memory is indexed elsewhere. Range-aware like FindMemObj, but the erase
-  // fires only when the covering entry is `expected` -- per-device VA ranges
-  // can numerically overlap an unrelated allocation's [base, base + size) in
-  // the global map, and erasing whatever covers the pointer would de-index a
-  // live allocation. A miss degrades to a warning instead of killing the
-  // process; the diagnostic lets a repro pin which allocation class is missing.
+  // be tracked only in a per-device VA map, and external memory may be indexed
+  // elsewhere. Everything runs under one hold of the lock that guards both the
+  // global and the per-device maps, so the caller observes all-or-nothing:
+  //
+  // - k is a base key of mem in some map: erase, by identity, every entry in
+  //   every map that points at mem. An allocation can be indexed under several
+  //   aliases at once (host pointer, per-device VAs), and any entry left
+  //   behind would dangle once the caller releases the object.
+  // - mem is indexed, but never under k: the pointer is interior, or resolved
+  //   only by falling inside a covering allocation's [base, base + size)
+  //   (per-device VA ranges can numerically overlap unrelated allocations in
+  //   the global map). Erase nothing; the caller must reject the free rather
+  //   than release an allocation whose base the user never held.
+  // - mem is in no map at all: nothing to de-index and nothing can dangle;
+  //   warn for diagnostics and let the free proceed.
   std::unique_lock lock(AllocatedLock_);
-  amd::Memory* removed =
-      EraseCoveringMemObjIf(MemObjMap_, reinterpret_cast<uintptr_t>(k), MemObjSpan,
-                            [expected](const amd::Memory* mem) { return mem == expected; });
-  if (removed != nullptr) {
-    return true;
+  const uintptr_t key = reinterpret_cast<uintptr_t>(k);
+  static const std::vector<Device*> kNoDevices;
+  const std::vector<Device*>& devs =
+      (Device::devices_ != nullptr) ? *Device::devices_ : kNoDevices;
+
+  bool base_match = ContainsKeyWithValue(MemObjMap_, key, mem);
+  for (auto it = devs.begin(); !base_match && it != devs.end(); ++it) {
+    base_match = ContainsKeyWithValue((*it)->devMemObjMap_, key, mem);
+  }
+  if (base_match) {
+    EraseEntriesWithValue(MemObjMap_, mem);
+    for (Device* dev : devs) {
+      EraseEntriesWithValue(dev->devMemObjMap_, mem);
+    }
+    return RemoveStatus::kRemovedAll;
+  }
+
+  bool tracked = ContainsValue(MemObjMap_, mem);
+  for (auto it = devs.begin(); !tracked && it != devs.end(); ++it) {
+    tracked = ContainsValue((*it)->devMemObjMap_, mem);
+  }
+  if (tracked) {
+    ClPrint(amd::LOG_WARNING, amd::LOG_MEM,
+            "TryRemoveMemObj: ptr 0x%zx is not a base address of memory %p (interior pointer "
+            "or overlapping-range resolution); leaving the maps untouched",
+            key, mem);
+    return RemoveStatus::kBaseMismatch;
   }
   ClPrint(amd::LOG_WARNING, amd::LOG_MEM,
-          "TryRemoveMemObj: global map has no entry for ptr 0x%zx owned by memory %p "
-          "(per-device VA or external memory?); skipping global de-index",
-          reinterpret_cast<uintptr_t>(k), expected);
-  return false;
+          "TryRemoveMemObj: no map entry anywhere for memory %p freed via ptr 0x%zx "
+          "(external or per-device-only memory?); nothing to de-index",
+          mem, key);
+  return RemoveStatus::kNotTracked;
 }
 
 MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
