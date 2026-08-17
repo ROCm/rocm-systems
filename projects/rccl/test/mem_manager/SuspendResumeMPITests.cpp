@@ -2133,9 +2133,11 @@ TEST_F(SuspendResumeSingleProcMultiGpu, IntraProcessPeerImportsSurviveCycle)
         handlelessBefore += total - countOwningHandle(before[dev]);
     }
     // p2pMap releases the handle right after mapping the peer memory, so the
-    // imports it tracks own none. Without them the test says nothing about the
-    // intra-process branch.
-    ASSERT_GT(handlelessBefore, 0) << "ncclCommInitAll must leave handle-less peer imports behind";
+    // imports it tracks own none. They exist only when the P2P transport was
+    // selected: without peer access the comms fall back to SHM or NET, which
+    // register no imports and leave the intra-process branch unreachable.
+    if (handlelessBefore == 0)
+        GTEST_SKIP() << "no handle-less peer imports, these devices are not connected over P2P";
 
     ASSERT_EQ(ncclSuccess, suspendAll(comms));
     for (int dev = 0; dev < deviceCount; ++dev)
@@ -2332,6 +2334,13 @@ TEST_F(SuspendResumeArgValidation, NonBlockingCommCycle)
 
     ASSERT_MPI_EQ(ncclSuccess, waitForCompletion(ncclCommSuspend(comm, NCCL_SUSPEND_MEM)));
     EXPECT_EQ(1u, readStat(comm, ncclStatGpuMemSuspended));
+
+    // A rejection is raised before the comm joins the group, so it never reaches
+    // the async state: the return code is the only place a caller can see it.
+    ASSERT_MPI_EQ(ncclInvalidUsage, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    ncclResult_t asyncError = ncclSystemError;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommGetAsyncError(comm, &asyncError));
+    ASSERT_MPI_EQ(ncclSuccess, asyncError);
 
     ASSERT_MPI_EQ(ncclSuccess, waitForCompletion(ncclCommResume(comm)));
     EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended));

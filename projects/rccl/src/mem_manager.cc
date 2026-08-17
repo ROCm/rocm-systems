@@ -1027,6 +1027,7 @@ ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags) {
 
   ncclResult_t ret = ncclSuccess;
   ncclResult_t groupRet = ncclSuccess;
+  cudaError_t restoreErr = cudaSuccess;
   int saveDev;
   CUDACHECK(cudaGetDevice(&saveDev));
   NCCLCHECK(ncclGroupStartInternal());
@@ -1070,7 +1071,11 @@ exit:
     const ncclResult_t asyncRet = ncclCommGetAsyncError(comm, &ret);
     if (asyncRet != ncclSuccess) ret = asyncRet;
   }
-  CUDACHECK(cudaSetDevice(saveDev));
+  restoreErr = cudaSetDevice(saveDev);
+  if (restoreErr != cudaSuccess) {
+    const ncclResult_t restoreRet = rcclCudaErrorHandler(restoreErr);
+    if (ret == ncclSuccess) ret = restoreRet;
+  }
   return ret;
 fail:
   goto exit;
@@ -1084,6 +1089,7 @@ ncclResult_t ncclCommResume_impl(ncclComm_t comm) {
 
   ncclResult_t ret = ncclSuccess;
   ncclResult_t groupRet = ncclSuccess;
+  cudaError_t restoreErr = cudaSuccess;
   int saveDev;
   CUDACHECK(cudaGetDevice(&saveDev));
   NCCLCHECK(ncclGroupStartInternal());
@@ -1125,7 +1131,11 @@ exit:
     const ncclResult_t asyncRet = ncclCommGetAsyncError(comm, &ret);
     if (asyncRet != ncclSuccess) ret = asyncRet;
   }
-  CUDACHECK(cudaSetDevice(saveDev));
+  restoreErr = cudaSetDevice(saveDev);
+  if (restoreErr != cudaSuccess) {
+    const ncclResult_t restoreRet = rcclCudaErrorHandler(restoreErr);
+    if (ret == ncclSuccess) ret = restoreRet;
+  }
   return ret;
 fail:
   goto exit;
