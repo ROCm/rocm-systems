@@ -11,6 +11,8 @@
 #include <hip/hip_runtime.h>
 #include "MPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
+#include "NetIbQpSharingInspect.hpp"
+#include "QpShareRefModel.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "DeviceBufferHelpers.hpp"
@@ -88,6 +90,33 @@ using namespace RCCLTestHelpers;
             GTEST_SKIP() << "Requires RCCL_IB_QP_SCHED_UPDATE_INTERVAL >= "             \
                          << (long long)(min_us) << " us (current: " << _v << ")";        \
         }                                                                                \
+    } while (0)
+
+// Skip a QP-sharing test when RCCL_IB_COMM_NGROUPS is absent/disabled, or when
+// a feature known to be mutually exclusive with sharing (resiliency, CAST
+// scheduler) is enabled alongside it. Must be called from the test body (not
+// a helper), because GTEST_SKIP() only interrupts execution when expanded
+// inline in the test scope. RCCL_IB_COMM_NGROUPS is set per preset by the
+// qpshare_* configs in net_ib_transport.json (and the matching qpshare_*
+// categories in test_categories_mpi.yaml); there is no shared qpshare_base.
+#define QPSHARE_ENV_CHECK_OR_SKIP()                                                       \
+    do {                                                                                   \
+        const char* _ng = getenv("RCCL_IB_COMM_NGROUPS");                                  \
+        if (!_ng || _ng[0] == '\0' || std::atoll(_ng) <= 0) {                              \
+            GTEST_SKIP() << "Requires RCCL_IB_COMM_NGROUPS > 0. "                          \
+                            "Use qpshare_* configs in net_ib_transport.json.";              \
+        }                                                                                   \
+        auto _qpshareIsSetTo1 = [](const char* name) {                                     \
+            const char* v = getenv(name);                                                  \
+            return v && v[0] && strcmp(v, "1") == 0;                                       \
+        };                                                                                  \
+        if (_qpshareIsSetTo1("NCCL_IB_RESILIENCY_PORT_FAILOVER") ||                        \
+            _qpshareIsSetTo1("NCCL_IB_RESILIENCY_PORT_RECOVERY")) {                         \
+            GTEST_SKIP() << "QP sharing tests do not support resiliency combos yet.";      \
+        }                                                                                   \
+        if (_qpshareIsSetTo1("RCCL_IB_QP_SCHED_ENABLE")) {                                 \
+            GTEST_SKIP() << "QP sharing tests do not support CAST scheduler combos yet.";  \
+        }                                                                                   \
     } while (0)
 
 // External NET IB plugin
@@ -225,6 +254,13 @@ protected:
     int numDevices_;
     std::vector<int> deviceIds_;
     void* initCtx_;
+
+    // ExpectQpShareLayout re-checks every live comm after every create and
+    // destroy, so a layout that is wrong from connection 0 fails O(n^2) times.
+    // Cap the reporting; see ExpectQpShareLayout. Per-fixture, so it resets for
+    // each TEST_F.
+    static constexpr int kMaxLayoutFailures = 40;
+    int qpShareLayoutFailures_ = 0;
 
     void SetUp() override {
         MPITestBase::SetUp();
@@ -729,6 +765,197 @@ protected:
         MPI_Barrier(MPI_COMM_WORLD);
     }
 
+    // Non-fatal, rank-agreed variant of SetupCastConnection.
+    //
+    // Returns true only when BOTH ranks established their side (agreed via
+    // MPI_LAND, so the two ranks never disagree about whether the connection
+    // exists). On false, each rank has closed whatever it managed to open and
+    // all three out-params are left null, so the caller can stop cleanly.
+    // It prevents a timeout in the case of a failed connection.
+    bool TryCastConnection(int dev,
+                           void** listenComm, void** sendComm, void** recvComm) {
+        const int rank = MPIEnvironment::world_rank;
+        const int peer = 1 - rank;
+        ncclNetHandle_t handle;
+        memset(&handle, 0, sizeof(handle));
+        int ok = 1;
+
+        if (rank == 0) {
+            if (CreateListenComm(dev, &handle, listenComm) != ncclSuccess || *listenComm == nullptr)
+                ok = 0;
+            // Sent unconditionally: rank 1 is already blocked in MPI_Recv, and
+            // a zeroed handle makes its connect fail rather than hang.
+            MPI_Send(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
+            for (int i = 0; ok && i < kMaxRetryAttempts && *recvComm == nullptr; i++) {
+                if (AcceptConnection(*listenComm, recvComm) != ncclSuccess) ok = 0;
+                else if (*recvComm == nullptr) usleep(kPollIntervalUs);
+            }
+            if (*recvComm == nullptr) ok = 0;
+        } else {
+            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD,
+                     MPI_STATUS_IGNORE);
+            for (int i = 0; ok && i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
+                if (ConnectToRemote(dev, &handle, sendComm) != ncclSuccess) ok = 0;
+                else if (*sendComm == nullptr) usleep(kPollIntervalUs);
+            }
+            if (*sendComm == nullptr) ok = 0;
+        }
+
+        int bothOk = 0;
+        MPI_Allreduce(&ok, &bothOk, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
+        if (!bothOk) {
+            if (*recvComm)   { CloseRecvComm(*recvComm);     *recvComm   = nullptr; }
+            if (*listenComm) { CloseListenComm(*listenComm); *listenComm = nullptr; }
+            if (*sendComm)   { CloseSendComm(*sendComm);     *sendComm   = nullptr; }
+        }
+        return bothOk != 0;
+    }
+
+    // Close one cast connection with no memory handle and no barrier. Each rank
+    // holds only its own comms (rank 0: listen+recv, rank 1: send), so the null
+    // checks make this rank-conditional without a rank test. Non-fatal: a close
+    // failure must not strand the peer at the next barrier.
+    void CloseCastConnection(void* listenComm, void* sendComm, void* recvComm) {
+        if (recvComm)   EXPECT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        if (listenComm) EXPECT_EQ(CloseListenComm(listenComm), ncclSuccess);
+        if (sendComm)   EXPECT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+
+    // Same MPI_LAND agreement TryCastConnection uses, for any other loop of
+    // per-connection setup calls (RegisterMemory, PostRecv, ...) that can fail
+    // on one rank but not the other.
+    bool RankAgree(bool localOk) {
+        int ok = localOk ? 1 : 0;
+        int allOk = 0;
+        MPI_Allreduce(&ok, &allOk, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
+        return allOk != 0;
+    }
+
+    // Highest refcount across the given comms: the sharing depth this run
+    // actually achieved. 1 means no QP ended up shared.
+    int MaxObservedSharingDepth(const std::vector<void*>& comms) {
+        int m = 0;
+        for (void* c : comms) {
+            if (c == nullptr) continue;
+            struct ncclIbQpSharingState st = GetActualQpSharingState(c);
+            m = std::max(m, st.refcount);
+        }
+        return m;
+    }
+
+    // Report what a QP-sharing run actually exercised.
+    //
+    // Goes to stdout on rank 0 (visible in mpirun logs) and into the gtest XML.
+    void ReportQpShareCoverage(const char* what, int nconns, int maxCommsPerGroup,
+                               int spread = -1) {
+        const int ng = QpShareEnvNGroups();
+        const int dm = QpShareEnvDepthMultiplier();
+        RecordProperty("qpshare_ngroups", ng);
+        RecordProperty("qpshare_depth_multiplier", dm);
+        RecordProperty("qpshare_nconns", nconns);
+        RecordProperty("qpshare_max_comms_per_group", maxCommsPerGroup);
+        if (spread >= 0) RecordProperty("qpshare_group_spread", spread);
+        if (MPIEnvironment::world_rank != 0) return;
+        printf("[QPSHARE-COV] %s ngroups=%d depth=%d nconns=%d max_comms_per_group=%d",
+               what, ng, dm, nconns, maxCommsPerGroup);
+        if (spread >= 0) printf(" group_spread=%d", spread);
+        if (maxCommsPerGroup <= 1)
+            printf("  (NO QP WAS SHARED -- unshared data path only)");
+        printf("\n");
+        fflush(stdout);
+    }
+
+    // Compare every live comm's actual sharing state against the reference
+    // model, including cross-comm QP identity: comms in the same group must sit
+    // on one physical QP, comms in different groups must not.
+    //
+    // `comms[i]` is this rank's comm for connection i (recvComm on rank 0,
+    // sendComm on rank 1); `places[i]` is what QpShareRefModel predicted for it.
+    // Non-fatal throughout, so a layout divergence is reported for every comm
+    // rather than only the first, and both ranks always reach the next barrier.
+    void ExpectQpShareLayout(const std::vector<void*>& comms,
+                             const std::vector<QpShareRefModel::Placement>& places,
+                             const QpShareRefModel& model,
+                             const char* stage) {
+        EXPECT_EQ(comms.size(), places.size()) << stage;
+        if (comms.size() != places.size()) return;
+        if (qpShareLayoutFailures_ > kMaxLayoutFailures) return;
+        const int partsOnEntry = CurrentTestFailureParts();
+        std::map<int, uint32_t> groupQpn;  // group -> qpn of its physical QP
+        for (size_t i = 0; i < comms.size(); i++) {
+            if (comms[i] == nullptr) continue;
+            struct ncclIbQpSharingState st = GetActualQpSharingState(comms[i]);
+            const int g = places[i].group;
+
+            EXPECT_EQ(st.sharedGroupIdx, g)
+                << stage << ": conn " << i << " group mismatch";
+            EXPECT_EQ(st.isSharedQpPrimary, places[i].primary)
+                << stage << ": conn " << i << " PRIMARY/SECONDARY role mismatch"
+                << " (group " << g << ")";
+            EXPECT_EQ(st.refcount, model.Load(g))
+                << stage << ": conn " << i << " refcount does not match the "
+                << "number of live comms in group " << g;
+            // cqRefcount is a second, independent counter over the same set of
+            // comms: connect.cc increments refcount and cqRefcount together on
+            // the q==0 slot (:1058/:1066, :1866/:1874) and decrements them
+            // together on close (:2082/:2092, :2160/:2174), both starting at 1.
+            // They must therefore always agree. It is worth asserting
+            // separately because cqRefcount alone gates IbCastCleanupGroupCqs,
+            // i.e. it is the counter that decides when the group's CQ and PD
+            // are released. QpShareStressConnectionChurn and
+            // QpShareStressBatchCreateDestroy observe that release only through
+            // its effect on RDMA object counts; a drift caught here says which
+            // of the two counters is wrong, which an object-count delta cannot.
+            EXPECT_EQ(st.cqRefcount, st.refcount)
+                << stage << ": conn " << i << " in group " << g
+                << " has cqRefcount=" << st.cqRefcount << " but refcount="
+                << st.refcount << ". These count the same comms and are"
+                << " maintained in lockstep; cqRefcount alone decides when the"
+                << " group's CQ and PD are released, so a drift here either"
+                << " frees a CQ that is still in use or never frees it.";
+            EXPECT_NE(st.commId, 0)
+                << stage << ": conn " << i << " has no commId -- it silently fell "
+                << "back off the sharing path";
+
+            if (st.sharedGroupIdx != g) continue;  // QP identity is meaningless if the group is wrong
+            auto it = groupQpn.find(g);
+            if (it == groupQpn.end()) groupQpn[g] = st.qpn[0];
+            else EXPECT_EQ(st.qpn[0], it->second)
+                << stage << ": conn " << i << " is in group " << g
+                << " but not on that group's physical QP";
+        }
+        for (auto a = groupQpn.begin(); a != groupQpn.end(); ++a) {
+            auto b = a;
+            for (++b; b != groupQpn.end(); ++b) {
+                EXPECT_NE(a->second, b->second)
+                    << stage << ": groups " << a->first << " and " << b->first
+                    << " unexpectedly share one physical QP";
+            }
+        }
+        qpShareLayoutFailures_ += CurrentTestFailureParts() - partsOnEntry;
+        if (qpShareLayoutFailures_ > kMaxLayoutFailures) {
+            printf("[QPSHARE-COV] layout divergences exceeded %d at \"%s\";"
+                   " further per-comm layout checks suppressed for this test."
+                   " The test still fails -- read the FIRST divergence above,"
+                   " not the last: every later one is downstream of it.\n",
+                   kMaxLayoutFailures, stage);
+            fflush(stdout);
+        }
+    }
+
+    // Failure records logged so far by the currently running test. Used as a
+    // cheap delta counter; gtest exposes no "did that block just fail" query.
+    static int CurrentTestFailureParts() {
+        const ::testing::TestInfo* info =
+            ::testing::UnitTest::GetInstance()->current_test_info();
+        if (info == nullptr || info->result() == nullptr) return 0;
+        const ::testing::TestResult* res = info->result();
+        int n = 0;
+        for (int i = 0; i < res->total_part_count(); i++)
+            if (res->GetTestPartResult(i).failed()) n++;
+        return n;
+    }
+
     // Composite block: Warmup send + read real nqps from sendComm on rank 1.
     // Both ranks call this together. actualNqps is broadcast so rank 0 can coordinate.
     // buf/mhandle must already be registered against the caller's comm.
@@ -745,6 +972,16 @@ protected:
         MPI_Bcast(&nqps, 1, MPI_INT, 1, MPI_COMM_WORLD);
         EXPECT_GT(nqps, 0);
         return nqps;
+    }
+
+    // Read QP-sharing pool state directly from a connected sendComm/recvComm.
+    // Unlike GetActualNqps(), no warmup send/recv is required: PRIMARY/SECONDARY
+    // role, groupIdx, refcount, and QP handles are all fixed at connect()/accept()
+    // time (see connect.cc groupIdx assignment), not populated lazily by traffic.
+    struct ncclIbQpSharingState GetActualQpSharingState(void* comm) {
+        struct ncclIbQpSharingState state = {};
+        EXPECT_EQ(ncclIbCastGetQpSharingState(comm, &state), ncclSuccess);
+        return state;
     }
 
     // Read RCCL_IB_QP_SCHED_SPLIT_DATA_MIN from the environment.

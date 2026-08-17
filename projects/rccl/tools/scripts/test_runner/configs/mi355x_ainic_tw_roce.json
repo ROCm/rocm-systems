@@ -239,6 +239,209 @@
       ]
     },
 
+    "qpshare_base": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "description": "QP-sharing base (RCCL_IB_COMM_NGROUPS). No tests here; children extend and set the tunables. NIC merging is turned off because the suite connects on device 0 and reasons about one physical IB device per rank. The CAST scheduler is deliberately left off: the QP-sharing tests skip themselves when RCCL_IB_QP_SCHED_ENABLE=1, so these configs extend gtest_base rather than cast_base. Both RCCL_IB_COMM_NGROUPS and RCCL_IB_QP_DEPTH_MULTIPLIER are RCCL_PARAMs and are cached for the process lifetime, which is why each value is a separate config rather than a case inside one run.",
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "0"
+      }
+    },
+
+    "qpshare_ngroups1": {
+      "extends": "qpshare_base",
+      "description": "A17: QP sharing at NGROUPS=1 — every connection is assigned to group 0, so the whole functional set runs on a single shared QP. RCCL_IB_QP_DEPTH_MULTIPLIER=8 scales the shared QP's CQ and work-queue sizing so the configuration is not close to the queue-depth limit at these connection counts.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "1",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "A17_QpShare_AlgoLayoutSweep",
+          "description": "Group-assignment layout, state only, no data phase. Opens connections one at a time up to min(2*NGROUPS+1, 64) and compares every live comm against the reference model (test/transport/NetIbMPI/QpShareRefModel.hpp) after each create — sharedGroupIdx, isSharedQpPrimary, refcount, cqRefcount, commId, and the cross-comm QP-identity relation — then tears down in creation order, releasing each group's PRIMARY while its SECONDARYs are live, re-checking after each destroy. Expectations are derived from RCCL_IB_COMM_NGROUPS rather than pinned to one value.",
+          "test_filter": "NetIbMPITest.QpShareAlgoLayoutSweep"
+        },
+        {
+          "name": "A17_QpShare_AlgoChurnLayout",
+          "description": "Group assignment under interleaved create/destroy with rotating non-tail victims, so a comm is released while it still has live neighbours in its group. Re-validates the full layout against the reference model after every operation, which is where a refcount that survives teardown or a pool slot that is freed but still counted becomes visible. Group spread is measured and reported, never asserted.",
+          "test_filter": "NetIbMPITest.QpShareAlgoChurnLayout"
+        },
+        {
+          "name": "A17_QpShare_DataAllConnsTransfer",
+          "description": "Data path at this (NGROUPS, DEPTH_MULTIPLIER) point: opens QPSHARE_TEST_NCONNS connections (default derived from NGROUPS) and moves data on every one of them across a payload sweep of 0, 1, 127, 128, 4095, 4096, 65535, 65536 and 1 MiB bytes, pattern-verified per connection.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        },
+        {
+          "name": "A17_QpShare_DataUnsharedGroups",
+          "description": "The unshared regime as an explicit case rather than a skip: the connection count is derived as min(NGROUPS, 8) so occupancy-modulo gives every comm a group of its own. Asserts each comm is a solo PRIMARY on a distinct physical QP and exercises the data path on each.",
+          "test_filter": "NetIbMPITest.QpShareDataUnsharedGroups"
+        },
+        {
+          "name": "A17_QpShare_DataFlushRouting",
+          "description": "GDR flush completion routing over a shared CQ. A flush QP is per-comm and is not itself shared, but its completion lands on the group's shared CQ. Locates a PRIMARY/SECONDARY pair from the reference model rather than hardcoded indices, posts iflush() on both, and waits the SECONDARY first so completions are exercised against commId routing rather than post order. An unshared comm supplies the baseline. Requires GDR-capable hardware and skips otherwise.",
+          "test_filter": "NetIbMPITest.QpShareDataFlushRouting"
+        }
+      ]
+    },
+
+    "qpshare_ngroups2": {
+      "extends": "qpshare_base",
+      "description": "A18: QP sharing at NGROUPS=2 — the smallest value that mixes a PRIMARY-only group with a PRIMARY+SECONDARY group, so group-index arithmetic has more than one possible answer. Same five functional tests as A17.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "2",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "A18_QpShare_AlgoLayoutSweep",
+          "description": "Group-assignment layout at NGROUPS=2, state only. See A17 for what the sweep checks; the connection count and every expectation are re-derived from NGROUPS.",
+          "test_filter": "NetIbMPITest.QpShareAlgoLayoutSweep"
+        },
+        {
+          "name": "A18_QpShare_AlgoChurnLayout",
+          "description": "Interleaved create/destroy with rotating non-tail victims at NGROUPS=2, layout re-validated against the reference model after every operation.",
+          "test_filter": "NetIbMPITest.QpShareAlgoChurnLayout"
+        },
+        {
+          "name": "A18_QpShare_DataAllConnsTransfer",
+          "description": "Payload sweep from 0 to 1 MiB on every connection at NGROUPS=2, pattern-verified per connection.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        },
+        {
+          "name": "A18_QpShare_DataUnsharedGroups",
+          "description": "Unshared regime at NGROUPS=2: two connections, one solo PRIMARY per group, each on its own physical QP.",
+          "test_filter": "NetIbMPITest.QpShareDataUnsharedGroups"
+        },
+        {
+          "name": "A18_QpShare_DataFlushRouting",
+          "description": "GDR flush completion routing over a shared CQ at NGROUPS=2, with an unshared comm as baseline. Skips on hardware without GDR.",
+          "test_filter": "NetIbMPITest.QpShareDataFlushRouting"
+        }
+      ]
+    },
+
+    "qpshare_ngroups16": {
+      "extends": "qpshare_base",
+      "description": "A19: QP sharing at NGROUPS=16 — the wide point. The connection counts the tests derive straddle the shared and unshared regimes within one run, and the layout sweep reaches 33 connections across 16 groups. Same five functional tests as A17.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "16",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "A19_QpShare_AlgoLayoutSweep",
+          "description": "Group-assignment layout across 16 groups, state only: 33 connections created and torn down one at a time, full layout re-checked after every operation.",
+          "test_filter": "NetIbMPITest.QpShareAlgoLayoutSweep"
+        },
+        {
+          "name": "A19_QpShare_AlgoChurnLayout",
+          "description": "Interleaved create/destroy with rotating non-tail victims across 16 groups — the widest point at which occupancy-modulo assignment is exercised against the reference model.",
+          "test_filter": "NetIbMPITest.QpShareAlgoChurnLayout"
+        },
+        {
+          "name": "A19_QpShare_DataAllConnsTransfer",
+          "description": "Payload sweep from 0 to 1 MiB on every connection at NGROUPS=16, pattern-verified per connection.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        },
+        {
+          "name": "A19_QpShare_DataUnsharedGroups",
+          "description": "Unshared regime at NGROUPS=16: the connection count is capped at 8, so every comm is a solo PRIMARY on its own physical QP.",
+          "test_filter": "NetIbMPITest.QpShareDataUnsharedGroups"
+        },
+        {
+          "name": "A19_QpShare_DataFlushRouting",
+          "description": "GDR flush completion routing over a shared CQ at NGROUPS=16, with an unshared comm as baseline. Skips on hardware without GDR.",
+          "test_filter": "NetIbMPITest.QpShareDataFlushRouting"
+        }
+      ]
+    },
+
+    "qpshare_depth_ceiling": {
+      "extends": "qpshare_base",
+      "timeout": 300,
+      "description": "A20: shared-QP depth-multiplier sizing. RCCL_IB_QP_DEPTH_MULTIPLIER scales the shared CQ, which is sized 3 x NET_IB_MAX_REQUESTS(256) x NCCL_IB_QPS_PER_CONNECTION x multiplier entries, so the multiplier and the QP count multiply into the same device limit and both are pinned here. 96 with QPS=1 requests a CQ far larger than the default and covers how the transport sizes that CQ against the device's queried max_cqe. QPSHARE_TEST_NCONNS=2 keeps the run to the sizing question rather than connection volume. The usable multiplier is hardware-dependent (a function of the device's max_cqe), so this value is a probe of the sizing path, not a portable constant.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "1",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "96",
+        "NCCL_IB_QPS_PER_CONNECTION": "1",
+        "QPSHARE_TEST_NCONNS": "2"
+      },
+      "tests": [
+        {
+          "name": "A20_QpShare_DataAllConnsTransfer_DepthCeiling",
+          "description": "Two connections in one group at a depth multiplier of 96, exercising shared-CQ sizing and the data path at that setting.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        }
+      ]
+    },
+
+    "qpshare_stress": {
+      "extends": "qpshare_base",
+      "timeout": 900,
+      "description": "A21: QP-sharing scale and resource lifetime. NGROUPS=2 with DEPTH_MULTIPLIER=64 and one QP per connection, so the shared QP carries the queue depth the default connection counts require. Scale with QPSHARE_TEST_NCONNS and QPSHARE_TEST_ITERS. Connection churn is intentionally not in this config — it runs separately as A22.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "2",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "64",
+        "NCCL_IB_QPS_PER_CONNECTION": "1"
+      },
+      "tests": [
+        {
+          "name": "A21_QpShare_StressManyConns",
+          "description": "Sustained batched traffic over QPSHARE_TEST_NCONNS connections to one peer (default 100, so roughly 50 comms per shared QP at NGROUPS=2). Each connection sends 20 messages of 4 KiB and the received data is compared byte-for-byte.",
+          "test_filter": "NetIbMPITest.QpShareStressManyConns"
+        },
+        {
+          "name": "A21_QpShare_StressSharedRqSaturation",
+          "description": "Loads the shared receive queue: one message posted from every connection before any completion is waited on, repeated for QPSHARE_TEST_ITERS rounds (default 10) over QPSHARE_TEST_NCONNS connections (default 50), with per-round pattern verification.",
+          "test_filter": "NetIbMPITest.QpShareStressSharedRqSaturation"
+        },
+        {
+          "name": "A21_QpShare_StressBatchCreateDestroy",
+          "description": "Bursty lifecycle: QPSHARE_TEST_ITERS batches (default 110) of QPSHARE_TEST_NCONNS connections (default 10) created together, used, and destroyed together. Every batch starts from an empty live set, so at each checkpoint the layout is re-derived from a fresh reference model and RDMA object counts are compared against a pre-batch baseline. Because several comms are live at once, the batch size has to fit the configured depth multiplier.",
+          "test_filter": "NetIbMPITest.QpShareStressBatchCreateDestroy"
+        }
+      ]
+    },
+
+    "qpshare_stress_churn": {
+      "extends": "qpshare_base",
+      "timeout": 1800,
+      "description": "A22: sequential connection churn under QP sharing, isolated in its own config so it runs in a separate process from A21 and its result is reported independently. Long-running by design — the default 2048 connect/transfer/close cycles are minutes of wall time, hence the 1800s timeout.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "2",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "64",
+        "NCCL_IB_QPS_PER_CONNECTION": "1"
+      },
+      "tests": [
+        {
+          "name": "A22_QpShare_StressConnectionChurn",
+          "description": "QPSHARE_TEST_ITERS connect/transfer/close cycles (default 2048) with exactly one connection live at a time, so every cycle is fully torn down before the next begins and each teardown reaches the group-release path. RDMA object counts and the comm's pool state are checkpointed every quarter of the run against a pre-churn baseline. Sharing depth is 1 by construction here: the test covers the create/destroy lifecycle of a shared group, not concurrent occupancy.",
+          "test_filter": "NetIbMPITest.QpShareStressConnectionChurn"
+        }
+      ]
+    },
+
+    "qpshare_heap_poison": {
+      "extends": "qpshare_base",
+      "description": "A23: QP-sharing group teardown under glibc heap poisoning. Same test and tunables as A19; the addition is MALLOC_PERTURB_=165, which makes glibc overwrite freed heap with 0xa5, so any read through a pointer into a freed comm returns poison instead of whatever the allocator happened to leave behind. MALLOC_PERTURB_ is a glibc feature and is inert on other allocators, so on a non-glibc platform this config is equivalent to A19.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "16",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8",
+        "NCCL_GDR_FLUSH_DISABLE": "0",
+        "MALLOC_PERTURB_": "165"
+      },
+      "tests": [
+        {
+          "name": "A23_QpShare_AlgoChurnLayout_HeapPoison",
+          "description": "Interleaved create/destroy across 16 groups with freed heap poisoned, exercising the shared-QP group teardown path against pointers that may outlive the comm they point into.",
+          "test_filter": "NetIbMPITest.QpShareAlgoChurnLayout"
+        }
+      ]
+    },
+
     "rccl_tests_base": {
       "is_gtest": false,
       "test_binary_dir": "${PERF_BIN_DIR:-/it-share/rccl-ci/rccl-tests-2.30.4/bin}",
@@ -458,6 +661,14 @@
     { "config": "rocmib_no_cts_offload", "enabled": true, "smoke": true },
     { "config": "cts_force_override",    "enabled": true, "smoke": true },
     { "config": "alltoall_fullrange_guard", "enabled": true, "smoke": true },
+
+    { "config": "qpshare_ngroups1",       "enabled": true, "smoke": true },
+    { "config": "qpshare_ngroups2",       "enabled": true, "smoke": true },
+    { "config": "qpshare_ngroups16",      "enabled": true, "smoke": true },
+    { "config": "qpshare_depth_ceiling",  "enabled": true },
+    { "config": "qpshare_stress",         "enabled": true },
+    { "config": "qpshare_stress_churn",   "enabled": true },
+    { "config": "qpshare_heap_poison",    "enabled": true },
 
     { "config": "ionic_counters",        "enabled": true }
   ]
