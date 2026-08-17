@@ -99,6 +99,75 @@ inventory::submit! {
     }
 }
 
+/// A stub whose daemon refuses to start.
+///
+/// Identical to [`Stub`] in every other way, so a test using it isolates
+/// exactly one variable: what a session does when the daemon it asked for
+/// is unavailable.
+#[derive(Debug)]
+struct NoDaemonStub;
+
+impl EmulatorBackend for NoDaemonStub {
+    fn description(&self) -> EmulatorDescription {
+        EmulatorDescription {
+            name: "nodaemon".to_string(),
+            version: "0".to_string(),
+            description: "test-only emulator whose daemon will not start".to_string(),
+            options_schema: Vec::new(),
+        }
+    }
+
+    fn boot(&self, _def: &ProfileDef) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn options(&self) -> Vec<OptionDef> {
+        Vec::new()
+    }
+
+    fn shutdown(&self, _ctx: &SessionContext) {}
+
+    fn validate_profile(&self, _def: &ProfileDef) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn installed(&self) -> bool {
+        true
+    }
+
+    fn supported(&self) -> SupportStatus {
+        SupportStatus::supported("stub emulator needs nothing".to_string())
+    }
+
+    fn discover_plugins(&self) -> Vec<PluginsDef> {
+        Vec::new()
+    }
+
+    fn health(&self, _ctx: &SessionContext) -> SessionHealth {
+        SessionHealth::phase(true, "ready", None)
+    }
+
+    fn injection_def(&self, _ctx: &SessionContext) -> mirage_core::error::Result<InjectionDef> {
+        Ok(InjectionDef::default())
+    }
+
+    fn start_daemon(
+        &self,
+        _ctx: &SessionContext,
+    ) -> mirage_core::error::Result<Option<Box<dyn mirage_core::emulator::EmulatorDaemon>>> {
+        Err(mirage_core::error::MirageError::other(
+            "the socket was already in use".to_string(),
+        ))
+    }
+}
+
+inventory::submit! {
+    EmulatorBackendDef {
+        kind: "nodaemon",
+        backend: &NoDaemonStub,
+    }
+}
+
 // ---------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------
@@ -933,4 +1002,53 @@ async fn a_single_process_exec_writes_straight_to_the_terminal() {
         "an inheriting exec must pipe nothing through mirage"
     );
     run.destroy().await;
+}
+
+/// A daemon that will not start must fail the session, not become a
+/// different kind of run.
+///
+/// This used to be a `warn!` and a fallback to in-process emulation. The
+/// justification was that in-process might still work — which is true,
+/// and is the trap: in-process cannot share emulated GPU memory between
+/// processes, so a multi-GPU collective returns a plausible wrong number
+/// instead of an error. The user asked for the daemon (it is the default;
+/// `--in-process` is the opt-out) and silently got something that
+/// computes differently.
+#[tokio::test]
+async fn a_daemon_that_will_not_start_fails_the_session() {
+    isolate();
+    let mut p = profile(1);
+    p.emulator.emulator = "nodaemon".to_string();
+
+    let run = Arc::new(
+        Run::start(CreateSessionRequest {
+            id: None,
+            profile: MaybeRef::Owned(p),
+            workdir: "/tmp".to_string(),
+            daemon: true,
+        })
+        .expect("run starts"),
+    );
+
+    let health = run
+        .wait_ready(Duration::from_secs(30))
+        .await
+        .expect("bring-up settles");
+    assert!(
+        !health.healthy,
+        "the session reported healthy despite its daemon failing: {health:?}"
+    );
+
+    // The reason has to survive teardown, and it has to name both the
+    // cause and the way forward — a bare "session failed to start" would
+    // leave the user with nowhere to go.
+    let reason = format!("{health:?}");
+    assert!(
+        reason.contains("the socket was already in use"),
+        "the backend's own reason was lost: {reason}"
+    );
+    assert!(
+        reason.contains("--in-process"),
+        "the error does not say how to proceed: {reason}"
+    );
 }

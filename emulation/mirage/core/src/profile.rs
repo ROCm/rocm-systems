@@ -144,9 +144,18 @@ impl PortMapping {
             None => (spec, None),
         };
 
+        // Zero is rejected rather than passed through. Docker reads a host
+        // port of 0 as "pick any free one", but mirage never tells the
+        // user which one was picked, so the mapping would be unusable —
+        // and a *container* port of 0 means nothing at all. The message
+        // has always promised 1-65535; this is the code agreeing with it.
         let parse_port = |s: &str| -> Result<u16, String> {
-            s.parse::<u16>()
-                .map_err(|_| format!("invalid port {s:?} in {spec:?} (expected a number 1-65535)"))
+            match s.parse::<u16>() {
+                Ok(0) | Err(_) => Err(format!(
+                    "invalid port {s:?} in {spec:?} (expected a number 1-65535)"
+                )),
+                Ok(p) => Ok(p),
+            }
         };
 
         let (host_port, container_port) = match ports.split_once(':') {
@@ -371,6 +380,25 @@ impl ProfileDef {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    /// Port 0 was accepted while the error message promised 1-65535 --
+    /// so `--port 0:8000` produced a mapping the user could never reach.
+    #[test]
+    fn port_zero_is_rejected_on_both_sides() {
+        for spec in ["0", "0:8000", "8000:0", "0:0", "0/tcp", "0:8000/udp"] {
+            let e = PortMapping::parse(spec).expect_err(&format!("{spec:?} should be rejected"));
+            assert!(e.contains("1-65535"), "{spec:?}: {e}");
+        }
+    }
+
+    /// The boundary the message names must itself be accepted, or the
+    /// fix above would have traded one wrong answer for another.
+    #[test]
+    fn the_advertised_port_range_is_accepted() {
+        for spec in ["1", "65535", "1:65535", "65535:1/udp"] {
+            PortMapping::parse(spec).unwrap_or_else(|e| panic!("{spec:?} rejected: {e}"));
+        }
+    }
 
     use super::*;
 

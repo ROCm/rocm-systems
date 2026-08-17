@@ -372,13 +372,30 @@ impl Run {
                     }
                 }
                 Err(e) => {
-                    // Not fatal: an emulator whose daemon will not start
-                    // may still run in-process, and the per-exec injection
-                    // fails loudly if it genuinely cannot.
-                    tracing::warn!(
-                        session = %session.id(),
-                        "emulator daemon failed to start ({e}); continuing in-process"
-                    );
+                    // Fatal, and the reasoning that said otherwise was
+                    // the trap. "It may still run in-process" is true and
+                    // is exactly the problem: in-process emulation cannot
+                    // share GPU memory between processes, so a multi-GPU
+                    // collective silently computes something else. The
+                    // run was not asked for "emulation, any kind" — this
+                    // arm is only reachable when the user did not pass
+                    // `--in-process`, and `start_daemon` is documented to
+                    // return `Err` only when a daemon was expected and
+                    // could not be started (a backend that needs none
+                    // returns `Ok(None)` and never lands here).
+                    //
+                    // Failing loudly at the first exec, the other half of
+                    // the old reasoning, does not happen either: the
+                    // workload runs, it just runs on one GPU's worth of
+                    // memory and returns a plausible wrong number.
+                    return Err(MirageError::other(format!(
+                        "the {} emulator daemon could not be started: {e}\n\
+                         The daemon is what lets several processes share emulated GPU \
+                         memory, so multi-GPU collectives need it. Pass `--in-process` \
+                         to run without it — results from a single process are still \
+                         correct.",
+                        session.ctx.profile.emulator.emulator
+                    )));
                 }
             }
         }
