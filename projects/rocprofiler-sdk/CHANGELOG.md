@@ -7,6 +7,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Added
 
 **API:**
+
   - Advanced Thread Trace (ATT) support in the live attach workflow:
     - On attach, the SDK registers for code-object iteration and creation callbacks so thread trace operates correctly on code objects that were loaded before the attach occurred.
     - Makes ATT usable on already-running production workloads without an application restart.
@@ -47,7 +48,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Streaming Performance Monitor (SPM) counter data in the rocpd output format:
     - SPM records are stored as `rocpd_track` rows labelled `SPM`, with counter values grouped by timestamp into `rocpd_sample` rows and per-dimension data in `rocpd_pmc_event` rows.
     - The rocpd schema gains the `sample_id`, `xcc`, `shader_engine`, and `instance` columns.
-    - SPM data is consumable by any tool that reads the rocpd database and convertible to the other output formats, such as Perfetto.    
+    - SPM data is consumable by any tool that reads the rocpd database and convertible to the other output formats, such as Perfetto.
   - Streaming Performance Monitor (SPM) counter collection support (beta):
     - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
     - GPU-timestamped counter values alongside kernel dispatch information.
@@ -96,6 +97,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Added
 
 **API:**
+
   - SPM counter collection support in `rocprofv3` (beta):
     - `--spm <counter>` flag to specify counters for SPM collection.
     - `--spm-sample-interval` and `--spm-sample-interval-unit` parameters to configure sampling rate.
