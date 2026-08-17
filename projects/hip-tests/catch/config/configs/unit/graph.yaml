@@ -554,9 +554,15 @@ graph:
     tags: [node]
   Unit_hipGraphMultiDevice:
     <<: *level_2
-    # ROCM-22772: Temporarily disabled until multi-device graph is added
-    disabled: [amd_linux]
     tags: [multigpu]
+  Unit_hipGraphRealMultiDevice_RepeatLaunch:
+    <<: *level_2
+    tags: [multigpu, exec]
+    disabled: [amd_windows]
+  Unit_hipGraphRealMultiDevice_DirectPeerMemoryDependency:
+    <<: *level_2
+    tags: [multigpu, exec]
+    disabled: [amd_windows]
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative:
     <<: *level_2
     tags: [exec]
@@ -1405,8 +1411,7 @@ graph:
   Unit_hipGraphCrossDeviceLaunch_CrossStreamDependencyOrdering:
     <<: *level_2
     tags: [exec]
-    # ROCM-22772: Temporarily disabled until multi-device graph is added
-    disabled: [amd_windows. amd_linux]
+    disabled: [amd_windows]
   Unit_hipGraphCrossDeviceLaunch_ExplicitNodes:
     <<: *level_2
     tags: [exec]
