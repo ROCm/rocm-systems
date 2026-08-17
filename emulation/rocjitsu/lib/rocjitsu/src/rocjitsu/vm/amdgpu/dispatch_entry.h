@@ -40,6 +40,50 @@ struct ClusterDispatchShape {
   uint32_t size_z = 1;
 };
 
+/// @brief One XCD's share of a grid that is spread across several XCDs.
+///
+/// @details A multi-XCD part running as a single partition spreads one dispatch
+/// over every XCD of that partition, round-robin, one chunk at a time. Each XCD
+/// therefore owns the chunk ordinals congruent to its rank modulo the number of
+/// participating XCDs. The chunk is a single workgroup, except for a clustered
+/// dispatch, where it is a whole cluster so that cluster peers stay co-resident
+/// on the XCD whose LDS they share.
+///
+/// Kernels that swizzle their workgroup index for cache locality (the
+/// widely-used `wg % num_xcds` remap) assume exactly this permutation, so the
+/// mapping matters, not just the even split.
+///
+/// The default {0, 1} owns the whole grid, which is what a queue serviced by a
+/// single command processor gets.
+struct XcdShard {
+  /// This XCD's position in the participating set.
+  uint32_t rank = 0;
+  /// Number of participating XCDs. One means "no sharding".
+  uint32_t stride = 1;
+
+  /// @returns True when this shard covers the entire grid.
+  bool is_whole_grid() const { return stride <= 1; }
+
+  /// @brief Count the chunks this shard owns.
+  /// @param total_chunks Chunk count of the whole grid.
+  /// @returns Number of chunks owned by this shard, possibly zero when the grid
+  /// has fewer chunks than participating XCDs.
+  uint32_t owned_chunks(uint32_t total_chunks) const {
+    assert(stride >= 1 && "shard stride must be at least one");
+    if (rank >= total_chunks)
+      return 0;
+    return (total_chunks - rank + stride - 1) / stride;
+  }
+
+  /// @brief Map a shard-local chunk index to its grid-wide chunk ordinal.
+  /// @param shard_chunk_index Zero-based index within this shard's own chunks.
+  /// @returns The grid-wide chunk ordinal.
+  uint32_t nth_owned_chunk(uint32_t shard_chunk_index) const {
+    assert(stride >= 1 && "shard stride must be at least one");
+    return rank + shard_chunk_index * stride;
+  }
+};
+
 /// @brief Per-dispatch tracking entry created by the AQL Packet Processor.
 struct DispatchEntry {
   uint32_t dispatch_id = 0;
