@@ -826,9 +826,16 @@ protected:
                           << " distinct worker threads, observed " << distinct.size()
                           << " — thread fan-out did not happen";
         }
-        if (nThreads > 1 && run.maxConcurrentWorkers < 2) {
-            ADD_FAILURE() << "expected overlapping worker execution, observed at most "
-                          << run.maxConcurrentWorkers << " active worker";
+        // bodyGate holds every worker at the top of the body until all N have
+        // arrived, so the peak is deterministically N rather than merely ">= 2".
+        // Asserting the exact value also catches a regression in the gate itself
+        // (a gate that stopped blocking would still let two workers overlap by
+        // chance and satisfy a ">= 2" check).
+        if (nThreads > 1 && run.maxConcurrentWorkers != nThreads) {
+            ADD_FAILURE() << "expected " << nThreads
+                          << " workers concurrently inside the body, observed at most "
+                          << run.maxConcurrentWorkers
+                          << " — the start/body gate did not hold all workers";
         }
     }
 
@@ -1021,15 +1028,6 @@ protected:
         return out;
     }
 
-    static int CountNonEmptyLines(const std::string& text) {
-        std::istringstream iss(text);
-        std::string line;
-        int count = 0;
-        while (std::getline(iss, line))
-            if (!line.empty()) count++;
-        return count;
-    }
-
     RdmaResourceCounts CaptureRdmaResources() {
         RdmaResourceCounts counts;
         std::string probe =
@@ -1038,26 +1036,31 @@ protected:
                              "rdma resource show mr >/dev/null 2>&1 && "
                              "rdma resource show pd >/dev/null 2>&1 && echo OK'");
         if (probe.find("OK") == std::string::npos) return counts;
-        // Filter to objects owned by this PID so concurrent processes on shared
-        // nodes do not cause spurious leak reports.
-        // `rdma resource show` lines contain "pid <N>"; grep for our PID.
-        // If the output format doesn't include "pid", fall back to system-wide count.
+        // Count only objects owned by this PID, so concurrent processes on a
+        // shared node cannot perturb the before/after comparison.
+        //
+        // `rdma resource show` emits one line per object. Kernel-owned objects
+        // carry "comm [ib_core]" and no pid field at all; objects owned by a
+        // userspace process carry " pid <N> comm <name> ". A process holding no
+        // RDMA objects therefore matches zero lines, which is the correct answer
+        // (zero), not a signal that the filter failed.
+        //
+        // Deliberately no fall back to a system-wide count when nothing matches:
+        // that would make the two snapshots use different counting modes
+        // whenever the process acquires or releases its last object between
+        // them, turning a real leak into a nonsensical negative delta and an
+        // unrelated neighbour process into a spurious leak failure.
         const std::string pid = std::to_string(getpid());
         const std::string pidFilter = " pid " + pid + " ";
         auto countOwned = [&](const char* resource) -> int {
             std::string raw = ExecShellCommand(
                 (std::string("rdma resource show ") + resource + " 2>/dev/null").c_str());
-            // If any line contains our pid, count only those lines.
-            if (raw.find(pidFilter) != std::string::npos) {
-                std::istringstream iss(raw);
-                std::string line;
-                int n = 0;
-                while (std::getline(iss, line))
-                    if (!line.empty() && line.find(pidFilter) != std::string::npos) n++;
-                return n;
-            }
-            // PID not in output — fall back to system-wide count.
-            return CountNonEmptyLines(raw);
+            std::istringstream iss(raw);
+            std::string line;
+            int n = 0;
+            while (std::getline(iss, line))
+                if (!line.empty() && line.find(pidFilter) != std::string::npos) n++;
+            return n;
         };
         counts.qp = countOwned("qp");
         counts.cq = countOwned("cq");

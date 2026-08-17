@@ -53,6 +53,12 @@ NetIbThreadConfig parseAndStripNThreads(int* argc, char** argv)
     const size_t          kPrefixLen  = std::strlen(kFlagPrefix);
     NetIbThreadConfig     config;
     bool                  sawFlag = false;
+    // Conflict detection compares the value as written on the command line,
+    // before clamping. Comparing post-clamp values would let two distinct
+    // out-of-range requests (e.g. 99 and 100) both collapse to kMaxThreads and
+    // pass as non-conflicting, so the reject-conflicting-values contract would
+    // not hold above the cap.
+    int                   rawSeen = 0;
 
     int writeIdx = 1;
     for(int readIdx = 1; readIdx < *argc; ++readIdx)
@@ -75,13 +81,9 @@ NetIbThreadConfig parseAndStripNThreads(int* argc, char** argv)
             continue;
         }
 
-        if(parsed > MPIEnvironment::kMaxThreads)
-        {
-            parsed         = MPIEnvironment::kMaxThreads;
-            config.clamped = true;
-        }
+        const int raw = parsed;
 
-        if(sawFlag && parsed != config.nThreads)
+        if(sawFlag && raw != rawSeen)
         {
             config.valid = false;
             if(config.error.empty())
@@ -89,7 +91,14 @@ NetIbThreadConfig parseAndStripNThreads(int* argc, char** argv)
             continue;
         }
 
-        sawFlag        = true;
+        if(parsed > MPIEnvironment::kMaxThreads)
+        {
+            parsed         = MPIEnvironment::kMaxThreads;
+            config.clamped = true;
+        }
+
+        sawFlag         = true;
+        rawSeen         = raw;
         config.nThreads = parsed;
     }
 

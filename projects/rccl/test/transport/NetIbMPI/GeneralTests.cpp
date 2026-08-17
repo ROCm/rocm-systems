@@ -299,6 +299,14 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
             size_t sizes[1]   = {bufferSize};
             int    tags[1]    = {tag};
             void*  handles[1] = {mhandle};
+            // Unlike the send path below, a NULL request is treated as a hard
+            // failure rather than retried. That is only valid because each
+            // worker owns its own recvComm and posts exactly one receive on it,
+            // so the receive FIFO is guaranteed empty here and irecv cannot
+            // return NULL for want of a free slot — a NULL means the plugin
+            // broke its contract. If workers ever share a comm or post several
+            // receives before waiting, NULL becomes ordinary backpressure and
+            // this path needs the same retry loop the send path uses.
             if (PostRecv(pair.recvComm, 1, bufs, sizes, tags, handles, &request) != ncclSuccess) {
                 result.ok = false; result.msg = "PostRecv failed"; return result;
             }
