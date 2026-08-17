@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -21,6 +22,12 @@ VNopVop3::VNopVop3(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVNopVop3(const MachineInst *opcode) {
+  return std::make_unique<VNopVop3>(opcode);
+}
+} // namespace detail
 
 VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -57,6 +64,12 @@ VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMovB32Vop3>(opcode);
+}
+} // namespace detail
+
 VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_readfirstlane_b32_e64_dpp"
@@ -73,6 +86,12 @@ VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_READFIRSTLANE_B32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVReadfirstlaneB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VReadfirstlaneB32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -96,6 +115,12 @@ VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CVT_I32_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtI32F64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtI32F64Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f64_i32_e64_dpp"
@@ -116,6 +141,12 @@ VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CVT_F64_I32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF64I32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF64I32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -152,6 +183,12 @@ VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32I32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32I32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f32_u32_e64_dpp"
@@ -186,6 +223,12 @@ VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32U32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32U32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -222,6 +265,12 @@ VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtU32F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtU32F32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_i32_f32_e64_dpp"
@@ -257,6 +306,12 @@ VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtI32F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtI32F32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f16_f32_e64_dpp"
@@ -291,6 +346,12 @@ VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF16F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF16F32Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtF16F32Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -337,6 +398,12 @@ VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32F16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32F16Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtNearestI32F32Vop3::VCvtNearestI32F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_nearest_i32_f32_e64_dpp"
@@ -371,6 +438,12 @@ VCvtNearestI32F32Vop3::VCvtNearestI32F32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtNearestI32F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtNearestI32F32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtFloorI32F32Vop3::VCvtFloorI32F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -407,6 +480,12 @@ VCvtFloorI32F32Vop3::VCvtFloorI32F32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtFloorI32F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtFloorI32F32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_off_f32_i4_e64_dpp"
@@ -442,6 +521,12 @@ VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtOffF32I4Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtOffF32I4Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f32_f64_e64_dpp"
@@ -464,6 +549,12 @@ VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CVT_F32_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32F64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32F64Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f64_f32_e64_dpp"
@@ -484,6 +575,12 @@ VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CVT_F64_F32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF64F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF64F32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -520,6 +617,12 @@ VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Ubyte0Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Ubyte0Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f32_ubyte1_e64_dpp"
@@ -554,6 +657,12 @@ VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Ubyte1Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Ubyte1Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -590,6 +699,12 @@ VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Ubyte2Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Ubyte2Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f32_ubyte3_e64_dpp"
@@ -625,6 +740,12 @@ VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Ubyte3Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Ubyte3Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_u32_f64_e64_dpp"
@@ -647,6 +768,12 @@ VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CVT_U32_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtU32F64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtU32F64Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f64_u32_e64_dpp"
@@ -667,6 +794,12 @@ VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CVT_F64_U32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF64U32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF64U32Vop3>(opcode);
+}
+} // namespace detail
 
 VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -690,6 +823,12 @@ VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_TRUNC_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVTruncF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VTruncF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_ceil_f64_e64_dpp"
@@ -711,6 +850,12 @@ VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CEIL_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCeilF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCeilF64Vop3>(opcode);
+}
+} // namespace detail
 
 VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -734,6 +879,12 @@ VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_RNDNE_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRndneF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VRndneF64Vop3>(opcode);
+}
+} // namespace detail
+
 VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_floor_f64_e64_dpp"
@@ -756,6 +907,12 @@ VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_FLOOR_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFloorF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFloorF64Vop3>(opcode);
+}
+} // namespace detail
+
 VPipeflushVop3::VPipeflushVop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_pipeflush_e64_dpp"
@@ -765,6 +922,12 @@ VPipeflushVop3::VPipeflushVop3(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPipeflushVop3(const MachineInst *opcode) {
+  return std::make_unique<VPipeflushVop3>(opcode);
+}
+} // namespace detail
 
 VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -804,6 +967,12 @@ VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovB16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMovB16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMovB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -846,6 +1015,12 @@ VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFractF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFractF32Vop3>(opcode);
+}
+} // namespace detail
+
 VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_trunc_f32_e64_dpp"
@@ -880,6 +1055,12 @@ VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVTruncF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VTruncF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -916,6 +1097,12 @@ VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCeilF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCeilF32Vop3>(opcode);
+}
+} // namespace detail
+
 VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_rndne_f32_e64_dpp"
@@ -950,6 +1137,12 @@ VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVRndneF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VRndneF32Vop3>(opcode);
+}
+} // namespace detail
 
 VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -986,6 +1179,12 @@ VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFloorF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFloorF32Vop3>(opcode);
+}
+} // namespace detail
+
 VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_exp_f32_e64_dpp"
@@ -1020,6 +1219,12 @@ VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVExpF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VExpF32Vop3>(opcode);
+}
+} // namespace detail
 
 VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1056,6 +1261,12 @@ VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLogF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLogF32Vop3>(opcode);
+}
+} // namespace detail
+
 VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_rcp_f32_e64_dpp"
@@ -1090,6 +1301,12 @@ VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVRcpF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VRcpF32Vop3>(opcode);
+}
+} // namespace detail
 
 VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1126,6 +1343,12 @@ VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRcpIflagF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VRcpIflagF32Vop3>(opcode);
+}
+} // namespace detail
+
 VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_rsq_f32_e64_dpp"
@@ -1161,6 +1384,12 @@ VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRsqF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VRsqF32Vop3>(opcode);
+}
+} // namespace detail
+
 VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_rcp_f64_e64_dpp"
@@ -1183,6 +1412,12 @@ VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_RCP_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVRcpF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VRcpF64Vop3>(opcode);
+}
+} // namespace detail
+
 VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_rsq_f64_e64_dpp"
@@ -1204,6 +1439,12 @@ VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_RSQ_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVRsqF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VRsqF64Vop3>(opcode);
+}
+} // namespace detail
 
 VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1240,6 +1481,12 @@ VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSqrtF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSqrtF32Vop3>(opcode);
+}
+} // namespace detail
+
 VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_sqrt_f64_e64_dpp"
@@ -1261,6 +1508,12 @@ VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_SQRT_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSqrtF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSqrtF64Vop3>(opcode);
+}
+} // namespace detail
 
 VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1297,6 +1550,12 @@ VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSinF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSinF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cos_f32_e64_dpp"
@@ -1331,6 +1590,12 @@ VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCosF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCosF32Vop3>(opcode);
+}
+} // namespace detail
 
 VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1367,6 +1632,12 @@ VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVNotB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VNotB32Vop3>(opcode);
+}
+} // namespace detail
+
 VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_bfrev_b32_e64_dpp"
@@ -1401,6 +1672,12 @@ VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVBfrevB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VBfrevB32Vop3>(opcode);
+}
+} // namespace detail
 
 VClzI32U32Vop3::VClzI32U32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1437,6 +1714,12 @@ VClzI32U32Vop3::VClzI32U32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVClzI32U32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VClzI32U32Vop3>(opcode);
+}
+} // namespace detail
+
 VCtzI32B32Vop3::VCtzI32B32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_ctz_i32_b32_e64_dpp"
@@ -1471,6 +1754,12 @@ VCtzI32B32Vop3::VCtzI32B32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCtzI32B32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCtzI32B32Vop3>(opcode);
+}
+} // namespace detail
 
 VClsI32Vop3::VClsI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1507,6 +1796,12 @@ VClsI32Vop3::VClsI32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVClsI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VClsI32Vop3>(opcode);
+}
+} // namespace detail
+
 VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_frexp_exp_i32_f64_e64_dpp"
@@ -1528,6 +1823,12 @@ VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_FREXP_EXP_I32_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFrexpExpI32F64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFrexpExpI32F64Vop3>(opcode);
+}
+} // namespace detail
 
 VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1551,6 +1852,12 @@ VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_FREXP_MANT_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFrexpMantF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFrexpMantF64Vop3>(opcode);
+}
+} // namespace detail
+
 VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_fract_f64_e64_dpp"
@@ -1572,6 +1879,12 @@ VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_FRACT_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFractF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFractF64Vop3>(opcode);
+}
+} // namespace detail
 
 VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1608,6 +1921,12 @@ VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFrexpExpI32F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFrexpExpI32F32Vop3>(opcode);
+}
+} // namespace detail
+
 VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_frexp_mant_f32_e64_dpp"
@@ -1642,6 +1961,12 @@ VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFrexpMantF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFrexpMantF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1681,6 +2006,12 @@ VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovreldB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMovreldB32Vop3>(opcode);
+}
+} // namespace detail
+
 VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_movrels_b32_e64_dpp"
@@ -1714,6 +2045,12 @@ VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
   }
   m0.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovrelsB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMovrelsB32Vop3>(opcode);
+}
+} // namespace detail
 
 VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1749,6 +2086,12 @@ VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovrelsdB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMovrelsdB32Vop3>(opcode);
+}
+} // namespace detail
+
 VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_movrelsd_2_b32_e64_dpp"
@@ -1782,6 +2125,12 @@ VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
   }
   m0.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMovrelsd2B32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMovrelsd2B32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -1821,6 +2170,12 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF16U16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF16U16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtF16U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1867,6 +2222,12 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF16I16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF16I16Vop3>(opcode);
+}
+} // namespace detail
+
 void VCvtF16I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1911,6 +2272,12 @@ VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtU16F16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtU16F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtU16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1957,6 +2324,12 @@ VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtI16F16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtI16F16Vop3>(opcode);
+}
+} // namespace detail
+
 void VCvtI16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2001,6 +2374,12 @@ VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVRcpF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VRcpF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VRcpF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2047,6 +2426,12 @@ VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSqrtF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSqrtF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VSqrtF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2091,6 +2476,12 @@ VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVRsqF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VRsqF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VRsqF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2137,6 +2528,12 @@ VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLogF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLogF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VLogF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2181,6 +2578,12 @@ VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVExpF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VExpF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VExpF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2227,6 +2630,12 @@ VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFrexpMantF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFrexpMantF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VFrexpMantF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2271,6 +2680,12 @@ VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFrexpExpI16F16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFrexpExpI16F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VFrexpExpI16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2317,6 +2732,12 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFloorF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFloorF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VFloorF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2361,6 +2782,12 @@ VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCeilF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCeilF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCeilF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2407,6 +2834,12 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVTruncF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VTruncF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VTruncF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2451,6 +2884,12 @@ VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVRndneF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VRndneF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VRndneF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2497,6 +2936,12 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFractF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFractF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VFractF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2541,6 +2986,12 @@ VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSinF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSinF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VSinF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2587,6 +3038,12 @@ VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCosF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCosF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VCosF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2627,6 +3084,12 @@ VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSatPkU8I16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSatPkU8I16Vop3>(opcode);
+}
+} // namespace detail
 
 void VSatPkU8I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2673,6 +3136,12 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtNormI16F16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtNormI16F16Vop3>(opcode);
+}
+} // namespace detail
+
 void VCvtNormI16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2717,6 +3186,12 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtNormU16F16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtNormU16F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtNormU16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2763,6 +3238,12 @@ VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVNotB16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VNotB16Vop3>(opcode);
+}
+} // namespace detail
+
 void VNotB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2808,6 +3289,12 @@ VCvtI32I16Vop3::VCvtI32I16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtI32I16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtI32I16Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtU32U16Vop3::VCvtU32U16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_u32_u16_e64_dpp"
@@ -2847,6 +3334,12 @@ VCvtU32U16Vop3::VCvtU32U16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtU32U16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtU32U16Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF32Fp8Vop3::VCvtF32Fp8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_f32_fp8_e64_dpp"
@@ -2881,6 +3374,12 @@ VCvtF32Fp8Vop3::VCvtF32Fp8Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Fp8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Fp8Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtF32Bf8Vop3::VCvtF32Bf8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -2917,6 +3416,12 @@ VCvtF32Bf8Vop3::VCvtF32Bf8Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtF32Bf8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtF32Bf8Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtPkF32Fp8Vop3::VCvtPkF32Fp8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_pk_f32_fp8_e64_dpp"
@@ -2942,6 +3447,12 @@ VCvtPkF32Fp8Vop3::VCvtPkF32Fp8Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CVT_PK_F32_FP8 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkF32Fp8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkF32Fp8Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtPkF32Bf8Vop3::VCvtPkF32Bf8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_pk_f32_bf8_e64_dpp"
@@ -2966,6 +3477,12 @@ VCvtPkF32Bf8Vop3::VCvtPkF32Bf8Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CVT_PK_F32_BF8 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkF32Bf8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkF32Bf8Vop3>(opcode);
+}
+} // namespace detail
 
 VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3010,6 +3527,12 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCndmaskB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCndmaskB32Vop3>(opcode);
+}
+} // namespace detail
+
 VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_add_f64_e64_dpp"
@@ -3038,6 +3561,12 @@ VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_ADD_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAddF64Vop3>(opcode);
+}
+} // namespace detail
 
 VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3080,6 +3609,12 @@ VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAddF32Vop3>(opcode);
+}
+} // namespace detail
+
 VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_sub_f32_e64_dpp"
@@ -3120,6 +3655,12 @@ VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSubF32Vop3>(opcode);
+}
+} // namespace detail
 
 VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3162,6 +3703,12 @@ VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubrevF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSubrevF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_f64_e64_dpp"
@@ -3190,6 +3737,12 @@ VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_MUL_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMulF64Vop3>(opcode);
+}
+} // namespace detail
 
 VMulDx9ZeroF32Vop3::VMulDx9ZeroF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3232,6 +3785,12 @@ VMulDx9ZeroF32Vop3::VMulDx9ZeroF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulDx9ZeroF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMulDx9ZeroF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_f32_e64_dpp"
@@ -3272,6 +3831,12 @@ VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMulF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3314,6 +3879,12 @@ VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulI32I24Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMulI32I24Vop3>(opcode);
+}
+} // namespace detail
+
 VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_hi_i32_i24_e64_dpp"
@@ -3354,6 +3925,12 @@ VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulHiI32I24Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMulHiI32I24Vop3>(opcode);
+}
+} // namespace detail
 
 VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3396,6 +3973,12 @@ VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulU32U24Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMulU32U24Vop3>(opcode);
+}
+} // namespace detail
+
 VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_hi_u32_u24_e64_dpp"
@@ -3437,6 +4020,12 @@ VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulHiU32U24Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMulHiU32U24Vop3>(opcode);
+}
+} // namespace detail
+
 VMinNumF64Vop3::VMinNumF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_min_num_f64_e64_dpp"
@@ -3466,6 +4055,12 @@ VMinNumF64Vop3::VMinNumF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_MIN_NUM_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinNumF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinNumF64Vop3>(opcode);
+}
+} // namespace detail
+
 VMaxNumF64Vop3::VMaxNumF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_max_num_f64_e64_dpp"
@@ -3494,6 +4089,12 @@ VMaxNumF64Vop3::VMaxNumF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_MAX_NUM_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxNumF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaxNumF64Vop3>(opcode);
+}
+} // namespace detail
 
 VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3536,6 +4137,12 @@ VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinI32Vop3>(opcode);
+}
+} // namespace detail
+
 VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_max_i32_e64_dpp"
@@ -3576,6 +4183,12 @@ VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaxI32Vop3>(opcode);
+}
+} // namespace detail
 
 VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3618,6 +4231,12 @@ VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinU32Vop3>(opcode);
+}
+} // namespace detail
+
 VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_max_u32_e64_dpp"
@@ -3658,6 +4277,12 @@ VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaxU32Vop3>(opcode);
+}
+} // namespace detail
 
 VMinNumF32Vop3::VMinNumF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3700,6 +4325,12 @@ VMinNumF32Vop3::VMinNumF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinNumF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinNumF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMaxNumF32Vop3::VMaxNumF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_max_num_f32_e64_dpp"
@@ -3740,6 +4371,12 @@ VMaxNumF32Vop3::VMaxNumF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxNumF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaxNumF32Vop3>(opcode);
+}
+} // namespace detail
 
 VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3782,6 +4419,12 @@ VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLshlrevB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLshlrevB32Vop3>(opcode);
+}
+} // namespace detail
+
 VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_lshrrev_b32_e64_dpp"
@@ -3822,6 +4465,12 @@ VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVLshrrevB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLshrrevB32Vop3>(opcode);
+}
+} // namespace detail
 
 VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3864,6 +4513,12 @@ VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAshrrevI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAshrrevI32Vop3>(opcode);
+}
+} // namespace detail
+
 VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_and_b32_e64_dpp"
@@ -3904,6 +4559,12 @@ VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAndB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAndB32Vop3>(opcode);
+}
+} // namespace detail
 
 VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -3946,6 +4607,12 @@ VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVOrB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VOrB32Vop3>(opcode);
+}
+} // namespace detail
+
 VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_xor_b32_e64_dpp"
@@ -3986,6 +4653,12 @@ VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVXorB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VXorB32Vop3>(opcode);
+}
+} // namespace detail
 
 VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4028,6 +4701,12 @@ VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVXnorB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VXnorB32Vop3>(opcode);
+}
+} // namespace detail
+
 VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_lshlrev_b64_e64_dpp"
@@ -4055,6 +4734,12 @@ VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_LSHLREV_B64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVLshlrevB64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLshlrevB64Vop3>(opcode);
+}
+} // namespace detail
 
 VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4097,6 +4782,12 @@ VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddNcU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAddNcU32Vop3>(opcode);
+}
+} // namespace detail
+
 VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_sub_nc_u32_e64_dpp"
@@ -4138,6 +4829,12 @@ VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubNcU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSubNcU32Vop3>(opcode);
+}
+} // namespace detail
+
 VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_subrev_nc_u32_e64_dpp"
@@ -4178,6 +4875,12 @@ VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubrevNcU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSubrevNcU32Vop3>(opcode);
+}
+} // namespace detail
 
 VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4221,6 +4924,12 @@ VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFmacF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFmacF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtPkRtzF16F32Vop3::VCvtPkRtzF16F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_pk_rtz_f16_f32_e64_dpp"
@@ -4261,6 +4970,12 @@ VCvtPkRtzF16F32Vop3::VCvtPkRtzF16F32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkRtzF16F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkRtzF16F32Vop3>(opcode);
+}
+} // namespace detail
 
 VMinNumF16Vop3::VMinNumF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4310,6 +5025,12 @@ VMinNumF16Vop3::VMinNumF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinNumF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinNumF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMinNumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4366,6 +5087,12 @@ VMaxNumF16Vop3::VMaxNumF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxNumF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaxNumF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMaxNumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4420,6 +5147,12 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAddF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VAddF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4476,6 +5209,12 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSubF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VSubF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4531,6 +5270,12 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubrevF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSubrevF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VSubrevF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4585,6 +5330,12 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMulF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMulF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4642,6 +5393,12 @@ VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFmacF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFmacF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VFmacF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4697,6 +5454,12 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLdexpF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLdexpF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VLdexpF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4750,6 +5513,12 @@ VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFmaDx9ZeroF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFmaDx9ZeroF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mad_i32_i24_e64_dpp"
@@ -4796,6 +5565,12 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadI32I24Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMadI32I24Vop3>(opcode);
+}
+} // namespace detail
 
 VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4844,6 +5619,12 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadU32U24Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMadU32U24Vop3>(opcode);
+}
+} // namespace detail
+
 VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cubeid_f32_e64_dpp"
@@ -4890,6 +5671,12 @@ VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCubeidF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCubeidF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -4938,6 +5725,12 @@ VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCubescF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCubescF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cubetc_f32_e64_dpp"
@@ -4984,6 +5777,12 @@ VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCubetcF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCubetcF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5032,6 +5831,12 @@ VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCubemaF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCubemaF32Vop3>(opcode);
+}
+} // namespace detail
+
 VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_bfe_u32_e64_dpp"
@@ -5078,6 +5883,12 @@ VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVBfeU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VBfeU32Vop3>(opcode);
+}
+} // namespace detail
 
 VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5126,6 +5937,12 @@ VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVBfeI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VBfeI32Vop3>(opcode);
+}
+} // namespace detail
+
 VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_bfi_b32_e64_dpp"
@@ -5172,6 +5989,12 @@ VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVBfiB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VBfiB32Vop3>(opcode);
+}
+} // namespace detail
 
 VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5220,6 +6043,12 @@ VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVFmaF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFmaF32Vop3>(opcode);
+}
+} // namespace detail
+
 VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_fma_f64_e64_dpp"
@@ -5255,6 +6084,12 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_FMA_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFmaF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFmaF64Vop3>(opcode);
+}
+} // namespace detail
 
 VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5302,6 +6137,12 @@ VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVLerpU8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLerpU8Vop3>(opcode);
+}
+} // namespace detail
 
 VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5354,6 +6195,12 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAlignbitB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAlignbitB32Vop3>(opcode);
+}
+} // namespace detail
+
 VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_alignbyte_b32_e64_dpp"
@@ -5405,6 +6252,12 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAlignbyteB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAlignbyteB32Vop3>(opcode);
+}
+} // namespace detail
+
 VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mullit_f32_e64_dpp"
@@ -5451,6 +6304,12 @@ VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMullitF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMullitF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5499,6 +6358,12 @@ VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMin3I32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMin3I32Vop3>(opcode);
+}
+} // namespace detail
+
 VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_min3_u32_e64_dpp"
@@ -5545,6 +6410,12 @@ VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMin3U32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMin3U32Vop3>(opcode);
+}
+} // namespace detail
 
 VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5593,6 +6464,12 @@ VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMax3I32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMax3I32Vop3>(opcode);
+}
+} // namespace detail
+
 VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_max3_u32_e64_dpp"
@@ -5639,6 +6516,12 @@ VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMax3U32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMax3U32Vop3>(opcode);
+}
+} // namespace detail
 
 VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5687,6 +6570,12 @@ VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMed3I32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMed3I32Vop3>(opcode);
+}
+} // namespace detail
+
 VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_med3_u32_e64_dpp"
@@ -5733,6 +6622,12 @@ VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMed3U32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMed3U32Vop3>(opcode);
+}
+} // namespace detail
 
 VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5781,6 +6676,12 @@ VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSadU8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSadU8Vop3>(opcode);
+}
+} // namespace detail
+
 VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_sad_hi_u8_e64_dpp"
@@ -5827,6 +6728,12 @@ VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSadHiU8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSadHiU8Vop3>(opcode);
+}
+} // namespace detail
 
 VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5875,6 +6782,12 @@ VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSadU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSadU16Vop3>(opcode);
+}
+} // namespace detail
+
 VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_sad_u32_e64_dpp"
@@ -5921,6 +6834,12 @@ VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSadU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSadU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -5969,6 +6888,12 @@ VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkU8F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkU8F32Vop3>(opcode);
+}
+} // namespace detail
+
 VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_div_fixup_f32_e64_dpp"
@@ -6001,6 +6926,12 @@ VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_DIV_FIXUP_F32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVDivFixupF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VDivFixupF32Vop3>(opcode);
+}
+} // namespace detail
 
 VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6037,6 +6968,12 @@ VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_DIV_FIXUP_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVDivFixupF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VDivFixupF64Vop3>(opcode);
+}
+} // namespace detail
 
 VMin3NumF32Vop3::VMin3NumF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6085,6 +7022,12 @@ VMin3NumF32Vop3::VMin3NumF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMin3NumF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMin3NumF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMax3NumF32Vop3::VMax3NumF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_max3_num_f32_e64_dpp"
@@ -6131,6 +7074,12 @@ VMax3NumF32Vop3::VMax3NumF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMax3NumF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMax3NumF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6190,6 +7139,12 @@ VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMin3NumF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMin3NumF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMin3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -6256,6 +7211,12 @@ VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMax3NumF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMax3NumF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMax3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -6309,6 +7270,12 @@ VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinimum3F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinimum3F32Vop3>(opcode);
+}
+} // namespace detail
+
 VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_maximum3_f32_e64_dpp"
@@ -6355,6 +7322,12 @@ VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaximum3F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaximum3F32Vop3>(opcode);
+}
+} // namespace detail
 
 VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6414,6 +7387,12 @@ VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinimum3F16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinimum3F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMinimum3F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -6480,6 +7459,12 @@ VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaximum3F16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaximum3F16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMaximum3F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -6532,6 +7517,12 @@ VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMed3NumF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMed3NumF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6592,6 +7583,12 @@ VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMed3NumF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMed3NumF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMed3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -6634,6 +7631,12 @@ VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVDivFmasF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VDivFmasF32Vop3>(opcode);
+}
+} // namespace detail
+
 VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_div_fmas_f64_e64_dpp"
@@ -6672,6 +7675,12 @@ VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_DIV_FMAS_F64 does not support DPP", "");
   vcc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVDivFmasF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VDivFmasF64Vop3>(opcode);
+}
+} // namespace detail
 
 VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6720,6 +7729,12 @@ VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMsadU8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMsadU8Vop3>(opcode);
+}
+} // namespace detail
+
 VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_qsad_pk_u16_u8_e64_dpp"
@@ -6754,6 +7769,12 @@ VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_QSAD_PK_U16_U8 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVQsadPkU16U8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VQsadPkU16U8Vop3>(opcode);
+}
+} // namespace detail
 
 VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6790,6 +7811,12 @@ VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_MQSAD_PK_U16_U8 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMqsadPkU16U8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMqsadPkU16U8Vop3>(opcode);
+}
+} // namespace detail
+
 VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mqsad_u32_u8_e64_dpp"
@@ -6819,6 +7846,12 @@ VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_MQSAD_U32_U8 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMqsadU32U8Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMqsadU32U8Vop3>(opcode);
+}
+} // namespace detail
 
 VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6866,6 +7899,12 @@ VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVXor3B32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VXor3B32Vop3>(opcode);
+}
+} // namespace detail
 
 VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -6926,6 +7965,12 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMadU16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMadU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -6979,6 +8024,12 @@ VPermB32Vop3::VPermB32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPermB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VPermB32Vop3>(opcode);
+}
+} // namespace detail
+
 VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_xad_u32_e64_dpp"
@@ -7025,6 +8076,12 @@ VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVXadU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VXadU32Vop3>(opcode);
+}
+} // namespace detail
 
 VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -7073,6 +8130,12 @@ VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLshlAddU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLshlAddU32Vop3>(opcode);
+}
+} // namespace detail
+
 VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_add_lshl_u32_e64_dpp"
@@ -7119,6 +8182,12 @@ VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddLshlU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAddLshlU32Vop3>(opcode);
+}
+} // namespace detail
 
 VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -7178,6 +8247,12 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVFmaF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VFmaF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VFmaF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -7244,6 +8319,12 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMin3I16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMin3I16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMin3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -7308,6 +8389,12 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMin3U16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMin3U16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMin3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -7374,6 +8461,12 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMax3I16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMax3I16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMax3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -7438,6 +8531,12 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMax3U16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMax3U16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMax3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -7504,6 +8603,12 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMed3I16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMed3I16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMed3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -7568,6 +8673,12 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMed3U16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMed3U16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMed3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -7634,6 +8745,12 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMadI16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMadI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -7699,6 +8816,12 @@ VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVDivFixupF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VDivFixupF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VDivFixupF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -7752,6 +8875,12 @@ VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAdd3U32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAdd3U32Vop3>(opcode);
+}
+} // namespace detail
+
 VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_lshl_or_b32_e64_dpp"
@@ -7798,6 +8927,12 @@ VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVLshlOrB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLshlOrB32Vop3>(opcode);
+}
+} // namespace detail
 
 VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -7846,6 +8981,12 @@ VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAndOrB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAndOrB32Vop3>(opcode);
+}
+} // namespace detail
+
 VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_or3_b32_e64_dpp"
@@ -7892,6 +9033,12 @@ VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVOr3B32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VOr3B32Vop3>(opcode);
+}
+} // namespace detail
 
 VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -7948,6 +9095,12 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadU32U16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMadU32U16Vop3>(opcode);
+}
+} // namespace detail
+
 VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mad_i32_i16_e64_dpp"
@@ -8003,6 +9156,12 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadI32I16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMadI32I16Vop3>(opcode);
+}
+} // namespace detail
+
 VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_permlane16_b32_e64_dpp"
@@ -8032,6 +9191,12 @@ VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_PERMLANE16_B32 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPermlane16B32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VPermlane16B32Vop3>(opcode);
+}
+} // namespace detail
+
 VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_permlanex16_b32_e64_dpp"
@@ -8060,6 +9225,12 @@ VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PERMLANEX16_B32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPermlanex16B32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VPermlanex16B32Vop3>(opcode);
+}
+} // namespace detail
 
 VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -8111,6 +9282,12 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCndmaskB16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCndmaskB16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCndmaskB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -8165,6 +9342,12 @@ VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxminU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaxminU32Vop3>(opcode);
+}
+} // namespace detail
+
 VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_minmax_u32_e64_dpp"
@@ -8211,6 +9394,12 @@ VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinmaxU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinmaxU32Vop3>(opcode);
+}
+} // namespace detail
 
 VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -8259,6 +9448,12 @@ VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxminI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaxminI32Vop3>(opcode);
+}
+} // namespace detail
+
 VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_minmax_i32_e64_dpp"
@@ -8305,6 +9500,12 @@ VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinmaxI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinmaxI32Vop3>(opcode);
+}
+} // namespace detail
 
 VDot2F16F16Vop3::VDot2F16F16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -8356,6 +9557,12 @@ VDot2F16F16Vop3::VDot2F16F16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot2F16F16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VDot2F16F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VDot2F16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -8414,6 +9621,12 @@ VDot2Bf16Bf16Vop3::VDot2Bf16Bf16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot2Bf16Bf16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VDot2Bf16Bf16Vop3>(opcode);
+}
+} // namespace detail
+
 void VDot2Bf16Bf16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -8467,6 +9680,12 @@ VMinmaxNumF32Vop3::VMinmaxNumF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinmaxNumF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinmaxNumF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMaxminNumF32Vop3::VMaxminNumF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_maxmin_num_f32_e64_dpp"
@@ -8513,6 +9732,12 @@ VMaxminNumF32Vop3::VMaxminNumF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxminNumF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaxminNumF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -8572,6 +9797,12 @@ VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinmaxNumF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinmaxNumF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMinmaxNumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -8638,6 +9869,12 @@ VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxminNumF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaxminNumF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMaxminNumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -8691,6 +9928,12 @@ VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinimummaximumF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinimummaximumF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMaximumminimumF32Vop3::VMaximumminimumF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_maximumminimum_f32_e64_dpp"
@@ -8737,6 +9980,12 @@ VMaximumminimumF32Vop3::VMaximumminimumF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaximumminimumF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaximumminimumF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -8796,6 +10045,12 @@ VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinimummaximumF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinimummaximumF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMinimummaximumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -8862,6 +10117,12 @@ VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaximumminimumF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaximumminimumF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMaximumminimumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -8891,6 +10152,12 @@ VSExpF32Vop3::VSExpF32Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_S_EXP_F32 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSExpF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSExpF32Vop3>(opcode);
+}
+} // namespace detail
+
 VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_s_exp_f16_e64_dpp"
@@ -8915,6 +10182,12 @@ VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_S_EXP_F16 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSExpF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSExpF16Vop3>(opcode);
+}
+} // namespace detail
+
 VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_s_log_f32_e64_dpp"
@@ -8937,6 +10210,12 @@ VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_LOG_F32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSLogF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSLogF32Vop3>(opcode);
+}
+} // namespace detail
 
 VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -8962,6 +10241,12 @@ VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_S_LOG_F16 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSLogF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSLogF16Vop3>(opcode);
+}
+} // namespace detail
+
 VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_s_rcp_f32_e64_dpp"
@@ -8984,6 +10269,12 @@ VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_RCP_F32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSRcpF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSRcpF32Vop3>(opcode);
+}
+} // namespace detail
 
 VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -9009,6 +10300,12 @@ VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_S_RCP_F16 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSRcpF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSRcpF16Vop3>(opcode);
+}
+} // namespace detail
+
 VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_s_rsq_f32_e64_dpp"
@@ -9031,6 +10328,12 @@ VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_RSQ_F32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSRsqF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSRsqF32Vop3>(opcode);
+}
+} // namespace detail
 
 VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -9056,6 +10359,12 @@ VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_S_RSQ_F16 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSRsqF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSRsqF16Vop3>(opcode);
+}
+} // namespace detail
+
 VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_s_sqrt_f32_e64_dpp"
@@ -9078,6 +10387,12 @@ VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_SQRT_F32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSSqrtF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSSqrtF32Vop3>(opcode);
+}
+} // namespace detail
 
 VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -9102,6 +10417,12 @@ VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_S_SQRT_F16 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSSqrtF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSSqrtF16Vop3>(opcode);
+}
+} // namespace detail
 
 VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -9151,6 +10472,12 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddNcU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAddNcU16Vop3>(opcode);
+}
+} // namespace detail
 
 void VAddNcU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -9207,6 +10534,12 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubNcU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSubNcU16Vop3>(opcode);
+}
+} // namespace detail
+
 void VSubNcU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -9262,6 +10595,12 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulLoU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMulLoU16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMulLoU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -9309,6 +10648,12 @@ VCvtPkI16F32Vop3::VCvtPkI16F32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkI16F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkI16F32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtPkU16F32Vop3::VCvtPkU16F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_pk_u16_f32_e64_dpp"
@@ -9349,6 +10694,12 @@ VCvtPkU16F32Vop3::VCvtPkU16F32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkU16F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkU16F32Vop3>(opcode);
+}
+} // namespace detail
 
 VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -9398,6 +10749,12 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaxU16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMaxU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -9454,6 +10811,12 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaxI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaxI16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMaxI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -9508,6 +10871,12 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinU16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMinU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -9564,6 +10933,12 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinI16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMinI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -9618,6 +10993,12 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddNcI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAddNcI16Vop3>(opcode);
+}
+} // namespace detail
 
 void VAddNcI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -9674,6 +11055,12 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubNcI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSubNcI16Vop3>(opcode);
+}
+} // namespace detail
+
 void VSubNcI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -9699,6 +11086,12 @@ VPermlane16VarB32Vop3::VPermlane16VarB32Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_PERMLANE16_VAR_B32 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPermlane16VarB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VPermlane16VarB32Vop3>(opcode);
+}
+} // namespace detail
+
 VPermlanex16VarB32Vop3::VPermlanex16VarB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_permlanex16_var_b32_e64_dpp"
@@ -9717,6 +11110,12 @@ VPermlanex16VarB32Vop3::VPermlanex16VarB32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_PERMLANEX16_VAR_B32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPermlanex16VarB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VPermlanex16VarB32Vop3>(opcode);
+}
+} // namespace detail
 
 VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -9767,6 +11166,12 @@ VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPackB32F16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VPackB32F16Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtPkNormI16F16Vop3::VCvtPkNormI16F16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_pk_norm_i16_f16_e64_dpp"
@@ -9815,6 +11220,12 @@ VCvtPkNormI16F16Vop3::VCvtPkNormI16F16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkNormI16F16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkNormI16F16Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtPkNormU16F16Vop3::VCvtPkNormU16F16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -9865,6 +11276,12 @@ VCvtPkNormU16F16Vop3::VCvtPkNormU16F16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkNormU16F16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkNormU16F16Vop3>(opcode);
+}
+} // namespace detail
+
 VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_ldexp_f32_e64_dpp"
@@ -9905,6 +11322,12 @@ VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVLdexpF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLdexpF32Vop3>(opcode);
+}
+} // namespace detail
 
 VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -9947,6 +11370,12 @@ VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVBfmB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VBfmB32Vop3>(opcode);
+}
+} // namespace detail
+
 VBcntU32B32Vop3::VBcntU32B32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_bcnt_u32_b32_e64_dpp"
@@ -9987,6 +11416,12 @@ VBcntU32B32Vop3::VBcntU32B32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVBcntU32B32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VBcntU32B32Vop3>(opcode);
+}
+} // namespace detail
 
 VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -10029,6 +11464,12 @@ VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMbcntLoU32B32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMbcntLoU32B32Vop3>(opcode);
+}
+} // namespace detail
+
 VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mbcnt_hi_u32_b32_e64_dpp"
@@ -10069,6 +11510,12 @@ VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMbcntHiU32B32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMbcntHiU32B32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtPkNormI16F32Vop3::VCvtPkNormI16F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -10111,6 +11558,12 @@ VCvtPkNormI16F32Vop3::VCvtPkNormI16F32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkNormI16F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkNormI16F32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtPkNormU16F32Vop3::VCvtPkNormU16F32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_pk_norm_u16_f32_e64_dpp"
@@ -10151,6 +11604,12 @@ VCvtPkNormU16F32Vop3::VCvtPkNormU16F32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkNormU16F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkNormU16F32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -10193,6 +11652,12 @@ VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkU16U32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkU16U32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cvt_pk_i16_i32_e64_dpp"
@@ -10233,6 +11698,12 @@ VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkI16I32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkI16I32Vop3>(opcode);
+}
+} // namespace detail
 
 VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -10275,6 +11746,12 @@ VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubNcI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VSubNcI32Vop3>(opcode);
+}
+} // namespace detail
+
 VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_add_nc_i32_e64_dpp"
@@ -10316,6 +11793,12 @@ VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddNcI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAddNcI32Vop3>(opcode);
+}
+} // namespace detail
+
 VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_ldexp_f64_e64_dpp"
@@ -10344,6 +11827,12 @@ VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_LDEXP_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLdexpF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLdexpF64Vop3>(opcode);
+}
+} // namespace detail
+
 VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_lo_u32_e64_dpp"
@@ -10370,6 +11859,12 @@ VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_MUL_LO_U32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulLoU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMulLoU32Vop3>(opcode);
+}
+} // namespace detail
 
 VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -10398,6 +11893,12 @@ VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_MUL_HI_U32 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulHiU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMulHiU32Vop3>(opcode);
+}
+} // namespace detail
+
 VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_mul_hi_i32_e64_dpp"
@@ -10424,6 +11925,12 @@ VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_MUL_HI_I32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMulHiI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMulHiI32Vop3>(opcode);
+}
+} // namespace detail
 
 VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -10452,6 +11959,12 @@ VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_TRIG_PREOP_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVTrigPreopF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VTrigPreopF64Vop3>(opcode);
+}
+} // namespace detail
 
 VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -10501,6 +12014,12 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVLshlrevB16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLshlrevB16Vop3>(opcode);
+}
+} // namespace detail
 
 void VLshlrevB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -10557,6 +12076,12 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLshrrevB16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLshrrevB16Vop3>(opcode);
+}
+} // namespace detail
+
 void VLshrrevB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -10612,6 +12137,12 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAshrrevI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAshrrevI16Vop3>(opcode);
+}
+} // namespace detail
+
 void VAshrrevI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -10646,6 +12177,12 @@ VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_LSHRREV_B64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVLshrrevB64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VLshrrevB64Vop3>(opcode);
+}
+} // namespace detail
+
 VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_ashrrev_i64_e64_dpp"
@@ -10673,6 +12210,12 @@ VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_ASHRREV_I64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAshrrevI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAshrrevI64Vop3>(opcode);
+}
+} // namespace detail
 
 VMinimumF64Vop3::VMinimumF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -10703,6 +12246,12 @@ VMinimumF64Vop3::VMinimumF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_MINIMUM_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinimumF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinimumF64Vop3>(opcode);
+}
+} // namespace detail
+
 VMaximumF64Vop3::VMaximumF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_maximum_f64_e64_dpp"
@@ -10732,6 +12281,12 @@ VMaximumF64Vop3::VMaximumF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_MAXIMUM_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaximumF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaximumF64Vop3>(opcode);
+}
+} // namespace detail
+
 VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_readlane_b32_e64_dpp"
@@ -10750,6 +12305,12 @@ VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_READLANE_B32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVReadlaneB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VReadlaneB32Vop3>(opcode);
+}
+} // namespace detail
 
 VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -10774,6 +12335,12 @@ VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_WRITELANE_B32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVWritelaneB32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VWritelaneB32Vop3>(opcode);
+}
+} // namespace detail
 
 VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -10823,6 +12390,12 @@ VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAndB16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VAndB16Vop3>(opcode);
+}
+} // namespace detail
 
 void VAndB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -10879,6 +12452,12 @@ VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVOrB16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VOrB16Vop3>(opcode);
+}
+} // namespace detail
+
 void VOrB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -10934,6 +12513,12 @@ VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVXorB16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VXorB16Vop3>(opcode);
+}
+} // namespace detail
+
 void VXorB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -10981,6 +12566,12 @@ VMinimumF32Vop3::VMinimumF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinimumF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinimumF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMaximumF32Vop3::VMaximumF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_maximum_f32_e64_dpp"
@@ -11021,6 +12612,12 @@ VMaximumF32Vop3::VMaximumF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaximumF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaximumF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMinimumF16Vop3::VMinimumF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -11070,6 +12667,12 @@ VMinimumF16Vop3::VMinimumF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMinimumF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMinimumF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMinimumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -11126,6 +12729,12 @@ VMaximumF16Vop3::VMaximumF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMaximumF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VMaximumF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMaximumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -11173,6 +12782,12 @@ VCvtPkFp8F32Vop3::VCvtPkFp8F32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkFp8F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkFp8F32Vop3>(opcode);
+}
+} // namespace detail
+
 void VCvtPkFp8F32Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -11219,6 +12834,12 @@ VCvtPkBf8F32Vop3::VCvtPkBf8F32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtPkBf8F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtPkBf8F32Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtPkBf8F32Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -11268,6 +12889,12 @@ VCvtSrFp8F32Vop3::VCvtSrFp8F32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtSrFp8F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtSrFp8F32Vop3>(opcode);
+}
+} // namespace detail
+
 void VCvtSrFp8F32Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -11315,6 +12942,12 @@ VCvtSrBf8F32Vop3::VCvtSrBf8F32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCvtSrBf8F32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCvtSrBf8F32Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtSrBf8F32Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -11371,6 +13004,12 @@ VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_eq_f16_e64_dpp"
@@ -11419,6 +13058,12 @@ VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -11469,6 +13114,12 @@ VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_gt_f16_e64_dpp"
@@ -11517,6 +13168,12 @@ VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -11567,6 +13224,12 @@ VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLgF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLgF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_f16_e64_dpp"
@@ -11615,6 +13278,12 @@ VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -11665,6 +13334,12 @@ VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpOF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpOF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_u_f16_e64_dpp"
@@ -11713,6 +13388,12 @@ VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpUF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpUF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -11763,6 +13444,12 @@ VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNgeF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNgeF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nlg_f16_e64_dpp"
@@ -11811,6 +13498,12 @@ VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNlgF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNlgF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -11861,6 +13554,12 @@ VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNgtF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNgtF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nle_f16_e64_dpp"
@@ -11909,6 +13608,12 @@ VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNleF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNleF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -11959,6 +13664,12 @@ VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeqF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeqF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nlt_f16_e64_dpp"
@@ -12008,6 +13719,12 @@ VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNltF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNltF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_f32_e64_dpp"
@@ -12048,6 +13765,12 @@ VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12090,6 +13813,12 @@ VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_f32_e64_dpp"
@@ -12130,6 +13859,12 @@ VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12172,6 +13907,12 @@ VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lg_f32_e64_dpp"
@@ -12212,6 +13953,12 @@ VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLgF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLgF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12254,6 +14001,12 @@ VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_o_f32_e64_dpp"
@@ -12294,6 +14047,12 @@ VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpOF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpOF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12336,6 +14095,12 @@ VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpUF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpUF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nge_f32_e64_dpp"
@@ -12376,6 +14141,12 @@ VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNgeF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNgeF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12418,6 +14189,12 @@ VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNlgF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNlgF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ngt_f32_e64_dpp"
@@ -12458,6 +14235,12 @@ VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNgtF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNgtF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12500,6 +14283,12 @@ VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNleF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNleF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_neq_f32_e64_dpp"
@@ -12540,6 +14329,12 @@ VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeqF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeqF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12582,6 +14377,12 @@ VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNltF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNltF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_f64_e64_dpp"
@@ -12610,6 +14411,12 @@ VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_LT_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12640,6 +14447,12 @@ VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_EQ_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_f64_e64_dpp"
@@ -12668,6 +14481,12 @@ VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_LE_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12698,6 +14517,12 @@ VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_GT_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lg_f64_e64_dpp"
@@ -12726,6 +14551,12 @@ VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_LG_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLgF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLgF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12756,6 +14587,12 @@ VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_GE_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_o_f64_e64_dpp"
@@ -12784,6 +14621,12 @@ VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_O_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpOF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpOF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12814,6 +14657,12 @@ VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_U_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpUF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpUF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nge_f64_e64_dpp"
@@ -12842,6 +14691,12 @@ VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_NGE_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNgeF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNgeF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12872,6 +14727,12 @@ VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_NLG_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNlgF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNlgF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ngt_f64_e64_dpp"
@@ -12900,6 +14761,12 @@ VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_NGT_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNgtF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNgtF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -12930,6 +14797,12 @@ VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_NLE_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNleF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNleF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_neq_f64_e64_dpp"
@@ -12959,6 +14832,12 @@ VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_NEQ_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeqF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeqF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_nlt_f64_e64_dpp"
@@ -12987,6 +14866,12 @@ VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_NLT_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNltF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNltF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -13037,6 +14922,12 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_eq_i16_e64_dpp"
@@ -13085,6 +14976,12 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqI16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -13135,6 +15032,12 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_gt_i16_e64_dpp"
@@ -13183,6 +15086,12 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtI16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -13233,6 +15142,12 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_i16_e64_dpp"
@@ -13281,6 +15196,12 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeI16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -13331,6 +15252,12 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_eq_u16_e64_dpp"
@@ -13379,6 +15306,12 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqU16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -13429,6 +15362,12 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_gt_u16_e64_dpp"
@@ -13477,6 +15416,12 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtU16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -13527,6 +15472,12 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_u16_e64_dpp"
@@ -13576,6 +15527,12 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_i32_e64_dpp"
@@ -13616,6 +15573,12 @@ VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -13658,6 +15621,12 @@ VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_i32_e64_dpp"
@@ -13698,6 +15667,12 @@ VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -13740,6 +15715,12 @@ VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ne_i32_e64_dpp"
@@ -13780,6 +15761,12 @@ VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -13822,6 +15809,12 @@ VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_u32_e64_dpp"
@@ -13862,6 +15855,12 @@ VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -13904,6 +15903,12 @@ VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_u32_e64_dpp"
@@ -13944,6 +15949,12 @@ VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -13986,6 +15997,12 @@ VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ne_u32_e64_dpp"
@@ -14026,6 +16043,12 @@ VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -14068,6 +16091,12 @@ VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_i64_e64_dpp"
@@ -14096,6 +16125,12 @@ VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_LT_I64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -14126,6 +16161,12 @@ VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_EQ_I64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_i64_e64_dpp"
@@ -14154,6 +16195,12 @@ VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_LE_I64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -14184,6 +16231,12 @@ VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_GT_I64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ne_i64_e64_dpp"
@@ -14212,6 +16265,12 @@ VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_NE_I64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -14242,6 +16301,12 @@ VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_GE_I64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_lt_u64_e64_dpp"
@@ -14270,6 +16335,12 @@ VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_LT_U64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLtU64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLtU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -14300,6 +16371,12 @@ VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_EQ_U64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpEqU64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpEqU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_le_u64_e64_dpp"
@@ -14328,6 +16405,12 @@ VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_LE_U64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpLeU64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpLeU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -14358,6 +16441,12 @@ VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_GT_U64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGtU64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGtU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ne_u64_e64_dpp"
@@ -14387,6 +16476,12 @@ VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
     throw util::InvalidInst("V_CMP_NE_U64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpNeU64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpNeU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_ge_u64_e64_dpp"
@@ -14415,6 +16510,12 @@ VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_GE_U64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpGeU64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpGeU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -14465,6 +16566,12 @@ VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpClassF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpClassF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_class_f32_e64_dpp"
@@ -14506,6 +16613,12 @@ VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpClassF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpClassF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmp_class_f64_e64_dpp"
@@ -14533,6 +16646,12 @@ VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_CMP_CLASS_F64 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpClassF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpClassF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -14587,6 +16706,12 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_eq_f16_e64_dpp"
@@ -14639,6 +16764,12 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -14693,6 +16824,12 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_gt_f16_e64_dpp"
@@ -14745,6 +16882,12 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -14799,6 +16942,12 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLgF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLgF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_f16_e64_dpp"
@@ -14851,6 +17000,12 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -14905,6 +17060,12 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxOF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxOF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_u_f16_e64_dpp"
@@ -14957,6 +17118,12 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxUF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxUF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -15011,6 +17178,12 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNgeF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNgeF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nlg_f16_e64_dpp"
@@ -15063,6 +17236,12 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNlgF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNlgF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -15117,6 +17296,12 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNgtF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNgtF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nle_f16_e64_dpp"
@@ -15169,6 +17354,12 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNleF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNleF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -15223,6 +17414,12 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeqF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeqF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nlt_f16_e64_dpp"
@@ -15276,6 +17473,12 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNltF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNltF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_f32_e64_dpp"
@@ -15320,6 +17523,12 @@ VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -15366,6 +17575,12 @@ VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_f32_e64_dpp"
@@ -15410,6 +17625,12 @@ VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -15456,6 +17677,12 @@ VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lg_f32_e64_dpp"
@@ -15500,6 +17727,12 @@ VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLgF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLgF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -15546,6 +17779,12 @@ VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_o_f32_e64_dpp"
@@ -15590,6 +17829,12 @@ VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxOF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxOF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -15636,6 +17881,12 @@ VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxUF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxUF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nge_f32_e64_dpp"
@@ -15680,6 +17931,12 @@ VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNgeF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNgeF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -15726,6 +17983,12 @@ VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNlgF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNlgF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ngt_f32_e64_dpp"
@@ -15770,6 +18033,12 @@ VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNgtF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNgtF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -15816,6 +18085,12 @@ VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNleF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNleF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_neq_f32_e64_dpp"
@@ -15860,6 +18135,12 @@ VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeqF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeqF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -15906,6 +18187,12 @@ VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNltF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNltF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_f64_e64_dpp"
@@ -15938,6 +18225,12 @@ VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -15972,6 +18265,12 @@ VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_f64_e64_dpp"
@@ -16004,6 +18303,12 @@ VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -16038,6 +18343,12 @@ VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lg_f64_e64_dpp"
@@ -16070,6 +18381,12 @@ VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLgF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLgF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -16104,6 +18421,12 @@ VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_o_f64_e64_dpp"
@@ -16136,6 +18459,12 @@ VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxOF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxOF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -16170,6 +18499,12 @@ VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxUF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxUF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nge_f64_e64_dpp"
@@ -16202,6 +18537,12 @@ VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNgeF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNgeF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -16236,6 +18577,12 @@ VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNlgF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNlgF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ngt_f64_e64_dpp"
@@ -16268,6 +18615,12 @@ VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNgtF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNgtF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -16302,6 +18655,12 @@ VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNleF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNleF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_neq_f64_e64_dpp"
@@ -16335,6 +18694,12 @@ VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeqF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeqF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_nlt_f64_e64_dpp"
@@ -16367,6 +18732,12 @@ VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNltF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNltF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -16421,6 +18792,12 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_eq_i16_e64_dpp"
@@ -16473,6 +18850,12 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqI16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -16527,6 +18910,12 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_gt_i16_e64_dpp"
@@ -16579,6 +18968,12 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtI16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -16633,6 +19028,12 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_i16_e64_dpp"
@@ -16685,6 +19086,12 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeI16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeI16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -16739,6 +19146,12 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_eq_u16_e64_dpp"
@@ -16791,6 +19204,12 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqU16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -16845,6 +19264,12 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_gt_u16_e64_dpp"
@@ -16897,6 +19322,12 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtU16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -16951,6 +19382,12 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_u16_e64_dpp"
@@ -17004,6 +19441,12 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeU16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_i32_e64_dpp"
@@ -17048,6 +19491,12 @@ VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -17094,6 +19543,12 @@ VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_i32_e64_dpp"
@@ -17138,6 +19593,12 @@ VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -17184,6 +19645,12 @@ VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ne_i32_e64_dpp"
@@ -17228,6 +19695,12 @@ VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -17274,6 +19747,12 @@ VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeI32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_u32_e64_dpp"
@@ -17318,6 +19797,12 @@ VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -17364,6 +19849,12 @@ VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_u32_e64_dpp"
@@ -17408,6 +19899,12 @@ VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -17454,6 +19951,12 @@ VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ne_u32_e64_dpp"
@@ -17498,6 +20001,12 @@ VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -17544,6 +20053,12 @@ VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeU32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_i64_e64_dpp"
@@ -17576,6 +20091,12 @@ VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -17610,6 +20131,12 @@ VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_i64_e64_dpp"
@@ -17642,6 +20169,12 @@ VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -17676,6 +20209,12 @@ VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ne_i64_e64_dpp"
@@ -17708,6 +20247,12 @@ VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -17742,6 +20287,12 @@ VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeI64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_lt_u64_e64_dpp"
@@ -17774,6 +20325,12 @@ VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLtU64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLtU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -17808,6 +20365,12 @@ VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxEqU64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxEqU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_le_u64_e64_dpp"
@@ -17840,6 +20403,12 @@ VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxLeU64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxLeU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -17874,6 +20443,12 @@ VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGtU64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGtU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ne_u64_e64_dpp"
@@ -17907,6 +20482,12 @@ VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxNeU64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxNeU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_ge_u64_e64_dpp"
@@ -17939,6 +20520,12 @@ VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxGeU64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxGeU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -17993,6 +20580,12 @@ VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxClassF16Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxClassF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_class_f32_e64_dpp"
@@ -18038,6 +20631,12 @@ VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxClassF32Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxClassF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_cmpx_class_f64_e64_dpp"
@@ -18069,6 +20668,12 @@ VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVCmpxClassF64Vop3(const MachineInst *opcode) {
+  return std::make_unique<VCmpxClassF64Vop3>(opcode);
+}
+} // namespace detail
 
 VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -18115,6 +20720,12 @@ VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddCoCiU32Vop3SdstEnc(const MachineInst *opcode) {
+  return std::make_unique<VAddCoCiU32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
+
 VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                       ? "v_sub_co_ci_u32_e64_dpp"
@@ -18159,6 +20770,12 @@ VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubCoCiU32Vop3SdstEnc(const MachineInst *opcode) {
+  return std::make_unique<VSubCoCiU32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
 
 VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -18205,6 +20822,12 @@ VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubrevCoCiU32Vop3SdstEnc(const MachineInst *opcode) {
+  return std::make_unique<VSubrevCoCiU32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
+
 VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                       ? "v_div_scale_f32_e64_dpp"
@@ -18239,6 +20862,12 @@ VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_DIV_SCALE_F32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVDivScaleF32Vop3SdstEnc(const MachineInst *opcode) {
+  return std::make_unique<VDivScaleF32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
 
 VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -18281,6 +20910,12 @@ VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
     throw util::InvalidInst("V_DIV_SCALE_F64 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVDivScaleF64Vop3SdstEnc(const MachineInst *opcode) {
+  return std::make_unique<VDivScaleF64Vop3SdstEnc>(opcode);
+}
+} // namespace detail
+
 VMadCoU64U32Vop3SdstEnc::VMadCoU64U32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                       ? "v_mad_co_u64_u32_e64_dpp"
@@ -18318,6 +20953,12 @@ VMadCoU64U32Vop3SdstEnc::VMadCoU64U32Vop3SdstEnc(const MachineInst *inst)
     throw util::InvalidInst("V_MAD_CO_U64_U32 does not support DPP", "");
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadCoU64U32Vop3SdstEnc(const MachineInst *opcode) {
+  return std::make_unique<VMadCoU64U32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
+
 VMadCoI64I32Vop3SdstEnc::VMadCoI64I32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                       ? "v_mad_co_i64_i32_e64_dpp"
@@ -18354,6 +20995,12 @@ VMadCoI64I32Vop3SdstEnc::VMadCoI64I32Vop3SdstEnc(const MachineInst *inst)
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
     throw util::InvalidInst("V_MAD_CO_I64_I32 does not support DPP", "");
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadCoI64I32Vop3SdstEnc(const MachineInst *opcode) {
+  return std::make_unique<VMadCoI64I32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
 
 VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
@@ -18398,6 +21045,12 @@ VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAddCoU32Vop3SdstEnc(const MachineInst *opcode) {
+  return std::make_unique<VAddCoU32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
+
 VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                       ? "v_sub_co_u32_e64_dpp"
@@ -18441,6 +21094,12 @@ VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubCoU32Vop3SdstEnc(const MachineInst *opcode) {
+  return std::make_unique<VSubCoU32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
+
 VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                       ? "v_subrev_co_u32_e64_dpp"
@@ -18483,6 +21142,12 @@ VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSubrevCoU32Vop3SdstEnc(const MachineInst *opcode) {
+  return std::make_unique<VSubrevCoU32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu
