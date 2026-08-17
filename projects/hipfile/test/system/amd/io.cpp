@@ -67,11 +67,11 @@ HIPFILE_WARN_NO_EXIT_DTOR_ON
 
 struct HipFileIo : public testing::TestWithParam<IoTestParam> {
 
-    Tmpfile         tmpfile;
-    size_t          tmpfile_size;
-    hipFileHandle_t tmpfile_handle;
-    void           *unregistered_device_buffer;
-    size_t          unregistered_device_buffer_size;
+    Tmpfile              tmpfile;
+    size_t               tmpfile_size;
+    hipFileHandle_t      tmpfile_handle;
+    void                *unregistered_device_buffer;
+    size_t               unregistered_device_buffer_size;
 
     HipFileIo()
         : tmpfile{test_env.ais_capable_dir}, tmpfile_size{1024 * 1024}, tmpfile_handle{nullptr},
