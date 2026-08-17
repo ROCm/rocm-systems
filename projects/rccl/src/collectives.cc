@@ -176,49 +176,9 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
   return ncclEnqueueCheck(&info);
 }
 
-RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
-RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(134217728));  // 128 MiB
-// Common DDA protocol-tier knobs, shared by every fabric collective (no
-// per-collective variants). For a given collective's size:
-//   size <= DdaLLThreshold     -> LL    one-shot (16B lines)
-//   size <= DdaLL128Threshold  -> LL128 one-shot (128B lines)
-//   otherwise                  -> Simple (flat one-shot / tree two-shot)
-// Constraint: DdaLLThreshold <= DdaLL128Threshold <= DdaThreshold. Setting an
-// enable to 0 (or a threshold to 0) disables that tier and falls through to the
-// next, so each protocol can be A/B'd in isolation at runtime.
-// Defaults tuned on 4x gfx1250 AllReduce (bf16): LL wins <=32KiB (grid hardcoded
-// to 24 blocks in the LL launcher for low latency), LL128 wins up to ~32MiB, and
-// Simple wins beyond (both use DDA_FABRIC_MAXBLOCKS=256). See the LL/LL128/Simple
-// x MAXBLOCKS sweep.
-RCCL_PARAM(DdaLL, "DDA_LL", 1);
-RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));       // 32 KiB
-RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
-RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
-// Returns true when the DDA fast path should be attempted for a collective
-// with the given total byte count.  gfx942Default is the per-collective
-// threshold for gfx942 (MI300).  gfx950Default optionally caps MI350; when 0,
-// gfx950 uses the user-configurable rcclParamDdaThreshold().
-// gfx1250 uses the user-configurable rcclParamDdaThreshold().
-// All other architectures return false (threshold 0).
-static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default = 0) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) return false;
-  size_t threshold;
-  if (IsArchMatch(comm->archName, "gfx1250")) {
-    threshold = (size_t)rcclParamDdaThreshold();
-  } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
-    if (comm->nRanks < 8) return false;
-    if (IsArchMatch(comm->archName, "gfx942")) {
-      threshold = gfx942Default;
-    } else {
-      threshold = gfx950Default ? gfx950Default : (size_t)rcclParamDdaThreshold();
-    }
-  } else {
-    return false;
-  }
-  return threshold > 0 && totalBytes <= threshold;
-}
+// rcclDdaEnabled() is now in rccl_wrap.cc (declared in rccl_common.h)
 
 // Decides whether ncclAllReduce_impl takes the DDA path for this call. Kept as a small named helper
 // (rather than an inline expression) so the dispatch decision is reachable from host unit tests; the
@@ -377,8 +337,10 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
   if (!symEligible && rcclDdaEnabled(comm, nRanks * sendcount * ncclTypeSize(datatype), 8388608)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
+      const int64_t llThresh = rcclParamDdaLLThreshold();
+      const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
       // Small-message fast lane: LL protocol (no GPU barrier).
-      if (rcclParamDdaLL() && msgSize <= (size_t)rcclParamDdaLLThreshold() &&
+      if (rcclParamDdaLL() && llThresh > 0 && msgSize <= (size_t)llThresh &&
           ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         INFO(NCCL_COLL,
              "AllGather: taking DDA fabric LL path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
@@ -387,7 +349,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
         return ncclSuccess;
       }
       // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
-      if (rcclParamDdaLL128() && msgSize <= (size_t)rcclParamDdaLL128Threshold() &&
+      if (rcclParamDdaLL128() && ll128Thresh > 0 && msgSize <= (size_t)ll128Thresh &&
           ncclAllGatherDdaFabricLL128Eligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         INFO(NCCL_COLL,
              "AllGather: taking DDA fabric LL128 path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
@@ -481,11 +443,15 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     }
 #endif // ENABLE_ROCSHMEM
     // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
-    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), 4194304, 4194304)) {
+    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype),
+                       kDdaAlltoAllGfx942ThresholdBytes, kDdaAlltoAllGfx950ThresholdBytes,
+                       kDdaAlltoAllGfx1250ThresholdBytes)) {
       if (IsArchMatch(comm->archName, "gfx1250")) {
         const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
+        const int64_t llThresh = rcclParamDdaLLThreshold();
+        const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
         // Small-chunk fast lane: LL protocol (no GPU barrier).
-        if (rcclParamDdaLL() && a2aBytes <= (size_t)rcclParamDdaLLThreshold() &&
+        if (rcclParamDdaLL() && llThresh > 0 && a2aBytes <= (size_t)llThresh &&
             ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
           INFO(NCCL_COLL, "AllToAll: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
                comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
@@ -493,7 +459,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
           return ncclSuccess;
         }
         // Mid-chunk fast lane: LL128 protocol (128B lines, no GPU barrier).
-        if (rcclParamDdaLL128() && a2aBytes <= (size_t)rcclParamDdaLL128Threshold() &&
+        if (rcclParamDdaLL128() && ll128Thresh > 0 && a2aBytes <= (size_t)ll128Thresh &&
             ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {
           INFO(NCCL_COLL, "AllToAll: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
                comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
@@ -703,8 +669,10 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   info.ceGraphDecisionValid = true;
   if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
+      const int64_t llThresh = rcclParamDdaLLThreshold();
+      const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
       // Small-message fast lane: LL protocol (no GPU barrier).
-      if (rcclParamDdaLL() && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLThreshold() &&
+      if (rcclParamDdaLL() && llThresh > 0 && (count * ncclTypeSize(datatype)) <= (size_t)llThresh &&
           ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
              comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
@@ -712,7 +680,8 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
         return ncclSuccess;
       }
       // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
-      if (rcclParamDdaLL128() && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLL128Threshold() &&
+      if (rcclParamDdaLL128() && ll128Thresh > 0 &&
+          (count * ncclTypeSize(datatype)) <= (size_t)ll128Thresh &&
           ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
              comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
@@ -1017,8 +986,10 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   if ((!symEligible || ddaFabricArch) && rcclDdaEnabled(comm, nRanks * recvcount * ncclTypeSize(datatype), 8388608)) {
     if (ddaFabricArch) {
       const size_t rsShardBytes = recvcount * ncclTypeSize(datatype);
+      const int64_t llThresh = rcclParamDdaLLThreshold();
+      const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
       // Small-shard fast lane: LL protocol (no GPU barrier).
-      if (rcclParamDdaLL() && rsShardBytes <= (size_t)rcclParamDdaLLThreshold() &&
+      if (rcclParamDdaLL() && llThresh > 0 && rsShardBytes <= (size_t)llThresh &&
           ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         INFO(NCCL_COLL,
              "ReduceScatter: taking DDA fabric LL path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
@@ -1027,7 +998,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
         return ncclSuccess;
       }
       // Mid-shard fast lane: LL128 protocol (128B lines, no GPU barrier).
-      if (rcclParamDdaLL128() && rsShardBytes <= (size_t)rcclParamDdaLL128Threshold() &&
+      if (rcclParamDdaLL128() && ll128Thresh > 0 && rsShardBytes <= (size_t)ll128Thresh &&
           ncclReduceScatterDdaFabricLL128Eligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         INFO(NCCL_COLL,
              "ReduceScatter: taking DDA fabric LL128 path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",

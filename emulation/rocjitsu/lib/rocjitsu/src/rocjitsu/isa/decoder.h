@@ -31,6 +31,8 @@ struct IsaExecutionBackend;
 /// (e.g., the ComputeUnit simulation loop).
 class Decoder {
 public:
+  using Pool = util::ArenaAlloc<512, 128>;
+
   virtual ~Decoder();
 
   /// @brief Decode a binary instruction.
@@ -71,15 +73,13 @@ public:
   }
 
   /// @brief Disable pool allocation; future allocations use the heap.
-  void disable_pool() { deactivate_pool(); }
+  void disable_pool();
 
 protected:
-  using Pool = util::ArenaAlloc<512, 128>;
   using AllocFn = void *(*)(void *, size_t);
   using DeallocFn = void (*)(void *, void *);
 
   static void activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool);
-  static void deactivate_pool();
   static void validate_instruction_operands(const Instruction &inst);
 
   Pool pool_;

@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/sopc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3_5 {
@@ -33,6 +34,12 @@ SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpEqI32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpEqI32Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpLgI32Sopc)),
@@ -54,6 +61,12 @@ SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLgI32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLgI32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -77,6 +90,12 @@ SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpGtI32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpGtI32Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpGeI32Sopc)),
@@ -98,6 +117,12 @@ SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpGeI32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpGeI32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -121,6 +146,12 @@ SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLtI32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLtI32Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_le_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpLeI32Sopc)),
@@ -142,6 +173,12 @@ SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLeI32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLeI32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -165,6 +202,12 @@ SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpEqU32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpEqU32Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpLgU32Sopc)),
@@ -186,6 +229,12 @@ SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLgU32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLgU32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -209,6 +258,12 @@ SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpGtU32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpGtU32Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpGeU32Sopc)),
@@ -230,6 +285,12 @@ SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpGeU32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpGeU32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -253,6 +314,12 @@ SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLtU32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLtU32Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_le_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpLeU32Sopc)),
@@ -274,6 +341,12 @@ SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLeU32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLeU32Sopc>(opcode);
+}
+} // namespace detail
 
 SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
     : Sopc("s_bitcmp0_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -297,6 +370,12 @@ SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitcmp0B32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SBitcmp0B32Sopc>(opcode);
+}
+} // namespace detail
+
 SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
     : Sopc("s_bitcmp1_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBitcmp1B32Sopc)),
@@ -318,6 +397,12 @@ SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitcmp1B32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SBitcmp1B32Sopc>(opcode);
+}
+} // namespace detail
 
 SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
     : Sopc("s_bitcmp0_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -342,6 +427,12 @@ SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitcmp0B64Sopc(const MachineInst *opcode) {
+  return std::make_unique<SBitcmp0B64Sopc>(opcode);
+}
+} // namespace detail
+
 SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
     : Sopc("s_bitcmp1_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBitcmp1B64Sopc)),
@@ -364,6 +455,12 @@ SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitcmp1B64Sopc(const MachineInst *opcode) {
+  return std::make_unique<SBitcmp1B64Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -389,6 +486,12 @@ SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpEqU64Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpEqU64Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpLgU64Sopc)),
@@ -413,6 +516,12 @@ SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLgU64Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLgU64Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpLtF32Sopc)),
@@ -434,6 +543,12 @@ SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLtF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLtF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lt_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -459,6 +574,12 @@ SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLtF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLtF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpEqF32Sopc)),
@@ -480,6 +601,12 @@ SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpEqF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpEqF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -505,6 +632,12 @@ SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpEqF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpEqF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_le_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpLeF32Sopc)),
@@ -526,6 +659,12 @@ SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLeF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLeF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_le_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -551,6 +690,12 @@ SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLeF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLeF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_gt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpGtF32Sopc)),
@@ -572,6 +717,12 @@ SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpGtF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpGtF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_gt_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -597,6 +748,12 @@ SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpGtF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpGtF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpLgF32Sopc)),
@@ -618,6 +775,12 @@ SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLgF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLgF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_lg_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -643,6 +806,12 @@ SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpLgF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpLgF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ge_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpGeF32Sopc)),
@@ -664,6 +833,12 @@ SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpGeF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpGeF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ge_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -689,6 +864,12 @@ SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpGeF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpGeF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_o_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpOF32Sopc)),
@@ -710,6 +891,12 @@ SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpOF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpOF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_o_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -735,6 +922,12 @@ SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpOF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpOF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_u_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpUF32Sopc)),
@@ -756,6 +949,12 @@ SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpUF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpUF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_u_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -781,6 +980,12 @@ SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpUF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpUF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nge_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpNgeF32Sopc)),
@@ -802,6 +1007,12 @@ SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpNgeF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpNgeF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nge_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -827,6 +1038,12 @@ SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpNgeF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpNgeF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nlg_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpNlgF32Sopc)),
@@ -848,6 +1065,12 @@ SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpNlgF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpNlgF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nlg_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -873,6 +1096,12 @@ SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpNlgF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpNlgF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ngt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpNgtF32Sopc)),
@@ -894,6 +1123,12 @@ SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpNgtF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpNgtF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_ngt_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -919,6 +1154,12 @@ SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpNgtF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpNgtF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nle_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpNleF32Sopc)),
@@ -940,6 +1181,12 @@ SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpNleF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpNleF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nle_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -965,6 +1212,12 @@ SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpNleF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpNleF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_neq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpNeqF32Sopc)),
@@ -986,6 +1239,12 @@ SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpNeqF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpNeqF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_neq_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1011,6 +1270,12 @@ SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpNeqF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpNeqF16Sopc>(opcode);
+}
+} // namespace detail
+
 SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nlt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCmpNltF32Sopc)),
@@ -1032,6 +1297,12 @@ SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpNltF32Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpNltF32Sopc>(opcode);
+}
+} // namespace detail
 
 SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
     : Sopc("s_cmp_nlt_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1056,6 +1327,12 @@ SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
                     reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmpNltF16Sopc(const MachineInst *opcode) {
+  return std::make_unique<SCmpNltF16Sopc>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna3_5
 } // namespace rocjitsu

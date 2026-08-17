@@ -616,26 +616,33 @@ static void hrr_run_exact_roundtrip(const std::string& direct_case,
   auto [ret, out] = hrr_playback_env(cap_path, {{"HIP_HRR_D2H_EXACT", "1"}});
   INFO("Playback stdout:\n" << out);
   INFO("Playback exit code: " << ret);
-#ifdef _WIN32
-  REQUIRE(ret < 128);  // best-effort D2H, but never a crash
-  if (ret != 0) return;
-#else
-  // hrr-playback exits non-zero when any D2H validation fails and also when
-  // every D2H event was skipped, so this covers d2h_fail == 0 on its own.
-  REQUIRE(ret == 0);
-#endif
 
-  // Guard against a vacuous pass: the archive must contain at least one
-  // validated D2H blob.  Parse only the pass count; the summary reads
-  // "N pass (X exact, Y within tol), M fail, K skipped".
+  // A handler returning anything other than hipSuccess aborts the replay pass
+  // before the summary block is printed, so the presence of the summary line is
+  // a platform-independent proof that the replay ran to completion.
   size_t pos = out.find("D2H checks");
   REQUIRE(pos != std::string::npos);
   size_t colon = out.find(':', pos);
   REQUIRE(colon != std::string::npos);
+  // Summary format: "N pass (E exact, T within tol), F fail, S skipped".
   int d2h_pass = 0;
   REQUIRE(sscanf(out.c_str() + colon + 1, " %d pass", &d2h_pass) == 1);
   INFO("D2H pass=" << d2h_pass);
+
+#ifdef _WIN32
+  // Same policy as hrr_run_playback(): on the Windows CI target replay is not
+  // guaranteed to reproduce device output bit-for-bit, so D2H fidelity is
+  // best-effort there.  The completion check above still applies, and a crash
+  // still fails via this bound.
+  REQUIRE(ret < 128);
+#else
+  // hrr-playback exits non-zero when any D2H validation fails and also when
+  // every D2H event was skipped, so this is the load-bearing fidelity
+  // assertion; the pass count rules out the one remaining vacuous case, an
+  // archive that carried no D2H blob at all.
+  REQUIRE(ret == 0);
   REQUIRE(d2h_pass >= 1);
+#endif
 }
 
 /**
@@ -709,53 +716,18 @@ HIP_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
 /**
  * Test Description
  * ----------------
- *   - Capture Unit_HRR_StreamWriteValue_Direct (hipStreamWriteValue32 /
- *     hipStreamWriteValue64, including one hipExtStreamWriteValueIncrement
- *     write) and replay it.  Replay must reproduce every written value.
- *   - Replay with HIP_HRR_D2H_EXACT=1.  This is deliberate, not decoration:
- *     with the default tolerant validator a lost 32-bit write is accepted as
- *     "f64 within tolerance" on any blob whose length is a multiple of 8, and
- *     the increment slot differs from its no-increment value by far less than
- *     atol=rtol=1e-3 of the recorded magnitude.  Exact mode makes the playback
- *     exit code (the real gate) a byte-for-byte verdict.
- *   - Gated on hipDeviceAttributeCanUseStreamWaitValue: on a target without
- *     support the workload skips, which would leave too few events / no D2H
- *     blob for the archive assertions, so skip the roundtrip as well.
+ *   - Capture Unit_HRR_MemsetD2DPitchAlloc_Direct, which aims all six
+ *     hipMemsetD2D* variants at a hipMemAllocPitch destination.  That API is a
+ *     playback no-op, so the recorded destination has no alloc_map entry at
+ *     replay.
+ *   - Replay must warn and skip those calls, not hand a null destination to the
+ *     real API: a non-success handler return is fatal and would abort the whole
+ *     replay.  The archive's other (translatable) D2H blob is only reached and
+ *     validated if the replay survived, which is what this asserts.
  */
-HIP_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
-  int canUseStreamValue = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&canUseStreamValue,
-                                  hipDeviceAttributeCanUseStreamWaitValue, 0));
-  if (!canUseStreamValue) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
-  }
-
-  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwritevalue"};
-  hrr_capture_direct("Unit_HRR_StreamWriteValue_Direct", cap.path);
-
-  auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_D2H_EXACT", "1"}});
-  INFO("Playback stdout:\n" << out);
-  INFO("Playback exit code: " << ret);
-#ifdef _WIN32
-  // Same policy as hrr_run_playback: on the Windows consumer-iGPU CI target
-  // replay is not guaranteed to reproduce device output bit-for-bit, so D2H
-  // fidelity is best-effort there.  A crash still fails via ret < 128.
-  REQUIRE(ret < 128);
-  if (ret != 0) return;
-#else
-  REQUIRE(ret == 0);  // exact-mode D2H: any differing byte fails the replay
-#endif
-
-  // Assert the three sentinel blobs were actually compared, so a replay that
-  // silently validated nothing cannot pass on the exit code alone.
-  size_t pos = out.find("D2H checks");
-  REQUIRE(pos != std::string::npos);
-  size_t colon = out.find(':', pos);
-  REQUIRE(colon != std::string::npos);
-  int d2h_pass = 0;
-  sscanf(out.c_str() + colon + 1, " %d pass", &d2h_pass);
-  INFO("D2H pass=" << d2h_pass);
-  CHECK(d2h_pass >= 3);
+HIP_TEST_CASE(Unit_HRR_MemsetD2DPitchAllocRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetd2dpitchalloc"};
+  hrr_run_exact_roundtrip("Unit_HRR_MemsetD2DPitchAlloc_Direct", cap.path);
 }
 
 HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {
@@ -996,7 +968,6 @@ HIP_TEST_CASE(Unit_HRR_MiscAPIsRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_MiscAPIs_Direct", cap.path);
 }
 
-// ---------------------------------------------------------------------------
 // Driver-memcpy roundtrips (hipDrvMemcpy3D / 3DAsync / 2DUnaligned).
 //
 // These workloads are pure copy chains (hipMemsetD32 -> driver copy -> D2H) with

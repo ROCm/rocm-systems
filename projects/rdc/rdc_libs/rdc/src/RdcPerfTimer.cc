@@ -22,7 +22,11 @@ THE SOFTWARE.
 
 #include "rdc_lib/RdcPerfTimer.h"
 
+#if defined(__x86_64__) || defined(__i386__)
 #include <x86intrin.h>
+#elif defined(__powerpc64__)
+#include <sys/platform/ppc.h>
+#endif
 
 namespace amd {
 namespace rdc {
@@ -141,6 +145,7 @@ uint64_t RdcPerfTimer::CoarseTimestampUs() {
 }
 
 uint64_t RdcPerfTimer::MeasureTSCFreqHz() {
+#if defined(__x86_64__) || defined(__i386__)
   // Make a coarse interval measurement of TSC ticks for 1 gigacycles.
   unsigned int unused;
   uint64_t tscTicksEnd;
@@ -158,6 +163,12 @@ uint64_t RdcPerfTimer::MeasureTSCFreqHz() {
   uint64_t coarseIntervalNs = (coarseEndUs - coarseBeginUs) * 1000;
   uint64_t tscIntervalTicks = tscTicksEnd - tscTicksBegin;
   return (tscIntervalTicks * 10 + (coarseIntervalNs / 2)) / coarseIntervalNs;
+#elif defined(__powerpc64__)
+  uint64_t freq = __ppc_get_timebase_freq();
+  return (freq * 10 + (kNanosecondsPerSecond / 2)) / kNanosecondsPerSecond;
+#else
+#error "Unsupported architecture"
+#endif
 }
 
 }  // namespace rdc

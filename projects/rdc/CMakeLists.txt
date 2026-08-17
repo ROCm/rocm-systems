@@ -60,7 +60,10 @@ set_property(
 )
 
 # Set compile flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    string(APPEND CMAKE_CXX_FLAGS " -m64 -msse -msse2")
+endif()
 set(CMAKE_CXX_FLAGS_DEBUG
     "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -DDEBUG"
     CACHE STRING
@@ -122,7 +125,11 @@ option(BUILD_EXAMPLES "Build examples" OFF)
 # Enable shared libraries for gtest
 option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
 
-option(BUILD_ESMI "Enable AMDSMI ESMI Library" ON)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    option(BUILD_ESMI "Enable AMDSMI ESMI Library" ON)
+else()
+    option(BUILD_ESMI "Enable AMDSMI ESMI Library" OFF)
+endif()
 if(BUILD_ESMI)
     add_definitions("-DENABLE_ESMI_LIB=1")
 endif()
@@ -167,7 +174,10 @@ set(GRPC_DESIRED_VERSION 1.78.1 CACHE STRING "GRPC desired package version.")
 
 # add package search paths
 list(APPEND CMAKE_PREFIX_PATH ${GRPC_ROOT} /usr/local)
-set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} /usr/lib64 /usr/lib/x86_64-linux-gnu)
+set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} /usr/lib64)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu)
+endif()
 
 # configure packaging
 # cpack version is populated with CMAKE_PROJECT_VERSION implicitly

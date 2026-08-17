@@ -596,6 +596,11 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMemset3DAsync",
     "hipMemset3D_spt",
     "hipMemset3DAsync_spt",
+    # hipMemset_spt / 2D_spt variants — host ptr for dst (stale) or pitched ptr — noop
+    "hipMemset_spt",
+    "hipMemset2D_spt",
+    "hipMemsetAsync_spt",
+    "hipMemset2DAsync_spt",
     # hipMallocPitch — already in MANUAL_PLAYBACK_APIS for the DrvMemcpy test; these are the _spt wrappers
     # NOTE: hipExtMallocWithFlags is intentionally NOT noop'd. It is a real device
     # allocation (see _ALLOC_CREATE_APIS) and is handled by a manual playback handler
