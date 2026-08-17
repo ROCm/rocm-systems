@@ -147,13 +147,19 @@ jobs:
           MPI_PATH: ${{ github.event.inputs.mpi_path || env.DEFAULT_MPI_PATH }}
           ROCM_PATH: ${{ github.event.inputs.rocm_path || env.DEFAULT_ROCM_PATH }}
           # Fresh build produced by Phase 0 of the batch job (on the compute node).
-          # librccl.so lives directly under build/debug (RCCL_BUILD_DIR -> librccl.so
-          # existence check + LD_LIBRARY_PATH so the prebuilt perf binaries load the
-          # fresh lib), and the gtest binaries live under build/debug/test
-          # (GTEST_BIN_DIR -> the gtest_base test_binary_dir in the config). Both
+          # librccl.so lives directly under build/debug; this is passed to the test
+          # run as RCCL_BUILD_DIR (librccl.so existence check + LD_LIBRARY_PATH so
+          # the prebuilt perf binaries load the fresh lib). It is deliberately NOT
+          # named RCCL_BUILD_DIR at the step/env level: test_runner treats a
+          # non-empty RCCL_BUILD_DIR as a prebuilt library and would skip Phase 0's
+          # build, so it must be absent from the environment while Phase 0 runs and
+          # only set inline on the --no-build test run below. The gtest binaries
+          # live under build/debug/test (GTEST_BIN_DIR -> the gtest_base
+          # test_binary_dir in the config); GTEST_BIN_DIR/PERF_BIN_DIR do not
+          # trigger the prebuilt-library path, so they are safe to export. Both
           # live under ${{ github.workspace }} (on /it-share, shared with the
           # compute nodes).
-          RCCL_BUILD_DIR: ${{ github.workspace }}/projects/rccl/build/debug
+          RUN_RCCL_BUILD_DIR: ${{ github.workspace }}/projects/rccl/build/debug
           GTEST_BIN_DIR: ${{ github.workspace }}/projects/rccl/build/debug/test
           # rccl-tests-sweeps category: prebuilt perf binaries (rccl_tests_base
           # test_binary_dir in the config resolves PERF_BIN_DIR).
@@ -187,8 +193,10 @@ jobs:
             EXCLUDE_ARG="--exclude=${SALLOC_EXCLUDE}"
           fi
 
-          # sbatch --export=ALL (default) forwards these to the batch job.
-          export RCCL_BUILD_DIR GTEST_BIN_DIR PERF_BIN_DIR SCOPE \
+          # sbatch --export=ALL (default) forwards these to the batch job. Note
+          # RUN_RCCL_BUILD_DIR (not RCCL_BUILD_DIR): the bare name is only set
+          # inline on the test run so it never leaks into Phase 0's build.
+          export RUN_RCCL_BUILD_DIR GTEST_BIN_DIR PERF_BIN_DIR SCOPE \
                  GITHUB_WORKSPACE TEST_RUNNER_DIR RUNNER_TEMP \
                  WORKDIR MPI_PATH ROCM_PATH
 
@@ -203,7 +211,9 @@ jobs:
           cd "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}"
 
           # Phase 0: build RCCL with --enable-mpi-tests on THIS compute node
-          # rather than the 8-core submit node. No RCCL_BUILD_DIR here, so
+          # rather than the 8-core submit node. RCCL_BUILD_DIR is intentionally not
+          # in the environment here (only RUN_RCCL_BUILD_DIR is), so test_runner
+          # does a real build instead of treating it as a prebuilt library:
           # test_runner.py invokes install.sh, which defaults -j to $(nproc) and
           # therefore uses ALL of the compute node's cores. WORKDIR points at this
           # run's own checkout so install.sh and the build tree resolve there (on
@@ -236,7 +246,7 @@ jobs:
           echo "================================================================"
           echo "Run AINIC suites (--scope ${SCOPE})"
           echo "================================================================"
-          RCCL_BUILD_DIR="${RCCL_BUILD_DIR}" \
+          RCCL_BUILD_DIR="${RUN_RCCL_BUILD_DIR}" \
           GTEST_BIN_DIR="${GTEST_BIN_DIR}" \
           PERF_BIN_DIR="${PERF_BIN_DIR}" \
           python3 test_runner.py \
