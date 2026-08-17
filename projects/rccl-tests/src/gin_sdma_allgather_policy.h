@@ -81,6 +81,35 @@ GIN_SDMA_AG_HD inline size_t pickSdmaThreshold(bool perCollSet, unsigned long lo
   return compiledDefault;
 }
 
+// Sentinel meaning "CTA-count env var unset/empty/unparseable" (mirrors the
+// ReduceScatter kThresholdUnset); allGatherCtas() falls back to the size-adaptive
+// ladder when the env value is this sentinel.
+static constexpr size_t kAllGatherCtasUnset = (size_t)-1;
+
+// AllGather -D 3 size-adaptive CTA count (decoupled from -V, mirrors ReduceScatter
+// and the broadcast/reduce rings). Keyed off the SAME tier predicate the kernel
+// evaluates (chunkUsesLsaTier), so the CTA choice tracks the actual tier even when
+// NCCL_GIN_ANVIL_SDMA_THRESHOLD[_ALLGATHER] moves the crossover:
+//   * LSA-direct tier (chunk <= threshold): a grid-stride all-peers store that
+//     scales with threads; ~16 CTAs peaks on 8x MI355X (128 KiB 448% of 1-CTA;
+//     tiny sizes are latency-bound and CTA-indifferent).
+//   * GIN-put / Anvil-SDMA tier (chunk > threshold): only nRanks threads issue the
+//     puts (the copy engines move the bytes), so extra CTAs are pure barrier/signal
+//     overhead -- FEW CTAs win (V=32 costs ~13% at 8 MiB, ~18% at 2 MiB vs V=4),
+//     and 4 is a stable near-peak across 1 MiB-128 MiB.
+// NCCL_GIN_ANVIL_AG_CTAS pins a fixed count for all sizes (diagnostic; must be <=
+// the launched -V/deviceCtaCount-sized barrier pool -- see allGatherMaxCtas).
+static constexpr int kAllGatherCtasLsa  = 16;   // chunk <= threshold (direct store)
+static constexpr int kAllGatherCtasSdma = 4;    // chunk >  threshold (GIN puts)
+GIN_SDMA_AG_HD inline int allGatherCtas(size_t chunkBytes_, size_t sdmaThreshold, size_t envCtas) {
+  if (envCtas != kAllGatherCtasUnset && envCtas > 0)
+    return (envCtas > 128) ? 128 : (int)envCtas;
+  return chunkUsesLsaTier(chunkBytes_, sdmaThreshold) ? kAllGatherCtasLsa : kAllGatherCtasSdma;
+}
+GIN_SDMA_AG_HD inline int allGatherMaxCtas() {
+  return (kAllGatherCtasLsa > kAllGatherCtasSdma) ? kAllGatherCtasLsa : kAllGatherCtasSdma;
+}
+
 // AllGather algorithm / bus bandwidth (GB/s) given the per-rank element count,
 // element size, elapsed seconds and rank count. algBw counts every rank's
 // contribution; busBw applies the AllGather (nranks-1)/nranks correction.
