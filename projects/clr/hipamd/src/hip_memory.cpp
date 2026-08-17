@@ -3088,18 +3088,6 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
   }
 
-  if (attrs != nullptr && !stream.device().settings().sdma_indirect_supported_) {
-    const unsigned int kBothIndirect =
-        hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
-    for (size_t i = 0; i < numAttrs; ++i) {
-      // Single-sided indirect (Src XOR Dst) can fall back to the shader path;
-      // dual-sided indirect still requires HW SDMA indirect support.
-      if ((attrs[i].flags & kBothIndirect) == kBothIndirect) {
-        return hipErrorNotSupported;
-      }
-    }
-  }
-
   // Classify copies by type and group them by the queue device that will execute each batch.
   std::vector<std::vector<amd::BatchCopyOp>> copy_ops_by_device(g_devices.size());
   std::vector<std::vector<amd::BatchWriteMemoryOp>> write_ops_by_device(g_devices.size());
@@ -3128,20 +3116,24 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
 
     const unsigned int copyFlags = getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, attrIdx);
+    const bool isDualSidedIndirect =
+        (copyFlags & (hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst)) ==
+        (hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst);
     if (copyFlags & kExtOpFlagMask) {
       switch (type) {
         case hipCopyBuffer:
-        case hipCopyBufferSDMA: {
-          // Narrow to H<->D for both swap and indirect.
+        case hipCopyBufferSDMA:
+        case hipCopyBufferP2P: {
+          // Narrow to H<->D for swap and single-sided indirect. Dual-sided
+          // indirect skips the type-equality check (both operands are holders).
           amd::Memory* sMem = srcMemories[i];
           amd::Memory* dMem = dstMemories[i];
-          if (sMem == nullptr || dMem == nullptr || getMemoryType(sMem) == getMemoryType(dMem)) {
+          if (sMem == nullptr || dMem == nullptr ||
+              (!isDualSidedIndirect && getMemoryType(sMem) == getMemoryType(dMem))) {
             return hipErrorNotSupported;
           }
           break;
         }
-        case hipCopyBufferP2P:
-          break;
         case hipHostToHost:
         case hipWriteBuffer:
         case hipReadBuffer:
@@ -3155,10 +3147,15 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
       case hipCopyBufferSDMA: {
         const hipMemoryType src_memory_type = getMemoryType(srcMemories[i]);
         const hipMemoryType dst_memory_type = getMemoryType(dstMemories[i]);
+        // For dual-sided indirect both operands are pointer-holders, so neither
+        // holder identifies the device the real buffers live on; execute on the
+        // stream's device (the real VAs are dereferenced on-device there).
         const int device_id =
-            (src_memory_type == hipMemoryTypeDevice && dst_memory_type == hipMemoryTypeHost)
-                ? srcMemories[i]->getUserData().deviceId
-                : dstMemories[i]->getUserData().deviceId;
+            isDualSidedIndirect
+                ? stream.DeviceId()
+                : (src_memory_type == hipMemoryTypeDevice && dst_memory_type == hipMemoryTypeHost)
+                      ? srcMemories[i]->getUserData().deviceId
+                      : dstMemories[i]->getUserData().deviceId;
         copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
                                                    dstOffsets[i], sizes[i], metadata);
         break;

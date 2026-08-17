@@ -3195,8 +3195,8 @@ bool KernelBlitManager::ShaderIndirectCopyBufferBatch(
         destination_device_memory->virtualAddress() + copy_operation.dstOffset;
 
     // indirect_mode bit0 = src indirect, bit1 = dst indirect (matches blitcl.cpp).
-    // v1 routing only ever produces IndirectSrc/IndirectDst, but map SrcDst too
-    // since the kernel and descriptor already support it as a trivial future add.
+    // All three indirect modes are routed here; IndirectSrcDst sets both bits so
+    // the kernel dereferences both holders on-device.
     uint32_t indirect_mode = 0;
     switch (copy_operation.metadata.copyOpType_) {
       case amd::CopyMetadata::kCopyOpIndirectSrc:
@@ -3216,13 +3216,11 @@ bool KernelBlitManager::ShaderIndirectCopyBufferBatch(
         (source_device_memory->owner()->getMemFlags() & CL_MEM_SVM_ATOMICS) != 0;
     const bool destination_svm_atomics =
         (destination_device_memory->owner()->getMemFlags() & CL_MEM_SVM_ATOMICS) != 0;
-    // Same formula as ShaderSwapBufferBatch, evaluated on (holder, real) memory
-    // for the current IndirectSrc/IndirectDst-only routing. This is provably
-    // always true today -- the indirect side's holder must satisfy
-    // isHostMemDirectAccess() to be a valid device-usable VA under the address
-    // contract -- but it is kept in this general form so it stays correct if
-    // IndirectSrcDst / relaxed H<->D narrowing is added later and both sides can
-    // be plain device buffers.
+    // Same formula as ShaderSwapBufferBatch, evaluated on both memory objects.
+    // For single-sided indirect one operand is the holder and the other the real
+    // buffer; for dual-sided IndirectSrcDst both are holders. Evaluating the
+    // formula over both operands keeps it correct across all three modes,
+    // including when both real buffers are plain device buffers (D<->D).
     needs_system_scope |=
         (!source_svm_atomics && source_device_memory->isHostMemDirectAccess()) ||
         (!destination_svm_atomics && destination_device_memory->isHostMemDirectAccess()) ||
@@ -3308,11 +3306,13 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
     const Memory& srcMem = gpuMem(*srcDevMem);
     const Memory& dstMem = gpuMem(*dstDevMem);
     bool isLinearCopyOp = op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpLinear;
-    // kCopyOpIndirectSrcDst is not shader-routed in v1 (unreachable via the current
-    // H<->D holder narrowing anyway); it falls through to the p2p/SDMA path below.
-    // TODO: Develop indirect src dst shader support
+    // All indirect modes are shader-routable: the kernel dereferences the
+    // holder(s) on-device per the indirect_mode bits (bit0 src, bit1 dst), so
+    // dual-sided IndirectSrcDst (indirect_mode == 3) is handled the same as the
+    // single-sided modes.
     bool isIndirectOp = op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpIndirectSrc ||
-                        op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpIndirectDst;
+                        op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpIndirectDst ||
+                        op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpIndirectSrcDst;
 
     if (isIndirectOp && useShaderIndirectPath(op.size, op.metadata)) {
       indirectShaderOps.push_back(op);
