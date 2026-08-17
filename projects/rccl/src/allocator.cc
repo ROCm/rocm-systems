@@ -12,10 +12,6 @@
 #include "utils.h"
 #include <mutex>
 
-static std::mutex& getVmmMutex() {
-  static std::mutex vmm_mutex;
-  return vmm_mutex;
-}
 
 NCCL_PARAM(ShadowMempoolMaxSize, "SHADOW_MEMPOOL_MAX_SIZE", 1LL << 30);
 

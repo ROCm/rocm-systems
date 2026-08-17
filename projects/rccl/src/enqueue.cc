@@ -3765,8 +3765,6 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
             info->recvbuff, (const char*)(info->recvbuff) + totalBytes);    
       }
 
-      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment && !(isOverlapping && info->coll == ncclFuncAlltoAll)) {
-        NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
       // CE collectives are not graph-capture-safe (hipMemcpyBatchAsync and the
       // cross-rank memop barrier deadlock on graph replay), so skip CE entirely
       // while the stream is capturing and fall through to the graph-safe
