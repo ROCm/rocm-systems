@@ -6,6 +6,7 @@
  ************************************************************************/
 
 #include "qp_sharing.h"
+#include "net_ib_qp_sharing_inspect.h"
 
 // QP sharing configuration parameters
 RCCL_PARAM(IbCastCommNGroups, "IB_COMM_NGROUPS", 0);
@@ -227,4 +228,40 @@ void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry) {
         g_IbCastSharedQpPool[i].used = false;
         g_IbCastSharedQpFreeStack[g_IbCastSharedQpFreeTop++] = i;
     }
+}
+
+// =============================================================================
+// Test introspection API — exposes internal QP-sharing pool state from a
+// sendComm/recvComm handle. Only intended for unit tests; not part of the
+// public net plugin ABI.
+// =============================================================================
+
+// ncclIbCastGetQpSharingState — copy QP-sharing pool state out of a comm.
+extern "C" ncclResult_t ncclIbCastGetQpSharingState(void* comm, struct ncclIbQpSharingState* out) {
+    if (!comm || !out) return ncclInvalidArgument;
+    struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+
+    out->commId = base->commId;
+    out->isSharedQpPrimary = base->isSharedQpPrimary;
+    out->sharedGroupIdx = base->sharedGroupIdx;
+    out->nqps = base->nqps;
+    out->refcount = 0;
+    out->cqRefcount = 0;
+
+    int n = (base->nqps < NCCL_IB_MAX_QPS) ? base->nqps : NCCL_IB_MAX_QPS;
+    for (int i = 0; i < n; i++) {
+        struct ncclIbQp* qp = base->activeQps[i];
+        out->qpn[i] = (qp && qp->qp) ? qp->qp->qp_num : 0;
+    }
+
+    if (base->sharedGroupIdx >= 0 && n > 0 && base->activeQps[0] && base->activeQps[0]->qp) {
+        std::lock_guard<std::mutex> lock(g_IbCastSharedQpMutex);
+        struct IbCastSharedQp* slot = IbCastFindSharedQpByQpn(base->activeQps[0]->qp->qp_num, base->isSend);
+        if (slot) {
+            out->refcount = slot->refcount;
+            out->cqRefcount = slot->cqRefcount;
+        }
+    }
+
+    return ncclSuccess;
 }
