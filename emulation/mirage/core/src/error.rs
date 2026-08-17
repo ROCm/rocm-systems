@@ -8,10 +8,18 @@ use thiserror::Error;
 pub type Result<T> = std::result::Result<T, MirageError>;
 
 /// Everything that can go wrong in mirage's control plane.
+///
+/// Variants that wrap another error name it with `#[source]` and leave it
+/// out of their own message. `main` prints failures with anyhow's
+/// alternate form (`{:#}`), which walks the source chain and joins it with
+/// `": "` — so a message that also interpolated `{source}` printed the
+/// underlying reason twice (`io error on /x: denied: denied`). Callers
+/// that need the whole chain flattened into one string, rather than a
+/// formatter that walks it, use [`MirageError::full_message`].
 #[derive(Debug, Error)]
 pub enum MirageError {
     /// A filesystem operation failed, naming the path it was on.
-    #[error("io error on {path}: {source}")]
+    #[error("io error on {path}")]
     Io {
         /// The path being operated on.
         path: PathBuf,
@@ -21,7 +29,7 @@ pub enum MirageError {
     },
 
     /// A document could not be parsed or serialized.
-    #[error("json error on {path}: {source}")]
+    #[error("json error on {path}")]
     Json {
         /// The document's path.
         path: PathBuf,
@@ -91,6 +99,25 @@ impl MirageError {
         }
     }
 
+    /// This error and every error underneath it, joined with `": "`.
+    ///
+    /// The same text anyhow's `{:#}` produces, for the callers that have
+    /// to hand a plain `String` to something else — the supervisor's RPC
+    /// replies, say, where the peer gets one string and no chain to walk.
+    /// Prefer `{:#}` (or letting the error propagate to `main`) wherever a
+    /// formatter will do.
+    #[must_use]
+    pub fn full_message(&self) -> String {
+        let mut out = self.to_string();
+        let mut source = std::error::Error::source(self);
+        while let Some(e) = source {
+            out.push_str(": ");
+            out.push_str(&e.to_string());
+            source = e.source();
+        }
+        out
+    }
+
     /// Whether this error means "the thing you named does not exist".
     ///
     /// Callers that clean up opportunistically (destroy a session that
@@ -130,8 +157,34 @@ mod tests {
             "/tmp/x",
             std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
         );
-        let msg = e.to_string();
-        assert!(msg.contains("/tmp/x"), "{msg}");
-        assert!(msg.contains("denied"), "{msg}");
+        assert!(e.to_string().contains("/tmp/x"), "{e}");
+        let full = e.full_message();
+        assert!(full.contains("/tmp/x"), "{full}");
+        assert!(full.contains("denied"), "{full}");
+    }
+
+    #[test]
+    fn a_wrapped_error_is_reported_once() {
+        // `main` prints with anyhow's `{:#}`, which walks `source()` and
+        // joins with ": ". A variant whose own message also interpolated
+        // its source printed the reason twice — "io error on /tmp/x:
+        // denied: denied". Reproduced here by flattening the chain the
+        // same way anyhow does.
+        let io = MirageError::io(
+            "/tmp/x",
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        );
+        assert_eq!(io.full_message(), "io error on /tmp/x: denied");
+
+        let source = serde_json::from_str::<u32>("nope").unwrap_err();
+        let reason = source.to_string();
+        let json = MirageError::Json {
+            path: "/tmp/y".into(),
+            source,
+        };
+        assert_eq!(
+            json.full_message(),
+            format!("json error on /tmp/y: {reason}")
+        );
     }
 }

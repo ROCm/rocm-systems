@@ -29,7 +29,10 @@ pub type EmulatorKind = String;
 
 /// The emulator half of a profile: which backend, how it runs, and the
 /// system it emulates.
+///
+/// Unknown fields are rejected; see [`crate::profile`] for why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EmulatorDef {
     /// Which emulator backend runs this profile, by its canonical
     /// lowercase name.
@@ -237,4 +240,80 @@ pub fn get_emulator_backend(kind: &str) -> Option<&'static dyn EmulatorBackend> 
         .into_iter()
         .find(|def| def.kind == kind)
         .map(|def| def.backend)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::*;
+
+    /// A backend for this crate's own tests.
+    ///
+    /// No backend crate can be linked here — they all depend on
+    /// `mirage_core` — so anything that resolves an emulator, such as
+    /// [`ProfileDef::validate`] on the way into the store, would find an
+    /// empty registry. This is the one entry those tests write profiles
+    /// against, and it accepts everything: what they exercise is the
+    /// store's own rules, not a backend's.
+    #[derive(Debug)]
+    pub(super) struct Accepting;
+
+    /// The name a test profile puts in its `emulator` field.
+    pub(super) const TEST_EMULATOR: &str = "test";
+
+    impl EmulatorBackend for Accepting {
+        fn description(&self) -> EmulatorDescription {
+            EmulatorDescription {
+                name: TEST_EMULATOR.to_string(),
+                version: "0".to_string(),
+                description: "test-only backend that accepts every profile".to_string(),
+                options_schema: Vec::new(),
+            }
+        }
+
+        fn boot(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
+            Ok(())
+        }
+
+        fn options(&self) -> Vec<OptionDef> {
+            Vec::new()
+        }
+
+        fn shutdown(&self, _ctx: &SessionContext) {}
+
+        fn validate_profile(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
+            Ok(())
+        }
+
+        fn installed(&self) -> bool {
+            true
+        }
+
+        fn supported(&self) -> SupportStatus {
+            SupportStatus::supported("the test backend needs nothing")
+        }
+
+        fn discover_plugins(&self) -> Vec<PluginsDef> {
+            Vec::new()
+        }
+
+        fn health(&self, _ctx: &SessionContext) -> SessionHealth {
+            SessionHealth::phase(true, crate::session::state::READY, None)
+        }
+
+        fn injection_def(&self, _ctx: &SessionContext) -> Result<InjectionDef> {
+            Ok(InjectionDef::default())
+        }
+    }
+
+    inventory::submit! {
+        EmulatorBackendDef { kind: TEST_EMULATOR, backend: &Accepting }
+    }
+
+    #[test]
+    fn an_unregistered_backend_is_not_found() {
+        assert!(get_emulator_backend(TEST_EMULATOR).is_some());
+        assert!(get_emulator_backend("no-such-backend").is_none());
+    }
 }

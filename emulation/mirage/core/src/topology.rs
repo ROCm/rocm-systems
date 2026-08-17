@@ -21,7 +21,10 @@ fn one() -> u32 {
 
 /// System-level topology: node/GPU counts plus the agent
 /// definition each GPU instantiates.
+///
+/// Unknown fields are rejected; see [`crate::profile`] for why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TopologyDef {
     /// Number of nodes. Defaults to 1.
     #[serde(default = "one")]
@@ -49,9 +52,16 @@ impl TopologyDef {
 }
 
 /// On-disk topology store backed by `<MIRAGE_CONFIG>/topology/`.
+///
+/// [`get`] is where a `MaybeRef::Ref` on a profile is followed, so it is
+/// also where that reference is checked: a name that arrived inside a
+/// document, rather than from a command line, is interpolated into
+/// `<config>/topology/<name>.json` by exactly the same rule and escapes
+/// the config directory just as easily.
 pub mod store {
     use super::TopologyDef;
     use crate::error::{MirageError, Result};
+    use crate::store::validate_name;
     use std::path::PathBuf;
 
     /// List the names of all topology files on disk.
@@ -79,13 +89,25 @@ pub mod store {
     }
 
     /// Read a topology by name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` is not a single path component, if
+    /// there is no such topology, or if it is malformed.
     pub fn get(name: &str) -> Result<TopologyDef> {
+        validate_name("topology", name)?;
         let p = crate::paths::topology_path(name);
         crate::state::read_json(&p)
     }
 
     /// Write a topology to disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` is not a single path component or the
+    /// document cannot be written.
     pub fn put(name: &str, topology: &TopologyDef) -> Result<PathBuf> {
+        validate_name("topology", name)?;
         let p = crate::paths::topology_path(name);
         crate::state::write_json(&p, topology)?;
         Ok(p)

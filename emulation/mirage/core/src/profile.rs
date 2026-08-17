@@ -1,4 +1,25 @@
 //! Profile: a reusable bundle of emulator configuration.
+//!
+//! # Why every document type here rejects unknown fields
+//!
+//! These are files people write and edit by hand, and mirage acts on
+//! them: a profile decides how many GPUs the emulated machine has, which
+//! image its nodes run in, and what is mounted into them. A key serde
+//! does not recognise is, overwhelmingly, a key that was *meant* to do
+//! something — `"descriptoin"`, `"read-only"`, a field from a newer
+//! mirage — and dropping it silently means the machine that comes up is
+//! quietly not the one the file describes. `deny_unknown_fields` turns
+//! that into a parse error naming the key, at the moment the document is
+//! read, which is the only moment the user is still looking at it.
+//!
+//! The cost is forward compatibility in one direction: a document written
+//! by a newer mirage that added a field is rejected by an older one
+//! rather than degraded. That is the trade we want. An older mirage
+//! cannot honour a field it has never heard of, so its choice is between
+//! saying so and running something else instead; and adding an *optional*
+//! field is still fully backward compatible, because older documents that
+//! omit it keep parsing. Only removals and renames need care, and those
+//! need care anyway.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +32,7 @@ use crate::emulator::EmulatorDef;
 /// therefore live on the profile, so a profile fully describes how its
 /// sessions are containerised.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FileMount {
     /// Path to the file or directory on the host.
     pub host_path: String,
@@ -84,6 +106,7 @@ impl FileMount {
 /// [`ContainerizedDef`] and therefore live on the profile, so a profile
 /// fully describes which container ports it exposes on the host.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PortMapping {
     /// Port published on the host.
     pub host_port: u16,
@@ -261,6 +284,7 @@ pub fn hacks_image_tag(base: &str, hacks: &[Hack]) -> Option<String> {
 /// runtime types and `mirage_container` for the engine that drives the
 /// provider CLI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContainerizedDef {
     /// Provider binary to drive: `"podman"`, `"docker"`, or an absolute
     /// path. `None` auto-detects (preferring podman, then docker).
@@ -300,6 +324,7 @@ pub struct ContainerizedDef {
 /// A profile is a named, on-disk emulator preset that can be referenced
 /// by sessions. Profiles live in `$XDG_CONFIG_HOME/mirage/profile/`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProfileDef {
     /// The profile's name (also used as the filename, `<name>.json`).
     pub name: String,
@@ -315,6 +340,32 @@ pub struct ProfileDef {
     /// inside its own container on a shared per-session network.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub containerize: Option<ContainerizedDef>,
+}
+
+impl ProfileDef {
+    /// Ask this profile's emulator backend whether it can run it.
+    ///
+    /// A profile names a backend, and only that backend knows whether the
+    /// rest of the document makes sense to it — an agent it has no model
+    /// for, an option it does not accept, a runtime asset it needs and
+    /// cannot find. Checked when the profile is written rather than when
+    /// a session first tries to use it, so the failure lands on the
+    /// command that could still fix it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the backend's own explanation, or a rejection naming the
+    /// emulator if no backend by that name is compiled into this build.
+    pub fn validate(&self) -> Result<(), String> {
+        let kind = &self.emulator.emulator;
+        match crate::emulator::get_emulator_backend(kind) {
+            Some(backend) => backend.validate_profile(self),
+            None => Err(format!(
+                "unknown emulator {kind:?}; run `mirage emulators` for the \
+                 backends this build has"
+            )),
+        }
+    }
 }
 
 #[cfg(test)]
