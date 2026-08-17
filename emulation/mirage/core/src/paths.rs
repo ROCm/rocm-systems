@@ -8,14 +8,15 @@
 //!
 //! Mirage does **not** keep session or exec state on disk. Sessions,
 //! execs, their process table, their output and their health live in
-//! memory inside the supervisor daemon (see `mirage_supervisor`), and
-//! clients reach them over the daemon's Unix socket. There is no
-//! `def.json`, no `status.json`, no pid files, no stdout files and no
-//! stdin FIFOs: an earlier design used those as an inter-process
-//! communication channel between the CLI and a per-session host process,
-//! which made lifecycle and cleanup ambiguous (a crashed writer left
-//! state that looked live). The socket has an owner, and when the owner
-//! dies the state goes with it.
+//! memory inside the `mirage run` that owns them (see
+//! `mirage_supervisor`), and a second terminal reaches them over that
+//! run's own socket under `run/`. There is no `def.json`, no
+//! `status.json`, no pid files, no stdout files and no stdin FIFOs: an
+//! earlier design used those as an inter-process communication channel
+//! between the CLI and a per-session host process, which made lifecycle
+//! and cleanup ambiguous (a crashed writer left state that looked live).
+//! Every socket has exactly one owning process, and when the owner dies
+//! the state goes with it.
 //!
 //! The one runtime directory that remains is a per-session scratch
 //! directory ([`session_runtime_dir`]). It is *not* a communication
@@ -35,7 +36,7 @@
 //! | Profiles                 | `$XDG_CONFIG_HOME` | `mirage/profile/<name>.json` |
 //! | Topologies               | `$XDG_CONFIG_HOME` | `mirage/topology/<name>.json`|
 //! | Agents                   | `$XDG_CONFIG_HOME` | `mirage/agent/<name>.json`   |
-//! | Daemon socket + log      | `$XDG_RUNTIME_DIR` | `mirage/`                    |
+//! | Per-run control socket   | `$XDG_RUNTIME_DIR` | `mirage/run/<session>.sock`  |
 //! | Per-session scratch      | `$XDG_RUNTIME_DIR` | `mirage/session/<id>/`       |
 //!
 //! Two environment variables provide direct overrides for the per-app
@@ -271,7 +272,7 @@ pub fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
 

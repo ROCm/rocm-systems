@@ -8,7 +8,6 @@ name = "mirage"
 path = "src/main.rs"
 
 [dependencies]
-mirage_core = { workspace = true }
 mirage_ctl = { workspace = true }
 # Emulator backends. Each is an optional, link-only dependency pulled in
 # by its matching feature below; the binary never references them
@@ -36,17 +35,11 @@ workspace = true
 serde_json = "1.0"
 
 [dev-dependencies]
-mirage_builtin = { workspace = true }
-mirage_supervisor = { workspace = true }
-assert_cmd = "2"
-predicates = "3"
 tempfile = "3"
 serde = { workspace = true }
 serde_json = "1.0"
 chrono = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { workspace = true }
-futures = { workspace = true }
 libc = { workspace = true }
 nix = { workspace = true }
 
@@ -66,6 +59,12 @@ members = [
 # `version.workspace = true`, so a release is a one-line change here.
 [workspace.package]
 version = "0.2.0"
+# Edition 2024 needs 1.85; let-chains (`if let … && …`, src/main.rs) need
+# 1.88, which is therefore the real floor. Bump this when a newer feature
+# is actually used, not in step with whatever the toolchain happens to be:
+# the number is a promise to whoever builds mirage, and docs/building.md
+# quotes it.
+rust-version = "1.88"
 
 # =============================================================================
 # Workspace lint policy
@@ -113,6 +112,15 @@ todo = "deny"
 unimplemented = "deny"
 dbg_macro = "deny"
 mem_forget = "deny"
+# `panic!` is `unwrap` with a nicer message: a CLI handed arbitrary argv
+# must print something and return a code, not abort with a backtrace.
+# Denied for the same reason, and opted out of in the same places.
+panic = "deny"
+# `process::exit` runs no destructor between the call and `main`, which is
+# precisely how a run would strand its containers and workloads — the one
+# thing mirage promises not to do. Exit codes travel back to `main` as an
+# `ExitCode` instead.
+exit = "deny"
 # Async-correctness lints. The supervisor holds locks around a lot of
 # process bookkeeping; holding a std lock across an await would silently
 # serialise (or deadlock) the runtime.
@@ -130,7 +138,6 @@ tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 futures = "0.3"
-async-trait = "0.1"
 nix = { version = "0.29", features = [
     "fs",
     "poll",
@@ -143,7 +150,6 @@ libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
-once_cell = "1"
 inventory = "0.3.24"
 libloading = "0.8"
 

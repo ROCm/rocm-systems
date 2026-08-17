@@ -341,6 +341,45 @@ impl BringUpPhase {
     }
 }
 
+/// The shape every node container in a session shares, borrowed from the
+/// profile that describes it.
+///
+/// Bring-up derives these once from the [`ContainerizedDef`] and then
+/// launches one identical container per rank, so they are exactly the
+/// inputs that do *not* vary across the loop — only the container's name,
+/// its rank, and its environment do. Passing them as one value says that
+/// in the signature, and stops eight identical arguments being threaded
+/// through [`Engine::launch_node`] into [`Engine::run_argv`] on every
+/// iteration.
+///
+/// Grouping them is also the only thing that makes the pair safe to call.
+/// `devices` and `groups` are both `&[String]` and mean entirely
+/// different things — one becomes `--device`, the other `--group-add` —
+/// so as positional parameters they could be exchanged at a call site
+/// without the compiler noticing, and the mistake would surface only as a
+/// container the provider refuses to start. As named fields they cannot.
+#[derive(Debug)]
+pub struct NodeSpec<'a> {
+    /// Image to run.
+    pub image: &'a str,
+    /// Network to attach to, or `None` to leave the provider's default.
+    pub network: Option<&'a str>,
+    /// Whether the container needs host GPU access.
+    pub host_gpus: bool,
+    /// Host paths bind-mounted into the container.
+    pub mounts: &'a [FileMount],
+    /// Ports published from the container to the host.
+    pub ports: &'a [PortMapping],
+    /// Device nodes passed through (`--device`).
+    pub devices: &'a [String],
+    /// Supplementary groups granted on docker (`--group-add`); ignored on
+    /// podman, which inherits the launching user's groups instead.
+    pub groups: &'a [String],
+    /// Ownership labels stamped on the container so teardown and orphan
+    /// reclamation can prove it is mirage's before removing it.
+    pub labels: &'a [(String, String)],
+}
+
 /// A resolved container provider plus the operations mirage performs on
 /// it. Cheap to clone; holds only the provider binary name/path.
 #[derive(Debug, Clone)]
@@ -391,32 +430,35 @@ impl Engine {
     /// with `mirage host …` tacked on as arguments instead of running
     /// mirage.
     ///
-    /// When `host_gpus` is set, the container is launched with the
+    /// When `spec.host_gpus` is set, the container is launched with the
     /// supplementary groups needed to open the passed-through GPU device
     /// nodes. The mechanism depends on `provider`: podman inherits the
     /// launching user's groups via `--group-add keep-groups`, while
-    /// docker (which has no `keep-groups`) is given the named `groups`
-    /// explicitly. When `host_gpus` is unset no group passthrough is
-    /// emitted, which keeps plain (non-GPU) containers working on docker
-    /// — `keep-groups` is a podman-only feature and docker rejects it.
+    /// docker (which has no `keep-groups`) is given the named
+    /// `spec.groups` explicitly. When `host_gpus` is unset no group
+    /// passthrough is emitted, which keeps plain (non-GPU) containers
+    /// working on docker — `keep-groups` is a podman-only feature and
+    /// docker rejects it.
     ///
     /// The container is named and given a matching hostname so peers can
     /// resolve it by name on the shared network.
-    #[allow(clippy::too_many_arguments)]
     pub fn run_argv(
         provider: &str,
         name: &str,
-        image: &str,
-        network: Option<&str>,
-        host_gpus: bool,
-        mounts: &[FileMount],
-        ports: &[PortMapping],
-        devices: &[String],
-        groups: &[String],
+        spec: &NodeSpec<'_>,
         env: &[(String, String)],
-        labels: &[(String, String)],
         command: &[String],
     ) -> Vec<String> {
+        let &NodeSpec {
+            image,
+            network,
+            host_gpus,
+            mounts,
+            ports,
+            devices,
+            groups,
+            labels,
+        } = spec;
         let mut argv = vec![
             "run".to_string(),
             // Not detached. The provider client stays in the foreground
@@ -830,42 +872,21 @@ impl Engine {
     /// Returns as soon as the client has been spawned. The container is
     /// not necessarily running yet; use [`Self::await_running`] for that.
     ///
-    /// `host_gpus` requests host GPU access for the container; the
+    /// `spec.host_gpus` requests host GPU access for the container; the
     /// group passthrough it implies is provider-specific (see
     /// [`Self::run_argv`]).
-    #[allow(clippy::too_many_arguments)]
     pub fn launch_node(
         &self,
         name: &str,
-        image: &str,
-        network: Option<&str>,
-        host_gpus: bool,
-        mounts: &[FileMount],
-        ports: &[PortMapping],
-        devices: &[String],
-        groups: &[String],
+        spec: &NodeSpec<'_>,
         env: &[(String, String)],
-        labels: &[(String, String)],
         rank: u32,
     ) -> Result<NodeClient> {
         let command: Vec<String> = CONTAINER_IDLE_COMMAND
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let argv = Self::run_argv(
-            &self.provider,
-            name,
-            image,
-            network,
-            host_gpus,
-            mounts,
-            ports,
-            devices,
-            groups,
-            env,
-            labels,
-            &command,
-        );
+        let argv = Self::run_argv(&self.provider, name, spec, env, &command);
         let child = spawn_retrying_etxtbsy(|| {
             Command::new(&self.provider)
                 .args(&argv)
@@ -1082,6 +1103,20 @@ impl Engine {
             (def.devices.clone(), def.groups.clone())
         };
 
+        // Every node in the session gets the same container, so this is
+        // built once and borrowed by each launch below; only the name,
+        // the rank and the environment differ per rank.
+        let spec = NodeSpec {
+            image: &def.image,
+            network: Some(&network),
+            host_gpus,
+            mounts: &def.mounts,
+            ports: &def.ports,
+            devices: &devices,
+            groups: &groups,
+            labels: &labels,
+        };
+
         for rank in 0..node_count {
             let name = mirage_core::container::container_name(session, rank);
             progress(BringUpPhase::LaunchingNode {
@@ -1091,19 +1126,7 @@ impl Engine {
             });
             let env = node_env(rank);
             let launched = self
-                .launch_node(
-                    &name,
-                    &def.image,
-                    Some(&network),
-                    host_gpus,
-                    &def.mounts,
-                    &def.ports,
-                    &devices,
-                    &groups,
-                    &env,
-                    &labels,
-                    rank,
-                )
+                .launch_node(&name, &spec, &env, rank)
                 .and_then(|mut client| {
                     // The client is spawned; the container is not up yet.
                     // Wait for it here rather than letting the first exec
@@ -1234,7 +1257,7 @@ fn spawn_retrying_etxtbsy<T>(run: impl FnMut() -> std::io::Result<T>) -> std::io
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
     use std::os::unix::fs::PermissionsExt;
@@ -1251,6 +1274,22 @@ mod tests {
 
     fn port(spec: &str) -> PortMapping {
         PortMapping::parse(spec).unwrap()
+    }
+
+    /// The plainest node there is: an image and nothing else. Tests that
+    /// care about one flag override just that field with `..bare_spec()`,
+    /// so what a case is actually about is the only thing written down.
+    fn bare_spec() -> NodeSpec<'static> {
+        NodeSpec {
+            image: "img",
+            network: None,
+            host_gpus: false,
+            mounts: &[],
+            ports: &[],
+            devices: &[],
+            groups: &[],
+            labels: &[],
+        }
     }
 
     /// Mock provider: logs every invocation to `log`, exits non-zero for
@@ -1293,15 +1332,17 @@ mod tests {
         let argv = Engine::run_argv(
             "podman",
             "mirage-s-node-0",
-            "img:latest",
-            Some("mirage-s"),
-            true,
-            &mounts,
-            &ports,
-            &devices,
-            &groups,
+            &NodeSpec {
+                image: "img:latest",
+                network: Some("mirage-s"),
+                host_gpus: true,
+                mounts: &mounts,
+                ports: &ports,
+                devices: &devices,
+                groups: &groups,
+                labels: &labels(),
+            },
             &env,
-            &labels(),
             &command,
         );
 
@@ -1329,6 +1370,78 @@ mod tests {
         assert!(joined.ends_with("img:latest host --session s --rank 0"));
     }
 
+    /// Pins the *whole* argv, element by element, for a spec that
+    /// exercises every list `run_argv` can emit.
+    ///
+    /// The other `run_argv` tests each assert one property and would all
+    /// still pass if two same-typed lists — `devices` and `groups`, say —
+    /// swapped places, or if the flags moved relative to each other. This
+    /// one would not: it is the regression net for any change that is
+    /// supposed to leave the command handed to podman/docker alone.
+    #[test]
+    fn run_argv_is_pinned_element_by_element() {
+        // docker rather than podman: it is the branch that emits the
+        // named groups, so `--group-add` and `--device` — two `&[String]`
+        // lists that a transposition would silently exchange — both
+        // appear in the pinned argv.
+        let mounts = vec![mount("/data:/data:ro")];
+        let ports = vec![port("8080:8000")];
+        let devices = vec!["/dev/kfd".to_string()];
+        let groups = vec!["render".to_string()];
+        let env = vec![("MIRAGE_RANK".to_string(), "0".to_string())];
+        let labels = vec![("mirage.owner".to_string(), "mirage".to_string())];
+        let command = vec!["/bin/mirage".to_string(), "host".to_string()];
+
+        let argv = Engine::run_argv(
+            "docker",
+            "mirage-s-node-0",
+            &NodeSpec {
+                image: "img:latest",
+                network: Some("mirage-s"),
+                host_gpus: true,
+                mounts: &mounts,
+                ports: &ports,
+                devices: &devices,
+                groups: &groups,
+                labels: &labels,
+            },
+            &env,
+            &command,
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "run",
+                "--rm",
+                "--name",
+                "mirage-s-node-0",
+                "--hostname",
+                "mirage-s-node-0",
+                "--label",
+                "mirage.owner=mirage",
+                "--security-opt",
+                "seccomp=unconfined",
+                "--group-add",
+                "render",
+                "--network",
+                "mirage-s",
+                "-e",
+                "MIRAGE_RANK=0",
+                "-v",
+                "/data:/data:ro",
+                "-p",
+                "8080:8000",
+                "--device",
+                "/dev/kfd",
+                "--entrypoint",
+                "/bin/mirage",
+                "img:latest",
+                "host",
+            ]
+        );
+    }
+
     #[test]
     fn run_argv_docker_host_gpus_adds_named_groups() {
         // docker has no `keep-groups`; the named GPU groups are added
@@ -1337,14 +1450,11 @@ mod tests {
         let argv = Engine::run_argv(
             "docker",
             "n",
-            "img",
-            None,
-            true,
-            &[],
-            &[],
-            &[],
-            &groups,
-            &[],
+            &NodeSpec {
+                host_gpus: true,
+                groups: &groups,
+                ..bare_spec()
+            },
             &[],
             &[],
         );
@@ -1363,14 +1473,10 @@ mod tests {
         let argv = Engine::run_argv(
             "docker",
             "n",
-            "img",
-            None,
-            false,
-            &[],
-            &[],
-            &[],
-            &groups,
-            &[],
+            &NodeSpec {
+                groups: &groups,
+                ..bare_spec()
+            },
             &[],
             &[],
         );
@@ -1383,20 +1489,7 @@ mod tests {
     #[test]
     fn run_argv_omits_network_when_none() {
         let command = vec!["sleep".to_string(), "infinity".to_string()];
-        let argv = Engine::run_argv(
-            "podman",
-            "n",
-            "img",
-            None,
-            false,
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &[],
-            &command,
-        );
+        let argv = Engine::run_argv("podman", "n", &bare_spec(), &[], &command);
         assert!(!argv.iter().any(|a| a == "--network"));
         assert_eq!(argv.last().map(String::as_str), Some("infinity"));
         // `sleep` overrides the entrypoint; `infinity` is its argument.
@@ -1530,15 +1623,12 @@ mod tests {
         let mut client = engine
             .launch_node(
                 "mirage-s-node-0",
-                "img",
-                Some("mirage-s"),
-                false,
+                &NodeSpec {
+                    network: Some("mirage-s"),
+                    labels: &labels(),
+                    ..bare_spec()
+                },
                 &[],
-                &[],
-                &[],
-                &[],
-                &[],
-                &labels(),
                 0,
             )
             .unwrap();
@@ -1579,15 +1669,11 @@ mod tests {
         let mut client = engine
             .launch_node(
                 "n",
-                "img",
-                None,
-                false,
+                &NodeSpec {
+                    labels: &labels(),
+                    ..bare_spec()
+                },
                 &[],
-                &[],
-                &[],
-                &[],
-                &[],
-                &labels(),
                 0,
             )
             .unwrap();
@@ -1617,15 +1703,11 @@ mod tests {
         let mut client = engine
             .launch_node(
                 "n",
-                "img",
-                None,
-                false,
+                &NodeSpec {
+                    labels: &labels(),
+                    ..bare_spec()
+                },
                 &[],
-                &[],
-                &[],
-                &[],
-                &[],
-                &labels(),
                 0,
             )
             .unwrap();

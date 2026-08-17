@@ -17,12 +17,24 @@ tempfile = { workspace = true }
 # one crate in the workspace that is allowed to write `unsafe`. The
 # workspace lint table forbids it, and `forbid` cannot be relaxed by a
 # later `allow`, so this crate carries an equivalent table of its own
-# instead of inheriting with `workspace = true`. Everything else matches
-# the workspace policy.
+# instead of inheriting with `workspace = true`.
+#
+# Every other line of the workspace policy is repeated below verbatim, and
+# it has to stay that way: a lint added to `[workspace.lints]` and not to
+# this table silently exempts the one crate that most needs it. The
+# `cargo_clippy` ctest cannot catch that drift, because a missing lint
+# produces no diagnostic — so the check is by eye, here, whenever the
+# workspace table changes.
+#
+# The exception runs in the strict direction too: `unsafe_op_in_unsafe_fn`
+# is denied here and nowhere else, because an `unsafe fn` body does not
+# get to be implicitly unsafe in the crate where every `unsafe` lives.
 [lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
 unused_must_use = "deny"
 unused_qualifications = "warn"
 unreachable_pub = "warn"
+missing_debug_implementations = "warn"
 rust_2018_idioms = { level = "deny", priority = -1 }
 
 [lints.clippy]
@@ -33,6 +45,10 @@ todo = "deny"
 unimplemented = "deny"
 dbg_macro = "deny"
 mem_forget = "deny"
+panic = "deny"
+exit = "deny"
+await_holding_lock = "deny"
+let_underscore_future = "deny"
 # This crate documents safety at *function* granularity: every `unsafe fn`
 # carries a `# Safety` section stating the C API contract its body relies
 # on, and the body is a single call honouring exactly that contract.

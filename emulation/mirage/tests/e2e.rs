@@ -12,7 +12,7 @@
 //! streams, its exit code, the socket it serves while it lives, and
 //! `mirage exec` borrowing that session from another terminal.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod harness;
 

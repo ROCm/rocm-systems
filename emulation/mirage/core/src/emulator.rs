@@ -31,19 +31,22 @@ pub type EmulatorKind = String;
 /// system it emulates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmulatorDef {
-    /// which emulator backend to use, e.g. "rocjitsu"
+    /// Which emulator backend runs this profile, by its canonical
+    /// lowercase name.
     pub emulator: EmulatorKind,
 
-    /// plugins to use with the emulator, e.g. "rocjitsu" plugin for AMD GPU simulation
+    /// Which of the backend's plugins to enable, each with its argument
+    /// object. See [`PluginsDef`] for what an empty object means.
     pub plugins: PluginsDef,
 
     /// Functional or clocked emulation.
     pub exec_mode: ExecMode,
 
-    /// extra options to configure the emulator, e.g. {"gpu_model": "cdna3"}
+    /// Backend-specific configuration overrides, e.g.
+    /// `{"gpu_model": "cdna3"}`.
     pub options: SimpleMap,
 
-    /// system topology (rack/node/GPU layout + per-GPU agent).
+    /// System topology (rack/node/GPU layout plus the per-GPU agent).
     pub topology: MaybeRef<TopologyDef>,
 }
 

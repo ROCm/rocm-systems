@@ -31,7 +31,7 @@
 //! `MIRAGE_BENCH_REPORT`). Iteration count is configurable via
 //! `MIRAGE_BENCH_ITERS` (default 5).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod harness;
 

@@ -30,6 +30,7 @@
 //! that a caller in another crate has to remember to honour.
 
 use std::ffi::{CStr, OsStr};
+use std::fmt;
 use std::os::raw::{c_char, c_int, c_void};
 
 /// Status codes returned by the rocjitsu C API (`rj_status_t`).
@@ -52,13 +53,21 @@ pub const ROCJITSU_STATUS_INVALID_FILE: RjStatus = 5;
 pub type RjHandle = c_int;
 
 /// Opaque VM handle (`rj_vm_t`). Only ever held behind a pointer.
+///
+/// `Debug` prints the type name and nothing else — there is nothing to
+/// print. It exists so a caller can derive `Debug` on a struct holding
+/// `*mut RjVm` without having to hand-write an impl.
 #[repr(C)]
+#[derive(Debug)]
 pub struct RjVm {
     _private: [u8; 0],
 }
 
 /// Opaque daemon handle (`rj_daemon_t`). Only ever held behind a pointer.
+///
+/// `Debug` is present for the same reason as on [`RjVm`].
 #[repr(C)]
+#[derive(Debug)]
 pub struct RjDaemon {
     _private: [u8; 0],
 }
@@ -156,7 +165,7 @@ pub struct RjVmUnmap {
 /// interposer can emulate libdrm/DRM device queries client-side. The
 /// layout must match `rocjitsu/vm/rj_vm.h` byte-for-byte.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct RjVmGpuInfo {
     /// Non-zero when this payload was populated by the VM.
     pub present: u32,
@@ -286,6 +295,21 @@ pub struct Lib {
 // `*_as` API), so the handle is safe to move and share across threads.
 unsafe impl Send for Lib {}
 unsafe impl Sync for Lib {}
+
+// Printing forty function-pointer addresses would be noise. What a reader
+// of a log actually wants to know about a loaded library is which of the
+// optional entry points it turned out to have, because that is what
+// decides whether plugin selection works and whether a daemon client gets
+// real `gpu_info` — and it is the first thing to check when an older
+// library behaves unexpectedly.
+impl fmt::Debug for Lib {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Lib")
+            .field("vm_load_plugins", &self.vm_load_plugins.is_some())
+            .field("vm_gpu_info", &self.vm_gpu_info.is_some())
+            .finish_non_exhaustive()
+    }
+}
 
 impl Lib {
     /// Load the rocjitsu shared library at `path` and resolve the
@@ -601,7 +625,7 @@ pub mod daemon;
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
 

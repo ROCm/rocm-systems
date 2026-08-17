@@ -12,7 +12,7 @@
 //! one process behaves identically to one built in another, and that
 //! nothing is left running when a run goes away.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

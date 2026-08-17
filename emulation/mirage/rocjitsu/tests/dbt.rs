@@ -18,7 +18,7 @@
 //! `rj_dbt_translate` CLI when both the tool and a sample code object
 //! are discoverable on this host; it skips cleanly otherwise.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::HashMap;
 use std::path::PathBuf;

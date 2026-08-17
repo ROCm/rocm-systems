@@ -47,22 +47,7 @@ pub async fn run_cmd(a: RunArgs) -> anyhow::Result<ExitCode> {
     let mut interrupts = Interrupts::install()?;
 
     let mut profile = mirage_core::store::profile_get(&a.profile)?;
-    let profile_ref = apply_profile_overrides(
-        &mut profile,
-        a.image.clone(),
-        &a.mounts,
-        &a.ports,
-        a.container_provider.clone(),
-        a.emulator.clone(),
-        a.exec_mode,
-        &a.options,
-        &a.plugins,
-        a.config.clone(),
-        a.num_nodes,
-        a.gpus_per_node,
-        &a.hacks,
-        &a.profile,
-    )?;
+    let profile_ref = apply_profile_overrides(&mut profile, &a)?;
 
     let workdir = a.workdir.clone().unwrap_or_else(|| {
         std::env::current_dir().map_or_else(|_| "/".to_string(), |p| p.display().to_string())
@@ -791,7 +776,7 @@ impl Drop for TerminalHandoff {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
 

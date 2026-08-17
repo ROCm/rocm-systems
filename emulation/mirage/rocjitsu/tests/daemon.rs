@@ -10,7 +10,7 @@
 //! library is discoverable on this machine (install rocjitsu under
 //! `$ROCM_HOME` or a sibling monorepo build to exercise it).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;

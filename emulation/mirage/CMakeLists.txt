@@ -14,7 +14,12 @@
 #                           `cargo test --release --workspace`. The
 #                           end-to-end suites bring up real sessions on
 #                           the `rocjitsu` backend and skip when its
-#                           runtime library is not discoverable.
+#                           runtime library is not discoverable. It also
+#                           runs `cargo clippy` and `cargo fmt --check`,
+#                           so a lint or formatting regression is a test
+#                           failure like any other.
+#   * `mirage_lint`       — just those two checks, without building or
+#                           running the suite. Not part of `all`.
 #
 # Options:
 #   * `MIRAGE_ALLOW_TEST_SKIP` (OFF)  — let the end-to-end suites report
@@ -24,6 +29,8 @@
 #                                       Off by default: a suite that
 #                                       silently proves nothing is worse
 #                                       than a red one.
+#   * `MIRAGE_LINT_TESTS`     (ON)    — register the clippy and rustfmt
+#                                       checks as ctests.
 #   * `MIRAGE_CARGO_PROFILE`  (release)
 #   * `MIRAGE_CARGO`          (auto)  — override cargo binary
 #
@@ -42,6 +49,11 @@ option(
     "Pass MIRAGE_E2E_ALLOW_SKIP=1 so the e2e suites may skip without a \
 rocjitsu runtime"
     OFF
+)
+option(
+    MIRAGE_LINT_TESTS
+    "Register `cargo clippy` and `cargo fmt --check` as ctest cases"
+    ON
 )
 set(MIRAGE_CARGO_PROFILE "release" CACHE STRING "Cargo build profile")
 set(MIRAGE_CARGO
@@ -141,6 +153,75 @@ add_test(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(cargo_test PROPERTIES TIMEOUT 1800)
+
+# The workspace lint policy (Cargo.toml, `[workspace.lints]`) is written at
+# deny level, but cargo only applies the clippy half when clippy is the
+# thing being run: `cargo build` and `cargo test` never see it. Left to
+# `ctest` alone the policy is advisory, and the way that fails is quiet —
+# a `#[allow]` widened to cover a whole module, or an `unwrap` added to
+# shipping code, lands green.
+#
+# Both flags on the clippy line are load-bearing. `--all-targets` reaches
+# the test and bench targets, where the unwrap/expect opt-outs live and
+# could otherwise spread unnoticed; `--all-features` reaches the
+# `hotswap` backend, which the default feature set leaves uncompiled.
+# `-D warnings` is what promotes the warn-level entries in the policy
+# (`unreachable_pub`, `unused_qualifications`,
+# `missing_debug_implementations`) into failures — without it they scroll
+# past and ctest still reports success.
+#
+# These are separate ctests rather than one, so a red result says which
+# of the two gates broke without reading the log.
+set(_mirage_clippy_cmd
+    ${CMAKE_COMMAND}
+    -E
+    env
+    ${_mirage_env}
+    ${MIRAGE_CARGO}
+    clippy
+    ${_mirage_profile_flag}
+    --workspace
+    --all-targets
+    --all-features
+    --
+    -D
+    warnings
+)
+set(_mirage_fmt_cmd
+    ${MIRAGE_CARGO}
+    fmt
+    --all
+    --
+    --check
+)
+
+if(MIRAGE_LINT_TESTS)
+    add_test(
+        NAME cargo_clippy
+        COMMAND ${_mirage_clippy_cmd}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(cargo_clippy PROPERTIES TIMEOUT 1800)
+
+    add_test(
+        NAME cargo_fmt
+        COMMAND ${_mirage_fmt_cmd}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(cargo_fmt PROPERTIES TIMEOUT 300)
+endif()
+
+# The same two checks as a target, for the common case of wanting them
+# without a 30-minute test run. Deliberately not in `all`: a formatting
+# nit should not stop you building the binary you are debugging.
+add_custom_target(
+    mirage_lint
+    COMMAND ${_mirage_fmt_cmd}
+    COMMAND ${_mirage_clippy_cmd}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Checking mirage formatting and lints"
+    VERBATIM
+)
 
 # rocjitsu-corpus gfx1250 regression, run through mirage + an emulator
 # (HotSwap by default). Opt-in via MIRAGE_RUN_CORPUS; tests SKIP when the

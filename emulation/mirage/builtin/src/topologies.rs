@@ -32,7 +32,7 @@ fn layout(num_nodes: u32, gpus_per_node: u32, agent: &str) -> TopologyDef {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
 

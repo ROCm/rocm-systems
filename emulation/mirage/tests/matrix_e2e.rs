@@ -37,7 +37,7 @@
 //! exercised without requiring a real image or container engine,
 //! mirroring `tests/container_e2e.rs`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod harness;
 

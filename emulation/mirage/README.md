@@ -213,7 +213,13 @@ including building `rocjitsu` itself.
 
 ```sh
 cargo test --workspace
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
+
+The lint policy is denied, not advised — but only when clippy is what you
+ran, so the last two lines are not optional. Both are `ctest` cases too;
+see [`docs/building.md`](docs/building.md).
 
 The end-to-end tests in `tests/` drive the real binary as a subprocess
 against a private XDG root, so what they exercise is the whole stack: CLI

@@ -258,50 +258,7 @@ pub enum ProfileCmd {
     /// `profile create <name>` an interactive UI while `profile create
     /// <name> --emulator ... --agent ...` stays fully non-interactive
     /// (e.g. in scripts and tests).
-    Create {
-        /// Profile name. Prompted for when omitted on a terminal.
-        name: Option<String>,
-        /// Emulator name (e.g. `rocjitsu`, `hotswap`). Defaults to the
-        /// first installed backend; see `mirage emulators`.
-        #[arg(long)]
-        emulator: Option<String>,
-        /// Agent name from `<MIRAGE_CONFIG>/agent/` (e.g. `MI300X`,
-        /// `MI350X`). Defaults to `MI350X`.
-        #[arg(long)]
-        agent: Option<String>,
-        /// Nodes per rack.
-        #[arg(long)]
-        num_nodes: Option<u32>,
-        /// GPUs per node.
-        #[arg(long)]
-        gpus_per_node: Option<u32>,
-        /// Optional description.
-        #[arg(long)]
-        description: Option<String>,
-        /// Containerise the profile: run every node inside a container
-        /// built from this image. Enables `--mount`/`--container-provider`.
-        #[arg(long)]
-        image: Option<String>,
-        /// Bind mount applied to every node container, as
-        /// `HOST[:CONTAINER[:ro|rw]]`. May be repeated. Requires
-        /// `--image`.
-        #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
-        mounts: Vec<String>,
-        /// Port published from every node container to the host, as
-        /// `HOST_PORT[:CONTAINER_PORT][/tcp|/udp]` (like docker `-p`).
-        /// May be repeated. Requires `--image`.
-        #[arg(long = "port", value_name = "HOST_PORT[:CONTAINER_PORT][/tcp|/udp]")]
-        ports: Vec<String>,
-        /// Container provider to use (`podman`, `docker`, or a path).
-        /// Autodetected (podman, then docker) when omitted. Requires
-        /// `--image`.
-        #[arg(long = "container-provider")]
-        provider: Option<String>,
-        /// Never prompt; use defaults for any unspecified field even on
-        /// a terminal.
-        #[arg(long)]
-        no_input: bool,
-    },
+    Create(ProfileCreateArgs),
     /// Import a profile from a JSON file.
     Import {
         /// File to import from (use `-` for stdin).
@@ -314,6 +271,59 @@ pub enum ProfileCmd {
         #[arg(short = 'f', long)]
         force: bool,
     },
+}
+
+/// Arguments for `mirage profile create`.
+///
+/// A named struct rather than an inline variant body because
+/// [`build_profile_create`] consumes the whole payload: six of these
+/// fields are `Option<String>`, so passing them positionally meant a
+/// transposition — image where the description belongs, say — compiled
+/// silently and wrote the wrong profile to disk.
+#[derive(Args, Debug)]
+pub struct ProfileCreateArgs {
+    /// Profile name. Prompted for when omitted on a terminal.
+    pub name: Option<String>,
+    /// Emulator name (e.g. `rocjitsu`, `hotswap`). Defaults to the
+    /// first installed backend; see `mirage emulators`.
+    #[arg(long)]
+    pub emulator: Option<String>,
+    /// Agent name from `<MIRAGE_CONFIG>/agent/` (e.g. `MI300X`,
+    /// `MI350X`). Defaults to `MI350X`.
+    #[arg(long)]
+    pub agent: Option<String>,
+    /// Nodes per rack.
+    #[arg(long)]
+    pub num_nodes: Option<u32>,
+    /// GPUs per node.
+    #[arg(long)]
+    pub gpus_per_node: Option<u32>,
+    /// Optional description.
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Containerise the profile: run every node inside a container
+    /// built from this image. Enables `--mount`/`--container-provider`.
+    #[arg(long)]
+    pub image: Option<String>,
+    /// Bind mount applied to every node container, as
+    /// `HOST[:CONTAINER[:ro|rw]]`. May be repeated. Requires
+    /// `--image`.
+    #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
+    pub mounts: Vec<String>,
+    /// Port published from every node container to the host, as
+    /// `HOST_PORT[:CONTAINER_PORT][/tcp|/udp]` (like docker `-p`).
+    /// May be repeated. Requires `--image`.
+    #[arg(long = "port", value_name = "HOST_PORT[:CONTAINER_PORT][/tcp|/udp]")]
+    pub ports: Vec<String>,
+    /// Container provider to use (`podman`, `docker`, or a path).
+    /// Autodetected (podman, then docker) when omitted. Requires
+    /// `--image`.
+    #[arg(long = "container-provider")]
+    pub provider: Option<String>,
+    /// Never prompt; use defaults for any unspecified field even on
+    /// a terminal.
+    #[arg(long)]
+    pub no_input: bool,
 }
 
 // ----- topology --------------------------------------------------------------
@@ -577,6 +587,41 @@ pub struct RunArgs {
     argv: Vec<String>,
 }
 
+/// Hand-written rather than derived, so that `RunArgs::default()` is the
+/// same set of arguments clap produces for a bare `mirage run -- …`.
+///
+/// Every field but `profile` already agrees: an `Option` flag defaults to
+/// `None`, a repeatable one to an empty `Vec`, and a switch to `false`.
+/// `profile` is the exception — it carries `#[arg(default_value =
+/// "mi350x")]`, which a derived `Default` would silently turn into the
+/// empty string. The `default_matches_clap` test holds the two in step.
+impl Default for RunArgs {
+    fn default() -> Self {
+        Self {
+            profile: "mi350x".to_string(),
+            emulator: None,
+            num_nodes: None,
+            gpus_per_node: None,
+            nproc_per_node: None,
+            workdir: None,
+            envs: Vec::new(),
+            image: None,
+            mounts: Vec::new(),
+            ports: Vec::new(),
+            container_provider: None,
+            hacks: Vec::new(),
+            exec_mode: None,
+            options: Vec::new(),
+            plugins: Vec::new(),
+            config: None,
+            daemon: false,
+            in_process: false,
+            clear_env_vars: false,
+            argv: Vec::new(),
+        }
+    }
+}
+
 // =============================================================================
 // Dispatch
 // =============================================================================
@@ -650,33 +695,9 @@ async fn profile_cmd(cmd: ProfileCmd, json: bool) -> anyhow::Result<ExitCode> {
             let p = mirage_core::store::profile_get(&name)?;
             println!("{}", serde_json::to_string_pretty(&p)?);
         }
-        ProfileCmd::Create {
-            name,
-            emulator,
-            agent,
-            num_nodes,
-            gpus_per_node,
-            description,
-            image,
-            mounts,
-            ports,
-            provider,
-            no_input,
-        } => {
-            let interactive = !no_input && std::io::stdin().is_terminal();
-            let p = build_profile_create(
-                name,
-                emulator,
-                agent,
-                num_nodes,
-                gpus_per_node,
-                description,
-                image,
-                mounts,
-                ports,
-                provider,
-                interactive,
-            )?;
+        ProfileCmd::Create(a) => {
+            let interactive = !a.no_input && std::io::stdin().is_terminal();
+            let p = build_profile_create(a, interactive)?;
             if let Err(e) = validate_profile(&p) {
                 anyhow::bail!("cannot create profile {}: {e}", p.name);
             }
@@ -840,25 +861,12 @@ fn build_containerize(
 /// field's default is used. This keeps `profile create <name>` a
 /// friendly interactive UI on a terminal while remaining fully
 /// non-interactive (defaults) in scripts, pipes and tests.
-#[allow(clippy::too_many_arguments)]
-fn build_profile_create(
-    name: Option<String>,
-    emulator: Option<String>,
-    agent: Option<String>,
-    num_nodes: Option<u32>,
-    gpus_per_node: Option<u32>,
-    description: Option<String>,
-    image: Option<String>,
-    mounts: Vec<String>,
-    ports: Vec<String>,
-    provider: Option<String>,
-    interactive: bool,
-) -> anyhow::Result<ProfileDef> {
+fn build_profile_create(a: ProfileCreateArgs, interactive: bool) -> anyhow::Result<ProfileDef> {
     use dialoguer::{Confirm, Input, Select};
     let theme = dialoguer::theme::ColorfulTheme::default();
 
     // ----- name -----
-    let name = match name {
+    let name = match a.name {
         Some(n) => n,
         None if interactive => Input::with_theme(&theme)
             .with_prompt("Profile name")
@@ -874,7 +882,7 @@ fn build_profile_create(
     };
 
     // ----- emulator -----
-    let spec = match emulator.as_deref() {
+    let spec = match a.emulator.as_deref() {
         Some(n) => match find_emulator(n) {
             Some(s) => s,
             None => anyhow::bail!(
@@ -925,11 +933,11 @@ fn build_profile_create(
     };
 
     // ----- topology -----
-    let num_nodes = resolve_count(num_nodes, "Nodes per rack", interactive, &theme)?;
-    let gpus_per_node = resolve_count(gpus_per_node, "GPUs per node", interactive, &theme)?;
+    let num_nodes = resolve_count(a.num_nodes, "Nodes per rack", interactive, &theme)?;
+    let gpus_per_node = resolve_count(a.gpus_per_node, "GPUs per node", interactive, &theme)?;
 
     // ----- agent -----
-    let agent = match agent {
+    let agent = match a.agent {
         Some(a) => a,
         None if interactive => {
             let known = mirage_core::agent::store::list().unwrap_or_default();
@@ -952,7 +960,7 @@ fn build_profile_create(
     };
 
     // ----- description -----
-    let description = match description {
+    let description = match a.description {
         Some(d) => Some(d),
         None if interactive => {
             let d: String = Input::with_theme(&theme)
@@ -966,10 +974,11 @@ fn build_profile_create(
 
     // ----- containerisation -----
     let containerize =
-        if image.is_some() || !mounts.is_empty() || !ports.is_empty() || provider.is_some() {
+        if a.image.is_some() || !a.mounts.is_empty() || !a.ports.is_empty() || a.provider.is_some()
+        {
             // Any explicit container flag: build directly (errors if mounts
             // or provider were given without an image).
-            build_containerize(image, &mounts, &ports, provider)?
+            build_containerize(a.image, &a.mounts, &a.ports, a.provider)?
         } else if interactive
             && Confirm::with_theme(&theme)
                 .with_prompt("Run each node inside a container?")
@@ -1006,7 +1015,7 @@ fn build_profile_create(
             build_containerize(
                 Some(img),
                 &specs,
-                &ports,
+                &a.ports,
                 if prov.is_empty() { None } else { Some(prov) },
             )?
         } else {
@@ -1145,61 +1154,53 @@ fn parse_plugin(spec: &str) -> anyhow::Result<(String, SimpleMap)> {
 /// Apply direct CLI overrides (containerisation + emulator settings) to
 /// a profile fetched by name.
 ///
+/// The overrides are read straight off the parsed [`RunArgs`] rather
+/// than passed field by field: every one of them is a `run` flag, and
+/// naming them positionally only created a long list of same-typed
+/// parameters that a caller could silently transpose.
+///
 /// When no override is supplied the cheap by-name [`MaybeRef::Ref`] is
 /// returned so the session keeps tracking the on-disk profile. As soon
 /// as any field is overridden the whole (mutated) profile is inlined as
 /// [`MaybeRef::Owned`].
-#[allow(clippy::too_many_arguments)]
 fn apply_profile_overrides(
     profile: &mut ProfileDef,
-    image: Option<String>,
-    mounts: &[String],
-    ports: &[String],
-    provider: Option<String>,
-    emulator: Option<String>,
-    exec_mode: Option<ExecModeArg>,
-    options: &[String],
-    plugins: &[String],
-    config: Option<String>,
-    num_nodes: Option<u32>,
-    gpus_per_node: Option<u32>,
-    hacks: &[HackArg],
-    profile_name: &str,
+    a: &RunArgs,
 ) -> anyhow::Result<MaybeRef<ProfileDef>> {
-    if image.is_none()
-        && mounts.is_empty()
-        && ports.is_empty()
-        && provider.is_none()
-        && emulator.is_none()
-        && exec_mode.is_none()
-        && options.is_empty()
-        && plugins.is_empty()
-        && config.is_none()
-        && num_nodes.is_none()
-        && gpus_per_node.is_none()
-        && hacks.is_empty()
+    if a.image.is_none()
+        && a.mounts.is_empty()
+        && a.ports.is_empty()
+        && a.container_provider.is_none()
+        && a.emulator.is_none()
+        && a.exec_mode.is_none()
+        && a.options.is_empty()
+        && a.plugins.is_empty()
+        && a.config.is_none()
+        && a.num_nodes.is_none()
+        && a.gpus_per_node.is_none()
+        && a.hacks.is_empty()
     {
         // No overrides: keep the cheap by-name reference.
-        return Ok(MaybeRef::Ref(profile_name.to_string()));
+        return Ok(MaybeRef::Ref(a.profile.clone()));
     }
 
     // Container overrides.
-    if image.is_some()
-        || !mounts.is_empty()
-        || !ports.is_empty()
-        || provider.is_some()
-        || !hacks.is_empty()
+    if a.image.is_some()
+        || !a.mounts.is_empty()
+        || !a.ports.is_empty()
+        || a.container_provider.is_some()
+        || !a.hacks.is_empty()
     {
-        let parsed = parse_mounts(mounts)?;
-        let parsed_ports = parse_ports(ports)?;
-        let parsed_hacks: Vec<Hack> = hacks.iter().copied().map(Hack::from).collect();
+        let parsed = parse_mounts(&a.mounts)?;
+        let parsed_ports = parse_ports(&a.ports)?;
+        let parsed_hacks: Vec<Hack> = a.hacks.iter().copied().map(Hack::from).collect();
         match &mut profile.containerize {
             Some(c) => {
-                if let Some(img) = image {
-                    c.image = img;
+                if let Some(img) = &a.image {
+                    c.image = img.clone();
                 }
-                if let Some(p) = provider {
-                    c.provider = Some(p);
+                if let Some(p) = &a.container_provider {
+                    c.provider = Some(p.clone());
                 }
                 c.mounts.extend(parsed);
                 c.ports.extend(parsed_ports);
@@ -1210,11 +1211,11 @@ fn apply_profile_overrides(
                 }
             }
             None => {
-                let image = image.ok_or_else(|| {
+                let image = a.image.clone().ok_or_else(|| {
                     anyhow::anyhow!("--mount/--port/--container-provider/--hack require a containerised profile or --image")
                 })?;
                 profile.containerize = Some(ContainerizedDef {
-                    provider,
+                    provider: a.container_provider.clone(),
                     image,
                     mounts: parsed,
                     ports: parsed_ports,
@@ -1227,8 +1228,8 @@ fn apply_profile_overrides(
     }
 
     // Emulator overrides.
-    if let Some(name) = emulator {
-        if find_emulator(&name).is_none() {
+    if let Some(name) = &a.emulator {
+        if find_emulator(name).is_none() {
             let available = registry()
                 .into_iter()
                 .map(|e| e.name)
@@ -1236,16 +1237,16 @@ fn apply_profile_overrides(
                 .join(", ");
             anyhow::bail!("unknown emulator `{name}`; available backends: {available}");
         }
-        profile.emulator.emulator = name;
+        profile.emulator.emulator = name.clone();
     }
-    if let Some(mode) = exec_mode {
+    if let Some(mode) = a.exec_mode {
         profile.emulator.exec_mode = mode.into();
     }
-    for opt in options {
+    for opt in &a.options {
         let (key, value) = parse_option(opt)?;
         profile.emulator.options.insert(key, value);
     }
-    for spec in plugins {
+    for spec in &a.plugins {
         let (name, args) = parse_plugin(spec)?;
         profile.emulator.plugins.insert(name, args);
     }
@@ -1253,9 +1254,9 @@ fn apply_profile_overrides(
     // (the upstream `rocjitsu --config`). Stored as the `config`
     // emulator option (absolute, so it resolves regardless of the
     // workload's working directory) for the backend to use verbatim.
-    if let Some(cfg) = config {
+    if let Some(cfg) = &a.config {
         let abs =
-            std::fs::canonicalize(&cfg).map_err(|e| anyhow::anyhow!("--config {cfg:?}: {e}"))?;
+            std::fs::canonicalize(cfg).map_err(|e| anyhow::anyhow!("--config {cfg:?}: {e}"))?;
         profile.emulator.options.insert(
             "config".to_string(),
             SimpleValue::String(abs.display().to_string()),
@@ -1265,7 +1266,7 @@ fn apply_profile_overrides(
     // Topology overrides: per-run node and per-node GPU counts. Resolve
     // the emulator's topology (following a by-name reference) so the
     // counts can be mutated, then inline the modified topology.
-    if num_nodes.is_some() || gpus_per_node.is_some() {
+    if a.num_nodes.is_some() || a.gpus_per_node.is_some() {
         let mut topo = match &profile.emulator.topology {
             MaybeRef::Owned(t) => t.clone(),
             // Through the store's front door, so the name is validated
@@ -1278,10 +1279,10 @@ fn apply_profile_overrides(
             // `TopologyNotFound`.
             MaybeRef::Ref(name) => mirage_core::store::topology_get(name)?,
         };
-        if let Some(n) = num_nodes {
+        if let Some(n) = a.num_nodes {
             topo.num_nodes = n;
         }
-        if let Some(g) = gpus_per_node {
+        if let Some(g) = a.gpus_per_node {
             topo.gpus_per_node = g;
         }
         profile.emulator.topology = MaybeRef::Owned(topo);
@@ -1667,7 +1668,7 @@ fn print_paths(json: bool) {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
     use mirage_core::common::SimpleMap;
@@ -1718,46 +1719,24 @@ mod tests {
     #[test]
     fn no_overrides_keeps_by_name_ref() {
         let mut p = sample_profile();
-        let r = apply_profile_overrides(
-            &mut p,
-            None,
-            &[],
-            &[],
-            None,
-            None,
-            None,
-            &[],
-            &[],
-            None,
-            None,
-            None,
-            &[],
-            "mi450x",
-        )
-        .unwrap();
+        let a = RunArgs {
+            profile: "mi450x".into(),
+            ..Default::default()
+        };
+        let r = apply_profile_overrides(&mut p, &a).unwrap();
         assert_eq!(r, MaybeRef::Ref("mi450x".to_string()));
     }
 
     #[test]
     fn exec_mode_and_options_inline_owned_profile() {
         let mut p = sample_profile();
-        let r = apply_profile_overrides(
-            &mut p,
-            None,
-            &[],
-            &[],
-            None,
-            None,
-            Some(ExecModeArg::Clocked),
-            &["gpu_model=cdna4".to_string(), "queues=8".to_string()],
-            &[],
-            None,
-            None,
-            None,
-            &[],
-            "mi450x",
-        )
-        .unwrap();
+        let a = RunArgs {
+            profile: "mi450x".into(),
+            exec_mode: Some(ExecModeArg::Clocked),
+            options: vec!["gpu_model=cdna4".to_string(), "queues=8".to_string()],
+            ..Default::default()
+        };
+        let r = apply_profile_overrides(&mut p, &a).unwrap();
         match r {
             MaybeRef::Owned(owned) => {
                 assert_eq!(owned.emulator.exec_mode, ExecMode::Clocked);
@@ -1777,23 +1756,13 @@ mod tests {
     #[test]
     fn topology_counts_override_inline_owned_profile() {
         let mut p = sample_profile();
-        let r = apply_profile_overrides(
-            &mut p,
-            None,
-            &[],
-            &[],
-            None,
-            None,
-            None,
-            &[],
-            &[],
-            None,
-            Some(2),
-            Some(4),
-            &[],
-            "mi450x",
-        )
-        .unwrap();
+        let a = RunArgs {
+            profile: "mi450x".into(),
+            num_nodes: Some(2),
+            gpus_per_node: Some(4),
+            ..Default::default()
+        };
+        let r = apply_profile_overrides(&mut p, &a).unwrap();
         match r {
             MaybeRef::Owned(owned) => match owned.emulator.topology {
                 MaybeRef::Owned(topo) => {
@@ -1828,23 +1797,12 @@ mod tests {
     #[test]
     fn plugins_enable_inline_owned_profile() {
         let mut p = sample_profile();
-        let r = apply_profile_overrides(
-            &mut p,
-            None,
-            &[],
-            &[],
-            None,
-            None,
-            None,
-            &[],
-            &["race".to_string(), "logging".to_string()],
-            None,
-            None,
-            None,
-            &[],
-            "mi450x",
-        )
-        .unwrap();
+        let a = RunArgs {
+            profile: "mi450x".into(),
+            plugins: vec!["race".to_string(), "logging".to_string()],
+            ..Default::default()
+        };
+        let r = apply_profile_overrides(&mut p, &a).unwrap();
         match r {
             MaybeRef::Owned(owned) => {
                 assert!(owned.emulator.plugins.contains_key("race"));
@@ -1862,23 +1820,12 @@ mod tests {
         p.emulator
             .plugins
             .insert("logging".to_string(), SimpleMap::new());
-        let r = apply_profile_overrides(
-            &mut p,
-            None,
-            &[],
-            &[],
-            None,
-            None,
-            None,
-            &[],
-            &["race".to_string()],
-            None,
-            None,
-            None,
-            &[],
-            "mi450x",
-        )
-        .unwrap();
+        let a = RunArgs {
+            profile: "mi450x".into(),
+            plugins: vec!["race".to_string()],
+            ..Default::default()
+        };
+        let r = apply_profile_overrides(&mut p, &a).unwrap();
         match r {
             MaybeRef::Owned(owned) => {
                 // The CLI plugin is added alongside the profile's existing one.
@@ -1905,5 +1852,24 @@ mod tests {
             w.run.plugins,
             vec!["race".to_string(), "logging".to_string()]
         );
+    }
+
+    /// `RunArgs::default()` is hand-written to reproduce clap's own
+    /// defaults, so that a test constructing one with `..Default::default()`
+    /// is testing the same starting point a user gets from the command
+    /// line. `profile` is the only field where the two could disagree —
+    /// every other one defaults to `None`, an empty `Vec`, or `false` in
+    /// both — so it is the only one worth pinning here.
+    #[test]
+    fn run_args_default_matches_clap() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Wrap {
+            #[command(flatten)]
+            run: RunArgs,
+        }
+        let w = Wrap::try_parse_from(["mirage", "--", "./app"])
+            .expect("`mirage run -- ./app` should parse");
+        assert_eq!(w.run.profile, RunArgs::default().profile);
     }
 }

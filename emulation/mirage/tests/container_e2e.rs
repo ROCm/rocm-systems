@@ -29,7 +29,7 @@
 //! mock that returned immediately would let a regression back to `-d`
 //! pass every test in this file.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod harness;
 

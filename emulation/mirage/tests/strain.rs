@@ -33,7 +33,7 @@
 //! liveness check alone cannot see one. These tests read `/proc/<pid>/stat`
 //! and assert a live run has no children in state `Z`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod harness;
 

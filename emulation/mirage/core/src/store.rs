@@ -5,12 +5,12 @@
 //! one involves nothing but the filesystem.
 //!
 //! That last point is why this module exists separately from the
-//! supervisor. Both the daemon and the CLI answer configuration queries
-//! from here directly, so `mirage profile list` does not have to start a
-//! background daemon to read a directory. There is no cache to keep
-//! coherent: the daemon reads a profile off disk when a session is
-//! created, so a profile written by the CLI a moment earlier is already
-//! visible to it.
+//! supervisor. Every command answers configuration queries from here
+//! directly, so `mirage profile list` is a directory read and nothing
+//! else — there is nothing to start first. There is no cache to keep
+//! coherent either: a `mirage run` reads a profile off disk when it
+//! creates its session, so a profile written a moment earlier in another
+//! terminal is already visible to it.
 
 use crate::agent::AgentDef;
 use crate::error::{MirageError, Result};
@@ -27,10 +27,11 @@ use crate::topology::TopologyDef;
 /// deletes one.
 ///
 /// That was survivable while these were CLI arguments the user typed
-/// about their own machine. It is not now: the daemon serves them over a
-/// socket, so the name arrives off the wire, and every other id that does
-/// (`SessionId`, `ExecId`) is validated at the serde boundary. This is
-/// the same guarantee for the three that are plain `String`s.
+/// about their own machine. It is not now: a live `mirage run` serves
+/// these over its socket, so the name can arrive off the wire, and every
+/// other id that does (`SessionId`, `ExecId`) is validated at the serde
+/// boundary. This is the same guarantee for the three that are plain
+/// `String`s.
 ///
 /// # Errors
 ///
@@ -238,7 +239,7 @@ fn list_json_stems(root: &std::path::Path) -> Result<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
     use crate::common::MaybeRef;

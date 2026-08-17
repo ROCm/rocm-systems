@@ -1142,7 +1142,7 @@ pub fn make_def(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
     use mirage_core::emulator::{EmulatorDef, ExecMode};

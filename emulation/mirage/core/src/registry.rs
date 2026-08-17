@@ -116,7 +116,7 @@ pub fn make_def(spec: &EmulatorInfo, topology: TopologyDef) -> EmulatorDef {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
 

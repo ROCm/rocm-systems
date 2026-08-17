@@ -194,6 +194,33 @@ alive, every one of those tests is bounded by a process it started: a
 suite that crashes cannot leave a session behind for the next one to
 trip over.
 
+## Linting
+
+The workspace lint policy lives in [`Cargo.toml`](../Cargo.toml) under
+`[workspace.lints]`: `unsafe_code` is forbidden everywhere except the
+`rocjitsu_sys` FFI crate, `clippy::all` is denied, and `unwrap_used`,
+`expect_used`, `panic` and `exit` are denied outside test modules.
+
+None of that is checked by `cargo build` or `cargo test` — cargo only
+applies the clippy half when clippy is what you ran. So run it:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+```
+
+Every flag is load-bearing. `--all-targets` reaches the test and bench
+targets, `--all-features` reaches the `hotswap` backend that the default
+feature set leaves uncompiled, and `-D warnings` is what turns the
+warn-level entries in the policy (`unreachable_pub`,
+`unused_qualifications`, `missing_debug_implementations`) into failures
+rather than output you scroll past.
+
+Both checks are also registered as `ctest` cases (`cargo_clippy` and
+`cargo_fmt`), so a CMake-driven build catches a lint regression the same
+way it catches a failing test. `cmake --build build --target mirage_lint`
+runs just those two without the test suite.
+
 ## Troubleshooting
 
 - **`command not found: <cmd>` from `mirage run`** — the program you asked

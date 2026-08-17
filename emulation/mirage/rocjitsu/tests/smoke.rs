@@ -4,7 +4,7 @@
 //! The `kmd_config` round-trip is skipped when no KMD library is
 //! discoverable on this machine (rocjitsu not installed).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use mirage_core::common::MaybeRef;
 use mirage_core::emulator::{EmulatorDef, ExecMode};

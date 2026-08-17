@@ -15,7 +15,13 @@
 //! run is a child of the test binary, and [`Run`] kills it in its own
 //! `Drop`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, dead_code, unreachable_pub)]
+// `dead_code` is the one that cannot be narrowed. This module is compiled
+// separately into each of the five integration-test binaries, and none of
+// them uses all of it — so every helper is dead code from the point of
+// view of at least one binary, and the lint has no way to see the others.
+// Everything else here is ordinary test-code opt-out: a panic in a test
+// *is* the failure mechanism.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -24,7 +30,7 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 /// A private mirage installation: its own XDG root and config store.
-pub struct Env {
+pub(crate) struct Env {
     dir: TempDir,
     config: PathBuf,
     runtime: PathBuf,
@@ -39,7 +45,7 @@ impl Env {
     /// socket lives under it. `sun_path` is 108 bytes on Linux, and a
     /// deep tempdir path plus `mirage/run/<session>.sock` can exceed it,
     /// which presents as a baffling "invalid argument" at bind time.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
         Self {
             config: dir.path().join("config"),
@@ -50,22 +56,22 @@ impl Env {
     }
 
     /// The mirage binary under test.
-    pub fn bin(&self) -> &Path {
+    pub(crate) fn bin(&self) -> &Path {
         &self.bin
     }
 
     /// This environment's XDG runtime root.
-    pub fn runtime(&self) -> &Path {
+    pub(crate) fn runtime(&self) -> &Path {
         &self.runtime
     }
 
     /// The directory live runs put their sockets in.
-    pub fn run_socket_dir(&self) -> PathBuf {
+    pub(crate) fn run_socket_dir(&self) -> PathBuf {
         self.runtime.join("mirage/run")
     }
 
     /// Session ids of every run currently serving a socket.
-    pub fn live_runs(&self) -> Vec<String> {
+    pub(crate) fn live_runs(&self) -> Vec<String> {
         let Ok(entries) = std::fs::read_dir(self.run_socket_dir()) else {
             return Vec::new();
         };
@@ -79,17 +85,17 @@ impl Env {
     }
 
     /// The temp root.
-    pub fn root(&self) -> &Path {
+    pub(crate) fn root(&self) -> &Path {
         self.dir.path()
     }
 
     /// The per-session scratch directory for `id`.
-    pub fn session_scratch(&self, id: &str) -> PathBuf {
+    pub(crate) fn session_scratch(&self, id: &str) -> PathBuf {
         self.runtime.join("mirage/session").join(id)
     }
 
     /// A `mirage` command wired to this environment.
-    pub fn mirage(&self) -> Command {
+    pub(crate) fn mirage(&self) -> Command {
         let mut c = Command::new(&self.bin);
         c.env("XDG_CONFIG_HOME", &self.config)
             .env("XDG_RUNTIME_DIR", &self.runtime)
@@ -103,7 +109,7 @@ impl Env {
     ///
     /// Exposed separately from [`Env::mirage`] so a test that builds its
     /// own command still gets the same isolation.
-    pub fn child_env(&self) -> Vec<(String, String)> {
+    pub(crate) fn child_env(&self) -> Vec<(String, String)> {
         vec![
             (
                 "XDG_CONFIG_HOME".to_string(),
@@ -117,7 +123,7 @@ impl Env {
     }
 
     /// Run a mirage command and return its output, whatever the status.
-    pub fn run(&self, args: &[&str]) -> Output {
+    pub(crate) fn run(&self, args: &[&str]) -> Output {
         self.mirage()
             .args(args)
             .output()
@@ -125,7 +131,7 @@ impl Env {
     }
 
     /// Run a mirage command that must succeed, returning its stdout.
-    pub fn ok(&self, args: &[&str]) -> String {
+    pub(crate) fn ok(&self, args: &[&str]) -> String {
         let out = self.run(args);
         assert!(
             out.status.success(),
@@ -139,7 +145,7 @@ impl Env {
     }
 
     /// Run a mirage command that must fail, returning its stderr.
-    pub fn fails(&self, args: &[&str]) -> String {
+    pub(crate) fn fails(&self, args: &[&str]) -> String {
         let out = self.run(args);
         assert!(
             !out.status.success(),
@@ -151,7 +157,7 @@ impl Env {
     }
 
     /// Create a profile named `name` on the test emulator backend.
-    pub fn create_profile(&self, name: &str) {
+    pub(crate) fn create_profile(&self, name: &str) {
         self.ok(&[
             "profile",
             "create",
@@ -168,7 +174,7 @@ impl Env {
     /// is dropped, so a test that panics cannot strand a session.
     ///
     /// `args` go before the `--`; `argv` is the command to run.
-    pub fn spawn_run(&self, args: &[&str], argv: &[&str]) -> Run {
+    pub(crate) fn spawn_run(&self, args: &[&str], argv: &[&str]) -> Run {
         let mut cmd = self.mirage();
         cmd.arg("run")
             .args(args)
@@ -193,7 +199,7 @@ impl Env {
 }
 
 /// A background `mirage run`, killed when this value is dropped.
-pub struct Run {
+pub(crate) struct Run {
     child: Option<std::process::Child>,
     socket_dir: PathBuf,
     /// Session ids that already had a socket when this run was spawned.
@@ -211,7 +217,7 @@ impl Run {
     /// starts answering once the session is healthy. Waiting for the file
     /// would hand a test a session that has no containers and no emulator
     /// environment yet, and every assertion after it would race bring-up.
-    pub fn await_ready(&mut self, timeout: Duration) -> String {
+    pub(crate) fn await_ready(&mut self, timeout: Duration) -> String {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
             if let Some(child) = self.child.as_mut()
@@ -239,19 +245,19 @@ impl Run {
     }
 
     /// This run's pid, while it is alive.
-    pub fn pid(&self) -> Option<u32> {
+    pub(crate) fn pid(&self) -> Option<u32> {
         self.child.as_ref().map(std::process::Child::id)
     }
 
     /// Signal the run, as a user pressing Ctrl-C in its terminal would.
-    pub fn signal(&self, sig: nix::sys::signal::Signal) {
+    pub(crate) fn signal(&self, sig: nix::sys::signal::Signal) {
         if let Some(pid) = self.pid() {
             let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), sig);
         }
     }
 
     /// Wait for the run to exit, returning its output.
-    pub fn wait(&mut self, timeout: Duration) -> Output {
+    pub(crate) fn wait(&mut self, timeout: Duration) -> Output {
         let deadline = Instant::now() + timeout;
         loop {
             match self.child.as_mut().map(std::process::Child::try_wait) {
@@ -288,7 +294,7 @@ impl Run {
     }
 
     /// Stop the run and wait for it to go away.
-    pub fn kill(&mut self) {
+    pub(crate) fn kill(&mut self) {
         let Some(mut child) = self.child.take() else {
             return;
         };
@@ -327,7 +333,7 @@ impl Drop for Env {
 /// drive. rocjitsu interposes GPU calls the shell commands here never
 /// make, so it adds no behaviour to what is under test, only the
 /// requirement that its runtime library is present.
-pub const TEST_EMULATOR: &str = "rocjitsu";
+pub(crate) const TEST_EMULATOR: &str = "rocjitsu";
 
 /// Whether the test emulator's runtime is available on this machine.
 ///
@@ -337,7 +343,7 @@ pub const TEST_EMULATOR: &str = "rocjitsu";
 ///
 /// Probed once and cached: it shells out to the binary, and asking
 /// per-test would add a process spawn to every one of them.
-pub fn test_emulator_available() -> bool {
+pub(crate) fn test_emulator_available() -> bool {
     static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *AVAILABLE.get_or_init(|| {
         let probe = match tempfile::tempdir() {
@@ -368,13 +374,13 @@ pub fn test_emulator_available() -> bool {
 /// Environment variable that acknowledges the emulator is missing.
 ///
 /// See [`assert_suite_can_run`].
-pub const ENV_ALLOW_SKIP: &str = "MIRAGE_E2E_ALLOW_SKIP";
+pub(crate) const ENV_ALLOW_SKIP: &str = "MIRAGE_E2E_ALLOW_SKIP";
 
 /// Skip the calling test when the test emulator is unavailable.
 ///
 /// Returns `true` when the test should stop.
 #[must_use]
-pub fn skip_without_emulator() -> bool {
+pub(crate) fn skip_without_emulator() -> bool {
     if test_emulator_available() {
         return false;
     }
@@ -396,7 +402,7 @@ pub fn skip_without_emulator() -> bool {
 /// deliberately does not include rocjitsu.
 ///
 /// Call this from exactly one test per suite.
-pub fn assert_suite_can_run() {
+pub(crate) fn assert_suite_can_run() {
     if test_emulator_available() {
         return;
     }
@@ -420,7 +426,7 @@ an install that provides librocjitsu.so.\n\n\
 /// nested inside a long tempdir path silently fails to bind. Putting the
 /// runtime root directly under `TMPDIR` keeps every socket well inside
 /// the limit.
-pub fn short_runtime_dir() -> PathBuf {
+pub(crate) fn short_runtime_dir() -> PathBuf {
     use std::sync::atomic::{AtomicU32, Ordering};
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
@@ -474,7 +480,7 @@ fn describes_itself(socket: &Path) -> bool {
 }
 
 /// Whether a pid is still in the process table.
-pub fn pid_alive(pid: u32) -> bool {
+pub(crate) fn pid_alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
         return false;
     };
@@ -489,7 +495,7 @@ pub fn pid_alive(pid: u32) -> bool {
 /// A zombie still answers `kill(pid, 0)`, so liveness checks alone cannot
 /// see one — which is precisely how the previous design's leaks stayed
 /// invisible. This reads the process state from `/proc` instead.
-pub fn pid_is_zombie(pid: u32) -> bool {
+pub(crate) fn pid_is_zombie(pid: u32) -> bool {
     let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
         return false;
     };
@@ -504,7 +510,7 @@ pub fn pid_is_zombie(pid: u32) -> bool {
 ///
 /// Tests tag their workloads with a unique marker so this counts only
 /// their own processes, never another test's or the harness's.
-pub fn count_processes(marker: &str) -> usize {
+pub(crate) fn count_processes(marker: &str) -> usize {
     find_processes(marker).len()
 }
 
@@ -523,7 +529,7 @@ pub fn count_processes(marker: &str) -> usize {
 /// Filtering on `comm` rather than on a pid list: `mirage exec` clients
 /// and any re-exec of the binary have to go too, and the test does not
 /// know their pids.
-pub fn find_processes(marker: &str) -> Vec<u32> {
+pub(crate) fn find_processes(marker: &str) -> Vec<u32> {
     let uid = nix::unistd::getuid().to_string();
     let Ok(output) = Command::new("pgrep")
         .args(["-u", &uid, "-f", marker])
@@ -545,7 +551,7 @@ fn is_mirage_process(pid: u32) -> bool {
 }
 
 /// Wait until `cond` holds, or fail with `what`.
-pub fn wait_for(what: &str, timeout: Duration, mut cond: impl FnMut() -> bool) {
+pub(crate) fn wait_for(what: &str, timeout: Duration, mut cond: impl FnMut() -> bool) {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if cond() {
@@ -557,7 +563,7 @@ pub fn wait_for(what: &str, timeout: Duration, mut cond: impl FnMut() -> bool) {
 }
 
 /// Assert that no process tagged `marker` is left running.
-pub fn assert_no_leaks(marker: &str) {
+pub(crate) fn assert_no_leaks(marker: &str) {
     // Allow a brief moment: a reap is a syscall away, not instantaneous.
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline && count_processes(marker) > 0 {
@@ -572,7 +578,7 @@ pub fn assert_no_leaks(marker: &str) {
 }
 
 /// A marker string unique to one test, for tagging its workloads.
-pub fn marker(name: &str) -> String {
+pub(crate) fn marker(name: &str) -> String {
     use std::sync::atomic::{AtomicU32, Ordering};
     static SEQ: AtomicU32 = AtomicU32::new(0);
     format!(
@@ -584,7 +590,7 @@ pub fn marker(name: &str) -> String {
 
 /// A shell snippet that sleeps forever, tagged with `marker` so the test
 /// can find it in the process table.
-pub fn tagged_sleep(marker: &str) -> String {
+pub(crate) fn tagged_sleep(marker: &str) -> String {
     // The marker is in the command line (as an unused variable), which is
     // what `pgrep -f` matches on.
     format!("MARKER={marker}; while true; do sleep 1; done")
