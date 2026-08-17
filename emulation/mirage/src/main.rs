@@ -102,16 +102,47 @@ const SUBCOMMANDS: &[&str] = &[
 /// by `build.rs` from `cargo metadata` and embedded into the binary.
 const THIRD_PARTY: &str = include_str!(concat!(env!("OUT_DIR"), "/about.txt"));
 
+/// The same manifest as a JSON array of `{name, version, license}`,
+/// generated alongside [`THIRD_PARTY`] by the same pass over
+/// `cargo metadata`.
+const THIRD_PARTY_JSON: &str = include_str!(concat!(env!("OUT_DIR"), "/about.json"));
+
+/// One-line summary of what mirage is, shared by `about` and the JSON
+/// form so the two cannot drift.
+const DESCRIPTION: &str = "A UX for the rocjitsu (and other) GPU emulators.";
+
+const COPYRIGHT: &str = "Copyright (c) Advanced Micro Devices, Inc. All rights reserved.";
+
+const LICENSE: &str = "Licensed under the terms of mirage's LICENSE.";
+
 /// Print version, copyright, and the embedded third-party manifest for
 /// `mirage about`.
-fn print_about() {
+///
+/// `--json` is a global flag, so it is accepted here whether or not this
+/// command has anything machine-readable to say. It does, and printing
+/// the prose anyway would be worse than rejecting the flag: a script that
+/// asked for JSON and got a paragraph has no way to tell that it did.
+fn print_about(json: bool) -> anyhow::Result<()> {
+    if json {
+        let doc = serde_json::json!({
+            "name": "mirage",
+            "version": env!("CARGO_PKG_VERSION"),
+            "description": DESCRIPTION,
+            "copyright": COPYRIGHT,
+            "license": LICENSE,
+            "third_party": serde_json::from_str::<serde_json::Value>(THIRD_PARTY_JSON)?,
+        });
+        println!("{}", serde_json::to_string_pretty(&doc)?);
+        return Ok(());
+    }
     println!("mirage {}", env!("CARGO_PKG_VERSION"));
-    println!("A UX for the rocjitsu (and other) GPU emulators.");
+    println!("{DESCRIPTION}");
     println!();
-    println!("Copyright (c) Advanced Micro Devices, Inc. All rights reserved.");
-    println!("Licensed under the terms of mirage's LICENSE.");
+    println!("{COPYRIGHT}");
+    println!("{LICENSE}");
     println!();
     print!("{THIRD_PARTY}");
+    Ok(())
 }
 
 /// Whether `arg` is one of [`Cli`]'s global flags, which may appear
@@ -200,7 +231,7 @@ fn dropin_argv(args: Vec<String>) -> Vec<String> {
 fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
     match cli.command {
         TopCmd::About => {
-            print_about();
+            print_about(cli.json)?;
             Ok(ExitCode::from(0))
         }
         // Everything else, including `run`, happens right here in this
