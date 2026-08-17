@@ -294,12 +294,11 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
     add_dependencies(${_dev_target} rocshmem_static)
   endif()
-  # ENABLE_ROCSHMEM_GIN: pass rocshmem device bitcode to per-kernel compiles
-  # so GIN device symbols (QueuePair::put_nbi, etc.) resolve during the
-  # per-arch device.elf link step.
-  # ENABLE_ROCSHMEM does not use the device linker (requires -fgpu-rdc
-  # --hip-link for librocshmem.a); see ENABLE_DEVICE_LINKER guard below.
-  if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_INSTALL_DIR)
+  # Pass rocshmem device bitcode to per-kernel compiles so rocshmem device
+  # symbols resolve during the per-arch device.elf link step.
+  # ENABLE_ROCSHMEM: rocshmem_n_pes, alltoall_wg, etc.
+  # ENABLE_ROCSHMEM_GIN: QueuePair::put_nbi, atomic_add, etc.
+  if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND ROCSHMEM_INSTALL_DIR)
     set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
     target_compile_options(${_dev_target} PRIVATE --rocshmem-bitcode=${_rocshmem_bc})
   endif()
@@ -352,7 +351,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   # present in the device ELF — they cannot be imported from a shared library.
   set(_rocshmem_bitcode_arg "")
   set(_rocshmem_link_depends "")
-  if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_INSTALL_DIR)
+  if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND ROCSHMEM_INSTALL_DIR)
     set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
     set(_rocshmem_bitcode_arg "--rocshmem-bitcode=${_rocshmem_bc}")
     if(TARGET rocshmem_static)
