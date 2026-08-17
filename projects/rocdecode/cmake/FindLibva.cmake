@@ -21,45 +21,21 @@
 #
 ################################################################################
 
+# libva is provided exclusively by TheRock's amd-mesa sysdeps, staged under
+# ${ROCM_PATH}/lib/rocm_sysdeps. The shared libraries carry a rocm_sysdeps_
+# prefix on both Linux and Windows. ROCM_PATH is the only knob needed.
+find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS ${ROCM_PATH}/lib/rocm_sysdeps/include NO_DEFAULT_PATH)
+find_library(LIBVA_LIBRARY NAMES rocm_sysdeps_va PATHS ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
+
 if(WIN32)
-  # On Windows, use vaon12 (VA-API on D3D12 translation layer)
-  # Override with -DVAON12_ROOT=<path> on the cmake configure command line.
-  # Expected layout: <VAON12_ROOT>/build/native/x64/{include,lib,bin}
-  if(NOT DEFINED VAON12_ROOT)
-    set(VAON12_ROOT "C:/vaon12" CACHE PATH "Path to vaon12 NuGet package root")
-    message(WARNING "VAON12_ROOT not set — defaulting to ${VAON12_ROOT}. "
-      "Pass -DVAON12_ROOT=<path> to use a different installation.")
-  else()
-    set(VAON12_ROOT "${VAON12_ROOT}" CACHE PATH "Path to vaon12 NuGet package root")
-  endif()
-  # When user provides VAON12_ROOT, use it directly as the base.
-  # The default C:/vaon12 is a NuGet package with a build/native/x64 subdirectory.
-  if(VAON12_ROOT STREQUAL "C:/vaon12")
-    set(VAON12_BASE "${VAON12_ROOT}/build/native/x64")
-  else()
-    set(VAON12_BASE "${VAON12_ROOT}")
-  endif()
-
-  find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS "${VAON12_BASE}/include" NO_DEFAULT_PATH)
-
-  # Custom builds (e.g. built with MinGW/Meson) produce libva.dll.a instead of va.lib.
-  # Search lib/ and bin/ and try both naming conventions.
-  set(CMAKE_FIND_LIBRARY_SUFFIXES ".lib" ".dll.a" ".a")
-  find_library(LIBVA_LIBRARY NAMES va libva PATHS "${VAON12_BASE}/lib" "${VAON12_BASE}/bin" NO_DEFAULT_PATH)
-  find_library(LIBVA_WIN32_LIBRARY NAMES va_win32 libva_win32 PATHS "${VAON12_BASE}/lib" "${VAON12_BASE}/bin" NO_DEFAULT_PATH)
+  # Windows uses the va_win32 D3D12 display backend; va-drm is Linux-only.
+  find_library(LIBVA_WIN32_LIBRARY NAMES rocm_sysdeps_va_win32 PATHS ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
 
   include(FindPackageHandleStandardArgs)
   find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_WIN32_LIBRARY)
   mark_as_advanced(LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_WIN32_LIBRARY)
 else()
-  # Search super-project (e.g. amd-mesa) sysdeps first when building in TheRock
-  if(DEFINED THEROCK_SUPERPROJECT_INCLUDE_DIRS)
-    list(APPEND _libva_include_hints ${THEROCK_SUPERPROJECT_INCLUDE_DIRS})
-  endif()
-
-  find_library(LIBVA_LIBRARY NAMES va HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib /opt/amdgpu/lib/x86_64-linux-gnu /opt/amdgpu/lib64 /usr/lib/x86_64-linux-gnu /usr/lib64)
-  find_library(LIBVA_DRM_LIBRARY NAMES va-drm HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib /opt/amdgpu/lib/x86_64-linux-gnu /opt/amdgpu/lib64 /usr/lib/x86_64-linux-gnu /usr/lib64)
-  find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS ${_libva_include_hints} ${ROCM_PATH}/lib/rocm_sysdeps/include /opt/amdgpu/include /usr/include NO_DEFAULT_PATH)
+  find_library(LIBVA_DRM_LIBRARY NAMES rocm_sysdeps_va-drm PATHS ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
 
   include(FindPackageHandleStandardArgs)
   find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY)
