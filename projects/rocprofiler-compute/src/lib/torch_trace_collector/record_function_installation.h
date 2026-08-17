@@ -38,7 +38,7 @@ inline std::int64_t install(bool capture_args = true, bool capture_values = fals
             {
                 callback.needsInputs(true);
             }
-            state.handle = at::addGlobalCallback(callback);
+            state.handle    = at::addGlobalCallback(callback);
             state.installed = true;
             return static_cast<std::int64_t>(state.handle);
         });
