@@ -7,10 +7,10 @@
 #include "rocjitsu/code/dbt/semantic/cdna4_to_rdna_common.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <span>

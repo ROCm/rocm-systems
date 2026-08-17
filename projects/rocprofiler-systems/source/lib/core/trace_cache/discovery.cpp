@@ -150,7 +150,7 @@ merge_perfetto_files()
     if(!_script_dir.empty())
         _script_path = fmt::format("{}/{}", _script_dir, _script_path);
 
-    if(!tim::filepath::exists(_script_path))
+    if(!path::is_regular_file(_script_path))
     {
         LOG_WARNING("Merge script not found: {}", _script_path);
         return;
