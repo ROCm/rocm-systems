@@ -693,14 +693,12 @@ if(BUILD_TESTS)
         set_target_properties(${test_executable} PROPERTIES LINK_FLAGS "${MPI_CXX_LINK_FLAGS}")
       endif()
     endif()
-    # rccl-UnitTestsGinAnvilPlugin is a self-contained host unit test: it compiles
-    # the plugin sources directly and provides its own stubs (bootstrap/devr/debug/
-    # factory), so it must NOT link librccl.so. When RCCL is built with
-    # ENABLE_ROCSHMEM_GIN=ON but ENABLE_ROCSHMEM=OFF, librccl.so carries unresolved
-    # rocSHMEM symbols (e.g. rocshmem::envvar::log_flags) that would fail at load
-    # time for any executable linking it.
+    # These host-only tests compile code directly with local stubs and must not
+    # link librccl.so (avoids runtime ABI coupling and unresolved rocSHMEM in
+    # plugin-only builds).
     if(test_executable STREQUAL "rccl-UnitTestsGinAnvilPlugin" OR
-       test_executable STREQUAL "rccl-UnitTestsDevRuntime")
+       test_executable STREQUAL "rccl-UnitTestsDevRuntime" OR
+       test_executable STREQUAL "rccl-UnitTestsGdr")
       # Intentionally no rccl link; needed symbols come from the compiled-in
       # source(s) + stubs and RCCL_COMMON_LINK_LIBS (hip/hsa/gtest/dl).
     elseif(BUILD_SHARED_LIBS)
