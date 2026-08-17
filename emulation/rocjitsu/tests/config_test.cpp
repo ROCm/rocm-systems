@@ -56,12 +56,13 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   auto loaded = config::load_config(json, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
 
-  // CDNA4 config: 8 XCDs, 4 SEs per XCD, 8 CUs per SE, 2 IODs.
+  // MI350X physical geometry: 8 XCDs, 4 SEs per XCD, 9 CUs per SE, 2 IODs.
+  // The part exposes 256 active CUs through simd_count but has capacity for 288.
   EXPECT_EQ(soc->num_xcds(), 8u);
   EXPECT_EQ(soc->num_iods(), 2u);
   auto *xcd = soc->xcd(0);
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
-  EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 8u);
+  EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 9u);
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {

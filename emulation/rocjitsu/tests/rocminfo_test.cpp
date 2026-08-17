@@ -134,4 +134,18 @@ TEST(RocminfoTest, ReportsWavefrontSize) {
       << rocminfo_output().output;
 }
 
+TEST(RocminfoTest, ReportsMi350xActiveComputeUnits) {
+  ASSERT_EQ(rocminfo_output().exit_code, 0) << rocminfo_output().output;
+  EXPECT_NE(rocminfo_output().output.find("Compute Unit:            256"), std::string::npos)
+      << "rocminfo did not report the captured MI350X active-CU count.\nOutput:\n"
+      << rocminfo_output().output;
+}
+
+TEST(RocminfoTest, ReportsMi350xMaxClockFrequency) {
+  ASSERT_EQ(rocminfo_output().exit_code, 0) << rocminfo_output().output;
+  EXPECT_NE(rocminfo_output().output.find("Max Clock Freq. (MHz):   2200"), std::string::npos)
+      << "rocminfo did not report the captured MI350X maximum compute clock.\nOutput:\n"
+      << rocminfo_output().output;
+}
+
 } // namespace

@@ -51,11 +51,11 @@ The remaining sections describe simulator topology configs.
     },
     "links": [
       {
-        "pattern": "xcd[i].se[j].cu[k].req -> xcd[i].l2.cpl_[j*8+k]",
+        "pattern": "xcd[i].se[j].cu[k].req -> xcd[i].l2.cpl_[j*9+k]",
         "for_ranges": [
           { "var_name": "i", "start": 0, "end": 8 },
           { "var_name": "j", "start": 0, "end": 4 },
-          { "var_name": "k", "start": 0, "end": 8 }
+          { "var_name": "k", "start": 0, "end": 9 }
         ],
         "latency": 1, "weight": 10
       }

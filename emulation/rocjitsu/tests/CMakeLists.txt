@@ -1534,6 +1534,8 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
             DetectsGpuAgent
             ReportsGfx950
             ReportsWavefrontSize
+            ReportsMi350xActiveComputeUnits
+            ReportsMi350xMaxClockFrequency
     )
         rj_add_test(
             NAME "RocminfoTest.${_rocminfo_test}"
