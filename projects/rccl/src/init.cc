@@ -868,11 +868,6 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.p2pChannelShiftSize = comm->p2pChannelShiftSize;
   tmpCommAndChans.comm.p2pCrossClique = comm->p2pCrossClique;
   tmpCommAndChans.comm.channels = &devCommAndChans->channels[0];
-  
-  if (comm->p2pSingleProcMemRegActive) {
-    tmpCommAndChans.comm.p2pSingleProcMemRegActive = true;
-  }
-  
 
   comm->workArgsBytes = std::min<size_t>(ncclParamWorkArgsBytes(), ncclMaxKernelArgsSize(comm->cudaArch));
 
@@ -2315,12 +2310,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // dedicated non-symmetric hostRma path for it.
   comm->hostRmaSupport = (isOneLsaTeams || comm->globalRmaProxySupport);
    
-  comm->p2pSingleProcMemRegActive = 0;
-  if ( (ncclParamSingleProcMemRegEnable() == 1) && ((comm->nRanks == comm->localRanks) && (comm->intraRanks == comm->nRanks)) &&  comm->symmetricSupport ) {
-    comm->p2pSingleProcMemRegActive = 1;
-  } else {
-    WARN("SingleProcMemReg requested but ranks span multiple processes or nodes. Disabling flag for safety.");
-  }
 
   if (!comm->symmetricSupport) {
     INFO(NCCL_INIT,

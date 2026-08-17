@@ -941,8 +941,7 @@ struct ncclComm {
   int symId;
   size_t bufThreshold;
 #endif
-  // Single Proc Memreg cross GPU barrier indicator
-  bool p2pSingleProcMemRegActive;
+
   // Direct Reduce Scatter [RCCL]
   bool enableDirectReduceScatter;
   // Temporary Buffer [RCCL]

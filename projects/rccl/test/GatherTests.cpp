@@ -155,7 +155,7 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollGather};
-    std::vector<ncclDataType_t> const dataTypes       = {ncclUint8, ncclUint32,ncclUint64};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclUint8, ncclBfloat16, ncclUint32, ncclUint64};
     std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {1};
     std::vector<int>            const numElements     = {1,4314};

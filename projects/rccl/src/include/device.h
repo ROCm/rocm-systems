@@ -613,9 +613,6 @@ struct ncclKernelComm {
   // Profiler counters
   struct ncclDevProfiler* workStarted /*[MAXCHANNELS]*/;
   struct ncclDevProfiler* workCompleted /*[MAXCHANNELS]*/;
- 
-  // For SingleProcMemReg with symmetric memory
-  bool p2pSingleProcMemRegActive;
 
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;

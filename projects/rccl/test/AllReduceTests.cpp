@@ -162,10 +162,10 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
-    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat64, ncclBfloat16};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat64, ncclFloat32, ncclFloat16, ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
     std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {1,4314};
+    std::vector<int>            const numElements     = {1,4314,5003};
     std::vector<bool>           const inPlaceList     = {true,false};
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true,false};
