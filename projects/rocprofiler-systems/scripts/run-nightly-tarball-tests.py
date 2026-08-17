@@ -32,8 +32,9 @@ work is incremental:
 Typical usage on a GPU test machine:
 
     python3 run-nightly-tarball-tests.py                 # latest multiarch nightly
-    python3 run-nightly-tarball-tests.py --variant auto  # smallest per-GPU tarball
+    python3 run-nightly-tarball-tests.py --variant gfx90a  # smallest per-GPU tarball
     python3 run-nightly-tarball-tests.py --tier quick    # fast smoke subset
+    python3 run-nightly-tarball-tests.py --tier full --run-labels mpi
     python3 run-nightly-tarball-tests.py --reruns 2      # retry flaky tests
     python3 run-nightly-tarball-tests.py --rocm-version 7.15.0a20260717
     python3 run-nightly-tarball-tests.py --pytest-args "-m gpu -k transpose"
@@ -59,12 +60,7 @@ failed-test names, and the rocprof-sys version under test), and, on failure, a
 failures log listing each failing test with its output.
 
 Environment variables:
-    The script inherits your shell environment and forwards it to every git, build
-    and pytest subprocess, so you can pre-set knobs before invoking it, e.g.:
-      - http_proxy / https_proxy   : honored by the download, git and pip
-      - PIP_INDEX_URL / PIP_NO_INDEX / PIP_FIND_LINKS : mirrored / offline pip
-      - CC / CXX                   : compilers for the example/source builds
-      - ROCPROFSYS_* / CMAKE_* / MAKEFLAGS : forwarded to the build/tests
+    The script inherits your shell environment and forwards it.
     The script manages a few variables and will override yours:
       ROCM_PATH, ROCPROFSYS_CI, ROCPROFSYS_INSTALL_DIR / ROCPROFSYS_BUILD_DIR, and
       TMPDIR/TMP/TEMP (redirected into <work-dir>/tmp during tests).
@@ -81,7 +77,9 @@ import argparse
 import datetime as _dt
 import json
 import os
+import platform
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -90,6 +88,7 @@ import tarfile
 import time
 import urllib.request
 from pathlib import Path
+from typing import NoReturn
 
 # --------------------------------------------------------------------------- #
 # Constants
@@ -109,81 +108,27 @@ REQUIRED_ROCPROFSYS_BINARIES = [
     "rocprof-sys-causal",
 ]
 
-# Tests known to be problematic under the TheRock install-mode flow. Mirrors
-# tests/test_categories.yaml::_common_therock_regex_excludes. Applied as a
-# pytest -k "not (...)" expression unless the caller overrides --pytest-args.
-DEFAULT_DESELECT_KEYWORDS = [
-    "transferbench",
-    "fork",
-    "openmp_target",
-    "jacobi_usm",
-    "jacobi_roctx",
-    "jpeg_decode",
-    "matrix_exponential",
-    "scratch_memory",
-    "selective_region",
-    "shmem_pingpong",
-    "video_decode",
-]
+# Tier names defined by tests/test_categories.yaml, ordered narrowest first.
+# Mirrors tests/pytest/conftest.py::TIER_ORDER.
+TIER_ORDER = ["quick", "standard", "comprehensive", "full"]
 
-# Curated fast smoke subset for `--tier quick` (pytest -k substrings). Approximates
-# the quick tier in tests/test_categories.yaml (which is defined for CTest labels).
-QUICK_KEYWORDS = [
-    "transpose",
-    "config",
-    "cli",
-    "avail",
-    "presets",
-    "roctx",
-]
+# Path of the tier definitions relative to the rocprofiler-systems source dir.
+TEST_CATEGORIES_REL = Path("tests") / "test_categories.yaml"
 
-# Marker (label) categories excluded from the standard/quick tiers. Mirrors
-# tests/test_categories.yaml::_common_therock_labels_exclude. Applied as a pytest
-# marker expression "not X and not Y ...". We deliberately do NOT filter on the
-# 'gpu' marker, so CPU-only install-mode tests (cli_help, config, presets, ...)
-# are also validated against the tarball binaries.
-LABEL_EXCLUDES = [
-    "annotate",
-    "mpi",
-    "julia",
-    "attach",
-    "lulesh",
-    "network",
-    "overflow",
-    "thread_limit",
-]
-
-# Map a detected GPU arch (gfxNNNN) to the smallest matching TheRock tarball
-# variant. Used by `--variant auto`. Anything unmapped falls back to multiarch.
-ARCH_TO_VARIANT = {
-    "gfx900": "gfx900",
-    "gfx906": "gfx906",
-    "gfx908": "gfx908",
-    "gfx90a": "gfx90a",
-    "gfx942": "gfx94X-dcgpu",
-    "gfx950": "gfx950-dcgpu",
-    "gfx1010": "gfx101X-dgpu",
-    "gfx1011": "gfx101X-dgpu",
-    "gfx1012": "gfx101X-dgpu",
-    "gfx1030": "gfx103X-all",
-    "gfx1031": "gfx103X-all",
-    "gfx1032": "gfx103X-all",
-    "gfx1100": "gfx110X-all",
-    "gfx1101": "gfx110X-all",
-    "gfx1102": "gfx110X-all",
-    "gfx1150": "gfx1150",
-    "gfx1151": "gfx1151",
-    "gfx1152": "gfx1152",
-    "gfx1153": "gfx1153",
-    "gfx1200": "gfx120X-all",
-    "gfx1201": "gfx120X-all",
-    "gfx1202": "gfx120X-all",
-    "gfx1250": "gfx125X-dcgpu",
-    "gfx1251": "gfx125X-dcgpu",
-}
+# Fallback tarball variant when no per-GPU one can be resolved.
+MULTIARCH_VARIANT = "multiarch"
 
 # minimum free disk space (GB) required before a tarball download
 DEFAULT_MIN_FREE_GB = 40
+
+# Pinned perfetto trace_processor_shell (mirrors tests/CMakeLists.txt defaults).
+TRACE_PROCESSOR_SHELL_URL = (
+    "https://commondatastorage.googleapis.com/perfetto-luci-artifacts/"
+    "v47.0/linux-amd64/trace_processor_shell"
+)
+TRACE_PROCESSOR_SHELL_SHA256 = (
+    "832425c3c7934904d1e0ec1721beb51423de7dbcf399a899973f2b6b464603fa"
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -257,7 +202,7 @@ def step(title: str) -> None:
     _STEP_START = time.monotonic()
 
 
-def die(msg: str, code: int = 1) -> "None":
+def die(msg: str, code: int = 1) -> NoReturn:
     _emit(f"\n[nightly-test][ERROR] {msg}", stream=sys.stderr)
     if _SUMMARY_PATH is not None:
         _FACTS.setdefault("result", "ABORTED")
@@ -274,7 +219,8 @@ def run(cmd, *, cwd=None, env=None, check=True, quiet=False):
     printable = " ".join(str(c) for c in cmd)
     if not quiet:
         log(f"$ {printable}" + (f"   (cwd={cwd})" if cwd else ""))
-    proc = subprocess.Popen(
+    # context manager so the stdout pipe is closed deterministically, not at GC
+    with subprocess.Popen(
         cmd,
         cwd=cwd,
         env=env,
@@ -282,13 +228,13 @@ def run(cmd, *, cwd=None, env=None, check=True, quiet=False):
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
-    )
-    for line in proc.stdout:
-        _emit(line, end="")
-    proc.wait()
-    if check and proc.returncode != 0:
-        die(f"command failed (exit {proc.returncode}): {printable}", proc.returncode)
-    return proc.returncode
+    ) as proc:
+        for line in proc.stdout:
+            _emit(line, end="")
+        rc = proc.wait()
+    if check and rc != 0:
+        die(f"command failed (exit {rc}): {printable}", rc)
+    return rc
 
 
 # --------------------------------------------------------------------------- #
@@ -306,6 +252,22 @@ def _http_get_text(url: str, timeout: int = 60) -> str:
     _require_https(url)
     with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
         return resp.read().decode("utf-8", errors="replace")
+
+
+_INDEX_HTML: str | None = None
+
+
+def fetch_tarball_index(timeout: int = 60) -> str:
+    """Return the nightly index HTML, fetching it at most once per run.
+
+    Both the preflight reachability check and the tarball resolution need this
+    page, and it does not change mid-run, so the second caller reuses the first
+    one's copy instead of making another request.
+    """
+    global _INDEX_HTML
+    if _INDEX_HTML is None:
+        _INDEX_HTML = _http_get_text(NIGHTLY_TARBALL_INDEX, timeout=timeout)
+    return _INDEX_HTML
 
 
 def _sha256_file(path: Path, chunk: int = 1 << 20) -> str:
@@ -374,18 +336,114 @@ def verify_tarball(
     facts["sha256"] = actual
 
 
-def resolve_tarball(variant: str, version: str | None) -> tuple[str, str]:
-    """Return (filename, url) of the nightly dist tarball to download.
+_DIST_TARBALL_RE = re.compile(
+    r"therock-dist-linux-(?P<variant>.+)-(?P<version>\d+\.\d+\.\d+a\d{8})\.tar\.gz\Z"
+)
 
-    ``variant`` is e.g. ``multiarch`` or ``gfx94X-dcgpu``. The regex deliberately
-    anchors a digit right after ``<variant>-`` so the separate ``<variant>-tests-``
-    tarballs are never matched.
+
+def parse_dist_tarball(filename: str) -> tuple[str, str] | None:
+    """Split a dist tarball filename into (variant, ROCm version), or None.
+
+    Lets a run that reuses an already-extracted tree (--offline / --skip-download)
+    report the variant and version it is *actually* testing, rather than echoing back
+    what was requested on the command line.
     """
-    log(f"Fetching nightly tarball index: {NIGHTLY_TARBALL_INDEX}")
+    m = _DIST_TARBALL_RE.match(filename)
+    return (m.group("variant"), m.group("version")) if m else None
+
+
+def index_dist_variants(html: str) -> list[str]:
+    """Return the dist tarball variants present in the index, sorted.
+
+    Only the ``therock-dist-linux-<variant>-<version>.tar.gz`` families are
+    reported; the parallel ``<variant>-tests-`` tarballs (sample data, not
+    redistributables) are skipped.
+    """
+    variants = set()
+    for m in re.finditer(
+        r"therock-dist-linux-(.+?)-\d+\.\d+\.\d+a\d{8}\.tar\.gz",
+        html,
+    ):
+        variant = m.group(1)
+        if not variant.endswith("-tests"):
+            variants.add(variant)
+    return sorted(variants)
+
+
+def _variant_family_pattern(variant: str) -> re.Pattern | None:
+    """Compile the GPU-arch family a tarball variant covers, or None if not a family.
+
+    TheRock names per-family tarballs with an upper-case ``X`` standing in for the
+    last digit of the arch, plus a market suffix: ``gfx94X-dcgpu`` covers gfx940 /
+    gfx941 / gfx942, ``gfx103X-all`` covers gfx1030 / gfx1031 / ... The arch token
+    is alphanumeric, so only the ``X`` needs substituting.
+    """
+    token = variant.split("-", 1)[0]
+    if not token.startswith("gfx"):
+        return None
+    return re.compile(token.replace("X", "[0-9a-f]") + r"\Z")
+
+
+def redirect_variant(
+    requested: str, available: list[str], fallback: str | None = None
+) -> str:
+    """Resolve a requested variant to one the index actually publishes.
+
+    A specific arch is accepted where only its family ships, e.g. ``gfx942`` ->
+    ``gfx94X-dcgpu``, which is how users refer to their GPU (and what rocminfo
+    reports) even though no ``gfx942`` tarball exists.
+    """
+    if requested in available:
+        return requested
+    matches = [
+        v for v in available if (p := _variant_family_pattern(v)) and p.match(requested)
+    ]
+    if len(matches) == 1:
+        log(f"Variant '{requested}' ships as '{matches[0]}'; using that tarball.")
+        return matches[0]
+    if len(matches) > 1:
+        die(
+            f"variant '{requested}' is ambiguous: it matches "
+            f"{', '.join(matches)}.\n"
+            "       Pass one of those to --variant explicitly."
+        )
+    if fallback and fallback in available:
+        log(
+            f"WARNING: no tarball covers '{requested}'; falling back to " f"'{fallback}'."
+        )
+        return fallback
+    die(
+        f"no nightly tarball variant matches '{requested}'.\n"
+        f"       Available variants: {', '.join(available)}\n"
+        f"       Browse {NIGHTLY_TARBALL_INDEX} for the full listing."
+    )
+
+
+def resolve_tarball(
+    variant: str, version: str | None, fallback: str | None = None
+) -> tuple[str, str, str]:
+    """Return (filename, url, variant) of the nightly dist tarball to download.
+
+    ``variant`` is e.g. ``multiarch``, ``gfx94X-dcgpu``, or a specific arch such
+    as ``gfx942`` that is redirected to the family tarball that ships it. The
+    returned variant is the one actually resolved against the index.
+
+    The filename regex deliberately anchors a digit right after ``<variant>-`` so
+    the separate ``<variant>-tests-`` tarballs are never matched.
+    """
+    log(f"Reading nightly tarball index: {NIGHTLY_TARBALL_INDEX}")
     try:
-        html = _http_get_text(NIGHTLY_TARBALL_INDEX)
+        html = fetch_tarball_index()
     except Exception as exc:  # noqa: BLE001
         die(f"could not fetch tarball index: {exc}")
+
+    available = index_dist_variants(html)
+    if not available:
+        die(
+            f"could not parse any dist tarball from {NIGHTLY_TARBALL_INDEX}; the "
+            "index layout may have changed."
+        )
+    variant = redirect_variant(variant, available, fallback)
 
     pattern = re.compile(
         r"therock-dist-linux-"
@@ -404,34 +462,109 @@ def resolve_tarball(variant: str, version: str | None) -> tuple[str, str]:
     if not candidates:
         die(
             f"no nightly tarballs found for variant '{variant}'.\n"
-            f"       Check available variants at {NIGHTLY_TARBALL_INDEX}\n"
-            f"       (e.g. multiarch, gfx94X-dcgpu, gfx90a, gfx110X-all, ...)."
+            f"       Available variants: {', '.join(available)}\n"
+            f"       Check {NIGHTLY_TARBALL_INDEX}"
         )
 
     if version:
-        # match either the full 'X.Y.ZaYYYYMMDD' or just the trailing date
         matches = [
-            fn for fn, (_d, ver) in candidates.items() if version in fn or ver == version
+            fn
+            for fn, (date_int, ver) in candidates.items()
+            if _rocm_version_matches(version, ver, date_int)
         ]
         if not matches:
             die(
                 f"requested version '{version}' not found for variant '{variant}'.\n"
                 f"       Browse {NIGHTLY_TARBALL_INDEX} for valid values."
             )
-        filename = sorted(matches)[-1]
+        filename = max(matches, key=lambda fn: candidates[fn][0])
     else:
         filename = max(candidates, key=lambda fn: candidates[fn][0])
 
     url = f"{NIGHTLY_TARBALL_BASE}/{filename}"
-    return filename, url
+    return filename, url, variant
 
 
-def download_file(url: str, dest: Path) -> None:
+def _rocm_version_matches(requested: str, full_version: str, date_int: int) -> bool:
+    """Return True when ``requested`` exactly selects ``full_version`` (X.Y.ZaYYYYMMDD).
+
+    Accepts the full nightly string (``7.15.0a20260717``), the trailing build date
+    (``20260717``), or the ROCm semver prefix without the date (``7.15.0``). Rejects
+    loose substring matches such as ``0`` or ``10.1`` matching unrelated tarballs.
+    """
+    if requested == full_version:
+        return True
+    if requested.isdigit() and len(requested) == 8 and int(requested) == date_int:
+        return True
+    semver = re.fullmatch(r"(\d+\.\d+\.\d+)", requested)
+    if semver and full_version.startswith(semver.group(1) + "a"):
+        return True
+    return False
+
+
+def _looks_like_gzip(path: Path) -> bool:
+    """Return True when ``path`` begins with the gzip magic header."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(2) == b"\x1f\x8b"
+    except OSError:
+        return False
+
+
+def _cached_download_is_valid(
+    path: Path,
+    url: str,
+    *,
+    expected_sha256: str | None,
+    require_checksum: bool,
+    is_gzip: bool,
+) -> bool:
+    """Return True when an on-disk download can be reused without re-fetching."""
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    if is_gzip and not _looks_like_gzip(path):
+        return False
+    digest = expected_sha256
+    origin = "cli (--sha256)"
+    if not digest:
+        digest, origin = fetch_published_sha256(url)
+    if digest:
+        actual = _sha256_file(path)
+        if actual.lower() != digest.lower():
+            log(
+                f"Cached file checksum mismatch (source: {origin}); "
+                f"will re-download: {path.name}"
+            )
+            return False
+        return True
+    if require_checksum:
+        return False
+    if is_gzip:
+        return True
+    return False
+
+
+def download_file(
+    url: str,
+    dest: Path,
+    *,
+    expected_sha256: str | None = None,
+    require_checksum: bool = False,
+) -> None:
     """Download ``url`` to ``dest`` with resume support (prefers wget/curl)."""
     _require_https(url)
-    if dest.exists() and dest.stat().st_size > 0:
-        log(f"Tarball already present, skipping download: {dest}")
+    if _cached_download_is_valid(
+        dest,
+        url,
+        expected_sha256=expected_sha256,
+        require_checksum=require_checksum,
+        is_gzip=True,
+    ):
+        log(f"Tarball already present and verified, skipping download: {dest}")
         return
+    if dest.exists():
+        log(f"Removing invalid or unverified tarball: {dest.name}")
+        dest.unlink(missing_ok=True)
 
     tmp = dest.with_suffix(dest.suffix + ".part")
     wget = shutil.which("wget")
@@ -540,97 +673,67 @@ def make_rocm_env(base_env: dict, rocm_dir: Path) -> dict:
     return env
 
 
-def apply_hpc_cray_settings(args, facts: dict) -> list[str]:
-    """Bundle Cray-MPICH-on-gfx90a HPC specifics.
-
-    Returns extra ``-D`` CMake args (MPI compile/link flags for the example build)
-    and mutates ``args`` / ``os.environ`` in place:
-      - injects Cray MPICH + XPMEM + GTL include/link flags so the tarball clang
-        can build the GPU-aware MPI examples (e.g. hpc/jacobi-hip),
-      - defaults the tarball variant to gfx90a,
-      - skips examples that don't build against the tarball (jpegdecode/videodecode),
-      - enables GPU-aware MPI at runtime (MPICH_GPU_SUPPORT_ENABLED=1).
-
-    Requires the Cray MPICH module to be loaded (``module load cray-mpich``).
-    """
-    log("Applying HPC Cray MPICH (gfx90a) settings...")
-
-    mpich_dir = os.environ.get("MPICH_DIR") or os.environ.get("CRAY_MPICH_DIR")
-    if not mpich_dir:
-        die(
-            "--hpc-cray requires Cray MPICH in the environment but neither "
-            "MPICH_DIR nor CRAY_MPICH_DIR is set.\n"
-            "       Run 'module load cray-mpich' (and the gfx90a accel module) first."
-        )
-    xpmem = os.environ.get("CRAY_XPMEM_POST_LINK_OPTS", "")
-    gtl_dir = os.environ.get("PE_MPICH_GTL_DIR_amd_gfx90a", "")
-    gtl_libs = os.environ.get("PE_MPICH_GTL_LIBS_amd_gfx90a", "")
-    if not gtl_libs:
-        log(
-            "WARNING: PE_MPICH_GTL_LIBS_amd_gfx90a is empty; GPU-aware MPI link may "
-            "fail. Ensure the craype-accel-amd-gfx90a module is loaded."
-        )
-
-    # compile: MPI headers ; link: MPI + XPMEM + GPU-transport (GTL)
-    cxx_flags = f"-I{mpich_dir}/include"
-    link_flags = " ".join(
-        p
-        for p in [f"-L{mpich_dir}/lib", "-lmpi", xpmem, "-lxpmem", gtl_dir, gtl_libs]
-        if p
-    )
-    extra = [f"-DCMAKE_CXX_FLAGS={cxx_flags}", f"-DCMAKE_EXE_LINKER_FLAGS={link_flags}"]
-
-    # runtime: resolve libmpi/GTL and enable GPU-aware transfers
-    lib_dirs = [f"{mpich_dir}/lib"]
-    if gtl_dir.startswith("-L"):
-        lib_dirs.append(gtl_dir[2:])
-    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(
-        lib_dirs + [os.environ.get("LD_LIBRARY_PATH", "")]
-    ).rstrip(os.pathsep)
-    os.environ.setdefault("MPICH_GPU_SUPPORT_ENABLED", "1")
-
-    # default to the gfx90a tarball; honor an explicit --variant
-    if args.variant == "multiarch":
-        args.variant = "gfx90a"
-
-    # skip examples that don't build against the tarball in this environment
-    for ex in ("jpegdecode", "videodecode"):
-        if ex not in args.disable_examples.split(","):
-            args.disable_examples = (
-                f"{args.disable_examples},{ex}" if args.disable_examples else ex
-            )
-
-    facts["hpc_cray"] = "on"
-    facts["mpich_dir"] = mpich_dir
-    log(f"HPC Cray: MPICH_DIR={mpich_dir}")
-    log(f"HPC Cray: variant={args.variant}, disabled_examples={args.disable_examples}")
-    return extra
-
-
 # --------------------------------------------------------------------------- #
 # Preflight / environment discovery
 # --------------------------------------------------------------------------- #
 
 
-def _tool_version(exe: str, env: dict | None = None) -> str:
+def _run_version(
+    exe: str, env: dict | None = None, timeout: int = 15
+) -> tuple[int | None, str]:
+    """Run ``<exe> --version`` once; return (exit status, parsed version line).
+
+    The status is None when the command could not be run at all (missing, timed
+    out). It is returned alongside the string because the rocprof-sys smoke check
+    needs the status while the summary needs the version, and one probe serves both.
+    """
     try:
         r = subprocess.run(
-            [exe, "--version"], capture_output=True, text=True, timeout=15, env=env
+            [exe, "--version"], capture_output=True, text=True, timeout=timeout, env=env
         )
-        lines = [ln.strip() for ln in (r.stdout + r.stderr).splitlines() if ln.strip()]
-        # skip log-noise lines like "[hh:mm:ss][P:..][file] ... [error] ..." that
-        # some rocprof-sys tools emit before the version banner
-        clean = [ln for ln in lines if not ln.startswith("[") and "Exception" not in ln]
-        for ln in clean:
-            if re.search(r"\d+\.\d+\.\d+", ln) or "version" in ln.lower():
-                return ln
-        if clean:
-            return clean[0]
-        if lines:
-            return lines[0]
     except Exception:  # noqa: BLE001
-        pass
-    return "unknown"
+        return None, "unknown"
+    lines = [ln.strip() for ln in (r.stdout + r.stderr).splitlines() if ln.strip()]
+    # skip log-noise lines like "[hh:mm:ss][P:..][file] ... [error] ..." that
+    # some rocprof-sys tools emit before the version banner
+    clean = [ln for ln in lines if not ln.startswith("[") and "Exception" not in ln]
+    for ln in clean:
+        if re.search(r"\d+\.\d+\.\d+", ln) or "version" in ln.lower():
+            return r.returncode, ln
+    if clean:
+        return r.returncode, clean[0]
+    if lines:
+        return r.returncode, lines[0]
+    return r.returncode, "unknown"
+
+
+def _tool_version(exe: str, env: dict | None = None) -> str:
+    return _run_version(exe, env)[1]
+
+
+# Guards against ROCm's generic targets (gfx9-4-generic): without the length floor
+# and the lookahead they truncate to a bogus "gfx9" that names no tarball variant.
+_GFX_TARGET_RE = re.compile(r"gfx[0-9a-f]{3,}(?![0-9a-z-])")
+
+
+_ROCMINFO_OUT: dict[str, str] = {}
+
+
+def run_rocminfo(exe: str, env: dict | None = None) -> str:
+    """Run ``rocminfo`` and return its stdout ("" on failure), once per executable.
+
+    Preflight runs it to discover the GPU archs and the sanity report wants the same
+    dump; keyed on the executable so the cache is only reused for an identical run
+    (preflight may fall back to a system rocminfo before the tarball is extracted).
+    """
+    if exe not in _ROCMINFO_OUT:
+        try:
+            _ROCMINFO_OUT[exe] = subprocess.run(
+                [exe], capture_output=True, text=True, timeout=30, env=env
+            ).stdout
+        except Exception:  # noqa: BLE001
+            _ROCMINFO_OUT[exe] = ""
+    return _ROCMINFO_OUT[exe]
 
 
 def detect_gpu_archs(rocm_dir: Path | None, env: dict | None = None) -> list[str]:
@@ -644,63 +747,78 @@ def detect_gpu_archs(rocm_dir: Path | None, env: dict | None = None) -> list[str
     rocminfo = next((p for p in search if Path(p).exists()), None)
     if rocminfo is None:
         return []
-    try:
-        out = subprocess.run(
-            [str(rocminfo)], capture_output=True, text=True, timeout=30, env=env
-        ).stdout
-    except Exception:  # noqa: BLE001
-        return []
+    out = run_rocminfo(str(rocminfo), env)
     archs: list[str] = []
-    for a in re.findall(r"gfx[0-9a-fA-F]+", out):
+    for a in re.findall(_GFX_TARGET_RE, out):
         if a != "gfx000" and a not in archs:
             archs.append(a)
     return archs
 
 
 def resolve_variant(variant: str, archs: list[str]) -> str:
-    """Map ``--variant auto`` to a per-family tarball based on detected GPU."""
+    """Map ``--variant auto`` to the detected GPU arch.
+
+    The arch is returned as-is (e.g. ``gfx942``); ``redirect_variant`` later maps
+    it onto whichever family tarball the index actually publishes, so no
+    hand-maintained arch->variant table is needed here.
+    """
     if variant != "auto":
         return variant
-    for a in archs:
-        if a in ARCH_TO_VARIANT:
-            log(f"--variant auto: detected {a} -> tarball variant '{ARCH_TO_VARIANT[a]}'")
-            return ARCH_TO_VARIANT[a]
+    if archs:
+        log(f"--variant auto: detected {archs[0]}")
+        return archs[0]
     log(
-        "WARNING: --variant auto could not map a detected GPU arch "
-        f"({', '.join(archs) or 'none'}); falling back to 'multiarch'."
+        "WARNING: --variant auto detected no GPU arch; falling back to "
+        f"'{MULTIARCH_VARIANT}'."
     )
-    return "multiarch"
+    return MULTIARCH_VARIANT
 
 
-def _trust_problems(path: Path) -> list[str]:
-    """Report ownership/permission issues that would let another local user plant
-    code we later execute (venv python, staged tests, tarball binaries)."""
-    problems = []
+def _trust_problems(path: Path) -> tuple[list[str], list[str]]:
+    """Split ownership/permission problems for *path* into (fatal, advisory).
+
+    Code is executed out of the work dir (venv python, staged pytest tree, tarball
+    binaries), so a directory *any* local user can write to is refused outright.
+    Foreign ownership is only advisory: reusing a tree prepared by a project
+    account or a teammate is a legitimate shared-cluster workflow, and the owner
+    is trusted by the person who chose that --work-dir.
+    """
+    fatal: list[str] = []
+    advisory: list[str] = []
     try:
         st = path.stat()
     except FileNotFoundError:
-        return problems
-    if st.st_uid not in (os.getuid(), 0):
-        problems.append(f"{path} is owned by uid {st.st_uid}, not you ({os.getuid()})")
+        return fatal, advisory
     if st.st_mode & 0o0002:
-        problems.append(f"{path} is world-writable")
-    return problems
+        fatal.append(f"{path} is world-writable")
+    if st.st_uid not in (os.getuid(), 0):
+        advisory.append(f"{path} is owned by uid {st.st_uid}, not you ({os.getuid()})")
+    return fatal, advisory
 
 
 def preflight(args, workdir: Path, rocm_dir: Path) -> list[str]:
     """Fail fast on missing tools/space/network; return detected GPU archs."""
     step("Preflight checks")
 
-    # workdir trust: we execute code from here (venv, staged tests, tarball bins),
-    # so refuse a reused dir another user could have tampered with.
-    trust_issues = []
+    # workdir trust: we execute code from here (venv, staged tests, tarball bins).
+    fatal: list[str] = []
+    advisory: list[str] = []
     for p in (workdir, rocm_dir, workdir / "venv"):
-        trust_issues += _trust_problems(p)
-    if trust_issues:
+        f, a = _trust_problems(p)
+        fatal += f
+        advisory += a
+    if fatal:
         die(
-            "untrusted working directory (could allow code injection):\n"
-            + "\n".join(f"       - {i}" for i in trust_issues)
-            + "\n       Use a private --work-dir you own, or remove the directory."
+            "unsafe working directory (any local user could plant code that we "
+            "then execute):\n"
+            + "\n".join(f"       - {i}" for i in fatal)
+            + "\n       Drop world-write permission (chmod o-w) or use a "
+            "--work-dir you own."
+        )
+    for issue in advisory:
+        log(
+            f"WARNING: {issue}; continuing, but its owner is trusted to have "
+            "prepared the tarball, venv and tests you are about to execute."
         )
 
     # required + informational tools
@@ -741,7 +859,8 @@ def preflight(args, workdir: Path, rocm_dir: Path) -> list[str]:
     # network reachability (only matters if we may download)
     if not args.skip_download:
         try:
-            _http_get_text(NIGHTLY_TARBALL_INDEX, timeout=20)
+            # cached for resolve_tarball(), which needs the same page
+            fetch_tarball_index(timeout=20)
             log(f"network : reachable ({NIGHTLY_TARBALL_INDEX})")
         except Exception as exc:  # noqa: BLE001
             die(
@@ -763,8 +882,13 @@ def preflight(args, workdir: Path, rocm_dir: Path) -> list[str]:
     return archs
 
 
-def report_under_test(rocm_dir: Path, env: dict, facts: dict) -> None:
-    """Log the manifest + rocprof-sys version being validated."""
+def report_under_test(rocm_dir: Path, env: dict, facts: dict) -> int | None:
+    """Log the manifest + rocprof-sys version being validated.
+
+    Returns the exit status of the single ``rocprof-sys-avail --version`` probe (None
+    if it could not be run) so ``smoke_check_rocprofsys`` can judge the binaries from
+    the same invocation instead of launching them a second time.
+    """
     manifest = rocm_dir / "share" / "therock" / "therock_manifest.json"
     if manifest.is_file():
         log(f"TheRock manifest: {manifest}")
@@ -775,34 +899,34 @@ def report_under_test(rocm_dir: Path, env: dict, facts: dict) -> None:
             _emit(manifest.read_text())
 
     avail = rocm_dir / "bin" / "rocprof-sys-avail"
-    version = _tool_version(str(avail), env) if avail.exists() else "unknown"
+    if avail.exists():
+        # generous timeout: this is the first touch of a large binary, possibly on a
+        # cold shared filesystem, and its status drives the smoke check below
+        rc, version = _run_version(str(avail), env, timeout=60)
+    else:
+        rc, version = None, "unknown"
     facts["rocprofsys_version"] = version
     log(f"rocprof-sys binaries under test: {rocm_dir / 'bin'}")
     log(f"rocprof-sys version : {version}")
+    return rc
 
 
-def smoke_check_rocprofsys(rocm_dir: Path, env: dict) -> None:
+def smoke_check_rocprofsys(rocm_dir: Path, version_rc: int | None) -> None:
     """Fail fast if the shipped rocprof-sys binaries can't even start here.
 
-    Runs ``rocprof-sys-avail --version``; if it is killed by a signal (e.g. SIGILL,
-    SIGSEGV, SIGABRT) the binaries are incompatible with this machine and every test
-    would fail, so abort early with a clear, generic message.
+    Judges the ``rocprof-sys-avail --version`` probe already run by
+    ``report_under_test``: if it was killed by a signal (e.g. SIGILL, SIGSEGV,
+    SIGABRT) the binaries are incompatible with this machine and every test would
+    fail, so abort early with a clear, generic message.
     """
     avail = rocm_dir / "bin" / "rocprof-sys-avail"
     if not avail.exists():
         return
-    try:
-        rc = subprocess.run(
-            [str(avail), "--version"],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=60,
-        ).returncode
-    except subprocess.TimeoutExpired:
+    rc = version_rc
+    if rc is None:
         log(
-            "WARNING: 'rocprof-sys-avail --version' timed out during smoke check; "
-            "continuing."
+            "WARNING: 'rocprof-sys-avail --version' could not be run (or timed out); "
+            "skipping the smoke check and continuing."
         )
         return
     # killed by a signal: negative returncode (direct exec) or 128+signal convention
@@ -841,13 +965,16 @@ def capture_rocm_sanity(rocm_dir: Path, env: dict, out_path: Path, facts: dict) 
         if not Path(cmd[0]).exists():
             lines.append(f"(skipped: {cmd[0]} not found)")
             continue
+        if title == "rocminfo":
+            # reuse preflight's dump of this same binary; keep only the first ~120
+            # lines, the rest is per-agent detail that bloats the report
+            out = run_rocminfo(cmd[0], env)
+            head = "\n".join(out.splitlines()[:120]).rstrip()
+            lines.append(head or "(no output: rocminfo failed or timed out)")
+            continue
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
-            out = (r.stdout or "") + (r.stderr or "")
-            # rocminfo is long - keep only the first ~120 lines
-            if title == "rocminfo":
-                out = "\n".join(out.splitlines()[:120])
-            lines.append(out.rstrip())
+            lines.append(((r.stdout or "") + (r.stderr or "")).rstrip())
         except Exception as exc:  # noqa: BLE001
             lines.append(f"(error: {exc})")
     out_path.write_text("\n".join(lines) + "\n")
@@ -900,6 +1027,7 @@ def sync_source(
     env: dict,
     no_fetch: bool = False,
     submodules: bool = False,
+    force: bool = False,
 ) -> tuple[Path, bool]:
     """Sparse-clone (or update) rocm-systems.
 
@@ -909,7 +1037,8 @@ def sync_source(
     When ``no_fetch`` is set (offline mode), an existing checkout is reused as-is
     with no network access; if none exists the run aborts with guidance. When
     ``submodules`` is set (source builds), submodules are initialized (online) or
-    verified present (offline).
+    verified present (offline). When ``force`` is set, a successful fetch is
+    always treated as a source change so examples/tests are rebuilt/refreshed.
     """
     repo_dir = workdir / "rocm-systems"
     src_dir = repo_dir / PROJECT_SUBDIR
@@ -940,8 +1069,13 @@ def sync_source(
         run(["git", "-C", str(repo_dir), "checkout", branch], env=env, check=False)
         run(["git", "-C", str(repo_dir), "reset", "--hard", f"origin/{branch}"], env=env)
         new_rev = _git_rev(repo_dir)
-        changed = old_rev != new_rev
-        if changed:
+        changed = old_rev != new_rev or force
+        if changed and force and old_rev == new_rev:
+            log(
+                f"--force-sync: source still at {new_rev[:10]}, "
+                "refreshing staged build/test artifacts anyway."
+            )
+        elif changed:
             log(f"Source updated: {old_rev[:10]} -> {new_rev[:10]}")
         else:
             log(f"Source already up to date at {new_rev[:10]}")
@@ -1054,6 +1188,56 @@ def install_system_deps() -> None:
     run(prefix + [apt, "install", "-y", *pkgs], check=False)
 
 
+def mpi_available(workdir: Path, env: dict, extra_cmake_args: list[str] | None) -> bool:
+    """Probe whether ``find_package(MPI)`` succeeds with this toolchain."""
+    probe = workdir / ".mpi-probe"
+    # never reuse the cache: stale results would ignore newly passed MPI hints
+    shutil.rmtree(probe, ignore_errors=True)
+    probe.mkdir(parents=True, exist_ok=True)
+    (probe / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.25)\n"
+        "project(rocprofsys_mpi_probe LANGUAGES C CXX)\n"
+        "find_package(MPI)\n"
+        "if(NOT (MPI_C_FOUND AND MPI_CXX_FOUND))\n"
+        '    message(FATAL_ERROR "MPI_C/MPI_CXX not found")\n'
+        "endif()\n",
+        encoding="utf-8",
+    )
+    cmd = [
+        shutil.which("cmake") or "cmake",
+        "-S",
+        str(probe),
+        "-B",
+        str(probe / "build"),
+    ] + (extra_cmake_args or [])
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
+def detect_mpi(workdir: Path, env: dict, cmake_args: list[str], facts: dict) -> bool:
+    """Probe MPI, record the outcome, and explain it (see ``mpi_available``).
+
+    Called immediately before a CMake configure rather than once up front, so a run
+    that reuses up-to-date examples does not pay for a probe it cannot act on.
+    """
+    step("Detect MPI support")
+    use_mpi = mpi_available(workdir, env, cmake_args)
+    facts["mpi"] = "available" if use_mpi else "unavailable (find_package(MPI) failed)"
+    if use_mpi:
+        log("find_package(MPI) succeeded; MPI is enabled for the build below.")
+        log("MPI tests stay excluded until you pass --run-labels mpi.")
+    else:
+        log(
+            "find_package(MPI) failed; MPI is disabled, so MPI tests would skip as "
+            "'binary not found'. For a vendor MPI with no mpicc wrapper, pass hints "
+            "via --cmake-arg (see --help)."
+        )
+    return use_mpi
+
+
 def build_from_source(
     src_dir: Path,
     workdir: Path,
@@ -1099,7 +1283,6 @@ def build_from_source(
         "-DROCPROFSYS_BUILD_EXAMPLES=ON",
         "-DROCPROFSYS_BUILD_TESTING=ON",
         "-DROCPROFSYS_USE_PYTHON=ON",
-        "-DROCPROFSYS_MAX_THREADS=64",
         f"-DROCPROFSYS_USE_MPI={'ON' if use_mpi else 'OFF'}",
     ]
     if disable_examples:
@@ -1153,7 +1336,106 @@ def build_examples(
     log(f"Installed {n} example artifact(s) into {examples_out}")
 
 
-def stage_tests(src_dir: Path, rocm_dir: Path, env: dict) -> Path:
+def _download_binary(
+    url: str,
+    dest: Path,
+    *,
+    expected_sha256: str,
+    skip_download: bool,
+) -> bool:
+    """Download a pinned binary into ``dest``, or reuse a verified cached copy.
+
+    Returns True when ``dest`` is present and executable afterward.
+    """
+    _require_https(url)
+    if dest.is_file() and os.access(dest, os.X_OK):
+        if _sha256_file(dest).lower() == expected_sha256.lower():
+            return True
+        if skip_download:
+            log(
+                f"WARNING: cached {dest.name} checksum mismatch; "
+                "Perfetto validation may fail offline."
+            )
+            return True
+        log(f"Removing invalid cached binary: {dest.name}")
+        dest.unlink(missing_ok=True)
+
+    if skip_download:
+        return False
+
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    wget = shutil.which("wget")
+    curl = shutil.which("curl")
+    if wget:
+        cmd = [wget, "--tries=3", "-q", "-O", str(tmp), url]
+    elif curl:
+        cmd = [curl, "-fL", "--retry", "3", "-o", str(tmp), url]
+    else:
+        log(
+            "WARNING: neither wget nor curl available; "
+            "cannot download trace_processor_shell."
+        )
+        return False
+
+    log(f"$ {' '.join(cmd)}")
+    rc = subprocess.run(cmd).returncode  # noqa: S603
+    if rc != 0:
+        tmp.unlink(missing_ok=True)
+        log(f"WARNING: download failed (exit {rc}): {url}")
+        return False
+
+    actual = _sha256_file(tmp)
+    if actual.lower() != expected_sha256.lower():
+        tmp.unlink(missing_ok=True)
+        die(
+            "trace_processor_shell SHA-256 mismatch:\n"
+            f"       expected: {expected_sha256}\n"
+            f"       actual:   {actual}"
+        )
+    tmp.rename(dest)
+    dest.chmod(0o755)
+    return True
+
+
+def ensure_trace_processor_shell(workdir: Path, skip_download: bool) -> Path | None:
+    """Cache the pinned perfetto trace_processor_shell under ``workdir``.
+
+    Mirrors the binary staged by tests/CMakeLists.txt so Perfetto validation works
+    on air-gapped compute nodes after a networked ``--prepare-only`` run.
+    """
+    if platform.machine() not in ("x86_64", "AMD64"):
+        log(
+            "WARNING: trace_processor_shell is built for x86-64 only; "
+            f"skipping on {platform.machine()}."
+        )
+        return None
+
+    dest = workdir / "trace_processor_shell"
+    if _download_binary(
+        TRACE_PROCESSOR_SHELL_URL,
+        dest,
+        expected_sha256=TRACE_PROCESSOR_SHELL_SHA256,
+        skip_download=skip_download,
+    ):
+        log(f"trace_processor_shell ready: {dest}")
+        return dest
+
+    if skip_download:
+        log(
+            "WARNING: trace_processor_shell is not cached; Perfetto validation "
+            "may fail offline."
+        )
+    return None
+
+
+def stage_tests(
+    src_dir: Path,
+    rocm_dir: Path,
+    workdir: Path,
+    env: dict,
+    *,
+    skip_download: bool = False,
+) -> Path:
     """Copy the pytest suite + helpers into the ROCm prefix (install-mode layout).
 
     Mirrors tests/CMakeLists.txt + tests/pytest/CMakeLists.txt copy rules.
@@ -1209,6 +1491,13 @@ def stage_tests(src_dir: Path, rocm_dir: Path, env: dict) -> Path:
     # capability-check helper (standalone C++; needed by several tests)
     _build_capchk(tests_src, tests_dst, env)
 
+    shell = ensure_trace_processor_shell(workdir, skip_download)
+    if shell is not None:
+        staged_shell = tests_dst / "trace_processor_shell"
+        shutil.copy2(shell, staged_shell)
+        staged_shell.chmod(0o755)
+        log(f"Installed trace_processor_shell into {tests_dst}")
+
     log(f"Staged test suite into {tests_dst}")
     return pytest_dst
 
@@ -1234,24 +1523,210 @@ def _build_capchk(tests_src: Path, tests_dst: Path, env: dict) -> None:
     )
 
 
-def tier_selection_args(tier: str) -> list[str]:
+def _yaml_to_obj(yaml_path: Path, venv_py: Path):
+    """Parse a YAML file, preferring this interpreter and falling back to the venv.
+
+    The script itself may run under a bare system/cray python without PyYAML,
+    while the test venv always has it (requirements.txt pins PyYAML>=5.1), so
+    shell out to the venv interpreter and exchange the result as JSON.
+    """
+    try:
+        import yaml  # noqa: PLC0415
+
+        return yaml.safe_load(yaml_path.read_text())
+    except ImportError:
+        pass
+    r = subprocess.run(
+        [
+            str(venv_py),
+            "-c",
+            "import json,sys,yaml; json.dump(yaml.safe_load(open(sys.argv[1]).read()), "
+            "sys.stdout)",
+            str(yaml_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        die(f"failed to parse {yaml_path} with {venv_py}:\n{r.stderr.strip()}")
+    return json.loads(r.stdout)
+
+
+def _flatten(values) -> list[str]:
+    """One-level flatten, so a YAML alias item (``- *anchor``) expands in place.
+
+    Mirrors tests/pytest/conftest.py::_load_test_categories.
+    """
+    flat: list[str] = []
+    for v in values or []:
+        flat.extend(v if isinstance(v, list) else [v])
+    return [str(v) for v in flat]
+
+
+# A YAML pattern is usable as a pytest -k term only if it is a plain substring,
+# optionally with a trailing ".*". Both CTest's -R/-E (re.search) and pytest's -k
+# match on containment, so "fork.*" and "fork" select the same tests.
+_TRAILING_ANY = ".*"
+_REGEX_METACHARS = set(".^$*+?{}[]()|\\")
+
+
+def _pattern_to_k_term(pattern: str, source: str) -> str | None:
+    """Translate one YAML name regex into a pytest ``-k`` term.
+
+    Returns None for a match-everything pattern (an empty axis in CTest terms).
+    Dies on anything that is not a literal, rather than silently mis-selecting
+    tests: the tier definitions have always been literal + optional ".*", and a
+    real regex needs a deliberate decision here.
+    """
+    term = pattern
+    while term.endswith(_TRAILING_ANY):
+        term = term[: -len(_TRAILING_ANY)]
+    if not term:
+        return None
+    leftover = _REGEX_METACHARS & set(term)
+    if leftover:
+        die(
+            f"cannot translate {source} pattern {pattern!r} into a pytest -k term: "
+            f"unsupported regex metacharacter(s) {''.join(sorted(leftover))}.\n"
+            f"       {TEST_CATEGORIES_REL} is consumed here as literal substrings "
+            "(see _pattern_to_k_term). Either keep the pattern literal or teach "
+            "this script how to translate it."
+        )
+    return term
+
+
+def _name_axis_terms(patterns, source: str, *, veto_match_all: bool) -> list[str]:
+    """Translate a name axis (regex_includes / regex_excludes) into ``-k`` terms.
+
+    A match-everything pattern collapses an include axis to a pass-through (as an
+    empty ``-R`` does in CTest) and is rejected on an exclude axis, where it would
+    deselect the whole suite.
+    """
+    terms: list[str] = []
+    for pattern in patterns:
+        term = _pattern_to_k_term(pattern, source)
+        if term is None:
+            if veto_match_all:
+                die(
+                    f"{TEST_CATEGORIES_REL}: {source} pattern {pattern!r} matches "
+                    "every test."
+                )
+            return []
+        terms.append(term)
+    return terms
+
+
+def _label_axis_terms(patterns, source: str) -> list[str]:
+    """Translate a label axis (label_includes / label_excludes) into ``-m`` terms."""
+    return [t for t in (_pattern_to_k_term(p, source) for p in patterns) if t]
+
+
+def load_test_categories(src_dir: Path, venv_py: Path) -> dict:
+    """Load the tier definitions from tests/test_categories.yaml.
+
+    Returns ``{tier: {"includes": [...], "excludes": [...], "label_includes":
+    [...], "label_excludes": [...]}}`` with every axis flattened to plain
+    pytest ``-k``/``-m`` terms.
+
+    tests/test_categories.yaml is the single source of truth for tier policy,
+    shared with CTest (tests/pytest/conftest.py turns the same axes into CTest
+    LABELS at generate time). Parsing it here keeps this script from drifting
+    from `ctest -L <tier>`.
+    """
+    yaml_path = src_dir / TEST_CATEGORIES_REL
+    if not yaml_path.is_file():
+        die(
+            f"tier definitions not found at {yaml_path}.\n"
+            "       The checked-out source tree looks incomplete; re-run without "
+            "--offline (or with --force-sync) to refresh it."
+        )
+    data = _yaml_to_obj(yaml_path, venv_py) or {}
+    categories = data.get("test_categories") or {}
+    missing = [t for t in TIER_ORDER if not categories.get(t)]
+    if missing:
+        die(f"{yaml_path} defines no {', '.join(missing)} tier(s).")
+
+    tiers: dict = {}
+    for tier in TIER_ORDER:
+        cfg = categories.get(tier) or {}
+        tiers[tier] = {
+            "includes": _name_axis_terms(
+                _flatten(cfg.get("regex_includes")),
+                f"{tier}.regex_includes",
+                veto_match_all=False,
+            ),
+            "excludes": _name_axis_terms(
+                _flatten(cfg.get("regex_excludes")),
+                f"{tier}.regex_excludes",
+                veto_match_all=True,
+            ),
+            "label_includes": _label_axis_terms(
+                _flatten(cfg.get("label_includes")), f"{tier}.label_includes"
+            ),
+            "label_excludes": _label_axis_terms(
+                _flatten(cfg.get("label_excludes")), f"{tier}.label_excludes"
+            ),
+        }
+    return tiers
+
+
+def drop_label_excludes(tiers: dict, labels: list[str]) -> list[str]:
+    """Stop excluding *labels* in every tier; returns the labels actually dropped.
+
+    ``label_excludes`` in the YAML is unconditional (e.g. 'mpi' is excluded even
+    by the full tier, because TheRock CI has no MPI runtime), so re-enabling a
+    category has to be an explicit local override rather than a tier choice.
+    """
+    dropped = []
+    for label in labels:
+        hit = False
+        for axes in tiers.values():
+            if label in axes["label_excludes"]:
+                axes["label_excludes"].remove(label)
+                hit = True
+        if hit:
+            dropped.append(label)
+        else:
+            log(
+                f"WARNING: --run-labels {label}: no tier excludes that label; "
+                "nothing to re-enable."
+            )
+    return dropped
+
+
+def tier_selection_args(tier: str, tiers: dict) -> list[str]:
     """Return the pytest -m/-k selection args for a named tier.
 
+    The YAML axes map onto pytest the same way they map onto CTest, and both
+    match on containment, so the translation is direct:
+      * ``regex_includes`` (-R)  -> ``-k "(a or b)"``
+      * ``regex_excludes`` (-E)  -> ``-k "not (a or b)"``
+      * ``label_includes`` (-L)  -> ``-m "(a or b)"``
+      * ``label_excludes`` (-LE) -> ``-m "not a and not b"``
+    An empty axis is a pass-through, exactly as in CTest.
+
     No 'gpu' marker filter is applied, so CPU-only install-mode tests (CLI help,
-    config, presets, ...) run alongside the GPU tests. Known-problematic marker
-    categories are excluded via ``-m "not ..."`` and known-flaky test names via
-    ``-k "not (...)"`` (see LABEL_EXCLUDES / DEFAULT_DESELECT_KEYWORDS).
+    config, presets, ...) run alongside the GPU tests. The marker names come from
+    pytest markers, and the name terms match the standardized (hyphenated) test
+    names that conftest.py registers as extra -k keywords.
     """
-    deselect = " or ".join(DEFAULT_DESELECT_KEYWORDS)
-    label_excl = " and ".join(f"not {m}" for m in LABEL_EXCLUDES)
-    if tier == "quick":
-        include = " or ".join(QUICK_KEYWORDS)
-        return ["-m", label_excl, "-k", f"({include}) and not ({deselect})"]
-    if tier == "full":
-        # everything that can run; only known-flaky test names are excluded
-        return ["-k", f"not ({deselect})"]
-    # standard (default): label-category excludes + known-flaky name excludes
-    return ["-m", label_excl, "-k", f"not ({deselect})"]
+    axes = tiers[tier]
+    k_parts = []
+    if axes["includes"]:
+        k_parts.append("(" + " or ".join(axes["includes"]) + ")")
+    if axes["excludes"]:
+        k_parts.append("not (" + " or ".join(axes["excludes"]) + ")")
+    m_parts = []
+    if axes["label_includes"]:
+        m_parts.append("(" + " or ".join(axes["label_includes"]) + ")")
+    m_parts += [f"not {label}" for label in axes["label_excludes"]]
+
+    args = []
+    if m_parts:
+        args += ["-m", " and ".join(m_parts)]
+    if k_parts:
+        args += ["-k", " and ".join(k_parts)]
+    return args
 
 
 def run_tests(
@@ -1261,6 +1736,7 @@ def run_tests(
     env: dict,
     extra_pytest_args: str | None,
     tier: str,
+    tiers: dict,
     reruns: int,
     reruns_delay: int,
     rerun_failed: int,
@@ -1312,9 +1788,13 @@ def run_tests(
     else:
         base += ["-p", "no:cacheprovider"]
 
-    selection = (
-        extra_pytest_args.split() if extra_pytest_args else tier_selection_args(tier)
-    )
+    if extra_pytest_args:
+        # shlex, not split(): marker expressions are one argument containing spaces,
+        # e.g. --pytest-args "-m 'hpc and mpi'"
+        selection = shlex.split(extra_pytest_args)
+    else:
+        selection = tier_selection_args(tier, tiers)
+        log(f"Tier '{tier}' filters: " + " ".join(shlex.quote(a) for a in selection))
     if reruns > 0:
         selection += ["--reruns", str(reruns), "--reruns-delay", str(reruns_delay)]
 
@@ -1445,8 +1925,10 @@ def parse_args(argv=None):
         "--variant",
         default="multiarch",
         help="Tarball GPU variant (default: multiarch). Use 'auto' to pick the "
-        "smallest per-family tarball for the detected GPU. Examples: "
-        "multiarch, gfx94X-dcgpu (MI300), gfx950-dcgpu, gfx90a, gfx110X-all.",
+        "smallest per-family tarball for the detected GPU. A specific arch is "
+        "accepted where only its family ships, e.g. 'gfx942' resolves to the "
+        "gfx94X-dcgpu tarball. Examples: multiarch, gfx942, gfx94X-dcgpu (MI300), "
+        "gfx950-dcgpu, gfx90a, gfx110X-all.",
     )
     p.add_argument(
         "--rocm-version",
@@ -1484,11 +1966,6 @@ def parse_args(argv=None):
         help="Parallel build jobs (default: nproc).",
     )
     p.add_argument(
-        "--build-mpi-examples",
-        action="store_true",
-        help="Build MPI-enabled examples (requires libopenmpi-dev). Off by default.",
-    )
-    p.add_argument(
         "--disable-examples",
         default="lulesh",
         help="Comma-separated example directories to skip building (default: "
@@ -1503,12 +1980,21 @@ def parse_args(argv=None):
     p.add_argument(
         "--tier",
         default="standard",
-        choices=("quick", "standard", "full"),
-        help="Test tier to run (default: standard). 'quick' is a fast smoke subset, "
-        "'standard' runs the suite minus known-flaky tests and excluded label "
-        "categories (mpi, network, ...), 'full' runs everything that can run. "
-        "GPU and CPU-only install-mode tests are both included. Ignored when "
+        choices=tuple(TIER_ORDER),
+        help="Test tier to run (default: standard). Tiers are read from "
+        f"{TEST_CATEGORIES_REL} in the checked-out source, the same definitions "
+        "'ctest -L <tier>' uses: 'quick' is a fast smoke subset, 'standard' is the "
+        "PR tier, 'comprehensive' the nightly tier, and 'full' everything that can "
+        "run. GPU and CPU-only install-mode tests are both included. Ignored when "
         "--pytest-args is given.",
+    )
+    p.add_argument(
+        "--run-labels",
+        default="",
+        help="Comma-separated marker labels to stop excluding, e.g. 'mpi' to run the "
+        f"MPI tests. {TEST_CATEGORIES_REL} excludes some categories (mpi, annotate, "
+        "julia, ...) from every tier including 'full', so re-enabling one is an "
+        "explicit override. Ignored when --pytest-args is given.",
     )
     p.add_argument(
         "--reruns",
@@ -1557,6 +2043,13 @@ def parse_args(argv=None):
         "are unchanged.",
     )
     p.add_argument(
+        "--force-sync",
+        action="store_true",
+        help="Force a git fetch/reset of the source checkout and treat the source "
+        "as changed so examples/tests are rebuilt/refreshed. Requires network "
+        "access; cannot be combined with --offline.",
+    )
+    p.add_argument(
         "--skip-tests",
         action="store_true",
         help="Do everything except run the pytest suite.",
@@ -1577,13 +2070,20 @@ def parse_args(argv=None):
         "submodules and takes ~1-2h. Mirrors the QA build+CTest flow.",
     )
     p.add_argument(
-        "--hpc-cray",
-        action="store_true",
-        help="Bundle Cray-MPICH-on-gfx90a HPC specifics: inject Cray MPICH + XPMEM + "
-        "GTL build flags (so GPU-aware MPI examples like hpc/jacobi-hip build with "
-        "the tarball clang), default the tarball variant to gfx90a, skip examples "
-        "that don't build on the tarball (jpegdecode/videodecode), and enable "
-        "GPU-aware MPI at runtime. Requires 'module load cray-mpich'.",
+        "--cmake-arg",
+        action="append",
+        default=[],
+        dest="cmake_args",
+        metavar="ARG",
+        help="Extra argument forwarded verbatim to the example / source CMake "
+        "configure step. Repeatable. Must use the '=' form, since the value starts "
+        "with a dash. Use it for site-specific needs, e.g. pointing "
+        "find_package(MPI) at a vendor MPI that ships no mpicc wrapper for CMake to "
+        "interrogate (Cray MPICH): --cmake-arg=-DMPI_C_LIB_NAMES=mpi "
+        "--cmake-arg=-DMPI_mpi_LIBRARY=$MPICH_DIR/lib/libmpi.so. These come last on "
+        "the CMake command line, so they also override what the script picked, e.g. "
+        "--cmake-arg=-DROCPROFSYS_USE_MPI=OFF to build without MPI on a host that "
+        "has it.",
     )
     # ---- offline / two-phase (air-gapped compute node) workflow ----------- #
     p.add_argument(
@@ -1612,6 +2112,10 @@ def main(argv=None) -> int:
     args.skip_pip = args.offline
     if args.offline:
         args.skip_download = True
+    if args.force_sync and args.offline:
+        die("--force-sync requires network access and cannot be combined with --offline.")
+    if args.force_sync:
+        args.skip_clone = False
 
     if args.work_dir:
         workdir = Path(args.work_dir).resolve()
@@ -1635,7 +2139,9 @@ def main(argv=None) -> int:
     facts.update(
         {
             "started": started.isoformat(timespec="seconds"),
-            "command": " ".join(sys.argv),
+            # shlex.join, not " ".join: keeps quoting so the recorded command can be
+            # pasted back verbatim (--pytest-args takes one space-containing value).
+            "command": shlex.join(sys.argv),
             "host": socket.gethostname(),
             "work_dir": str(workdir),
             "rocm_prefix": str(rocm_dir),
@@ -1664,12 +2170,9 @@ def main(argv=None) -> int:
     log(f"Detailed log: {detail_log}")
     log(f"Summary log:  {summary_log}")
 
-    # HPC Cray MPICH bundle: mutates args (variant/disable_examples) + os.environ
-    # and returns extra CMake args (MPI compile/link flags) for the example/source
-    # build.
-    hpc_cray_cmake_args: list[str] = []
-    if args.hpc_cray:
-        hpc_cray_cmake_args = apply_hpc_cray_settings(args, facts)
+    if args.cmake_args:
+        facts["cmake_args"] = " ".join(args.cmake_args)
+        log("Extra CMake args: " + " ".join(shlex.quote(a) for a in args.cmake_args))
 
     # ---- 0. Preflight ----------------------------------------------------- #
     archs = preflight(args, workdir, rocm_dir)
@@ -1697,12 +2200,24 @@ def main(argv=None) -> int:
     if args.skip_download and (rocm_dir / "bin").is_dir():
         log(f"--skip-download: reusing existing ROCm tree ({current or 'unknown'}).")
         facts["tarball"] = current or "unknown"
+        # report what is staged, not what --variant/--rocm-version asked for: no
+        # download happens here, so the extracted tree is the thing under test
+        parsed = parse_dist_tarball(current) if current else None
+        if parsed:
+            facts["variant"], facts["rocm_version"] = parsed
     else:
-        filename, url = resolve_tarball(variant, args.rocm_version)
+        # --variant auto is a best-effort hint, so let it degrade to multiarch;
+        # an explicitly requested variant must resolve or abort.
+        filename, url, variant = resolve_tarball(
+            variant,
+            args.rocm_version,
+            fallback=MULTIARCH_VARIANT if args.variant == "auto" else None,
+        )
+        facts["variant"] = variant
         facts["tarball"] = filename
         facts["tarball_url"] = url
-        vm = re.search(r"-((\d+\.\d+\.\d+)a\d{8})\.tar\.gz$", filename)
-        facts["rocm_version"] = vm.group(1) if vm else "unknown"
+        parsed = parse_dist_tarball(filename)
+        facts["rocm_version"] = parsed[1] if parsed else "unknown"
         if (rocm_dir / "bin").is_dir() and current == filename:
             log(f"ROCm tarball already current ({filename}); reusing extracted tree.")
         else:
@@ -1711,7 +2226,12 @@ def main(argv=None) -> int:
             if current and current != filename:
                 log(f"Newer nightly available: {current} -> {filename}")
             tarball = workdir / filename
-            download_file(url, tarball)
+            download_file(
+                url,
+                tarball,
+                expected_sha256=args.sha256,
+                require_checksum=args.require_checksum,
+            )
             verify_tarball(url, tarball, args.sha256, args.require_checksum, facts)
             extract_tarball(tarball, rocm_dir)
             set_rocm_tarball(workdir, filename)
@@ -1738,14 +2258,14 @@ def main(argv=None) -> int:
     )
 
     env = make_rocm_env(os.environ.copy(), rocm_dir)
-    report_under_test(rocm_dir, env, facts)
+    version_rc = report_under_test(rocm_dir, env, facts)
     capture_rocm_sanity(rocm_dir, env, workdir / f"rocm-sanity-{run_stamp}.log", facts)
 
-    # Fail fast if the tarball binaries can't start on this machine. Skipped when
-    # building from source (those tarball binaries aren't what's tested) and during
-    # prepare-only (which may run on a different node than the tests).
+    # Fail fast if the tarball binaries can't start on this machine, judged from the
+    # --version probe above. Skipped when building from source (those tarball binaries
+    # aren't what's tested) and during prepare-only (which may run on another node).
     if not args.build_from_source and not args.prepare_only:
-        smoke_check_rocprofsys(rocm_dir, env)
+        smoke_check_rocprofsys(rocm_dir, version_rc)
 
     facts["validation"] = (
         "build-from-source" if args.build_from_source else "tarball-install"
@@ -1759,6 +2279,7 @@ def main(argv=None) -> int:
         env,
         no_fetch=args.skip_clone,
         submodules=args.build_from_source,
+        force=args.force_sync,
     )
     repo_dir = workdir / "rocm-systems"
     facts["git_revision"] = _git_rev(repo_dir) or "unknown"
@@ -1779,8 +2300,29 @@ def main(argv=None) -> int:
     venv_py = make_venv(workdir, src_dir, skip_install=args.skip_pip)
     capture_pip_freeze(venv_py, workdir / f"pip-freeze-{run_stamp}.txt", facts)
 
+    # Resolve the tier now (not just before pytest) so a bad/unreadable tier
+    # definition fails before the build instead of after it.
+    tiers = load_test_categories(src_dir, venv_py)
+    dropped = drop_label_excludes(
+        tiers, [x.strip() for x in args.run_labels.split(",") if x.strip()]
+    )
+    if dropped:
+        facts["run_labels"] = ", ".join(dropped)
+    if not args.pytest_args:
+        log(
+            f"Tier '{args.tier}' from {TEST_CATEGORIES_REL}: "
+            + " ".join(shlex.quote(a) for a in tier_selection_args(args.tier, tiers))
+        )
+
     # ---- Phase 1 stop: prepared for a later offline compute-node run ------ #
     if args.prepare_only:
+        shell = ensure_trace_processor_shell(workdir, skip_download=False)
+        if shell is None and platform.machine() in ("x86_64", "AMD64"):
+            die(
+                "failed to stage trace_processor_shell during --prepare-only.\n"
+                "       Install wget or curl and re-run so offline Perfetto tests "
+                "have a cached binary."
+            )
         step("Prepare-only complete (--prepare-only)")
         log("Network prep done. The tarball, source, and venv are staged under:")
         log(f"  {workdir}")
@@ -1794,7 +2336,12 @@ def main(argv=None) -> int:
         return 0
 
     # ---- 4. Build (source or examples) + prepare the test tree ------------ #
+    # MPI is built whenever the machine supports it and --tier/--run-labels decide
+    # what runs, so it is probed just before each configure below - never during
+    # --prepare-only, whose login node has a different MPI environment than the
+    # compute node that does the build.
     if args.build_from_source:
+        use_mpi = detect_mpi(workdir, env, args.cmake_args, facts)
         step("Build rocprofiler-systems from source")
         _src_disable = [e.strip() for e in args.disable_examples.split(",") if e.strip()]
         build_dir = build_from_source(
@@ -1804,9 +2351,9 @@ def main(argv=None) -> int:
             env,
             venv_py,
             args.jobs,
-            args.build_mpi_examples,
+            use_mpi,
             disable_examples=_src_disable,
-            extra_cmake_args=hpc_cray_cmake_args,
+            extra_cmake_args=args.cmake_args,
         )
         pytest_dir = build_dir / "share" / "rocprofiler-systems" / "tests" / "pytest"
         if not (pytest_dir / "conftest.py").is_file():
@@ -1837,6 +2384,7 @@ def main(argv=None) -> int:
             args.force_rebuild or rocm_updated or source_changed or not examples_present
         )
         if need_build:
+            use_mpi = detect_mpi(workdir, env, args.cmake_args, facts)
             reasons = []
             if args.force_rebuild:
                 reasons.append("--force-rebuild")
@@ -1853,17 +2401,22 @@ def main(argv=None) -> int:
                 rocm_dir,
                 env,
                 args.jobs,
-                args.build_mpi_examples,
+                use_mpi,
                 disable_examples,
-                extra_cmake_args=hpc_cray_cmake_args,
+                extra_cmake_args=args.cmake_args,
             )
         else:
+            # nothing will be configured, so the MPI probe is skipped: the examples
+            # on disk already carry whatever MPI decision their build made.
+            facts["mpi"] = "not probed (examples up to date)"
             log(f"Examples up to date ({facts['git_revision'][:10]}); skipping rebuild.")
 
         # Staging the pytest tree is cheap; refresh it whenever we rebuilt, the ROCm
         # tree changed, or the suite isn't staged yet.
         if need_build or not (pytest_dir / "conftest.py").is_file():
-            pytest_dir = stage_tests(src_dir, rocm_dir, env)
+            pytest_dir = stage_tests(
+                src_dir, rocm_dir, workdir, env, skip_download=args.skip_download
+            )
         else:
             log("Test suite already staged; skipping.")
 
@@ -1897,6 +2450,7 @@ def main(argv=None) -> int:
         env,
         args.pytest_args,
         args.tier,
+        tiers,
         args.reruns,
         args.reruns_delay,
         args.rerun_failed,
@@ -1945,10 +2499,11 @@ def write_summary(summary_log: Path, facts: dict) -> None:
         "skipped",
         "duration_sec",
         "tier",
+        "run_labels",
+        "mpi",
         "reruns",
         "rerun_failed_attempts",
-        "hpc_cray",
-        "mpich_dir",
+        "cmake_args",
         "variant",
         "gpu_arch",
         "host",
