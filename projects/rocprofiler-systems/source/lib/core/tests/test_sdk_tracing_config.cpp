@@ -271,20 +271,12 @@ protected:
     {
         g_mock_wrapper   = std::make_unique<gmock_wrapper>();
         g_mock_externals = std::make_unique<gtest::StrictMock<gmock_sdk_externals>>();
-
-        // Fallback so a test that forgets to stub get_settings() never gets null.
-        m_default_settings = std::make_shared<fake_settings>();
-        ON_CALL(*g_mock_externals, get_settings)
-            .WillByDefault(gtest::Return(m_default_settings.get()));
     }
     void TearDown() override
     {
         g_mock_wrapper.reset();
         g_mock_externals.reset();
     }
-
-private:
-    std::shared_ptr<fake_settings> m_default_settings;
 };
 
 // ─── get_version ─────────────────────────────────────────────────────────────
