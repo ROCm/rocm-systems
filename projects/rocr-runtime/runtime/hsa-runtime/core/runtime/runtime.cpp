@@ -1697,14 +1697,63 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
     // hsaKmtRegisterGraphicsHandleToNodesExt and is cleaned up via
     // hsaKmtDeregisterMemory in IPCDetach.
     if (isDmabufSysmem) {
+      // The importing process can touch this buffer from any GPU, and
+      // hsaKmtMemoryVaMap only maps a buffer object into the device that owns
+      // it, so every DRM device needs an import of its own. An import on
+      // another device is a fresh buffer object with no IPC metadata to check.
+      HsaHandleImportFlags peerFlags = hflags;
+      peerFlags.ui32.IPCHandle = 0;
+
+      std::vector<AllocationRegion::PeerImport> peerImports;
+      std::vector<HsaAMDGPUDeviceHandle> importedDevices;
+
+      HSAuint32 ownerNode = AllocationRegion::kNodeUnmapped;
+
+      if (thunkLoader()->IsDXG()) {
+        // The DXG thunk maps an imported handle at an address of its own
+        // choosing, so devices cannot be given a common address to share.
+        ownerNode = agent->node_id();
+      } else {
+        for (core::Agent* peer : gpu_agents_) {
+          HsaHandleImportDesc peerDesc = desc;
+          peerDesc.device_handle = reinterpret_cast<AMD::GpuAgent*>(peer)->libThunkDev();
+          if (peerDesc.device_handle == desc.device_handle) {
+            // The import above covers every node of the exporting device.
+            if (ownerNode == AllocationRegion::kNodeUnmapped) ownerNode = peer->node_id();
+            continue;
+          }
+          if (std::find(importedDevices.begin(), importedDevices.end(), peerDesc.device_handle) !=
+              importedDevices.end())
+            continue;
+
+          // An attach naming no agents grants every agent access, so a device
+          // that cannot import the buffer fails the attach.
+          HsaHandleImportResult peerRes = {};
+          if (HSAKMT_CALL(hsaKmtHandleImport(&peerDesc, &peerRes, &peerFlags)) !=
+              HSAKMT_STATUS_SUCCESS) {
+            fprintf(stderr, "IPC Client Import: dma-buf import failed on node %u\n",
+                    peer->node_id());
+            for (const auto& imported : peerImports)
+              HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(imported.thunk_bo));
+            HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(res.buf_handle));
+            return -1;
+          }
+          importedDevices.push_back(peerDesc.device_handle);
+          peerImports.push_back({peer->node_id(), peerRes.buf_handle});
+        }
+      }
+
       std::lock_guard<std::shared_mutex> lock(memory_lock_);
       auto [it, inserted] = allocation_map_.try_emplace(
           *importAddress, nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
       if (!inserted && it->second.thunk_bo) {
         HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(it->second.thunk_bo));
+        for (const auto& stale : it->second.thunk_peer_imports)
+          HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(stale.thunk_bo));
       }
       it->second.thunk_bo = res.buf_handle;
-      it->second.thunk_node_id = agent->node_id();
+      it->second.thunk_node_id = ownerNode;
+      it->second.thunk_peer_imports = std::move(peerImports);
     } else {
       HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(res.buf_handle));
     }
@@ -1727,7 +1776,9 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   bool isFragment = false;
   uint32_t fragOffset = 0;
 
-  auto fixFragment = [&](HsaMemoryObjectHandle new_thunk_bo, HSAuint32 node_id = -1) {
+  auto fixFragment = [&](HsaMemoryObjectHandle new_thunk_bo,
+                         HSAuint32 node_id = AllocationRegion::kNodeUnmapped,
+                         std::vector<AllocationRegion::PeerImport> peer_imports = {}) {
     if (isFragment) {
       importAddress = reinterpret_cast<uint8_t*>(importAddress) + fragOffset;
       len = Min(len, importSize - fragOffset);
@@ -1741,8 +1792,14 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       if (it->second.thunk_bo && it->second.thunk_bo != new_thunk_bo) {
         HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(it->second.thunk_bo));
       }
+      // Release whatever peer imports are being replaced, including when the
+      // buffer object is unchanged: re-importing the same dma-buf on a device
+      // takes another reference to the same handles.
+      for (const auto& stale : it->second.thunk_peer_imports)
+        HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(stale.thunk_bo));
       it->second.thunk_bo = new_thunk_bo;
       it->second.thunk_node_id = node_id;
+      it->second.thunk_peer_imports = std::move(peer_imports);
     }
   };
 
@@ -1808,28 +1865,65 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     if (!isDmabufSysMem) return mapMemoryToNodes(0, NULL);
 
     // System memory DMA Buf import
-    auto errCleanup = [&](HsaMemoryObjectHandle bo) {
+    void* cpuPtr = nullptr;
+    void* intermediateAddr = importAddress;
+    HsaMemoryObjectHandle bo = nullptr;
+    HSAuint32 gpu_node_id = AllocationRegion::kNodeUnmapped;
+    std::vector<AllocationRegion::PeerImport> peerImports;
+    {
+      std::lock_guard<std::shared_mutex> lock(memory_lock_);
+      auto allocation = allocation_map_.find(importAddress);
+      if (allocation == allocation_map_.end() || !allocation->second.thunk_bo)
+        return HSA_STATUS_ERROR;
+      bo = allocation->second.thunk_bo;
+      gpu_node_id = allocation->second.thunk_node_id;
+      peerImports = std::move(allocation->second.thunk_peer_imports);
+    }
+
+    // Releasing a buffer object drops the mappings taken from it, so no unmap
+    // is needed here. An entry naming a different buffer object belongs to
+    // another attach of the same handle.
+    auto errCleanup = [&]() {
+      for (const auto& peer : peerImports)
+        HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(peer.thunk_bo));
       HSAKMT_CALL(hsaKmtMemHandleFree(bo));
+      std::lock_guard<std::shared_mutex> lock(memory_lock_);
+      auto stale = allocation_map_.find(intermediateAddr);
+      if (stale != allocation_map_.end() && stale->second.thunk_bo == bo)
+        allocation_map_.erase(stale);
       return HSA_STATUS_ERROR;
     };
 
     // Create a shared cpu access pointer for user
-    void* cpuPtr;
-    void* intermediateAddr = importAddress;
-    HsaMemoryObjectHandle bo = allocation_map_[importAddress].thunk_bo;
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryCpuMap(bo, &cpuPtr));
     if (status != HSAKMT_STATUS_SUCCESS) {
-      return errCleanup(bo);
+      return errCleanup();
     }
-    HSAuint32 gpu_node_id = allocation_map_[importAddress].thunk_node_id;
-    status = HSAKMT_CALL(hsaKmtMemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
-                                           reinterpret_cast<HSAuint64>(cpuPtr),
-                                           HSA_MEMORY_ACCESS_RW, gpu_node_id));
-    if (status != HSAKMT_STATUS_SUCCESS) {
-      return errCleanup(bo);
+    if (gpu_node_id != AllocationRegion::kNodeUnmapped) {
+      status = HSAKMT_CALL(hsaKmtMemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
+                                             reinterpret_cast<HSAuint64>(cpuPtr),
+                                             HSA_MEMORY_ACCESS_RW, gpu_node_id));
+      if (status != HSAKMT_STATUS_SUCCESS) {
+        return errCleanup();
+      }
     }
+
+    // Every GPU needs the mapping at the same address: work submitted by the
+    // importing process is not restricted to the exporting node, and for an IPC
+    // signal the command processor writes the completion value to this page.
+    for (const auto& peer : peerImports) {
+      status = HSAKMT_CALL(hsaKmtMemoryVaMap(peer.thunk_bo, 0,
+                                             static_cast<HSAuint64>(importSize),
+                                             reinterpret_cast<HSAuint64>(cpuPtr),
+                                             HSA_MEMORY_ACCESS_RW, peer.node_id));
+      if (status != HSAKMT_STATUS_SUCCESS) {
+        fprintf(stderr, "IPC Attach: dma-buf mapping failed on node %u\n", peer.node_id);
+        return errCleanup();
+      }
+    }
+
     importAddress = cpuPtr;
-    fixFragment(bo, gpu_node_id);
+    fixFragment(bo, gpu_node_id, std::move(peerImports));
 
     // Remove the stale intermediate entry created by IPCClientImport.
     // The canonical entry now lives at cpuPtr (set by fixFragment above).
@@ -1871,16 +1965,25 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       if (it->second.thunk_bo) {
         HSAuint32 gpu_node_id = it->second.thunk_node_id;
-        HSAKMT_STATUS status = HSAKMT_CALL(
-            hsaKmtMemoryVaUnmap(it->second.thunk_bo, 0, static_cast<HSAuint64>(it->second.size),
-                                reinterpret_cast<HSAuint64>(ptr), gpu_node_id));
-        if (status != HSAKMT_STATUS_SUCCESS) {
-          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        // A failed thunk call must not skip the remaining releases: the caller
+        // has no way to retry a detach.
+        for (const auto& peer : it->second.thunk_peer_imports) {
+          if (HSAKMT_CALL(hsaKmtMemoryVaUnmap(peer.thunk_bo, 0,
+                                              static_cast<HSAuint64>(it->second.size),
+                                              reinterpret_cast<HSAuint64>(ptr), peer.node_id)) !=
+              HSAKMT_STATUS_SUCCESS)
+            debug_warning(false && "Peer dma-buf unmap failed");
+          if (HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(peer.thunk_bo)) !=
+              HSAKMT_STATUS_SUCCESS)
+            debug_warning(false && "Peer dma-buf handle release failed");
         }
-        status = HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
-        if (status != HSAKMT_STATUS_SUCCESS) {
-          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-        }
+        if (gpu_node_id != AllocationRegion::kNodeUnmapped &&
+            HSAKMT_CALL(hsaKmtMemoryVaUnmap(
+                it->second.thunk_bo, 0, static_cast<HSAuint64>(it->second.size),
+                reinterpret_cast<HSAuint64>(ptr), gpu_node_id)) != HSAKMT_STATUS_SUCCESS)
+          debug_warning(false && "Owner dma-buf unmap failed");
+        if (HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo)) != HSAKMT_STATUS_SUCCESS)
+          debug_warning(false && "Owner dma-buf handle release failed");
         ldrmImportCleaned = true;
       }
       allocation_map_.erase(it);

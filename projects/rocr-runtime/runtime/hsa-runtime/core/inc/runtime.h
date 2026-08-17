@@ -603,6 +603,10 @@ class Runtime {
   static void AsyncIPCSockServerConnLoop(void*);
 
   struct AllocationRegion {
+    /* Value of thunk_node_id when thunk_bo carries no GPU mapping, as happens
+       for an IPC import whose exporting device backs no usable agent. */
+    static constexpr HSAuint32 kNodeUnmapped = HSAuint32(-1);
+
     AllocationRegion()
         : region(NULL),
           size(0),
@@ -610,7 +614,7 @@ class Runtime {
           alloc_flags(core::MemoryRegion::AllocateNoFlags),
           user_ptr(nullptr),
           thunk_bo(nullptr),
-          thunk_node_id(-1) {}
+          thunk_node_id(kNodeUnmapped) {}
 
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
                      MemoryRegion::AllocateFlags alloc_flags,
@@ -621,13 +625,19 @@ class Runtime {
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
           thunk_bo(nullptr),
-          thunk_node_id(-1),
+          thunk_node_id(kNodeUnmapped),
           driver_handle(driver_handle_arg) {}
 
     struct notifier_t {
       void* ptr;
       AMD::callback_t<hsa_amd_deallocation_callback_t> callback;
       void* user_data;
+    };
+
+    /* An import of thunk_bo's dma-buf made on a device other than the one that exported it. */
+    struct PeerImport {
+      HSAuint32 node_id;
+      HsaMemoryObjectHandle thunk_bo;
     };
 
     const MemoryRegion* region;
@@ -638,6 +648,7 @@ class Runtime {
     std::unique_ptr<std::vector<notifier_t>> notifiers;
     HsaMemoryObjectHandle thunk_bo;
     HSAuint32 thunk_node_id;
+    std::vector<PeerImport> thunk_peer_imports;
     DriverMemoryHandle driver_handle;
   };
 
