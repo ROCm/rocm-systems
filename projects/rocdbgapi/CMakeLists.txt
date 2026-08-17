@@ -144,6 +144,7 @@ add_library(amd-dbgapi
   src/agent.cpp
   src/architecture.cpp
   src/callbacks.cpp
+  src/cluster.cpp
   src/code_object.cpp
   src/debug.cpp
   src/dispatch.cpp
