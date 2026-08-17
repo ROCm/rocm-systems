@@ -46,8 +46,15 @@ endif()
 # first-party sources from vendored ones by directory (ROCm/rocm-systems#10227).
 # Note this file declares its own project(), so PROJECT_SOURCE_DIR is src/lib
 # here -- derive the project root from this list file instead.
-get_filename_component(ROCPROF_COMPUTE_ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
-add_subdirectory(${ROCPROF_COMPUTE_ROOT_DIR}/external ${CMAKE_CURRENT_BINARY_DIR}/external)
+get_filename_component(
+    ROCPROF_COMPUTE_ROOT_DIR
+    "${CMAKE_CURRENT_LIST_DIR}/../.."
+    ABSOLUTE
+)
+add_subdirectory(
+    ${ROCPROF_COMPUTE_ROOT_DIR}/external
+    ${CMAKE_CURRENT_BINARY_DIR}/external
+)
 add_subdirectory(utils)
 add_subdirectory(pc_sampling_collector)
 add_subdirectory(rocprofiler_compute_tool)
