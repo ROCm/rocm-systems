@@ -28,11 +28,11 @@ static void Copy_to_device() {
   for (unsigned int i = 0; i < ele_size; ++i) {
     A_h[i] = 123;
   }
-  HIP_CHECK(
+  HIP_CHECK_THREAD(
       hipMemcpyAsync(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice, hipStreamPerThread));
   // Clean up
-  HIP_CHECK(hipHostFree(A_h));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK_THREAD(hipHostFree(A_h));
+  HIP_CHECK_THREAD(hipFree(A_d));
 }
 
 HIP_TEST_CASE(Unit_hipStreamPerThread_DeviceReset_1) {
@@ -46,6 +46,7 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_DeviceReset_1) {
     th.join();
   }
 
+  HIP_CHECK_THREAD_FINALIZE();
   HIP_CHECK(hipDeviceReset());
 }
 
