@@ -160,6 +160,10 @@ workgroup_t::get_info (amd_dbgapi_workgroup_info_t query, size_t value_size,
         utils::get_info (value_size, value, *ids);
         return;
       }
+
+    case AMD_DBGAPI_WORKGROUP_INFO_CLUSTER:
+      utils::get_info (value_size, value, cluster ().id ());
+      return;
     }
 
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
