@@ -333,7 +333,7 @@
  * 6. By default, for some architectures, the AMD GPU device driver for Linux
  *    causes all wavefronts created when the library is not attached to the
  *    process by ::amd_dbgapi_process_attach to be unable to query the
- *    wavesfront's ::AMD_DBGAPI_WAVE_INFO_DISPATCH,
+ *    wavefront's ::AMD_DBGAPI_WAVE_INFO_DISPATCH,
  *    ::AMD_DBGAPI_WAVE_INFO_WORKGROUP_COORD, or
  *    ::AMD_DBGAPI_WAVE_INFO_WAVE_NUMBER_IN_WORKGROUP, or workgroup's
  *    ::AMD_DBGAPI_WORKGROUP_INFO_DISPATCH, or
