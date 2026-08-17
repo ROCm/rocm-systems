@@ -372,6 +372,12 @@ class Resource {
   //! Returns HW state for the resource (used for images only)
   const void* hwState() const { return hwState_; }
 
+  //! Returns the retained external shared handle (Vulkan/D3D interop), 0 if none. Used to reopen an
+  //! imported buffer as a shared image so PAL applies the real tiling (swizzle) from the driver.
+  Pal::OsExternalHandle sharedHandle() const { return sharedHandle_; }
+  //! Returns true if sharedHandle() is an NT handle.
+  bool sharedNtHandle() const { return sharedNtHandle_; }
+
   //! Returns CPU HW SRD for the resource (used for images only)
   uint64_t hwSrd() const { return hwSrd_; }
 
@@ -443,6 +449,19 @@ class Resource {
                    bool forceLinear = false  //!< forces linear tiling for images
   );
 
+  /*! \brief Reopens an imported external buffer (Vulkan/D3D12 image interop) as a shared image so
+   *   PAL applies the driver's real tiling, then builds the SRD. Used for the ImageExternalBuffer
+   *   path.
+   *
+   *  \return True if we successfully created the shared image and SRD
+   */
+  bool CreateImageFromExternalBuffer(
+      Pal::ChNumFormat format,           //!< PAL channel/number format for the view
+      Pal::ChannelMapping channels,      //!< PAL channel swizzle for the view
+      Pal::ImageViewInfo viewInfo,       //!< view template (viewType/possibleLayouts preset)
+      const Pal::SubresRange& subresRange  //!< subresource range for the view
+  );
+
   /*! \brief Creates a PAL interop object, associated with the resource
    *
    *  \return True if we succesfully created a PAL interop resource
@@ -504,6 +523,12 @@ class Resource {
   void* glInteropMbRes_;        //!< Mb Res handle
   uint32_t glType_;             //!< GL interop type
   void* glPlatformContext_;
+
+  //! External shared handle retained from a Vulkan/D3D12 interop import so an image created on
+  //! this imported buffer can be reopened as a shared image (letting PAL apply the driver's
+  //! tiling).
+  Pal::OsExternalHandle sharedHandle_ = 0;
+  bool sharedNtHandle_ = false;
 
   // Optimization for multilayer map/unmap
   uint startLayer_;  //!< Start layer for map/unmapLayer
