@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
@@ -28,7 +29,6 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
@@ -74,7 +74,6 @@ test_init();  // att_packet_test.cpp
 
 namespace
 {
-
 rocprofiler_thread_trace_control_flags_t
 counting_dispatch_cb(rocprofiler_agent_id_t,
                      rocprofiler_queue_id_t,
@@ -113,8 +112,8 @@ TEST(thread_trace, local_context_override_skips_pre_kernel_call)
     std::atomic<int> hits{0};
 
     thread_trace::thread_trace_parameter_pack params{};
-    params.context_id      = {.handle = 62};
-    params.dispatch_cb_fn  = counting_dispatch_cb;
+    params.context_id            = {.handle = 62};
+    params.dispatch_cb_fn        = counting_dispatch_cb;
     params.callback_userdata.ptr = &hits;
 
     thread_trace::DispatchThreadTracer tracer{};
@@ -122,8 +121,8 @@ TEST(thread_trace, local_context_override_skips_pre_kernel_call)
     tracer.resource_init();
     ASSERT_FALSE(tracer.get_agents().empty());
 
-    rocprofiler_queue_id_t qid{.handle = 1};
-    FakeQueue              fq(agent, qid);
+    rocprofiler_queue_id_t  qid{.handle = 1};
+    FakeQueue               fq(agent, qid);
     rocprofiler_user_data_t user_data{};
 
     context::context dummy{};
@@ -133,7 +132,7 @@ TEST(thread_trace, local_context_override_skips_pre_kernel_call)
     EXPECT_EQ(hits.load(), 1);
 
     {
-        auto                                 active = as_active(dummy);
+        auto                                        active = as_active(dummy);
         kernel_replay::scoped_local_context_control loop{active};
         kernel_replay::set_toggles_armed(true);
         EXPECT_EQ(kernel_replay::replay_local_stop_context(params.context_id),
@@ -185,7 +184,7 @@ TEST(thread_trace, local_context_override_forced_on_still_invokes_dispatch_cb)
     dummy.context_idx = params.context_id.handle;
 
     {
-        auto                                 active = as_active(dummy);
+        auto                                        active = as_active(dummy);
         kernel_replay::scoped_local_context_control loop{active};
         kernel_replay::set_toggles_armed(true);
         EXPECT_EQ(kernel_replay::replay_local_start_context(params.context_id),

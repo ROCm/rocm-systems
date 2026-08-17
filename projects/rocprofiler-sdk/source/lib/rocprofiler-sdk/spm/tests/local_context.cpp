@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -27,7 +28,6 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/core.hpp"
 #include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
@@ -104,9 +104,9 @@ invoke_pre_kernel_call(context::context& ctx, std::atomic<int>* hits)
     info->user_cb       = spm_dispatch_cb;
     info->callback_args = hits;
 
-    context::correlation_id corr{};
-    hsa::rocprofiler_packet pkt{};
-    rocprofiler_user_data_t user_data{};
+    context::correlation_id                           corr{};
+    hsa::rocprofiler_packet                           pkt{};
+    rocprofiler_user_data_t                           user_data{};
     hsa::queue_info_session_t::external_corr_id_map_t extern_ids{};
 
     auto ret = spm::pre_kernel_call(
@@ -134,8 +134,8 @@ TEST(spm_core, local_context_override_stops_pre_kernel_call)
     context::push_client(1);
 
     context::context ctx{};
-    ctx.context_idx   = 52;
-    ctx.dispatch_spm  = std::make_unique<context::spm_dispatch_counter_collection_service>();
+    ctx.context_idx  = 52;
+    ctx.dispatch_spm = std::make_unique<context::spm_dispatch_counter_collection_service>();
     ctx.dispatch_spm->enabled.wlock([](auto& data) { data = true; });
 
     std::atomic<int> hits{0};
@@ -143,7 +143,7 @@ TEST(spm_core, local_context_override_stops_pre_kernel_call)
     EXPECT_EQ(hits.load(), 1);
 
     {
-        auto                                 active = as_active(ctx);
+        auto                                        active = as_active(ctx);
         kernel_replay::scoped_local_context_control loop{active};
         kernel_replay::set_toggles_armed(true);
         EXPECT_EQ(kernel_replay::replay_local_stop_context({.handle = ctx.context_idx}),
@@ -179,8 +179,8 @@ TEST(spm_core, local_context_override_restarts_pre_kernel_call)
     ctx.dispatch_spm = std::make_unique<context::spm_dispatch_counter_collection_service>();
     ctx.dispatch_spm->enabled.wlock([](auto& data) { data = true; });
 
-    std::atomic<int> hits{0};
-    auto             active = as_active(ctx);
+    std::atomic<int>                            hits{0};
+    auto                                        active = as_active(ctx);
     kernel_replay::scoped_local_context_control loop{active};
 
     kernel_replay::set_toggles_armed(true);

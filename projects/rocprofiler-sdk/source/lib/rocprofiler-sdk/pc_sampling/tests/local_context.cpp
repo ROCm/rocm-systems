@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -54,7 +54,7 @@ TEST(pc_sampling, local_context_override_does_not_toggle_enabled)
     ctx.pc_sampler->enabled.store(true);
 
     {
-        auto                                 active = as_active(ctx);
+        auto                                        active = as_active(ctx);
         kernel_replay::scoped_local_context_control loop{active};
         kernel_replay::set_toggles_armed(true);
         EXPECT_EQ(kernel_replay::replay_local_stop_context({.handle = ctx.context_idx}),
@@ -77,7 +77,7 @@ TEST(pc_sampling, local_context_override_restart_does_not_toggle_enabled)
     ctx.pc_sampler  = std::make_unique<context::pc_sampling_service>();
     ctx.pc_sampler->enabled.store(true);
 
-    auto                                 active = as_active(ctx);
+    auto                                        active = as_active(ctx);
     kernel_replay::scoped_local_context_control loop{active};
 
     kernel_replay::set_toggles_armed(true);
