@@ -1058,7 +1058,7 @@ TEST_F(roctx_marker_gating_test, should_write_false_when_session_paused_by_other
     auto        client  = make_client();
     const auto& session = client->get_session();
 
-    other_trigger other{ *session };
+    const other_trigger other{ *session };
     other.set_action(rocprofsys::control::action::pause);
 
     ASSERT_TRUE(client->get_trigger().should_write_markers())

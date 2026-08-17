@@ -60,7 +60,7 @@ public:
         for(auto current = now(); current < deadline; current = now())
         {
             {
-                std::scoped_lock const lk{ m_mutex };
+                const std::scoped_lock lk{ m_mutex };
                 if(m_interrupted) return false;
             }
 
@@ -70,8 +70,8 @@ public:
             const auto this_chunk_ns = std::min(remaining_ns, chunk_ns);
 
 #ifdef __linux__
-            const auto      next_ns = current.time_since_epoch().count() + this_chunk_ns;
-            struct timespec ts      = to_timespec(next_ns);
+            const auto next_ns       = current.time_since_epoch().count() + this_chunk_ns;
+            const struct timespec ts = to_timespec(next_ns);
             if(const auto rc = clock_nanosleep(m_clock_id, TIMER_ABSTIME, &ts, nullptr);
                rc != 0 && rc != EINTR)
             {
@@ -83,19 +83,19 @@ public:
 #endif
         }
 
-        std::scoped_lock const lk{ m_mutex };
+        const std::scoped_lock lk{ m_mutex };
         return !m_interrupted;
     }
 
     void interrupt()
     {
-        std::scoped_lock const lk{ m_mutex };
+        const std::scoped_lock lk{ m_mutex };
         m_interrupted = true;
     }
 
     void reset()
     {
-        std::scoped_lock const lk{ m_mutex };
+        const std::scoped_lock lk{ m_mutex };
         m_interrupted = false;
     }
 
