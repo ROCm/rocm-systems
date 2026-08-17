@@ -3421,6 +3421,31 @@ amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_dispatch_list (
 
 /** @} */
 
+/** \defgroup cluster_group Workgroup Clusters
+ *
+ * Operations related to AMD GPU Workgroup Clusters.
+ *
+ * @{
+ */
+
+/**
+ * Opaque cluster handle.
+ *
+ * AMD GPU may execute code as workgroups organized into clusters.
+ *
+ * Globally unique for a single library instance.
+ */
+typedef struct
+{
+  uint64_t handle;
+} amd_dbgapi_cluster_id_t;
+
+/**
+ * The NULL cluster handle.
+ */
+#define AMD_DBGAPI_CLUSTER_NONE                                                  \
+    AMD_DBGAPI_HANDLE_LITERAL (amd_dbgapi_cluster_id_t, 0)
+
 /** \defgroup workgroup_group Workgroup
  *
  * Operations related to AMD GPU workgroups.
