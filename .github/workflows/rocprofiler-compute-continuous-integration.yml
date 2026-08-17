@@ -340,7 +340,6 @@ jobs:
             -DENABLE_TESTS=ON \
             -DINSTALL_TESTS=ON \
             -DPYTEST_NUMPROCS=8 \
-            -DBUILD_TORCH_TRACE_COLLECTOR=ON \
             -DTORCH_TRACE_PYTHON=/usr/bin/python3 \
             -- \
             -L full \
