@@ -198,12 +198,13 @@ multiple details, and examine call stacks.
 HIP Record & Replay
 ===================
 
-HIP Record & Replay (HRR) captures HIP API traces into a binary archive and replays them on a live GPU for bug reproduction, debugging, and validation. During capture, HRR records every HIP API call made by an application into a binary archive (.hrr directory). During replay, it reproduces the original workload on a live GPU, including multi-threaded command submission, graph execution, and GPU memory transfers. 
+HIP Record & Replay (HRR) captures HIP API traces into a binary archive and replays them on a live GPU for bug reproduction, debugging, and validation. During capture, HRR records every HIP API call made by an application into a binary archive (.hrr directory). During replay, it reproduces the original workload on a live GPU, including multi-threaded command submission, graph execution, and GPU memory transfers.
 
-As described in https://github.com/ROCm/rocm-systems/blob/develop/projects/clr/hipamd/src/hrr/README.md
-HRR allows you to capture and replay runtime operations of a HIP kernel, letting you replay the
-kernel on other GPUs without having the avilable source code. This lets you review performance issues
-or execution problems without the actual application. 
+Because the archive carries the buffers and the GPU code the run used, a failing workload can be
+replayed without its source code or its input data. That makes it possible to investigate a wrong
+result, a crash or a hang away from the machine and the application that produced it.
+
+For how to record a workload and replay an archive, see :doc:`/how-to/hip_record_replay`.
 
 Useful environment variables
 ===================================================
