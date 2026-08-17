@@ -560,6 +560,7 @@ set(SRC_FILES
   transport/net_ib/wqe_lat_mon.cc
   transport/net_ib/wqe_lat_mon.h
   transport/net_ib_cast/net_ib_cast_inspect.h
+  transport/net_ib_cast/net_ib_qp_sharing_inspect.h
   transport/net_ib_cast/net_ib_fault_inject.h
   transport/net_ib_limits.h
   transport/net_socket.cc
