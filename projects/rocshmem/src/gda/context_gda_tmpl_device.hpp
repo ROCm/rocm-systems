@@ -1476,48 +1476,66 @@ __device__ __forceinline__ void GDAContext::tile_finish_get(int pe, int qp_index
 __device__ inline void GDAContext::tile_put_rows_nbi(
     char *dst_base, const char *src_base, size_t dst_row_stride_bytes,
     size_t src_row_stride_bytes, size_t num_rows, size_t row_bytes,
-    int qp_index, int worker_id, int worker_count, ActiveWFInfo &wf_info) {
+    int qp_index, int worker_id, int worker_count,
+    [[maybe_unused]] ActiveWFInfo &wf_info) {
   for (size_t i = static_cast<size_t>(worker_id); i < num_rows;
        i += static_cast<size_t>(worker_count)) {
     char *dst_row = dst_base + i * dst_row_stride_bytes;
     const char *src_row = src_base + i * src_row_stride_bytes;
-    qps[qp_index].put_nbi(dst_row, src_row, row_bytes, wf_info);
+    auto [dst_raddr, dst_rkey] = qps[qp_index].get_raddr_info(dst_row);
+    uint32_t src_lkey =
+        (static_cast<int32_t>(row_bytes) <=
+         static_cast<int32_t>(qps[qp_index].inline_threshold))
+            ? 0
+            : qps[qp_index].get_lkey(reinterpret_cast<uintptr_t>(src_row));
+    qps[qp_index].put_nbi_single(reinterpret_cast<void *>(dst_raddr), dst_rkey,
+                                 src_row, src_lkey, row_bytes, true);
   }
 }
 
 __device__ inline void GDAContext::tile_put_cols_nbi(
     char *dst_base, const char *src_base, size_t dst_col_stride_bytes,
     size_t src_col_stride_bytes, size_t num_cols, size_t col_bytes,
-    int qp_index, int worker_id, int worker_count, ActiveWFInfo &wf_info) {
+    int qp_index, int worker_id, int worker_count,
+    [[maybe_unused]] ActiveWFInfo &wf_info) {
   for (size_t j = static_cast<size_t>(worker_id); j < num_cols;
        j += static_cast<size_t>(worker_count)) {
     char *dst_col = dst_base + j * dst_col_stride_bytes;
     const char *src_col = src_base + j * src_col_stride_bytes;
-    qps[qp_index].put_nbi(dst_col, src_col, col_bytes, wf_info);
+    auto [dst_raddr, dst_rkey] = qps[qp_index].get_raddr_info(dst_col);
+    uint32_t src_lkey =
+        (static_cast<int32_t>(col_bytes) <=
+         static_cast<int32_t>(qps[qp_index].inline_threshold))
+            ? 0
+            : qps[qp_index].get_lkey(reinterpret_cast<uintptr_t>(src_col));
+    qps[qp_index].put_nbi_single(reinterpret_cast<void *>(dst_raddr), dst_rkey,
+                                 src_col, src_lkey, col_bytes, true);
   }
 }
 
 __device__ inline void GDAContext::tile_get_rows_nbi(
     char *dst_base, const char *src_base, size_t dst_row_stride_bytes,
     size_t src_row_stride_bytes, size_t num_rows, size_t row_bytes,
-    int qp_index, int worker_id, int worker_count, ActiveWFInfo &wf_info) {
+    int qp_index, int worker_id, int worker_count,
+    [[maybe_unused]] ActiveWFInfo &wf_info) {
   for (size_t i = static_cast<size_t>(worker_id); i < num_rows;
        i += static_cast<size_t>(worker_count)) {
     char *dst_row = dst_base + i * dst_row_stride_bytes;
     const char *src_row = src_base + i * src_row_stride_bytes;
-    qps[qp_index].get_nbi(dst_row, src_row, row_bytes, wf_info);
+    qps[qp_index].get_nbi_single(dst_row, src_row, row_bytes, true);
   }
 }
 
 __device__ inline void GDAContext::tile_get_cols_nbi(
     char *dst_base, const char *src_base, size_t dst_col_stride_bytes,
     size_t src_col_stride_bytes, size_t num_cols, size_t col_bytes,
-    int qp_index, int worker_id, int worker_count, ActiveWFInfo &wf_info) {
+    int qp_index, int worker_id, int worker_count,
+    [[maybe_unused]] ActiveWFInfo &wf_info) {
   for (size_t j = static_cast<size_t>(worker_id); j < num_cols;
        j += static_cast<size_t>(worker_count)) {
     char *dst_col = dst_base + j * dst_col_stride_bytes;
     const char *src_col = src_base + j * src_col_stride_bytes;
-    qps[qp_index].get_nbi(dst_col, src_col, col_bytes, wf_info);
+    qps[qp_index].get_nbi_single(dst_col, src_col, col_bytes, true);
   }
 }
 
@@ -1695,11 +1713,95 @@ __device__ inline int GDAContext::tile_put_wave(void* dst_data, const void* src_
     if (is_thread_zero_in_wave()) {
       ipcImpl_.ipcQuiet();
     }
-  }
-  // GDA path: delegate to lane variant from wave leader
-  else if (is_thread_zero_in_wave()) {
-    tile_put(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-             ndim, element_size, pe, flags);
+  } else {
+    // GDA/RDMA path: multi-WQE for row/col-contiguous tiles; leader for the rest
+    const int wave_tid = get_flat_block_id() % WF_SIZE;
+    ActiveWFInfo wf_info(pe);  // unused by *_single helpers; kept for API
+    const int qp_index = pe;
+
+    if (ndim == 2) {
+      const size_t src_stride_0 = src_strides[0];
+      const size_t src_stride_1 = src_strides[1];
+      const size_t dst_stride_0 = dst_strides[0];
+      const size_t dst_stride_1 = dst_strides[1];
+      const size_t tile_extent_0 = boundary[0] - start_coord[0];
+      const size_t tile_extent_1 = boundary[1] - start_coord[1];
+      char *src_base = static_cast<char *>(const_cast<void *>(src_data));
+      char *dst_base =
+          static_cast<char *>(dst_data) +
+          (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) *
+              element_size;
+      const GdaTileLayout layout = gda_tile_classify_2d(
+          src_stride_0, src_stride_1, dst_stride_0, dst_stride_1, tile_extent_0,
+          tile_extent_1);
+
+      switch (layout) {
+        case GdaTileLayout::Contiguous:
+          if (wave_tid == 0) {
+            ActiveWFInfo lead(pe, ThreadScope::wave);
+            const size_t total_size =
+                tile_extent_0 * tile_extent_1 * element_size;
+            internal_putmem_nbi(dst_base, src_base, total_size, pe, qp_index,
+                                lead);
+            tile_finish_put(pe, qp_index, lead);
+          }
+          break;
+        case GdaTileLayout::RowContig: {
+          const size_t row_bytes = tile_extent_1 * element_size;
+          if (gda_tile_use_multi_wqe(tile_extent_0, WF_SIZE)) {
+            tile_put_rows_nbi(dst_base, src_base, dst_stride_0 * element_size,
+                              src_stride_0 * element_size, tile_extent_0,
+                              row_bytes, qp_index, wave_tid, WF_SIZE, wf_info);
+            __builtin_amdgcn_wave_barrier();
+            if (wave_tid == 0) {
+              qps[qp_index].quiet_single();
+            }
+          } else if (wave_tid == 0) {
+            ActiveWFInfo lead(pe);
+            for (size_t i = 0; i < tile_extent_0; i++) {
+              internal_putmem_nbi(dst_base + i * dst_stride_0 * element_size,
+                                  src_base + i * src_stride_0 * element_size,
+                                  row_bytes, pe, qp_index, lead);
+            }
+            tile_finish_put(pe, qp_index, lead);
+          }
+          break;
+        }
+        case GdaTileLayout::ColContig: {
+          const size_t col_bytes = tile_extent_0 * element_size;
+          if (gda_tile_use_multi_wqe(tile_extent_1, WF_SIZE)) {
+            tile_put_cols_nbi(dst_base, src_base, dst_stride_1 * element_size,
+                              src_stride_1 * element_size, tile_extent_1,
+                              col_bytes, qp_index, wave_tid, WF_SIZE, wf_info);
+            __builtin_amdgcn_wave_barrier();
+            if (wave_tid == 0) {
+              qps[qp_index].quiet_single();
+            }
+          } else if (wave_tid == 0) {
+            ActiveWFInfo lead(pe);
+            for (size_t j = 0; j < tile_extent_1; j++) {
+              internal_putmem_nbi(dst_base + j * dst_stride_1 * element_size,
+                                  src_base + j * src_stride_1 * element_size,
+                                  col_bytes, pe, qp_index, lead);
+            }
+            tile_finish_put(pe, qp_index, lead);
+          }
+          break;
+        }
+        case GdaTileLayout::Strided:
+        default:
+          if (wave_tid == 0) {
+            tile_put(dst_data, src_data, dst_strides, src_strides, start_coord,
+                     boundary, ndim, element_size, pe, flags);
+          }
+          break;
+      }
+    } else if (ndim == 1) {
+      if (wave_tid == 0) {
+        tile_put(dst_data, src_data, dst_strides, src_strides, start_coord,
+                 boundary, ndim, element_size, pe, flags);
+      }
+    }
   }
 
   return ROCSHMEM_SUCCESS;
@@ -1799,13 +1901,98 @@ __device__ inline int GDAContext::tile_put_wg(void* dst_data, const void* src_da
       ipcImpl_.ipcQuiet();
     }
     __builtin_amdgcn_s_barrier();
-  }
-  // GDA path: delegate to lane variant from block leader
-  else if (is_thread_zero_in_block()) {
-    tile_put(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-             ndim, element_size, pe, flags);
-    __builtin_amdgcn_s_barrier();
   } else {
+    // GDA/RDMA path: multi-WQE for row/col-contiguous tiles; leader for the rest
+    const int thread_id = get_flat_block_id();
+    const int block_size = get_flat_block_size();
+    ActiveWFInfo wf_info(pe);
+    const int qp_index = pe;
+
+    if (ndim == 2) {
+      const size_t src_stride_0 = src_strides[0];
+      const size_t src_stride_1 = src_strides[1];
+      const size_t dst_stride_0 = dst_strides[0];
+      const size_t dst_stride_1 = dst_strides[1];
+      const size_t tile_extent_0 = boundary[0] - start_coord[0];
+      const size_t tile_extent_1 = boundary[1] - start_coord[1];
+      char *src_base = static_cast<char *>(const_cast<void *>(src_data));
+      char *dst_base =
+          static_cast<char *>(dst_data) +
+          (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) *
+              element_size;
+      const GdaTileLayout layout = gda_tile_classify_2d(
+          src_stride_0, src_stride_1, dst_stride_0, dst_stride_1, tile_extent_0,
+          tile_extent_1);
+
+      switch (layout) {
+        case GdaTileLayout::Contiguous:
+          if (thread_id == 0) {
+            ActiveWFInfo lead(pe, ThreadScope::wg);
+            const size_t total_size =
+                tile_extent_0 * tile_extent_1 * element_size;
+            internal_putmem_nbi(dst_base, src_base, total_size, pe, qp_index,
+                                lead);
+            tile_finish_put(pe, qp_index, lead);
+          }
+          break;
+        case GdaTileLayout::RowContig: {
+          const size_t row_bytes = tile_extent_1 * element_size;
+          if (gda_tile_use_multi_wqe(tile_extent_0, block_size)) {
+            tile_put_rows_nbi(dst_base, src_base, dst_stride_0 * element_size,
+                              src_stride_0 * element_size, tile_extent_0,
+                              row_bytes, qp_index, thread_id, block_size,
+                              wf_info);
+            __builtin_amdgcn_s_barrier();
+            if (thread_id == 0) {
+              qps[qp_index].quiet_single();
+            }
+          } else if (thread_id == 0) {
+            ActiveWFInfo lead(pe);
+            for (size_t i = 0; i < tile_extent_0; i++) {
+              internal_putmem_nbi(dst_base + i * dst_stride_0 * element_size,
+                                  src_base + i * src_stride_0 * element_size,
+                                  row_bytes, pe, qp_index, lead);
+            }
+            tile_finish_put(pe, qp_index, lead);
+          }
+          break;
+        }
+        case GdaTileLayout::ColContig: {
+          const size_t col_bytes = tile_extent_0 * element_size;
+          if (gda_tile_use_multi_wqe(tile_extent_1, block_size)) {
+            tile_put_cols_nbi(dst_base, src_base, dst_stride_1 * element_size,
+                              src_stride_1 * element_size, tile_extent_1,
+                              col_bytes, qp_index, thread_id, block_size,
+                              wf_info);
+            __builtin_amdgcn_s_barrier();
+            if (thread_id == 0) {
+              qps[qp_index].quiet_single();
+            }
+          } else if (thread_id == 0) {
+            ActiveWFInfo lead(pe);
+            for (size_t j = 0; j < tile_extent_1; j++) {
+              internal_putmem_nbi(dst_base + j * dst_stride_1 * element_size,
+                                  src_base + j * src_stride_1 * element_size,
+                                  col_bytes, pe, qp_index, lead);
+            }
+            tile_finish_put(pe, qp_index, lead);
+          }
+          break;
+        }
+        case GdaTileLayout::Strided:
+        default:
+          if (thread_id == 0) {
+            tile_put(dst_data, src_data, dst_strides, src_strides, start_coord,
+                     boundary, ndim, element_size, pe, flags);
+          }
+          break;
+      }
+    } else if (ndim == 1) {
+      if (thread_id == 0) {
+        tile_put(dst_data, src_data, dst_strides, src_strides, start_coord,
+                 boundary, ndim, element_size, pe, flags);
+      }
+    }
     __builtin_amdgcn_s_barrier();
   }
 
@@ -1975,11 +2162,95 @@ __device__ inline int GDAContext::tile_get_wave(void* dst_data, const void* src_
     if (is_thread_zero_in_wave()) {
       ipcImpl_.ipcQuiet();
     }
-  }
-  // GDA path: delegate to lane variant from wave leader
-  else if (is_thread_zero_in_wave()) {
-    tile_get(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-             ndim, element_size, pe, flags);
+  } else {
+    // GDA/RDMA path: multi-WQE for row/col-contiguous tiles; leader for the rest
+    const int wave_tid = get_flat_block_id() % WF_SIZE;
+    ActiveWFInfo wf_info(pe);
+    const int qp_index = pe;
+
+    if (ndim == 2) {
+      const size_t src_stride_0 = src_strides[0];
+      const size_t src_stride_1 = src_strides[1];
+      const size_t dst_stride_0 = dst_strides[0];
+      const size_t dst_stride_1 = dst_strides[1];
+      const size_t tile_extent_0 = boundary[0] - start_coord[0];
+      const size_t tile_extent_1 = boundary[1] - start_coord[1];
+      char *src_base =
+          static_cast<char *>(const_cast<void *>(src_data)) +
+          (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) *
+              element_size;
+      char *dst_base = static_cast<char *>(dst_data);
+      const GdaTileLayout layout = gda_tile_classify_2d(
+          src_stride_0, src_stride_1, dst_stride_0, dst_stride_1, tile_extent_0,
+          tile_extent_1);
+
+      switch (layout) {
+        case GdaTileLayout::Contiguous:
+          if (wave_tid == 0) {
+            ActiveWFInfo lead(pe, ThreadScope::wave);
+            const size_t total_size =
+                tile_extent_0 * tile_extent_1 * element_size;
+            internal_getmem_nbi(dst_base, src_base, total_size, pe, qp_index,
+                                lead);
+            tile_finish_get(pe, qp_index, lead);
+          }
+          break;
+        case GdaTileLayout::RowContig: {
+          const size_t row_bytes = tile_extent_1 * element_size;
+          if (gda_tile_use_multi_wqe(tile_extent_0, WF_SIZE)) {
+            tile_get_rows_nbi(dst_base, src_base, dst_stride_0 * element_size,
+                              src_stride_0 * element_size, tile_extent_0,
+                              row_bytes, qp_index, wave_tid, WF_SIZE, wf_info);
+            __builtin_amdgcn_wave_barrier();
+            if (wave_tid == 0) {
+              qps[qp_index].quiet_single();
+            }
+          } else if (wave_tid == 0) {
+            ActiveWFInfo lead(pe);
+            for (size_t i = 0; i < tile_extent_0; i++) {
+              internal_getmem_nbi(dst_base + i * dst_stride_0 * element_size,
+                                  src_base + i * src_stride_0 * element_size,
+                                  row_bytes, pe, qp_index, lead);
+            }
+            tile_finish_get(pe, qp_index, lead);
+          }
+          break;
+        }
+        case GdaTileLayout::ColContig: {
+          const size_t col_bytes = tile_extent_0 * element_size;
+          if (gda_tile_use_multi_wqe(tile_extent_1, WF_SIZE)) {
+            tile_get_cols_nbi(dst_base, src_base, dst_stride_1 * element_size,
+                              src_stride_1 * element_size, tile_extent_1,
+                              col_bytes, qp_index, wave_tid, WF_SIZE, wf_info);
+            __builtin_amdgcn_wave_barrier();
+            if (wave_tid == 0) {
+              qps[qp_index].quiet_single();
+            }
+          } else if (wave_tid == 0) {
+            ActiveWFInfo lead(pe);
+            for (size_t j = 0; j < tile_extent_1; j++) {
+              internal_getmem_nbi(dst_base + j * dst_stride_1 * element_size,
+                                  src_base + j * src_stride_1 * element_size,
+                                  col_bytes, pe, qp_index, lead);
+            }
+            tile_finish_get(pe, qp_index, lead);
+          }
+          break;
+        }
+        case GdaTileLayout::Strided:
+        default:
+          if (wave_tid == 0) {
+            tile_get(dst_data, src_data, dst_strides, src_strides, start_coord,
+                     boundary, ndim, element_size, pe, flags);
+          }
+          break;
+      }
+    } else if (ndim == 1) {
+      if (wave_tid == 0) {
+        tile_get(dst_data, src_data, dst_strides, src_strides, start_coord,
+                 boundary, ndim, element_size, pe, flags);
+      }
+    }
   }
 
   return ROCSHMEM_SUCCESS;
@@ -2078,13 +2349,98 @@ __device__ inline int GDAContext::tile_get_wg(void* dst_data, const void* src_da
       ipcImpl_.ipcQuiet();
     }
     __builtin_amdgcn_s_barrier();
-  }
-  // GDA path: delegate to lane variant from block leader
-  else if (is_thread_zero_in_block()) {
-    tile_get(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-             ndim, element_size, pe, flags);
-    __builtin_amdgcn_s_barrier();
   } else {
+    // GDA/RDMA path: multi-WQE for row/col-contiguous tiles; leader for the rest
+    const int thread_id = get_flat_block_id();
+    const int block_size = get_flat_block_size();
+    ActiveWFInfo wf_info(pe);
+    const int qp_index = pe;
+
+    if (ndim == 2) {
+      const size_t src_stride_0 = src_strides[0];
+      const size_t src_stride_1 = src_strides[1];
+      const size_t dst_stride_0 = dst_strides[0];
+      const size_t dst_stride_1 = dst_strides[1];
+      const size_t tile_extent_0 = boundary[0] - start_coord[0];
+      const size_t tile_extent_1 = boundary[1] - start_coord[1];
+      char *src_base =
+          static_cast<char *>(const_cast<void *>(src_data)) +
+          (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) *
+              element_size;
+      char *dst_base = static_cast<char *>(dst_data);
+      const GdaTileLayout layout = gda_tile_classify_2d(
+          src_stride_0, src_stride_1, dst_stride_0, dst_stride_1, tile_extent_0,
+          tile_extent_1);
+
+      switch (layout) {
+        case GdaTileLayout::Contiguous:
+          if (thread_id == 0) {
+            ActiveWFInfo lead(pe, ThreadScope::wg);
+            const size_t total_size =
+                tile_extent_0 * tile_extent_1 * element_size;
+            internal_getmem_nbi(dst_base, src_base, total_size, pe, qp_index,
+                                lead);
+            tile_finish_get(pe, qp_index, lead);
+          }
+          break;
+        case GdaTileLayout::RowContig: {
+          const size_t row_bytes = tile_extent_1 * element_size;
+          if (gda_tile_use_multi_wqe(tile_extent_0, block_size)) {
+            tile_get_rows_nbi(dst_base, src_base, dst_stride_0 * element_size,
+                              src_stride_0 * element_size, tile_extent_0,
+                              row_bytes, qp_index, thread_id, block_size,
+                              wf_info);
+            __builtin_amdgcn_s_barrier();
+            if (thread_id == 0) {
+              qps[qp_index].quiet_single();
+            }
+          } else if (thread_id == 0) {
+            ActiveWFInfo lead(pe);
+            for (size_t i = 0; i < tile_extent_0; i++) {
+              internal_getmem_nbi(dst_base + i * dst_stride_0 * element_size,
+                                  src_base + i * src_stride_0 * element_size,
+                                  row_bytes, pe, qp_index, lead);
+            }
+            tile_finish_get(pe, qp_index, lead);
+          }
+          break;
+        }
+        case GdaTileLayout::ColContig: {
+          const size_t col_bytes = tile_extent_0 * element_size;
+          if (gda_tile_use_multi_wqe(tile_extent_1, block_size)) {
+            tile_get_cols_nbi(dst_base, src_base, dst_stride_1 * element_size,
+                              src_stride_1 * element_size, tile_extent_1,
+                              col_bytes, qp_index, thread_id, block_size,
+                              wf_info);
+            __builtin_amdgcn_s_barrier();
+            if (thread_id == 0) {
+              qps[qp_index].quiet_single();
+            }
+          } else if (thread_id == 0) {
+            ActiveWFInfo lead(pe);
+            for (size_t j = 0; j < tile_extent_1; j++) {
+              internal_getmem_nbi(dst_base + j * dst_stride_1 * element_size,
+                                  src_base + j * src_stride_1 * element_size,
+                                  col_bytes, pe, qp_index, lead);
+            }
+            tile_finish_get(pe, qp_index, lead);
+          }
+          break;
+        }
+        case GdaTileLayout::Strided:
+        default:
+          if (thread_id == 0) {
+            tile_get(dst_data, src_data, dst_strides, src_strides, start_coord,
+                     boundary, ndim, element_size, pe, flags);
+          }
+          break;
+      }
+    } else if (ndim == 1) {
+      if (thread_id == 0) {
+        tile_get(dst_data, src_data, dst_strides, src_strides, start_coord,
+                 boundary, ndim, element_size, pe, flags);
+      }
+    }
     __builtin_amdgcn_s_barrier();
   }
 
