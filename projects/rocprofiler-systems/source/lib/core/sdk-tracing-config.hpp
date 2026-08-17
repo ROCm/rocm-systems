@@ -4,18 +4,14 @@
 #pragma once
 
 #include "common/delimit.hpp"
-#include "common/env_vars.hpp"
 #include "logger/debug.hpp"
 
 #include <cctype>
 #include <cstddef>
-#include <initializer_list>
 #include <iterator>
 #include <ranges>
 
 #include <algorithm>
-#include <array>
-#include <compare>
 #include <concepts>
 #include <cstdint>
 #include <optional>
@@ -389,8 +385,6 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
 {
     using kind_t = typename SdkBackend::buffer_tracing_kind_t;
 
-    auto supported = get_supported_buffer_domains();
-
     auto data    = std::unordered_set<kind_t>{};
     auto domains = rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
     // Check that the domains are valid
@@ -411,8 +405,12 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
 
     for(const auto& itr : domains)
     {
-        const auto& domain_kinds = domain_map.at(itr);
-        data.insert(domain_kinds.begin(), domain_kinds.end());
+        const auto& domain_map_itr = domain_map.find(itr);
+        if(domain_map_itr != domain_map.end())
+        {
+            const auto& domain_list = domain_map_itr->second;
+            data.insert(domain_list.begin(), domain_list.end());
+        }
     }
 
     if constexpr(s_compile_time_sdk_version >=
@@ -804,10 +802,9 @@ sdk_tracing_config<SdkBackend, Externals>::get_callback_domain_map()
     for(size_t idx = 0; idx < callback_info.size(); ++idx)
     {
         const auto& ditr = callback_info[idx];
-        auto        dval = static_cast<kind_t>(idx);
-        if(supported.count(dval) > 0)
+        if(supported.contains(ditr.value))
         {
-            domain_map.emplace(to_lower(ditr.name), std::vector<kind_t>{ dval });
+            domain_map.emplace(to_lower(ditr.name), std::vector<kind_t>{ ditr.value });
         }
     }
 
@@ -821,6 +818,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
 {
     using kind_t            = typename SdkBackend::buffer_tracing_kind_t;
     const auto& buffer_info = SdkBackend::get_buffer_tracing_names();
+    const auto  supported   = get_supported_buffer_domains();
 
     std::unordered_map<std::string, std::vector<kind_t>> domain_map{
         {
@@ -907,10 +905,14 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
         });
     }
 
-    for(size_t index = 0; index < buffer_info.size(); index++)
+    for(size_t index = 0; index < buffer_info.size(); ++index)
     {
-        auto& domain = buffer_info[index];
-        domain_map.insert({ to_lower(domain.name), { domain.value } });
+        const auto& domain = buffer_info[index];
+        if(supported.contains(domain.value))
+        {
+            domain_map.emplace(to_lower(domain.name),
+                               std::vector<kind_t>{ domain.value });
+        }
     }
 
     return domain_map;

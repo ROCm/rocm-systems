@@ -68,6 +68,7 @@ enum backend_tag : int
     callback_domains_implicit_flags             = 100,
     callback_domains_invalid                    = 101,
     callback_domains_rocshmem_hipfile_supported = 103,
+    buffered_domains_callback_only_skipped      = 104,
 };
 
 // sdk_tracing_config no longer caches get_version()/get_callback_tracing_names()/
@@ -896,6 +897,33 @@ TEST_F(sdk_tracing_config_domains_test,
 
     EXPECT_THAT(sut::get_buffered_domains(),
                 gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_SCRATCH_MEMORY));
+}
+
+// rccl_api is a callback-only domain (present in make_callback_name_info(), absent
+// from make_buffer_name_info()). domain_choices() accepts it as valid, but
+// get_buffered_domain_map() has no entry for it, so it must be silently skipped
+// rather than throwing std::out_of_range.
+TEST_F(sdk_tracing_config_domains_test, get_buffered_domains_skips_callback_only_domain)
+{
+    using backend_t = tagged_backend<buffered_domains_callback_only_skipped>;
+    using sut       = sdk_tracing_config<backend_t, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "memory_copy,rccl_api" }));
+    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
+        .Times(1)
+        .WillOnce(gtest::Return(false));
+
+    EXPECT_THAT(sut::get_buffered_domains(),
+                gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_MEMORY_COPY));
 }
 
 TEST_F(sdk_tracing_config_domains_test, get_buffered_domains_invalid_domain_throws)
