@@ -207,10 +207,6 @@ mod tests {
             Ok(())
         }
 
-        fn installed(&self) -> bool {
-            self.runtime().installed
-        }
-
         fn runtime(&self) -> RuntimeStatus {
             RuntimeStatus::from_location(locate_emulator_lib(&missing_search()))
         }

@@ -187,25 +187,38 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
     /// Returns a human-readable reason on rejection.
     fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String>;
 
-    /// Returns true if the emulator is properly installed and can be used.
-    fn installed(&self) -> bool;
-
     /// Whether this backend's runtime is installed *and* where it was
     /// found, or the locations that were searched when it was not.
     ///
-    /// This is what [`crate::registry::registry`] probes with, in place
-    /// of [`Self::installed`], so that `mirage emulators` can answer the
-    /// only question a user has when a backend reports itself missing —
-    /// where mirage looked — without searching the filesystem twice to
-    /// do it.
+    /// This is what [`crate::registry::registry`] probes with, and the
+    /// two halves come from one search on purpose: locating a backend's
+    /// library means stat'ing every candidate its discovery policy names,
+    /// and asking "installed?" and "where?" separately would walk that
+    /// list twice to print one line.
     ///
-    /// The default reports the backend's install flag with no location,
-    /// which is the honest answer for a backend that has no runtime
-    /// library to locate. Any backend that discovers one should override
-    /// this and return the [`RuntimeLocation`] its search produced (see
-    /// [`crate::discovery::locate_emulator_lib`]).
-    fn runtime(&self) -> RuntimeStatus {
-        RuntimeStatus::new(self.installed(), RuntimeLocation::Unknown)
+    /// Required rather than defaulted, and [`Self::installed`] defaulted
+    /// from it rather than the other way round, because the location is
+    /// the half a user can act on. It was the other way round once: the
+    /// compiler asked a new backend author for the bare "no" and let them
+    /// skip the actionable answer, whose absence renders as nothing at
+    /// all in `mirage emulators -l`.
+    ///
+    /// A backend with no runtime library to locate has nothing to report
+    /// either way and should return
+    /// `RuntimeStatus::new(<installed>, RuntimeLocation::Unknown)`; one
+    /// that discovers a library should return the [`RuntimeLocation`] its
+    /// search produced (see [`crate::discovery::locate_emulator_lib`]).
+    fn runtime(&self) -> RuntimeStatus;
+
+    /// Returns true if the emulator is properly installed and can be
+    /// used.
+    ///
+    /// Defaults to [`Self::runtime`]'s verdict, which is where the
+    /// question is actually answered; a backend has no reason to
+    /// override this and every reason not to, since two implementations
+    /// of "is it installed?" can disagree.
+    fn installed(&self) -> bool {
+        self.runtime().installed
     }
 
     /// check if the emulator is supported on this host, i.e. meets the hardware/environment requirements to run. This is a stronger condition than `installed`: an emulator can be installed but unsupported (e.g. HotSwap installed on a machine with no compatible physical GPU), or supported but not installed.
@@ -349,8 +362,10 @@ mod tests {
             Ok(())
         }
 
-        fn installed(&self) -> bool {
-            true
+        fn runtime(&self) -> RuntimeStatus {
+            // Nothing to locate: this backend is compiled in rather than
+            // installed, so there is no library and no search to report.
+            RuntimeStatus::new(true, RuntimeLocation::Unknown)
         }
 
         fn supported(&self) -> SupportStatus {
@@ -372,6 +387,82 @@ mod tests {
 
     inventory::submit! {
         EmulatorBackendDef { kind: TEST_EMULATOR, backend: &Accepting }
+    }
+
+    /// A backend that answers only the question with an answer in it.
+    ///
+    /// It is [`Accepting`] with [`EmulatorBackend::installed`] left to
+    /// the trait, which is the shape the inverted pair is meant to
+    /// produce: the compiler demands the location, and the bare yes/no
+    /// falls out of it. It is not registered — nothing looks it up — so
+    /// it exists purely to hold that shape to the fire at compile time.
+    #[derive(Debug)]
+    struct LocationOnly;
+
+    /// A library name no machine has, so the search below always misses.
+    const NO_SUCH_LIB: &str = "libmirage-emulator-trait-test.so";
+
+    impl EmulatorBackend for LocationOnly {
+        fn description(&self) -> EmulatorDescription {
+            Accepting.description()
+        }
+
+        fn boot(&self, def: &ProfileDef) -> std::result::Result<(), String> {
+            Accepting.boot(def)
+        }
+
+        fn options(&self) -> Vec<OptionDef> {
+            Accepting.options()
+        }
+
+        fn shutdown(&self, ctx: &SessionContext) {
+            Accepting.shutdown(ctx);
+        }
+
+        fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String> {
+            Accepting.validate_profile(def)
+        }
+
+        fn runtime(&self) -> RuntimeStatus {
+            RuntimeStatus::from_location(RuntimeLocation::Missing {
+                lib_name: NO_SUCH_LIB.to_string(),
+                searched: vec![std::path::PathBuf::from("/nowhere").join(NO_SUCH_LIB)],
+                env: Vec::new(),
+            })
+        }
+
+        fn supported(&self) -> SupportStatus {
+            Accepting.supported()
+        }
+
+        fn discover_plugins(&self) -> Vec<PluginsDef> {
+            Accepting.discover_plugins()
+        }
+
+        fn health(&self, ctx: &SessionContext) -> SessionHealth {
+            Accepting.health(ctx)
+        }
+
+        fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
+            Accepting.injection_def(ctx)
+        }
+    }
+
+    /// The pair used to run the other way round: `installed` was
+    /// required and `runtime` defaulted to
+    /// `RuntimeStatus::new(self.installed(), RuntimeLocation::Unknown)`,
+    /// which renders as nothing — so a backend author was asked for the
+    /// bare "no" and allowed to skip the answer `mirage emulators -l`
+    /// exists to give. Now the location is what a backend must supply
+    /// and the flag is derived from it, so the two cannot disagree
+    /// either.
+    #[test]
+    fn installed_comes_from_the_runtime_search() {
+        let backend = LocationOnly;
+        assert!(!backend.installed());
+        assert_eq!(backend.installed(), backend.runtime().installed);
+        // And the answer a user can act on came with it.
+        assert_eq!(backend.runtime().location.searched().len(), 1);
     }
 
     #[test]
