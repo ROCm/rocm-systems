@@ -992,18 +992,23 @@ enum class timer_state
 // firing and its signal keeps interrupting the target's sleeps. Stop the
 // timers themselves so a paused sampler is unobservable to the application.
 void
-set_sampler_timers(timer_state state)
+set_sampler_timers(timer_state _state)
 {
     for(std::int64_t i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
     {
         auto& _sampler = get_sampler(i);
-        auto& _running = get_sampler_running(i);
-        if(!_sampler || !_running || !*_running) continue;
+        if(!_sampler)
+        {
+            continue;
+        }
 
-        if(state == timer_state::running)
-            _sampler->start();
-        else
-            _sampler->stop();
+        auto& _running = get_sampler_running(i);
+        if(!_running || !*_running)
+        {
+            continue;
+        }
+
+        _state == timer_state::running ? _sampler->start() : _sampler->stop();
     }
 }
 
