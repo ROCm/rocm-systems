@@ -16,14 +16,20 @@
 //! mysteriously fails under `exec`. Sharing the builder makes that class
 //! of bug unrepresentable.
 //!
-//! Everything here is a pure function of its inputs, so the whole mapping
-//! is testable without a container runtime or an emulator.
+//! The mapping is a function of its inputs, so the whole of it is
+//! testable without a container runtime or an emulator. Two things are
+//! read from the process rather than passed in, and both are properties
+//! of the terminal mirage was started from rather than of the session:
+//! whether the caller's streams are a terminal, and which runtime
+//! directory this mirage resolved. Both callers — `mirage run` and
+//! `mirage exec` — are the process the user is sitting in front of, which
+//! is what makes reading them here correct.
 
 use std::collections::BTreeMap;
 
 use mirage_core::container::{
     ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_LOCAL_RANK, ENV_MASTER_ADDR, ENV_MASTER_PORT,
-    ENV_NCCL_HOSTID, ENV_RANK, ENV_SESSION, ENV_TORCH_RANK, ENV_WORLD_SIZE,
+    ENV_NCCL_HOSTID, ENV_RANK, ENV_RUNTIME, ENV_SESSION, ENV_TORCH_RANK, ENV_WORLD_SIZE,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId};
@@ -121,6 +127,17 @@ pub fn build_specs(
         )
     };
 
+    // The runtime directory that owns everything this call starts, read
+    // from the environment rather than from `desc` because both callers
+    // necessarily agree on it: a `mirage exec` reached this session
+    // through a socket in that very directory, so a client that resolved
+    // a different one would not have found the run at all.
+    //
+    // Resolved once. It is the same for every rank, and canonicalising it
+    // per process would put a syscall inside the loop for no answer that
+    // could differ.
+    let runtime = mirage_core::container::owning_runtime();
+
     let mut specs = Vec::with_capacity(nodes.len() * nproc as usize);
     for node in nodes {
         for local in 0..nproc {
@@ -130,7 +147,7 @@ pub fn build_specs(
             } else {
                 def.worker_exec.as_ref().unwrap_or(&def.exec)
             };
-            let env = process_env(desc, args, global, node, local, world_size);
+            let env = process_env(desc, args, global, node, local, world_size, &runtime);
 
             specs.push(match &desc.containers {
                 // Containerised: run the workload inside the node's
@@ -146,6 +163,22 @@ pub fn build_specs(
                         })?
                         .to_string();
                     let engine = mirage_container::Engine::with_provider(&targets.provider);
+                    let mut env = env;
+                    // Inside the container the host's runtime directory is
+                    // a path that does not exist; what is mounted there is
+                    // the session scratch, under the same name the
+                    // container itself was given (see `plan_container`).
+                    // Re-asserted here rather than left to the container's
+                    // own environment for the same reason `LD_LIBRARY_PATH`
+                    // is: `provider exec -e` replaces the container's value
+                    // for that process, so a variable mirage sets on both
+                    // has to be set consistently on both.
+                    //
+                    // The host-side attribution a containerised session
+                    // needs is on the provider client below and on the
+                    // container's own `mirage.runtime` label, neither of
+                    // which is reachable from in here.
+                    env.insert(ENV_RUNTIME.to_string(), CONTAINER_RUNTIME_DIR.to_string());
                     let env_pairs: Vec<(String, String)> = env.into_iter().collect();
                     let pid_file = targets
                         .scratch
@@ -182,16 +215,20 @@ pub fn build_specs(
                         args: rest,
                         // The client's own environment, not the
                         // workload's — what the workload sees was passed
-                        // with `-e` above. The session tag is set on it
-                        // anyway so that a `provider exec` client
+                        // with `-e` above. The ownership marker is set on
+                        // it anyway so that a `provider exec` client
                         // stranded by a `SIGKILL`ed run is reclaimable by
                         // the same scan as a host workload; without it
                         // the client would linger until its container was
-                        // removed out from under it.
-                        env: BTreeMap::from([(
-                            ENV_SESSION.to_string(),
-                            desc.session.as_str().to_string(),
-                        )]),
+                        // removed out from under it. Both halves of the
+                        // marker, because the scan needs both: a client
+                        // naming only its session belongs, as far as any
+                        // other mirage can tell, to no runtime directory
+                        // at all.
+                        env: BTreeMap::from([
+                            (ENV_SESSION.to_string(), desc.session.as_str().to_string()),
+                            (ENV_RUNTIME.to_string(), runtime.clone()),
+                        ]),
                         workdir: None,
                         stdio,
                         // The provider CLI needs its own environment to
@@ -265,18 +302,11 @@ fn process_env(
     node: u32,
     local: u32,
     world_size: u32,
+    runtime: &str,
 ) -> BTreeMap<String, String> {
     let mut env = desc.env.clone();
     env.extend(args.env.clone());
-    env.extend(proc_env(
-        &desc.session,
-        global,
-        node,
-        local,
-        world_size,
-        &desc.head_addr,
-        desc.head_port,
-    ));
+    env.extend(proc_env(desc, global, node, local, world_size, runtime));
 
     // `LD_PRELOAD` is the exception: the emulator's interposer and a
     // user-supplied preload must coexist, so they are concatenated rather
@@ -334,24 +364,43 @@ fn pid_recording_command(
 /// on), `global` (its index across the whole job) and `local` (its index
 /// within the node, which a workload typically uses to pin a GPU). With
 /// the default of one process per node, `global == node` and `local == 0`.
+///
+/// The session's own fields are read from `desc` rather than passed one
+/// by one: they always come from there, and unpacking them at the call
+/// site only made this the widest signature in the crate.
 fn proc_env(
-    session: &mirage_core::session::SessionId,
+    desc: &SessionDescription,
     global: u32,
     node: u32,
     local: u32,
     world_size: u32,
-    head_addr: &str,
-    head_port: u16,
+    runtime: &str,
 ) -> Vec<(String, String)> {
     // Processes on the head node reach the rendezvous over loopback;
     // everyone else needs the head's address.
-    let head = if node == 0 { "localhost" } else { head_addr };
+    let head = if node == 0 {
+        "localhost"
+    } else {
+        &desc.head_addr
+    };
+    let head_port = desc.head_port;
+    let session = &desc.session;
     vec![
         // Which session this process belongs to. Set on every workload,
         // and inherited by everything it forks, because it is the only
         // record of the association that survives the owning run being
         // `SIGKILL`ed — see [`mirage_core::reclaim`].
         (ENV_SESSION.to_string(), session.as_str().to_string()),
+        // And which mirage that session belongs to. The session name is
+        // meaningful only to the runtime directory that issued it, so
+        // reclamation needs both to tell a crashed run's leftovers from a
+        // healthy session of a mirage running elsewhere on the machine.
+        //
+        // Resolved, not inherited: this overrides whatever the caller
+        // exported, which is also what makes it a correct *input* for a
+        // nested `mirage` — a workload that runs one sees the state
+        // directory of the run it is inside.
+        (ENV_RUNTIME.to_string(), runtime.to_string()),
         (ENV_RANK.to_string(), node.to_string()),
         (ENV_TORCH_RANK.to_string(), global.to_string()),
         (ENV_HEAD_ADDR.to_string(), head.to_string()),
@@ -567,7 +616,57 @@ mod tests {
     }
 
     #[test]
+    fn every_process_records_the_runtime_directory_that_owns_it() {
+        // `owning_runtime` reads the process-wide directory
+        // resolution, which another test in this binary moves under a
+        // scratch root while it runs. The shared lock keeps the value
+        // this test stamps and the value it asserts the same one.
+        let _paths = mirage_core::paths::test_env_lock();
+        // The other half of the tag. A session name means something only
+        // to the mirage that issued it, so without this a `mirage
+        // cleanup` running under a different `MIRAGE_RUNTIME` sees a
+        // healthy workload as a crashed run's leftovers.
+        let runtime = mirage_core::container::owning_runtime();
+        let specs = build_specs(&desc(2), &exec_def(2, None), &id()).unwrap();
+        for spec in &specs {
+            assert_eq!(
+                spec.env.get("MIRAGE_RUNTIME").map(String::as_str),
+                Some(runtime.as_str()),
+                "rank {} does not say which mirage owns it",
+                spec.node
+            );
+        }
+    }
+
+    #[test]
+    fn a_user_supplied_runtime_does_not_become_the_ownership_marker() {
+        // `owning_runtime` reads the process-wide directory
+        // resolution, which another test in this binary moves under a
+        // scratch root while it runs. The shared lock keeps the value
+        // this test stamps and the value it asserts the same one.
+        let _paths = mirage_core::paths::test_env_lock();
+        // Same rule as the rank variables: mirage's own bookkeeping wins
+        // over anything the caller exported or passed with `--env`, or a
+        // workload could make itself unreclaimable — or, worse, claim to
+        // belong to somebody else's runtime directory.
+        let mut def = exec_def(1, None);
+        def.exec
+            .env
+            .insert("MIRAGE_RUNTIME".to_string(), "/not/mine".to_string());
+        let specs = build_specs(&desc(1), &def, &id()).unwrap();
+        assert_eq!(
+            specs[0].env.get("MIRAGE_RUNTIME").map(String::as_str),
+            Some(mirage_core::container::owning_runtime().as_str())
+        );
+    }
+
+    #[test]
     fn a_containerised_provider_client_is_tagged_too() {
+        // `owning_runtime` reads the process-wide directory
+        // resolution, which another test in this binary moves under a
+        // scratch root while it runs. The shared lock keeps the value
+        // this test stamps and the value it asserts the same one.
+        let _paths = mirage_core::paths::test_env_lock();
         // The workload's own tag goes into the container with `-e`, where
         // the host-side scan cannot see it. The client that proxies it is
         // a host process and would otherwise linger unreclaimable.
@@ -589,6 +688,23 @@ mod tests {
                 .args
                 .windows(2)
                 .any(|w| w[0] == "-e" && w[1] == "MIRAGE_SESSION=s"),
+            "{:?}",
+            specs[0].args
+        );
+        // The client is a host process, so its runtime marker is the host
+        // directory — that is what the `/proc` scan compares against.
+        assert_eq!(
+            specs[0].env.get("MIRAGE_RUNTIME").map(String::as_str),
+            Some(mirage_core::container::owning_runtime().as_str())
+        );
+        // The workload's is the in-container mount, matching what the
+        // container itself was given: the host path does not exist in
+        // there, and a nested mirage would resolve it to nothing.
+        assert!(
+            specs[0]
+                .args
+                .windows(2)
+                .any(|w| w[0] == "-e" && w[1] == format!("MIRAGE_RUNTIME={CONTAINER_RUNTIME_DIR}")),
             "{:?}",
             specs[0].args
         );

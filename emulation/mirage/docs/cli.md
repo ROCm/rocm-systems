@@ -469,14 +469,33 @@ mirage's at all, and then three things survive it:
 
 All three are found by a mark on the thing itself, because the session's
 own record of them died with the run: containers and networks carry the
-`mirage.owner` and `mirage.session` labels, and every workload carries
-`MIRAGE_SESSION` in its environment. Anything without those marks is
-never a candidate, so this is safe on an engine shared with other work.
+`mirage.owner`, `mirage.session` and `mirage.runtime` labels, and every
+workload carries `MIRAGE_SESSION` and `MIRAGE_RUNTIME` in its
+environment. Anything without those marks is never a candidate, so this
+is safe on an engine shared with other work.
 
 Safe to run at any time. A session whose `mirage run` still answers on
 its socket is not an orphan and is skipped entirely — unlike `state
 purge`, which refuses outright while any run is live. Use `--dry-run` to
 see what would be removed without removing it.
+
+### Scope: one runtime directory
+
+Cleanup reclaims only what its own runtime directory created. That is
+not a limitation but the safety property: the run sockets under
+`MIRAGE_RUNTIME` are the entire registry of what is live there, so a
+cleanup has no way to see the live sessions of a mirage running under a
+different one. Without the `mirage.runtime` mark it would read those
+healthy jobs as a crashed run's leftovers and `SIGKILL` them — which is
+what makes two concurrent mirages (a CI job beside an interactive
+session, a test suite beside your own work) safe on one machine.
+
+A resource that records no runtime directory at all cannot be attributed
+to anybody, and is skipped for the same reason. The one thing this
+leaves behind is work started by a mirage older than the mark: it is
+never reclaimed by this one and has to be removed by hand (`kill`, or
+`podman rm -f`). That is the deliberate trade — an orphan you can see and
+remove, rather than a running job destroyed by a tidy-up.
 
 One consequence of tagging by environment is worth knowing: the tag is
 inherited, so anything started from an interactive `mirage exec -- bash`
@@ -531,13 +550,22 @@ Invocations that name a subcommand, or that have no `--` separator (so
 | `MIRAGE_LOG`                 | Tracing-subscriber filter, e.g. `debug` or `mirage_supervisor=debug`. Takes precedence over `-v`/`-vv`. |
 | `MIRAGE_CONTAINER_PROVIDER`  | Default container provider when none is given (`podman`/`docker`/path). |
 | `MIRAGE_CONFIG`              | Override the config dir (else `$XDG_CONFIG_HOME/mirage`).         |
-| `MIRAGE_RUNTIME`             | Override the runtime dir — run sockets and emulator scratch (else `$XDG_RUNTIME_DIR/mirage`). |
+| `MIRAGE_RUNTIME`             | Override the runtime dir — run sockets and emulator scratch (else `$XDG_RUNTIME_DIR/mirage`). Also stamped on every workload; see below. |
 | `XDG_CONFIG_HOME` / `XDG_RUNTIME_DIR` | Standard XDG base directories used when the `MIRAGE_*` overrides are unset. |
 
 mirage sets these *in* every workload process, on every rank:
 `MIRAGE_RANK` (the node's rank, 0 = head), `MIRAGE_HEAD_ADDR` and
 `MIRAGE_HEAD_PORT`, plus their `torch.distributed` aliases `RANK`,
 `LOCAL_RANK`, `WORLD_SIZE`, `MASTER_ADDR` and `MASTER_PORT`.
+
+It also sets `MIRAGE_SESSION` and `MIRAGE_RUNTIME`, which together say
+which run a process belongs to. Both are resolved by mirage and replace
+whatever the caller exported, so a nested `mirage` inside a session sees
+the state directory of the run it is inside — and `mirage cleanup` can
+tell that run's processes from those of a mirage using a different
+runtime directory. In a containerised session `MIRAGE_RUNTIME` names the
+in-container mount of the session scratch (`/mnt/mirage/runtime`) rather
+than a host path, which does not exist in there.
 
 rocjitsu discovery additionally honours `ROCM_HOME` and the ROCm SDK
 install root reported by `rocm-sdk path --root` (see

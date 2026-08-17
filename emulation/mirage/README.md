@@ -181,9 +181,18 @@ all, so the leak is expected and this is the recovery. Sessions whose run
 still answers are left completely alone, as is anything mirage did not
 create, so it is safe to run at any time; `--dry-run` shows what it would
 remove first. Everything it looks for is marked on the resource itself —
-a `mirage.owner` label on containers, `MIRAGE_SESSION` in every
-workload's environment — because that is what survives the death of the
-only process that knew about it.
+`mirage.owner` and `mirage.runtime` labels on containers, `MIRAGE_SESSION`
+and `MIRAGE_RUNTIME` in every workload's environment — because that is
+what survives the death of the only process that knew about it.
+
+The runtime mark is what keeps this safe when two mirages share a
+machine. The sockets in one runtime directory are the whole registry of
+what is live under it, so a cleanup run there has never heard of a
+session belonging to a different `MIRAGE_RUNTIME` and would otherwise
+read a perfectly healthy job as wreckage. It reclaims only what its own
+runtime directory created, and skips anything that does not say which
+runtime directory that was — including work left by a mirage older than
+the mark, which has to be cleaned up by hand.
 
 `mirage state purge` is the blunter version: it does all of the above and
 then removes the runtime directory (`--all` takes the config directory

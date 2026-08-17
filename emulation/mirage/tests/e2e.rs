@@ -19,7 +19,8 @@ mod harness;
 use std::time::Duration;
 
 use harness::{
-    Env, TEST_EMULATOR, assert_no_leaks, marker, skip_without_emulator, tagged_sleep, wait_for,
+    Env, TEST_EMULATOR, assert_no_leaks, count_processes, marker, skip_without_emulator,
+    tagged_sleep, wait_for,
 };
 use nix::sys::signal::Signal;
 
@@ -344,7 +345,7 @@ fn a_run_waits_for_a_borrower_before_tearing_its_session_down() {
     wait_for(
         "the borrowed workload to start",
         Duration::from_secs(30),
-        || harness::count_processes(&tag) > 0,
+        || count_processes(&tag) > 0,
     );
 
     // Well past the run's own one-second command. The session has to
@@ -419,7 +420,7 @@ fn interrupting_a_waiting_run_tears_down_and_tells_the_borrower() {
     wait_for(
         "the borrowed workload to start",
         Duration::from_secs(30),
-        || harness::count_processes(&tag) > 0,
+        || count_processes(&tag) > 0,
     );
 
     // Let the run reach its wait, then decline to wait any longer.
@@ -709,6 +710,72 @@ fn state_purge_refuses_while_a_run_is_live() {
     let err = env.fails(&["state", "purge", "--force"]);
     assert!(err.contains("still running"), "{err}");
     assert!(env.runtime().join("mirage").exists());
+}
+
+#[test]
+fn cleanup_leaves_a_run_in_another_runtime_directory_alone() {
+    // Two mirages on one machine, each with its own `$XDG_RUNTIME_DIR`:
+    // a CI job beside an interactive session, or a test suite beside a
+    // developer's. The sockets in `run/` are the whole registry of what
+    // is live, so B's registry cannot mention A's session — and a
+    // reclamation that goes by session name alone therefore reads A's
+    // healthy workload as the wreckage of a crashed run and `SIGKILL`s
+    // it. The victim's failure looks like a product bug somewhere else
+    // entirely, which is what makes this worth an end-to-end test rather
+    // than only a unit one.
+    let a = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    a.create_profile("p");
+    let tag = marker("cross-runtime");
+
+    let mut run = a.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let id = run.await_ready(Duration::from_secs(90));
+    wait_for("A's workload to start", Duration::from_secs(30), || {
+        count_processes(&tag) > 0
+    });
+
+    // A second, entirely separate mirage installation.
+    let b = Env::new();
+    assert!(
+        b.live_runs().is_empty(),
+        "the second runtime directory must start empty for this to mean anything"
+    );
+    let out = b.ok(&["cleanup"]);
+    assert!(
+        !out.contains(&id),
+        "cleanup named a session belonging to another runtime directory:\n{out}"
+    );
+
+    // The claim `mirage cleanup --help` makes: a session whose run still
+    // answers is left completely alone. Alive, still serving, and still
+    // able to start a command — the last one is the difference between
+    // "the process exists" and "the session works".
+    assert!(
+        count_processes(&tag) > 0,
+        "cleanup under another runtime directory killed a live workload"
+    );
+    assert_eq!(a.live_runs(), vec![id.clone()]);
+    let echoed = a.ok(&["exec", "--session", &id, "--", "/bin/echo", "ALIVE"]);
+    assert!(
+        echoed.contains("ALIVE"),
+        "the run stopped answering after another runtime's cleanup:\n{echoed}"
+    );
+
+    // `state purge` reclaims through the same path, so it inherits the
+    // same scope: it may empty its own runtime directory and nobody
+    // else's.
+    b.ok(&["state", "purge", "--force"]);
+    assert!(
+        count_processes(&tag) > 0,
+        "purge under another runtime directory killed a live workload"
+    );
+    assert_eq!(a.live_runs(), vec![id.clone()]);
+
+    run.signal(Signal::SIGINT);
+    run.wait(Duration::from_secs(90));
+    assert_no_leaks(&tag);
 }
 
 #[test]

@@ -50,6 +50,21 @@ pub const ENV_TORCH_RANK: &str = "RANK";
 /// [`crate::reclaim`] is what reads it.
 pub const ENV_SESSION: &str = "MIRAGE_SESSION";
 
+/// Environment variable naming the mirage runtime directory that owns a
+/// process.
+///
+/// [`crate::paths::mirage_runtime_dir`] already reads this as an *input*
+/// override, and setting it on a workload is coherent with that reading:
+/// a nested `mirage` inside a session sees the same state directory as
+/// the run that owns it. What makes it a *marker* is that reclamation
+/// reads it back. [`ENV_SESSION`] alone says "some mirage started this",
+/// which is not enough on a machine where two mirages are running under
+/// different runtime directories: the other one's sessions are not in
+/// this one's registry of live runs, so without this variable they look
+/// exactly like the wreckage of a crash. See [`crate::reclaim`], and
+/// [`LABEL_RUNTIME`] for the container-side counterpart.
+pub const ENV_RUNTIME: &str = "MIRAGE_RUNTIME";
+
 /// Environment variable carrying the head node's address. Set on every
 /// node, including the head (rank 0), which gets `localhost`.
 pub const ENV_HEAD_ADDR: &str = "MIRAGE_HEAD_ADDR";
@@ -128,13 +143,71 @@ pub const LABEL_OWNER_VALUE: &str = "mirage";
 /// came from.
 pub const LABEL_SESSION: &str = "mirage.session";
 
+/// Label recording which mirage runtime directory created a resource.
+///
+/// [`LABEL_OWNER`] says "a mirage made this" and [`LABEL_SESSION`] says
+/// which session, but neither says *which* mirage — and two mirages
+/// running under different `MIRAGE_RUNTIME` directories keep separate
+/// registries of what is live. Each therefore sees the other's sessions
+/// as belonging to no live run at all, which is indistinguishable from
+/// the wreckage this module's reclamation exists to remove. This label is
+/// what tells them apart; it is the resource-side counterpart of
+/// [`ENV_RUNTIME`].
+pub const LABEL_RUNTIME: &str = "mirage.runtime";
+
 /// The labels every resource belonging to `session` carries.
 #[must_use]
 pub fn owner_labels(session: &SessionId) -> Vec<(String, String)> {
     vec![
         (LABEL_OWNER.to_string(), LABEL_OWNER_VALUE.to_string()),
         (LABEL_SESSION.to_string(), session.as_str().to_string()),
+        (LABEL_RUNTIME.to_string(), owning_runtime()),
     ]
+}
+
+/// The runtime directory to record on everything this process creates.
+///
+/// Resolved rather than copied out of the environment: `MIRAGE_RUNTIME`
+/// is one of three ways the directory can be named (see
+/// [`crate::paths::mirage_runtime_dir`]), and a user who set none of them
+/// would otherwise leave the marker empty. Canonicalised where possible
+/// so that `/tmp/rt`, `/tmp/rt/` and a symlink to either all record the
+/// same string; where it is not — the directory does not exist yet — an
+/// absolute path is the next best thing, because a relative one means
+/// something different to every process that reads it.
+#[must_use]
+pub fn owning_runtime() -> String {
+    let dir = crate::paths::mirage_runtime_dir();
+    dir.canonicalize()
+        .or_else(|_| std::path::absolute(&dir))
+        .unwrap_or(dir)
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Whether a recorded runtime marker names the same directory as `ours`.
+///
+/// Both sides are canonicalised first, so a resource stamped before its
+/// runtime directory was resolvable still matches one scanned after, and
+/// a symlinked or trailing-slashed path matches the path it names.
+///
+/// Canonicalisation fails when a path no longer exists — a purged runtime
+/// directory, a tempdir the test that made it has removed — and that must
+/// not be read as agreement, because *every* removed path would then
+/// match every other. The fallback is a literal comparison of the two
+/// paths, which is exact: it can only report a difference that is not
+/// really there, and the consequence of that is a resource left alone,
+/// never one destroyed.
+#[must_use]
+pub fn same_runtime(recorded: &str, ours: &str) -> bool {
+    let recorded = std::path::Path::new(recorded);
+    let ours = std::path::Path::new(ours);
+    match (recorded.canonicalize(), ours.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        // `Path`'s equality is by component, so this already ignores a
+        // trailing separator and a doubled one.
+        _ => recorded == ours,
+    }
 }
 
 /// Read one label off a container, or `None` if it is absent.
@@ -340,8 +413,8 @@ pub struct Orphan {
     pub is_network: bool,
 }
 
-/// Every mirage-owned container and network whose session is not in
-/// `live`, containers first.
+/// Every container and network this runtime directory created whose
+/// session is not in `live`, containers first.
 ///
 /// Split out from [`reclaim_orphans`] so `mirage cleanup --dry-run` can
 /// name what it would remove without removing it, and so the ordering —
@@ -349,24 +422,42 @@ pub struct Orphan {
 ///
 /// Filtering by [`LABEL_OWNER`] is what keeps this safe on an engine
 /// shared with other work: a container mirage did not create is never a
-/// candidate, whatever it is called.
+/// candidate, whatever it is called. Filtering by [`LABEL_RUNTIME`] is
+/// what keeps it safe on an engine shared with *another mirage*: `live`
+/// is this runtime directory's registry of live runs, so a container
+/// belonging to a healthy session of some other runtime directory would
+/// otherwise be an orphan by every test applied here.
 ///
 /// Blocks on the provider binary.
 #[must_use]
 pub fn orphans(provider: &str, live: &[SessionId]) -> Vec<Orphan> {
     let live: std::collections::HashSet<&str> = live.iter().map(SessionId::as_str).collect();
+    let ours = owning_runtime();
     let mut found = Vec::new();
     for (verb, is_network) in [
         (&["ps", "--all"][..], false),
         (&["network", "ls"][..], true),
     ] {
-        for (name, session) in labelled(provider, verb) {
-            if live.contains(session.as_str()) {
+        for resource in labelled(provider, verb) {
+            if live.contains(resource.session.as_str()) {
+                continue;
+            }
+            // An unlabelled runtime cannot be attributed to anybody, and
+            // removing what cannot be attributed is the failure mode this
+            // filter exists to prevent — so it is left alone. The cost is
+            // that a container created by a mirage older than this label
+            // is never reclaimed by this one; the alternative is
+            // destroying a healthy container belonging to somebody else,
+            // which is strictly worse.
+            if !resource
+                .runtime
+                .is_some_and(|recorded| same_runtime(&recorded, &ours))
+            {
                 continue;
             }
             found.push(Orphan {
-                name,
-                session,
+                name: resource.name,
+                session: resource.session,
                 is_network,
             });
         }
@@ -401,8 +492,8 @@ pub fn remove_orphans(provider: &str, orphans: &[Orphan]) {
 /// its sessions down. Session state is deliberately in-memory, so a
 /// `SIGKILL`ed run leaves containers with no record anywhere that a later
 /// mirage could read — except the resources themselves, which carry
-/// [`LABEL_SESSION`]. See [`crate::reclaim`] for the same idea applied to
-/// the workload processes such a run also strands.
+/// [`LABEL_SESSION`] and [`LABEL_RUNTIME`]. See [`crate::reclaim`] for the
+/// same idea applied to the workload processes such a run also strands.
 ///
 /// Blocks on the provider binary.
 pub fn reclaim_orphans(provider: &str, live: &[SessionId]) -> Vec<String> {
@@ -411,12 +502,23 @@ pub fn reclaim_orphans(provider: &str, live: &[SessionId]) -> Vec<String> {
     found.into_iter().map(|o| o.name).collect()
 }
 
-/// `(name, session)` for every mirage-owned resource the given listing
-/// verb reports.
+/// One mirage-owned resource, as a listing plus its labels describe it.
+struct Labelled {
+    /// The resource's id.
+    name: String,
+    /// The session it was created for ([`LABEL_SESSION`]).
+    session: String,
+    /// The runtime directory that created it ([`LABEL_RUNTIME`]), absent
+    /// on anything made before that label existed.
+    runtime: Option<String>,
+}
+
+/// Every mirage-owned resource the given listing verb reports, with the
+/// labels that say who it belongs to.
 ///
 /// The owner filter is applied by the engine rather than by us, so a
 /// resource without the label is never even named here.
-fn labelled(provider: &str, verb: &[&str]) -> Vec<(String, String)> {
+fn labelled(provider: &str, verb: &[&str]) -> Vec<Labelled> {
     let filter = format!("label={LABEL_OWNER}={LABEL_OWNER_VALUE}");
     // `{{.ID}}` only, and the session label read back per resource with
     // `inspect`.
@@ -446,6 +548,13 @@ fn labelled(provider: &str, verb: &[&str]) -> Vec<(String, String)> {
         return Vec::new();
     }
     let network = verb.first() == Some(&"network");
+    let label = |id: &str, label: &str| {
+        if network {
+            network_label(provider, id, label)
+        } else {
+            container_label(provider, id, label)
+        }
+    };
     String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|line| {
@@ -453,15 +562,15 @@ fn labelled(provider: &str, verb: &[&str]) -> Vec<(String, String)> {
             if id.is_empty() {
                 return None;
             }
-            let session = if network {
-                network_label(provider, id, LABEL_SESSION)?
-            } else {
-                container_label(provider, id, LABEL_SESSION)?
-            };
+            let session = label(id, LABEL_SESSION)?;
             if session.is_empty() || session == "<no value>" {
                 return None;
             }
-            Some((id.to_string(), session))
+            Some(Labelled {
+                name: id.to_string(),
+                session,
+                runtime: label(id, LABEL_RUNTIME),
+            })
         })
         .collect()
 }
@@ -557,6 +666,54 @@ fn which_on_path(name: &str) -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+/// Holds the runtime directory still for the duration of a test.
+///
+/// Both [`owning_runtime`] and everything that compares against it read
+/// the process-wide directory resolution, and other tests in this crate
+/// move that resolution under a temporary root while they run
+/// ([`crate::paths::set_test_root`]). A resource stamped before one of
+/// those starts would be compared against a different directory
+/// afterwards — the comparison behaving exactly as designed, and the test
+/// measuring nothing. Holding [`crate::paths::test_env_lock`] excludes
+/// them for as long as the guard lives.
+///
+/// Lives outside the test modules because both this module's and
+/// [`crate::reclaim`]'s need it.
+#[cfg(test)]
+// A test fixture: a failure to set one up is a failed test, and there is
+// nobody to return an error to.
+#[allow(clippy::unwrap_used)]
+pub(crate) struct PinnedRuntime {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    _root: tempfile::TempDir,
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+impl PinnedRuntime {
+    pub(crate) fn new() -> Self {
+        let lock = crate::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(root.path());
+        // Materialised, so the marker is stamped and compared as a
+        // canonical path — the case that runs in production.
+        std::fs::create_dir_all(crate::paths::mirage_runtime_dir()).unwrap();
+        Self {
+            _lock: lock,
+            _root: root,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for PinnedRuntime {
+    fn drop(&mut self) {
+        // Before the tempdir goes, so nothing left behind resolves paths
+        // under a directory that no longer exists.
+        crate::paths::clear_test_root();
+    }
 }
 
 #[cfg(test)]
@@ -680,30 +837,70 @@ mod tests {
     }
 
     #[test]
-    fn owner_labels_name_the_session() {
+    fn owner_labels_name_the_session_and_the_runtime_that_made_it() {
+        let _runtime = PinnedRuntime::new();
         let labels = owner_labels(&SessionId::new("s1").unwrap());
         assert_eq!(
             labels,
             vec![
                 (LABEL_OWNER.to_string(), LABEL_OWNER_VALUE.to_string()),
                 (LABEL_SESSION.to_string(), "s1".to_string()),
+                (LABEL_RUNTIME.to_string(), owning_runtime()),
             ]
         );
     }
 
     #[test]
-    fn reclaim_removes_only_orphans_and_only_ours() {
-        // The recovery path after a supervisor died without tearing down:
-        // the only surviving record of a container is the label on the
-        // container itself.
+    fn the_recorded_runtime_is_absolute() {
+        // A relative path names a different directory to every process
+        // that reads it back, and the readers are `mirage cleanup`
+        // invocations started from wherever the user happened to be.
+        let _runtime = PinnedRuntime::new();
+        assert!(Path::new(&owning_runtime()).is_absolute());
+    }
+
+    #[test]
+    fn spellings_of_one_directory_all_compare_equal() {
         let dir = tempfile::tempdir().unwrap();
-        let log = dir.path().join("provider.log");
-        let provider = dir.path().join("mock-provider.sh");
-        // `ps`/`network ls` report one live session and one orphan; the
-        // owner filter is applied by the engine, so everything listed is
-        // already ours. The listing yields ids only — the session label is
-        // read back per resource with `inspect`, which is the one shape
-        // both podman and docker agree on.
+        let real = dir.path().join("rt");
+        std::fs::create_dir(&real).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let canonical = real.to_string_lossy().into_owned();
+        assert!(same_runtime(&canonical, &canonical));
+        assert!(same_runtime(&format!("{canonical}/"), &canonical));
+        assert!(same_runtime(&format!("{canonical}//"), &canonical));
+        assert!(same_runtime(&link.to_string_lossy(), &canonical));
+        assert!(!same_runtime(
+            &dir.path().join("other").to_string_lossy(),
+            &canonical
+        ));
+    }
+
+    #[test]
+    fn a_runtime_that_no_longer_exists_matches_only_itself() {
+        // Canonicalisation fails for a directory that has been removed —
+        // a purged runtime, a tempdir the run that owned it took with it.
+        // Folding that into "matches" would make every removed path equal
+        // to every other, which is the cross-runtime kill this comparison
+        // exists to prevent.
+        let gone = "/tmp/mirage-no-such-runtime-a";
+        let also_gone = "/tmp/mirage-no-such-runtime-b";
+        assert!(same_runtime(gone, gone));
+        assert!(!same_runtime(gone, also_gone));
+    }
+
+    /// A provider whose listings report one resource of each kind
+    /// reclamation has to tell apart.
+    ///
+    /// The owner filter is applied by the engine, so everything listed is
+    /// already mirage's; what distinguishes these is the session and
+    /// runtime labels, which the listing does not carry. It yields ids
+    /// only and the labels are read back per resource with `inspect` —
+    /// the one shape podman and docker agree on.
+    fn mock_reclaim_provider(dir: &Path, log: &Path) -> String {
+        let provider = dir.join("mock-provider.sh");
         std::fs::write(
             &provider,
             format!(
@@ -711,21 +908,46 @@ mod tests {
                  echo \"$@\" >> {log}\n\
                  for a in \"$@\"; do last=$a; done\n\
                  case \"$1 $2\" in\n\
-                 \"ps --all\") printf 'mirage-live-node-0\\nmirage-dead-node-0\\n' ;;\n\
-                 \"network ls\") printf 'mirage-dead\\n' ;;\n\
+                 \"ps --all\") printf 'mirage-live-node-0\\nmirage-dead-node-0\\n\
+                 mirage-elsewhere-node-0\\nmirage-unmarked-node-0\\n' ;;\n\
+                 \"network ls\") printf 'mirage-dead\\nmirage-elsewhere\\n' ;;\n\
                  \"inspect --format\"|\"network inspect\")\n\
+                 case \"$*\" in\n\
+                 *{runtime_label}*)\n\
+                 case \"$last\" in\n\
+                 mirage-unmarked-node-0) printf '<no value>' ;;\n\
+                 mirage-elsewhere-node-0|mirage-elsewhere) echo /somewhere/else ;;\n\
+                 *) echo '{ours}' ;;\n\
+                 esac ;;\n\
+                 *)\n\
                  case \"$last\" in\n\
                  mirage-live-node-0) echo live ;;\n\
                  mirage-dead-node-0|mirage-dead) echo dead ;;\n\
+                 mirage-elsewhere-node-0|mirage-elsewhere) echo elsewhere ;;\n\
+                 mirage-unmarked-node-0) echo unmarked ;;\n\
+                 esac ;;\n\
                  esac ;;\n\
                  esac\n\
                  exit 0\n",
                 log = log.display(),
+                runtime_label = LABEL_RUNTIME,
+                ours = owning_runtime(),
             ),
         )
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let provider = provider.to_string_lossy().to_string();
+        provider.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn reclaim_removes_only_orphans_and_only_ours() {
+        // The recovery path after a supervisor died without tearing down:
+        // the only surviving record of a container is the label on the
+        // container itself.
+        let _runtime = PinnedRuntime::new();
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("provider.log");
+        let provider = mock_reclaim_provider(dir.path(), &log);
 
         let live = vec![SessionId::new("live").unwrap()];
         let removed = reclaim_orphans(&provider, &live);
@@ -741,6 +963,61 @@ mod tests {
         assert!(
             !recorded.contains("mirage-live-node-0\n") || !recorded.contains("rm -f mirage-live"),
             "a container belonging to a live session was reclaimed:\n{recorded}"
+        );
+    }
+
+    #[test]
+    fn a_resource_of_another_runtime_directory_is_never_an_orphan() {
+        // The session belongs to a mirage running under a different
+        // `MIRAGE_RUNTIME`, so it is absent from *this* runtime's list of
+        // live runs — and every other test here would call it an orphan.
+        // It is somebody's healthy session.
+        let _runtime = PinnedRuntime::new();
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("provider.log");
+        let provider = mock_reclaim_provider(dir.path(), &log);
+
+        let found = orphans(&provider, &[]);
+        assert!(
+            !found.iter().any(|o| o.name.contains("elsewhere")),
+            "a resource created by another runtime directory was reported: {found:?}"
+        );
+
+        reclaim_orphans(&provider, &[]);
+        let recorded = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            !recorded.contains("rm -f mirage-elsewhere-node-0"),
+            "another runtime directory's container was removed:\n{recorded}"
+        );
+        assert!(
+            !recorded.contains("network rm mirage-elsewhere"),
+            "another runtime directory's network was removed:\n{recorded}"
+        );
+    }
+
+    #[test]
+    fn a_resource_with_no_runtime_label_is_left_alone() {
+        // Made by a mirage older than `mirage.runtime`, so nothing says
+        // which runtime directory owns it. Unattributable is not the same
+        // as unowned, and this one is skipped: the cost is a container
+        // that has to be removed by hand, against the alternative of
+        // destroying a container that some other mirage is using.
+        let _runtime = PinnedRuntime::new();
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("provider.log");
+        let provider = mock_reclaim_provider(dir.path(), &log);
+
+        let found = orphans(&provider, &[]);
+        assert!(
+            !found.iter().any(|o| o.name.contains("unmarked")),
+            "an unattributable resource was reported as an orphan: {found:?}"
+        );
+
+        reclaim_orphans(&provider, &[]);
+        let recorded = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            !recorded.contains("rm -f mirage-unmarked-node-0"),
+            "an unattributable container was removed:\n{recorded}"
         );
     }
 

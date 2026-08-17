@@ -23,6 +23,10 @@ below.
 
 Each `MIRAGE_*` variable, when set, fully overrides the corresponding
 directory; otherwise the XDG variable (or its standard default) is used.
+`MIRAGE_RUNTIME` is also an *output*: mirage stamps the resolved runtime
+directory on every process it starts and every container it creates, so
+that reclamation can tell its own leftovers from the live sessions of a
+mirage using a different one. See [Cleanup](#cleanup).
 `mirage paths` prints the resolved directories — config, runtime,
 profiles, sessions and runs. `$XDG_RUNTIME_DIR` is preferred for runtime
 files because it is per-user, writable only by its owner, and cleared on
@@ -208,10 +212,20 @@ session the user believes is alive.
   runs, so the containers keep running, the workloads are reparented to
   init and the scratch directory stays. `mirage cleanup` is the recovery.
   It finds them by the marks left on the resources themselves — the
-  `mirage.owner` label on containers and networks, `MIRAGE_SESSION` in
-  every workload's environment — since the session's own record died with
-  the run. Sessions whose run still answers are skipped, so it is safe to
-  run while other work is in flight; `--dry-run` previews it.
+  `mirage.owner`, `mirage.session` and `mirage.runtime` labels on
+  containers and networks, `MIRAGE_SESSION` and `MIRAGE_RUNTIME` in every
+  workload's environment — since the session's own record died with the
+  run. Sessions whose run still answers are skipped, so it is safe to run
+  while other work is in flight; `--dry-run` previews it.
+* Cleanup is scoped to one runtime directory, which is why the runtime
+  mark exists. The sockets under `<runtime>/mirage/run/` are the whole
+  registry of what is live *there*, so a cleanup cannot see the live
+  sessions of a mirage running under a different `MIRAGE_RUNTIME`, and
+  without the mark it would read them as a crashed run's leftovers. It
+  therefore reclaims only what its own runtime directory created, and
+  skips anything that records no runtime directory at all — including
+  work left behind by a mirage older than the mark, which has to be
+  removed by hand.
 * `mirage state purge` does the same and then removes the whole runtime
   directory. Unlike `cleanup` it refuses while any run is still live:
   killing someone else's foreground command from a state-cleanup

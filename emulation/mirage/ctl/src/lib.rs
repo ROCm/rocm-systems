@@ -222,6 +222,12 @@ pub enum CtlCmd {
     ///
     /// Safe to run at any time: sessions whose `mirage run` still answers
     /// are left completely alone, as is anything mirage did not create.
+    ///
+    /// The scope is this runtime directory. Every workload and container
+    /// records the `MIRAGE_RUNTIME` it was started under, and anything
+    /// recording a different one — a CI job's, a test suite's, another
+    /// terminal's — belongs to a mirage whose live sessions this command
+    /// cannot see, so it is left for that mirage to reclaim.
     Cleanup {
         /// List what would be removed without removing anything.
         #[arg(long)]

@@ -93,6 +93,20 @@ impl Env {
         names
     }
 
+    /// The runtime directory a mirage run in this environment resolves,
+    /// and therefore stamps on everything it creates.
+    fn own_runtime(&self) -> String {
+        self.base.runtime().join("mirage").display().to_string()
+    }
+
+    /// Give a resource the `mirage.runtime` label the mock reads back on
+    /// inspect, as its creation would have.
+    fn label_runtime(&self, name: &str, runtime: &str) {
+        let labels = self.base.root().join("labels");
+        std::fs::create_dir_all(&labels).unwrap();
+        std::fs::write(labels.join(name), runtime).unwrap();
+    }
+
     fn create_containerized_profile(&self, name: &str) {
         self.base.ok(&[
             "profile",
@@ -125,7 +139,7 @@ fn write_mock_provider(path: &Path, log: &Path) {
     let script = r#"#!/bin/sh
 echo "$@" >> __LOG__
 STATE=__STATE__
-mkdir -p "$STATE/containers" "$STATE/networks"
+mkdir -p "$STATE/containers" "$STATE/networks" "$STATE/labels"
 
 # The session a resource belongs to, recovered from its name the way a
 # real engine recovers it from the `mirage.session` label. Containers are
@@ -133,6 +147,29 @@ mkdir -p "$STATE/containers" "$STATE/networks"
 session_of() {
   s=${1#mirage-}
   printf '%s' "${s%-node-*}"
+}
+
+# The runtime directory a resource records, stored when it was created
+# and read back on inspect. Unlike the session this cannot be recovered
+# from the name, and it is the difference between a resource this mirage
+# may reclaim and one belonging to a mirage elsewhere on the machine — so
+# the mock keeps it the way an engine keeps a label.
+runtime_of() {
+  if [ -f "$STATE/labels/$1" ]; then cat "$STATE/labels/$1"; else printf '<no value>'; fi
+}
+
+# Record `--label mirage.runtime=<dir>` from an argv, if it carries one.
+record_runtime() {
+  name=$1; shift
+  prev=""
+  for a in "$@"; do
+    if [ "$prev" = "--label" ]; then
+      case "$a" in
+        mirage.runtime=*) printf '%s' "${a#mirage.runtime=}" > "$STATE/labels/$name" ;;
+      esac
+    fi
+    prev=$a
+  done
 }
 
 case "$1" in
@@ -158,9 +195,11 @@ case "$1" in
         # The name is the last argument, after any --label pairs.
         for a in "$@"; do last=$a; done
         : > "$STATE/networks/$last"
+        record_runtime "$last" "$@"
         exit 0 ;;
       rm)
         rm -f "$STATE/networks/$3"
+        rm -f "$STATE/labels/$3"
         exit 0 ;;
       # `network inspect --format` reads one label: the ownership check
       # teardown makes before removing anything, or the session a
@@ -170,6 +209,7 @@ case "$1" in
         if [ "$3" = "--format" ]; then
           case "$4" in
             *mirage.session*) session_of "$5" ;;
+            *mirage.runtime*) runtime_of "$5" ;;
             *) printf mirage ;;
           esac
           exit 0
@@ -188,10 +228,14 @@ case "$1" in
     # exists to exercise is silently untested.
     name=""
     autoremove=0
+    runtime_label=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --rm) autoremove=1 ;;
         --name) name="$2"; shift ;;
+        --label)
+          case "$2" in mirage.runtime=*) runtime_label=${2#mirage.runtime=} ;; esac
+          shift ;;
         *:/mnt/mirage/runtime|*:/mnt/mirage/runtime:*)
           echo "${1%%:/mnt/mirage/runtime*}" > "$STATE/runtime-mount" ;;
       esac
@@ -199,6 +243,9 @@ case "$1" in
     done
     if [ -z "$name" ]; then echo "run: no --name given" >&2; exit 1; fi
     : > "$STATE/containers/$name"
+    if [ -n "$runtime_label" ]; then
+      printf '%s' "$runtime_label" > "$STATE/labels/$name"
+    fi
     # Not detached: this client *is* the container's lifetime. A real
     # engine's foreground client exits when the container stops and stops
     # the container when it is killed; here the container lasts exactly
@@ -267,7 +314,7 @@ case "$1" in
     exec "$@" ;;
   rm)
     # `rm -f <name>`: teardown's belt to `--rm`'s braces.
-    rm -f "$STATE/containers/$3"
+    rm -f "$STATE/containers/$3" "$STATE/labels/$3"
     exit 0 ;;
   inspect)
     # `inspect --format` reads one label: the ownership check (a Go
@@ -277,6 +324,7 @@ case "$1" in
     if [ "$2" = "--format" ]; then
       case "$3" in
         *mirage.session*) session_of "$4" ;;
+        *mirage.runtime*) runtime_of "$4" ;;
         *mirage.owner*) printf mirage ;;
         *) echo true ;;
       esac
@@ -866,8 +914,8 @@ fn cleanup_reclaims_containers_no_live_run_accounts_for() {
     // A container and a network with nothing that knows they exist: what
     // a `SIGKILL`ed run leaves when its provider client is reparented to
     // init rather than dying with it. Nothing on disk records them — the
-    // only surviving evidence is the `mirage.owner` label on the
-    // resources themselves, and that is what cleanup goes looking for.
+    // only surviving evidence is the labels on the resources themselves,
+    // and that is what cleanup goes looking for.
     //
     // Stood up directly rather than by killing a run, because the mock's
     // client emulates `--rm` faithfully and removes its own container on
@@ -880,6 +928,10 @@ fn cleanup_reclaims_containers_no_live_run_accounts_for() {
     let networks = env.base.root().join("networks");
     std::fs::create_dir_all(&networks).unwrap();
     std::fs::write(networks.join(network), "").unwrap();
+    // Including the runtime directory they were created under, without
+    // which they are unattributable and cleanup leaves them alone.
+    env.label_runtime(orphan, &env.own_runtime());
+    env.label_runtime(network, &env.own_runtime());
 
     let out = env
         .base
@@ -910,6 +962,43 @@ fn cleanup_reclaims_containers_no_live_run_accounts_for() {
     assert!(
         !networks.join(network).exists(),
         "the orphaned network survived cleanup"
+    );
+}
+
+#[test]
+fn cleanup_spares_a_container_created_by_another_runtime_directory() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+
+    // Two mirages sharing one container engine. The other one's session
+    // is not in *this* one's registry of live runs — it cannot be, the
+    // registry is the sockets under this runtime directory — so every
+    // other test cleanup applies would call this container an orphan.
+    // The `mirage.runtime` label is the only thing that says otherwise.
+    let theirs = "mirage-theirsession-node-0";
+    std::fs::write(env.containers.join(theirs), "").unwrap();
+    env.label_runtime(theirs, "/some/other/runtime");
+
+    let out = env
+        .base
+        .mirage()
+        .arg("cleanup")
+        .env("MIRAGE_CONTAINER_PROVIDER", &env.provider)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !text.contains(theirs),
+        "cleanup named another runtime directory's container:\n{text}"
+    );
+    assert_eq!(
+        env.live_containers(),
+        vec![theirs.to_string()],
+        "cleanup removed a container belonging to another mirage"
     );
 }
 

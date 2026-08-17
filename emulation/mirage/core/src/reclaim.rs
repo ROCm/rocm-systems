@@ -39,10 +39,41 @@
 //! is reclaimed with that session. That is the intended reading — it is
 //! part of the session's process tree — but it is worth knowing before
 //! running a build from inside one.
+//!
+//! ## Which mirage
+//!
+//! A session name is not enough on its own. The question this module
+//! answers is "does any live run account for this process?", and the list
+//! of live runs it is given comes from the sockets in *the caller's*
+//! runtime directory. Two mirages can be running under two different
+//! `MIRAGE_RUNTIME` directories — a test suite beside an interactive
+//! session, two CI jobs on one machine — and neither one's registry
+//! mentions the other's sessions. Session name alone therefore reports a
+//! perfectly healthy workload of the other runtime as stranded, and
+//! reclaiming it means `SIGKILL`ing a running job that nothing is wrong
+//! with.
+//!
+//! So the marker is a pair. Every workload also carries
+//! [`ENV_RUNTIME`](crate::container::ENV_RUNTIME), holding the resolved
+//! runtime directory of the run that started it, and the scan ignores
+//! anything whose recorded directory is not the caller's own — the same
+//! pair, and the same rule, as the [`LABEL_SESSION`] and [`LABEL_RUNTIME`]
+//! labels on containers.
+//!
+//! A process with no recorded runtime at all is ignored too, and that is
+//! the deliberate half. It cannot be attributed to any runtime directory,
+//! and killing what cannot be attributed is exactly the failure this pair
+//! exists to prevent. The consequence is that a workload left behind by a
+//! mirage older than [`ENV_RUNTIME`] is never reclaimed by this one — a
+//! leak, recoverable with `kill` by the user who can see it, and a much
+//! smaller wrong than destroying somebody's running job.
+//!
+//! [`LABEL_SESSION`]: crate::container::LABEL_SESSION
+//! [`LABEL_RUNTIME`]: crate::container::LABEL_RUNTIME
 
 use std::collections::HashSet;
 
-use crate::container::ENV_SESSION;
+use crate::container::{ENV_RUNTIME, ENV_SESSION, owning_runtime, same_runtime};
 use crate::session::SessionId;
 
 /// A workload process belonging to a session that is no longer live.
@@ -54,11 +85,18 @@ pub struct Stranded {
     pub session: SessionId,
 }
 
-/// Every process tagged with a session that is not in `live`.
+/// Every process this runtime directory started whose session is not in
+/// `live`.
 ///
 /// Only processes this user owns are considered: `/proc/<pid>/environ` is
 /// readable by its owner alone, so another user's process is skipped
 /// rather than reported as unreclaimable.
+///
+/// Only processes started under the caller's own runtime directory are
+/// considered either, and a process that does not say which directory
+/// started it is skipped rather than claimed. See *Which mirage* in the
+/// [module documentation](self) for why both halves of that are
+/// deliberate.
 ///
 /// The caller's own process is never returned, and neither is anything
 /// sharing the caller's session. Running `mirage cleanup` from inside a
@@ -72,6 +110,10 @@ pub fn stranded_workloads(live: &[SessionId]) -> Vec<Stranded> {
         excluded.insert(own);
     }
     let me = std::process::id();
+    // Resolved once for the whole scan rather than per candidate: this
+    // walks every entry in `/proc`, and canonicalising the same directory
+    // for each of them is a syscall per process on the machine.
+    let ours = owning_runtime();
 
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return Vec::new();
@@ -83,8 +125,11 @@ pub fn stranded_workloads(live: &[SessionId]) -> Vec<Stranded> {
             if pid == me {
                 return None;
             }
-            let session = session_of(pid)?;
+            let (session, runtime) = marker_of(pid)?;
             if excluded.contains(session.as_str()) {
+                return None;
+            }
+            if !runtime.is_some_and(|recorded| same_runtime(&recorded, &ours)) {
                 return None;
             }
             Some(Stranded { pid, session })
@@ -143,22 +188,34 @@ pub fn reap_stranded(live: &[SessionId]) -> Vec<Stranded> {
     stranded
 }
 
-/// The session named in a process's environment, if it has one.
-fn session_of(pid: u32) -> Option<SessionId> {
+/// The session a process's environment names, and the runtime directory
+/// it records, if it is tagged at all.
+///
+/// The runtime is `None` for a process tagged by a mirage that predates
+/// [`ENV_RUNTIME`]; the session is what makes a process a candidate, so
+/// its absence ends the read.
+fn marker_of(pid: u32) -> Option<(SessionId, Option<String>)> {
     // Not `read_to_string`: an environment is arbitrary bytes and need not
     // be UTF-8, and one invalid byte in an unrelated variable must not
     // hide the tag.
     let environ = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
-    let prefix = format!("{ENV_SESSION}=");
-    environ
-        .split(|b| *b == 0)
-        .find_map(|entry| {
-            std::str::from_utf8(entry)
-                .ok()?
-                .strip_prefix(&prefix)
-                .map(str::to_string)
-        })
-        .and_then(|value| SessionId::new(value).ok())
+    let session_prefix = format!("{ENV_SESSION}=");
+    let runtime_prefix = format!("{ENV_RUNTIME}=");
+    let mut session = None;
+    let mut runtime = None;
+    for entry in environ.split(|b| *b == 0) {
+        let Ok(entry) = std::str::from_utf8(entry) else {
+            continue;
+        };
+        // First occurrence wins for each, which is what `execve` gives a
+        // process that was handed a duplicate name.
+        if let Some(value) = entry.strip_prefix(&session_prefix) {
+            session.get_or_insert_with(|| value.to_string());
+        } else if let Some(value) = entry.strip_prefix(&runtime_prefix) {
+            runtime.get_or_insert_with(|| value.to_string());
+        }
+    }
+    Some((SessionId::new(session?).ok()?, runtime))
 }
 
 #[cfg(test)]
@@ -166,6 +223,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
+    use crate::container::PinnedRuntime;
 
     /// A tagged child, killed when the guard is dropped so a failing
     /// assertion cannot leave a `sleep` behind for the rest of the suite.
@@ -181,16 +239,32 @@ mod tests {
             Self::script(session, "exec sleep 300")
         }
 
+        /// A process carrying the whole marker: this session, and this
+        /// runtime directory as its owner.
         fn script(session: &str, script: &str) -> Self {
-            let child = std::process::Command::new("/bin/sh")
+            Self::owned_by(session, Some(&owning_runtime()), script)
+        }
+
+        /// A process tagged with `session`, and with `runtime` as the
+        /// directory that owns it — or with no runtime at all, as one
+        /// started by a mirage older than the marker's second half would
+        /// be.
+        fn owned_by(session: &str, runtime: Option<&str>, script: &str) -> Self {
+            let mut command = std::process::Command::new("/bin/sh");
+            command
                 .args(["-c", script])
                 .env(ENV_SESSION, session)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .unwrap();
-            Self(child)
+                .stderr(std::process::Stdio::null());
+            match runtime {
+                Some(runtime) => command.env(ENV_RUNTIME, runtime),
+                // Removed rather than left unset: the suite may well be
+                // run from a shell that exported it, and inheriting it
+                // would make an "untagged" process silently tagged.
+                None => command.env_remove(ENV_RUNTIME),
+            };
+            Self(command.spawn().unwrap())
         }
 
         fn pid(&self) -> u32 {
@@ -219,6 +293,7 @@ mod tests {
 
     #[test]
     fn a_tagged_process_is_found_by_its_session() {
+        let _runtime = PinnedRuntime::new();
         let session = unique("found");
         let child = Tagged::spawn(session.as_str());
         let found = stranded_workloads(&[]);
@@ -232,10 +307,68 @@ mod tests {
     }
 
     #[test]
+    fn a_dead_session_of_our_own_runtime_is_still_reported() {
+        // The feature itself, asserted against an explicitly stamped
+        // marker rather than the helper's default, because the cheapest
+        // way to "fix" a cleanup that kills too much is to break
+        // reclamation altogether and never report anything again.
+        let _runtime = PinnedRuntime::new();
+        let session = unique("ours");
+        let child = Tagged::owned_by(session.as_str(), Some(&owning_runtime()), "exec sleep 300");
+        let found = stranded_workloads(&[]);
+        assert!(
+            found.iter().any(|s| s.pid == child.pid()),
+            "a workload of this runtime whose session is not live must be \
+             reclaimable: {found:?}"
+        );
+    }
+
+    #[test]
+    fn a_process_owned_by_another_runtime_is_not_a_candidate() {
+        // The bug this pair of markers exists for. `mirage cleanup` under
+        // one `MIRAGE_RUNTIME` has never heard of a session belonging to
+        // another, so by session name alone a perfectly healthy workload
+        // of that other mirage is an orphan — and reclaiming it means
+        // `SIGKILL`ing a running job.
+        let _runtime = PinnedRuntime::new();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let session = unique("elsewhere");
+        let child = Tagged::owned_by(
+            session.as_str(),
+            Some(&elsewhere.path().to_string_lossy()),
+            "exec sleep 300",
+        );
+        let found = stranded_workloads(&[]);
+        assert!(
+            !found.iter().any(|s| s.pid == child.pid()),
+            "a live workload of another runtime directory was reported as \
+             stranded: {found:?}"
+        );
+    }
+
+    #[test]
+    fn a_process_with_no_recorded_runtime_is_not_a_candidate() {
+        // Tagged with a session but by a mirage that predates the runtime
+        // half of the marker, so there is no way to tell whose it is.
+        // Skipping leaks it; killing it is the cross-runtime kill in a
+        // different disguise, because "no runtime recorded" is exactly
+        // what somebody else's process looks like.
+        let _runtime = PinnedRuntime::new();
+        let session = unique("unmarked");
+        let child = Tagged::owned_by(session.as_str(), None, "exec sleep 300");
+        let found = stranded_workloads(&[]);
+        assert!(
+            !found.iter().any(|s| s.pid == child.pid()),
+            "an unattributable process was reported as stranded: {found:?}"
+        );
+    }
+
+    #[test]
     fn a_live_session_is_left_alone() {
         // The whole safety property: `mirage cleanup` runs while other
         // runs are healthy, and must reclaim only what no live run
         // accounts for.
+        let _runtime = PinnedRuntime::new();
         let session = unique("live");
         let child = Tagged::spawn(session.as_str());
         let found = stranded_workloads(std::slice::from_ref(&session));
@@ -247,6 +380,7 @@ mod tests {
 
     #[test]
     fn reaping_kills_the_process() {
+        let _runtime = PinnedRuntime::new();
         let session = unique("reap");
         let mut child = Tagged::spawn(session.as_str());
         let pid = child.pid();
@@ -277,6 +411,7 @@ mod tests {
         // workload that forks — a shell script, `torchrun`, an MPI
         // launcher — leaves descendants that no such file would name.
         // They inherit the environment, so they inherit the tag.
+        let _runtime = PinnedRuntime::new();
         let session = unique("grandchild");
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("grandchild.pid");
