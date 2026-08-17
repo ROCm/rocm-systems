@@ -384,6 +384,105 @@ fn cleanup_dry_run_reports_without_acting() {
     kill_survivors(&tag);
 }
 
+/// The recovery report is machine-readable too, and says the same thing.
+///
+/// `cleanup` is the command a wrapper script runs before a CI job, and
+/// such a script needs to branch on what was found rather than grep a
+/// table meant for a person. Every other list command was checked for a
+/// parseable `--json`; this one never was, and it is the only one whose
+/// document describes work that has already happened — a dry run that
+/// silently reported an empty document would read, to a script, exactly
+/// like a machine with nothing wrong with it.
+#[test]
+fn the_cleanup_report_is_parseable_and_names_what_it_found() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+    let tag = marker("cleanup-json");
+
+    // A clean machine first, so the empty document is pinned as well:
+    // the arrays have to be there and empty, not absent.
+    let empty: serde_json::Value =
+        serde_json::from_str(&env.ok(&["--json", "cleanup", "--dry-run"])).unwrap();
+    for key in ["processes", "sessions", "resources", "scratch"] {
+        assert_eq!(
+            empty[key].as_array().map(Vec::len),
+            Some(0),
+            "`cleanup --dry-run --json` on a clean runtime must report an \
+             empty {key} array: {empty}"
+        );
+    }
+
+    let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let id = run.await_ready(READY);
+    wait_for_workload(&tag);
+    run.kill();
+    std::thread::sleep(Duration::from_millis(500));
+
+    let stranded = find_processes(&tag);
+    assert!(
+        !stranded.is_empty(),
+        "the workload did not outlive its `SIGKILL`ed run, so there is \
+         nothing for the report to describe"
+    );
+
+    let out = env.run(&["--json", "cleanup", "--dry-run"]);
+    assert!(
+        out.stderr.is_empty(),
+        "the report must be the whole of stdout and nothing else: {:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let preview: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("`cleanup --json` must be one JSON document");
+    assert_eq!(preview["dry_run"], true, "{preview}");
+    let reported: Vec<u64> = preview["processes"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no processes array: {preview}"))
+        .iter()
+        .filter_map(|entry| entry["pid"].as_u64())
+        .collect();
+    for pid in &stranded {
+        assert!(
+            reported.contains(&u64::from(*pid)),
+            "the report does not mention stranded process {pid}: {preview}"
+        );
+    }
+    // The session and its scratch directory are the other two things the
+    // killed run could not take with it, and a report that named the
+    // processes alone would send a script looking for a clean machine
+    // that still has a directory on it.
+    assert!(
+        preview["sessions"]
+            .as_array()
+            .is_some_and(|s| s.iter().any(|entry| entry == &serde_json::json!(id))),
+        "the report does not name the dead session {id}: {preview}"
+    );
+    assert!(
+        preview["scratch"].as_array().is_some_and(|s| s
+            .iter()
+            .any(|entry| { entry.as_str().is_some_and(|path| path.contains(&id)) })),
+        "the killed run's scratch directory is still there, so the report \
+         must name it: {preview}"
+    );
+    // A dry run is a preview: the pids it named are still running.
+    assert!(
+        count_processes(&tag) > 0,
+        "`--dry-run --json` reclaimed what it was only asked to describe"
+    );
+
+    let done = env.ok(&["cleanup"]);
+    assert!(
+        done.contains(&id) || done.contains("stranded process"),
+        "{done}"
+    );
+    wait_for("the stranded workload to be reclaimed", TEARDOWN, || {
+        count_processes(&tag) == 0
+    });
+    kill_survivors(&tag);
+}
+
 /// Cleanup on a clean machine must say so rather than inventing work.
 #[test]
 fn cleanup_with_nothing_to_do_says_nothing_to_do() {

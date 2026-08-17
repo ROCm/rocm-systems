@@ -65,6 +65,11 @@ impl Env {
         &self.runtime
     }
 
+    /// The directory stored profiles live in.
+    pub(crate) fn profile_dir(&self) -> PathBuf {
+        self.config.join("mirage/profile")
+    }
+
     /// The directory live runs put their sockets in.
     pub(crate) fn run_socket_dir(&self) -> PathBuf {
         self.runtime.join("mirage/run")

@@ -20,6 +20,12 @@
 //! * the `race` plugin is skipped when the selected backend does not
 //!   advertise it.
 //!
+//! A combination that *fails* is recorded and the matrix carries on. The
+//! point of a matrix is to say which dimensions are broken, and stopping
+//! at the first failure answers that question for one cell and hides it
+//! for the other seventy-one; the whole table is printed either way, and
+//! the test fails at the end with the list.
+//!
 //! # The run *is* the session
 //!
 //! There is no daemon to start and no session to delete. `mirage run`
@@ -526,11 +532,15 @@ esac
 enum Outcome {
     Ran,
     Skipped(String),
+    /// The combination ran and broke its contract, with the assertion
+    /// that caught it.
+    Failed(String),
 }
 
 /// Drive a single combination through create -> run -> ensure nothing
 /// survived -> delete. Panics on any deviation from the expected
-/// contract.
+/// contract, which [`attempt`] turns into one row of the table rather
+/// than the end of the suite.
 fn run_combo(c: &Combo, caps: &Caps) -> Outcome {
     if let Some(reason) = caps.skip_reason(c) {
         return Outcome::Skipped(reason);
@@ -678,6 +688,72 @@ fn assert_dimensions_reached_the_emulator(c: &Combo, stdout: &str, profile: &str
     c.plugin.assert_selected(cfg, profile);
 }
 
+/// Run one combination, turning whatever it does into a value.
+///
+/// [`run_combo`] asserts inline, which is what keeps it readable — but a
+/// panic escaping into the loop would abandon every combination after it
+/// and truncate the table this suite exists to print. A matrix whose
+/// whole job is saying *which* dimensions are broken must not stop at the
+/// first one, so each cell's failure is caught here and reported with the
+/// rest at the end.
+fn attempt(c: &Combo, caps: &Caps, hook: &PanicSite) -> Outcome {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_combo(c, caps))) {
+        Ok(outcome) => outcome,
+        Err(payload) => Outcome::Failed(match hook.take() {
+            Some(site) => format!("{} ({site})", panic_message(&*payload)),
+            None => panic_message(&*payload),
+        }),
+    }
+}
+
+/// The message a caught panic carried.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "panicked with a payload that is not a message".to_string()
+    }
+}
+
+/// Where the last panic came from.
+///
+/// The unwind payload carries the assertion's message but not its
+/// location, and the location is half of what makes a failed cell
+/// actionable. It is only available to a panic hook, so this is the hook:
+/// it records the site and prints nothing, because the default hook's
+/// output would interleave with the table and every message it swallows
+/// is reported by [`attempt`] anyway.
+#[derive(Clone)]
+struct PanicSite(std::sync::Arc<std::sync::Mutex<Option<String>>>);
+
+/// The hook [`PanicSite::install`] displaced, to be put back afterwards.
+type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
+
+impl PanicSite {
+    /// Install the hook, returning both the handle and the hook it
+    /// replaced so the caller can put it back.
+    fn install() -> (Self, PanicHook) {
+        let site = Self(std::sync::Arc::new(std::sync::Mutex::new(None)));
+        let previous = std::panic::take_hook();
+        let sink = site.clone();
+        std::panic::set_hook(Box::new(move |info| {
+            if let Some(location) = info.location()
+                && let Ok(mut slot) = sink.0.lock()
+            {
+                *slot = Some(format!("{}:{}", location.file(), location.line()));
+            }
+        }));
+        (site, previous)
+    }
+
+    /// The site of the most recent panic, consuming it.
+    fn take(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|mut slot| slot.take())
+    }
+}
+
 /// The session id a run announces on stderr as it starts.
 ///
 /// This is how a user finds the session to `mirage exec` into from
@@ -705,6 +781,7 @@ fn matrix_lifecycle_across_all_dimensions() {
     let total = combos.len();
     let mut ran = 0usize;
     let mut skipped = 0usize;
+    let mut failures: Vec<(String, String)> = Vec::new();
 
     eprintln!("\nmirage testing matrix — {total} combinations\n");
     eprintln!(
@@ -712,13 +789,15 @@ fn matrix_lifecycle_across_all_dimensions() {
         "COMBINATION (emulator+container+hw+payload+plugin)"
     );
 
+    let (site, previous_hook) = PanicSite::install();
     for c in &combos {
         // The name goes out *before* the combination runs. A combination
-        // that hangs or panics takes the whole suite with it, and a table
-        // that only prints completed rows would name every combination
-        // except the one that failed.
+        // that hangs takes the whole suite with it — the run timeout is a
+        // bound on a run, not on a deadlock in the harness — and a table
+        // that only printed completed rows would name every combination
+        // except the one that wedged.
         eprint!("  {:<58}  ", c.name());
-        match run_combo(c, &caps) {
+        match attempt(c, &caps, &site) {
             Outcome::Ran => {
                 ran += 1;
                 eprintln!("RAN");
@@ -727,10 +806,37 @@ fn matrix_lifecycle_across_all_dimensions() {
                 skipped += 1;
                 eprintln!("SKIP ({reason})");
             }
+            Outcome::Failed(why) => {
+                // One line here, because the table is meant to be
+                // scannable; the whole message is reprinted below.
+                eprintln!("FAIL ({})", why.lines().next().unwrap_or_default());
+                failures.push((c.name(), why));
+            }
         }
     }
+    // Restored before the assertions below, so a genuine failure of this
+    // test is reported the ordinary way.
+    std::panic::set_hook(previous_hook);
 
-    eprintln!("\nmatrix summary: {ran} ran, {skipped} skipped, {total} total\n");
+    eprintln!(
+        "\nmatrix summary: {ran} ran, {} failed, {skipped} skipped, {total} total\n",
+        failures.len()
+    );
+
+    if !failures.is_empty() {
+        for (name, why) in &failures {
+            eprintln!("--- {name}\n{why}\n");
+        }
+        panic!(
+            "{} of {total} matrix combinations failed: {}",
+            failures.len(),
+            failures
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
 
     // Sanity: the matrix must be coherent. Every dbt + mi450x and every
     // race-plugin combinations are expected to skip on a host without

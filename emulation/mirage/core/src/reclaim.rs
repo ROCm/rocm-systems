@@ -250,13 +250,28 @@ mod tests {
         /// started by a mirage older than the marker's second half would
         /// be.
         fn owned_by(session: &str, runtime: Option<&str>, script: &str) -> Self {
+            Self::marked(Some(session), runtime, script)
+        }
+
+        /// A process carrying whichever halves of the marker are given.
+        ///
+        /// Both are optional so a test can withhold exactly one of them
+        /// and leave the other in place; a candidate rejected for two
+        /// reasons at once proves neither of them.
+        fn marked(session: Option<&str>, runtime: Option<&str>, script: &str) -> Self {
             let mut command = std::process::Command::new("/bin/sh");
             command
                 .args(["-c", script])
-                .env(ENV_SESSION, session)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
+            match session {
+                Some(session) => command.env(ENV_SESSION, session),
+                // Removed for the same reason the runtime is below: the
+                // suite may be run from inside a `mirage exec` shell,
+                // which exports it.
+                None => command.env_remove(ENV_SESSION),
+            };
             match runtime {
                 Some(runtime) => command.env(ENV_RUNTIME, runtime),
                 // Removed rather than left unset: the suite may well be
@@ -471,23 +486,23 @@ mod tests {
 
     #[test]
     fn an_untagged_process_is_never_a_candidate() {
-        // Every process on the machine is scanned, so the tag is the only
-        // thing standing between this and killing unrelated work.
-        let mut plain = std::process::Command::new("/bin/sh")
-            .args(["-c", "while true; do sleep 1; done"])
-            .env_remove(ENV_SESSION)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
-        let pid = plain.id();
+        // Every process on the machine is scanned, so the session tag is
+        // the only thing standing between this and killing unrelated
+        // work — and this test has to make it the only thing. The child
+        // therefore carries the runtime half of the marker, which is the
+        // shape of anything started from a shell that exported
+        // `MIRAGE_RUNTIME` to point mirage at a directory: it passes the
+        // runtime filter, so the missing session tag is the sole reason
+        // it must not be reported. Withholding both halves instead — as
+        // this test used to — leaves the runtime filter rejecting the
+        // child on its own, and the session check can be deleted outright
+        // without the assertion noticing.
+        let _runtime = PinnedRuntime::new();
+        let plain = Tagged::marked(None, Some(&owning_runtime()), "exec sleep 300");
         let found = stranded_workloads(&[]);
-        let _ = plain.kill();
-        let _ = plain.wait();
         assert!(
-            !found.iter().any(|s| s.pid == pid),
-            "an untagged process was reported as stranded"
+            !found.iter().any(|s| s.pid == plain.pid()),
+            "an untagged process was reported as stranded: {found:?}"
         );
     }
 

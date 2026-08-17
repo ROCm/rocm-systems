@@ -559,6 +559,13 @@ fn a_run_on_a_missing_profile_fails_clearly() {
     let env = Env::new();
     let err = env.fails(&["run", "--profile", "nope", "--", "/bin/true"]);
     assert!(err.contains("profile not found"), "{err}");
+    // Naming the directory it searched is what turns "not found" into
+    // something the user can act on: the usual cause is a profile that
+    // exists under a different `MIRAGE_CONFIG` than the one in force.
+    assert!(
+        err.contains(&env.profile_dir().display().to_string()),
+        "the error must say where mirage looked: {err}"
+    );
     // And no half-created session is left advertising itself.
     assert!(env.live_runs().is_empty(), "{:?}", env.live_runs());
 }
@@ -1040,33 +1047,43 @@ fn a_profile_reference_that_escapes_the_config_directory_is_refused() {
     );
 }
 
-/// Declining a delete leaves the document alone — and says so.
+/// Declining a delete leaves the document alone — and says so in a way a
+/// script can read.
 ///
 /// Every other test in this suite passes `--force`, which means the
 /// prompt itself, the exit status of a decline, and the JSON shape a
-/// script would branch on were all untested. A decline is not an error:
-/// the user was asked and answered, so the command succeeded at what it
-/// was for. Reporting it as a failure would make `|| exit 1` scripts
-/// abort on a deliberate "no".
+/// script would branch on were all untested. Three outcomes have to be
+/// distinguishable, and only two of them are "nothing happened": the
+/// document is gone, the user was asked and said no, and mirage could not
+/// ask at all. A decline that exited 0 and printed nothing was
+/// indistinguishable from a completed delete, which is how a cleanup
+/// script reports success for work it never did.
 #[test]
 fn a_declined_delete_changes_nothing_and_reports_that_it_did_not() {
+    use std::io::Write as _;
+
     let env = Env::new();
     if skip_without_emulator() {
         return;
     }
     env.create_profile("survivor");
 
-    // stdin is closed, so the prompt reads EOF — which is a "no", the
-    // same as an empty line at the `[y/N]` default.
-    let out = env
+    // Answered, deliberately, with "no".
+    let mut child = env
         .mirage()
         .args(["--json", "profile", "delete", "survivor"])
-        .stdin(std::process::Stdio::null())
-        .output()
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .unwrap();
-    assert!(
-        out.status.success(),
-        "declining a delete is an answer, not an error: {:?}",
+    child.stdin.take().unwrap().write_all(b"n\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "a deliberate \"no\" needs an exit code of its own — not 0, which \
+         is what a completed delete says: {:?}",
         out.status.code()
     );
 
@@ -1081,9 +1098,32 @@ fn a_declined_delete_changes_nothing_and_reports_that_it_did_not() {
     let json: serde_json::Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|e| panic!("stdout must be one JSON document ({e}): {stdout:?}"));
     assert_eq!(json["deleted"], false, "{json}");
+    assert_eq!(json["declined"], true, "{json}");
     assert_eq!(json["name"], "survivor", "{json}");
 
-    // And the profile is still there.
+    // A prompt nobody can answer is the third outcome, and it is a
+    // failure rather than a "no": a `mirage profile delete x` in a cron
+    // job or a pipeline that read end-of-file and called it a decline
+    // would tell the script its cleanup had run.
+    let out = env
+        .mirage()
+        .args(["profile", "delete", "survivor"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "a prompt that reached end-of-file is a failure: {:?}",
+        out.status.code()
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--force"),
+        "the error must say how to run it without a prompt: {stderr}"
+    );
+
+    // And the profile survived both.
     env.ok(&["profile", "show", "survivor"]);
 }
 
@@ -1393,6 +1433,23 @@ fn arguments_the_parser_rejects_exit_two() {
             "--",
             "/bin/true",
         ],
+        // A value outside an enumerated set is the parser's job too, and
+        // the message has to list what would have worked.
+        &[
+            "run",
+            "--profile",
+            "p",
+            "--exec-mode",
+            "turbo",
+            "--",
+            "/bin/true",
+        ],
+        // `exec` is parsed by the same rules, and the parse happens
+        // before any session is looked for — so these are exit 2 with no
+        // run live at all, and would be exit 1 if the validation had
+        // moved out of clap.
+        &["exec", "--node", "-1", "--", "/bin/true"],
+        &["exec", "--session", "../../etc", "--", "/bin/true"],
     ];
 
     for args in cases {
@@ -1408,6 +1465,296 @@ fn arguments_the_parser_rejects_exit_two() {
         );
     }
     assert!(env.live_runs().is_empty(), "{:?}", env.live_runs());
+}
+
+/// A subcommand mirage does not have is a parse error that names the one
+/// it thinks you meant.
+///
+/// This is the top layer of the exit-code contract, and the layer below
+/// it is asserted in the same test on purpose: 2 means "I did not
+/// understand you" and 1 means "I understood and could not", and the
+/// distinction is only worth anything if both halves hold at once. A
+/// script that retries on 1 and gives up on 2 gets the opposite of what
+/// it wanted if a typo starts reporting itself as a runtime failure.
+#[test]
+fn an_unknown_subcommand_is_a_parse_error_that_points_at_the_real_one() {
+    let env = Env::new();
+
+    let out = env.run(&["frobnicate"]);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "an unknown subcommand is a parse error: {:?}",
+        out.status.code()
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("unrecognized subcommand 'frobnicate'"),
+        "the error must name what was typed: {err}"
+    );
+
+    // A near miss gets the suggestion, which is the whole reason clap is
+    // allowed to own this layer.
+    let out = env.run(&["profil", "list"]);
+    assert_eq!(out.status.code(), Some(2), "{:?}", out.status.code());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("'profile'"),
+        "a one-letter typo must be told what it nearly was: {err}"
+    );
+
+    // Understood, and impossible: exit 1, naming the input.
+    let out = env.run(&["profile", "show", "nope"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "a request mirage understood and could not satisfy exits 1, not 2: {:?}",
+        out.status.code()
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("profile not found: nope"),
+        "the error must name the input: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Every `--json` command prints exactly one document, and prints it
+/// alone.
+///
+/// `--json` exists so a script can pipe mirage into `jq`, and that only
+/// works if stdout is the document and nothing else — no progress line,
+/// no warning, no second object. Each command renders its own JSON, so
+/// this is one property with a dozen independent implementations of it,
+/// and a table is the honest way to check that.
+#[test]
+fn every_json_command_prints_one_document_on_stdout_and_nothing_on_stderr() {
+    let env = Env::new();
+
+    let commands: &[&[&str]] = &[
+        &["paths"],
+        &["about"],
+        &["emulators"],
+        &["emulators", "--long"],
+        &["profile", "list"],
+        &["profile", "list", "--long"],
+        &["topology", "list"],
+        &["agent", "list"],
+        &["state", "builtins"],
+        &["cleanup", "--dry-run"],
+        &["profile", "show", "mi350x"],
+        &["topology", "show", "MI350X-1x8"],
+        &["agent", "show", "mi350x"],
+    ];
+
+    for command in commands {
+        let mut args = vec!["--json"];
+        args.extend_from_slice(command);
+        let out = env.run(&args);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            out.status.success(),
+            "`mirage --json {}` failed: {:?}\n{stderr}",
+            command.join(" "),
+            out.status.code()
+        );
+        serde_json::from_str::<serde_json::Value>(&stdout).unwrap_or_else(|e| {
+            panic!(
+                "`mirage --json {}` did not print one JSON document ({e}): {stdout:?}",
+                command.join(" ")
+            )
+        });
+        assert!(
+            stderr.is_empty(),
+            "`mirage --json {}` wrote to stderr, which a script reading both \
+             streams would splice into the document: {stderr:?}",
+            command.join(" ")
+        );
+    }
+}
+
+/// A `--json` command that fails writes nothing at all to stdout.
+///
+/// The failure mode this rules out is the expensive one: half a document,
+/// or a document describing a state that does not exist, left on stdout
+/// beside an error on stderr. A consumer that checks the exit code is
+/// fine either way, but one that pipes straight into `jq` sees a parse
+/// error at best and a plausible wrong answer at worst.
+#[test]
+fn a_command_that_fails_under_json_writes_nothing_to_stdout() {
+    let env = Env::new();
+
+    let commands: &[&[&str]] = &[
+        &["profile", "show", "nope"],
+        &["topology", "show", "nope"],
+        &["agent", "show", "nope"],
+        &["profile", "delete", "nope", "--force"],
+        &["run", "--profile", "nope", "--", "/bin/true"],
+    ];
+
+    for command in commands {
+        let mut args = vec!["--json"];
+        args.extend_from_slice(command);
+        let out = env.run(&args);
+        assert!(
+            !out.status.success(),
+            "`mirage --json {}` was supposed to fail",
+            command.join(" ")
+        );
+        assert!(
+            out.stdout.is_empty(),
+            "`mirage --json {}` failed but left {:?} on stdout",
+            command.join(" "),
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert!(
+            !out.stderr.is_empty(),
+            "`mirage --json {}` failed silently, so nothing says why",
+            command.join(" ")
+        );
+    }
+}
+
+/// `mirage help <cmd>` and `mirage <cmd> --help` are the same page.
+///
+/// Two spellings of one request, and users pick between them by habit. If
+/// they ever diverge it is because one of them is being rendered by
+/// something other than clap, and the one that is will be the one that
+/// goes stale.
+#[test]
+fn help_for_a_subcommand_is_the_same_page_as_its_own_help_flag() {
+    let env = Env::new();
+
+    for command in [
+        "run",
+        "exec",
+        "profile",
+        "topology",
+        "agent",
+        "emulators",
+        "paths",
+        "about",
+        "state",
+        "cleanup",
+    ] {
+        let via_help = env.run(&["help", command]);
+        let via_flag = env.run(&[command, "--help"]);
+        assert_eq!(
+            String::from_utf8_lossy(&via_help.stdout),
+            String::from_utf8_lossy(&via_flag.stdout),
+            "`mirage help {command}` and `mirage {command} --help` differ"
+        );
+        assert_eq!(via_help.status.code(), via_flag.status.code());
+    }
+
+    // Help is output, not a diagnostic: it goes to stdout so it can be
+    // piped into a pager, and leaves stderr empty.
+    let out = env.run(&["--help"]);
+    assert!(out.status.success(), "{:?}", out.status.code());
+    assert!(!out.stdout.is_empty(), "`--help` printed nothing");
+    assert!(
+        out.stderr.is_empty(),
+        "`--help` wrote to stderr: {:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// A mistyped drop-in is a parse error, not a session.
+///
+/// The two ways to get the drop-in shape wrong are a flag mirage does not
+/// have and a command with no `--` in front of it, and both used to end
+/// somewhere expensive. `mirage --nodes 2 -- ./app` (the plural is the
+/// natural typo for `--num-nodes`) brought up a whole emulated machine
+/// and then reported `command not found: --nodes`, blaming the workload
+/// for mirage's own argument; `mirage ./app` dead-ended on "unrecognized
+/// subcommand" with nothing said about the separator that would have made
+/// it work. Both answers are cheap to give before anything starts, and
+/// the test insists they *are* given before anything starts.
+#[test]
+fn a_mistyped_drop_in_is_a_parse_error_rather_than_a_session() {
+    let env = Env::new();
+
+    let out = env.run(&["--nodes", "2", "--", "/bin/echo", "hi"]);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "a flag mirage does not have is a parse error: {:?}",
+        out.status.code()
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("unexpected argument") && err.contains("--nodes"),
+        "the error must name the flag it could not use: {err}"
+    );
+    assert!(
+        !err.contains("command not found"),
+        "mirage's own flag was handed to the workload: {err}"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).is_empty(),
+        "the workload ran despite the parse error"
+    );
+
+    // And the separator itself, when it is what is missing.
+    let out = env.run(&["/bin/echo", "hi"]);
+    assert_eq!(out.status.code(), Some(2), "{:?}", out.status.code());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("/bin/echo"),
+        "the error must name what was typed: {err}"
+    );
+    assert!(
+        err.contains("--"),
+        "the error must point at the separator that would have worked: {err}"
+    );
+
+    // Neither of them started anything on the way to saying so.
+    assert!(env.live_runs().is_empty(), "{:?}", env.live_runs());
+}
+
+/// A hostile name inside an imported document is refused exactly as one
+/// typed on the command line is.
+///
+/// `profile create ../escape` is the obvious attack and is checked
+/// elsewhere; this is the same attack arriving by the route nobody looks
+/// at. The name in an imported document is chosen by whoever wrote the
+/// file, not by the person running the command, and it becomes a path
+/// under the config directory — so a document fetched from a colleague or
+/// a repository could write outside it. The validation has to live where
+/// the name is stored, not where it is typed.
+#[test]
+fn a_hostile_name_inside_an_imported_document_is_refused() {
+    let env = Env::new();
+
+    let document = env.root().join("pwn.json");
+    std::fs::create_dir_all(env.root()).unwrap();
+    std::fs::write(
+        &document,
+        r#"{"name":"../../PWNED","emulator":{"emulator":"rocjitsu","plugins":{},
+           "exec_mode":"Functional","options":{},
+           "topology":{"num_nodes":1,"gpus_per_node":1,"agent":"MI350X"}}}"#,
+    )
+    .unwrap();
+
+    let err = env.fails(&["profile", "import", document.to_str().unwrap()]);
+    assert!(
+        err.contains("invalid profile name"),
+        "a traversing name in an imported document must be rejected as \
+         invalid: {err}"
+    );
+    // Nowhere on the way out of the config directory, either.
+    for dir in [env.root(), &env.root().join("config")] {
+        assert!(
+            !dir.join("PWNED.json").exists(),
+            "the document was written to {}",
+            dir.display()
+        );
+    }
+    let list = env.ok(&["profile", "list"]);
+    assert!(
+        !list.contains("PWNED"),
+        "the refused name reached the store anyway: {list}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1590,6 +1937,805 @@ fn exec_can_target_one_node_of_a_multi_node_session() {
          there are: {err}"
     );
 
+    run.signal(Signal::SIGINT);
+    run.wait(Duration::from_secs(60));
+}
+
+/// The run's exit code is the workload's own, however the workload ended.
+///
+/// The bottom layer of the exit-code contract, and the one scripts lean
+/// on hardest: `mirage run -- make` has to be substitutable for `make`.
+/// A table, because each row is a different path through the supervisor —
+/// a plain exit, a large code that must not be truncated or turned into
+/// 1, and the shell's `128 + signal` convention for a workload the kernel
+/// killed. Reporting 1 for all of them, which is what a supervisor that
+/// forgets to plumb the status through does, would leave every one of
+/// these passing except the first.
+#[test]
+fn the_run_exits_with_the_workloads_own_code_however_the_workload_ended() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    let cases: &[(&str, i32)] = &[
+        ("exit 0", 0),
+        ("exit 1", 1),
+        ("exit 42", 42),
+        // The top of the byte, where a code that is masked wrongly comes
+        // back as -1 or 0.
+        ("exit 255", 255),
+        // Signals, via the shell convention mirage documents.
+        ("kill -TERM $$", 143),
+        ("kill -SEGV $$", 139),
+        ("kill -KILL $$", 137),
+    ];
+
+    for (script, expected) in cases {
+        let out = env.run(&["run", "--profile", "p", "--", "/bin/sh", "-c", script]);
+        assert_eq!(
+            out.status.code(),
+            Some(*expected),
+            "`{script}` must make the run exit {expected}\nstderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    assert!(env.live_runs().is_empty(), "{:?}", env.live_runs());
+}
+
+/// With many ranks, the worst exit across them is the run's.
+///
+/// There is one exit code and several processes to derive it from, so the
+/// rule has to be one nobody can be surprised by: a job is a failure if
+/// any part of it failed. Taking rank 0's — the obvious implementation,
+/// since rank 0 is the one a user thinks of as "the job" — silently
+/// reports a distributed run as successful when a worker crashed and the
+/// head process shut down cleanly, which is the exact case a CI job
+/// exists to catch.
+#[test]
+fn the_worst_exit_across_ranks_is_the_runs_exit_code() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    // Rank 0 succeeds and a worker does not.
+    let out = env.run(&[
+        "run",
+        "--profile",
+        "p",
+        "--nproc-per-node",
+        "4",
+        "--",
+        "/bin/sh",
+        "-c",
+        "case $RANK in 3) exit 17;; *) exit 0;; esac",
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(17),
+        "a job with a crashed worker and a clean rank 0 must report the \
+         crash\nstderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // And when several fail, the furthest from zero wins regardless of
+    // which rank it was — so the answer does not depend on scheduling.
+    for script in [
+        "case $RANK in 0) exit 99;; 3) exit 5;; *) exit 0;; esac",
+        "case $RANK in 0) exit 5;; 3) exit 99;; *) exit 0;; esac",
+    ] {
+        let out = env.run(&[
+            "run",
+            "--profile",
+            "p",
+            "--nproc-per-node",
+            "4",
+            "--",
+            "/bin/sh",
+            "-c",
+            script,
+        ]);
+        assert_eq!(
+            out.status.code(),
+            Some(99),
+            "`{script}` must report the worst rank's exit\nstderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+/// A redirected single-process run is byte-exact.
+///
+/// The README's claim, tested with the bytes that break every design that
+/// is not: a NUL, a byte that is not valid UTF-8, and enough output that
+/// anything buffering it would have to flush. A single-process job's
+/// stdout *is* this command's stdout — no relay, no line discipline, no
+/// lossy `String` in the middle — so `mirage run -- ./app > out.bin` has
+/// to produce exactly what `./app > out.bin` would.
+#[test]
+fn a_redirected_run_is_byte_exact_including_nul_and_high_bytes() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    let out = env.run(&[
+        "run",
+        "--profile",
+        "p",
+        "--",
+        "/bin/sh",
+        "-c",
+        r#"printf 'A\000B\377C'"#,
+    ]);
+    assert!(out.status.success(), "{:?}", out.status.code());
+    assert_eq!(
+        out.stdout, b"A\0B\xffC",
+        "the workload's bytes were altered on the way out: {:?}",
+        out.stdout
+    );
+
+    // Volume, for the other half: a pipe that is drained late, or in
+    // fixed-size reads that lose the tail, only shows up past the pipe
+    // buffer.
+    const BYTES: usize = 4 * 1024 * 1024;
+    let out = env.run(&[
+        "run",
+        "--profile",
+        "p",
+        "--",
+        "/bin/sh",
+        "-c",
+        &format!("yes abcdefghij | head -c {BYTES}"),
+    ]);
+    assert!(out.status.success(), "{:?}", out.status.code());
+    assert_eq!(
+        out.stdout.len(),
+        BYTES,
+        "{BYTES} bytes of output came back as {}",
+        out.stdout.len()
+    );
+    let expected: Vec<u8> = b"abcdefghij\n"
+        .iter()
+        .copied()
+        .cycle()
+        .take(BYTES)
+        .collect();
+    assert!(
+        out.stdout == expected,
+        "a large stdout was reordered or corrupted"
+    );
+}
+
+/// The drop-in shape hands every argument to the workload untouched.
+///
+/// `mirage [opts] -- ./app ...` exists so mirage can be dropped in front
+/// of an existing `rocjitsu` command line, which means everything after
+/// the separator belongs to the workload — including a second `--`, and
+/// including spellings mirage has flags of its own for. A parser that
+/// kept looking after the separator would quietly eat the workload's
+/// `--json` and change what the command does rather than failing.
+#[test]
+fn the_drop_in_shape_hands_every_argument_to_the_workload_untouched() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    let script = env.root().join("argv.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nfor a in \"$@\"; do echo \"arg=<$a>\"; done\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let script = script.to_str().unwrap();
+
+    let out = env.ok(&[
+        "--profile",
+        "p",
+        "--",
+        script,
+        "a",
+        "b c",
+        "--",
+        "-x",
+        "--json",
+    ]);
+    for argument in ["a", "b c", "--", "-x", "--json"] {
+        assert!(
+            out.contains(&format!("arg=<{argument}>")),
+            "the workload did not receive {argument:?}: {out}"
+        );
+    }
+
+    // And a run flag before the separator is still mirage's, so the shape
+    // is usable rather than all-or-nothing.
+    let out = env.ok(&["--profile", "p", "--num-nodes", "1", "--", script, "kept"]);
+    assert!(out.contains("arg=<kept>"), "{out}");
+}
+
+/// A workload starts in the directory it was given, or in the one the
+/// user was standing in.
+///
+/// Every existing test drives `--workdir` through its error cases, which
+/// leaves the two spellings that are supposed to *work* untested — and a
+/// relative path in a workload's argv means nothing without them. The
+/// default is the surprising half: a session is an emulated machine, so
+/// "the directory `mirage run` was started from" is a decision rather
+/// than an inevitability, and a run that quietly landed in `/` or in its
+/// own scratch directory would break `mirage run -- ./configure` for
+/// reasons nobody would look for in mirage.
+#[test]
+fn a_workload_starts_in_the_directory_it_was_given() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    let here = env.root().join("here");
+    let there = env.root().join("there");
+    std::fs::create_dir_all(&here).unwrap();
+    std::fs::create_dir_all(&there).unwrap();
+
+    let run_in = |cwd: &std::path::Path, args: &[&str]| -> String {
+        let mut argv = vec!["run", "--profile", "p"];
+        argv.extend_from_slice(args);
+        argv.extend(["--", "/bin/pwd"]);
+        let out = env
+            .mirage()
+            .args(&argv)
+            .current_dir(cwd)
+            .output()
+            .unwrap_or_else(|e| panic!("running `mirage {}`: {e}", argv.join(" ")));
+        assert!(
+            out.status.success(),
+            "`mirage {}` failed: {}",
+            argv.join(" "),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+
+    // `canonicalize`, because the tempdir may be reached through a
+    // symlink (`/tmp` is one on macOS and on some Linux setups) and
+    // `pwd` reports the resolved path.
+    let canonical = |p: &std::path::Path| p.canonicalize().unwrap().display().to_string();
+
+    assert_eq!(
+        run_in(&here, &[]),
+        canonical(&here),
+        "a run must start where the user was standing"
+    );
+    assert_eq!(
+        run_in(&here, &["--workdir", there.to_str().unwrap()]),
+        canonical(&there),
+        "`--workdir` must win over the caller's directory"
+    );
+    // Trailing slashes are what a shell's tab completion leaves behind,
+    // so they cannot be the difference between a run and an error.
+    let sloppy = format!("{}///", there.display());
+    assert_eq!(
+        run_in(&here, &["--workdir", &sloppy]),
+        canonical(&there),
+        "a path with trailing slashes names the same directory"
+    );
+}
+
+/// `--clear-env-vars` drops the ambient environment and keeps what the
+/// session needs.
+///
+/// Both halves matter and they pull in opposite directions. The flag is
+/// for reproducibility, so a variable the user happened to have exported
+/// must not reach the workload — but the emulator's own variables, the
+/// rank identity and the `MIRAGE_SESSION`/`MIRAGE_RUNTIME` marker are not
+/// ambient, they are the session, and dropping the marker would make the
+/// run's workloads invisible to `mirage cleanup` after a `SIGKILL`.
+#[test]
+fn clear_env_vars_drops_the_ambient_environment_but_keeps_what_the_session_needs() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    let ambient = "MIRAGE_E2E_AMBIENT";
+    let dump = |clear: bool| -> String {
+        let mut cmd = env.mirage();
+        cmd.args(["run", "--profile", "p"]);
+        if clear {
+            cmd.arg("--clear-env-vars");
+        }
+        let out = cmd
+            .args(["--", "/usr/bin/env"])
+            .env(ambient, "from-the-callers-shell")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "dumping the workload's environment failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    let inherited = dump(false);
+    assert!(
+        inherited.contains(&format!("{ambient}=from-the-callers-shell")),
+        "without the flag the workload sees what the caller exported: {inherited}"
+    );
+
+    let cleared = dump(true);
+    assert!(
+        !cleared.contains(ambient),
+        "`--clear-env-vars` let an ambient variable through: {cleared}"
+    );
+    for kept in [
+        "PATH=",
+        "HOME=",
+        "MIRAGE_SESSION=",
+        "MIRAGE_RUNTIME=",
+        "RANK=",
+    ] {
+        assert!(
+            cleared.lines().any(|line| line.starts_with(kept)),
+            "`--clear-env-vars` dropped {kept}, which is the session rather \
+             than the caller's shell:\n{cleared}"
+        );
+    }
+
+    // An explicit `--env` is a request, not ambient, so it survives too.
+    let out = env.ok(&[
+        "run",
+        "--profile",
+        "p",
+        "--clear-env-vars",
+        "--env",
+        "FOO=bar",
+        "--",
+        "/bin/sh",
+        "-c",
+        "echo [$FOO]",
+    ]);
+    assert!(out.contains("[bar]"), "{out}");
+}
+
+/// `--env` is one key and one value, the last spelling wins, and the
+/// names mirage owns are not for sale.
+///
+/// The parse is a single `split_once('=')`, which is only obviously right
+/// once the awkward cases are written down: a value that is empty, and a
+/// value that itself contains `=`. The last case is the one with teeth —
+/// letting `--env RANK=99` through would give one process a rank that
+/// disagrees with every other process's idea of the job, and the failure
+/// would surface inside the user's collective, not here.
+#[test]
+fn an_env_flag_is_one_pair_and_the_names_mirage_owns_are_refused() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    let echo = |args: &[&str]| -> String {
+        let mut argv = vec!["run", "--profile", "p"];
+        argv.extend_from_slice(args);
+        argv.extend(["--", "/bin/sh", "-c", "echo [$K]"]);
+        env.ok(&argv).trim().to_string()
+    };
+    assert_eq!(echo(&["--env", "K="]), "[]", "an empty value is a value");
+    assert_eq!(
+        echo(&["--env", "K=a=b=c"]),
+        "[a=b=c]",
+        "only the first `=` separates the key from the value"
+    );
+    assert_eq!(
+        echo(&["--env", "K=first", "--env", "K=second"]),
+        "[second]",
+        "a repeated key takes its last spelling, as `env` itself does"
+    );
+
+    // A pair with no key at all is refused, and says which input it
+    // could not use.
+    let err = env.fails(&[
+        "run",
+        "--profile",
+        "p",
+        "--env",
+        "=value",
+        "--",
+        "/bin/true",
+    ]);
+    assert!(
+        err.contains("key is empty") && err.contains("=value"),
+        "an empty key must be refused, naming the input: {err}"
+    );
+
+    // A name mirage sets itself is ignored rather than obeyed — and said
+    // out loud, because silently discarding what the user asked for is
+    // the failure this is protecting against, not a fix for it.
+    let out = env
+        .mirage()
+        .args([
+            "run",
+            "--profile",
+            "p",
+            "--env",
+            "RANK=99",
+            "--",
+            "/bin/sh",
+            "-c",
+            "echo [$RANK]",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{:?}", out.status.code());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "[0]",
+        "`--env RANK=…` overwrote the rank mirage assigned"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("RANK") && stderr.contains("ignored"),
+        "an ignored `--env` must say so: {stderr}"
+    );
+}
+
+/// The rank grid is the product of the node count and the processes per
+/// node.
+///
+/// `WORLD_SIZE = num_nodes * nproc_per_node`, `RANK` unique and dense
+/// over it, `LOCAL_RANK` restarting at zero on every node — the formula
+/// `torch.distributed` assumes and the README documents. The two flags
+/// are covered separately elsewhere; only their product distinguishes the
+/// right formula from the several plausible wrong ones (`RANK` restarting
+/// per node, `WORLD_SIZE` taken from the node count, `LOCAL_RANK` running
+/// to `WORLD_SIZE`), and every one of those wrong ones is invisible until
+/// both flags are used at once.
+#[test]
+fn the_rank_grid_is_the_product_of_nodes_and_processes_per_node() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    let out = env.ok(&[
+        "run",
+        "--profile",
+        "p",
+        "--num-nodes",
+        "2",
+        "--nproc-per-node",
+        "3",
+        "--",
+        "/bin/sh",
+        "-c",
+        "echo grid $RANK $LOCAL_RANK $WORLD_SIZE $MIRAGE_RANK",
+    ]);
+
+    let mut rows: Vec<(u32, u32, u32, u32)> = out
+        .lines()
+        .filter_map(|line| line.split_once("grid ").map(|(_, rest)| rest))
+        .map(|rest| {
+            let f: Vec<u32> = rest
+                .split_whitespace()
+                .filter_map(|v| v.parse().ok())
+                .collect();
+            assert_eq!(f.len(), 4, "a rank printed {rest:?}");
+            (f[0], f[1], f[2], f[3])
+        })
+        .collect();
+    rows.sort_unstable();
+
+    assert_eq!(
+        rows.len(),
+        6,
+        "2 nodes of 3 processes is 6 processes, not {}:\n{out}",
+        rows.len()
+    );
+    for (index, (rank, local, world, node)) in rows.iter().enumerate() {
+        let index = u32::try_from(index).unwrap();
+        assert_eq!(
+            *rank, index,
+            "global ranks must be dense and unique:\n{out}"
+        );
+        assert_eq!(
+            *local,
+            index % 3,
+            "LOCAL_RANK must restart at zero on every node:\n{out}"
+        );
+        assert_eq!(*world, 6, "WORLD_SIZE is nodes * processes:\n{out}");
+        assert_eq!(
+            *node,
+            index / 3,
+            "each node hosts 3 consecutive ranks:\n{out}"
+        );
+    }
+
+    // The `torchrun` spelling of the same flag, which `run --help`
+    // advertises as an alias. An alias nobody exercises is an alias that
+    // stops existing the next time the flag is touched, and the failure
+    // is silent: an underscore mirage does not know becomes an
+    // unrecognised argument, or worse, part of the workload's argv.
+    let out = env.ok(&[
+        "run",
+        "--profile",
+        "p",
+        "--nproc_per_node",
+        "2",
+        "--",
+        "/bin/sh",
+        "-c",
+        "echo aliased $RANK/$WORLD_SIZE",
+    ]);
+    for rank in 0..2 {
+        assert!(
+            out.contains(&format!("aliased {rank}/2")),
+            "`--nproc_per_node` did not build the same grid as \
+             `--nproc-per-node`:\n{out}"
+        );
+    }
+}
+
+/// Every process of a node sees one environment apart from its own rank.
+///
+/// A distributed job agrees on its shape or it deadlocks, so the
+/// variables that describe the job — `WORLD_SIZE`, the rendezvous, the
+/// session — have to be identical everywhere, and the ones that describe
+/// the *process* have to be the only difference. Asserting it as a
+/// difference rather than a list of names is what makes it a real check:
+/// any future variable that leaks a per-process value into what should be
+/// job-wide state fails here without anyone having to think of it in
+/// advance.
+#[test]
+fn every_process_on_a_node_shares_one_environment_apart_from_its_own_rank() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    // `--clear-env-vars`, so what is compared is the environment mirage
+    // built rather than whatever the developer's shell had in it.
+    let dir = env.root().join("envdump");
+    std::fs::create_dir_all(&dir).unwrap();
+    env.ok(&[
+        "run",
+        "--profile",
+        "p",
+        "--num-nodes",
+        "2",
+        "--nproc-per-node",
+        "2",
+        "--clear-env-vars",
+        "--",
+        "/bin/sh",
+        "-c",
+        &format!("/usr/bin/env > {}/$RANK", dir.display()),
+    ]);
+
+    let of = |rank: u32| -> std::collections::BTreeMap<String, String> {
+        let text = std::fs::read_to_string(dir.join(rank.to_string()))
+            .unwrap_or_else(|e| panic!("rank {rank} wrote no environment: {e}"));
+        text.lines()
+            .filter_map(|line| line.split_once('='))
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    };
+    let ranks: Vec<_> = (0..4).map(of).collect();
+
+    // Two processes on one node: only their own identity may differ. A
+    // key missing from one side counts as a difference, which is why the
+    // comparison is over the union of both.
+    let mut differing: Vec<&str> = ranks[0]
+        .keys()
+        .chain(ranks[1].keys())
+        .filter(|key| ranks[0].get(*key) != ranks[1].get(*key))
+        .map(String::as_str)
+        .collect();
+    differing.sort_unstable();
+    differing.dedup();
+    assert_eq!(
+        differing,
+        ["LOCAL_RANK", "RANK"],
+        "two processes on the same node must differ in nothing but their \
+         own rank"
+    );
+
+    // Across the whole job: the shape and the rendezvous are one answer.
+    for key in ["WORLD_SIZE", "MASTER_PORT", "MIRAGE_SESSION"] {
+        let values: std::collections::BTreeSet<_> =
+            ranks.iter().map(|r| r.get(key).cloned()).collect();
+        assert_eq!(
+            values.len(),
+            1,
+            "every rank must agree on {key}, but they reported {values:?}"
+        );
+    }
+    // And the host identity is per node, because that is what it names.
+    assert_eq!(ranks[0].get("NCCL_HOSTID"), ranks[1].get("NCCL_HOSTID"));
+    assert_ne!(
+        ranks[0].get("NCCL_HOSTID"),
+        ranks[2].get("NCCL_HOSTID"),
+        "two different nodes reported the same host id"
+    );
+}
+
+/// An exec joins the running job rather than standing up a new one.
+///
+/// The claim `mirage exec --help` makes is that the process "still
+/// believes it is that node — same rank variables, same `WORLD_SIZE`,
+/// same rendezvous as its neighbours". A job of several processes per
+/// node is what makes the claim falsifiable: an exec that derived the
+/// world from its own shape rather than the session's would report a
+/// `WORLD_SIZE` of 2 for a job of 6, and number its ranks against it —
+/// while still pointing them at the run's `MASTER_PORT`, so the ranks
+/// collide on a live rendezvous instead of failing to find one. The port
+/// is checked in the same test for that reason: neither half is a
+/// problem on its own, and together they are a mis-formed collective.
+#[test]
+fn an_exec_joins_the_running_job_rather_than_standing_up_a_new_one() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    // The run's own rank 0 records its rendezvous in a file rather than
+    // on stdout: the run is still going, so its stdout cannot be
+    // collected until it exits, and the comparison has to happen while
+    // the session is up.
+    let report = "echo id=$MIRAGE_SESSION rank=$RANK world=$WORLD_SIZE port=$MASTER_PORT";
+    let recorded = env.root().join("rendezvous");
+    let mut run = env.spawn_run(
+        &[
+            "--profile",
+            "p",
+            "--num-nodes",
+            "2",
+            "--nproc-per-node",
+            "3",
+        ],
+        &[
+            "/bin/sh",
+            "-c",
+            &format!(
+                "if [ \"$RANK\" = 0 ]; then {report} > {}; fi; sleep 300",
+                recorded.display()
+            ),
+        ],
+    );
+    let id = run.await_ready(Duration::from_secs(90));
+    wait_for(
+        "the run to publish its rendezvous",
+        Duration::from_secs(60),
+        || recorded.exists(),
+    );
+
+    let field = |text: &str, key: &str| -> String {
+        text.split_once(&format!("{key}="))
+            .map(|(_, rest)| {
+                rest.split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .unwrap_or_else(|| panic!("no {key}= in {text:?}"))
+    };
+    let announced = std::fs::read_to_string(&recorded).unwrap();
+    let run_port = field(&announced, "port");
+    assert_eq!(field(&announced, "world"), "6", "{announced}");
+
+    let joined = env.ok(&[
+        "exec",
+        "--session",
+        &id,
+        "--node",
+        "1",
+        "--",
+        "/bin/sh",
+        "-c",
+        report,
+    ]);
+    assert_eq!(
+        field(&joined, "id"),
+        id,
+        "the exec did not report the session it joined: {joined}"
+    );
+    assert_eq!(
+        field(&joined, "world"),
+        "6",
+        "the exec reported the size of its own invocation rather than the \
+         job's: {joined}"
+    );
+    assert_eq!(
+        field(&joined, "port"),
+        run_port,
+        "the exec picked its own rendezvous port instead of the session's \
+         ({run_port}): {joined}"
+    );
+    // Node 1 of a 2x3 job hosts ranks 3, 4 and 5. Landing on one of the
+    // ranks node *0* already has would put two live processes on one
+    // rank of one rendezvous.
+    let rank: u32 = field(&joined, "rank").parse().unwrap();
+    assert!(
+        (3..6).contains(&rank),
+        "`--node 1` must take a rank that node 1 hosts (3..5), not {rank}: {joined}"
+    );
+
+    run.signal(Signal::SIGINT);
+    run.wait(Duration::from_secs(60));
+}
+
+/// An exec that cannot start its command fails the way a run does.
+///
+/// `mirage exec` is a second front door to the same machinery, and the
+/// two have separate argument handling — so every diagnostic worth having
+/// on `run` can be missing here without a single `run` test noticing. A
+/// user in the second terminal is usually there *because* something is
+/// already wrong, which is the worst moment to be handed a bare errno or
+/// an exit code with no message.
+#[test]
+fn an_exec_that_cannot_start_its_command_fails_the_way_a_run_does() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", "sleep 300"]);
+    let id = run.await_ready(Duration::from_secs(90));
+
+    // A command that is not there: the shell's 127, and the name, so the
+    // user can see the typo.
+    let out = env.run(&["exec", "--session", &id, "--", "/no/such/binary"]);
+    assert_eq!(out.status.code(), Some(127), "{:?}", out.status.code());
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        said.contains("command not found") && said.contains("/no/such/binary"),
+        "the exec must say what it could not run: {said}"
+    );
+
+    // A working directory that is not there: a mirage-level failure, so
+    // exit 1, naming the flag and the path.
+    let err = env.fails(&[
+        "exec",
+        "--session",
+        &id,
+        "--workdir",
+        "/no/such/dir",
+        "--",
+        "/bin/pwd",
+    ]);
+    assert!(
+        err.contains("--workdir") && err.contains("/no/such/dir"),
+        "the exec must name the flag and the directory: {err}"
+    );
+
+    // A session id nothing is serving: exit 1, naming the id and saying
+    // why an id can stop working, which is the surprising part.
+    let err = env.fails(&["exec", "--session", "s-never-existed-0", "--", "/bin/true"]);
+    assert!(
+        err.contains("s-never-existed-0") && err.contains("alive"),
+        "an id with no run behind it must be explained, not just refused: {err}"
+    );
+
+    // The run is untouched by any of it.
+    assert_eq!(env.live_runs(), vec![id.clone()]);
     run.signal(Signal::SIGINT);
     run.wait(Duration::from_secs(60));
 }
