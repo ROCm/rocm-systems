@@ -1166,7 +1166,17 @@ The preceding command collects both counter groups in a single run of ``<applica
 
    - ``--kernel-replay-beta-enabled`` requires ``--pmc``.
 
-   - This feature is in beta.
+   - This feature is in beta. The flag, the SDK API, and the output schema may change.
+
+   - There is no ``--kernel-replay-passes`` flag. The number of passes is the number of ``--pmc`` groups collectable on the dispatch's GPU agent.
+
+   - JSON counter records include a ``replay_pass`` field. CSV ``counter_collection.csv`` does **not** add a ``Replay_Pass`` column; passes of a dispatch share ``Dispatch_Id`` and are distinguished by ``Counter_Name``.
+
+   - Only coarse-grained device allocations (and module-scope ``__device__`` / ``__constant__`` variables) are restored. Unified, managed, and ``hipMallocAsync`` memory are not. Snapshot is a full in-memory copy; dirty-page hashing is not implemented in this version.
+
+   - HIP graph launches are not supported.
+
+For usage, limitations, and when to prefer application replay, see :ref:`using-kernel-replay`. Tool authors should see :ref:`kernel-replay-sdk-api`.
 
 .. _extra-counters:
 
