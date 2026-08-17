@@ -2194,5 +2194,164 @@ TEST(BinaryTranslatorE2E, IncompleteConsumerFailsClosedAtKernargPreloadFirmwareE
 // path is already covered end-to-end by
 // IncompleteIndirectConsumerTranslatesWhenScopeHasNoStalePcValues above.
 
+// A device function reached by more than one kernel scope is cloned once per scope, so each
+// scope's branches resolve through its own placement map. A stored function pointer holds exactly
+// one value and cannot choose between clones, so the translator nominates one clone canonical and
+// rewrites every R_AMDGPU_RELATIVE64 addend to name it.
+//
+// That nomination is only sound while the clones are interchangeable, and a virtual-LDS sidecar
+// scope is not interchangeable with its hardware-LDS twin: the sidecar clone is lowered against a
+// different LDS model, so a pointer that reached it under a dispatch configured for the hardware
+// model -- or the reverse -- would execute the wrong lowering. When two scopes emitting the same
+// address-taken body disagree on that variant, the offset is recorded as variant-conflicted and
+// withheld from the canonical map, which leaves the addend path fail-closed on it instead of
+// silently answering with whichever clone happened to be nominated first.
+//
+// Sidecar variants exist only for the CDNA4 -> CDNA3 pair, so both tests below use it. They share
+// one fixture and differ in a single input field -- kernel 0's group_segment_fixed_size -- which is
+// what makes the refusal attributable to the variant disagreement rather than to the cloning.
+namespace {
+
+constexpr uint16_t kSharedHelperReturnSreg = 30;
+constexpr size_t kSharedHelperEntryWord = 4;
+/// @brief Static LDS beyond the CDNA3 host's 64 KiB per-workgroup limit, which is what makes the
+/// hosting scope acquire a virtual-LDS sidecar variant alongside its hardware-LDS one.
+constexpr uint32_t kOversizedGroupSegmentBytes = 105600u;
+
+/// @brief Two kernels that both call one address-taken helper, so the helper is cloned per scope.
+///
+/// @details The helper is named by an R_AMDGPU_RELATIVE64 slot, which is what makes it
+/// address-taken, and is reached by a direct call from each kernel, which is what makes every
+/// scope emit its own clone rather than leaving it to be adopted by one.
+///
+/// @param oversized_kernel0_lds Give kernel 0 more static LDS than the host can dispatch, so its
+/// scope gains a sidecar variant and the two variants disagree about the helper they both emit.
+[[nodiscard]] std::vector<uint8_t>
+make_shared_address_taken_helper_image(bool oversized_kernel0_lds) {
+  const std::vector<uint32_t> words = {
+      // word 0: kernel 0 entry, calls the helper at word 4.
+      build_s_call_b64(kSharedHelperReturnSreg, 3, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // word 1
+      // word 2: kernel 1 entry, calls the same helper.
+      build_s_call_b64(kSharedHelperReturnSreg, 1, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                             // word 3
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                             // word 4: helper entry
+      build_s_setpc_b64(kSharedHelperReturnSreg, ROCJITSU_CODE_ARCH_CDNA4), // word 5: helper return
+  };
+
+  auto image = test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
+      words, /*kernel1_entry_word=*/2, {{.offset_word = kSharedHelperEntryWord, .words = 2}});
+  if (!oversized_kernel0_lds)
+    return image;
+
+  AmdGpuCodeObject layout(image.data(), image.size());
+  const auto *rodata = find_section(layout, ".rodata");
+  if (rodata == nullptr)
+    return image;
+  // Kernel 0's descriptor is first in .rodata, so this leaves kernel 1 on the hardware-LDS model.
+  write_value_for_test<uint32_t>(
+      image, rodata->sectionOffset() + offsetof(TestKernelDescriptor, group_segment_fixed_size),
+      kOversizedGroupSegmentBytes);
+  // The sidecar descriptor owns a wrapper ABI that needs an initialized workgroup id and room in
+  // the User SGPRs, so the source descriptor has to declare both for the variant to be computable.
+  uint32_t rsrc2 = 0;
+  AMDHSA_BITS_SET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  AMDHSA_BITS_SET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  write_value_for_test<uint32_t>(
+      image, rodata->sectionOffset() + offsetof(TestKernelDescriptor, compute_pgm_rsrc2), rsrc2);
+  uint16_t properties = 0;
+  AMDHSA_BITS_SET(properties,
+                  rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  write_value_for_test<uint16_t>(
+      image, rodata->sectionOffset() + offsetof(TestKernelDescriptor, kernel_code_properties),
+      properties);
+  return image;
+}
+
+/// @brief `.text`-relative offsets of every clone of the helper body in a translated image.
+///
+/// @details Each clone ends in the helper's `s_setpc_b64` return, so counting those locates the
+/// clones without depending on where the layout placed them.
+[[nodiscard]] std::vector<uint64_t>
+translated_helper_entry_offsets(const AmdGpuCodeObject &object) {
+  std::vector<uint64_t> entries;
+  if (object.text_sections().empty())
+    return entries;
+  const Section &text = *object.text_sections().front();
+  const auto *words = reinterpret_cast<const uint32_t *>(text.data());
+  const size_t word_count = text.size() / sizeof(uint32_t);
+  const uint32_t ret = build_s_setpc_b64(kSharedHelperReturnSreg, ROCJITSU_CODE_ARCH_CDNA3);
+  for (size_t i = 1; i < word_count; ++i) {
+    if (words[i] == ret)
+      entries.push_back((i - 1) * sizeof(uint32_t));
+  }
+  return entries;
+}
+
+/// @brief The single `R_AMDGPU_RELATIVE64` addend the fixture's pointer slot carries.
+[[nodiscard]] std::optional<uint64_t> only_relative64_addend(const AmdGpuCodeObject &object) {
+  const auto *rela = find_section(object, ".rela.dyn");
+  if (rela == nullptr || rela->size() != sizeof(Elf64_Rela))
+    return std::nullopt;
+  Elf64_Rela entry{};
+  std::memcpy(&entry, rela->data(), sizeof(entry));
+  if (elf_reloc_type(entry.r_info) != R_AMDGPU_RELATIVE64 || entry.r_addend < 0)
+    return std::nullopt;
+  return static_cast<uint64_t>(entry.r_addend);
+}
+
+} // namespace
+
+// The control. Both kernels stay on the hardware-LDS model, so the two scopes that clone the
+// helper agree on variant, nothing is recorded as conflicted, and the stored pointer is answered
+// from the canonical placement -- the clone the lowest-offset scope emitted. Without this the
+// refusal below could be passing because the body is cloned at all rather than because the clones
+// are not equivalent.
+TEST(BinaryTranslatorE2E, AgreeingScopesResolveAnAddressTakenCloneThroughCanonicalPlacement) {
+  const auto image = make_shared_address_taken_helper_image(/*oversized_kernel0_lds=*/false);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto clones = translated_helper_entry_offsets(translated);
+  ASSERT_EQ(clones.size(), 2u) << "each kernel scope emits its own clone of the shared helper";
+
+  const auto addend = only_relative64_addend(translated);
+  ASSERT_TRUE(addend.has_value());
+  const uint64_t text_vaddr = translated.text_sections().front()->vaddr();
+  ASSERT_GE(*addend, text_vaddr);
+  EXPECT_EQ(*addend - text_vaddr, clones.front())
+      << "the stored pointer names the canonical clone, not the caller-local one";
+}
+
+// The same fixture with kernel 0 given more static LDS than the host can dispatch. Its scope now
+// has a hardware-LDS variant and a virtual-LDS sidecar variant, both emitting the shared helper
+// and disagreeing about how LDS in it is lowered, so no single clone can answer for the pointer.
+// The object must be refused whole rather than translated with the addend pointing at whichever
+// clone was nominated first: that artifact would look correct and would run the hardware-LDS
+// lowering under a sidecar dispatch.
+TEST(BinaryTranslatorE2E, VariantConflictedAddressTakenCloneRefusesInsteadOfNamingOneClone) {
+  const auto image = make_shared_address_taken_helper_image(/*oversized_kernel0_lds=*/true);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  const auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok())
+      << "a code address whose clones disagree on kernel-scope variant has no single answer";
+  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ResourceLimit,
+                                   "relocated .text could not be materialized safely"))
+      << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
+  EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
+}
+
 } // namespace
 } // namespace rocjitsu

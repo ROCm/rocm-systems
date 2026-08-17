@@ -78,10 +78,10 @@ parse_line_info(const std::string& _name, bool _process_dwarf, bool _process_bfd
 
         for(auto* itr : _section_set)
         {
-            auto*         _section     = const_cast<asection*>(itr);
-            bfd_vma       _section_vma = bfd_section_vma(_section);
-            bfd_size_type _section_len = bfd_section_size(_section);
-            auto          _section_range =
+            auto*               _section     = const_cast<asection*>(itr);
+            const bfd_vma       _section_vma = bfd_section_vma(_section);
+            const bfd_size_type _section_len = bfd_section_size(_section);
+            auto                _section_range =
                 address_range{ _section_vma, _section_vma + _section_len };
             _section_map[_section_range] = _section;
         }

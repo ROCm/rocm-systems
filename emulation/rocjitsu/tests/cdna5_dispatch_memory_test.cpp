@@ -19,6 +19,25 @@ namespace {
 using namespace rocjitsu;
 using namespace rocjitsu::test::cdna5;
 
+TEST(Gfx1250ExecutionTest, LdsAccessesRejectWrappedRanges) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto &lds = cu->lds();
+  constexpr uint32_t kWrappedAddress = UINT32_MAX - 3;
+  constexpr uint32_t kValue = 0x12345678u;
+
+  lds.write32(kWrappedAddress, kValue);
+  EXPECT_EQ(lds.read32(kWrappedAddress), 0u);
+
+  std::array<uint8_t, sizeof(kValue)> bytes{};
+  std::memcpy(bytes.data(), &kValue, sizeof(kValue));
+  lds.write(kWrappedAddress, bytes.data(), bytes.size());
+  bytes.fill(0xff);
+  const auto &const_lds = lds;
+  const_lds.read(kWrappedAddress, bytes.data(), bytes.size());
+  EXPECT_EQ(bytes, (std::array<uint8_t, sizeof(kValue)>{}));
+}
+
 TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
   Gfx1250Sim sim;
   const uint32_t code[] = {S_ENDPGM_GFX12};
