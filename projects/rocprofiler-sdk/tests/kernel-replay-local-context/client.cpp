@@ -88,11 +88,11 @@ rocprofiler_context_id_t g_spm_ctx{0};
 rocprofiler_context_id_t g_pcs_ctx{0};
 rocprofiler_buffer_id_t  g_pcs_buffer{0};
 
-std::set<std::string> g_services{};
-std::set<std::string> g_keep{};
-int64_t               g_passes     = 4;
-int64_t               g_stop_pass  = 1;
-int64_t               g_start_pass = -1;
+std::set<std::string>   g_services{};
+std::set<std::string>   g_keep{};
+int64_t                 g_passes        = 4;
+int64_t                 g_stop_pass     = 1;
+int64_t                 g_start_pass    = -1;
 rocprofiler_kernel_id_t g_target_kernel = UINT64_MAX;
 
 std::atomic<int> g_counter_records{0};
@@ -157,8 +157,7 @@ gpu_agents()
     return agents;
 }
 
-uint64_t
-pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return static_cast<uint64_t>(g_passes);
 }
@@ -212,8 +211,8 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        p->pass_count_cb  = pass_count_cb;
-        g_target_kernel   = p->dispatch_info.kernel_id;
+        p->pass_count_cb = pass_count_cb;
+        g_target_kernel  = p->dispatch_info.kernel_id;
         g_replayed.fetch_add(1);
         return;
     }
@@ -245,7 +244,7 @@ counter_dispatch_cb(rocprofiler_dispatch_counting_service_data_t d,
 {
     static std::mutex                                                    m{};
     static std::unordered_map<uint64_t, rocprofiler_counter_config_id_t> cache{};
-    const auto                                                           agent = d.dispatch_info.agent_id;
+    const auto agent = d.dispatch_info.agent_id;
     {
         std::lock_guard<std::mutex> lk{m};
         if(auto it = cache.find(agent.handle); it != cache.end())
@@ -338,10 +337,11 @@ spm_dispatch_cb(const rocprofiler_spm_dispatch_counting_service_data_t* d,
         fprintf(stderr, "[lc] no SPM counters\n");
         std::abort();
     }
-    rocprofiler_spm_parameters_t  param{.size  = sizeof(rocprofiler_spm_parameters_t),
-                                       .type  = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
-                                       .value = 1200};
-    rocprofiler_spm_parameters_t* params[] = {&param};
+    rocprofiler_spm_parameters_t param{
+        .size  = sizeof(rocprofiler_spm_parameters_t),
+        .type  = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
+        .value = 1200};
+    rocprofiler_spm_parameters_t*   params[] = {&param};
     rocprofiler_counter_config_id_t cfg{.handle = 0};
     RC(rocprofiler_spm_create_counter_config(agent, want.data(), want.size(), params, 1, &cfg));
     {
@@ -364,8 +364,7 @@ att_dispatch_cb(rocprofiler_agent_id_t,
     return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
 }
 
-void
-att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
+void att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
 {
     g_att_shader.fetch_add(1);
 }
@@ -406,13 +405,14 @@ configure_att()
     for(auto id : agents)
     {
         auto st = rocprofiler_configure_dispatch_thread_trace_service(g_att_ctx,
-                                                                     id,
-                                                                     parameters.data(),
-                                                                     parameters.size(),
-                                                                     att_dispatch_cb,
-                                                                     att_shader_cb,
-                                                                     nullptr);
-        if(st == ROCPROFILER_STATUS_SUCCESS) any = true;
+                                                                      id,
+                                                                      parameters.data(),
+                                                                      parameters.size(),
+                                                                      att_dispatch_cb,
+                                                                      att_shader_cb,
+                                                                      nullptr);
+        if(st == ROCPROFILER_STATUS_SUCCESS)
+            any = true;
         else
             fprintf(stderr,
                     "[lc] ATT configure agent %lu: %s\n",
@@ -506,8 +506,8 @@ expected_dispatch_records()
 int
 tool_init(rocprofiler_client_finalize_t, void*)
 {
-    g_services    = parse_list(std::getenv("KR_LC_SERVICES"));
-    g_keep        = parse_list(std::getenv("KR_LC_KEEP"));
+    g_services   = parse_list(std::getenv("KR_LC_SERVICES"));
+    g_keep       = parse_list(std::getenv("KR_LC_KEEP"));
     g_passes     = env_i64("KR_LC_PASSES", 4);
     g_stop_pass  = env_i64("KR_LC_STOP_PASS", 1);
     g_start_pass = env_i64("KR_LC_START_PASS", -1);

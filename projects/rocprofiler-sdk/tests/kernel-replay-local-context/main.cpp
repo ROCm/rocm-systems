@@ -64,8 +64,8 @@ main()
     printf("[app] bump=%d\n", h);
     if(h != 1)
     {
-        fprintf(stderr, "[app] FAIL: bump=%d (expected 1; restore did not revert between passes)\n",
-                h);
+        fprintf(
+            stderr, "[app] FAIL: bump=%d (expected 1; restore did not revert between passes)\n", h);
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;

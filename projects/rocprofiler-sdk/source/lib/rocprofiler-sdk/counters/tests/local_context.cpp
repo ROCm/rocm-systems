@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
@@ -28,7 +29,6 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -93,13 +93,13 @@ invoke_queue_cb(context::context& ctx, std::atomic<int>* hits)
     rocprofiler_queue_id_t qid{.handle = 1};
     FakeQueue              fq(agent, qid);
 
-    auto info          = std::make_shared<counters::counter_callback_info>();
-    info->user_cb      = counting_dispatch_cb;
+    auto info           = std::make_shared<counters::counter_callback_info>();
+    info->user_cb       = counting_dispatch_cb;
     info->callback_args = hits;
 
-    context::correlation_id corr{};
-    hsa::rocprofiler_packet pkt{};
-    rocprofiler_user_data_t user_data{};
+    context::correlation_id                           corr{};
+    hsa::rocprofiler_packet                           pkt{};
+    rocprofiler_user_data_t                           user_data{};
     hsa::queue_info_session_t::external_corr_id_map_t extern_ids{};
 
     auto ret = counters::queue_cb(
@@ -136,7 +136,7 @@ TEST(core, local_context_override_stops_queue_cb)
     EXPECT_EQ(hits.load(), 1);
 
     {
-        auto                                 active = as_active(ctx);
+        auto                                        active = as_active(ctx);
         kernel_replay::scoped_local_context_control loop{active};
         kernel_replay::set_toggles_armed(true);
         EXPECT_EQ(kernel_replay::replay_local_stop_context({.handle = ctx.context_idx}),
@@ -172,8 +172,8 @@ TEST(core, local_context_override_restarts_queue_cb)
         std::make_unique<context::dispatch_counter_collection_service>();
     ctx.dispatch_counter_collection->enabled.wlock([](auto& data) { data = true; });
 
-    std::atomic<int> hits{0};
-    auto             active = as_active(ctx);
+    std::atomic<int>                            hits{0};
+    auto                                        active = as_active(ctx);
     kernel_replay::scoped_local_context_control loop{active};
 
     kernel_replay::set_toggles_armed(true);
