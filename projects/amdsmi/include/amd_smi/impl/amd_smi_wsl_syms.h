@@ -29,21 +29,22 @@
 
 #ifdef ENABLE_WSL_BACKEND
 
-#include <hsakmt/hsakmt.h>
-#include <hsakmt/rocdxg_smi.h>
+#include "amd_smi/impl/wsl/rocdxg_abi.h"
 
 namespace amd::smi {
 
 // Function pointer table populated by load_rocdxg().
 // All pointers are null until dlopen succeeds.
 struct WslSyms {
-  // hsakmt
+  // hsakmt lifecycle. rocdxg_smi_* calls fail until the DXG runtime is open and
+  // hsaKmtAcquireSystemProperties() has built the WDDM device list.
   HSAKMT_STATUS (*hsaKmtOpenKFD)() = nullptr;
   HSAKMT_STATUS (*hsaKmtCloseKFD)() = nullptr;
   HSAKMT_STATUS (*hsaKmtAcquireSystemProperties)(HsaSystemProperties*) = nullptr;
   HSAKMT_STATUS (*hsaKmtReleaseSystemProperties)() = nullptr;
-  HSAKMT_STATUS (*hsaKmtGetNodeProperties)(HSAuint32, HsaNodeProperties*) = nullptr;
 
+  // rocdxg_smi — enumeration
+  HSAKMT_STATUS (*rocdxg_smi_get_device_count)(uint32_t*) = nullptr;
   // rocdxg_smi — aggregate static device info (cached per device)
   HSAKMT_STATUS (*rocdxg_smi_get_device_info)(uint32_t, rocdxg_smi_device_info_t*) = nullptr;
   // rocdxg_smi — dynamic queries

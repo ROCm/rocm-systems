@@ -358,9 +358,9 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
 
 amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
 #ifdef ENABLE_WSL_BACKEND
-  // WSL path: TryPopulate handles /dev/dxg detection, librocdxg loading, and
+  // WSL path: try_populate handles /dev/dxg detection, librocdxg loading, and
   // device enumeration. Returns NOT_SUPPORTED when not on WSL.
-  amdsmi_status_t wsl_status = WSLGPUBackend::TryPopulate(sockets_, processors_);
+  amdsmi_status_t wsl_status = WSLGPUBackend::try_populate(sockets_, processors_);
   if (wsl_status == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     std::ostringstream ss;
     ss << __func__ << ": WSL detected (/dev/dxg) but librocdxg.so.1 failed to load";
@@ -372,6 +372,7 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   // Native Linux path: use rsmi + libdrm.
   AMDSmiSystem::cleanup();
   rsmi_driver_state_t state;
+  // Forward the test flag so rsmi's mutex becomes non-blocking.
   uint64_t rsmi_flags = (init_flag_ & AMD_SMI_INIT_FLAG_RESRV_TEST1)
                             ? static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1)
                             : 0ULL;
@@ -395,6 +396,7 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   }
 
   for (uint32_t i = 0; i < device_count; i++) {
+    // GPU devices are keyed by bdf, since several may share one socket.
     std::string socket_id;
     amd_smi_status = get_gpu_socket_id(i, socket_id);
     if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
@@ -715,8 +717,8 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
     }
     drm_.cleanup();
 #ifdef ENABLE_WSL_BACKEND
-    bool used_wsl = WSLGPUBackend::IsActive();
-    amdsmi_status_t wsl_ret = WSLGPUBackend::Shutdown();
+    bool used_wsl = WSLGPUBackend::is_active();
+    amdsmi_status_t wsl_ret = WSLGPUBackend::shutdown();
     if (wsl_ret != AMDSMI_STATUS_SUCCESS) return wsl_ret;
     if (!used_wsl) {
 #endif

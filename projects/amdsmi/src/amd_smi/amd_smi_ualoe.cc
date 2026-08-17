@@ -660,7 +660,7 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
 
 #ifdef ENABLE_WSL_BACKEND
   if (auto* backend = device->backend()) {
-    return backend->GetFabricTelemetryData(telemetry);
+    return backend->get_fabric_telemetry_data(telemetry);
   }
 #endif
 
@@ -751,7 +751,7 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
 
 #ifdef ENABLE_WSL_BACKEND
   if (auto* backend = device->backend()) {
-    return backend->GetGpuFabricInfo(info);
+    return backend->get_gpu_fabric_info(info);
   }
 #endif
 
