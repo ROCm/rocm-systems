@@ -5847,6 +5847,7 @@ class CodeGenerator:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         _, _, nt = self._coherency_exprs()
+        stride = esz * ne
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
@@ -5869,7 +5870,7 @@ class CodeGenerator:
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
-            '  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.'
+            '  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.'
         )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vdst')};")
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -5877,7 +5878,9 @@ class CodeGenerator:
         L.append(
             '    uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);'
         )
-        L.append('    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;')
+        L.append(
+            f'    d->per_lane_lds_addr[lane] = async_lds_lane_address(inst_, wf, lane_lds_addr, {stride});'
+        )
         L.append('  }')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -5903,14 +5906,20 @@ class CodeGenerator:
         L.append('  const auto &lds = cu.lds();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
-            '  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.'
+            '  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.'
         )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vsrc')};")
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(
-            '    uint32_t lds_addr = wf.lds_base() + amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);'
+            '    uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);'
+        )
+        L.append(
+            f'    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, {stride});'
+        )
+        L.append(
+            '    // Out-of-range LDS reads return zero; the global store still issues.'
         )
         L.append(f'    lds.read(lds_addr, &d->store_data[lane * {stride}], {stride});')
         L.append('  }')
@@ -5925,9 +5934,12 @@ class CodeGenerator:
         L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
         L.append('    d->cu_path = wf.cu().full_path();')
         L.append('    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);')
-        L.append(
-            '    int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);'
+        offset_expr = (
+            'signed_ioffset(inst_.ioffset)'
+            if self.isa_spec.arch_name == 'gfx1250'
+            else 'static_cast<int32_t>(inst_.ioffset << 8) >> 8'
         )
+        L.append(f'    int64_t offset = static_cast<int64_t>({offset_expr});')
         L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('      if (!(exec & (1ULL << lane))) continue;')
         L.append(
@@ -7332,6 +7344,8 @@ class CodeGenerator:
         The ``encoding_map`` is used to resolve each instruction's actual
         encoding fields for correct struct member access.
         """
+        decoder_factories = self._distributed_decoder_factories()
+
         # Build a mapping of parent encoding names to their child alt
         # encodings that have their own instructions (Category 1 alts).
         profile = self.isa_spec.profile
@@ -8981,6 +8995,18 @@ class CodeGenerator:
 
                     inst_classes.append(s)
                     inst_impls = [class_ctor_impl]
+                    decoder_factory = decoder_factories.get(inst.fmt_name)
+                    if decoder_factory is not None:
+                        inst_impls.append(
+                            cgen.Line(
+                                'namespace detail {\n'
+                                f'std::unique_ptr<Instruction> {decoder_factory}'
+                                '(const MachineInst *opcode) {\n'
+                                f'  return std::make_unique<{inst.fmt_name}>(opcode);\n'
+                                '}\n'
+                                '} // namespace detail'
+                            )
+                        )
                     if gfx1250_f8f6f4_shape is not None:
                         inst_impls.append(
                             cgen.Line(
@@ -9504,6 +9530,12 @@ class CodeGenerator:
                         model_cpp_includes.append(('format', True))
                     if 'std::array' in model_impl_text:
                         model_cpp_includes.append(('array', True))
+
+                model_impl_text = '\n'.join(
+                    str(impl) for impl in class_func_impls.model
+                )
+                if 'std::make_unique' in model_impl_text:
+                    model_cpp_includes.append(('memory', True))
 
                 inst_def_file.gen_code()
                 self._write_inst_impl_files(
@@ -12086,9 +12118,47 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 generated_dir_name=self.generated_dir_name,
             ).gen_code()
 
+    def _distributed_decoder_factories(self) -> dict[str, str]:
+        """Return instruction classes whose trivial factories live with their model.
+
+        Decoder tables contain both dispatch helpers and one-line instruction
+        factories.  Keeping the latter in each encoding's existing model source
+        distributes code generation without creating more translation units.
+        """
+        classes = {
+            inst.fmt_name for enc in self.isa_spec.inst_encodings for inst in enc.insts
+        }
+        factory_names: set[str] = set()
+        for dte in self.isa_spec.primary_decode_table:
+            if dte is None:
+                continue
+            if dte.is_primary:
+                factory_names.add(dte.decode_func)
+            elif dte.sub_decode_funcs is not None:
+                factory_names.update(dte.sub_decode_funcs)
+
+        return {
+            class_name: factory_name
+            for class_name in sorted(classes)
+            if (factory_name := f'decode{class_name}') in factory_names
+        }
+
     def gen_decoder(self) -> None:
         """Generate decoder lookup tables and decode functions."""
-        class_def = []
+        distributed_factories = self._distributed_decoder_factories()
+        distributed_factory_names = set(distributed_factories.values())
+        class_def = [
+            cgen.Struct(
+                'Decoder',
+                [
+                    cgen.Line('public:'),
+                    cgen.FunctionDeclaration(
+                        cgen.Value('static std::unique_ptr<Instruction>', 'decode'),
+                        [cgen.Value('const MachineInst *', 'opcode')],
+                    ),
+                ],
+            )
+        ]
         class_impl = []
         class_members = [
             cgen.Line('public:'),
@@ -12135,7 +12205,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         decode_table_funcs = [
             cgen.FunctionBody(
                 cgen.FunctionDeclaration(
-                    cgen.Value('std::unique_ptr<Instruction>', 'Decoder::decode'),
+                    cgen.Value('std::unique_ptr<Instruction>', 'DecoderImpl::decode'),
                     [cgen.Value('const MachineInst *', 'opcode')],
                 ),
                 cgen.Block(decode_body),
@@ -12144,7 +12214,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 cgen.FunctionDeclaration(
                     cgen.Value(
                         'std::unique_ptr<Instruction>',
-                        'Decoder::decodeInvalid',
+                        'DecoderImpl::decodeInvalid',
                     ),
                     [cgen.Value('const MachineInst *', 'opcode')],
                 ),
@@ -12283,7 +12353,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             decode_table_funcs.append(
                 cgen.FunctionBody(
                     cgen.FunctionDeclaration(
-                        cgen.Value('std::unique_ptr<Instruction>', f'Decoder::{_fn}'),
+                        cgen.Value(
+                            'std::unique_ptr<Instruction>', f'DecoderImpl::{_fn}'
+                        ),
                         [cgen.Value('const MachineInst *', 'opcode')],
                     ),
                     _body,
@@ -12293,22 +12365,30 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         for _primary_index, dte in enumerate(self.isa_spec.primary_decode_table):
             if _primary_index in _custom_primary_decode_funcs:
                 decode_table_entries.append(
-                    f'&Decoder::{_custom_primary_decode_funcs[_primary_index]},'
+                    f'&DecoderImpl::{_custom_primary_decode_funcs[_primary_index]},'
                 )
                 continue
             if dte is not None:
-                decode_table_entries.append(f'&Decoder::{dte.decode_func},')
+                primary_factory_is_distributed = (
+                    dte.is_primary and dte.decode_func in distributed_factory_names
+                )
+                if primary_factory_is_distributed:
+                    decode_table_entries.append(f'&detail::{dte.decode_func},')
+                else:
+                    decode_table_entries.append(f'&DecoderImpl::{dte.decode_func},')
                 if dte.decode_func not in decode_funcs_found:
                     decode_funcs_found.add(dte.decode_func)
                     func_decl = cgen.FunctionDeclaration(
                         cgen.Value(
                             'std::unique_ptr<Instruction>',
-                            f'Decoder::{dte.decode_func}',
+                            f'DecoderImpl::{dte.decode_func}',
                         ),
                         [cgen.Value('const MachineInst *', 'opcode')],
                     )
                     sub_decode_func_decls = []
-                    if dte.is_primary:
+                    if primary_factory_is_distributed:
+                        pass
+                    elif dte.is_primary:
                         decode_table_funcs.append(
                             cgen.FunctionBody(
                                 func_decl,
@@ -12345,49 +12425,28 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         )
                         sub_decode_table_entries.append(
                             cgen.Line(
-                                f'const std::array<Decoder::DecodeFunc, {len(dte.sub_decode_funcs)}> Decoder::{dte.sub_decode_table} = {{'
+                                f'const std::array<DecoderImpl::DecodeFunc, {len(dte.sub_decode_funcs)}> DecoderImpl::{dte.sub_decode_table} = {{'
                             )
                         )
                         sub_decode_table_entry_str = []
                         sub_decode_funcs_found = set()
                         for fn in dte.sub_decode_funcs:
+                            sub_factory_is_distributed = (
+                                fn in distributed_factory_names
+                                and fn not in _custom_decode_bodies
+                            )
                             if (
                                 fn != 'decodeInvalid'
                                 and fn not in sub_decode_funcs_found
                             ):
                                 sub_decode_funcs_found.add(fn)
                                 class_name = fn.removeprefix('decode')
-                                sub_decode_func_decls.append(
-                                    cgen.FunctionDeclaration(
-                                        cgen.Value(
-                                            'static std::unique_ptr<Instruction>',
-                                            fn,
-                                        ),
-                                        [
-                                            cgen.Value(
-                                                'const MachineInst *',
-                                                'opcode',
-                                            )
-                                        ],
-                                    )
-                                )
-                                _fn_body = (
-                                    _custom_decode_bodies[fn]
-                                    if fn in _custom_decode_bodies
-                                    else cgen.Block(
-                                        [
-                                            cgen.Statement(
-                                                f'return std::make_unique<{class_name}>(opcode)'
-                                            )
-                                        ]
-                                    )
-                                )
-                                decode_table_funcs.append(
-                                    cgen.FunctionBody(
+                                if not sub_factory_is_distributed:
+                                    sub_decode_func_decls.append(
                                         cgen.FunctionDeclaration(
                                             cgen.Value(
-                                                'std::unique_ptr<Instruction>',
-                                                f'Decoder::{fn}',
+                                                'static std::unique_ptr<Instruction>',
+                                                fn,
                                             ),
                                             [
                                                 cgen.Value(
@@ -12395,34 +12454,86 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                     'opcode',
                                                 )
                                             ],
-                                        ),
-                                        _fn_body,
+                                        )
                                     )
+                                    _fn_body = (
+                                        _custom_decode_bodies[fn]
+                                        if fn in _custom_decode_bodies
+                                        else cgen.Block(
+                                            [
+                                                cgen.Statement(
+                                                    f'return std::make_unique<{class_name}>(opcode)'
+                                                )
+                                            ]
+                                        )
+                                    )
+                                    decode_table_funcs.append(
+                                        cgen.FunctionBody(
+                                            cgen.FunctionDeclaration(
+                                                cgen.Value(
+                                                    'std::unique_ptr<Instruction>',
+                                                    f'DecoderImpl::{fn}',
+                                                ),
+                                                [
+                                                    cgen.Value(
+                                                        'const MachineInst *',
+                                                        'opcode',
+                                                    )
+                                                ],
+                                            ),
+                                            _fn_body,
+                                        ),
+                                    )
+                            if sub_factory_is_distributed:
+                                sub_decode_table_entry_str.append(f'&detail::{fn},')
+                            else:
+                                sub_decode_table_entry_str.append(
+                                    f'&DecoderImpl::{fn},'
                                 )
-                            sub_decode_table_entry_str.append(f'&Decoder::{fn},')
                         sub_decode_table_entries.append(
                             cgen.Line(''.join(sub_decode_table_entry_str))
                         )
                         sub_decode_table_entries.append(cgen.Line('};'))
-                    class_members.append(
-                        cgen.FunctionDeclaration(
-                            cgen.Value(
-                                'static std::unique_ptr<Instruction>',
-                                f'{dte.decode_func}',
-                            ),
-                            [cgen.Value('const MachineInst *', 'opcode')],
+                    if not primary_factory_is_distributed:
+                        class_members.append(
+                            cgen.FunctionDeclaration(
+                                cgen.Value(
+                                    'static std::unique_ptr<Instruction>',
+                                    f'{dte.decode_func}',
+                                ),
+                                [cgen.Value('const MachineInst *', 'opcode')],
+                            )
                         )
-                    )
                     class_members.extend(sub_decode_func_decls)
             else:
-                decode_table_entries.append('&Decoder::decodeInvalid,')
+                decode_table_entries.append('&DecoderImpl::decodeInvalid,')
         decode_table_entries = ''.join(decode_table_entries)
         class_members.extend(decode_tables)
-        class_def.append(cgen.Struct('Decoder', class_members))
+        detail_decls = '\n'.join(
+            f'std::unique_ptr<Instruction> {factory_name}'
+            '(const MachineInst *opcode);'
+            for factory_name in sorted(distributed_factory_names)
+        )
+        class_impl[0:0] = [
+            cgen.Line(
+                'namespace detail {\n' f'{detail_decls}\n' '} // namespace detail'
+            ),
+            cgen.Struct('DecoderImpl', class_members),
+        ]
+        decode_table_funcs.insert(
+            0,
+            cgen.FunctionBody(
+                cgen.FunctionDeclaration(
+                    cgen.Value('std::unique_ptr<Instruction>', 'Decoder::decode'),
+                    [cgen.Value('const MachineInst *', 'opcode')],
+                ),
+                cgen.Block([cgen.Statement('return DecoderImpl::decode(opcode)')]),
+            ),
+        )
         class_impl.extend(decode_table_funcs)
         class_impl.append(
             cgen.Line(
-                f'const std::array<Decoder::DecodeFunc, {pow(2, self.isa_spec.profile.max_enc_bits)}> Decoder::primary_decode_table = {{'
+                f'const std::array<DecoderImpl::DecodeFunc, {pow(2, self.isa_spec.profile.max_enc_bits)}> DecoderImpl::primary_decode_table = {{'
             )
         )
         class_impl.append(cgen.Line(decode_table_entries))
@@ -12439,7 +12550,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ),
                     False,
                 ),
-                ('array', True),
                 ('memory', True),
             ],
             ['Instruction'],
@@ -12448,23 +12558,36 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             True,
             generated_dir_name=self.generated_dir_name,
         )
+        decoder_impl_includes = [
+            (
+                self.config.generated_include(self.generated_dir_name, 'decoder.h'),
+                False,
+            ),
+            ('util/except.h', False),
+            (
+                self.config.generated_include(
+                    self.generated_dir_name,
+                    'vop3p.h',
+                ),
+                False,
+            ),
+        ]
+        if self._supports_generated_vopd():
+            decoder_impl_includes.append(
+                (
+                    self.config.generated_include(
+                        self.generated_dir_name,
+                        'vopd.h',
+                    ),
+                    False,
+                )
+            )
+        decoder_impl_includes.extend([('array', True), ('bit', True), ('format', True)])
         class_impl_file = CppFile(
             'decoder',
             self.out_path,
             False,
-            [
-                (
-                    self.config.generated_include(self.generated_dir_name, 'decoder.h'),
-                    False,
-                ),
-                ('util/except.h', False),
-                (
-                    self.config.generated_include(self.generated_dir_name, 'insts.h'),
-                    False,
-                ),
-                ('bit', True),
-                ('format', True),
-            ],
+            decoder_impl_includes,
             [],
             class_impl,
             self.cpp_namespace,

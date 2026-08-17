@@ -35,7 +35,8 @@ list_dir_files(const std::string& path)
         if(d) closedir(d);
     };
 
-    std::unique_ptr<DIR, decltype(dir_deleter)> dir(opendir(path.c_str()), dir_deleter);
+    const std::unique_ptr<DIR, decltype(dir_deleter)> dir(opendir(path.c_str()),
+                                                          dir_deleter);
 
     if(!dir) throw std::runtime_error(fmt::format("Error opening directory: {}", path));
 
@@ -71,15 +72,15 @@ find_cache_files(const pid_t& root_pid, const data::directory_files_t& dir_conte
         {
             if(std::regex_match(filename, match, buff_regex))
             {
-                int parent_pid = std::stoi(match[1]);
-                int pid        = std::stoi(match[2]);
+                const int parent_pid = std::stoi(match[1]);
+                const int pid        = std::stoi(match[2]);
                 if(parent_pid == root_pid)
                     cache_map[pid].buff_storage = trace_cache::tmp_directory + filename;
             }
             else if(std::regex_match(filename, match, meta_regex))
             {
-                int parent_pid = std::stoi(match[1]);
-                int pid        = std::stoi(match[2]);
+                const int parent_pid = std::stoi(match[1]);
+                const int pid        = std::stoi(match[2]);
                 if(parent_pid == root_pid)
                     cache_map[pid].metadata = trace_cache::tmp_directory + filename;
             }
@@ -150,14 +151,14 @@ merge_perfetto_files()
     if(!_script_dir.empty())
         _script_path = fmt::format("{}/{}", _script_dir, _script_path);
 
-    if(!tim::filepath::exists(_script_path))
+    if(!path::is_regular_file(_script_path))
     {
         LOG_WARNING("Merge script not found: {}", _script_path);
         return;
     }
 
-    auto _command = _script_path + " '" + _output_folder + "'";
-    int  result   = system(_command.c_str());
+    auto      _command = _script_path + " '" + _output_folder + "'";
+    const int result   = system(_command.c_str());
 
     if(result != 0)
         LOG_ERROR("Failed to execute merge script: {}", _command);

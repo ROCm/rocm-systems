@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna4 {
@@ -34,6 +35,12 @@ DsAddU32Ds::DsAddU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAddU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsAddU32Ds>(opcode);
+}
+} // namespace detail
+
 DsSubU32Ds::DsSubU32Ds(const MachineInst *inst)
     : Ds("ds_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsSubU32Ds)),
@@ -54,6 +61,12 @@ DsSubU32Ds::DsSubU32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsSubU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsSubU32Ds>(opcode);
+}
+} // namespace detail
 
 DsRsubU32Ds::DsRsubU32Ds(const MachineInst *inst)
     : Ds("ds_rsub_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -76,6 +89,12 @@ DsRsubU32Ds::DsRsubU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsRsubU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsRsubU32Ds>(opcode);
+}
+} // namespace detail
+
 DsIncU32Ds::DsIncU32Ds(const MachineInst *inst)
     : Ds("ds_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsIncU32Ds)),
@@ -96,6 +115,12 @@ DsIncU32Ds::DsIncU32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsIncU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsIncU32Ds>(opcode);
+}
+} // namespace detail
 
 DsDecU32Ds::DsDecU32Ds(const MachineInst *inst)
     : Ds("ds_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -118,6 +143,12 @@ DsDecU32Ds::DsDecU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsDecU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsDecU32Ds>(opcode);
+}
+} // namespace detail
+
 DsMinI32Ds::DsMinI32Ds(const MachineInst *inst)
     : Ds("ds_min_i32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinI32Ds)),
@@ -138,6 +169,12 @@ DsMinI32Ds::DsMinI32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMinI32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMinI32Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxI32Ds::DsMaxI32Ds(const MachineInst *inst)
     : Ds("ds_max_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -160,6 +197,12 @@ DsMaxI32Ds::DsMaxI32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMaxI32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMaxI32Ds>(opcode);
+}
+} // namespace detail
+
 DsMinU32Ds::DsMinU32Ds(const MachineInst *inst)
     : Ds("ds_min_u32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinU32Ds)),
@@ -180,6 +223,12 @@ DsMinU32Ds::DsMinU32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMinU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMinU32Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxU32Ds::DsMaxU32Ds(const MachineInst *inst)
     : Ds("ds_max_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -202,6 +251,12 @@ DsMaxU32Ds::DsMaxU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMaxU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMaxU32Ds>(opcode);
+}
+} // namespace detail
+
 DsAndB32Ds::DsAndB32Ds(const MachineInst *inst)
     : Ds("ds_and_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsAndB32Ds)),
@@ -222,6 +277,12 @@ DsAndB32Ds::DsAndB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAndB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsAndB32Ds>(opcode);
+}
+} // namespace detail
 
 DsOrB32Ds::DsOrB32Ds(const MachineInst *inst)
     : Ds("ds_or_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -244,6 +305,12 @@ DsOrB32Ds::DsOrB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsOrB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsOrB32Ds>(opcode);
+}
+} // namespace detail
+
 DsXorB32Ds::DsXorB32Ds(const MachineInst *inst)
     : Ds("ds_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsXorB32Ds)),
@@ -264,6 +331,12 @@ DsXorB32Ds::DsXorB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsXorB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsXorB32Ds>(opcode);
+}
+} // namespace detail
 
 DsMskorB32Ds::DsMskorB32Ds(const MachineInst *inst)
     : Ds("ds_mskor_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -292,6 +365,12 @@ DsMskorB32Ds::DsMskorB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMskorB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMskorB32Ds>(opcode);
+}
+} // namespace detail
+
 DsWriteB32Ds::DsWriteB32Ds(const MachineInst *inst)
     : Ds("ds_write_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWriteB32Ds)),
@@ -310,6 +389,12 @@ DsWriteB32Ds::DsWriteB32Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWriteB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWriteB32Ds>(opcode);
+}
+} // namespace detail
 
 DsWrite2B32Ds::DsWrite2B32Ds(const MachineInst *inst)
     : Ds("ds_write2_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -336,6 +421,12 @@ DsWrite2B32Ds::DsWrite2B32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWrite2B32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWrite2B32Ds>(opcode);
+}
+} // namespace detail
+
 DsWrite2st64B32Ds::DsWrite2st64B32Ds(const MachineInst *inst)
     : Ds("ds_write2st64_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWrite2st64B32Ds)),
@@ -360,6 +451,12 @@ DsWrite2st64B32Ds::DsWrite2st64B32Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWrite2st64B32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWrite2st64B32Ds>(opcode);
+}
+} // namespace detail
 
 DsCmpstB32Ds::DsCmpstB32Ds(const MachineInst *inst)
     : Ds("ds_cmpst_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -388,6 +485,12 @@ DsCmpstB32Ds::DsCmpstB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsCmpstB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsCmpstB32Ds>(opcode);
+}
+} // namespace detail
+
 DsCmpstF32Ds::DsCmpstF32Ds(const MachineInst *inst)
     : Ds("ds_cmpst_f32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsCmpstF32Ds)),
@@ -415,6 +518,12 @@ DsCmpstF32Ds::DsCmpstF32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsCmpstF32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsCmpstF32Ds>(opcode);
+}
+} // namespace detail
+
 DsMinF32Ds::DsMinF32Ds(const MachineInst *inst)
     : Ds("ds_min_f32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinF32Ds)),
@@ -435,6 +544,12 @@ DsMinF32Ds::DsMinF32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMinF32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMinF32Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxF32Ds::DsMaxF32Ds(const MachineInst *inst)
     : Ds("ds_max_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -457,12 +572,24 @@ DsMaxF32Ds::DsMaxF32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMaxF32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMaxF32Ds>(opcode);
+}
+} // namespace detail
+
 DsNopDs::DsNopDs(const MachineInst *inst)
     : Ds("ds_nop", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsNopDs)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsNopDs(const MachineInst *opcode) {
+  return std::make_unique<DsNopDs>(opcode);
+}
+} // namespace detail
 
 DsAddF32Ds::DsAddF32Ds(const MachineInst *inst)
     : Ds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -485,6 +612,12 @@ DsAddF32Ds::DsAddF32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAddF32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsAddF32Ds>(opcode);
+}
+} // namespace detail
+
 DsPkAddF16Ds::DsPkAddF16Ds(const MachineInst *inst)
     : Ds("ds_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsPkAddF16Ds)),
@@ -505,6 +638,12 @@ DsPkAddF16Ds::DsPkAddF16Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsPkAddF16Ds(const MachineInst *opcode) {
+  return std::make_unique<DsPkAddF16Ds>(opcode);
+}
+} // namespace detail
 
 DsPkAddBf16Ds::DsPkAddBf16Ds(const MachineInst *inst)
     : Ds("ds_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
@@ -527,6 +666,12 @@ DsPkAddBf16Ds::DsPkAddBf16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsPkAddBf16Ds(const MachineInst *opcode) {
+  return std::make_unique<DsPkAddBf16Ds>(opcode);
+}
+} // namespace detail
+
 DsWriteAddtidB32Ds::DsWriteAddtidB32Ds(const MachineInst *inst)
     : Ds("ds_write_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWriteAddtidB32Ds)),
@@ -545,6 +690,12 @@ DsWriteAddtidB32Ds::DsWriteAddtidB32Ds(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWriteAddtidB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWriteAddtidB32Ds>(opcode);
+}
+} // namespace detail
 
 DsWriteB8Ds::DsWriteB8Ds(const MachineInst *inst)
     : Ds("ds_write_b8", reinterpret_cast<const OpEncoding *>(inst),
@@ -565,6 +716,12 @@ DsWriteB8Ds::DsWriteB8Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWriteB8Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWriteB8Ds>(opcode);
+}
+} // namespace detail
+
 DsWriteB16Ds::DsWriteB16Ds(const MachineInst *inst)
     : Ds("ds_write_b16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWriteB16Ds)),
@@ -583,6 +740,12 @@ DsWriteB16Ds::DsWriteB16Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWriteB16Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWriteB16Ds>(opcode);
+}
+} // namespace detail
 
 DsAddRtnU32Ds::DsAddRtnU32Ds(const MachineInst *inst)
     : Ds("ds_add_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -611,6 +774,12 @@ DsAddRtnU32Ds::DsAddRtnU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAddRtnU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsAddRtnU32Ds>(opcode);
+}
+} // namespace detail
+
 DsSubRtnU32Ds::DsSubRtnU32Ds(const MachineInst *inst)
     : Ds("ds_sub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsSubRtnU32Ds)),
@@ -637,6 +806,12 @@ DsSubRtnU32Ds::DsSubRtnU32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsSubRtnU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsSubRtnU32Ds>(opcode);
+}
+} // namespace detail
 
 DsRsubRtnU32Ds::DsRsubRtnU32Ds(const MachineInst *inst)
     : Ds("ds_rsub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -665,6 +840,12 @@ DsRsubRtnU32Ds::DsRsubRtnU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsRsubRtnU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsRsubRtnU32Ds>(opcode);
+}
+} // namespace detail
+
 DsIncRtnU32Ds::DsIncRtnU32Ds(const MachineInst *inst)
     : Ds("ds_inc_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsIncRtnU32Ds)),
@@ -691,6 +872,12 @@ DsIncRtnU32Ds::DsIncRtnU32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsIncRtnU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsIncRtnU32Ds>(opcode);
+}
+} // namespace detail
 
 DsDecRtnU32Ds::DsDecRtnU32Ds(const MachineInst *inst)
     : Ds("ds_dec_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -719,6 +906,12 @@ DsDecRtnU32Ds::DsDecRtnU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsDecRtnU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsDecRtnU32Ds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnI32Ds::DsMinRtnI32Ds(const MachineInst *inst)
     : Ds("ds_min_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinRtnI32Ds)),
@@ -745,6 +938,12 @@ DsMinRtnI32Ds::DsMinRtnI32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMinRtnI32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMinRtnI32Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxRtnI32Ds::DsMaxRtnI32Ds(const MachineInst *inst)
     : Ds("ds_max_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -773,6 +972,12 @@ DsMaxRtnI32Ds::DsMaxRtnI32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMaxRtnI32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMaxRtnI32Ds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnU32Ds::DsMinRtnU32Ds(const MachineInst *inst)
     : Ds("ds_min_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinRtnU32Ds)),
@@ -799,6 +1004,12 @@ DsMinRtnU32Ds::DsMinRtnU32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMinRtnU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMinRtnU32Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxRtnU32Ds::DsMaxRtnU32Ds(const MachineInst *inst)
     : Ds("ds_max_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -827,6 +1038,12 @@ DsMaxRtnU32Ds::DsMaxRtnU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMaxRtnU32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMaxRtnU32Ds>(opcode);
+}
+} // namespace detail
+
 DsAndRtnB32Ds::DsAndRtnB32Ds(const MachineInst *inst)
     : Ds("ds_and_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsAndRtnB32Ds)),
@@ -853,6 +1070,12 @@ DsAndRtnB32Ds::DsAndRtnB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAndRtnB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsAndRtnB32Ds>(opcode);
+}
+} // namespace detail
 
 DsOrRtnB32Ds::DsOrRtnB32Ds(const MachineInst *inst)
     : Ds("ds_or_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -881,6 +1104,12 @@ DsOrRtnB32Ds::DsOrRtnB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsOrRtnB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsOrRtnB32Ds>(opcode);
+}
+} // namespace detail
+
 DsXorRtnB32Ds::DsXorRtnB32Ds(const MachineInst *inst)
     : Ds("ds_xor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsXorRtnB32Ds)),
@@ -907,6 +1136,12 @@ DsXorRtnB32Ds::DsXorRtnB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsXorRtnB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsXorRtnB32Ds>(opcode);
+}
+} // namespace detail
 
 DsMskorRtnB32Ds::DsMskorRtnB32Ds(const MachineInst *inst)
     : Ds("ds_mskor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -941,6 +1176,12 @@ DsMskorRtnB32Ds::DsMskorRtnB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMskorRtnB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMskorRtnB32Ds>(opcode);
+}
+} // namespace detail
+
 DsWrxchgRtnB32Ds::DsWrxchgRtnB32Ds(const MachineInst *inst)
     : Ds("ds_wrxchg_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWrxchgRtnB32Ds)),
@@ -967,6 +1208,12 @@ DsWrxchgRtnB32Ds::DsWrxchgRtnB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWrxchgRtnB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWrxchgRtnB32Ds>(opcode);
+}
+} // namespace detail
 
 DsWrxchg2RtnB32Ds::DsWrxchg2RtnB32Ds(const MachineInst *inst)
     : Ds("ds_wrxchg2_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1001,6 +1248,12 @@ DsWrxchg2RtnB32Ds::DsWrxchg2RtnB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWrxchg2RtnB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWrxchg2RtnB32Ds>(opcode);
+}
+} // namespace detail
+
 DsWrxchg2st64RtnB32Ds::DsWrxchg2st64RtnB32Ds(const MachineInst *inst)
     : Ds("ds_wrxchg2st64_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWrxchg2st64RtnB32Ds)),
@@ -1033,6 +1286,12 @@ DsWrxchg2st64RtnB32Ds::DsWrxchg2st64RtnB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWrxchg2st64RtnB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWrxchg2st64RtnB32Ds>(opcode);
+}
+} // namespace detail
 
 DsCmpstRtnB32Ds::DsCmpstRtnB32Ds(const MachineInst *inst)
     : Ds("ds_cmpst_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1067,6 +1326,12 @@ DsCmpstRtnB32Ds::DsCmpstRtnB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsCmpstRtnB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsCmpstRtnB32Ds>(opcode);
+}
+} // namespace detail
+
 DsCmpstRtnF32Ds::DsCmpstRtnF32Ds(const MachineInst *inst)
     : Ds("ds_cmpst_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsCmpstRtnF32Ds)),
@@ -1100,6 +1365,12 @@ DsCmpstRtnF32Ds::DsCmpstRtnF32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsCmpstRtnF32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsCmpstRtnF32Ds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnF32Ds::DsMinRtnF32Ds(const MachineInst *inst)
     : Ds("ds_min_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinRtnF32Ds)),
@@ -1127,6 +1398,12 @@ DsMinRtnF32Ds::DsMinRtnF32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMinRtnF32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMinRtnF32Ds>(opcode);
+}
+} // namespace detail
+
 DsMaxRtnF32Ds::DsMaxRtnF32Ds(const MachineInst *inst)
     : Ds("ds_max_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMaxRtnF32Ds)),
@@ -1153,6 +1430,12 @@ DsMaxRtnF32Ds::DsMaxRtnF32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMaxRtnF32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMaxRtnF32Ds>(opcode);
+}
+} // namespace detail
 
 DsWrapRtnB32Ds::DsWrapRtnB32Ds(const MachineInst *inst)
     : Ds("ds_wrap_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1186,6 +1469,12 @@ DsWrapRtnB32Ds::DsWrapRtnB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWrapRtnB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWrapRtnB32Ds>(opcode);
+}
+} // namespace detail
+
 DsAddRtnF32Ds::DsAddRtnF32Ds(const MachineInst *inst)
     : Ds("ds_add_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsAddRtnF32Ds)),
@@ -1213,6 +1502,12 @@ DsAddRtnF32Ds::DsAddRtnF32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAddRtnF32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsAddRtnF32Ds>(opcode);
+}
+} // namespace detail
+
 DsReadB32Ds::DsReadB32Ds(const MachineInst *inst)
     : Ds("ds_read_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadB32Ds)),
@@ -1231,6 +1526,12 @@ DsReadB32Ds::DsReadB32Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadB32Ds>(opcode);
+}
+} // namespace detail
 
 DsRead2B32Ds::DsRead2B32Ds(const MachineInst *inst)
     : Ds("ds_read2_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1251,6 +1552,12 @@ DsRead2B32Ds::DsRead2B32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsRead2B32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsRead2B32Ds>(opcode);
+}
+} // namespace detail
+
 DsRead2st64B32Ds::DsRead2st64B32Ds(const MachineInst *inst)
     : Ds("ds_read2st64_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsRead2st64B32Ds)),
@@ -1269,6 +1576,12 @@ DsRead2st64B32Ds::DsRead2st64B32Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsRead2st64B32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsRead2st64B32Ds>(opcode);
+}
+} // namespace detail
 
 DsReadI8Ds::DsReadI8Ds(const MachineInst *inst)
     : Ds("ds_read_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -1289,6 +1602,12 @@ DsReadI8Ds::DsReadI8Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadI8Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadI8Ds>(opcode);
+}
+} // namespace detail
+
 DsReadU8Ds::DsReadU8Ds(const MachineInst *inst)
     : Ds("ds_read_u8", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadU8Ds)),
@@ -1307,6 +1626,12 @@ DsReadU8Ds::DsReadU8Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadU8Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadU8Ds>(opcode);
+}
+} // namespace detail
 
 DsReadI16Ds::DsReadI16Ds(const MachineInst *inst)
     : Ds("ds_read_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1327,6 +1652,12 @@ DsReadI16Ds::DsReadI16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadI16Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadI16Ds>(opcode);
+}
+} // namespace detail
+
 DsReadU16Ds::DsReadU16Ds(const MachineInst *inst)
     : Ds("ds_read_u16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadU16Ds)),
@@ -1346,6 +1677,12 @@ DsReadU16Ds::DsReadU16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadU16Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadU16Ds>(opcode);
+}
+} // namespace detail
+
 DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
     : Ds("ds_swizzle_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsSwizzleB32Ds)),
@@ -1360,6 +1697,12 @@ DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsSwizzleB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsSwizzleB32Ds>(opcode);
+}
+} // namespace detail
 
 DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
     : Ds("ds_permute_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1382,6 +1725,12 @@ DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsPermuteB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsPermuteB32Ds>(opcode);
+}
+} // namespace detail
+
 DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
     : Ds("ds_bpermute_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsBpermuteB32Ds)),
@@ -1402,6 +1751,12 @@ DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsBpermuteB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsBpermuteB32Ds>(opcode);
+}
+} // namespace detail
 
 DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
     : Ds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1424,6 +1779,12 @@ DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAddU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsAddU64Ds>(opcode);
+}
+} // namespace detail
+
 DsSubU64Ds::DsSubU64Ds(const MachineInst *inst)
     : Ds("ds_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsSubU64Ds)),
@@ -1444,6 +1805,12 @@ DsSubU64Ds::DsSubU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsSubU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsSubU64Ds>(opcode);
+}
+} // namespace detail
 
 DsRsubU64Ds::DsRsubU64Ds(const MachineInst *inst)
     : Ds("ds_rsub_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1466,6 +1833,12 @@ DsRsubU64Ds::DsRsubU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsRsubU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsRsubU64Ds>(opcode);
+}
+} // namespace detail
+
 DsIncU64Ds::DsIncU64Ds(const MachineInst *inst)
     : Ds("ds_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsIncU64Ds)),
@@ -1486,6 +1859,12 @@ DsIncU64Ds::DsIncU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsIncU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsIncU64Ds>(opcode);
+}
+} // namespace detail
 
 DsDecU64Ds::DsDecU64Ds(const MachineInst *inst)
     : Ds("ds_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1508,6 +1887,12 @@ DsDecU64Ds::DsDecU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsDecU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsDecU64Ds>(opcode);
+}
+} // namespace detail
+
 DsMinI64Ds::DsMinI64Ds(const MachineInst *inst)
     : Ds("ds_min_i64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinI64Ds)),
@@ -1528,6 +1913,12 @@ DsMinI64Ds::DsMinI64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMinI64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMinI64Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxI64Ds::DsMaxI64Ds(const MachineInst *inst)
     : Ds("ds_max_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1550,6 +1941,12 @@ DsMaxI64Ds::DsMaxI64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMaxI64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMaxI64Ds>(opcode);
+}
+} // namespace detail
+
 DsMinU64Ds::DsMinU64Ds(const MachineInst *inst)
     : Ds("ds_min_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinU64Ds)),
@@ -1570,6 +1967,12 @@ DsMinU64Ds::DsMinU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMinU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMinU64Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxU64Ds::DsMaxU64Ds(const MachineInst *inst)
     : Ds("ds_max_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1592,6 +1995,12 @@ DsMaxU64Ds::DsMaxU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMaxU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMaxU64Ds>(opcode);
+}
+} // namespace detail
+
 DsAndB64Ds::DsAndB64Ds(const MachineInst *inst)
     : Ds("ds_and_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsAndB64Ds)),
@@ -1612,6 +2021,12 @@ DsAndB64Ds::DsAndB64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAndB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsAndB64Ds>(opcode);
+}
+} // namespace detail
 
 DsOrB64Ds::DsOrB64Ds(const MachineInst *inst)
     : Ds("ds_or_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1634,6 +2049,12 @@ DsOrB64Ds::DsOrB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsOrB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsOrB64Ds>(opcode);
+}
+} // namespace detail
+
 DsXorB64Ds::DsXorB64Ds(const MachineInst *inst)
     : Ds("ds_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsXorB64Ds)),
@@ -1654,6 +2075,12 @@ DsXorB64Ds::DsXorB64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsXorB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsXorB64Ds>(opcode);
+}
+} // namespace detail
 
 DsMskorB64Ds::DsMskorB64Ds(const MachineInst *inst)
     : Ds("ds_mskor_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1682,6 +2109,12 @@ DsMskorB64Ds::DsMskorB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMskorB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMskorB64Ds>(opcode);
+}
+} // namespace detail
+
 DsWriteB64Ds::DsWriteB64Ds(const MachineInst *inst)
     : Ds("ds_write_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWriteB64Ds)),
@@ -1700,6 +2133,12 @@ DsWriteB64Ds::DsWriteB64Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWriteB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWriteB64Ds>(opcode);
+}
+} // namespace detail
 
 DsWrite2B64Ds::DsWrite2B64Ds(const MachineInst *inst)
     : Ds("ds_write2_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1726,6 +2165,12 @@ DsWrite2B64Ds::DsWrite2B64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWrite2B64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWrite2B64Ds>(opcode);
+}
+} // namespace detail
+
 DsWrite2st64B64Ds::DsWrite2st64B64Ds(const MachineInst *inst)
     : Ds("ds_write2st64_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWrite2st64B64Ds)),
@@ -1750,6 +2195,12 @@ DsWrite2st64B64Ds::DsWrite2st64B64Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWrite2st64B64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWrite2st64B64Ds>(opcode);
+}
+} // namespace detail
 
 DsCmpstB64Ds::DsCmpstB64Ds(const MachineInst *inst)
     : Ds("ds_cmpst_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1778,6 +2229,12 @@ DsCmpstB64Ds::DsCmpstB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsCmpstB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsCmpstB64Ds>(opcode);
+}
+} // namespace detail
+
 DsCmpstF64Ds::DsCmpstF64Ds(const MachineInst *inst)
     : Ds("ds_cmpst_f64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsCmpstF64Ds)),
@@ -1805,6 +2262,12 @@ DsCmpstF64Ds::DsCmpstF64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsCmpstF64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsCmpstF64Ds>(opcode);
+}
+} // namespace detail
+
 DsMinF64Ds::DsMinF64Ds(const MachineInst *inst)
     : Ds("ds_min_f64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinF64Ds)),
@@ -1825,6 +2288,12 @@ DsMinF64Ds::DsMinF64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMinF64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMinF64Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxF64Ds::DsMaxF64Ds(const MachineInst *inst)
     : Ds("ds_max_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1847,6 +2316,12 @@ DsMaxF64Ds::DsMaxF64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMaxF64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMaxF64Ds>(opcode);
+}
+} // namespace detail
+
 DsWriteB8D16HiDs::DsWriteB8D16HiDs(const MachineInst *inst)
     : Ds("ds_write_b8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWriteB8D16HiDs)),
@@ -1865,6 +2340,12 @@ DsWriteB8D16HiDs::DsWriteB8D16HiDs(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWriteB8D16HiDs(const MachineInst *opcode) {
+  return std::make_unique<DsWriteB8D16HiDs>(opcode);
+}
+} // namespace detail
 
 DsWriteB16D16HiDs::DsWriteB16D16HiDs(const MachineInst *inst)
     : Ds("ds_write_b16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -1885,6 +2366,12 @@ DsWriteB16D16HiDs::DsWriteB16D16HiDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWriteB16D16HiDs(const MachineInst *opcode) {
+  return std::make_unique<DsWriteB16D16HiDs>(opcode);
+}
+} // namespace detail
+
 DsReadU8D16Ds::DsReadU8D16Ds(const MachineInst *inst)
     : Ds("ds_read_u8_d16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadU8D16Ds)),
@@ -1903,6 +2390,12 @@ DsReadU8D16Ds::DsReadU8D16Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadU8D16Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadU8D16Ds>(opcode);
+}
+} // namespace detail
 
 void DsReadU8D16Ds::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
@@ -1929,6 +2422,12 @@ DsReadU8D16HiDs::DsReadU8D16HiDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadU8D16HiDs(const MachineInst *opcode) {
+  return std::make_unique<DsReadU8D16HiDs>(opcode);
+}
+} // namespace detail
+
 void DsReadU8D16HiDs::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1953,6 +2452,12 @@ DsReadI8D16Ds::DsReadI8D16Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadI8D16Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadI8D16Ds>(opcode);
+}
+} // namespace detail
 
 void DsReadI8D16Ds::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
@@ -1979,6 +2484,12 @@ DsReadI8D16HiDs::DsReadI8D16HiDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadI8D16HiDs(const MachineInst *opcode) {
+  return std::make_unique<DsReadI8D16HiDs>(opcode);
+}
+} // namespace detail
+
 void DsReadI8D16HiDs::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2004,6 +2515,12 @@ DsReadU16D16Ds::DsReadU16D16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadU16D16Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadU16D16Ds>(opcode);
+}
+} // namespace detail
+
 void DsReadU16D16Ds::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2028,6 +2545,12 @@ DsReadU16D16HiDs::DsReadU16D16HiDs(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadU16D16HiDs(const MachineInst *opcode) {
+  return std::make_unique<DsReadU16D16HiDs>(opcode);
+}
+} // namespace detail
 
 void DsReadU16D16HiDs::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
@@ -2056,6 +2579,12 @@ DsAddF64Ds::DsAddF64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAddF64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsAddF64Ds>(opcode);
+}
+} // namespace detail
+
 DsAddRtnU64Ds::DsAddRtnU64Ds(const MachineInst *inst)
     : Ds("ds_add_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsAddRtnU64Ds)),
@@ -2082,6 +2611,12 @@ DsAddRtnU64Ds::DsAddRtnU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAddRtnU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsAddRtnU64Ds>(opcode);
+}
+} // namespace detail
 
 DsSubRtnU64Ds::DsSubRtnU64Ds(const MachineInst *inst)
     : Ds("ds_sub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2110,6 +2645,12 @@ DsSubRtnU64Ds::DsSubRtnU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsSubRtnU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsSubRtnU64Ds>(opcode);
+}
+} // namespace detail
+
 DsRsubRtnU64Ds::DsRsubRtnU64Ds(const MachineInst *inst)
     : Ds("ds_rsub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsRsubRtnU64Ds)),
@@ -2136,6 +2677,12 @@ DsRsubRtnU64Ds::DsRsubRtnU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsRsubRtnU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsRsubRtnU64Ds>(opcode);
+}
+} // namespace detail
 
 DsIncRtnU64Ds::DsIncRtnU64Ds(const MachineInst *inst)
     : Ds("ds_inc_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2164,6 +2711,12 @@ DsIncRtnU64Ds::DsIncRtnU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsIncRtnU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsIncRtnU64Ds>(opcode);
+}
+} // namespace detail
+
 DsDecRtnU64Ds::DsDecRtnU64Ds(const MachineInst *inst)
     : Ds("ds_dec_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsDecRtnU64Ds)),
@@ -2190,6 +2743,12 @@ DsDecRtnU64Ds::DsDecRtnU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsDecRtnU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsDecRtnU64Ds>(opcode);
+}
+} // namespace detail
 
 DsMinRtnI64Ds::DsMinRtnI64Ds(const MachineInst *inst)
     : Ds("ds_min_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2218,6 +2777,12 @@ DsMinRtnI64Ds::DsMinRtnI64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMinRtnI64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMinRtnI64Ds>(opcode);
+}
+} // namespace detail
+
 DsMaxRtnI64Ds::DsMaxRtnI64Ds(const MachineInst *inst)
     : Ds("ds_max_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMaxRtnI64Ds)),
@@ -2244,6 +2809,12 @@ DsMaxRtnI64Ds::DsMaxRtnI64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMaxRtnI64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMaxRtnI64Ds>(opcode);
+}
+} // namespace detail
 
 DsMinRtnU64Ds::DsMinRtnU64Ds(const MachineInst *inst)
     : Ds("ds_min_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2272,6 +2843,12 @@ DsMinRtnU64Ds::DsMinRtnU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMinRtnU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMinRtnU64Ds>(opcode);
+}
+} // namespace detail
+
 DsMaxRtnU64Ds::DsMaxRtnU64Ds(const MachineInst *inst)
     : Ds("ds_max_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMaxRtnU64Ds)),
@@ -2298,6 +2875,12 @@ DsMaxRtnU64Ds::DsMaxRtnU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMaxRtnU64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMaxRtnU64Ds>(opcode);
+}
+} // namespace detail
 
 DsAndRtnB64Ds::DsAndRtnB64Ds(const MachineInst *inst)
     : Ds("ds_and_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2326,6 +2909,12 @@ DsAndRtnB64Ds::DsAndRtnB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAndRtnB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsAndRtnB64Ds>(opcode);
+}
+} // namespace detail
+
 DsOrRtnB64Ds::DsOrRtnB64Ds(const MachineInst *inst)
     : Ds("ds_or_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsOrRtnB64Ds)),
@@ -2353,6 +2942,12 @@ DsOrRtnB64Ds::DsOrRtnB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsOrRtnB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsOrRtnB64Ds>(opcode);
+}
+} // namespace detail
+
 DsXorRtnB64Ds::DsXorRtnB64Ds(const MachineInst *inst)
     : Ds("ds_xor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsXorRtnB64Ds)),
@@ -2379,6 +2974,12 @@ DsXorRtnB64Ds::DsXorRtnB64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsXorRtnB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsXorRtnB64Ds>(opcode);
+}
+} // namespace detail
 
 DsMskorRtnB64Ds::DsMskorRtnB64Ds(const MachineInst *inst)
     : Ds("ds_mskor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2413,6 +3014,12 @@ DsMskorRtnB64Ds::DsMskorRtnB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMskorRtnB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMskorRtnB64Ds>(opcode);
+}
+} // namespace detail
+
 DsWrxchgRtnB64Ds::DsWrxchgRtnB64Ds(const MachineInst *inst)
     : Ds("ds_wrxchg_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWrxchgRtnB64Ds)),
@@ -2439,6 +3046,12 @@ DsWrxchgRtnB64Ds::DsWrxchgRtnB64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWrxchgRtnB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWrxchgRtnB64Ds>(opcode);
+}
+} // namespace detail
 
 DsWrxchg2RtnB64Ds::DsWrxchg2RtnB64Ds(const MachineInst *inst)
     : Ds("ds_wrxchg2_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2473,6 +3086,12 @@ DsWrxchg2RtnB64Ds::DsWrxchg2RtnB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWrxchg2RtnB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWrxchg2RtnB64Ds>(opcode);
+}
+} // namespace detail
+
 DsWrxchg2st64RtnB64Ds::DsWrxchg2st64RtnB64Ds(const MachineInst *inst)
     : Ds("ds_wrxchg2st64_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWrxchg2st64RtnB64Ds)),
@@ -2505,6 +3124,12 @@ DsWrxchg2st64RtnB64Ds::DsWrxchg2st64RtnB64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWrxchg2st64RtnB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWrxchg2st64RtnB64Ds>(opcode);
+}
+} // namespace detail
 
 DsCmpstRtnB64Ds::DsCmpstRtnB64Ds(const MachineInst *inst)
     : Ds("ds_cmpst_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2539,6 +3164,12 @@ DsCmpstRtnB64Ds::DsCmpstRtnB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsCmpstRtnB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsCmpstRtnB64Ds>(opcode);
+}
+} // namespace detail
+
 DsCmpstRtnF64Ds::DsCmpstRtnF64Ds(const MachineInst *inst)
     : Ds("ds_cmpst_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsCmpstRtnF64Ds)),
@@ -2572,6 +3203,12 @@ DsCmpstRtnF64Ds::DsCmpstRtnF64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsCmpstRtnF64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsCmpstRtnF64Ds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnF64Ds::DsMinRtnF64Ds(const MachineInst *inst)
     : Ds("ds_min_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinRtnF64Ds)),
@@ -2598,6 +3235,12 @@ DsMinRtnF64Ds::DsMinRtnF64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMinRtnF64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMinRtnF64Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxRtnF64Ds::DsMaxRtnF64Ds(const MachineInst *inst)
     : Ds("ds_max_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2626,6 +3269,12 @@ DsMaxRtnF64Ds::DsMaxRtnF64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsMaxRtnF64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsMaxRtnF64Ds>(opcode);
+}
+} // namespace detail
+
 DsReadB64Ds::DsReadB64Ds(const MachineInst *inst)
     : Ds("ds_read_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadB64Ds)),
@@ -2644,6 +3293,12 @@ DsReadB64Ds::DsReadB64Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadB64Ds>(opcode);
+}
+} // namespace detail
 
 DsRead2B64Ds::DsRead2B64Ds(const MachineInst *inst)
     : Ds("ds_read2_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2664,6 +3319,12 @@ DsRead2B64Ds::DsRead2B64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsRead2B64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsRead2B64Ds>(opcode);
+}
+} // namespace detail
+
 DsRead2st64B64Ds::DsRead2st64B64Ds(const MachineInst *inst)
     : Ds("ds_read2st64_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsRead2st64B64Ds)),
@@ -2682,6 +3343,12 @@ DsRead2st64B64Ds::DsRead2st64B64Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsRead2st64B64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsRead2st64B64Ds>(opcode);
+}
+} // namespace detail
 
 DsAddRtnF64Ds::DsAddRtnF64Ds(const MachineInst *inst)
     : Ds("ds_add_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2710,6 +3377,12 @@ DsAddRtnF64Ds::DsAddRtnF64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAddRtnF64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsAddRtnF64Ds>(opcode);
+}
+} // namespace detail
+
 DsCondxchg32RtnB64Ds::DsCondxchg32RtnB64Ds(const MachineInst *inst)
     : Ds("ds_condxchg32_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsCondxchg32RtnB64Ds)),
@@ -2737,6 +3410,12 @@ DsCondxchg32RtnB64Ds::DsCondxchg32RtnB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsCondxchg32RtnB64Ds(const MachineInst *opcode) {
+  return std::make_unique<DsCondxchg32RtnB64Ds>(opcode);
+}
+} // namespace detail
+
 DsReadAddtidB32Ds::DsReadAddtidB32Ds(const MachineInst *inst)
     : Ds("ds_read_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadAddtidB32Ds)),
@@ -2755,6 +3434,12 @@ DsReadAddtidB32Ds::DsReadAddtidB32Ds(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadAddtidB32Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadAddtidB32Ds>(opcode);
+}
+} // namespace detail
 
 DsPkAddRtnF16Ds::DsPkAddRtnF16Ds(const MachineInst *inst)
     : Ds("ds_pk_add_rtn_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -2783,6 +3468,12 @@ DsPkAddRtnF16Ds::DsPkAddRtnF16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsPkAddRtnF16Ds(const MachineInst *opcode) {
+  return std::make_unique<DsPkAddRtnF16Ds>(opcode);
+}
+} // namespace detail
+
 DsPkAddRtnBf16Ds::DsPkAddRtnBf16Ds(const MachineInst *inst)
     : Ds("ds_pk_add_rtn_bf16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsPkAddRtnBf16Ds)),
@@ -2810,6 +3501,12 @@ DsPkAddRtnBf16Ds::DsPkAddRtnBf16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsPkAddRtnBf16Ds(const MachineInst *opcode) {
+  return std::make_unique<DsPkAddRtnBf16Ds>(opcode);
+}
+} // namespace detail
+
 DsConsumeDs::DsConsumeDs(const MachineInst *inst)
     : Ds("ds_consume", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsConsumeDs)),
@@ -2828,6 +3525,12 @@ DsConsumeDs::DsConsumeDs(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsConsumeDs(const MachineInst *opcode) {
+  return std::make_unique<DsConsumeDs>(opcode);
+}
+} // namespace detail
 
 DsAppendDs::DsAppendDs(const MachineInst *inst)
     : Ds("ds_append", reinterpret_cast<const OpEncoding *>(inst),
@@ -2848,6 +3551,12 @@ DsAppendDs::DsAppendDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsAppendDs(const MachineInst *opcode) {
+  return std::make_unique<DsAppendDs>(opcode);
+}
+} // namespace detail
+
 DsWriteB96Ds::DsWriteB96Ds(const MachineInst *inst)
     : Ds("ds_write_b96", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWriteB96Ds)),
@@ -2866,6 +3575,12 @@ DsWriteB96Ds::DsWriteB96Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWriteB96Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWriteB96Ds>(opcode);
+}
+} // namespace detail
 
 DsWriteB128Ds::DsWriteB128Ds(const MachineInst *inst)
     : Ds("ds_write_b128", reinterpret_cast<const OpEncoding *>(inst),
@@ -2886,6 +3601,12 @@ DsWriteB128Ds::DsWriteB128Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsWriteB128Ds(const MachineInst *opcode) {
+  return std::make_unique<DsWriteB128Ds>(opcode);
+}
+} // namespace detail
+
 DsReadB64TrB4Ds::DsReadB64TrB4Ds(const MachineInst *inst)
     : Ds("ds_read_b64_tr_b4", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadB64TrB4Ds)),
@@ -2904,6 +3625,12 @@ DsReadB64TrB4Ds::DsReadB64TrB4Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadB64TrB4Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadB64TrB4Ds>(opcode);
+}
+} // namespace detail
 
 DsReadB96TrB6Ds::DsReadB96TrB6Ds(const MachineInst *inst)
     : Ds("ds_read_b96_tr_b6", reinterpret_cast<const OpEncoding *>(inst),
@@ -2924,6 +3651,12 @@ DsReadB96TrB6Ds::DsReadB96TrB6Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadB96TrB6Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadB96TrB6Ds>(opcode);
+}
+} // namespace detail
+
 DsReadB64TrB8Ds::DsReadB64TrB8Ds(const MachineInst *inst)
     : Ds("ds_read_b64_tr_b8", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadB64TrB8Ds)),
@@ -2942,6 +3675,12 @@ DsReadB64TrB8Ds::DsReadB64TrB8Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadB64TrB8Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadB64TrB8Ds>(opcode);
+}
+} // namespace detail
 
 DsReadB64TrB16Ds::DsReadB64TrB16Ds(const MachineInst *inst)
     : Ds("ds_read_b64_tr_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -2962,6 +3701,12 @@ DsReadB64TrB16Ds::DsReadB64TrB16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadB64TrB16Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadB64TrB16Ds>(opcode);
+}
+} // namespace detail
+
 DsReadB96Ds::DsReadB96Ds(const MachineInst *inst)
     : Ds("ds_read_b96", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadB96Ds)),
@@ -2981,6 +3726,12 @@ DsReadB96Ds::DsReadB96Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadB96Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadB96Ds>(opcode);
+}
+} // namespace detail
+
 DsReadB128Ds::DsReadB128Ds(const MachineInst *inst)
     : Ds("ds_read_b128", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadB128Ds)),
@@ -2999,6 +3750,12 @@ DsReadB128Ds::DsReadB128Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeDsReadB128Ds(const MachineInst *opcode) {
+  return std::make_unique<DsReadB128Ds>(opcode);
+}
+} // namespace detail
 
 } // namespace cdna4
 } // namespace rocjitsu

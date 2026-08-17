@@ -355,7 +355,8 @@ The relevant functions, declared in ``rccl.h``, are described in full in
 - ``ncclCommSuspend`` releases the resources selected by its ``flags``
   argument. Pass ``NCCL_SUSPEND_MEM`` to release dynamic GPU memory
   allocations. After this call, the communicator can't be used until it's
-  resumed.
+  resumed: a collective issued while it's suspended is rejected with
+  ``ncclInvalidUsage``.
 - ``ncclCommResume`` reacquires every resource that the matching
   ``ncclCommSuspend`` call released, after which the communicator can run
   collectives again.
