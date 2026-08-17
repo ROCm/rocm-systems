@@ -109,6 +109,45 @@ TEST(AllGatherPolicyThreshold, LargeValueDoesNotWrap) {
             (size_t)big);
 }
 
+// ---- allGatherCtas: size-adaptive CTA ladder keyed off the tier predicate -----
+
+TEST(AllGatherPolicyCtas, LsaTierUsesLsaCtaCount) {
+  // chunk <= threshold -> LSA-direct tier -> kAllGatherCtasLsa.
+  EXPECT_EQ(allGatherCtas(0, 32768, kAllGatherCtasUnset), kAllGatherCtasLsa);
+  EXPECT_EQ(allGatherCtas(32768, 32768, kAllGatherCtasUnset), kAllGatherCtasLsa);  // boundary
+  EXPECT_EQ(allGatherCtas(1024, 32768, kAllGatherCtasUnset), kAllGatherCtasLsa);
+}
+
+TEST(AllGatherPolicyCtas, SdmaTierUsesSdmaCtaCount) {
+  // chunk > threshold -> GIN-put/SDMA tier -> kAllGatherCtasSdma (few CTAs).
+  EXPECT_EQ(allGatherCtas(32769, 32768, kAllGatherCtasUnset), kAllGatherCtasSdma);
+  EXPECT_EQ(allGatherCtas(64ull * 1024 * 1024, 32768, kAllGatherCtasUnset), kAllGatherCtasSdma);
+}
+
+TEST(AllGatherPolicyCtas, TracksThresholdOverride) {
+  // The ladder keys off the SAME predicate as the kernel, so a moved crossover
+  // moves the CTA choice: at threshold 0 (all-SDMA) any non-empty chunk is SDMA;
+  // at a huge threshold (all-LSA) even a large chunk is LSA.
+  EXPECT_EQ(allGatherCtas(1, 0, kAllGatherCtasUnset), kAllGatherCtasSdma);
+  EXPECT_EQ(allGatherCtas(64ull * 1024 * 1024, 1ull << 40, kAllGatherCtasUnset), kAllGatherCtasLsa);
+}
+
+TEST(AllGatherPolicyCtas, EnvPinOverridesLadderAndClamps) {
+  // A set env value pins a fixed count for both tiers, clamped to 128.
+  EXPECT_EQ(allGatherCtas(1024, 32768, 8), 8);            // LSA size, pinned 8
+  EXPECT_EQ(allGatherCtas(64ull << 20, 32768, 8), 8);     // SDMA size, pinned 8
+  EXPECT_EQ(allGatherCtas(1024, 32768, 200), 128);        // clamp to 128
+  // An env of 0 is "not pinned" -> fall back to the size-adaptive ladder.
+  EXPECT_EQ(allGatherCtas(1024, 32768, 0), kAllGatherCtasLsa);
+}
+
+TEST(AllGatherPolicyCtas, MaxCtasCoversBothTiers) {
+  EXPECT_EQ(allGatherMaxCtas(), (kAllGatherCtasLsa > kAllGatherCtasSdma) ? kAllGatherCtasLsa
+                                                                         : kAllGatherCtasSdma);
+  EXPECT_GE(allGatherMaxCtas(), kAllGatherCtasLsa);
+  EXPECT_GE(allGatherMaxCtas(), kAllGatherCtasSdma);
+}
+
 // ---- bandwidthGBps: algBw counts all ranks, busBw applies (n-1)/n ------------
 
 TEST(AllGatherPolicyBandwidth, AlgAndBusBandwidth) {
