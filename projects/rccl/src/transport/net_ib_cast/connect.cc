@@ -2088,13 +2088,6 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
           }
         }
       }
-      if (slot0) {
-        slot0->cqRefcount--;
-        if (slot0->cqRefcount <= 0) {
-          IbCastCleanupGroupCqs(slot0);
-        }
-      }
-
       if (comm->base.resiliency) {
         NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));
       }
@@ -2111,6 +2104,15 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
           NCCLCHECK(IbCastResiliencyDevDestroy(comm->base.resiliency, i));
         }
         // Skip IbCastDestroyBase for shared comms -- CQ/PD managed by pool
+      }
+
+      // Group CQ/PD cleanup must come last: the MRs deregistered above are
+      // registered on the group's shared PD.
+      if (slot0) {
+        slot0->cqRefcount--;
+        if (slot0->cqRefcount <= 0) {
+          IbCastCleanupGroupCqs(slot0);
+        }
       }
     } else {
       // Non-shared: original teardown
@@ -2170,12 +2172,6 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
       if (comm->base.resiliency) {
         NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));
       }
-      if (slot0) {
-        slot0->cqRefcount--;
-        if (slot0->cqRefcount <= 0) {
-          IbCastCleanupGroupCqs(slot0);
-        }
-      }
       IbCastFreeCommIdLocked(comm->base.commId);  // caller holds g_IbCastSharedQpMutex
 
       // GPU flush cleanup remains per-comm
@@ -2198,6 +2194,17 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
           IbCastResiliencyDevDestroy(comm->base.resiliency, i);
         }
         // Skip IbCastDestroyBase for shared comms -- CQ/PD managed by pool
+      }
+
+      // Group CQ/PD cleanup must come last: this comm's GPU flush QP is created
+      // on the group's shared CQ, and its MRs are registered on the group's
+      // shared PD. Destroying the CQ/PD before the loop above returns EBUSY and
+      // orphans them.
+      if (slot0) {
+        slot0->cqRefcount--;
+        if (slot0->cqRefcount <= 0) {
+          IbCastCleanupGroupCqs(slot0);
+        }
       }
     } else {
       // Non-shared: original teardown
