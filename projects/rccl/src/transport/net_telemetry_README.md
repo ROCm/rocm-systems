@@ -32,6 +32,22 @@ One file per rank, named:
 The file is written once, at process exit (via an `atexit` handler). A 2-node
 run of 8 ranks each therefore produces 16 files.
 
+## When telemetry itself fails
+
+Telemetry is diagnostic, so nothing inside it can fail the collective that
+carries it: a run produces the same result whether telemetry succeeded,
+degraded or never started. Failures are reported rather than propagated, so
+they are visible without being fatal.
+
+* If telemetry cannot start, initialization says so on stderr, RCCL logs one
+  `INFO` line, and the run continues with telemetry off.
+* If the JSON cannot be written at exit, the reason and the path are printed.
+* If a QP or channel cannot be given a stats slot, it is counted in
+  `num_qp_untracked` rather than dropped silently, and that count is in the
+  JSON next to the counters it is missing from.
+* A hardware counter that cannot be read is emitted as `-1`, never as `0`, so
+  "not available" is never mistaken for "no events".
+
 ## Enabling and running
 
 ```bash

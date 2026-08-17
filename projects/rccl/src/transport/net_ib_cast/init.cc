@@ -364,7 +364,10 @@ ncclResult_t IbCastFinalizeDevices(void) {
 
 extern int64_t IbCastArThreshold;
 ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
-  rcclTelemetryInit();
+  // Never NCCLCHECKed; telemetry reports its own failures. See net_telemetry.h.
+  if (rcclTelemetryInit() != 0) {
+    INFO(NCCL_NET, "NET/IB-CAST: telemetry was requested but could not start; continuing without it");
+  }
   ncclResult_t ret = ncclSuccess;
   if (netRefCount++) return ret;
   IbCastProfilerFunction = profFunction;
@@ -593,11 +596,10 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       // every counter under the post-sort index d, so registering during
       // enumeration would attach each slot to whichever NIC happened to occupy
       // that position in the ibv_get_device_list order.
-      // The sysfs walk is telemetry-only work, so skip it when disabled.
-      if (rcclTelemetryOn()) {
-        char telEthDev[64];
-        rcclTelemetryGetEthDevice(IbCastDevs[d].devName, telEthDev, sizeof(telEthDev));
-        rcclTelemetryRegisterDevice(d, IbCastDevs[d].devName, telEthDev, "IB-CAST");
+      // Registration walks sysfs, so skip it entirely when telemetry is off.
+      if (rcclTelemetryOn() && rcclTelemetryRegisterDevice(d, IbCastDevs[d].devName, "IB-CAST") < 0) {
+        INFO(NCCL_NET, "NET/IB-CAST: telemetry did not register device %s, its counters are not collected",
+             IbCastDevs[d].devName);
       }
 
       // Add this plain physical device to the list of virtual devices (after sorting)
@@ -667,9 +669,10 @@ fail:
 
 ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction,
                         ncclProfilerCallback_t profFunction) {
-  rcclTelemetryInit();
   ncclResult_t ret = ncclSuccess;
   ncclNetCommConfig_t* netCommConfig = nullptr;
+  // Telemetry is initialized by IbCastInitDevices below, which is where its
+  // status gets reported.
   NCCLCHECK(IbCastInitDevices(logFunction, profFunction));
   NCCLCHECK(IbCastPortRecoveryThreadStart());
   NCCLCHECK(ncclCalloc(&netCommConfig, 1));

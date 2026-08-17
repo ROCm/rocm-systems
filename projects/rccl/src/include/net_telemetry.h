@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <limits.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,10 +29,47 @@ extern "C" {
  *   - AMD AINIC (driver: ionic)
  */
 
-/* Maximum constants; MAX_CHANNELS is a sanity bound, not a reservation. */
-#define RCCL_TELEMETRY_MAX_DEVS       16
+/* One slot per device the transport can enumerate, since device_id doubles as
+ * the slot index. Kept equal to the transports' own MAX_IB_DEVS: a device that
+ * does not fit here cannot be registered, and all of its traffic silently
+ * lands in num_qp_untracked. The transports static_assert against this. */
+#define RCCL_TELEMETRY_MAX_DEVS       32
+/* Sanity bound, not a reservation: channel storage is allocated on demand, and
+ * this only rejects indices too absurd to be a real channel. Matches the
+ * largest MAXCHANNELS RCCL is built with (src/include/device.h). */
 #define RCCL_TELEMETRY_MAX_CHANNELS   512
 #define RCCL_TELEMETRY_HISTOGRAM_SIZE 16
+
+/* PFC is defined over eight traffic classes, so every per-priority counter
+ * array is this wide and every loop over priorities runs this far. */
+#define RCCL_TELEMETRY_NUM_PFC_PRIO   8
+
+/* Every filesystem path telemetry builds (sysfs, debugfs, procfs, the output
+ * file) uses one buffer size, so no call site has to reason about which limit
+ * applies to it. PATH_MAX is 4096 on Linux; the fallback covers platforms
+ * where limits.h leaves it undefined. */
+#ifdef PATH_MAX
+#define RCCL_TEL_PATH_MAX PATH_MAX
+#else
+#define RCCL_TEL_PATH_MAX 1024
+#endif
+
+/* POSIX puts this in <limits.h>, but it is optional and musl-based and some
+ * BSD-derived libcs omit it. 255 is the Linux kernel bound. */
+#ifndef HOST_NAME_MAX
+#define HOST_NAME_MAX 255
+#endif
+
+/* Worst case of the file name telemetry appends to output_dir, which is
+ * "/rccl_telemetry_<hostname>_<pid>.json" (20 covers the pid digits). */
+#define RCCL_TEL_FILENAME_MAX (sizeof("/rccl_telemetry__.json") + HOST_NAME_MAX + 20)
+
+/* Device names as sysfs exposes them: IBV_SYSFS_NAME_MAX is 64 for the RoCE
+ * device, and IFNAMSIZ (16) bounds the netdev name, so one buffer covers both
+ * without pulling verbs headers into this file. */
+#define RCCL_TELEMETRY_DEV_NAME_MAX   64
+/* Transport label, e.g. "IB-CAST" or "IB". */
+#define RCCL_TELEMETRY_TRANSPORT_MAX  32
 
 /* Power-of-two buckets for the WQE payload-size distribution: bucket b holds
  * WQEs of [2^(b-1), 2^b - 1] bytes, bucket 0 holds zero-length WQEs. */
@@ -45,9 +83,17 @@ extern "C" {
 
 /*
  * Maximum number of scalar hardware counters stored per device.
- * Must be >= the largest per-HW counter table size (see net_telemetry.cc).
+ *
+ * Every per-HW counter table becomes a config through RCCL_TEL_HW_CONFIG() in
+ * net_telemetry.cc, which derives the table's counter count and asserts it
+ * against this bound in one step, so a table cannot outgrow this array
+ * without failing the build.
  */
 #define RCCL_TELEMETRY_MAX_HWC        80
+
+/* Bound on the longest json_name in any counter table, used to size the config
+ * filter list below so that naming every counter still fits. */
+#define RCCL_TELEMETRY_HWC_NAME_MAX   32
 
 /* Runtime guard - 1 if telemetry is enabled, 0 otherwise.
  * Published with a release store at the very end of rcclTelemetryInit(), so it
@@ -60,15 +106,32 @@ static inline int rcclTelemetryOn(void) {
   return __atomic_load_n(&rcclTelemetryEnabled, __ATOMIC_ACQUIRE);
 }
 
+/*
+ * ERROR MODEL
+ *
+ * Telemetry is diagnostic, so no failure inside it may fail the collective that
+ * carries it: a run must produce the same result whether telemetry succeeded,
+ * degraded or never started. The entry points therefore never return
+ * ncclResult_t and are never wrapped in NCCLCHECK.
+ *
+ * They do report, so a failure is not silent. Each returns 0 on success and -1
+ * when it could not do its job while enabled, having already logged the reason;
+ * being disabled is success, not failure. Callers are expected to log the
+ * status and carry on. Partial degradation has its own channel instead of a
+ * return code: QPs that could not be given a slot are counted in
+ * num_qp_untracked and reported in the JSON, and counters that could not be
+ * read are emitted as -1 rather than as a plausible zero.
+ */
+
 /* Initialize telemetry system - reads env vars, parses config, registers atexit handler */
-void rcclTelemetryInit(void);
+int rcclTelemetryInit(void);
 
 /* Flush telemetry to JSON file - called via atexit() or can be called manually.
  * HW counters report deltas vs the baseline captured on each device's first use,
  * so telemetry always covers the whole period the device carried traffic.
  * Only the first call writes a file, and no telemetry storage is ever released,
  * so a manual flush cannot race a concurrent hot-path hook. */
-void rcclTelemetryFlush(void);
+int rcclTelemetryFlush(void);
 
 /*
  * Lightweight per-device software-counter snapshot.
@@ -109,7 +172,10 @@ int rcclTelemetrySwCapture(RcclTelemetrySwSnapshot* out, int maxDevs);
  * or uses defaults if not specified
  */
 typedef struct {
-  char    output_dir[512];              /* default: "/tmp" */
+  /* Directory the JSON is written to, default "/tmp". PATH_MAX bounds the
+   * finished path, so the directory gets PATH_MAX minus the file name that is
+   * appended to it, and the join can never truncate. */
+  char    output_dir[RCCL_TEL_PATH_MAX - RCCL_TEL_FILENAME_MAX];
   int     histogram_max_buckets;        /* default: 5 */
   int64_t histogram_bucket_interval_ns; /* default: 30000 */
 
@@ -125,7 +191,9 @@ typedef struct {
   uint64_t histogram_recip;
   uint64_t histogram_recip_max_ns;
 
-  char    hw_counter_list[1024];        /* default: "" means collect all */
+  /* Comma-separated json_names to collect; "" means collect all. Sized so that
+   * naming every counter of the widest table still fits without truncation. */
+  char    hw_counter_list[RCCL_TELEMETRY_MAX_HWC * (RCCL_TELEMETRY_HWC_NAME_MAX + 1)];
 } RcclTelemetryConfig;
 
 extern RcclTelemetryConfig rcclTelemetryCfg;
@@ -288,9 +356,9 @@ typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
  */
 typedef struct {
   int    device_id;
-  char   roce_device[64];
-  char   eth_device[64];
-  char   transport[32];       /* e.g., "IB-CAST", "IB" */
+  char   roce_device[RCCL_TELEMETRY_DEV_NAME_MAX];
+  char   eth_device[RCCL_TELEMETRY_DEV_NAME_MAX];
+  char   transport[RCCL_TELEMETRY_TRANSPORT_MAX]; /* e.g., "IB-CAST", "IB" */
 
   const void* hw_config;      /* opaque: points to active per-HW RcclHwConfig */
 
@@ -311,11 +379,11 @@ typedef struct {
    * Indexed by position in the active per-HW counter table. */
   int64_t hw_counters[RCCL_TELEMETRY_MAX_HWC];
 
-  /* Per-priority PFC counters (priorities 0-7), -1 if not supported */
-  int64_t pfc_rx_frames[8];
-  int64_t pfc_tx_frames[8];
-  int64_t pfc_rx_pause_us[8];
-  int64_t pfc_tx_pause_us[8];
+  /* Per-priority PFC counters, -1 if not supported */
+  int64_t pfc_rx_frames[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int64_t pfc_tx_frames[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int64_t pfc_rx_pause_us[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int64_t pfc_tx_pause_us[RCCL_TELEMETRY_NUM_PFC_PRIO];
 
   /* Snapshot-based NIC deltas — internal init snapshots (not written to JSON) */
   int64_t snap_init_tx_bytes;
@@ -336,10 +404,10 @@ typedef struct {
   /* Baselines for hw_counters[]/pfc_*[] — captured on first use of the device,
    * subtracted from the current values at flush so JSON reports deltas. */
   int64_t snap_init_hw_counters[RCCL_TELEMETRY_MAX_HWC];
-  int64_t snap_init_pfc_rx_frames[8];
-  int64_t snap_init_pfc_tx_frames[8];
-  int64_t snap_init_pfc_rx_pause_us[8];
-  int64_t snap_init_pfc_tx_pause_us[8];
+  int64_t snap_init_pfc_rx_frames[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int64_t snap_init_pfc_tx_frames[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int64_t snap_init_pfc_rx_pause_us[RCCL_TELEMETRY_NUM_PFC_PRIO];
+  int64_t snap_init_pfc_tx_pause_us[RCCL_TELEMETRY_NUM_PFC_PRIO];
 
   /* Snapshot deltas — written to JSON under hw_counters */
   int64_t delta_tx_bytes;
@@ -360,16 +428,12 @@ extern int             rcclTelemetryNumDevs;
  * device numbering they later use for devIdx, and must register after any
  * reordering of their own device list.
  *
+ * The netdev name is resolved from roce_device via sysfs here, so callers hold
+ * no buffer for it.
+ *
  * Returns the device index (== device_id) or -1 on failure.
  */
-int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
-                                 const char* eth_device, const char* transport);
-
-/*
- * Helper to map eth device name from roce device via sysfs
- * eth_device: output buffer (at least 64 bytes)
- */
-void rcclTelemetryGetEthDevice(const char* roce_device, char* eth_device, size_t eth_device_size);
+int rcclTelemetryRegisterDevice(int device_id, const char* roce_device, const char* transport);
 
 /* ------------------------------------------------------------------ */
 /* Hot-path telemetry inline functions                                 */

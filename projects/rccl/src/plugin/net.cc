@@ -340,7 +340,12 @@ static ncclResult_t ncclNetPluginFinalize(struct ncclComm* comm, int pluginIndex
 }
 
 ncclResult_t ncclNetInit(struct ncclComm* comm) {
-  rcclTelemetryInit();
+  // Deliberately not NCCLCHECKed: telemetry is diagnostic, so it reports its
+  // own failures and never turns one into a failed init. See the error model
+  // in net_telemetry.h.
+  if (rcclTelemetryInit() != 0) {
+    INFO(NCCL_NET, "Telemetry was requested but could not start; continuing without it");
+  }
   bool ncclNetPluginInitialized = false;
   std::call_once(initPluginLibsOnceFlag, initPluginLibsOnceFunc);
   std::lock_guard<std::mutex> lock(netPluginMutex);

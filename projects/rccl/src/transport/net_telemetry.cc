@@ -18,16 +18,17 @@
 #include <sys/stat.h>
 #include <pthread.h>
 
-/* POSIX puts this in <limits.h>, but it is optional and musl-based and some
- * BSD-derived libcs omit it. 255 is the Linux kernel bound. */
-#ifndef HOST_NAME_MAX
-#define HOST_NAME_MAX 255
+#ifdef __cplusplus
+#define RCCL_TEL_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#else
+#define RCCL_TEL_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
 #endif
 
-/* One bound for every filesystem path this file builds, so the JSON output
- * path and the sysfs/debugfs paths cannot drift apart. Must exceed
- * RcclTelemetryConfig::output_dir plus a hostname and a pid. */
-#define RCCL_TEL_PATH_MAX 1024
+/* The output path is output_dir plus the file name appended to it, and both
+ * bounds come from RCCL_TEL_PATH_MAX, so the join below cannot truncate. */
+RCCL_TEL_STATIC_ASSERT(sizeof(((RcclTelemetryConfig*)0)->output_dir) + RCCL_TEL_FILENAME_MAX
+                           <= RCCL_TEL_PATH_MAX,
+                       "output_dir plus the JSON file name does not fit RCCL_TEL_PATH_MAX");
 
 /* Upper bound on RCCL_TELEMETRY_LATENCY_SAMPLE. Well past the point where the
  * latency work has stopped costing anything; it exists so that the round-up to
@@ -299,6 +300,25 @@ typedef struct {
 #define HWC(json, src, key)            { (json), (src), (key), NULL }
 #define HWC_FB(json, src, key, fb)     { (json), (src), (key), (fb) }
 
+#define RCCL_TEL_HW_TABLE_SIZE(tbl) ((int)(sizeof(tbl) / sizeof((tbl)[0])))
+
+/*
+ * Define the config for one HW type from its counter table.
+ *
+ * A device's counters are stored in RcclDeviceStats::hw_counters[], indexed by
+ * position in that table, so a table longer than RCCL_TELEMETRY_MAX_HWC would
+ * write past the array. This macro is the only way a table becomes a config,
+ * and it derives the counter count and asserts the bound in the same step, so
+ * the two cannot drift and a newly added table cannot skip the check. Anything
+ * after `hwname` is the rest of the RcclHwConfig initializer, passed through.
+ */
+#define RCCL_TEL_HW_CONFIG(cfgname, tblname, hwname, ...)                     \
+  RCCL_TEL_STATIC_ASSERT(RCCL_TEL_HW_TABLE_SIZE(tblname) <= RCCL_TELEMETRY_MAX_HWC, \
+                         hwname " counter table exceeds RCCL_TELEMETRY_MAX_HWC");   \
+  static const RcclHwConfig cfgname = {                                       \
+    hwname, tblname, RCCL_TEL_HW_TABLE_SIZE(tblname), __VA_ARGS__             \
+  }
+
 /* ------------------------------------------------------------------ */
 /* AINIC (AMD / Pensando ionic driver)                                 */
 /* ------------------------------------------------------------------ */
@@ -393,26 +413,13 @@ static const RcclHwCounterDesc rcclHwcAinic[] = {
   HWC("resp_tx_loc_sgl_inv_err",     HWC_IB_SYSFS, "resp_tx_loc_sgl_inv_err"),
 };
 
-static const RcclHwConfig rcclHwConfigAinic = {
-  "ainic",
-  rcclHwcAinic,
-  (int)(sizeof(rcclHwcAinic) / sizeof(rcclHwcAinic[0])),
+RCCL_TEL_HW_CONFIG(rcclHwConfigAinic, rcclHwcAinic, "ainic",
   { "frames_rx_pri_%d",        "frames_tx_pri_%d",
     "rx_pripause_%d_1us_count", "tx_pripause_%d_1us_count" },
   /* RoCE traffic only: the ethtool frames_*_ok keys are absent on this NIC, and
    * netdev-level byte counts miss RDMA traffic entirely. */
   { HWC_IB_SYSFS, "tx_rdma_ucast_bytes", "rx_rdma_ucast_bytes",
-                  "tx_rdma_ucast_pkts",  "rx_rdma_ucast_pkts" },
-};
-
-/* Compile-time check: per-HW counter arrays must fit in RcclDeviceStats::hw_counters */
-#ifndef __cplusplus
-_Static_assert(sizeof(rcclHwcAinic) / sizeof(rcclHwcAinic[0]) <= RCCL_TELEMETRY_MAX_HWC,
-               "AINIC counter table exceeds RCCL_TELEMETRY_MAX_HWC");
-#else
-static_assert(sizeof(rcclHwcAinic) / sizeof(rcclHwcAinic[0]) <= RCCL_TELEMETRY_MAX_HWC,
-              "AINIC counter table exceeds RCCL_TELEMETRY_MAX_HWC");
-#endif
+                  "tx_rdma_ucast_pkts",  "rx_rdma_ucast_pkts" });
 
 /* ------------------------------------------------------------------ */
 /* MLX5 (NVIDIA/Mellanox ConnectX, mlx5_core driver)                   */
@@ -473,10 +480,7 @@ static const RcclHwCounterDesc rcclHwcMlx5[] = {
   HWC_FB("pfc_tx_pause_frames",     HWC_ETHTOOL, "tx_pause_ctrl_phy", "tx_pause"),
 };
 
-static const RcclHwConfig rcclHwConfigMlx5 = {
-  "mlx5",
-  rcclHwcMlx5,
-  (int)(sizeof(rcclHwcMlx5) / sizeof(rcclHwcMlx5[0])),
+RCCL_TEL_HW_CONFIG(rcclHwConfigMlx5, rcclHwcMlx5, "mlx5",
   /* PFC per-priority pause frames + pause duration, from ethtool -S. */
   { "rx_prio%d_pause",          "tx_prio%d_pause",
     "rx_prio%d_pause_duration", "tx_prio%d_pause_duration" },
@@ -484,16 +488,7 @@ static const RcclHwConfig rcclHwConfigMlx5 = {
    * almost all of it. The vport RDMA counters track the IB port counters
    * exactly (port_xmit_data * 4 == tx_vport_rdma_unicast_bytes). */
   { HWC_ETHTOOL, "tx_vport_rdma_unicast_bytes", "rx_vport_rdma_unicast_bytes",
-                 "tx_vport_rdma_unicast_packets", "rx_vport_rdma_unicast_packets" },
-};
-
-#ifndef __cplusplus
-_Static_assert(sizeof(rcclHwcMlx5) / sizeof(rcclHwcMlx5[0]) <= RCCL_TELEMETRY_MAX_HWC,
-               "MLX5 counter table exceeds RCCL_TELEMETRY_MAX_HWC");
-#else
-static_assert(sizeof(rcclHwcMlx5) / sizeof(rcclHwcMlx5[0]) <= RCCL_TELEMETRY_MAX_HWC,
-              "MLX5 counter table exceeds RCCL_TELEMETRY_MAX_HWC");
-#endif
+                 "tx_vport_rdma_unicast_packets", "rx_vport_rdma_unicast_packets" });
 
 /* ------------------------------------------------------------------ */
 /* THOR2 (Broadcom ConnectX-class NIC, bnxt_re driver)                 */
@@ -552,24 +547,12 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
   HWC_FB("pfc_tx_pause_frames",     HWC_ETHTOOL, "tx_pause_frames", "tx_pause_ctrl_phy"),
 };
 
-static const RcclHwConfig rcclHwConfigThor2 = {
-  "thor2",
-  rcclHwcThor2,
-  (int)(sizeof(rcclHwcThor2) / sizeof(rcclHwcThor2[0])),
+RCCL_TEL_HW_CONFIG(rcclHwConfigThor2, rcclHwcThor2, "thor2",
   /* Broadcom bnxt_en per-priority pause frames via ethtool -S. */
   { "rx_prio%d_pause",  "tx_prio%d_pause",
     NULL,               NULL },
   /* bnxt_re exposes rx/tx_bytes + rx/tx_pkts in IB sysfs hw_counters. */
-  { HWC_IB_SYSFS, "tx_bytes", "rx_bytes", "tx_pkts", "rx_pkts" },
-};
-
-#ifndef __cplusplus
-_Static_assert(sizeof(rcclHwcThor2) / sizeof(rcclHwcThor2[0]) <= RCCL_TELEMETRY_MAX_HWC,
-               "THOR2 counter table exceeds RCCL_TELEMETRY_MAX_HWC");
-#else
-static_assert(sizeof(rcclHwcThor2) / sizeof(rcclHwcThor2[0]) <= RCCL_TELEMETRY_MAX_HWC,
-              "THOR2 counter table exceeds RCCL_TELEMETRY_MAX_HWC");
-#endif
+  { HWC_IB_SYSFS, "tx_bytes", "rx_bytes", "tx_pkts", "rx_pkts" });
 
 /* ------------------------------------------------------------------ */
 /* Driver name → HW config resolution                                  */
@@ -599,6 +582,7 @@ static void rcclTelemetryCollectHwCounters(RcclDeviceStats* dev);
 static int64_t rcclTelemetryReadSysfsCounter(const char* path);
 static int64_t rcclTelemetryReadHwCounter(const char* roce_device, const char* counter_name);
 static void rcclTelemetryGetDriverName(const char* roce_device, char* driver_name, size_t size);
+static void rcclTelemetryGetEthDevice(const char* roce_device, char* eth_device, size_t eth_device_size);
 static int rcclTelemetryIsCounterEnabled(const char* counter_name);
 static void rcclTelemetryGetTimestamp(char* buf, size_t size);
 static void rcclTelemetryWriteJson(FILE* fp);
@@ -628,10 +612,30 @@ static void rcclTelemetryReadCounters(RcclDeviceStats* dev, int64_t* hwc,
 /* Unified batched ethtool reader                                     */
 /* ------------------------------------------------------------------ */
 
-#define RCCL_ETHTOOL_MAX_WANTED 80
+/* Longest `ethtool -S` statistic name we ever ask for. The kernel bounds a
+ * statistic name by ETH_GSTRING_LEN (32), and the per-priority names we format
+ * stay well inside that, so this has room to spare. */
+#define RCCL_TEL_ETHTOOL_KEY_MAX 64
+
+/* The four PFC per-priority patterns (rx/tx frames, rx/tx pause duration) and
+ * the four delta keys (tx/rx bytes, tx/rx packets) of an RcclHwConfig. */
+#define RCCL_TEL_NUM_PFC_PATTERNS 4
+#define RCCL_TEL_NUM_DELTA_KEYS   4
+
+/*
+ * Worst case of one batched ethtool query, derived rather than restated: every
+ * counter of the widest possible table can contribute its key and its fallback,
+ * every PFC pattern is asked for at every priority, and the delta keys are
+ * added once. Deriving it means adding counters cannot silently overflow the
+ * request and drop the ones past the end.
+ */
+#define RCCL_ETHTOOL_MAX_WANTED                                     \
+  (2 * RCCL_TELEMETRY_MAX_HWC +                                     \
+   RCCL_TEL_NUM_PFC_PATTERNS * RCCL_TELEMETRY_NUM_PFC_PRIO +        \
+   RCCL_TEL_NUM_DELTA_KEYS)
 
 typedef struct {
-  char     key[64];
+  char     key[RCCL_TEL_ETHTOOL_KEY_MAX];
   int64_t* target;
 } RcclEthtoolWantedEx;
 
@@ -686,15 +690,21 @@ static void rcclTelemetryCollectEthtoolBatch(const char* eth_device,
 /* Init / Flush / Register                                            */
 /* ------------------------------------------------------------------ */
 
-void rcclTelemetryInit(void) {
+/* atexit() takes void(void); the flush status is already logged by the flush
+ * itself, and at exit there is no caller left to act on it. */
+static void rcclTelemetryFlushAtExit(void) {
+  (void)rcclTelemetryFlush();
+}
+
+int rcclTelemetryInit(void) {
   if (__atomic_exchange_n(&rcclTelemetryInitialized, 1, __ATOMIC_SEQ_CST)) {
-    return;
+    return 0;
   }
 
   const char* enable_env = getenv("RCCL_TELEMETRY_ENABLE");
   if (enable_env == NULL || strcmp(enable_env, "1") != 0) {
     rcclTelemetryEnabled = 0;
-    return;
+    return 0;
   }
 
   strncpy(rcclTelemetryCfg.output_dir, "/tmp", sizeof(rcclTelemetryCfg.output_dir) - 1);
@@ -707,6 +717,15 @@ void rcclTelemetryInit(void) {
 
   env_val = getenv("RCCL_TELEMETRY_OUTPUT_DIR");
   if (env_val != NULL && env_val[0] != '\0') {
+    /* Truncating here would put the JSON in a directory the user did not ask
+     * for, so refuse rather than write somewhere unintended. */
+    if (strlen(env_val) >= sizeof(rcclTelemetryCfg.output_dir)) {
+      fprintf(stderr,
+              "RCCL NET_TELEMETRY: RCCL_TELEMETRY_OUTPUT_DIR is longer than %zu bytes; "
+              "telemetry stays disabled\n",
+              sizeof(rcclTelemetryCfg.output_dir) - 1);
+      return -1;
+    }
     strncpy(rcclTelemetryCfg.output_dir, env_val, sizeof(rcclTelemetryCfg.output_dir) - 1);
     rcclTelemetryCfg.output_dir[sizeof(rcclTelemetryCfg.output_dir) - 1] = '\0';
   }
@@ -758,6 +777,14 @@ void rcclTelemetryInit(void) {
 
   env_val = getenv("RCCL_TELEMETRY_HW_COUNTERS");
   if (env_val != NULL) {
+    /* Unlike the output directory, a truncated filter only narrows what is
+     * collected, so say so and keep going. */
+    if (strlen(env_val) >= sizeof(rcclTelemetryCfg.hw_counter_list)) {
+      fprintf(stderr,
+              "RCCL NET_TELEMETRY: RCCL_TELEMETRY_HW_COUNTERS is longer than %zu bytes; "
+              "the list is truncated and the counters past the cut are not collected\n",
+              sizeof(rcclTelemetryCfg.hw_counter_list) - 1);
+    }
     strncpy(rcclTelemetryCfg.hw_counter_list, env_val, sizeof(rcclTelemetryCfg.hw_counter_list) - 1);
     rcclTelemetryCfg.hw_counter_list[sizeof(rcclTelemetryCfg.hw_counter_list) - 1] = '\0';
   }
@@ -776,7 +803,7 @@ void rcclTelemetryInit(void) {
       rcclTelemetryDevs[i].hw_counters[c] = -1;
       rcclTelemetryDevs[i].snap_init_hw_counters[c] = -1;
     }
-    for (int p = 0; p < 8; p++) {
+    for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) {
       rcclTelemetryDevs[i].pfc_rx_frames[p] = -1;
       rcclTelemetryDevs[i].pfc_tx_frames[p] = -1;
       rcclTelemetryDevs[i].pfc_rx_pause_us[p] = -1;
@@ -811,7 +838,15 @@ void rcclTelemetryInit(void) {
     fclose(fp);
   }
 
-  atexit(rcclTelemetryFlush);
+  /* Before the sampler, so that a failure here leaves nothing running. Without
+   * this handler the run would pay for telemetry and never emit it, which is
+   * worse than not collecting at all. */
+  if (atexit(rcclTelemetryFlushAtExit) != 0) {
+    fprintf(stderr,
+            "RCCL NET_TELEMETRY: could not register the exit handler that writes the JSON; "
+            "telemetry stays disabled\n");
+    return -1;
+  }
 
   /* The sampler only needs rcclTelemetryNumDevs, which stays 0 until a device
    * registers, and registration is itself gated on the flag below. */
@@ -820,16 +855,17 @@ void rcclTelemetryInit(void) {
   /* Publish last: every hot-path hook keys off this flag, so it must not be
    * observable as 1 before the table above is seeded. */
   __atomic_store_n(&rcclTelemetryEnabled, 1, __ATOMIC_RELEASE);
+  return 0;
 }
 
-void rcclTelemetryFlush(void) {
+int rcclTelemetryFlush(void) {
   if (!rcclTelemetryOn()) {
-    return;
+    return 0;
   }
 
   static int flushed = 0;
   if (__atomic_exchange_n(&flushed, 1, __ATOMIC_SEQ_CST)) {
-    return;
+    return 0;
   }
 
   /* Stop the sampler first so the sample buffer is stable while we write. */
@@ -881,10 +917,14 @@ void rcclTelemetryFlush(void) {
            rcclTelemetryCfg.output_dir, hostname, (int)getpid());
 
   FILE* fp = fopen(filepath, "w");
-  if (fp != NULL) {
-    rcclTelemetryWriteJson(fp);
-    fclose(fp);
+  if (fp == NULL) {
+    fprintf(stderr, "RCCL NET_TELEMETRY: cannot write %s (%s); the run's telemetry is lost\n",
+            filepath, strerror(errno));
+    return -1;
   }
+  rcclTelemetryWriteJson(fp);
+  fclose(fp);
+  return 0;
 }
 
 __attribute__((visibility("default")))
@@ -942,8 +982,7 @@ int rcclTelemetrySwCapture(RcclTelemetrySwSnapshot* out, int maxDevs) {
   return num_devs;
 }
 
-int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
-                                 const char* eth_device, const char* transport) {
+int rcclTelemetryRegisterDevice(int device_id, const char* roce_device, const char* transport) {
   if (!rcclTelemetryOn()) {
     return -1;
   }
@@ -965,12 +1004,6 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
   }
   int idx = device_id;
 
-  if (getenv("RCCL_TELEMETRY_DEBUG") != NULL) {
-    fprintf(stderr, "RCCL NET_TELEMETRY: RegisterDevice idx=%d id=%d roce=%s eth=%s transport=%s\n",
-            idx, device_id, roce_device ? roce_device : "(null)",
-            eth_device ? eth_device : "(null)", transport ? transport : "(null)");
-  }
-
   RcclDeviceStats* dev = &rcclTelemetryDevs[idx];
   dev->device_id = device_id;
 
@@ -979,9 +1012,14 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
     dev->roce_device[sizeof(dev->roce_device) - 1] = '\0';
   }
 
-  if (eth_device != NULL) {
-    strncpy(dev->eth_device, eth_device, sizeof(dev->eth_device) - 1);
-    dev->eth_device[sizeof(dev->eth_device) - 1] = '\0';
+  /* The netdev name comes from the RoCE device, so resolve it here instead of
+   * making every caller do the sysfs walk and carry a buffer for the result. */
+  rcclTelemetryGetEthDevice(dev->roce_device, dev->eth_device, sizeof(dev->eth_device));
+
+  if (getenv("RCCL_TELEMETRY_DEBUG") != NULL) {
+    fprintf(stderr, "RCCL NET_TELEMETRY: RegisterDevice idx=%d id=%d roce=%s eth=%s transport=%s\n",
+            idx, device_id, roce_device ? roce_device : "(null)", dev->eth_device,
+            transport ? transport : "(null)");
   }
 
   if (transport != NULL) {
@@ -990,7 +1028,7 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
   }
 
   /* Resolve HW config once at registration time; stays valid for process lifetime. */
-  char driver_name[64] = {0};
+  char driver_name[RCCL_TELEMETRY_DEV_NAME_MAX] = {0};
   rcclTelemetryGetDriverName(dev->roce_device, driver_name, sizeof(driver_name));
   dev->hw_config = rcclTelemetryResolveHw(driver_name);
 
@@ -1001,7 +1039,7 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
     dev->hw_counters[c] = -1;
     dev->snap_init_hw_counters[c] = -1;
   }
-  for (int p = 0; p < 8; p++) {
+  for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) {
     dev->pfc_rx_frames[p] = dev->snap_init_pfc_rx_frames[p] = -1;
     dev->pfc_tx_frames[p] = dev->snap_init_pfc_tx_frames[p] = -1;
     dev->pfc_rx_pause_us[p] = dev->snap_init_pfc_rx_pause_us[p] = -1;
@@ -1023,7 +1061,10 @@ int rcclTelemetryRegisterDevice(int device_id, const char* roce_device,
   return idx;
 }
 
-void rcclTelemetryGetEthDevice(const char* roce_device, char* eth_device, size_t eth_device_size) {
+/* Map a RoCE device to its netdev name via sysfs. Internal: the only caller is
+ * registration, which is where the pair used to be spelled out at every call
+ * site. */
+static void rcclTelemetryGetEthDevice(const char* roce_device, char* eth_device, size_t eth_device_size) {
   eth_device[0] = '\0';
 
   if (roce_device == NULL || roce_device[0] == '\0') {
@@ -1106,9 +1147,10 @@ static void rcclTelemetryReadCounters(RcclDeviceStats* dev, int64_t* hwc,
   const RcclHwConfig* hw = (const RcclHwConfig*)dev->hw_config;
 
   for (int c = 0; c < RCCL_TELEMETRY_MAX_HWC; c++) hwc[c] = -1;
-  int64_t* pfc_out[4] = { pfc_rx_frames, pfc_tx_frames, pfc_rx_pause_us, pfc_tx_pause_us };
-  for (int k = 0; k < 4; k++)
-    for (int p = 0; p < 8; p++) pfc_out[k][p] = -1;
+  int64_t* pfc_out[RCCL_TEL_NUM_PFC_PATTERNS] = { pfc_rx_frames, pfc_tx_frames,
+                                                  pfc_rx_pause_us, pfc_tx_pause_us };
+  for (int k = 0; k < RCCL_TEL_NUM_PFC_PATTERNS; k++)
+    for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) pfc_out[k][p] = -1;
   *tx_bytes = *rx_bytes = *tx_packets = *rx_packets = -1;
 
   /* 1. IB sysfs hw_counters (individual reads, with fallback key). */
@@ -1126,40 +1168,44 @@ static void rcclTelemetryReadCounters(RcclDeviceStats* dev, int64_t* hwc,
   /* 2. Batched ethtool: scalar hw_counters + PFC per-priority + the 4-way
    *    tx/rx bytes/packets sources. Both primary and fallback keys are queued
    *    with the same target; the batch reader skips targets already >= 0. */
+  /* Bounded by construction: num_counters is asserted against
+   * RCCL_TELEMETRY_MAX_HWC when the table becomes a config, and
+   * RCCL_ETHTOOL_MAX_WANTED is the exact worst case of the three loops below
+   * given that, so none of them needs a capacity test. */
   RcclEthtoolWantedEx ew[RCCL_ETHTOOL_MAX_WANTED];
   int ew_n = 0;
   for (int c = 0; c < hw->num_counters; c++) {
     const RcclHwCounterDesc* d = &hw->counters[c];
     if (d->source != HWC_ETHTOOL || d->key == NULL) continue;
     if (!rcclTelemetryIsCounterEnabled(d->json_name)) continue;
-    if (ew_n < RCCL_ETHTOOL_MAX_WANTED) {
-      strncpy(ew[ew_n].key, d->key, 63); ew[ew_n].key[63] = '\0';
-      ew[ew_n].target = &hwc[c]; ew_n++;
-    }
-    if (d->key_fallback != NULL && ew_n < RCCL_ETHTOOL_MAX_WANTED) {
-      strncpy(ew[ew_n].key, d->key_fallback, 63); ew[ew_n].key[63] = '\0';
+    snprintf(ew[ew_n].key, sizeof(ew[ew_n].key), "%s", d->key);
+    ew[ew_n].target = &hwc[c]; ew_n++;
+    if (d->key_fallback != NULL) {
+      snprintf(ew[ew_n].key, sizeof(ew[ew_n].key), "%s", d->key_fallback);
       ew[ew_n].target = &hwc[c]; ew_n++;
     }
   }
 
   const RcclPfcPatterns* pfc = &hw->pfc;
-  const char* pfc_fmt[4] = { pfc->rx_frames_fmt, pfc->tx_frames_fmt,
-                             pfc->rx_pause_us_fmt, pfc->tx_pause_us_fmt };
-  for (int pri = 0; pri < 8; pri++) {
-    for (int k = 0; k < 4; k++) {
-      if (pfc_fmt[k] && ew_n < RCCL_ETHTOOL_MAX_WANTED - 4) {
-        snprintf(ew[ew_n].key, 64, pfc_fmt[k], pri);
-        ew[ew_n].target = &pfc_out[k][pri]; ew_n++;
-      }
+  const char* pfc_fmt[RCCL_TEL_NUM_PFC_PATTERNS] = { pfc->rx_frames_fmt, pfc->tx_frames_fmt,
+                                                     pfc->rx_pause_us_fmt, pfc->tx_pause_us_fmt };
+  for (int pri = 0; pri < RCCL_TELEMETRY_NUM_PFC_PRIO; pri++) {
+    for (int k = 0; k < RCCL_TEL_NUM_PFC_PATTERNS; k++) {
+      if (pfc_fmt[k] == NULL) continue;
+      snprintf(ew[ew_n].key, sizeof(ew[ew_n].key), pfc_fmt[k], pri);
+      ew[ew_n].target = &pfc_out[k][pri]; ew_n++;
     }
   }
 
   const RcclDeltaPatterns* dp = &hw->delta;
-  if (dp->source == HWC_ETHTOOL && ew_n + 4 <= RCCL_ETHTOOL_MAX_WANTED) {
-    snprintf(ew[ew_n].key, 64, "%s", dp->tx_bytes);   ew[ew_n].target = tx_bytes;   ew_n++;
-    snprintf(ew[ew_n].key, 64, "%s", dp->rx_bytes);   ew[ew_n].target = rx_bytes;   ew_n++;
-    snprintf(ew[ew_n].key, 64, "%s", dp->tx_packets); ew[ew_n].target = tx_packets; ew_n++;
-    snprintf(ew[ew_n].key, 64, "%s", dp->rx_packets); ew[ew_n].target = rx_packets; ew_n++;
+  if (dp->source == HWC_ETHTOOL) {
+    const char* delta_key[RCCL_TEL_NUM_DELTA_KEYS] = { dp->tx_bytes, dp->rx_bytes,
+                                                       dp->tx_packets, dp->rx_packets };
+    int64_t* delta_target[RCCL_TEL_NUM_DELTA_KEYS] = { tx_bytes, rx_bytes, tx_packets, rx_packets };
+    for (int k = 0; k < RCCL_TEL_NUM_DELTA_KEYS; k++) {
+      snprintf(ew[ew_n].key, sizeof(ew[ew_n].key), "%s", delta_key[k]);
+      ew[ew_n].target = delta_target[k]; ew_n++;
+    }
   }
 
   rcclTelemetryCollectEthtoolBatch(dev->eth_device, ew, ew_n);
@@ -1184,7 +1230,7 @@ static void rcclTelemetryReadCounters(RcclDeviceStats* dev, int64_t* hwc,
     }
   }
   if (debugfs_count > 0) {
-    char driver_name[64];
+    char driver_name[RCCL_TELEMETRY_DEV_NAME_MAX];
     rcclTelemetryGetDriverName(dev->roce_device, driver_name, sizeof(driver_name));
     rcclTelemetryCollectDebugfs(hwc, dev->roce_device, driver_name, debugfs_list, debugfs_count);
   }
@@ -1427,7 +1473,8 @@ static void rcclTelemetryCollectDebugfs(int64_t* hwc,
  * A -1 on either side means the counter or the baseline was unavailable, and
  * stays -1 rather than becoming a bogus difference. */
 static void rcclTelemetryPfcDelta(int64_t* cur, const int64_t* init) {
-  for (int p = 0; p < 8; p++) cur[p] = (cur[p] >= 0 && init[p] >= 0) ? (cur[p] - init[p]) : -1;
+  for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++)
+    cur[p] = (cur[p] >= 0 && init[p] >= 0) ? (cur[p] - init[p]) : -1;
 }
 
 static void rcclTelemetryCollectHwCounters(RcclDeviceStats* dev) {
@@ -1471,12 +1518,14 @@ static void rcclTelemetryCollectHwCounters(RcclDeviceStats* dev) {
 /* JSON writer                                                        */
 /* ------------------------------------------------------------------ */
 
-static void rcclTelemetryWriteJsonArray8(FILE* fp, const char* name, const int64_t arr[8], int trailing_comma) {
-  fprintf(fp, "        \"%s\": [%ld, %ld, %ld, %ld, %ld, %ld, %ld, %ld]%s\n",
-          name,
-          (long)arr[0], (long)arr[1], (long)arr[2], (long)arr[3],
-          (long)arr[4], (long)arr[5], (long)arr[6], (long)arr[7],
-          trailing_comma ? "," : "");
+/* One JSON array per PFC counter, one element per priority. */
+static void rcclTelemetryWriteJsonPfcArray(FILE* fp, const char* name,
+                                           const int64_t arr[RCCL_TELEMETRY_NUM_PFC_PRIO],
+                                           int trailing_comma) {
+  fprintf(fp, "        \"%s\": [", name);
+  for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++)
+    fprintf(fp, "%s%ld", p == 0 ? "" : ", ", (long)arr[p]);
+  fprintf(fp, "]%s\n", trailing_comma ? "," : "");
 }
 
 static void rcclTelemetryWriteJson(FILE* fp) {
@@ -1645,13 +1694,13 @@ static void rcclTelemetryWriteJson(FILE* fp) {
 
       const RcclPfcPatterns* pfc = &hw->pfc;
       if (pfc->rx_frames_fmt)
-        rcclTelemetryWriteJsonArray8(fp, "pfc_rx_frames",   dev->pfc_rx_frames,   1);
+        rcclTelemetryWriteJsonPfcArray(fp, "pfc_rx_frames",   dev->pfc_rx_frames,   1);
       if (pfc->tx_frames_fmt)
-        rcclTelemetryWriteJsonArray8(fp, "pfc_tx_frames",   dev->pfc_tx_frames,   1);
+        rcclTelemetryWriteJsonPfcArray(fp, "pfc_tx_frames",   dev->pfc_tx_frames,   1);
       if (pfc->rx_pause_us_fmt)
-        rcclTelemetryWriteJsonArray8(fp, "pfc_rx_pause_us", dev->pfc_rx_pause_us, 1);
+        rcclTelemetryWriteJsonPfcArray(fp, "pfc_rx_pause_us", dev->pfc_rx_pause_us, 1);
       if (pfc->tx_pause_us_fmt)
-        rcclTelemetryWriteJsonArray8(fp, "pfc_tx_pause_us", dev->pfc_tx_pause_us, 1);
+        rcclTelemetryWriteJsonPfcArray(fp, "pfc_tx_pause_us", dev->pfc_tx_pause_us, 1);
     }
 
     fprintf(fp, "        \"delta_tx_bytes\": %ld,\n",   (long)dev->delta_tx_bytes);

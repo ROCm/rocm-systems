@@ -140,6 +140,11 @@ struct alignas(64) ncclIbDev {
 
 #define MAX_IB_DEVS 32
 #define MAX_IB_VDEVS MAX_IB_DEVS * 8
+// Telemetry indexes its per-device slots with this transport's device index, so
+// a shortfall there would silently drop every counter of the devices past the
+// end. Keeping the two in step is cheaper than detecting that at runtime.
+static_assert(MAX_IB_DEVS <= RCCL_TELEMETRY_MAX_DEVS,
+              "telemetry has fewer device slots than the transport can enumerate");
 extern struct ncclIbMergedDev IbCastMergedDevs[MAX_IB_VDEVS];
 extern struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
 extern int IbCastRelaxedOrderingEnabled;
