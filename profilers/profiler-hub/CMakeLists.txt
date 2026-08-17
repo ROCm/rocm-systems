@@ -29,6 +29,14 @@ endif()
 include(GNUInstallDirs)
 
 # ------------------------------------------------------------ #
+# Version
+# ------------------------------------------------------------ #
+
+# Version is the single source of truth in `project(profiler-hub VERSION ...)`
+# above. CMake automatically populates profiler-hub_VERSION_{MAJOR,MINOR,PATCH}
+# and profiler-hub_VERSION from it.
+
+# ------------------------------------------------------------ #
 # Object Library (compiled once, used by both shared and static)
 # ------------------------------------------------------------ #
 
@@ -36,6 +44,16 @@ add_library(profiler-hub-objects OBJECT)
 set_target_properties(
     profiler-hub-objects
     PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+
+target_compile_definitions(
+    profiler-hub-objects
+    PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_MAJOR=${profiler-hub_VERSION_MAJOR}>
+    PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_MINOR=${profiler-hub_VERSION_MINOR}>
+    PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_PATCH=${profiler-hub_VERSION_PATCH}>
 )
 
 target_compile_options(
@@ -141,20 +159,21 @@ include(nlohmann_json)
 target_link_libraries(profiler-hub-objects PRIVATE nlohmann_json::nlohmann_json)
 
 # ------------------------------------------------------------ #
-# Schema from cloned rocprofiler-sdk-rocpd
+# yaml-cpp (schema manifest parsing)
 # ------------------------------------------------------------ #
 
-set(SQL_SCHEMA_DIR ${CMAKE_CURRENT_LIST_DIR}/source/data_storage/schema)
-set(SQL_SCHEMA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/source/data_storage/)
-
-include(rocprofiler-sdk-rocpd)
-
-# All schema SQL is compiled in via the generated headers below; no raw
-# .sql/versions.yml files need to be staged or read at runtime.
-target_include_directories(
+include(yaml-cpp)
+target_link_libraries(
     profiler-hub-objects
-    PRIVATE ${SQL_SCHEMA_BINARY_DIR}
+    PRIVATE yaml-cpp::yaml-cpp ${CMAKE_DL_LIBS}
 )
+
+# ------------------------------------------------------------ #
+# Schema from rocprofiler-sdk-rocpd
+# ------------------------------------------------------------ #
+
+set(SQL_SCHEMA_DIR "${CMAKE_BINARY_DIR}/share/profiler-hub/schema")
+include(rocprofiler-sdk-rocpd)
 
 # ------------------------------------------------------------ #
 # Logging
@@ -310,6 +329,12 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(
+    DIRECTORY "${SQL_SCHEMA_DIR}/"
+    DESTINATION "share/profiler-hub/schema"
+    COMPONENT profiler-hub
 )
 
 install(
