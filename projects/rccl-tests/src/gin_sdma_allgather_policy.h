@@ -81,13 +81,12 @@ GIN_SDMA_AG_HD inline size_t pickSdmaThreshold(bool perCollSet, unsigned long lo
   return compiledDefault;
 }
 
-// Sentinel meaning "CTA-count env var unset/empty/unparseable" (mirrors the
-// ReduceScatter kThresholdUnset); allGatherCtas() falls back to the size-adaptive
-// ladder when the env value is this sentinel.
+// Sentinel meaning "CTA-count env var unset/empty/unparseable"; allGatherCtas()
+// falls back to the size-adaptive ladder when the env value is this sentinel.
 static constexpr size_t kAllGatherCtasUnset = (size_t)-1;
 
-// AllGather -D 3 size-adaptive CTA count (decoupled from -V, mirrors ReduceScatter
-// and the broadcast/reduce rings). Keyed off the SAME tier predicate the kernel
+// AllGather -D 3 size-adaptive CTA count (decoupled from -V, like the
+// broadcast/reduce rings). Keyed off the SAME tier predicate the kernel
 // evaluates (chunkUsesLsaTier), so the CTA choice tracks the actual tier even when
 // NCCL_GIN_ANVIL_SDMA_THRESHOLD[_ALLGATHER] moves the crossover:
 //   * LSA-direct tier (chunk <= threshold): a grid-stride all-peers store that

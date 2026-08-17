@@ -133,7 +133,7 @@ bool AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* re
 // the backend gin.put inline-vs-copy-engine threshold (ctx->sdmaThreshold).
 // Parse a decimal CTA-count env var (NCCL_GIN_ANVIL_AG_CTAS) into a size_t,
 // returning the "unset" sentinel when absent/empty/unparseable so allGatherCtas()
-// falls back to its size-adaptive ladder. Mirrors ReduceScatterParseCtasEnv.
+// falls back to its size-adaptive ladder.
 static inline size_t AllGatherParseCtasEnv() {
   const char* e = getenv("NCCL_GIN_ANVIL_AG_CTAS");
   if (e == nullptr || e[0] == '\0') return gin_sdma_allgather::kAllGatherCtasUnset;
