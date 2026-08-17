@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/log.h"
@@ -297,10 +298,14 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
           return;
       }
       uint32_t ldsAddrs[64];
-      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+      uint64_t validLaneMask = d.lane_mask;
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         ldsAddrs[lane] =
             d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * perLaneBytes;
-      rs->registerLdsEvent(wf.pc, MemoryEventType::GLOBAL_TO_LDS, {}, d.lane_mask, wf.wf_size(),
+        if (ldsAddrs[lane] == amdgpu::kInvalidLdsAddress)
+          validLaneMask &= ~(1ULL << lane);
+      }
+      rs->registerLdsEvent(wf.pc, MemoryEventType::GLOBAL_TO_LDS, {}, validLaneMask, wf.wf_size(),
                            std::span<const uint32_t>(ldsAddrs, wf.wf_size()), perLaneBytes);
     } else if (d.is_load && d.dst_reg_base >= wf.vgpr_alloc().base) {
       uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;

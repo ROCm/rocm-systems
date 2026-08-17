@@ -1131,6 +1131,7 @@ TEST(Gfx1250SimulationTest, AsyncToLdsUsesDstAndSrc0HighBanks) {
   const uint32_t vb = wf->vgpr_alloc().base;
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(256));
+  wf->set_lds_size(256);
   wf->set_vgpr_msb_mode((kDstBank << 6) | kSrc0Bank);
   cu.write_vgpr(vb + kSrc0Bank * kBankStride + kVaddr, 0, static_cast<uint32_t>(kGlobalAddr));
   cu.write_vgpr(vb + kSrc0Bank * kBankStride + kVaddr + 1, 0,
