@@ -130,6 +130,12 @@ struct DispatchEntry {
   uint32_t private_segment_fixed_size = 0;
   uint32_t group_segment_fixed_size = 0;
 
+  /// This entry's share of the grid. The default owns all of it.
+  XcdShard shard{};
+
+  /// Workgroups this entry is responsible for: the whole grid for an unsharded
+  /// entry, otherwise this shard's share. dispatched_wgs and completed_wgs count
+  /// against it, so an entry retires when its own share is done.
   uint32_t total_wgs = 0;
   uint32_t dispatched_wgs = 0;
   uint32_t completed_wgs = 0;
@@ -153,6 +159,7 @@ struct DispatchEntry {
 
   uint32_t cluster_size() const { return cluster_size_x * cluster_size_y * cluster_size_z; }
   bool has_workgroup_clusters() const { return cluster_size() > 1; }
+
   bool cluster_grid_is_complete() const {
     return static_cast<uint64_t>(cluster_count_x) * cluster_size_x == grid_wgs_x &&
            static_cast<uint64_t>(cluster_count_y) * cluster_size_y == grid_wgs_y &&
@@ -221,6 +228,28 @@ struct DispatchEntry {
     base.y = cluster_coord.y * cluster_size_y;
     base.z = cluster_coord.z * cluster_size_z;
     return flatten_local_wg_coord(base);
+  }
+
+  /// @brief Chunk the grid walk advances by: a cluster, else a single workgroup.
+  uint32_t dispatch_chunk_wgs() const { return has_workgroup_clusters() ? cluster_size() : 1u; }
+
+  /// @brief Grid-wide chunk ordinal for this entry's @p shard_chunk_index -th chunk.
+  uint32_t chunk_ordinal_for(uint32_t shard_chunk_index) const {
+    return shard.nth_owned_chunk(shard_chunk_index);
+  }
+
+  /// @brief Narrow this entry to one XCD's share of a grid.
+  ///
+  /// @details Rewrites total_wgs to the share @p s owns, so the existing dispatch
+  /// and retirement bookkeeping operates on the share rather than the grid. Must
+  /// be called before any workgroup of the entry is dispatched.
+  /// @param s The shard to apply.
+  /// @param grid_wgs Workgroup count of the whole grid.
+  void apply_shard(XcdShard s, uint32_t grid_wgs) {
+    assert(dispatched_wgs == 0 && "shard must be applied before dispatching");
+    shard = s;
+    uint32_t chunk = dispatch_chunk_wgs();
+    total_wgs = s.owned_chunks(grid_wgs / chunk) * chunk;
   }
 
   uint32_t cluster_peer_local_wg_id(uint32_t local_wg_id, uint32_t rank) const {

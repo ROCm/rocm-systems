@@ -1072,7 +1072,10 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   };
 
   while (entry.dispatched_wgs < entry.total_wgs) {
-    uint32_t local_wg_id = entry.dispatched_wgs;
+    // dispatched_wgs counts this entry's own share, so it indexes into the
+    // shard's chunks; the shard maps that back to a grid-wide chunk ordinal.
+    // An unsharded entry maps the ordinal to itself.
+    uint32_t local_wg_id = entry.chunk_ordinal_for(entry.dispatched_wgs);
     uint32_t global_wg_id = local_wg_id + entry.workgroup_id_offset;
 
     if (entry.has_workgroup_clusters()) {
@@ -1085,7 +1088,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
              "clustered dispatch advances by whole clusters");
       assert(entry.total_wgs - entry.dispatched_wgs >= cluster_size &&
              "validate_cluster_shape guarantees a complete trailing cluster");
-      uint32_t cluster_ordinal = entry.dispatched_wgs / cluster_size;
+      uint32_t cluster_ordinal = entry.chunk_ordinal_for(entry.dispatched_wgs / cluster_size);
       local_wg_id = entry.cluster_base_local_wg_id_for_ordinal(cluster_ordinal);
       std::vector<PlannedWorkgroup> plan;
       size_t planned_next_cu = next_cu_;

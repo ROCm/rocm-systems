@@ -14,6 +14,7 @@
 
 namespace {
 
+using rocjitsu::amdgpu::DispatchEntry;
 using rocjitsu::amdgpu::XcdShard;
 
 /// Enumerate every grid-wide chunk ordinal owned by @p shard.
@@ -90,4 +91,60 @@ TEST(XcdShardTest, UnevenGridDistributesRemainderToLowRanks) {
     EXPECT_EQ(XcdShard({rank, kStride}).owned_chunks(kTotalChunks), 13u) << "rank " << rank;
   for (uint32_t rank = 4; rank < kStride; ++rank)
     EXPECT_EQ(XcdShard({rank, kStride}).owned_chunks(kTotalChunks), 12u) << "rank " << rank;
+}
+
+// A dispatch entry walks its own share: dispatched_wgs indexes into the shard,
+// and chunk_ordinal_for maps that back to a grid-wide ordinal.
+TEST(XcdShardTest, EntryWalksItsOwnShareOfTheGrid) {
+  constexpr uint32_t kStride = 8;
+  constexpr uint32_t kGridWgs = 256;
+
+  std::multiset<uint32_t> seen;
+  for (uint32_t rank = 0; rank < kStride; ++rank) {
+    DispatchEntry entry;
+    entry.grid_wgs_x = kGridWgs;
+    entry.total_wgs = kGridWgs;
+    entry.apply_shard({rank, kStride}, kGridWgs);
+    EXPECT_EQ(entry.total_wgs, kGridWgs / kStride) << "rank " << rank;
+
+    for (uint32_t i = 0; i < entry.total_wgs; ++i) {
+      uint32_t wg = entry.chunk_ordinal_for(i);
+      ASSERT_EQ(wg % kStride, rank) << "rank " << rank << " wg " << wg;
+      seen.insert(wg);
+    }
+  }
+  EXPECT_EQ(seen.size(), kGridWgs);
+}
+
+// A clustered dispatch shards by whole clusters so cluster peers stay
+// co-resident on the XCD whose LDS they share.
+TEST(XcdShardTest, ClusteredEntryShardsByWholeClusters) {
+  constexpr uint32_t kStride = 8;
+  constexpr uint32_t kClusterSize = 4;
+  constexpr uint32_t kGridWgs = 256;
+
+  DispatchEntry entry;
+  entry.grid_wgs_x = kGridWgs;
+  entry.cluster_size_x = kClusterSize;
+  entry.cluster_count_x = kGridWgs / kClusterSize;
+  entry.total_wgs = kGridWgs;
+  ASSERT_EQ(entry.dispatch_chunk_wgs(), kClusterSize);
+
+  entry.apply_shard({3, kStride}, kGridWgs);
+  EXPECT_EQ(entry.total_wgs, kGridWgs / kStride);
+
+  // Every owned cluster ordinal belongs to this rank, and the workgroups of a
+  // cluster are never split across ranks.
+  for (uint32_t i = 0; i < entry.total_wgs / kClusterSize; ++i)
+    EXPECT_EQ(entry.chunk_ordinal_for(i) % kStride, 3u);
+}
+
+// An unsharded entry must walk the grid exactly as it did before sharding
+// existed: chunk index i is workgroup i.
+TEST(XcdShardTest, UnshardedEntryWalksTheGridUnchanged) {
+  DispatchEntry entry;
+  entry.grid_wgs_x = 100;
+  entry.total_wgs = 100;
+  for (uint32_t i = 0; i < entry.total_wgs; ++i)
+    EXPECT_EQ(entry.chunk_ordinal_for(i), i);
 }
