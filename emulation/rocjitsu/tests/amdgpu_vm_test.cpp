@@ -368,6 +368,22 @@ hsa_kernel_dispatch_packet_t make_dispatch_packet(uint64_t kernel_object, uint64
   return pkt;
 }
 
+uint64_t write_test_kernel(amdgpu::GpuMemory *memory, uint64_t addr,
+                           std::span<const uint32_t> code) {
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t descriptor{};
+  descriptor.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  31);
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  12);
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  memory->load_image(reinterpret_cast<const uint8_t *>(&descriptor), sizeof(descriptor), addr);
+  memory->load_image(reinterpret_cast<const uint8_t *>(code.data()), code.size_bytes(),
+                     addr + sizeof(descriptor));
+  return addr;
+}
+
 // Drive the engine until the listed CUs have no resident wavefronts. A wavefront
 // frees itself at s_endpgm (num_wfs()/has_active_wfs() drop as it halts), so the
 // kernel is complete once every listed CU reports idle. Waves that need their final
@@ -3716,8 +3732,12 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
     queue.submit(dispatch);
     (void)f.engine->step();
 
-    EXPECT_EQ(f.cu()->num_wfs(), 1u);
-    EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 1u);
+    const bool completes_ahead_of_prior_dispatch =
+        !header_barrier_bit &&
+        (packet_type == HSA_PACKET_TYPE_BARRIER_AND || packet_type == HSA_PACKET_TYPE_BARRIER_OR);
+    EXPECT_EQ(f.cu()->num_wfs(), completes_ahead_of_prior_dispatch ? 2u : 1u);
+    EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset),
+              completes_ahead_of_prior_dispatch ? 0u : 1u);
     EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 1u);
 
     f.engine->run();
@@ -3725,6 +3745,46 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
     EXPECT_EQ(f.mem()->read64(kBarrierCompletionSignal + kSignalValueOffset), 0u);
     EXPECT_EQ(f.mem()->read64(kLaterCompletionSignal + kSignalValueOffset), 0u);
   }
+}
+
+TEST(AqlDispatchTest, HeaderClearBarrierUnblocksPriorPollingKernelBeforeLaterDispatch) {
+  VmFixture f("cdna4", /*num_cus=*/2);
+  f.cp()->set_dispatch_threads(2);
+
+  const uint32_t waiter_code[] = {
+      0xC0060080u,
+      0x00000008u, // s_load_dwordx2 s[2:3], s[0:1], 8
+      0xBF8C0000u, // s_waitcnt 0
+      0xBF128002u, // s_cmp_eq_u64 s[2:3], 0
+      0xBF84FFFBu, // s_cbranch_scc0 -5
+      SOPP_S_ENDPGM,
+  };
+  const uint32_t later_code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  const uint64_t waiter = f.write_kernel(0x1000, waiter_code, sizeof(waiter_code));
+  const uint64_t later = f.write_kernel(0x2000, later_code, sizeof(later_code));
+
+  constexpr uint64_t barrier_signal = 0xF0022000;
+  constexpr uint64_t waiter_signal = 0xF0022100;
+  constexpr uint64_t later_signal = 0xF0022200;
+  init_completion_signal(f.mem(), barrier_signal);
+  init_completion_signal(f.mem(), waiter_signal);
+  init_completion_signal(f.mem(), later_signal);
+
+  auto waiter_packet = make_dispatch_packet(waiter, waiter_signal);
+  waiter_packet.kernarg_address = reinterpret_cast<void *>(barrier_signal);
+  hsa_kernel_dispatch_packet_t barrier{};
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND;
+  barrier.completion_signal.handle = barrier_signal;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(waiter_packet);
+  queue.submit(barrier);
+  queue.submit(make_dispatch_packet(later, later_signal));
+  f.engine->run();
+
+  EXPECT_EQ(completion_signal_value(f.mem(), barrier_signal), 0);
+  EXPECT_EQ(completion_signal_value(f.mem(), waiter_signal), 0);
+  EXPECT_EQ(completion_signal_value(f.mem(), later_signal), 0);
 }
 
 TEST_P(IsaTest, VendorSpecificRejectsUnsupportedFormats) {
@@ -3775,6 +3835,26 @@ TEST(ClusterDispatchTest, AccountsForPerWorkgroupLdsAlignmentWhenPlanningCluster
 
   EXPECT_THROW((void)f.engine->step(), std::runtime_error);
   EXPECT_FALSE(f.cu()->has_active_wfs());
+}
+
+TEST(ClusterDispatchTest, ParallelGfx1250RetiresClusterAfterWorkersRejoin) {
+  VmFixture f("gfx1250", /*num_cus=*/2, /*num_wf_slots=*/1, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/128);
+  f.cp()->set_dispatch_threads(2);
+
+  const uint32_t code[] = {0xBFB00000u}; // s_endpgm
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/128);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch_clustered(ko, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/32);
+
+  ASSERT_NO_THROW(f.engine->run());
+  EXPECT_FALSE(f.cu(0)->has_active_wfs());
+  EXPECT_FALSE(f.cu(1)->has_active_wfs());
+  EXPECT_TRUE(f.cp()
+                  ->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0,
+                                        /*mcast_mask=*/0x3)
+                  .empty());
 }
 
 TEST(ClusterDispatchTest, ReclaimsLdsBetweenClusterWaves) {
@@ -4305,7 +4385,6 @@ void run_deferred_rescan_late_completion_test(uint32_t dispatch_threads, SubmitT
 
   ASSERT_TRUE(f.engine->step());
   EXPECT_TRUE(submitter->submitted());
-  EXPECT_EQ(f.cp()->dispatched_count(), 2u);
 
   for (uint32_t i = 0; i < 10000 && (completion_signal_value(f.mem(), sig_a) != 0 ||
                                      completion_signal_value(f.mem(), sig_b) != 0);
@@ -4315,6 +4394,7 @@ void run_deferred_rescan_late_completion_test(uint32_t dispatch_threads, SubmitT
 
   EXPECT_EQ(completion_signal_value(f.mem(), sig_a), 0);
   EXPECT_EQ(completion_signal_value(f.mem(), sig_b), 0);
+  EXPECT_EQ(f.cp()->dispatched_count(), 2u);
   EXPECT_FALSE(f.cu(0)->has_active_wfs());
   EXPECT_FALSE(f.cu(1)->has_active_wfs());
 }
@@ -4361,6 +4441,113 @@ TEST(AqlDispatchTest, SerialCompletionUnblocksCoResidentSignalWaiter) {
   EXPECT_EQ(completion_signal_value(f.mem(), producer_signal), 0);
   EXPECT_EQ(completion_signal_value(f.mem(), waiter_signal), 0);
   EXPECT_FALSE(f.cu()->has_active_wfs());
+}
+
+TEST(AqlDispatchTest, PoolContinuationLetsPeerQueueSatisfyPollingWave) {
+  VmFixture f("cdna4", /*num_cus=*/2, /*num_wf_slots=*/1);
+  f.cp()->set_dispatch_threads(2);
+
+  const uint32_t waiter_code[] = {
+      0xC0060080u,
+      0x00000008u, // s_load_dwordx2 s[2:3], s[0:1], 8
+      enc::S_WAITCNT_0, 0xBF128002u, enc::s_cbranch_scc0(-5), SOPP_S_ENDPGM,
+  };
+  const uint32_t producer_code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  const uint64_t waiter = f.write_kernel(0x1000, waiter_code, sizeof(waiter_code));
+  const uint64_t producer = f.write_kernel(0x2000, producer_code, sizeof(producer_code));
+
+  constexpr uint64_t producer_signal = 0xF0023000;
+  constexpr uint64_t waiter_signal = 0xF0023100;
+  init_completion_signal(f.mem(), producer_signal);
+  init_completion_signal(f.mem(), waiter_signal);
+
+  test::AqlQueue waiter_queue(f.mem(), f.cp());
+  test::AqlQueue producer_queue(f.mem(), f.cp(), /*ring_addr=*/0xE0000000,
+                                test::AqlQueue::DEFAULT_RING_SIZE,
+                                /*read_ptr_addr=*/0xE0010000,
+                                /*write_ptr_addr=*/0xE0010008,
+                                /*doorbell_addr=*/0xE0010010);
+  auto waiter_packet = make_dispatch_packet(waiter, waiter_signal);
+  waiter_packet.kernarg_address = reinterpret_cast<void *>(producer_signal);
+  waiter_queue.submit(waiter_packet);
+  producer_queue.submit(make_dispatch_packet(producer, producer_signal));
+
+  f.engine->run();
+
+  EXPECT_EQ(completion_signal_value(f.mem(), producer_signal), 0);
+  EXPECT_EQ(completion_signal_value(f.mem(), waiter_signal), 0);
+}
+
+TEST(AqlDispatchTest, PoolContinuationLetsPeerCommandProcessorSatisfyPollingWave) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"cdna4"},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu0","type":"compute_unit","config":[
+            {"key":"num_wf_slots","value":"1"},{"key":"sgprs_per_wf","value":"104"},
+            {"key":"vgprs_per_wf","value":"256"},{"key":"lds_size_kb","value":"64"}]}]}]},
+      {"name":"xcd1","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu0","type":"compute_unit","config":[
+            {"key":"num_wf_slots","value":"1"},{"key":"sgprs_per_wf","value":"104"},
+            {"key":"vgprs_per_wf","value":"256"},{"key":"lds_size_kb","value":"64"}]}]}]}
+    ]},"links":[
+      {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+      {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10},
+      {"src":"xcd1.cp.req_0","dst":"xcd1.se0.cu0.cpl","latency":1,"weight":2},
+      {"src":"xcd1.se0.cu0.req","dst":"xcd1.l2.cpl_0","latency":1,"weight":10}
+    ]}})";
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *soc_ptr = loaded.soc();
+  auto *memory = loaded.memory();
+  simdojo::SimulationEngine engine(loaded.engine_config);
+  engine.topology().set_root(loaded.take_root());
+  loaded.wire_links(engine.topology());
+  engine.create();
+  soc_ptr->set_dispatch_threads(2);
+
+  const uint32_t waiter_code[] = {
+      0xC0060080u,
+      0x00000008u, // s_load_dwordx2 s[2:3], s[0:1], 8
+      enc::S_WAITCNT_0, 0xBF128002u, enc::s_cbranch_scc0(-5), SOPP_S_ENDPGM,
+  };
+  const uint64_t waiter = write_test_kernel(memory, 0x1000, waiter_code);
+
+  constexpr uint64_t producer_signal = 0xF0024000;
+  constexpr uint64_t waiter_signal = 0xF0024100;
+  init_completion_signal(memory, producer_signal);
+  init_completion_signal(memory, waiter_signal);
+
+  auto *waiter_cp = soc_ptr->xcd(0)->command_processor();
+  auto *producer_cp = soc_ptr->xcd(1)->command_processor();
+  test::AqlQueue waiter_queue(memory, waiter_cp);
+  auto waiter_packet = make_dispatch_packet(waiter, waiter_signal);
+  waiter_packet.kernarg_address = reinterpret_cast<void *>(producer_signal);
+  waiter_queue.submit(waiter_packet);
+
+  bool producer_event_ran = false;
+  simdojo::Event producer_event{producer_cp, simdojo::EventType::TIMER_CALLBACK,
+                                [&](simdojo::Tick, simdojo::Message *) {
+                                  producer_event_ran = true;
+                                  memory->write64(producer_signal + 8, 0);
+                                  soc_ptr->xcd(0)->shader_engine(0)->compute_unit(0)->flush_l1();
+                                  soc_ptr->xcd(0)->l2_cache()->invalidate_all();
+                                }};
+  engine.schedule_event_async(&producer_event, 1);
+
+  for (uint32_t i = 0; i < 10000 && (completion_signal_value(memory, producer_signal) != 0 ||
+                                     completion_signal_value(memory, waiter_signal) != 0);
+       ++i)
+    ASSERT_TRUE(engine.step());
+
+  EXPECT_TRUE(producer_event_ran);
+  EXPECT_EQ(completion_signal_value(memory, producer_signal), 0);
+  EXPECT_EQ(completion_signal_value(memory, waiter_signal), 0)
+      << "waiter dispatches=" << waiter_cp->dispatched_count()
+      << " exit=" << engine.last_exit().message;
 }
 
 TEST_P(IsaTest, EngineRunsToCompletion) {

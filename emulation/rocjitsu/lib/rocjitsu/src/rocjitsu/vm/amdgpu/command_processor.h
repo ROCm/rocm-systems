@@ -232,6 +232,7 @@ public:
         std::max(scratch_shader_engine_count_, cu->shader_engine_id() + 1);
     scratch_waves_per_se_ =
         std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->num_wf_slots());
+    cu->set_pool_driven(dispatch_threads_ > 1);
     cu->set_command_processor(this);
     cu->set_on_idle([this]() { on_cu_idle(); });
   }
@@ -524,6 +525,7 @@ private:
   bool find_valid_cluster_barrier_locked(const Wavefront &wf, int32_t barrier_id,
                                          const ClusterWorkgroupPlacement *&placement,
                                          const ClusterBarrierState *&barriers) const;
+  void drain_pending_wg_completions();
   void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroups(uint32_t dispatch_id);
@@ -645,6 +647,12 @@ private:
   std::unique_ptr<CpuDispatchPool> local_dispatch_pool_;
   std::vector<ComputeUnitCore *> active_cu_scratch_;
 
+  struct PendingWorkgroupCompletion {
+    uint32_t dispatch_id = 0;
+    uint32_t wg_id = 0;
+  };
+  std::vector<PendingWorkgroupCompletion> pending_wg_completions_;
+
   struct ClusterWorkgroupPlacement {
     ComputeUnitCore *cu = nullptr;
     uint32_t lds_base = 0;
@@ -674,6 +682,8 @@ private:
   std::unordered_map<uint64_t, ClusterBarrierState> cluster_barriers_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
+  simdojo::Event dispatch_continuation_event_{this, simdojo::EventType::TIMER_CALLBACK};
+  bool dispatch_continuation_pending_ = false;
   // Guards changes to the shape of hw_queues_ and new_queue_states_. The
   // dispatch handler holds a shared lock while worker execution temporarily
   // releases hw_queue_mutex_, keeping its vector references stable.

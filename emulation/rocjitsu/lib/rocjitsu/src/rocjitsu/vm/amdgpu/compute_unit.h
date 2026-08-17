@@ -196,6 +196,10 @@ public:
     return config_.functional_quantum == 0 ? UINT32_MAX : config_.functional_quantum;
   }
 
+  /// @brief Select whether the CP continuation event owns functional execution.
+  void set_pool_driven(bool value) { pool_driven_ = value; }
+  bool pool_driven() const { return pool_driven_; }
+
   /// @brief Execute up to one functional quantum of instructions on this CU.
   /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
   FunctionalQuantumResult run_quantum() {
@@ -1060,6 +1064,7 @@ protected:
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   bool observes_sgpr_reads_ = false;
+  bool pool_driven_ = false;
 
   /// @brief Resolve the owner of a physical SGPR from its allocation block.
   /// @details Power-of-two block sizes use a shift on the instruction read path;
@@ -1142,6 +1147,12 @@ public:
 
   /// @brief Execute work up to the quantum limit, then yield.
   bool execute_quantum() override {
+    // A CP continuation event owns pool-driven execution. If the policy changed
+    // while a CU tick was already queued, retire that stale driver here.
+    if (this->pool_driven()) {
+      executing_ = false;
+      return false;
+    }
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
       // A request left by direct step() execution must not shorten this quantum.
       functional_yield_requested_ = false;
@@ -1184,7 +1195,7 @@ public:
     // resident on this CU, so scheduling work for it would spin the engine
     // against a wave that cannot retire an instruction until the debugger
     // resumes it.
-    if (executing_ || !this->engine() || !this->has_runnable_wfs())
+    if (this->pool_driven() || executing_ || !this->engine() || !this->has_runnable_wfs())
       return;
     executing_ = true;
     auto now = this->engine()->context(this->partition_id()).current_tick();
