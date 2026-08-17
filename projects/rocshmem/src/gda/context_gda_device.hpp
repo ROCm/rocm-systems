@@ -427,6 +427,51 @@ class GDAContext : public Context {
 
   __device__ void tile_finish_get(int pe, int qp_index, ActiveWFInfo &wf_info);
 
+  /**
+   * @brief Post NBI puts for contiguous rows, striped across workers.
+   *
+   * Requires ActiveWFInfo with ThreadScope::thread so each worker posts its
+   * own WQE. Does not quiet; caller must tile_finish_put.
+   * Strides are in bytes between consecutive rows.
+   */
+  __device__ void tile_put_rows_nbi(char *dst_base, const char *src_base,
+                                    size_t dst_row_stride_bytes,
+                                    size_t src_row_stride_bytes,
+                                    size_t num_rows, size_t row_bytes,
+                                    int qp_index, int worker_id,
+                                    int worker_count, ActiveWFInfo &wf_info);
+
+  /**
+   * @brief Post NBI puts for contiguous columns, striped across workers.
+   * Strides are in bytes between consecutive columns.
+   */
+  __device__ void tile_put_cols_nbi(char *dst_base, const char *src_base,
+                                    size_t dst_col_stride_bytes,
+                                    size_t src_col_stride_bytes,
+                                    size_t num_cols, size_t col_bytes,
+                                    int qp_index, int worker_id,
+                                    int worker_count, ActiveWFInfo &wf_info);
+
+  /**
+   * @brief Post NBI gets for contiguous rows, striped across workers.
+   */
+  __device__ void tile_get_rows_nbi(char *dst_base, const char *src_base,
+                                    size_t dst_row_stride_bytes,
+                                    size_t src_row_stride_bytes,
+                                    size_t num_rows, size_t row_bytes,
+                                    int qp_index, int worker_id,
+                                    int worker_count, ActiveWFInfo &wf_info);
+
+  /**
+   * @brief Post NBI gets for contiguous columns, striped across workers.
+   */
+  __device__ void tile_get_cols_nbi(char *dst_base, const char *src_base,
+                                    size_t dst_col_stride_bytes,
+                                    size_t src_col_stride_bytes,
+                                    size_t num_cols, size_t col_bytes,
+                                    int qp_index, int worker_id,
+                                    int worker_count, ActiveWFInfo &wf_info);
+
   __device__
   void internal_quiet(ActiveWFInfo &wf_info);
 

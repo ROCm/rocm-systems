@@ -1421,6 +1421,41 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
  ******************** TILE API RMA IMPLEMENTATIONS ****************************
  *****************************************************************************/
 
+// Layout classes for 2D tiles (element strides). Used by multi-WQE RMA helpers;
+// wiring into tile_put/get_wave/wg is a follow-up.
+enum class GdaTileLayout {
+  Contiguous,  // fully packed in both dimensions
+  RowContig,   // each row contiguous (stride1 == 1), rows may be gapped
+  ColContig,   // each column contiguous (stride0 == 1), cols may be gapped
+  Strided      // general strided / element-wise
+};
+
+__device__ __forceinline__ GdaTileLayout gda_tile_classify_2d(
+    size_t src_stride0, size_t src_stride1, size_t dst_stride0,
+    size_t dst_stride1, size_t extent0, size_t extent1) {
+  const bool row_contig = (src_stride1 == 1 && dst_stride1 == 1);
+  const bool col_contig = (src_stride0 == 1 && dst_stride0 == 1);
+  if (row_contig && src_stride0 == extent1 && dst_stride0 == extent1) {
+    return GdaTileLayout::Contiguous;
+  }
+  if (row_contig) {
+    return GdaTileLayout::RowContig;
+  }
+  if (col_contig) {
+    return GdaTileLayout::ColContig;
+  }
+  return GdaTileLayout::Strided;
+}
+
+// Multi-WQE requires every worker to post the same number of WQEs. When the
+// chunk count is smaller than the worker count, callers should use a
+// leader-sequential path instead.
+__device__ __forceinline__ bool gda_tile_use_multi_wqe(size_t num_chunks,
+                                                       int worker_count) {
+  return worker_count > 1 &&
+         num_chunks >= static_cast<size_t>(worker_count);
+}
+
 // Synchronize outstanding tile PUT operations (IPC quiet or GDA QP quiet)
 __device__ __forceinline__ void GDAContext::tile_finish_put(int pe, int qp_index,
                                                             ActiveWFInfo &wf_info) {
@@ -1436,6 +1471,54 @@ __device__ __forceinline__ void GDAContext::tile_finish_put(int pe, int qp_index
 __device__ __forceinline__ void GDAContext::tile_finish_get(int pe, int qp_index,
                                                             ActiveWFInfo &wf_info) {
   tile_finish_put(pe, qp_index, wf_info);
+}
+
+__device__ inline void GDAContext::tile_put_rows_nbi(
+    char *dst_base, const char *src_base, size_t dst_row_stride_bytes,
+    size_t src_row_stride_bytes, size_t num_rows, size_t row_bytes,
+    int qp_index, int worker_id, int worker_count, ActiveWFInfo &wf_info) {
+  for (size_t i = static_cast<size_t>(worker_id); i < num_rows;
+       i += static_cast<size_t>(worker_count)) {
+    char *dst_row = dst_base + i * dst_row_stride_bytes;
+    const char *src_row = src_base + i * src_row_stride_bytes;
+    qps[qp_index].put_nbi(dst_row, src_row, row_bytes, wf_info);
+  }
+}
+
+__device__ inline void GDAContext::tile_put_cols_nbi(
+    char *dst_base, const char *src_base, size_t dst_col_stride_bytes,
+    size_t src_col_stride_bytes, size_t num_cols, size_t col_bytes,
+    int qp_index, int worker_id, int worker_count, ActiveWFInfo &wf_info) {
+  for (size_t j = static_cast<size_t>(worker_id); j < num_cols;
+       j += static_cast<size_t>(worker_count)) {
+    char *dst_col = dst_base + j * dst_col_stride_bytes;
+    const char *src_col = src_base + j * src_col_stride_bytes;
+    qps[qp_index].put_nbi(dst_col, src_col, col_bytes, wf_info);
+  }
+}
+
+__device__ inline void GDAContext::tile_get_rows_nbi(
+    char *dst_base, const char *src_base, size_t dst_row_stride_bytes,
+    size_t src_row_stride_bytes, size_t num_rows, size_t row_bytes,
+    int qp_index, int worker_id, int worker_count, ActiveWFInfo &wf_info) {
+  for (size_t i = static_cast<size_t>(worker_id); i < num_rows;
+       i += static_cast<size_t>(worker_count)) {
+    char *dst_row = dst_base + i * dst_row_stride_bytes;
+    const char *src_row = src_base + i * src_row_stride_bytes;
+    qps[qp_index].get_nbi(dst_row, src_row, row_bytes, wf_info);
+  }
+}
+
+__device__ inline void GDAContext::tile_get_cols_nbi(
+    char *dst_base, const char *src_base, size_t dst_col_stride_bytes,
+    size_t src_col_stride_bytes, size_t num_cols, size_t col_bytes,
+    int qp_index, int worker_id, int worker_count, ActiveWFInfo &wf_info) {
+  for (size_t j = static_cast<size_t>(worker_id); j < num_cols;
+       j += static_cast<size_t>(worker_count)) {
+    char *dst_col = dst_base + j * dst_col_stride_bytes;
+    const char *src_col = src_base + j * src_col_stride_bytes;
+    qps[qp_index].get_nbi(dst_col, src_col, col_bytes, wf_info);
+  }
 }
 
 // RMA Operations - Type-erased implementations
