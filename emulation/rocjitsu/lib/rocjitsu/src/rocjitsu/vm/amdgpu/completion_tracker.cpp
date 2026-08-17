@@ -51,7 +51,33 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
                           entry.completed_wgs, entry.total_wgs, entry.completion_signal);
       });
 
+      // Publish this XCD's share only after its own caches are flushed. The
+      // release in publish_share() pairs with the acquire in grid_retired(), so
+      // the XCD that fires the signal cannot do so while another XCD's results
+      // are still sitting in its caches.
       flush_caches(entry.process_id);
+      if (entry.grid_completion && !entry.grid_share_published) {
+        entry.grid_share_published = true;
+        entry.grid_completion->publish_share(entry.total_wgs);
+        if (grid_share_retired_cb_)
+          grid_share_retired_cb_(entry);
+      }
+
+      // A peer XCD's shard carries no signal and no dispatch-level callbacks; it
+      // has done its part and retires as soon as its own share is flushed and
+      // published.
+      if (entry.is_fanout_peer()) {
+        if (qs.next_dispatch_idx > 0)
+          --qs.next_dispatch_idx;
+        qs.entries.pop_front();
+        continue;
+      }
+
+      // The owning XCD holds the head of its queue until every XCD has retired
+      // its share, so the dispatch retires once, in queue order.
+      if (entry.grid_completion && !entry.grid_completion->grid_retired())
+        break;
+
       plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
       if (entry.completion_signal != 0) {
         fire_signal(entry);
@@ -67,7 +93,10 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
     // HQD idle: write the queue's inactive signal and fire the interrupt.
     // On real hardware the CP writes the HQD status to amd_signal_t::value
     // and kfd_signal_event_interrupt broadcasts to all type-0 events.
-    if (had_entries && qs.entries.empty() && last_process_id != 0) {
+    // A fan-out replica does not own the queue and must not report it idle: its
+    // shards drain ahead of the owning XCD's, so it would signal idle while the
+    // dispatch is still running elsewhere.
+    if (had_entries && qs.entries.empty() && last_process_id != 0 && !qs.fanout_replica) {
       if (qs.queue_desc_va != 0)
         fire_queue_idle_signal(qs.queue_desc_va, last_process_id);
       if (interrupt_cb_)

@@ -40,7 +40,13 @@ public:
            uint64_t ring_addr = DEFAULT_RING_ADDR, uint32_t ring_size = DEFAULT_RING_SIZE,
            uint64_t read_ptr_addr = DEFAULT_READ_PTR_ADDR,
            uint64_t write_ptr_addr = DEFAULT_WRITE_PTR_ADDR,
-           uint64_t doorbell_addr = DEFAULT_DOORBELL_ADDR)
+           uint64_t doorbell_addr = DEFAULT_DOORBELL_ADDR,
+           /// Spread each dispatch over every XCD, as the KFD queue path does on a
+           /// multi-XCD part. Off by default so a test that binds a queue to one
+           /// command processor keeps that command processor's CUs to itself.
+           /// Queues opting in must use distinct queue ids, which this helper does
+           /// not assign; use one such queue per test.
+           bool xcd_fanout = false)
       : memory_(memory), cp_(cp), ring_addr_(ring_addr), ring_size_(ring_size),
         read_ptr_addr_(read_ptr_addr), write_ptr_addr_(write_ptr_addr),
         doorbell_addr_(doorbell_addr) {
@@ -56,6 +62,7 @@ public:
     hw.read_ptr_va = read_ptr_addr_;
     hw.write_ptr_va = write_ptr_addr_;
     hw.doorbell_va = doorbell_addr_;
+    hw.xcd_fanout = xcd_fanout;
     cp_->register_queue(std::move(hw));
   }
 

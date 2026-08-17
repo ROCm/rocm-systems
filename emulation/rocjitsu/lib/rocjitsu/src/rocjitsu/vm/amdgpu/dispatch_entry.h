@@ -12,12 +12,16 @@
 /// independently. Completion signals fire when all WGs of a dispatch finish,
 /// in per-queue submission order.
 
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <deque>
+#include <memory>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class CommandProcessor;
 
 struct WorkgroupCoord {
   uint32_t x = 0;
@@ -82,6 +86,24 @@ struct XcdShard {
     assert(stride >= 1 && "shard stride must be at least one");
     return rank + shard_chunk_index * stride;
   }
+};
+
+/// @brief Grid-wide retirement state shared by every shard of one dispatch.
+///
+/// @details When a dispatch is fanned out, each participating XCD retires its own
+/// share independently, but the dispatch's completion signal must fire once, after
+/// the last workgroup anywhere on the device. Each XCD flushes its own caches and
+/// then publishes its share here; the owning XCD fires the signal only once the
+/// published total covers the grid. Publishing releases and the owner's check
+/// acquires, so every XCD's flush is visible before the signal is written.
+struct GridCompletion {
+  /// Workgroups retired across all participating XCDs.
+  std::atomic<uint32_t> completed_wgs{0};
+  /// Workgroups in the whole grid.
+  uint32_t grid_wgs = 0;
+
+  void publish_share(uint32_t wgs) { completed_wgs.fetch_add(wgs, std::memory_order_release); }
+  bool grid_retired() const { return completed_wgs.load(std::memory_order_acquire) >= grid_wgs; }
 };
 
 /// @brief Per-dispatch tracking entry created by the AQL Packet Processor.
@@ -152,6 +174,21 @@ struct DispatchEntry {
   bool host_signal = false;
   bool barrier_bit = false;
   bool execution_begun = false;
+
+  /// Grid-wide retirement state, shared by every shard of a fanned-out dispatch.
+  /// Null when this entry owns the whole grid by itself.
+  std::shared_ptr<GridCompletion> grid_completion{};
+  /// The command processor holding the dispatch's completion signal. Set on the
+  /// shards handed to peer XCDs so a peer can wake the owner when its share
+  /// retires; null on the owner's own shard.
+  CommandProcessor *fanout_owner = nullptr;
+  /// Set once this shard has published its retired workgroups to grid_completion,
+  /// so a repeated drain cannot double-count them.
+  bool grid_share_published = false;
+
+  /// @returns True when this entry is a peer XCD's share of a fanned-out dispatch,
+  /// rather than the share held by the XCD that owns the completion signal.
+  bool is_fanout_peer() const { return fanout_owner != nullptr; }
 
   bool fully_dispatched() const { return dispatched_wgs >= total_wgs; }
   bool fully_completed() const { return completed_wgs >= total_wgs; }
@@ -341,6 +378,10 @@ struct HwQueueState {
   bool implicit_barrier_next = false;
   size_t next_dispatch_idx = 0;
   uint64_t queue_desc_va = 0;
+  /// True on a peer XCD's replica of a fanned-out queue. Such a replica never
+  /// reads the ring and never owns the queue's idle signal; it only receives
+  /// dispatch shards from the XCD that does.
+  bool fanout_replica = false;
 };
 
 } // namespace amdgpu

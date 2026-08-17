@@ -104,6 +104,80 @@ TEST(XcdDistributionTest, SingleQueueGridLandsOnOneXcd) {
   EXPECT_EQ(xcds_used, 1u) << "expected the whole grid confined to one XCD";
 }
 
+// A queue marked for fan-out spreads each dispatch over every XCD, round-robin
+// one workgroup at a time. The permutation is part of the contract: kernels that
+// swizzle their workgroup index for cache locality assume workgroup i runs on XCD
+// i % num_xcds.
+TEST(XcdDistributionTest, FanoutQueueGridSpreadsOverAllXcds) {
+  XcdDistributionFixture fx;
+  ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
+
+  auto *cp = fx.soc->assign_queue_cp();
+  ASSERT_NE(cp, nullptr);
+  test::AqlQueue queue(fx.memory, cp, test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/true);
+  queue.dispatch(kKdAddr, kTotalCus * kWavefrontSize, kWavefrontSize);
+
+  fx.engine->run();
+
+  auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  ASSERT_EQ(counts.size(), kTotalXcds);
+  EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), kTotalCus);
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+    EXPECT_EQ(counts[xi], kTotalCus / kTotalXcds) << "xcd" << xi;
+}
+
+// The split must not depend on which XCD the queue landed on: rank is the XCD's
+// own index, so the workgroup-to-XCD mapping is the same for every queue.
+TEST(XcdDistributionTest, FanoutIsIndependentOfOwningXcd) {
+  XcdDistributionFixture fx;
+
+  // Rotate the assignment so the queue is owned by an XCD other than xcd0.
+  for (uint32_t i = 0; i < 3; ++i)
+    ASSERT_NE(fx.soc->assign_queue_cp(), nullptr);
+  auto *cp = fx.soc->assign_queue_cp();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_NE(cp, fx.soc->xcd(0)->command_processor());
+
+  test::AqlQueue queue(fx.memory, cp, test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/true);
+  queue.dispatch(kKdAddr, kTotalCus * kWavefrontSize, kWavefrontSize);
+
+  fx.engine->run();
+
+  auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+    EXPECT_EQ(counts[xi], kTotalCus / kTotalXcds) << "xcd" << xi;
+}
+
+// A grid with fewer workgroups than XCDs is not split: an empty share is
+// indistinguishable from a barrier packet and would retire the dispatch early.
+TEST(XcdDistributionTest, GridSmallerThanXcdCountIsNotSplit) {
+  XcdDistributionFixture fx;
+
+  auto *cp = fx.soc->assign_queue_cp();
+  ASSERT_NE(cp, nullptr);
+  test::AqlQueue queue(fx.memory, cp, test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/true);
+  constexpr uint32_t kWgs = kTotalXcds - 1;
+  queue.dispatch(kKdAddr, kWgs * kWavefrontSize, kWavefrontSize);
+
+  fx.engine->run();
+
+  auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), kWgs);
+  size_t xcds_used = 0;
+  for (auto count : counts)
+    xcds_used += count > 0 ? 1 : 0;
+  EXPECT_EQ(xcds_used, 1u);
+}
+
 // assign_queue_cp() rotates queues across XCDs, so N queues do reach N XCDs.
 // This is the only XCD spreading that exists today, and it only helps an
 // application that opens more than one HW queue.

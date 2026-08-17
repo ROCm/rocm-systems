@@ -509,6 +509,15 @@ void CommandProcessor::startup() {
   completion_->set_plugin_group(plugin_group_);
   completion_->set_dispatch_retired_callback(
       [this](const DispatchEntry &entry) { erase_cluster_workgroups(entry.dispatch_id); });
+  completion_->set_grid_share_retired_callback([](const DispatchEntry &entry) {
+    // The owning XCD may have finished its own share long ago and be parked with
+    // nothing left to wake it. Re-arm its doorbell so it re-checks the grid
+    // counter and fires the completion signal. Cross-partition safe: the engine
+    // buffers the event into the owner's partition.
+    auto *owner = entry.fanout_owner;
+    if (owner && owner->engine())
+      owner->engine()->schedule_event_now(owner->doorbell_event());
+  });
   if (interrupt_cb_)
     completion_->set_interrupt_callback(interrupt_cb_);
 }
@@ -522,6 +531,79 @@ void CommandProcessor::shutdown() {
   completion_.reset();
 }
 
+void CommandProcessor::set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers) {
+  assert(rank < peers.size() && "XCD rank must index its own SoC's CP list");
+  assert(peers[rank] == this && "XCD rank must be this CP's own position");
+  xcd_rank_ = rank;
+  xcd_peers_ = std::move(peers);
+}
+
+HwQueueState *CommandProcessor::find_queue_state(uint32_t queue_id, uint32_t process_id) {
+  for (size_t i = 0; i < hw_queues_.size(); ++i) {
+    if (hw_queues_[i].queue_id == queue_id && hw_queues_[i].process_id == process_id)
+      return &new_queue_states_[i];
+  }
+  return nullptr;
+}
+
+void CommandProcessor::accept_fanout_shard(DispatchEntry shard) {
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    auto *qs = find_queue_state(shard.queue_id, shard.process_id);
+    if (!qs) {
+      // The replica was torn down between the owner reading the packet and this
+      // call. Publish the share so the owner's grid counter still completes and
+      // its signal is not lost.
+      if (shard.grid_completion)
+        shard.grid_completion->publish_share(shard.total_wgs);
+      return;
+    }
+    util::Logger::cp([&](auto &os) {
+      os << std::format("{}: FANOUT_SHARD d={} rank={}/{} wgs={}", name(), shard.dispatch_id,
+                        shard.shard.rank, shard.shard.stride, shard.total_wgs);
+    });
+    qs->entries.push_back(std::move(shard));
+  }
+  // Cross-thread and cross-partition safe: the engine buffers the event and drains
+  // it into this CP's partition at its next safe point. Dispatching inline here
+  // would reach into another partition's compute units.
+  if (engine())
+    engine()->schedule_event_now(doorbell_event());
+}
+
+bool CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
+  const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
+  if (num_xcds <= 1)
+    return false;
+
+  const uint32_t grid_wgs = dp.total_wgs;
+  const uint32_t chunk = dp.dispatch_chunk_wgs();
+  // Every XCD must end up with at least one chunk: a zero-workgroup entry is
+  // indistinguishable from a barrier packet and would retire immediately.
+  if (grid_wgs / chunk < num_xcds)
+    return false;
+
+  auto grid = std::make_shared<GridCompletion>();
+  grid->grid_wgs = grid_wgs;
+
+  for (uint32_t rank = 0; rank < num_xcds; ++rank) {
+    if (rank == xcd_rank_)
+      continue;
+    DispatchEntry shard = dp;
+    shard.grid_completion = grid;
+    shard.fanout_owner = this;
+    // The peer must not fire the dispatch's completion signal; the owning XCD
+    // does that once the grid counter shows every share retired.
+    shard.completion_signal = 0;
+    shard.apply_shard({rank, num_xcds}, grid_wgs);
+    xcd_peers_[rank]->accept_fanout_shard(std::move(shard));
+  }
+
+  dp.grid_completion = std::move(grid);
+  dp.apply_shard({xcd_rank_, num_xcds}, grid_wgs);
+  return true;
+}
+
 void CommandProcessor::register_queue(HwQueue queue) {
   util::Logger::cp([&](auto &os) {
     os << std::format("{}: REGISTER_QUEUE id={} pid={} ring={:#x} size={} rptr={:#x} wptr={:#x} "
@@ -530,11 +612,30 @@ void CommandProcessor::register_queue(HwQueue queue) {
                       queue.read_ptr_va, queue.write_ptr_va, queue.doorbell_offset, queue.is_sdma,
                       reinterpret_cast<uintptr_t>(queue.doorbell_base));
   });
-  bool start_poll = queue.host_accessible;
+  // A replica exists only to receive dispatch shards from the XCD that owns the
+  // queue. It must never read the ring or poll the doorbell, or the same packets
+  // would be dispatched once per XCD.
+  bool start_poll = queue.host_accessible && !queue.fanout_replica;
+  // Replicate onto the peer XCDs before taking the lock: accept_fanout_shard()
+  // and the peers' register_queue() take their own locks, and a shard can arrive
+  // only after this returns, so there is no window where a peer has work but no
+  // queue state.
+  bool replicate = queue.xcd_fanout && xcd_peers_.size() > 1;
+  if (replicate) {
+    for (uint32_t rank = 0; rank < xcd_peers_.size(); ++rank) {
+      if (rank == xcd_rank_)
+        continue;
+      HwQueue replica = queue;
+      replica.xcd_fanout = false;
+      replica.fanout_replica = true;
+      xcd_peers_[rank]->register_queue(std::move(replica));
+    }
+  }
   {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     HwQueueState qs{};
     qs.queue_desc_va = queue.queue_desc_va;
+    qs.fanout_replica = queue.fanout_replica;
     hw_queues_.push_back(std::move(queue));
     new_queue_states_.push_back(std::move(qs));
     // KFD queues rely on the VM-level primary (rj_vm.cpp); only internal test
@@ -565,12 +666,25 @@ void CommandProcessor::register_queue(HwQueue queue) {
 }
 
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  for (size_t i = 0; i < hw_queues_.size(); ++i) {
-    if (hw_queues_[i].queue_id == queue_id && hw_queues_[i].process_id == process_id) {
-      hw_queues_.erase(hw_queues_.begin() + static_cast<ptrdiff_t>(i));
-      new_queue_states_.erase(new_queue_states_.begin() + static_cast<ptrdiff_t>(i));
-      break;
+  bool drop_replicas = false;
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    for (size_t i = 0; i < hw_queues_.size(); ++i) {
+      if (hw_queues_[i].queue_id == queue_id && hw_queues_[i].process_id == process_id) {
+        drop_replicas = hw_queues_[i].xcd_fanout;
+        hw_queues_.erase(hw_queues_.begin() + static_cast<ptrdiff_t>(i));
+        new_queue_states_.erase(new_queue_states_.begin() + static_cast<ptrdiff_t>(i));
+        break;
+      }
+    }
+  }
+  // Tear the replicas down outside our own lock: a peer's unregister_queue takes
+  // that peer's lock, and holding both would fix no order between two CPs whose
+  // queues are being destroyed concurrently.
+  if (drop_replicas) {
+    for (uint32_t rank = 0; rank < xcd_peers_.size(); ++rank) {
+      if (rank != xcd_rank_)
+        xcd_peers_[rank]->unregister_queue(queue_id, process_id);
     }
   }
   // Don't stop the doorbell monitor here — the join can deadlock when
@@ -668,6 +782,10 @@ bool CommandProcessor::scan_doorbells() {
   bool found = false;
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   for (auto &q : hw_queues_) {
+    // A replica shares the owner's ring and doorbell. Only the owning XCD may
+    // consume them, or every XCD would dispatch the whole grid.
+    if (q.fanout_replica)
+      continue;
     uint64_t val;
     if (q.host_accessible) {
       if (!q.doorbell_base)
@@ -983,9 +1101,12 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
           const ShaderProcessorInput::WorkgroupPlacement &placement) -> bool {
     // Fire the dispatch-execution-begin hook exactly once, on the first workgroup
     // actually placed on a CU, guarded by the per-dispatch flag.
+    // One begin per dispatch, not per XCD: only the shard that also owns the
+    // dispatch's completion signal reports it.
     if (!entry.execution_begun) {
       entry.execution_begun = true;
-      plugin_group_->onAmdgpuDispatchExecutionBegin(entry.dispatch_id);
+      if (!entry.is_fanout_peer())
+        plugin_group_->onAmdgpuDispatchExecutionBegin(entry.dispatch_id);
     }
     ComputeUnitCore *cu = placement.cu;
     uint32_t lds_base = placement.lds_base;
@@ -1493,6 +1614,9 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
     }
   });
 
+  if (queue.xcd_fanout)
+    fan_out_dispatch(dp);
+
   qs.entries.push_back(std::move(dp));
 }
 
@@ -1509,6 +1633,10 @@ void CommandProcessor::arm_stall_recheck(simdojo::Tick now) {
 
 void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdojo::Tick now) {
   if (!memory_)
+    return;
+  // A replica's work arrives as dispatch shards, not from the ring. Reading the
+  // ring here would also advance a read pointer the owning XCD owns.
+  if (queue.fanout_replica)
     return;
   if (queue.host_accessible ? (queue.doorbell_base == nullptr) : (queue.doorbell_va == 0))
     return;

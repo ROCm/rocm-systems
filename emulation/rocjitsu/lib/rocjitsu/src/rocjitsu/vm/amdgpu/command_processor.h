@@ -71,6 +71,15 @@ struct HwQueue {
   bool host_accessible = false;
   bool is_sdma = false;
   uint64_t queue_desc_va = 0;
+  /// Spread each of this queue's dispatches over every XCD of the SoC, the way a
+  /// multi-XCD part does when it runs as a single partition. Set by the queue
+  /// creation path that models such a device; registering the queue replicates it
+  /// onto the peer XCDs.
+  bool xcd_fanout = false;
+  /// Set on the replicas that xcd_fanout creates. A replica never reads the ring
+  /// and never polls a doorbell; work reaches it as dispatch shards from the XCD
+  /// that owns the queue.
+  bool fanout_replica = false;
 };
 
 enum class SdmaPacketDialect {
@@ -137,8 +146,30 @@ public:
     scratch_allocator_ = std::move(cb);
   }
 
+  /// @brief Tell this CP where its XCD sits among the SoC's XCDs.
+  ///
+  /// @details @p peers lists every XCD's command processor in XCD index order and
+  /// includes this one at index @p rank. A dispatch on a fanned-out queue is split
+  /// so that XCD i takes the grid chunks congruent to i modulo peers.size(); the
+  /// rank is the XCD's own index, not its position relative to the queue's owner,
+  /// so the workgroup-to-XCD mapping does not depend on which XCD a queue landed on.
+  /// @param rank This CP's XCD index.
+  /// @param peers All XCD command processors of the SoC, in XCD index order.
+  void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
+
+  /// @brief This CP's XCD index within its SoC.
+  uint32_t xcd_rank() const { return xcd_rank_; }
+
   void register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
+
+  /// @brief Take one XCD's share of a dispatch fanned out by a peer XCD.
+  ///
+  /// @details Thread-safe, and safe to call from another partition's thread: the
+  /// shard is appended under this CP's queue lock and the CP is woken through the
+  /// engine's cross-thread event queue rather than dispatched inline.
+  /// @param shard The share of the grid this XCD is to run.
+  void accept_fanout_shard(DispatchEntry shard);
   void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
                     uint32_t ring_size);
 
@@ -254,6 +285,22 @@ private:
   /// @brief Dispatch workgroups from entry to CUs. Returns number dispatched.
   uint32_t dispatch_workgroups(DispatchEntry &entry);
 
+  /// @brief Split a dispatch across the SoC's XCDs, keeping this XCD's share.
+  ///
+  /// @details Narrows @p dp to this XCD's share and hands the remaining shares to
+  /// the peer XCDs, all sharing one GridCompletion so the completion signal fires
+  /// once. Does nothing when the SoC has a single XCD or when the grid has fewer
+  /// chunks than XCDs — with fewer chunks some XCD would receive an empty share,
+  /// which is indistinguishable from a barrier packet.
+  /// @returns True when the dispatch was split.
+  bool fan_out_dispatch(DispatchEntry &dp);
+
+  /// @brief Locate the queue state for a (queue_id, process_id) pair.
+  /// @returns Pointer into new_queue_states_, or null when not registered. Caller
+  /// must hold hw_queue_mutex_ and must not use the result across a registration
+  /// change.
+  HwQueueState *find_queue_state(uint32_t queue_id, uint32_t process_id);
+
   void register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
                                   uint32_t global_wg_id, ComputeUnitCore *cu, uint32_t lds_base);
   void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
@@ -309,6 +356,11 @@ private:
   std::vector<HwQueueState> new_queue_states_;
   std::vector<ComputeUnitCore *> cus_;
   std::vector<simdojo::Port *> dispatch_ports_;
+
+  uint32_t xcd_rank_ = 0;
+  // Every XCD's CP in XCD index order, including this one. Empty until the SoC
+  // wires the topology, which leaves fan-out disabled.
+  std::vector<CommandProcessor *> xcd_peers_;
 
   size_t next_cu_ = 0;
   size_t next_queue_idx_ = 0;

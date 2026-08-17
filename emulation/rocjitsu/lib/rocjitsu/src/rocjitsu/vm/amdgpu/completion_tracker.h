@@ -26,6 +26,10 @@ class CompletionTracker {
 public:
   using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
   using DispatchRetiredCallback = std::function<void(const DispatchEntry &entry)>;
+  /// Called when one XCD's share of a fanned-out dispatch has flushed and
+  /// published itself, so the XCD holding the completion signal can be woken to
+  /// re-check whether the whole grid has now retired.
+  using GridShareRetiredCallback = std::function<void(const DispatchEntry &entry)>;
 
   CompletionTracker(GpuMemory *mem, std::vector<ComputeUnitCore *> &cus)
       : memory_(mem), cus_(cus) {}
@@ -37,6 +41,9 @@ public:
   void set_interrupt_callback(InterruptCallback cb) { interrupt_cb_ = std::move(cb); }
   void set_dispatch_retired_callback(DispatchRetiredCallback cb) {
     dispatch_retired_cb_ = std::move(cb);
+  }
+  void set_grid_share_retired_callback(GridShareRetiredCallback cb) {
+    grid_share_retired_cb_ = std::move(cb);
   }
 
   /// @brief Notify that a workgroup has completed all its wavefronts.
@@ -61,6 +68,7 @@ private:
   std::vector<ComputeUnitCore *> &cus_;
   InterruptCallback interrupt_cb_;
   DispatchRetiredCallback dispatch_retired_cb_;
+  GridShareRetiredCallback grid_share_retired_cb_;
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
 };
 

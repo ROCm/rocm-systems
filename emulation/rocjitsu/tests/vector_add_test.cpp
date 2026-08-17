@@ -220,6 +220,92 @@ TEST(VectorAddCodeObjectTest, LoadsAndDecodes) {
   EXPECT_NE(inst, nullptr) << "Failed to decode first instruction";
 }
 
+// One queue, one dispatch, spread over all 8 XCDs by fan-out rather than by the
+// caller splitting the grid by hand. Proves the parts that a workgroup histogram
+// cannot: that a shard's workgroup ids address the right slice of the grid, that
+// each XCD's caches are published before the dispatch retires, and that the
+// completion signal fires once, after the last workgroup anywhere on the device.
+void run_fanout_golden_reference(uint32_t num_threads) {
+  Executable exec(kernel_path("vector_add"));
+  ASSERT_TRUE(exec.is_valid()) << "Failed to load vector_add.o";
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+  auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+
+  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+  auto *memory = loaded.memory();
+  loaded.engine_config.num_threads = num_threads;
+  auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
+  engine->topology().set_root(loaded.take_root());
+  loaded.wire_links(engine->topology());
+  if (num_threads > 1)
+    ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads));
+  engine->create();
+
+  co->load_to_memory(memory, KD_ADDR);
+  uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");
+  ASSERT_NE(kernel_object, KD_ADDR);
+
+  size_t vec_bytes = N * sizeof(float);
+  std::vector<float> A(N), B(N), C_expected(N);
+  for (uint32_t i = 0; i < N; ++i) {
+    A[i] = static_cast<float>(i % 97) * 0.1f;
+    B[i] = static_cast<float>(i % 61) * 0.2f;
+    C_expected[i] = A[i] + B[i];
+  }
+
+  memory->load_image(reinterpret_cast<const uint8_t *>(A.data()), vec_bytes, A_ADDR);
+  memory->load_image(reinterpret_cast<const uint8_t *>(B.data()), vec_bytes, B_ADDR);
+  std::vector<float> zeros(N, 0.0f);
+  memory->load_image(reinterpret_cast<const uint8_t *>(zeros.data()), vec_bytes, C_ADDR);
+
+  struct {
+    uint64_t A, B, C;
+    uint32_t N;
+  } args = {A_ADDR, B_ADDR, C_ADDR, N};
+  memory->load_image(reinterpret_cast<const uint8_t *>(&args), sizeof(args), KERNARG_ADDR);
+
+  auto *cp = soc->assign_queue_cp();
+  ASSERT_NE(cp, nullptr);
+  test::AqlQueue queue(memory, cp, test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*xcd_fanout=*/true);
+  queue.dispatch(kernel_object, N, WF_SIZE, KERNARG_ADDR);
+
+  engine->run();
+  soc->flush_all();
+
+  auto counts = soc->dispatched_workgroups_per_xcd();
+  ASSERT_EQ(counts.size(), TOTAL_XCDS);
+  for (uint32_t xi = 0; xi < TOTAL_XCDS; ++xi)
+    EXPECT_EQ(counts[xi], TOTAL_CUS / TOTAL_XCDS) << "xcd" << xi;
+
+  unsigned mismatches = 0;
+  for (uint32_t i = 0; i < N; ++i) {
+    float actual = std::bit_cast<float>(memory->read32(C_ADDR + i * sizeof(float)));
+    if (std::abs(actual - C_expected[i]) > 1e-6f) {
+      if (mismatches < 10)
+        ADD_FAILURE() << "Mismatch at C[" << i << "]: GPU=" << actual << " CPU=" << C_expected[i];
+      ++mismatches;
+    }
+  }
+  EXPECT_EQ(mismatches, 0u) << mismatches << " elements differ (showing first 10)";
+}
+
+TEST(VectorAddStressTest, FanoutSingleQueueGoldenReference) {
+  run_fanout_golden_reference(/*num_threads=*/1);
+}
+
+// The same dispatch with one engine thread per XCD. Here the owning XCD hands
+// shards to command processors on other partitions and the last XCD to finish
+// wakes the owner to fire the completion signal, so this is the case where the
+// cross-partition handoff and the flush-before-publish ordering actually matter.
+TEST(VectorAddStressTest, FanoutSingleQueueGoldenReference_MultiThreaded) {
+  run_fanout_golden_reference(/*num_threads=*/TOTAL_XCDS);
+}
+
 } // namespace
 
 #endif // HAS_DEVICE_KERNELS
