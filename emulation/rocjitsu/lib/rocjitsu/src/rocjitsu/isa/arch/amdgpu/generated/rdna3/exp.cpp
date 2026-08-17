@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/exp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3 {
@@ -32,6 +33,12 @@ ExpExp::ExpExp(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeExpExp(const MachineInst *opcode) {
+  return std::make_unique<ExpExp>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna3
 } // namespace rocjitsu

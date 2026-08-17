@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -38,6 +39,12 @@ GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadU8Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadU8Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_i8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadI8Vglobal)),
@@ -56,6 +63,12 @@ GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadI8Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadI8Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -76,6 +89,12 @@ GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadU16Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadU16Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_i16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadI16Vglobal)),
@@ -94,6 +113,12 @@ GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadI16Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadI16Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -114,6 +139,12 @@ GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadB32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadB32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadB64Vglobal)),
@@ -132,6 +163,12 @@ GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadB64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadB64Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -152,6 +189,12 @@ GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadB96Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadB96Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadB128Vglobal)),
@@ -170,6 +213,12 @@ GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadB128Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadB128Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b8", reinterpret_cast<const OpEncoding *>(inst),
@@ -190,6 +239,12 @@ GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalStoreB8Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalStoreB8Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreB16Vglobal)),
@@ -208,6 +263,12 @@ GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalStoreB16Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalStoreB16Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -228,6 +289,12 @@ GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalStoreB32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalStoreB32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreB64Vglobal)),
@@ -246,6 +313,12 @@ GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalStoreB64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalStoreB64Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -266,6 +339,12 @@ GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalStoreB96Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalStoreB96Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreB128Vglobal)),
@@ -285,6 +364,12 @@ GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalStoreB128Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalStoreB128Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadD16U8Vglobal)),
@@ -303,6 +388,12 @@ GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadD16U8Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadD16U8Vglobal>(opcode);
+}
+} // namespace detail
 
 void GlobalLoadD16U8Vglobal::implicit_uses(RegisterSet &uses) const {
   Vglobal::implicit_uses(uses);
@@ -329,6 +420,12 @@ GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadD16I8Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadD16I8Vglobal>(opcode);
+}
+} // namespace detail
+
 void GlobalLoadD16I8Vglobal::implicit_uses(RegisterSet &uses) const {
   Vglobal::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -353,6 +450,12 @@ GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadD16B16Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadD16B16Vglobal>(opcode);
+}
+} // namespace detail
 
 void GlobalLoadD16B16Vglobal::implicit_uses(RegisterSet &uses) const {
   Vglobal::implicit_uses(uses);
@@ -379,6 +482,12 @@ GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadD16HiU8Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadD16HiU8Vglobal>(opcode);
+}
+} // namespace detail
+
 void GlobalLoadD16HiU8Vglobal::implicit_uses(RegisterSet &uses) const {
   Vglobal::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -403,6 +512,12 @@ GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadD16HiI8Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadD16HiI8Vglobal>(opcode);
+}
+} // namespace detail
 
 void GlobalLoadD16HiI8Vglobal::implicit_uses(RegisterSet &uses) const {
   Vglobal::implicit_uses(uses);
@@ -429,6 +544,12 @@ GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadD16HiB16Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadD16HiB16Vglobal>(opcode);
+}
+} // namespace detail
+
 void GlobalLoadD16HiB16Vglobal::implicit_uses(RegisterSet &uses) const {
   Vglobal::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -454,6 +575,12 @@ GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalStoreD16HiB8Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalStoreD16HiB8Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
     : Vglobal("global_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreD16HiB16Vglobal)),
@@ -473,6 +600,12 @@ GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalStoreD16HiB16Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalStoreD16HiB16Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalLoadAddtidB32Vglobal::GlobalLoadAddtidB32Vglobal(const MachineInst *inst)
     : Vglobal("global_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadAddtidB32Vglobal)),
@@ -488,6 +621,12 @@ GlobalLoadAddtidB32Vglobal::GlobalLoadAddtidB32Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadAddtidB32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadAddtidB32Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst)
     : Vglobal("global_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -505,6 +644,12 @@ GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalStoreAddtidB32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalStoreAddtidB32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalInvVglobal::GlobalInvVglobal(const MachineInst *inst)
     : Vglobal("global_inv", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalInvVglobal)) {
@@ -512,12 +657,24 @@ GlobalInvVglobal::GlobalInvVglobal(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalInvVglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalInvVglobal>(opcode);
+}
+} // namespace detail
+
 GlobalWbVglobal::GlobalWbVglobal(const MachineInst *inst)
     : Vglobal("global_wb", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalWbVglobal)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalWbVglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalWbVglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -543,6 +700,12 @@ GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicSwapB32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicSwapB32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicCmpswapB32Vglobal)),
@@ -566,6 +729,12 @@ GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicCmpswapB32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicCmpswapB32Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -591,6 +760,12 @@ GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicAddU32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicAddU32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicSubU32Vglobal)),
@@ -614,6 +789,12 @@ GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicSubU32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicSubU32Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -639,6 +820,12 @@ GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicSubClampU32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicSubClampU32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMinI32Vglobal)),
@@ -662,6 +849,12 @@ GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicMinI32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicMinI32Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -687,6 +880,12 @@ GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicMinU32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicMinU32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxI32Vglobal)),
@@ -710,6 +909,12 @@ GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicMaxI32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicMaxI32Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -735,6 +940,12 @@ GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicMaxU32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicMaxU32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicAndB32Vglobal)),
@@ -758,6 +969,12 @@ GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicAndB32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicAndB32Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -783,6 +1000,12 @@ GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicOrB32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicOrB32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicXorB32Vglobal)),
@@ -806,6 +1029,12 @@ GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicXorB32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicXorB32Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -831,6 +1060,12 @@ GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicIncU32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicIncU32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicDecU32Vglobal)),
@@ -854,6 +1089,12 @@ GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicDecU32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicDecU32Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -879,6 +1120,12 @@ GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicSwapB64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicSwapB64Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicCmpswapB64Vglobal)),
@@ -902,6 +1149,12 @@ GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicCmpswapB64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicCmpswapB64Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -927,6 +1180,12 @@ GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicAddU64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicAddU64Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicSubU64Vglobal)),
@@ -950,6 +1209,12 @@ GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicSubU64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicSubU64Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -975,6 +1240,12 @@ GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicMinI64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicMinI64Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMinU64Vglobal)),
@@ -998,6 +1269,12 @@ GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicMinU64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicMinU64Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1023,6 +1300,12 @@ GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicMaxI64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicMaxI64Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxU64Vglobal)),
@@ -1046,6 +1329,12 @@ GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicMaxU64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicMaxU64Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1071,6 +1360,12 @@ GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicAndB64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicAndB64Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicOrB64Vglobal)),
@@ -1094,6 +1389,12 @@ GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicOrB64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicOrB64Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1119,6 +1420,12 @@ GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicXorB64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicXorB64Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicIncU64Vglobal)),
@@ -1142,6 +1449,12 @@ GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicIncU64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicIncU64Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1167,12 +1480,24 @@ GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicDecU64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicDecU64Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalWbinvVglobal::GlobalWbinvVglobal(const MachineInst *inst)
     : Vglobal("global_wbinv", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalWbinvVglobal)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalWbinvVglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalWbinvVglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1198,6 +1523,12 @@ GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicCondSubU32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicCondSubU32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicMinNumF32Vglobal)),
@@ -1221,6 +1552,12 @@ GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *in
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicMinNumF32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicMinNumF32Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1246,6 +1583,12 @@ GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicMaxNumF32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicMaxNumF32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
     : Vglobal("global_load_block", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadBlockVglobal)),
@@ -1267,6 +1610,12 @@ GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadBlockVglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadBlockVglobal>(opcode);
+}
+} // namespace detail
+
 GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
     : Vglobal("global_store_block", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalStoreBlockVglobal)),
@@ -1287,6 +1636,12 @@ GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalStoreBlockVglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalStoreBlockVglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1312,6 +1667,12 @@ GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicAddF32Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicAddF32Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalLoadTrB128Vglobal::GlobalLoadTrB128Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadTrB128Vglobal)),
@@ -1331,6 +1692,12 @@ GlobalLoadTrB128Vglobal::GlobalLoadTrB128Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadTrB128Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadTrB128Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalLoadTrB64Vglobal::GlobalLoadTrB64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalLoadTrB64Vglobal)),
@@ -1349,6 +1716,12 @@ GlobalLoadTrB64Vglobal::GlobalLoadTrB64Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalLoadTrB64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalLoadTrB64Vglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1374,6 +1747,12 @@ GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicPkAddF16Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicPkAddF16Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicPkAddBf16Vglobal)),
@@ -1398,6 +1777,12 @@ GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicPkAddBf16Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicPkAddBf16Vglobal>(opcode);
+}
+} // namespace detail
+
 GlobalAtomicOrderedAddB64Vglobal::GlobalAtomicOrderedAddB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_ordered_add_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::GlobalAtomicOrderedAddB64Vglobal)),
@@ -1421,6 +1806,12 @@ GlobalAtomicOrderedAddB64Vglobal::GlobalAtomicOrderedAddB64Vglobal(const Machine
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeGlobalAtomicOrderedAddB64Vglobal(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicOrderedAddB64Vglobal>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu

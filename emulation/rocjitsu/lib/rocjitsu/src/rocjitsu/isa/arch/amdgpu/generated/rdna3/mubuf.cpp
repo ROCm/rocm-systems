@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3 {
@@ -40,6 +41,12 @@ BufferLoadFormatXMubuf::BufferLoadFormatXMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadFormatXMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadFormatXMubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadFormatXyMubuf)),
@@ -57,6 +64,12 @@ BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadFormatXyMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadFormatXyMubuf>(opcode);
+}
+} // namespace detail
 
 BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -76,6 +89,12 @@ BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadFormatXyzMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadFormatXyzMubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadFormatXyzwMubuf)),
@@ -93,6 +112,12 @@ BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadFormatXyzwMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadFormatXyzwMubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -112,6 +137,12 @@ BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreFormatXMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreFormatXMubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreFormatXyMubuf)),
@@ -129,6 +160,12 @@ BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreFormatXyMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreFormatXyMubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -148,6 +185,12 @@ BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreFormatXyzMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreFormatXyzMubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreFormatXyzwMubuf)),
@@ -166,6 +209,12 @@ BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreFormatXyzwMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreFormatXyzwMubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadD16FormatXMubuf::BufferLoadD16FormatXMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadD16FormatXMubuf)),
@@ -183,6 +232,12 @@ BufferLoadD16FormatXMubuf::BufferLoadD16FormatXMubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadD16FormatXMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadD16FormatXMubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadD16FormatXMubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -208,6 +263,12 @@ BufferLoadD16FormatXyMubuf::BufferLoadD16FormatXyMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadD16FormatXyMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadD16FormatXyMubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadD16FormatXyzMubuf::BufferLoadD16FormatXyzMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadD16FormatXyzMubuf)),
@@ -225,6 +286,12 @@ BufferLoadD16FormatXyzMubuf::BufferLoadD16FormatXyzMubuf(const MachineInst *inst
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadD16FormatXyzMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadD16FormatXyzMubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadD16FormatXyzMubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -250,6 +317,12 @@ BufferLoadD16FormatXyzwMubuf::BufferLoadD16FormatXyzwMubuf(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadD16FormatXyzwMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadD16FormatXyzwMubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreD16FormatXMubuf::BufferStoreD16FormatXMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreD16FormatXMubuf)),
@@ -267,6 +340,12 @@ BufferStoreD16FormatXMubuf::BufferStoreD16FormatXMubuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreD16FormatXMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreD16FormatXMubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreD16FormatXyMubuf::BufferStoreD16FormatXyMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -286,6 +365,12 @@ BufferStoreD16FormatXyMubuf::BufferStoreD16FormatXyMubuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreD16FormatXyMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreD16FormatXyMubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreD16FormatXyzMubuf::BufferStoreD16FormatXyzMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreD16FormatXyzMubuf)),
@@ -303,6 +388,12 @@ BufferStoreD16FormatXyzMubuf::BufferStoreD16FormatXyzMubuf(const MachineInst *in
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreD16FormatXyzMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreD16FormatXyzMubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreD16FormatXyzwMubuf::BufferStoreD16FormatXyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -322,6 +413,12 @@ BufferStoreD16FormatXyzwMubuf::BufferStoreD16FormatXyzwMubuf(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreD16FormatXyzwMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreD16FormatXyzwMubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadU8Mubuf::BufferLoadU8Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_u8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadU8Mubuf)),
@@ -339,6 +436,12 @@ BufferLoadU8Mubuf::BufferLoadU8Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadU8Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadU8Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferLoadI8Mubuf::BufferLoadI8Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -358,6 +461,12 @@ BufferLoadI8Mubuf::BufferLoadI8Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadI8Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadI8Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadU16Mubuf::BufferLoadU16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_u16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadU16Mubuf)),
@@ -375,6 +484,12 @@ BufferLoadU16Mubuf::BufferLoadU16Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadU16Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadU16Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferLoadI16Mubuf::BufferLoadI16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -394,6 +509,12 @@ BufferLoadI16Mubuf::BufferLoadI16Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadI16Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadI16Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadB32Mubuf::BufferLoadB32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadB32Mubuf)),
@@ -411,6 +532,12 @@ BufferLoadB32Mubuf::BufferLoadB32Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadB32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadB32Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferLoadB64Mubuf::BufferLoadB64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -430,6 +557,12 @@ BufferLoadB64Mubuf::BufferLoadB64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadB64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadB64Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadB96Mubuf::BufferLoadB96Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_b96", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadB96Mubuf)),
@@ -447,6 +580,12 @@ BufferLoadB96Mubuf::BufferLoadB96Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadB96Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadB96Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferLoadB128Mubuf::BufferLoadB128Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_b128", reinterpret_cast<const OpEncoding *>(inst),
@@ -466,6 +605,12 @@ BufferLoadB128Mubuf::BufferLoadB128Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadB128Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadB128Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreB8Mubuf::BufferStoreB8Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_b8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreB8Mubuf)),
@@ -483,6 +628,12 @@ BufferStoreB8Mubuf::BufferStoreB8Mubuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreB8Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreB8Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreB16Mubuf::BufferStoreB16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -502,6 +653,12 @@ BufferStoreB16Mubuf::BufferStoreB16Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreB16Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreB16Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreB32Mubuf::BufferStoreB32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreB32Mubuf)),
@@ -519,6 +676,12 @@ BufferStoreB32Mubuf::BufferStoreB32Mubuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreB32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreB32Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreB64Mubuf::BufferStoreB64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -538,6 +701,12 @@ BufferStoreB64Mubuf::BufferStoreB64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreB64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreB64Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreB96Mubuf::BufferStoreB96Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_b96", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreB96Mubuf)),
@@ -555,6 +724,12 @@ BufferStoreB96Mubuf::BufferStoreB96Mubuf(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreB96Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreB96Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferStoreB128Mubuf::BufferStoreB128Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_b128", reinterpret_cast<const OpEncoding *>(inst),
@@ -574,6 +749,12 @@ BufferStoreB128Mubuf::BufferStoreB128Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreB128Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreB128Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadD16U8Mubuf::BufferLoadD16U8Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadD16U8Mubuf)),
@@ -591,6 +772,12 @@ BufferLoadD16U8Mubuf::BufferLoadD16U8Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadD16U8Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadD16U8Mubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadD16U8Mubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -616,6 +803,12 @@ BufferLoadD16I8Mubuf::BufferLoadD16I8Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadD16I8Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadD16I8Mubuf>(opcode);
+}
+} // namespace detail
+
 void BufferLoadD16I8Mubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
   if (auto r = vdata.to_register_ref())
@@ -639,6 +832,12 @@ BufferLoadD16B16Mubuf::BufferLoadD16B16Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadD16B16Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadD16B16Mubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadD16B16Mubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -664,6 +863,12 @@ BufferLoadD16HiU8Mubuf::BufferLoadD16HiU8Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadD16HiU8Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadD16HiU8Mubuf>(opcode);
+}
+} // namespace detail
+
 void BufferLoadD16HiU8Mubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
   if (auto r = vdata.to_register_ref())
@@ -687,6 +892,12 @@ BufferLoadD16HiI8Mubuf::BufferLoadD16HiI8Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadD16HiI8Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadD16HiI8Mubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadD16HiI8Mubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -712,6 +923,12 @@ BufferLoadD16HiB16Mubuf::BufferLoadD16HiB16Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadD16HiB16Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadD16HiB16Mubuf>(opcode);
+}
+} // namespace detail
+
 void BufferLoadD16HiB16Mubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
   if (auto r = vdata.to_register_ref())
@@ -736,6 +953,12 @@ BufferStoreD16HiB8Mubuf::BufferStoreD16HiB8Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreD16HiB8Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreD16HiB8Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferStoreD16HiB16Mubuf::BufferStoreD16HiB16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreD16HiB16Mubuf)),
@@ -754,6 +977,12 @@ BufferStoreD16HiB16Mubuf::BufferStoreD16HiB16Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreD16HiB16Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreD16HiB16Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferLoadD16HiFormatXMubuf::BufferLoadD16HiFormatXMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_d16_hi_format_x", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferLoadD16HiFormatXMubuf)),
@@ -771,6 +1000,12 @@ BufferLoadD16HiFormatXMubuf::BufferLoadD16HiFormatXMubuf(const MachineInst *inst
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferLoadD16HiFormatXMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferLoadD16HiFormatXMubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadD16HiFormatXMubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -796,6 +1031,12 @@ BufferStoreD16HiFormatXMubuf::BufferStoreD16HiFormatXMubuf(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferStoreD16HiFormatXMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferStoreD16HiFormatXMubuf>(opcode);
+}
+} // namespace detail
+
 BufferGl0InvMubuf::BufferGl0InvMubuf(const MachineInst *inst)
     : Mubuf("buffer_gl0_inv", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferGl0InvMubuf)) {
@@ -803,12 +1044,24 @@ BufferGl0InvMubuf::BufferGl0InvMubuf(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferGl0InvMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferGl0InvMubuf>(opcode);
+}
+} // namespace detail
+
 BufferGl1InvMubuf::BufferGl1InvMubuf(const MachineInst *inst)
     : Mubuf("buffer_gl1_inv", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferGl1InvMubuf)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferGl1InvMubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferGl1InvMubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicSwapB32Mubuf::BufferAtomicSwapB32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -829,6 +1082,12 @@ BufferAtomicSwapB32Mubuf::BufferAtomicSwapB32Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicSwapB32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicSwapB32Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicCmpswapB32Mubuf::BufferAtomicCmpswapB32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -851,6 +1110,12 @@ BufferAtomicCmpswapB32Mubuf::BufferAtomicCmpswapB32Mubuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicCmpswapB32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicCmpswapB32Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicAddU32Mubuf::BufferAtomicAddU32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicAddU32Mubuf)),
@@ -870,6 +1135,12 @@ BufferAtomicAddU32Mubuf::BufferAtomicAddU32Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicAddU32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicAddU32Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicSubU32Mubuf::BufferAtomicSubU32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -891,6 +1162,12 @@ BufferAtomicSubU32Mubuf::BufferAtomicSubU32Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicSubU32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicSubU32Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicCsubU32Mubuf::BufferAtomicCsubU32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_csub_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicCsubU32Mubuf)),
@@ -910,6 +1187,12 @@ BufferAtomicCsubU32Mubuf::BufferAtomicCsubU32Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicCsubU32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicCsubU32Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicMinI32Mubuf::BufferAtomicMinI32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -931,6 +1214,12 @@ BufferAtomicMinI32Mubuf::BufferAtomicMinI32Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicMinI32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicMinI32Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicMinU32Mubuf::BufferAtomicMinU32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicMinU32Mubuf)),
@@ -950,6 +1239,12 @@ BufferAtomicMinU32Mubuf::BufferAtomicMinU32Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicMinU32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicMinU32Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicMaxI32Mubuf::BufferAtomicMaxI32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -971,6 +1266,12 @@ BufferAtomicMaxI32Mubuf::BufferAtomicMaxI32Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicMaxI32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicMaxI32Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicMaxU32Mubuf::BufferAtomicMaxU32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicMaxU32Mubuf)),
@@ -990,6 +1291,12 @@ BufferAtomicMaxU32Mubuf::BufferAtomicMaxU32Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicMaxU32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicMaxU32Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicAndB32Mubuf::BufferAtomicAndB32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1011,6 +1318,12 @@ BufferAtomicAndB32Mubuf::BufferAtomicAndB32Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicAndB32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicAndB32Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicOrB32Mubuf::BufferAtomicOrB32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicOrB32Mubuf)),
@@ -1030,6 +1343,12 @@ BufferAtomicOrB32Mubuf::BufferAtomicOrB32Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicOrB32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicOrB32Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicXorB32Mubuf::BufferAtomicXorB32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1051,6 +1370,12 @@ BufferAtomicXorB32Mubuf::BufferAtomicXorB32Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicXorB32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicXorB32Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicIncU32Mubuf::BufferAtomicIncU32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicIncU32Mubuf)),
@@ -1070,6 +1395,12 @@ BufferAtomicIncU32Mubuf::BufferAtomicIncU32Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicIncU32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicIncU32Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicDecU32Mubuf::BufferAtomicDecU32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1091,6 +1422,12 @@ BufferAtomicDecU32Mubuf::BufferAtomicDecU32Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicDecU32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicDecU32Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicSwapB64Mubuf::BufferAtomicSwapB64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicSwapB64Mubuf)),
@@ -1110,6 +1447,12 @@ BufferAtomicSwapB64Mubuf::BufferAtomicSwapB64Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicSwapB64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicSwapB64Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicCmpswapB64Mubuf::BufferAtomicCmpswapB64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1132,6 +1475,12 @@ BufferAtomicCmpswapB64Mubuf::BufferAtomicCmpswapB64Mubuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicCmpswapB64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicCmpswapB64Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicAddU64Mubuf::BufferAtomicAddU64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicAddU64Mubuf)),
@@ -1151,6 +1500,12 @@ BufferAtomicAddU64Mubuf::BufferAtomicAddU64Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicAddU64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicAddU64Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicSubU64Mubuf::BufferAtomicSubU64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1172,6 +1527,12 @@ BufferAtomicSubU64Mubuf::BufferAtomicSubU64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicSubU64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicSubU64Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicMinI64Mubuf::BufferAtomicMinI64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicMinI64Mubuf)),
@@ -1191,6 +1552,12 @@ BufferAtomicMinI64Mubuf::BufferAtomicMinI64Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicMinI64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicMinI64Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicMinU64Mubuf::BufferAtomicMinU64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1212,6 +1579,12 @@ BufferAtomicMinU64Mubuf::BufferAtomicMinU64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicMinU64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicMinU64Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicMaxI64Mubuf::BufferAtomicMaxI64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicMaxI64Mubuf)),
@@ -1231,6 +1604,12 @@ BufferAtomicMaxI64Mubuf::BufferAtomicMaxI64Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicMaxI64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicMaxI64Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicMaxU64Mubuf::BufferAtomicMaxU64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1252,6 +1631,12 @@ BufferAtomicMaxU64Mubuf::BufferAtomicMaxU64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicMaxU64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicMaxU64Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicAndB64Mubuf::BufferAtomicAndB64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicAndB64Mubuf)),
@@ -1271,6 +1656,12 @@ BufferAtomicAndB64Mubuf::BufferAtomicAndB64Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicAndB64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicAndB64Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicOrB64Mubuf::BufferAtomicOrB64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1292,6 +1683,12 @@ BufferAtomicOrB64Mubuf::BufferAtomicOrB64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicOrB64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicOrB64Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicXorB64Mubuf::BufferAtomicXorB64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicXorB64Mubuf)),
@@ -1311,6 +1708,12 @@ BufferAtomicXorB64Mubuf::BufferAtomicXorB64Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicXorB64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicXorB64Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicIncU64Mubuf::BufferAtomicIncU64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1332,6 +1735,12 @@ BufferAtomicIncU64Mubuf::BufferAtomicIncU64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicIncU64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicIncU64Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicDecU64Mubuf::BufferAtomicDecU64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicDecU64Mubuf)),
@@ -1351,6 +1760,12 @@ BufferAtomicDecU64Mubuf::BufferAtomicDecU64Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicDecU64Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicDecU64Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicCmpswapF32Mubuf::BufferAtomicCmpswapF32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_cmpswap_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1373,6 +1788,12 @@ BufferAtomicCmpswapF32Mubuf::BufferAtomicCmpswapF32Mubuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicCmpswapF32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicCmpswapF32Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicMinF32Mubuf::BufferAtomicMinF32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_min_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicMinF32Mubuf)),
@@ -1392,6 +1813,12 @@ BufferAtomicMinF32Mubuf::BufferAtomicMinF32Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicMinF32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicMinF32Mubuf>(opcode);
+}
+} // namespace detail
 
 BufferAtomicMaxF32Mubuf::BufferAtomicMaxF32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_max_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1413,6 +1840,12 @@ BufferAtomicMaxF32Mubuf::BufferAtomicMaxF32Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicMaxF32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicMaxF32Mubuf>(opcode);
+}
+} // namespace detail
+
 BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferAtomicAddF32Mubuf)),
@@ -1432,6 +1865,12 @@ BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeBufferAtomicAddF32Mubuf(const MachineInst *opcode) {
+  return std::make_unique<BufferAtomicAddF32Mubuf>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna3
 } // namespace rocjitsu
