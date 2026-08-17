@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/sop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna2 {
@@ -27,6 +28,12 @@ SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
   flags_ |= RESULT_COPY;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSMovB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SMovB32Sop1>(opcode);
+}
+} // namespace detail
+
 SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
     : Sop1("s_mov_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SMovB64Sop1)),
@@ -43,6 +50,12 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   flags_ |= RESULT_COPY;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSMovB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SMovB64Sop1>(opcode);
+}
+} // namespace detail
 
 SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
     : Sop1("s_cmov_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -63,6 +76,12 @@ SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= PREDICATED_DEF;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmovB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SCmovB32Sop1>(opcode);
+}
+} // namespace detail
 
 SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
     : Sop1("s_cmov_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -85,6 +104,12 @@ SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
   flags_ |= PREDICATED_DEF;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSCmovB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SCmovB64Sop1>(opcode);
+}
+} // namespace detail
+
 SNotB32Sop1::SNotB32Sop1(const MachineInst *inst)
     : Sop1("s_not_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SNotB32Sop1)),
@@ -102,6 +127,12 @@ SNotB32Sop1::SNotB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSNotB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SNotB32Sop1>(opcode);
+}
+} // namespace detail
 
 SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
     : Sop1("s_not_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -122,6 +153,12 @@ SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSNotB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SNotB64Sop1>(opcode);
+}
+} // namespace detail
+
 SWqmB32Sop1::SWqmB32Sop1(const MachineInst *inst)
     : Sop1("s_wqm_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SWqmB32Sop1)),
@@ -139,6 +176,12 @@ SWqmB32Sop1::SWqmB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSWqmB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SWqmB32Sop1>(opcode);
+}
+} // namespace detail
 
 SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
     : Sop1("s_wqm_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -159,6 +202,12 @@ SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSWqmB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SWqmB64Sop1>(opcode);
+}
+} // namespace detail
+
 SBrevB32Sop1::SBrevB32Sop1(const MachineInst *inst)
     : Sop1("s_brev_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBrevB32Sop1)),
@@ -173,6 +222,12 @@ SBrevB32Sop1::SBrevB32Sop1(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSBrevB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SBrevB32Sop1>(opcode);
+}
+} // namespace detail
 
 SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
     : Sop1("s_brev_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -189,6 +244,12 @@ SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSBrevB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SBrevB64Sop1>(opcode);
+}
+} // namespace detail
 
 SBcnt0I32B32Sop1::SBcnt0I32B32Sop1(const MachineInst *inst)
     : Sop1("s_bcnt0_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -207,6 +268,12 @@ SBcnt0I32B32Sop1::SBcnt0I32B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSBcnt0I32B32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SBcnt0I32B32Sop1>(opcode);
+}
+} // namespace detail
 
 SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
     : Sop1("s_bcnt0_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -227,6 +294,12 @@ SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSBcnt0I32B64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SBcnt0I32B64Sop1>(opcode);
+}
+} // namespace detail
+
 SBcnt1I32B32Sop1::SBcnt1I32B32Sop1(const MachineInst *inst)
     : Sop1("s_bcnt1_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBcnt1I32B32Sop1)),
@@ -244,6 +317,12 @@ SBcnt1I32B32Sop1::SBcnt1I32B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSBcnt1I32B32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SBcnt1I32B32Sop1>(opcode);
+}
+} // namespace detail
 
 SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
     : Sop1("s_bcnt1_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -264,6 +343,12 @@ SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSBcnt1I32B64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SBcnt1I32B64Sop1>(opcode);
+}
+} // namespace detail
+
 SFf0I32B32Sop1::SFf0I32B32Sop1(const MachineInst *inst)
     : Sop1("s_ff0_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SFf0I32B32Sop1)),
@@ -278,6 +363,12 @@ SFf0I32B32Sop1::SFf0I32B32Sop1(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSFf0I32B32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SFf0I32B32Sop1>(opcode);
+}
+} // namespace detail
 
 SFf0I32B64Sop1::SFf0I32B64Sop1(const MachineInst *inst)
     : Sop1("s_ff0_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -295,6 +386,12 @@ SFf0I32B64Sop1::SFf0I32B64Sop1(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSFf0I32B64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SFf0I32B64Sop1>(opcode);
+}
+} // namespace detail
+
 SFf1I32B32Sop1::SFf1I32B32Sop1(const MachineInst *inst)
     : Sop1("s_ff1_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SFf1I32B32Sop1)),
@@ -309,6 +406,12 @@ SFf1I32B32Sop1::SFf1I32B32Sop1(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSFf1I32B32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SFf1I32B32Sop1>(opcode);
+}
+} // namespace detail
 
 SFf1I32B64Sop1::SFf1I32B64Sop1(const MachineInst *inst)
     : Sop1("s_ff1_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -326,6 +429,12 @@ SFf1I32B64Sop1::SFf1I32B64Sop1(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSFf1I32B64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SFf1I32B64Sop1>(opcode);
+}
+} // namespace detail
+
 SFlbitI32B32Sop1::SFlbitI32B32Sop1(const MachineInst *inst)
     : Sop1("s_flbit_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SFlbitI32B32Sop1)),
@@ -340,6 +449,12 @@ SFlbitI32B32Sop1::SFlbitI32B32Sop1(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSFlbitI32B32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SFlbitI32B32Sop1>(opcode);
+}
+} // namespace detail
 
 SFlbitI32B64Sop1::SFlbitI32B64Sop1(const MachineInst *inst)
     : Sop1("s_flbit_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -357,6 +472,12 @@ SFlbitI32B64Sop1::SFlbitI32B64Sop1(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSFlbitI32B64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SFlbitI32B64Sop1>(opcode);
+}
+} // namespace detail
+
 SFlbitI32Sop1::SFlbitI32Sop1(const MachineInst *inst)
     : Sop1("s_flbit_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SFlbitI32Sop1)),
@@ -371,6 +492,12 @@ SFlbitI32Sop1::SFlbitI32Sop1(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSFlbitI32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SFlbitI32Sop1>(opcode);
+}
+} // namespace detail
 
 SFlbitI32I64Sop1::SFlbitI32I64Sop1(const MachineInst *inst)
     : Sop1("s_flbit_i32_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -388,6 +515,12 @@ SFlbitI32I64Sop1::SFlbitI32I64Sop1(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSFlbitI32I64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SFlbitI32I64Sop1>(opcode);
+}
+} // namespace detail
+
 SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
     : Sop1("s_sext_i32_i8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSextI32I8Sop1)),
@@ -403,6 +536,12 @@ SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSSextI32I8Sop1(const MachineInst *opcode) {
+  return std::make_unique<SSextI32I8Sop1>(opcode);
+}
+} // namespace detail
 
 SSextI32I16Sop1::SSextI32I16Sop1(const MachineInst *inst)
     : Sop1("s_sext_i32_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -420,6 +559,12 @@ SSextI32I16Sop1::SSextI32I16Sop1(const MachineInst *inst)
                     reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSSextI32I16Sop1(const MachineInst *opcode) {
+  return std::make_unique<SSextI32I16Sop1>(opcode);
+}
+} // namespace detail
+
 SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
     : Sop1("s_bitset0_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBitset0B32Sop1)),
@@ -435,6 +580,12 @@ SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitset0B32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SBitset0B32Sop1>(opcode);
+}
+} // namespace detail
 
 SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
     : Sop1("s_bitset0_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -452,6 +603,12 @@ SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitset0B64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SBitset0B64Sop1>(opcode);
+}
+} // namespace detail
+
 SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
     : Sop1("s_bitset1_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBitset1B32Sop1)),
@@ -467,6 +624,12 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitset1B32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SBitset1B32Sop1>(opcode);
+}
+} // namespace detail
 
 SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
     : Sop1("s_bitset1_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -484,6 +647,12 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitset1B64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SBitset1B64Sop1>(opcode);
+}
+} // namespace detail
+
 SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
     : Sop1("s_getpc_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SGetpcB64Sop1)),
@@ -495,6 +664,12 @@ SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSGetpcB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SGetpcB64Sop1>(opcode);
+}
+} // namespace detail
 
 SSetpcB64Sop1::SSetpcB64Sop1(const MachineInst *inst)
     : Sop1("s_setpc_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -508,6 +683,12 @@ SSetpcB64Sop1::SSetpcB64Sop1(const MachineInst *inst)
   pc.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_BRANCH;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSSetpcB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SSetpcB64Sop1>(opcode);
+}
+} // namespace detail
 
 SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
     : Sop1("s_swappc_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -526,6 +707,12 @@ SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
   flags_ |= INDIRECT_CALL;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSSwappcB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SSwappcB64Sop1>(opcode);
+}
+} // namespace detail
+
 SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)
     : Sop1("s_rfe_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SRfeB64Sop1)),
@@ -537,6 +724,12 @@ SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSRfeB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SRfeB64Sop1>(opcode);
+}
+} // namespace detail
 
 SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_and_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -563,6 +756,12 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSAndSaveexecB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SAndSaveexecB64Sop1>(opcode);
+}
+} // namespace detail
 
 SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_or_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -591,6 +790,12 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
   flags_ |= RESULT_OR;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSOrSaveexecB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SOrSaveexecB64Sop1>(opcode);
+}
+} // namespace detail
+
 SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_xor_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SXorSaveexecB64Sop1)),
@@ -616,6 +821,12 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSXorSaveexecB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SXorSaveexecB64Sop1>(opcode);
+}
+} // namespace detail
 
 SAndn2SaveexecB64Sop1::SAndn2SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_andn2_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -643,6 +854,12 @@ SAndn2SaveexecB64Sop1::SAndn2SaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSAndn2SaveexecB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SAndn2SaveexecB64Sop1>(opcode);
+}
+} // namespace detail
+
 SOrn2SaveexecB64Sop1::SOrn2SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_orn2_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SOrn2SaveexecB64Sop1)),
@@ -668,6 +885,12 @@ SOrn2SaveexecB64Sop1::SOrn2SaveexecB64Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSOrn2SaveexecB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SOrn2SaveexecB64Sop1>(opcode);
+}
+} // namespace detail
 
 SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_nand_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -695,6 +918,12 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSNandSaveexecB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SNandSaveexecB64Sop1>(opcode);
+}
+} // namespace detail
+
 SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_nor_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SNorSaveexecB64Sop1)),
@@ -720,6 +949,12 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSNorSaveexecB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SNorSaveexecB64Sop1>(opcode);
+}
+} // namespace detail
 
 SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_xnor_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -747,6 +982,12 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSXnorSaveexecB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SXnorSaveexecB64Sop1>(opcode);
+}
+} // namespace detail
+
 SQuadmaskB32Sop1::SQuadmaskB32Sop1(const MachineInst *inst)
     : Sop1("s_quadmask_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SQuadmaskB32Sop1)),
@@ -764,6 +1005,12 @@ SQuadmaskB32Sop1::SQuadmaskB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSQuadmaskB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SQuadmaskB32Sop1>(opcode);
+}
+} // namespace detail
 
 SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
     : Sop1("s_quadmask_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -784,6 +1031,12 @@ SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSQuadmaskB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SQuadmaskB64Sop1>(opcode);
+}
+} // namespace detail
+
 SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)
     : Sop1("s_movrels_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SMovrelsB32Sop1)),
@@ -798,6 +1051,12 @@ SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSMovrelsB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SMovrelsB32Sop1>(opcode);
+}
+} // namespace detail
+
 SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
     : Sop1("s_movrels_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SMovrelsB64Sop1)),
@@ -811,6 +1070,12 @@ SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSMovrelsB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SMovrelsB64Sop1>(opcode);
+}
+} // namespace detail
 
 SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
     : Sop1("s_movreld_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -829,6 +1094,12 @@ SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   m0.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSMovreldB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SMovreldB32Sop1>(opcode);
+}
+} // namespace detail
 
 SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
     : Sop1("s_movreld_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -849,6 +1120,12 @@ SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSMovreldB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SMovreldB64Sop1>(opcode);
+}
+} // namespace detail
+
 SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
     : Sop1("s_abs_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAbsI32Sop1)),
@@ -866,6 +1143,12 @@ SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSAbsI32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SAbsI32Sop1>(opcode);
+}
+} // namespace detail
 
 SAndn1SaveexecB64Sop1::SAndn1SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_andn1_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -893,6 +1176,12 @@ SAndn1SaveexecB64Sop1::SAndn1SaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSAndn1SaveexecB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SAndn1SaveexecB64Sop1>(opcode);
+}
+} // namespace detail
+
 SOrn1SaveexecB64Sop1::SOrn1SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_orn1_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SOrn1SaveexecB64Sop1)),
@@ -918,6 +1207,12 @@ SOrn1SaveexecB64Sop1::SOrn1SaveexecB64Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSOrn1SaveexecB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SOrn1SaveexecB64Sop1>(opcode);
+}
+} // namespace detail
 
 SAndn1WrexecB64Sop1::SAndn1WrexecB64Sop1(const MachineInst *inst)
     : Sop1("s_andn1_wrexec_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -945,6 +1240,12 @@ SAndn1WrexecB64Sop1::SAndn1WrexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSAndn1WrexecB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SAndn1WrexecB64Sop1>(opcode);
+}
+} // namespace detail
+
 SAndn2WrexecB64Sop1::SAndn2WrexecB64Sop1(const MachineInst *inst)
     : Sop1("s_andn2_wrexec_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAndn2WrexecB64Sop1)),
@@ -971,6 +1272,12 @@ SAndn2WrexecB64Sop1::SAndn2WrexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSAndn2WrexecB64Sop1(const MachineInst *opcode) {
+  return std::make_unique<SAndn2WrexecB64Sop1>(opcode);
+}
+} // namespace detail
+
 SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
     : Sop1("s_bitreplicate_b64_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBitreplicateB64B32Sop1)),
@@ -985,6 +1292,12 @@ SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSBitreplicateB64B32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SBitreplicateB64B32Sop1>(opcode);
+}
+} // namespace detail
 
 SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_and_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1010,6 +1323,12 @@ SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSAndSaveexecB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SAndSaveexecB32Sop1>(opcode);
+}
+} // namespace detail
 
 SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_or_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1037,6 +1356,12 @@ SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
   flags_ |= RESULT_OR;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSOrSaveexecB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SOrSaveexecB32Sop1>(opcode);
+}
+} // namespace detail
+
 SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_xor_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SXorSaveexecB32Sop1)),
@@ -1061,6 +1386,12 @@ SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSXorSaveexecB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SXorSaveexecB32Sop1>(opcode);
+}
+} // namespace detail
 
 SAndn2SaveexecB32Sop1::SAndn2SaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_andn2_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1087,6 +1418,12 @@ SAndn2SaveexecB32Sop1::SAndn2SaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSAndn2SaveexecB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SAndn2SaveexecB32Sop1>(opcode);
+}
+} // namespace detail
+
 SOrn2SaveexecB32Sop1::SOrn2SaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_orn2_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SOrn2SaveexecB32Sop1)),
@@ -1111,6 +1448,12 @@ SOrn2SaveexecB32Sop1::SOrn2SaveexecB32Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSOrn2SaveexecB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SOrn2SaveexecB32Sop1>(opcode);
+}
+} // namespace detail
 
 SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_nand_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1137,6 +1480,12 @@ SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSNandSaveexecB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SNandSaveexecB32Sop1>(opcode);
+}
+} // namespace detail
+
 SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_nor_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SNorSaveexecB32Sop1)),
@@ -1161,6 +1510,12 @@ SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSNorSaveexecB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SNorSaveexecB32Sop1>(opcode);
+}
+} // namespace detail
 
 SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_xnor_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1187,6 +1542,12 @@ SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSXnorSaveexecB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SXnorSaveexecB32Sop1>(opcode);
+}
+} // namespace detail
+
 SAndn1SaveexecB32Sop1::SAndn1SaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_andn1_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAndn1SaveexecB32Sop1)),
@@ -1211,6 +1572,12 @@ SAndn1SaveexecB32Sop1::SAndn1SaveexecB32Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSAndn1SaveexecB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SAndn1SaveexecB32Sop1>(opcode);
+}
+} // namespace detail
 
 SOrn1SaveexecB32Sop1::SOrn1SaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_orn1_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1237,6 +1604,12 @@ SOrn1SaveexecB32Sop1::SOrn1SaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSOrn1SaveexecB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SOrn1SaveexecB32Sop1>(opcode);
+}
+} // namespace detail
+
 SAndn1WrexecB32Sop1::SAndn1WrexecB32Sop1(const MachineInst *inst)
     : Sop1("s_andn1_wrexec_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAndn1WrexecB32Sop1)),
@@ -1261,6 +1634,12 @@ SAndn1WrexecB32Sop1::SAndn1WrexecB32Sop1(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSAndn1WrexecB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SAndn1WrexecB32Sop1>(opcode);
+}
+} // namespace detail
 
 SAndn2WrexecB32Sop1::SAndn2WrexecB32Sop1(const MachineInst *inst)
     : Sop1("s_andn2_wrexec_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1287,6 +1666,12 @@ SAndn2WrexecB32Sop1::SAndn2WrexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeSAndn2WrexecB32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SAndn2WrexecB32Sop1>(opcode);
+}
+} // namespace detail
+
 SMovrelsd2B32Sop1::SMovrelsd2B32Sop1(const MachineInst *inst)
     : Sop1("s_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SMovrelsd2B32Sop1)),
@@ -1300,6 +1685,12 @@ SMovrelsd2B32Sop1::SMovrelsd2B32Sop1(const MachineInst *inst)
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeSMovrelsd2B32Sop1(const MachineInst *opcode) {
+  return std::make_unique<SMovrelsd2B32Sop1>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna2
 } // namespace rocjitsu

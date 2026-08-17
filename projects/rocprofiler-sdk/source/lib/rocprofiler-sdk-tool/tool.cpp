@@ -2923,6 +2923,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         bool     exclude_nontarget = tool::get_config().att_param_target_only;
         auto&    att_perf          = tool::get_config().att_param_perfcounters;
         bool     att_serialize_all = tool::get_config().att_serialize_all;
+        bool     att_no_detail     = tool::get_config().att_no_detail;
         bool     att_no_intercept  = tool::get_config().att_no_intercept;
 
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {target_cu}});
@@ -2933,6 +2934,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL,
                                      {static_cast<uint64_t>(att_serialize_all)}});
+        if(att_no_detail)
+            global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, {1}});
         if(att_no_intercept)
             global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {6}});
 

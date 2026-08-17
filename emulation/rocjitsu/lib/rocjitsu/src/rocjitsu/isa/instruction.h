@@ -109,6 +109,63 @@ public:
   static thread_local inline DeallocFn dealloc_fn_;
   static thread_local inline void *alloc_pool_;
 
+  /// @brief Temporarily force instruction allocations onto the heap.
+  ///
+  /// @details C ABI entry points use this guard when instructions can outlive
+  /// the decoder that produced them. It preserves the ambient allocator hooks
+  /// and restores them on scope exit. Decoder destruction invalidates matching
+  /// saved hooks so a scope never restores a pointer to a dead pool.
+  class ScopedHeapAllocation {
+  public:
+    ScopedHeapAllocation()
+        : saved_alloc_fn_(alloc_fn_), saved_dealloc_fn_(dealloc_fn_),
+          saved_alloc_pool_(alloc_pool_), previous_scope_(active_scope_) {
+      active_scope_ = this;
+      alloc_fn_ = nullptr;
+      dealloc_fn_ = nullptr;
+      alloc_pool_ = nullptr;
+    }
+
+    ~ScopedHeapAllocation() {
+      assert(active_scope_ == this && "allocation guards must be destroyed in stack order");
+      alloc_fn_ = saved_alloc_fn_;
+      dealloc_fn_ = saved_dealloc_fn_;
+      alloc_pool_ = saved_alloc_pool_;
+      active_scope_ = previous_scope_;
+    }
+
+    ScopedHeapAllocation(const ScopedHeapAllocation &) = delete;
+    ScopedHeapAllocation &operator=(const ScopedHeapAllocation &) = delete;
+    ScopedHeapAllocation(ScopedHeapAllocation &&) = delete;
+    ScopedHeapAllocation &operator=(ScopedHeapAllocation &&) = delete;
+
+  private:
+    friend class Instruction;
+
+    static thread_local inline ScopedHeapAllocation *active_scope_;
+    AllocFn saved_alloc_fn_;
+    DeallocFn saved_dealloc_fn_;
+    void *saved_alloc_pool_;
+    ScopedHeapAllocation *previous_scope_;
+  };
+
+  /// @brief Remove every active or saved reference to an allocator pool.
+  /// @param[in] pool Pool that is being disabled or destroyed.
+  static void invalidate_allocator_pool(void *pool) {
+    if (alloc_pool_ == pool) {
+      alloc_fn_ = nullptr;
+      dealloc_fn_ = nullptr;
+      alloc_pool_ = nullptr;
+    }
+    for (auto *scope = ScopedHeapAllocation::active_scope_; scope; scope = scope->previous_scope_) {
+      if (scope->saved_alloc_pool_ != pool)
+        continue;
+      scope->saved_alloc_fn_ = nullptr;
+      scope->saved_dealloc_fn_ = nullptr;
+      scope->saved_alloc_pool_ = nullptr;
+    }
+  }
+
   static void *operator new(size_t size) {
     if (alloc_fn_)
       return alloc_fn_(alloc_pool_, size);
