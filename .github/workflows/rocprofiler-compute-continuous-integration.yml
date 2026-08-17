@@ -236,7 +236,7 @@ jobs:
           esac
 
           for i in 1 2 3; do
-            pip install --break-system-packages --prerelease=allow \
+            pip install --break-system-packages \
               --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
               "torch[${DEVICE_EXTRA}]" --timeout 120 && break
             echo "⚠️ PyTorch install attempt $i failed, retrying..."
