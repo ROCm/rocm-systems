@@ -37,6 +37,13 @@ struct VgprMsbState {
   bool operator==(const VgprMsbState &) const = default;
 };
 
+/// @brief Architectural VGPR_MSB state at a function entry: all four banks zero.
+///
+/// @details This is an ABI guarantee rather than an assumption. LLVM documents it in
+/// AMDGPULowerVGPREncoding ("the ABI is set to expect all 4 MSBs to be zero on entry") and
+/// enforces it by resetting the mode before every call and every terminator, so a callee is
+/// always entered with the banks cleared. The same state therefore seeds a kernel entry and any
+/// address-taken device function adopted as an additional root.
 [[nodiscard]] VgprMsbState entry_state() {
   VgprMsbState state;
   state.reachable = true;
@@ -137,9 +144,9 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
 class Gfx1250VgprMsbAnalysis::Impl {
 public:
   Impl(KernelBlockScope blocks, BasicBlock *entry, std::span<const ScopedCfgEdge> extra_edges,
-       std::span<const uint8_t> text)
+       std::span<const uint8_t> text, std::span<BasicBlock *const> additional_entries)
       : text_(text) {
-    analyze(blocks, entry, extra_edges);
+    analyze(blocks, entry, extra_edges, additional_entries);
   }
 
   [[nodiscard]] std::optional<uint8_t> bank_before(const Instruction &inst,
@@ -157,7 +164,8 @@ public:
 
 private:
   void analyze(KernelBlockScope blocks, BasicBlock *entry,
-               std::span<const ScopedCfgEdge> extra_edges) {
+               std::span<const ScopedCfgEdge> extra_edges,
+               std::span<BasicBlock *const> additional_entries) {
     std::unordered_map<const BasicBlock *, size_t> block_index;
     block_index.reserve(blocks.size());
     for (size_t i = 0; i < blocks.size(); ++i) {
@@ -201,6 +209,16 @@ private:
     };
     enqueue(entry_it->second);
 
+    // An adopted root is entered by a call through its address, never by an edge from this scope,
+    // so the fixed point below would otherwise never give it a state.
+    for (BasicBlock *additional : additional_entries) {
+      const auto it = block_index.find(additional);
+      if (it == block_index.end())
+        continue;
+      (void)merge_state(in[it->second], entry_state());
+      enqueue(it->second);
+    }
+
     while (!worklist.empty()) {
       const size_t index = worklist.front();
       worklist.pop_front();
@@ -241,8 +259,9 @@ private:
 
 Gfx1250VgprMsbAnalysis::Gfx1250VgprMsbAnalysis(KernelBlockScope blocks, BasicBlock *entry,
                                                std::span<const ScopedCfgEdge> extra_edges,
-                                               std::span<const uint8_t> text)
-    : impl_(std::make_unique<Impl>(blocks, entry, extra_edges, text)) {}
+                                               std::span<const uint8_t> text,
+                                               std::span<BasicBlock *const> additional_entries)
+    : impl_(std::make_unique<Impl>(blocks, entry, extra_edges, text, additional_entries)) {}
 
 Gfx1250VgprMsbAnalysis::~Gfx1250VgprMsbAnalysis() = default;
 Gfx1250VgprMsbAnalysis::Gfx1250VgprMsbAnalysis(Gfx1250VgprMsbAnalysis &&) noexcept = default;
