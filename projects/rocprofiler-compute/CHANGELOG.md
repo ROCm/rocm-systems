@@ -7,13 +7,24 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added the `LDS Utilization` metric to the gfx115x Memory Chart.
+
 ### Changed
+
+* gfx115x Memory Chart improvements.
+  * Renamed memory chart metric names for more clarity.
+  * Each edge now reports the traffic measured at the interface it represents.
+  * Updated arrows, labels, and the legend in the memory chart to better represent their meaning.
 
 ### Removed
 
 ### Optimized
 
 ### Resolved issues
+
+* Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
+
+* Fixed `GL2-Fabric Write BW` understating write bandwidth on gfx115x in the System Speed-of-Light and Memory Chart panels.
 
 ### Upcoming changes
 
@@ -40,18 +51,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   modes on partition-capable accelerators, noting that analysis derives logical
   XCD, L2 channel, and HBM channel counts from them.
 
-* Added the `LDS Utilization` metric to the gfx115x Memory Chart.
-
 ### Changed
 
 * Renamed the PC sampling analysis output: `pc_sampling.csv` is now `pc_sampling_summary.csv`, and the `compute_pc_sampling_view` view is now `compute_pc_sampling_summary_view`.
 
 * ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
-
-* gfx115x Memory Chart improvements.
-  * Renamed memory chart metric names for more clarity.
-  * Each edge now reports the traffic measured at the interface it represents.
-  * Updated arrows, labels, and the legend in the memory chart to better represent their meaning.
 
 ### Removed
 
@@ -69,10 +73,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 * Corrected the VGPR allocation label from `RVGPRseq` to `VGPRs` in gfx9 memory charts
-
-* Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
-
-* Fixed `GL2-Fabric Write BW` understating write bandwidth on gfx115x in the System Speed-of-Light and Memory Chart panels.
 
 ### Upcoming changes
 
