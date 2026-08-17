@@ -211,15 +211,15 @@ fail:
   comm->ceColl.signalBuffer = nullptr;
   comm->ceColl.signalWin = nullptr;
   if (comm->ceColl.d_barrierSync != nullptr) {
-    hipFree(comm->ceColl.d_barrierSync);
+    CUDACHECKIGNORE(hipFree(comm->ceColl.d_barrierSync));
     comm->ceColl.d_barrierSync = nullptr;
   }
   if (comm->ceColl.scatterStream != nullptr) {
-    cudaStreamDestroy(comm->ceColl.scatterStream);
+    CUDACHECKIGNORE(cudaStreamDestroy(comm->ceColl.scatterStream));
     comm->ceColl.scatterStream = nullptr;
   }
   if (comm->ceColl.synceEvent != nullptr) {
-    cudaEventDestroy(comm->ceColl.synceEvent);
+    CUDACHECKIGNORE(cudaEventDestroy(comm->ceColl.synceEvent));
     comm->ceColl.synceEvent = nullptr;
   }
   if (comm->ceColl.ceSeqNumDev != nullptr) {
@@ -612,7 +612,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
     // ready/complete barrier on graph replay. (ported from NCCL)
     if (params->intraBatchSync &&
         ((params->numOps + comm->ceColl.intraBatchSyncFreq - 1) / comm->ceColl.intraBatchSyncFreq) % 2 == 0) {
-      NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
+      NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
     }
   }
   //--------------No graph capture--------------
