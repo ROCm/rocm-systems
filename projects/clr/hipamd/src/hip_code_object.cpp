@@ -534,7 +534,13 @@ hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int d
 
   // Lazy load
   FatBinaryInfo** module = it->second->ModuleInfo();
-  if (module != nullptr) {
+  if (module == nullptr) {
+    return hipErrorInvalidDeviceFunction;
+  }
+
+  // Only take sclock_ when the module has not been loaded yet. Once loaded the
+  // fast path avoids the lock entirely.
+  if (*(module) == nullptr) {
     std::scoped_lock lock(sclock_);
     if (*(module) == nullptr) {
       hipError_t err = DigestFatBinary(module_to_hostModule_[module], *module);
@@ -543,9 +549,6 @@ hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int d
         return err;
       }
     }
-  } else {
-    // Module was nullptr
-    return hipErrorInvalidDeviceFunction;
   }
 
   return it->second->GetStatFunc(hfunc, deviceId);
