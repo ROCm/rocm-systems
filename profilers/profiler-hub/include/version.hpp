@@ -32,6 +32,11 @@ struct version_t
         return lhs.major == rhs.major && lhs.minor == rhs.minor && lhs.patch == rhs.patch;
     }
 
+    friend bool operator!=(const version_t& lhs, const version_t& rhs) noexcept
+    {
+        return !(lhs == rhs);
+    }
+
     friend bool operator<(const version_t& lhs, const version_t& rhs) noexcept
     {
         if(lhs.major != rhs.major) return lhs.major < rhs.major;

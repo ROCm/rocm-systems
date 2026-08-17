@@ -5,6 +5,8 @@
 
 #include "data_storage/schema_version.hpp"
 
+#include <profiler-hub/version.hpp>
+
 #include <string>
 #include <unordered_map>
 
@@ -28,20 +30,21 @@ using version_file_map_t = std::unordered_map<std::string, kind_filename_map_t>;
 /**
  * Reads versions.yml and fills the version -> schema file map.
  * latest_version is set to the highest manifest version found.
- * Throws if the manifest is missing, invalid, or empty.
+ * Throws if the manifest is missing, invalid, or empty, or if any version
+ * entry does not specify every kind in known_schema_kinds()
  */
 void
-load_schema_manifest(const std::string&  schema_dir,
-                     version_file_map_t& version_file_map,
-                     schema_version_t&   latest_version);
+load_schema_manifest(const std::string&       schema_dir,
+                     version_file_map_t&      version_file_map,
+                     profiler_hub::version_t& latest_version);
 
 /**
  * Resolves a requested schema version against a loaded manifest.
  * The "latest" sentinel resolves to latest_version; explicit versions must match.
  */
-[[nodiscard]] schema_version_t
-resolve_schema_version(const version_file_map_t& version_file_map,
-                       const schema_version_t&   latest_version,
-                       const schema_version_t&   requested);
+[[nodiscard]] profiler_hub::version_t
+resolve_schema_version(const version_file_map_t&      version_file_map,
+                       const profiler_hub::version_t& latest_version,
+                       const profiler_hub::version_t& requested);
 
 }  // namespace profiler_hub::data_storage

@@ -9,8 +9,15 @@
 #include <memory>
 #include <string>
 
+#define DEFAULT_SCHEMA_VERSION                                                           \
+    profiler_hub::version_t { 3, 0, 0 }
+
 namespace profiler_hub
 {
+
+storage_t::storage_t(const std::string& database_path, const std::string& uuid)
+: m_impl(std::make_unique<impl>(database_path, uuid, DEFAULT_SCHEMA_VERSION))
+{}
 
 storage_t::storage_t(const std::string&      database_path,
                      const std::string&      uuid,

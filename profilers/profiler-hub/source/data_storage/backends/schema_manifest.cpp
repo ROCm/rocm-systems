@@ -29,19 +29,19 @@ known_schema_kinds()
 }
 
 // Parses a "<major>.<minor>.<patch>" string
-schema_version_t
+profiler_hub::version_t
 parse_schema_version(const std::string& version_str)
 {
-    schema_version_t   version;
-    std::istringstream iss(version_str);
-    std::string        part;
+    profiler_hub::version_t version;
+    std::istringstream      iss(version_str);
+    std::string             part;
 
     if(std::getline(iss, part, '.'))
-        version.major = static_cast<unsigned>(std::stoul(part));
+        version.major = static_cast<uint32_t>(std::stoul(part));
     if(std::getline(iss, part, '.'))
-        version.minor = static_cast<unsigned>(std::stoul(part));
+        version.minor = static_cast<uint32_t>(std::stoul(part));
     if(std::getline(iss, part, '.'))
-        version.patch = static_cast<unsigned>(std::stoul(part));
+        version.patch = static_cast<uint32_t>(std::stoul(part));
 
     return version;
 }
@@ -49,9 +49,9 @@ parse_schema_version(const std::string& version_str)
 
 // Load versions.yml and build the schema-file map used during DB initialization.
 void
-load_schema_manifest(const std::string&  schema_dir,
-                     version_file_map_t& version_file_map,
-                     schema_version_t&   latest_version)
+load_schema_manifest(const std::string&       schema_dir,
+                     version_file_map_t&      version_file_map,
+                     profiler_hub::version_t& latest_version)
 {
     const std::filesystem::path manifest_path =
         std::filesystem::path(schema_dir) / "versions.yml";
@@ -59,7 +59,7 @@ load_schema_manifest(const std::string&  schema_dir,
     LOG_TRACE("Loading schema manifest: '{}'", manifest_path.string());
 
     version_file_map.clear();
-    latest_version = schema_version_t{};
+    latest_version = profiler_hub::version_t{};
 
     if(!std::filesystem::exists(manifest_path))
     {
@@ -67,10 +67,17 @@ load_schema_manifest(const std::string&  schema_dir,
         throw std::runtime_error("Schema manifest not found: " + manifest_path.string());
     }
 
+    auto ifs = std::ifstream{ manifest_path };
+    if(!ifs.is_open())
+    {
+        LOG_ERROR("Failed to open schema manifest: '{}'", manifest_path.string());
+        throw std::runtime_error("Failed to open schema manifest: " +
+                                 manifest_path.string());
+    }
+
     try
     {
         auto manifest_contents = std::stringstream{};
-        auto ifs               = std::ifstream{ manifest_path };
         manifest_contents << ifs.rdbuf();
 
         const auto yaml = YAML::Load(manifest_contents.str());
@@ -86,16 +93,46 @@ load_schema_manifest(const std::string&  schema_dir,
         {
             const auto version_str = entry["version"].as<std::string>();
 
+            kind_filename_map_t      kind_paths;
+            std::vector<std::string> missing_kinds;
+
             for(const auto& kind : known_schema_kinds())
             {
                 if(entry[kind])
                 {
-                    version_file_map[version_str][kind] = entry[kind].as<std::string>();
-
-                    latest_version =
-                        std::max(latest_version, parse_schema_version(version_str));
+                    kind_paths[kind] = entry[kind].as<std::string>();
+                }
+                else
+                {
+                    missing_kinds.push_back(kind);
                 }
             }
+
+            // get_schema_query() unconditionally looks up every known kind via
+            // kind_paths.at(...), so a partially-specified version entry must be
+            // rejected here rather than surfacing later as an opaque
+            // std::out_of_range at database-initialization time.
+            if(!missing_kinds.empty())
+            {
+                std::string joined_missing;
+                for(size_t i = 0; i < missing_kinds.size(); ++i)
+                {
+                    if(i != 0) joined_missing += ", ";
+                    joined_missing += missing_kinds[i];
+                }
+
+                LOG_ERROR("Schema manifest entry for version '{}' in '{}' is missing "
+                          "required schema kind(s): {}",
+                          version_str,
+                          manifest_path.string(),
+                          joined_missing);
+                throw std::runtime_error(
+                    "Schema manifest entry for version '" + version_str +
+                    "' is missing required schema kind(s): " + joined_missing);
+            }
+
+            version_file_map[version_str] = std::move(kind_paths);
+            latest_version = std::max(latest_version, parse_schema_version(version_str));
         }
     } catch(const YAML::Exception& e)
     {
@@ -118,10 +155,10 @@ load_schema_manifest(const std::string&  schema_dir,
     }
 }
 
-schema_version_t
-resolve_schema_version(const version_file_map_t& version_file_map,
-                       const schema_version_t&   latest_version,
-                       const schema_version_t&   requested)
+profiler_hub::version_t
+resolve_schema_version(const version_file_map_t&      version_file_map,
+                       const profiler_hub::version_t& latest_version,
+                       const profiler_hub::version_t& requested)
 {
     if(version_file_map.empty())
     {
@@ -129,7 +166,8 @@ resolve_schema_version(const version_file_map_t& version_file_map,
             "Schema manifest is empty; cannot resolve schema version");
     }
 
-    const schema_version_t resolved = requested.is_latest() ? latest_version : requested;
+    const profiler_hub::version_t resolved =
+        requested.is_latest() ? latest_version : requested;
 
     if(version_file_map.find(resolved.to_string()) == version_file_map.end())
     {

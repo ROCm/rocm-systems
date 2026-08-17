@@ -9,6 +9,18 @@ find_package(yaml-cpp ${YAML_CPP_VERSION} QUIET)
 
 if(yaml-cpp_FOUND)
     message(STATUS "Using system yaml-cpp (version ${yaml-cpp_VERSION})")
+    get_target_property(
+        _yaml_cpp_includes
+        yaml-cpp::yaml-cpp
+        INTERFACE_INCLUDE_DIRECTORIES
+    )
+    if(_yaml_cpp_includes)
+        set_target_properties(
+            yaml-cpp::yaml-cpp
+            PROPERTIES
+                INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_yaml_cpp_includes}"
+        )
+    endif()
 else()
     message(
         STATUS
@@ -29,10 +41,6 @@ else()
     set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
     set(YAML_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
-    # Force a static, PIC yaml-cpp regardless of a parent project's BUILD_SHARED_LIBS
-    # (e.g. rocprofiler-systems sets it ON project-wide, which would otherwise
-    # produce a libyaml-cpp.so that YAML_CPP_INSTALL=OFF never installs, leaving
-    # it unresolvable at runtime).
     set(_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
     set(BUILD_SHARED_LIBS OFF)
 
@@ -43,6 +51,18 @@ else()
 
     if(TARGET yaml-cpp)
         set_target_properties(yaml-cpp PROPERTIES POSITION_INDEPENDENT_CODE ON)
+        get_target_property(
+            _yaml_cpp_includes
+            yaml-cpp
+            INTERFACE_INCLUDE_DIRECTORIES
+        )
+        if(_yaml_cpp_includes)
+            set_target_properties(
+                yaml-cpp
+                PROPERTIES
+                    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_yaml_cpp_includes}"
+            )
+        endif()
     endif()
 
     if(NOT TARGET yaml-cpp::yaml-cpp)

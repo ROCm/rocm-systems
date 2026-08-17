@@ -5,7 +5,6 @@
 
 #include "database_backend.hpp"
 
-#include "data_storage/schema_version.hpp"
 #include "debug.hpp"
 #include "directory.hpp"
 #include "schema_manifest.hpp"
@@ -99,7 +98,7 @@ read_schema_file(const std::string& schema_file_name)
 [[maybe_unused]] std::string
 get_schema_query(rocpd_sql_schema_kind_t                                schema_kind,
                  const profiler_hub::data_storage::kind_filename_map_t& kind_paths,
-                 const profiler_hub::data_storage::schema_version_t&    version,
+                 const profiler_hub::version_t&                         version,
                  const std::string&                                     uuid)
 {
     std::string query_str;
@@ -266,7 +265,7 @@ database_backend<SqlitePolicy>::discover_uuids()
 
 template <typename SqlitePolicy>
 void
-database_backend<SqlitePolicy>::initialize_schema(schema_version_t schema_version)
+database_backend<SqlitePolicy>::initialize_schema(profiler_hub::version_t schema_version)
 {
     if(m_initialized)
     {
@@ -274,13 +273,13 @@ database_backend<SqlitePolicy>::initialize_schema(schema_version_t schema_versio
         return;
     }
 
-    version_file_map_t version_file_map;
-    schema_version_t   latest_version;
+    version_file_map_t      version_file_map;
+    profiler_hub::version_t latest_version;
     // Load the manifest before resolving which schema version to initialize.
     load_schema_manifest(schema_directory(), version_file_map, latest_version);
 
     // Resolve "latest" or an explicit request to the manifest entry we will apply.
-    const schema_version_t resolved_version =
+    const profiler_hub::version_t resolved_version =
         resolve_schema_version(version_file_map, latest_version, schema_version);
     const auto& kind_paths = version_file_map.at(resolved_version.to_string());
 
@@ -288,10 +287,11 @@ database_backend<SqlitePolicy>::initialize_schema(schema_version_t schema_versio
              resolved_version.to_string(),
              m_uuid);
 
+    // Order matters: indexes are created on tables that must already exist.
     const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
-        ROCPD_SQL_SCHEMA_ROCPD_TABLES,     ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_METADATA,
+        ROCPD_SQL_SCHEMA_ROCPD_TABLES,        ROCPD_SQL_SCHEMA_ROCPD_INDEXES,
+        ROCPD_SQL_SCHEMA_ROCPD_VIEWS,         ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
+        ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_METADATA,
     };
     for(const auto& schema_kind : schema_kinds)
     {
@@ -300,9 +300,10 @@ database_backend<SqlitePolicy>::initialize_schema(schema_version_t schema_versio
 
         if(query.empty())
         {
-            LOG_ERROR("Failed to get schema query for schema kind: {}",
-                      static_cast<int>(schema_kind));
-            continue;
+            throw std::runtime_error("Empty schema SQL for kind " +
+                                     std::to_string(static_cast<int>(schema_kind)) +
+                                     " (schema version " + resolved_version.to_string() +
+                                     ")");
         }
 
         validate_sqlite3_result(SqlitePolicy::exec(m_sqlite3, query.c_str()),

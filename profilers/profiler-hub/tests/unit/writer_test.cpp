@@ -8,7 +8,6 @@
 #include "profiler-hub/writer_types.hpp"
 
 #include "backends/sqlite_backend.hpp"
-#include "data_storage/schema_version.hpp"
 
 #include <gtest/gtest.h>
 
@@ -21,7 +20,6 @@ namespace
 {
 
 using namespace profiler_hub;
-using profiler_hub::data_storage::schema_version_t;
 
 class writer_test : public ::testing::Test
 {
@@ -81,7 +79,7 @@ TEST_F(writer_test, get_storage_version_defaults_to_3_0_0_when_not_specified)
 
 TEST_F(writer_test, get_storage_version_returns_explicitly_passed_version)
 {
-    const storage_t storage{ m_db_path, m_uuid, version_t{ 3, 0, 1 } };
+    const storage_t storage{ m_db_path, m_uuid, profiler_hub::version_t{ 3, 0, 1 } };
 
     const auto version = storage.get_storage_version();
     EXPECT_EQ(version.major, 3);
@@ -92,33 +90,33 @@ TEST_F(writer_test, get_storage_version_returns_explicitly_passed_version)
 TEST_F(writer_test, initialize_schema_default_version_succeeds)
 {
     auto backend = make_backend();
-    EXPECT_NO_THROW(backend->initialize_schema(schema_version_t{ 3, 0, 0 }));
+    EXPECT_NO_THROW(backend->initialize_schema(profiler_hub::version_t{ 3, 0, 0 }));
 }
 
 TEST_F(writer_test, initialize_schema_latest_sentinel_version_succeeds)
 {
     auto backend = make_backend();
 
-    // schema_version_t{} (all-zero) is the latest version
-    EXPECT_NO_THROW(backend->initialize_schema(schema_version_t{}));
+    // profiler_hub::version_t{} (all-zero) is the latest version
+    EXPECT_NO_THROW(backend->initialize_schema(profiler_hub::version_t{}));
 }
 
 TEST_F(writer_test, initialize_schema_called_twice_is_a_no_op)
 {
     auto backend = make_backend();
 
-    backend->initialize_schema(schema_version_t{ 3, 0, 0 });
+    backend->initialize_schema(profiler_hub::version_t{ 3, 0, 0 });
 
     // Second call logs a warning and returns early instead of throwing or re-executing
     // the schema SQL against an already-initialized database.
-    EXPECT_NO_THROW(backend->initialize_schema(schema_version_t{ 3, 0, 0 }));
+    EXPECT_NO_THROW(backend->initialize_schema(profiler_hub::version_t{ 3, 0, 0 }));
 }
 
 TEST_F(writer_test, initialize_schema_unsupported_version_throws_runtime_error)
 {
     auto backend = make_backend();
 
-    EXPECT_THROW(backend->initialize_schema(schema_version_t{ 99, 0, 0 }),
+    EXPECT_THROW(backend->initialize_schema(profiler_hub::version_t{ 99, 0, 0 }),
                  std::runtime_error);
 }
 
